@@ -189,6 +189,19 @@ which use the same lock) does not wait. Set `STUDIO_GATE_LOCK_MAX_WAIT_S` to sto
 waiting after that many seconds; the default is no limit. Focused commands do not
 take the lock. Owner: `gate-config.ts`; code: `gate-lock.ts`.
 
+### Machine load adaptation
+
+Other sessions can keep the machine load far above the CPU count. Before each gate
+command, the gate reads the 1 minute load average and computes
+`factor = clamp(load / CPUs, 1, 4)`. Nextest `--test-threads` and the Playwright
+worker count divide by the factor. The nextest `slow-timeout` period, the
+Playwright test and global timeouts, and the command deadline multiply by it.
+Nextest has no flag for the period, so the gate writes a scaled copy of
+`.config/nextest.toml` and passes it with `--config-file`. Each command prints one
+`gate load:` line with the load, factor, threads and limits, and the line is in the
+step log. No test is retried or skipped. Owner: `gate-config.ts`; the base
+`slow-timeout` in `.config/nextest.toml` must match it (a test checks this).
+
 ### Test result cache
 
 - A step with declared inputs reuses its saved result while the git tree IDs of

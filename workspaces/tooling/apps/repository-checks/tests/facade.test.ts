@@ -2,6 +2,7 @@ import {
   javascriptFindings,
   readJavaScriptExceptions,
 } from "../javascript-policy.ts";
+import { NEXTEST_SLOW_PERIOD_S } from "../gate-config.ts";
 import type {
   LocatedPackage,
   WorkspacePackage,
@@ -19,6 +20,7 @@ import {
   executeRecipe,
   evaluatePlaywrightReport,
   nextestError,
+  NEXTEST_SLOW_TIMEOUT_LINE,
   nextestSelectionError,
   packageTarget,
   parseCounts,
@@ -485,6 +487,11 @@ test("Cargo facade failures retain selection, test failure, install guidance and
   const root = mkdtempSync(path.join(os.tmpdir(), "codex-nextest-facade-"));
   const bin = path.join(root, "bin");
   mkdirSync(bin);
+  mkdirSync(path.join(root, ".config"));
+  writeFileSync(
+    path.join(root, ".config", "nextest.toml"),
+    `${NEXTEST_SLOW_TIMEOUT_LINE(NEXTEST_SLOW_PERIOD_S)}\n`,
+  );
   const cargo = path.join(bin, "cargo");
   writeFileSync(
     cargo,

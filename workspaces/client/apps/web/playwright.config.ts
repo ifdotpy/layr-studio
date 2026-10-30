@@ -4,7 +4,10 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { browserExecutablePath } from "./tests/browser-executable.ts";
 import { choosePlaywrightScratchRoot } from "./tests/scratch-root.ts";
-import { getPlaywrightWorkerSelection } from "./playwright-workers.ts";
+import {
+  gateLoadFactor,
+  getPlaywrightWorkerSelection,
+} from "./playwright-workers.ts";
 
 const workerSelection = getPlaywrightWorkerSelection();
 const workerLimit = workerSelection.workers;
@@ -37,9 +40,11 @@ console.log(
     tested: playwrightScratch.tested,
   })}`,
 );
-const globalTimeoutMs = 15 * 60 * 1000;
+// Time limits grow with the machine load factor set by the gate.
+const loadFactor = gateLoadFactor();
+const globalTimeoutMs = Math.ceil(15 * 60 * 1000 * loadFactor);
 // Sized for a debug build on a busy machine: the gate runs it beside the Rust lane.
-const defaultTestTimeoutMs = 60_000;
+const defaultTestTimeoutMs = Math.ceil(60_000 * loadFactor);
 const outputDirectory = process.env.PLAYWRIGHT_OUTPUT_DIR;
 const requestedBrowser = process.env.BROWSER ?? "chromium";
 if (requestedBrowser !== "chromium" && requestedBrowser !== "webkit")

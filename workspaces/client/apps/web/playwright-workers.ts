@@ -5,6 +5,10 @@ import { randomUUID } from "node:crypto";
 import os from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  GATE_LOAD_FACTOR_ENV,
+  GATE_LOAD_FACTOR_MAX,
+} from "../../../tooling/apps/repository-checks/gate-config.ts";
 
 type WorkerProcessMemory = ReturnType<
   typeof sampleProcessTreeMemory
@@ -368,6 +372,14 @@ export function sampleCompetingRunnableProcesses({
   return { samples: [competingRunnable], competingRunnable };
 }
 
+// The gate sets the machine load factor (see gate-config.ts); unset means 1.
+export function gateLoadFactor(environment = process.env) {
+  const factor = Number(environment[GATE_LOAD_FACTOR_ENV]);
+  return Number.isFinite(factor)
+    ? Math.min(GATE_LOAD_FACTOR_MAX, Math.max(1, factor))
+    : 1;
+}
+
 export function choosePlaywrightWorkerCount({
   cpuLimit,
   competingRunnable,
@@ -406,7 +418,10 @@ export function choosePlaywrightWorkerCount({
       memorySafeToStart: memoryWorkers > 0 && workers <= memoryWorkers,
     };
   }
-  const workers = Math.min(cpuWorkerSlots, memoryWorkers);
+  const workers = Math.max(
+    1,
+    Math.floor(Math.min(cpuWorkerSlots, memoryWorkers) / gateLoadFactor()),
+  );
   return {
     workers,
     availableCpus,

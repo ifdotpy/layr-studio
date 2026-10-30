@@ -18,9 +18,21 @@ import {
 } from "node:fs";
 import { createHash } from "node:crypto";
 import { runLogged } from "./owned-process.ts";
-import { CARGO_BUILD_JOBS, scrubAgentEnvironment } from "./gate-config.ts";
+import {
+  CARGO_BUILD_JOBS,
+  GATE_COMMAND_TIMEOUT_MS,
+  GATE_LOAD_FACTOR_ENV,
+  NEXTEST_SLOW_PERIOD_S,
+  NEXTEST_TERMINATE_AFTER,
+  dividedByLoad,
+  gateLoad,
+  gateLoadLine,
+  scaledByLoad,
+  scrubAgentEnvironment,
+  type GateLoad,
+} from "./gate-config.ts";
 import { withGateLock } from "./gate-lock.ts";
-import { homedir } from "node:os";
+import { availableParallelism, homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -1776,6 +1788,43 @@ const NEXTTEST_INSTALL =
   "cargo install cargo-nextest --version 0.9.146 --locked";
 const NEXTTEST_MISSING = `cargo-nextest 0.9.146 is required. Install it with: ${NEXTTEST_INSTALL}`;
 
+export const NEXTEST_SLOW_TIMEOUT_LINE = (period: number) =>
+  `slow-timeout = { period = "${period}s", terminate-after = ${NEXTEST_TERMINATE_AFTER} }`;
+
+// Nextest has no flag for slow-timeout: write a scaled copy of the repository config.
+export function adaptNextestArgs(
+  args: string[],
+  gate: GateLoad,
+  config: string,
+  configPath: string,
+) {
+  const base = NEXTEST_SLOW_TIMEOUT_LINE(NEXTEST_SLOW_PERIOD_S);
+  if (!config.includes(base))
+    fail(`.config/nextest.toml must contain: ${base}`);
+  const period = scaledByLoad(NEXTEST_SLOW_PERIOD_S, gate);
+  const threads = dividedByLoad(availableParallelism(), gate);
+  writeFileSync(
+    configPath,
+    config.replace(base, NEXTEST_SLOW_TIMEOUT_LINE(period)),
+  );
+  // Every gate nextest command is `nextest run ...`.
+  return {
+    args: [
+      "nextest",
+      "run",
+      "--test-threads",
+      String(threads),
+      "--config-file",
+      configPath,
+      ...args.slice(2),
+    ],
+    details: [
+      `test-threads=${threads}`,
+      `slow-timeout=${period}s x${NEXTEST_TERMINATE_AFTER}`,
+    ],
+  };
+}
+
 export function nextestError(output: string) {
   return output.includes(NEXTTEST_MISSING) ||
     /no such command.*nextest|could not find.*cargo-nextest/i.test(output)
@@ -1856,9 +1905,36 @@ export async function execute(
           CODEX_STUDIO_PLAYWRIGHT_JSON_REPORT: playwrightReportPath,
         }
       : commandEnv;
-    const child = await runLogged(bin, args, root, logPath, env, {
-      signal: options.signal,
-    });
+    const gate = gateLoad();
+    const details = [
+      `deadline=${scaledByLoad(GATE_COMMAND_TIMEOUT_MS / 1000, gate)}s`,
+    ];
+    let commandArgs = args;
+    if (bin === "cargo" && args[0] === "nextest") {
+      const adapted = adaptNextestArgs(
+        args,
+        gate,
+        readFileSync(path.join(root, ".config", "nextest.toml"), "utf8"),
+        path.join(logDir, "nextest-load.toml"),
+      );
+      commandArgs = adapted.args;
+      details.push(...adapted.details);
+    }
+    if (playwrightReportPath)
+      details.push(`playwright-timeout-scale=${gate.factor.toFixed(2)}`);
+    const loadLine = gateLoadLine(options.label ?? item.name, gate, details);
+    appendFileSync(logPath, loadLine);
+    const child = await runLogged(
+      bin,
+      commandArgs,
+      root,
+      logPath,
+      { ...env, [GATE_LOAD_FACTOR_ENV]: String(gate.factor) },
+      {
+        signal: options.signal,
+        timeoutMs: scaledByLoad(GATE_COMMAND_TIMEOUT_MS, gate),
+      },
+    );
     const missingNextest =
       bin === "cargo" && args[0] === "nextest"
         ? nextestError(child.output)
