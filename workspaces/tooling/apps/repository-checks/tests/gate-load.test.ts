@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  GATE_LOAD_FACTOR_ENV,
   GATE_LOAD_FACTOR_MAX,
   dividedByLoad,
   gateLoad,
@@ -72,5 +73,14 @@ test(".config/nextest.toml states the base slow-timeout of the gate owner", () =
     readFileSync(path.join(root, ".config/nextest.toml"), "utf8").includes(
       NEXTEST_SLOW_TIMEOUT_LINE(NEXTEST_SLOW_PERIOD_S),
     ),
+  );
+});
+
+test("the web package reads the same factor variable as the gate owner", () => {
+  assert.ok(
+    readFileSync(
+      path.join(root, "workspaces/client/apps/web/playwright-workers.ts"),
+      "utf8",
+    ).includes(`environment.${GATE_LOAD_FACTOR_ENV}`),
   );
 });
