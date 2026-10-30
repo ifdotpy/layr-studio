@@ -2840,7 +2840,25 @@ export async function main(argv = process.argv.slice(2)) {
                 : {}),
             }
           : process.env;
-      const result = await runLogged(bin, args, root, log, env);
+      const gate = gateLoad();
+      const details = [
+        `deadline=${scaledByLoad(GATE_COMMAND_TIMEOUT_MS / 1000, gate)}s`,
+      ];
+      let commandArgs = args;
+      if (bin === "cargo" && args[0] === "nextest") {
+        const adapted = adaptNextestArgs(
+          args,
+          gate,
+          readFileSync(path.join(root, ".config", "nextest.toml"), "utf8"),
+          path.join(dir, "nextest-load.toml"),
+        );
+        commandArgs = adapted.args;
+        details.push(...adapted.details);
+      }
+      appendFileSync(log, gateLoadLine(item.name, gate, details));
+      const result = await runLogged(bin, commandArgs, root, log, env, {
+        timeoutMs: scaledByLoad(GATE_COMMAND_TIMEOUT_MS, gate),
+      });
       const missingNextest =
         bin === "cargo" && args[0] === "nextest"
           ? nextestError(result.output)
