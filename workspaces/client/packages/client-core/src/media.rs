@@ -298,7 +298,7 @@ pub fn close_all() {
 pub(crate) mod mac {
     use super::*;
     use block2::RcBlock;
-    use objc2::{AnyThread, rc::Retained, runtime::Bool};
+    use objc2::{rc::Retained, runtime::Bool};
     use objc2_av_foundation::{AVAuthorizationStatus, AVCaptureDevice, AVMediaTypeAudio};
     use objc2_avf_audio::{AVAudioEngine, AVAudioPCMBuffer, AVAudioTime};
     use std::{cell::RefCell, ptr::NonNull, sync::Arc};
