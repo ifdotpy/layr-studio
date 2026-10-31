@@ -1946,6 +1946,48 @@ mod tests {
     }
 
     #[test]
+    fn receipt_unclassifiable_row_moves_to_quarantine_and_migration_continues() {
+        let root = tempfile::tempdir().expect("fixture");
+        let mut db = receipt_batch_fixture(&root.path().join("canvas.sqlite3"), 3);
+        db.execute(
+            "UPDATE runtime_operation_receipts SET signature='old' WHERE id='request-2'",
+            [],
+        )
+        .expect("old shape");
+        let family = ReceiptMigration {
+            family: &BatchWitness,
+            sources: &["runtime_operation_receipts"],
+        };
+        run_receipt_family(&mut db, &family, &mut |_, _, _| Ok(()))
+            .expect("unclassifiable row is quarantined, not fatal");
+        let imported: Vec<String> = db
+            .prepare("SELECT id FROM request_results ORDER BY id")
+            .expect("results")
+            .query_map([], |row| row.get(0))
+            .expect("rows")
+            .collect::<rusqlite::Result<_>>()
+            .expect("read");
+        assert_eq!(imported, ["request-1", "request-3"]);
+        let quarantined: Vec<String> = db
+            .prepare("SELECT id FROM quarantine_runtime_operation_receipts ORDER BY id")
+            .expect("quarantine")
+            .query_map([], |row| row.get(0))
+            .expect("rows")
+            .collect::<rusqlite::Result<_>>()
+            .expect("read");
+        assert_eq!(quarantined, ["request-2"]);
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM runtime_operation_receipts WHERE id='request-2'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .expect("source"),
+            0
+        );
+    }
+
+    #[test]
     fn receipt_progress_reports_committed_cursor() {
         let root = tempfile::tempdir().expect("fixture");
         let mut db = receipt_batch_fixture(&root.path().join("canvas.sqlite3"), 1001);
@@ -1981,7 +2023,7 @@ mod tests {
     }
 
     #[test]
-    fn receipt_cutover_drop_crashes_are_atomic_and_never_accept_leftover_rows() {
+    fn receipt_cutover_drop_crashes_are_atomic_and_quarantine_leftover_rows() {
         for boundary in [CommitBoundary::Before, CommitBoundary::After] {
             let root = tempfile::tempdir().expect("fixture");
             let path = root.path().join("canvas.sqlite3");
@@ -2017,24 +2059,17 @@ mod tests {
             family: &m2026_10_28_receipts_drop_old_tables::Family,
             sources: &[],
         };
-        let error = run_receipt_family(&mut db, &migration, &mut |_, _, _| Ok(()))
-            .expect_err("leftover refuses drop");
-        let error = error.to_string();
-        assert!(
-            error.contains("runtime_operation_receipts")
-                && error.contains("request-1")
-                && error.contains("known"),
-            "{error}"
-        );
-        assert_eq!(
-            db.query_row(
-                "SELECT count(*) FROM runtime_operation_receipts",
-                [],
-                |row| row.get::<_, i64>(0)
-            )
-            .expect("source"),
-            1
-        );
+        run_receipt_family(&mut db, &migration, &mut |_, _, _| Ok(()))
+            .expect("leftover row is quarantined before the drop");
+        assert!(!crate::schema::table_exists(&db, "runtime_operation_receipts").expect("schema"));
+        let quarantined: Vec<(String, String)> = db
+            .prepare("SELECT id,signature FROM quarantine_runtime_operation_receipts")
+            .expect("quarantine")
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .expect("rows")
+            .collect::<rusqlite::Result<_>>()
+            .expect("read");
+        assert_eq!(quarantined, [("request-1".to_owned(), "known".to_owned())]);
     }
 
     #[test]

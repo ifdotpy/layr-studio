@@ -1197,6 +1197,28 @@ mod tests {
         assert!(plan.contains("runtime_outbox_owner"));
     }
     #[test]
+    fn receipt_account_worker_user_item_without_input_ids_is_skipped() {
+        let mut db = database();
+        let tx = db.transaction().expect("transaction");
+        tx.execute_batch("CREATE TABLE runtime_items(id TEXT PRIMARY KEY, agent TEXT NOT NULL, record TEXT NOT NULL)")
+            .expect("items");
+        tx.execute(
+            "INSERT INTO runtime_items VALUES('item',?1,?2)",
+            params![
+                "worker",
+                json!({"agent":"worker","role":"user","inputs":[{"text":"old"}]}).to_string()
+            ],
+        )
+        .expect("old item");
+        move_source(&tx, "submission-inputs");
+        assert_eq!(
+            tx.query_row("SELECT count(*) FROM runtime_items", [], |r| r
+                .get::<_, i64>(0))
+                .expect("items"),
+            1
+        );
+    }
+    #[test]
     fn receipt_account_worker_host_and_vm_streams_keep_exact_base_and_pending() {
         let mut db = database();
         let tx = db.transaction().expect("transaction");

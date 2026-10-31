@@ -2495,6 +2495,28 @@ mod tests {
         }
     }
     #[test]
+    fn receipts_actions_paused_agent_drops_old_start_attempt_instead_of_refusing() {
+        let mut db = Connection::open_in_memory().expect("database");
+        fixture(&db);
+        let tx = db.transaction().expect("transaction");
+        let mut row = SourceReceipt {
+            rowid: 1,
+            id: "agent".into(),
+            signature: "owner".into(),
+            result: String::new(),
+        };
+        let value = json!({"id":"agent","epoch":1,"status":"paused","inFlight":false,"startAttempt":{"action":true}});
+        row.result = value.to_string();
+        let owner = agent_owners(&tx, &row, value, 1000).expect("paused agent");
+        assert!(owner.get("startAttempt").is_none());
+        let value = json!({"id":"agent","epoch":1,"status":"running","inFlight":false,"startAttempt":{"action":true}});
+        row.result = value.to_string();
+        assert!(matches!(
+            agent_owners(&tx, &row, value, 1000),
+            Err(ReceiptMigrationError::Unclassifiable { .. })
+        ));
+    }
+    #[test]
     fn receipts_actions_steer_preserves_complete_and_holds_incomplete_submissions() {
         for stage in ["submitted", "unconfirmed"] {
             for missing in [

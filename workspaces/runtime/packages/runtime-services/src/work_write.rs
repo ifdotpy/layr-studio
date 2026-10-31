@@ -5810,6 +5810,22 @@ mod actor_tests {
         assert_eq!(count, 0);
         tx.commit().expect("transaction commits");
     }
+
+    #[tokio::test]
+    async fn accepted_archive_skips_intent_of_an_older_shape() {
+        let dir = tempfile::tempdir().expect("state");
+        let store = Arc::new(RuntimeStore::open(Some(dir.path())).await.expect("store"));
+        let old = json!({"status":"pending","attempts":0,"created":1.0}).to_string();
+        let run = super::run_accepted_archive(
+            &store,
+            "old".into(),
+            old,
+            1000.0,
+            super::ArchiveTiming::Immediate,
+        )
+        .await;
+        assert!(matches!(run, Ok(super::ArchiveRun::Skipped)));
+    }
 }
 
 #[cfg(test)]

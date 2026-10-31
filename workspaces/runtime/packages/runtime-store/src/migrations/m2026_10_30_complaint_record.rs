@@ -40,6 +40,31 @@ mod tests {
     use rusqlite::Connection;
 
     #[test]
+    fn open_replies_become_in_progress_and_legacy_fields_are_removed() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE runtime_complaints(id TEXT PRIMARY KEY, record TEXT NOT NULL)",
+        )
+        .unwrap();
+        let raw = r#"{"id":"c","legacyStatus":"open","legacyLeadReadAt":1.0,"author":"user","leadId":"l","text":"hello","recipient":"lead","version":1,"status":"open","created":1.0,"updated":1.0,"readAt":null,"responses":[{"id":"r","author":"lead","text":"working on it","status":"open","at":2.0}]}"#;
+        db.execute("INSERT INTO runtime_complaints VALUES('c',?1)", [raw])
+            .unwrap();
+        let tx = db.transaction().unwrap();
+        super::apply(&tx).unwrap();
+        let stored: String = tx
+            .query_row(
+                "SELECT record FROM runtime_complaints WHERE id='c'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&stored).unwrap();
+        assert!(value.get("legacyStatus").is_none());
+        assert!(value.get("legacyLeadReadAt").is_none());
+        assert_eq!(value["responses"][0]["status"], "in_progress");
+    }
+
+    #[test]
     fn migrates_sparse_rows_preserving_complaint_text_and_refuses_unknown_fields() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(

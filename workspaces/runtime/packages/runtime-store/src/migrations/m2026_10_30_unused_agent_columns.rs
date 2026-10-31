@@ -104,6 +104,39 @@ mod tests {
     }
 
     #[test]
+    fn index_on_retired_column_is_dropped_before_the_column() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL,\
+             capacity_retry_id GENERATED ALWAYS AS (json_extract(record,'$.capacityRetry.id')) STORED,\
+             start_attempt_submitted GENERATED ALWAYS AS (json_extract(record,'$.startAttempt.submitted')) STORED);\
+             CREATE INDEX runtime_agent_account_wake_candidates_v5 ON runtime_agents(capacity_retry_id);\
+             CREATE INDEX runtime_agent_submitted ON runtime_agents(start_attempt_submitted);\
+             INSERT INTO runtime_agents(id,record) VALUES('a','{}');",
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        super::apply(&tx).unwrap();
+        tx.commit().unwrap();
+        let columns: i64 = db
+            .query_row(
+                "SELECT count(*) FROM pragma_table_xinfo('runtime_agents') WHERE name IN ('capacity_retry_id','start_attempt_submitted')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(columns, 0);
+        let indexes: i64 = db
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' AND name IN ('runtime_agent_account_wake_candidates_v5','runtime_agent_submitted')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(indexes, 0);
+    }
+
+    #[test]
     fn unexpected_plain_column_fails_and_rolls_back_prior_drops() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE runtime_agents(id TEXT, record TEXT, native_reset_pending AS (json_extract(record,'$.x')) STORED, capacity_retry_id TEXT);").unwrap();
