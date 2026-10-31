@@ -329,7 +329,17 @@ mod tests {
     fn room_projection_matches_existing_view() {
         let agents = ["a", "b"]
             .into_iter()
-            .map(|id| serde_json::from_value(json!({"id":id,"name":id,"rootId":"a"})).unwrap())
+            .map(|id| AgentAuthorityRow {
+                id: Some(id.into()),
+                root_id: Some("a".into()),
+                parent_id: None,
+                is_lead: None,
+                deleted_at: None,
+                cwd: None,
+                name: crate::submit_gates::StoredField::Value(id.into()),
+                shared_room_id: None,
+                execution_mode: None,
+            })
             .collect();
         let mut context = RoomViewContext::new(agents, vec![]);
         context.last_message = Some(RoomLastMessage {
@@ -341,26 +351,31 @@ mod tests {
         context.federation = Some(
             json!({"status":"approved","localApproved":true,"remoteApproved":true,"localMembers":["b","a","a"],"name":"Remote chat","peerLabel":"Peer"}),
         );
-        for raw in [
-            json!({"id":"private:a:b","kind":"private","members":["a","b"],"customName":"hello","projectPath":null,"updated":1,"userHidden":false}),
-            json!({"id":"broadcast:a","kind":"broadcast","rootId":"a"}),
-            json!({"id":"federated:x","kind":"federated","members":["a"],"customName":null}),
-            json!({"id":"radio:x","kind":"private","members":["a","b"],"radio":{"teamId":"x","revision":0,"status":"idle","speaker":null,"next":[],"active":null,"error":null,"direct":false,"seen":{}}}),
-            json!({"id":"radio:y","kind":"private","members":["a","b"],"radio":{"teamId":"x","revision":1,"status":"speaking","speaker":"a","next":[],"active":{"identity":["thread",1,2],"eventId":"event","agentId":"a","epoch":1,"threadId":"thread","through":3,"turnId":null},"error":null,"direct":false,"seen":{"a":{"identity":["thread",1,2],"seq":3}}}}),
-        ] {
-            let record: RoomRecord = serde_json::from_str(&raw.to_string()).unwrap();
-            let expected = crate::sync_views::room_entity_view(&raw, &context).unwrap();
-            let actual =
-                serde_json::to_value(project_room(&record, &context).unwrap().unwrap()).unwrap();
+        let expected = [
+            r#"{"id":"private:a:b","kind":"private","members":["a","b"],"name":"hello","lastMessage":{"seq":1,"text":"hello","sender":"a","created":1},"projectPath":null,"updated":1,"userHidden":false}"#,
+            r#"{"id":"broadcast:a","kind":"broadcast","members":["a","b"],"name":"a · Broadcast","lastMessage":{"seq":1,"text":"hello","sender":"a","created":1},"rootId":"a"}"#,
+            r#"{"id":"federated:x","kind":"federated","members":["a","b"],"name":"Remote chat","lastMessage":{"seq":1,"text":"hello","sender":"a","created":1},"localMembers":["a","b"],"peerLabel":"Peer"}"#,
+            r#"{"id":"radio:x","kind":"private","members":["a","b"],"name":"a ↔ b","lastMessage":{"seq":1,"text":"hello","sender":"a","created":1},"radio":{"teamId":"x","revision":0,"status":"idle","speaker":null,"next":[],"active":null,"error":null,"direct":false,"seen":{}}}"#,
+            r#"{"id":"radio:y","kind":"private","members":["a","b"],"name":"a ↔ b","lastMessage":{"seq":1,"text":"hello","sender":"a","created":1},"radio":{"teamId":"x","revision":1,"status":"speaking","speaker":"a","next":[],"active":{"identity":["thread",1,2],"eventId":"event","agentId":"a","epoch":1,"threadId":"thread","through":3,"turnId":null},"error":null,"direct":false,"seen":{"a":{"identity":["thread",1,2],"seq":3}}}}"#,
+        ];
+        for (raw, expected) in [
+            r#"{"id":"private:a:b","kind":"private","members":["a","b"],"customName":"hello","projectPath":null,"updated":1,"userHidden":false}"#,
+            r#"{"id":"broadcast:a","kind":"broadcast","rootId":"a"}"#,
+            r#"{"id":"federated:x","kind":"federated","members":["a"],"customName":null}"#,
+            r#"{"id":"radio:x","kind":"private","members":["a","b"],"radio":{"teamId":"x","revision":0,"status":"idle","speaker":null,"next":[],"active":null,"error":null,"direct":false,"seen":{}}}"#,
+            r#"{"id":"radio:y","kind":"private","members":["a","b"],"radio":{"teamId":"x","revision":1,"status":"speaking","speaker":"a","next":[],"active":{"identity":["thread",1,2],"eventId":"event","agentId":"a","epoch":1,"threadId":"thread","through":3,"turnId":null},"error":null,"direct":false,"seen":{"a":{"identity":["thread",1,2],"seq":3}}}}"#,
+        ].into_iter().zip(expected) {
+            let record: RoomRecord = serde_json::from_str(raw).unwrap();
+            let actual = serde_json::to_string(&project_room(&record, &context).unwrap().unwrap()).unwrap();
             assert_eq!(actual, expected);
             if let Field::Value(state) = &record.radio {
-                let direct = serde_json::to_value(
+                let direct = serde_json::to_string(&
                     project_radio_room(&record, &context, state)
                         .unwrap()
                         .unwrap(),
                 )
                 .unwrap();
-                assert_eq!(direct, expected);
+                assert_eq!(direct, actual);
             }
         }
     }
