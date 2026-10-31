@@ -39,6 +39,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let document: serde_json::Value = serde_json::from_slice(&fs::read(&spec_path)?)?;
     let mut analyzer = SchemaAnalyzer::new(document)?;
     let mut analysis = analyzer.analyze()?;
+    analysis
+        .schemas
+        .get_mut("ResetRequest")
+        .ok_or("missing reset request schema")?
+        .schema_type = SchemaType::Primitive {
+        rust_type: "studio_runtime_schema::limit_reset_request::ResetRequest".to_owned(),
+        serde_with: None,
+    };
     // Draft ingress has a single bounded Rust owner in routes/sync_documents.
     for name in ["DraftPushRequest", "DraftPushRow", "DraftDocumentInput"] {
         analysis

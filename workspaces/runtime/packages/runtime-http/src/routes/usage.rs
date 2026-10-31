@@ -121,7 +121,7 @@ async fn cost_interest(
 
 async fn reset_limits(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Value>,
+    ApiJson(body): ApiJson<studio_runtime_schema::limit_reset_request::ResetRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let session = state
