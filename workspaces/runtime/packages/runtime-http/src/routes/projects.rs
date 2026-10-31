@@ -1657,6 +1657,20 @@ mod local_registration_tests {
         let (status, updated) = post_project(&app, &json!({"action":"set_account", "path":project, "account_key":account["id"], "expected_revision":registered["accountRevision"]})).await;
         assert_eq!(status, axum::http::StatusCode::OK, "{updated}");
         assert_eq!(updated["accountKey"], account["id"]);
+
+        let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+        let peer = json!({"action":"delete", "path":project, "expected_revision":0,
+            "request_id":request_id, "team_id":"a8b5b7aa-6459-4023-b148-0ad5a4f0ba56"});
+        let (status, first) = post(&app, "/api/peer-teams", &peer).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{first}");
+        assert_eq!(first["peerTeamsRevision"], 1);
+        let (status, replay) = post(&app, "/api/peer-teams", &peer).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{replay}");
+        assert_eq!(replay, first);
+        let mut changed = peer;
+        changed["team_id"] = json!("27272727-2727-4272-8272-272727272727");
+        let (status, _) = post(&app, "/api/peer-teams", &changed).await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT);
     }
 
     impl PairedTransport for ProjectPeer {

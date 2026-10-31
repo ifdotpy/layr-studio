@@ -9,11 +9,6 @@ pub async fn peer_team_write(
     default_account: String,
     known_accounts: Vec<crate::account_policy::PublicAccount>,
 ) -> Result<Value, ProjectsError> {
-    let action = match &body {
-        TeamMutation::Save(_) => "save",
-        TeamMutation::Delete(_) => "delete",
-        TeamMutation::Move(_) => "move",
-    };
     let path_value = Some(body.path().to_owned());
     let revision = body
         .expected_revision()
@@ -31,11 +26,7 @@ pub async fn peer_team_write(
                 .map_err(|_| ProjectsError::Invalid("peer team ID is invalid"))
         })
         .transpose()?;
-    let member = match &body {
-        TeamMutation::Move(v) => Some(python_strip(&v.member).to_owned()),
-        _ => None,
-    };
-    if action != "move" && team_id.is_none() {
+    if !matches!(&body, TeamMutation::Move(_)) && team_id.is_none() {
         return Err(ProjectsError::Invalid("peer team ID is invalid"));
     }
     let (name, members) = match &body {
@@ -58,7 +49,7 @@ pub async fn peer_team_write(
             }
             (Some(name.to_owned()), v.members.clone())
         }
-        _ => (None, Vec::new()),
+        TeamMutation::Delete(_) | TeamMutation::Move(_) => (None, Vec::new()),
     };
     let signature = sha256_hex(&serde_json::to_vec(&body).map_err(StoreError::from)?);
     let key = format!("peer-team:{request_id}");
@@ -89,8 +80,8 @@ pub async fn peer_team_write(
         let mut statement = tx.prepare_cached("SELECT id FROM sync_entities WHERE collection='peerTeam' AND json_extract(payload,'$.value.projectPath')=?1")?;
         previous_ids.extend(statement.query_map([&path], |row| row.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?);
         drop(statement);
-        match action {
-            "save" => {
+        match body {
+            TeamMutation::Save(_) => {
                 let team_id = team_id.as_deref().ok_or(ProjectsError::Invalid("peer team ID is invalid"))?;
                 for member in &members {
                     let id = member.as_str();
@@ -103,9 +94,9 @@ pub async fn peer_team_write(
                 let selected = json!({"id":team_id,"name":name,"members":members});
                 if let Some(old) = teams.iter_mut().find(|team| team.get("id").and_then(Value::as_str) == Some(team_id)) { *old = selected; } else { teams.push(selected); }
             }
-            "delete" => teams.retain(|team| team.get("id").and_then(Value::as_str) != team_id.as_deref()),
-            "move" => {
-                let member = member.as_deref().ok_or(ProjectsError::Invalid("peer team member is required"))?;
+            TeamMutation::Delete(_) => teams.retain(|team| team.get("id").and_then(Value::as_str) != team_id.as_deref()),
+            TeamMutation::Move(movement) => {
+                let member = python_strip(&movement.member);
                 if member.is_empty() || member.chars().count() > 255 || !agents.get(member).is_some_and(|agent| is_project_lead(agent, &path, &prepared)) { return Err(ProjectsError::Invalid("select a live lead chat from this project only")); }
                 let source = teams.iter().position(|team| team.get("members").and_then(Value::as_array).is_some_and(|items| items.iter().any(|item| item.as_str() == Some(member))));
                 let target = team_id.as_deref().and_then(|id| teams.iter().position(|team| team.get("id").and_then(Value::as_str) == Some(id)));
@@ -119,7 +110,6 @@ pub async fn peer_team_write(
                 { list.push(json!(member)); }
                 teams.retain(|team| team.get("members").and_then(Value::as_array).is_some_and(|items| items.len() >= 2));
             }
-            _ => return Err(ProjectsError::Invalid("unknown peer team action")),
         }
         project["peerTeams"] = json!(teams);
         project["peerTeamsRevision"] = json!(current + 1);

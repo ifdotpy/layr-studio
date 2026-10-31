@@ -61,12 +61,6 @@ pub async fn manage(
     store: Arc<RuntimeStore>,
     body: &RadioManage,
 ) -> Result<RadioReply, ProjectsError> {
-    let action = match body {
-        RadioManage::Open(_) => "open",
-        RadioManage::Send(_) => "send",
-        RadioManage::Pass(_) => "pass",
-        RadioManage::Stop(_) => "stop",
-    };
     let root = bounded_text(body.request_id(), 255)?;
     let key = format!("radio:{root}");
     let signature = studio_runtime_store::sha256_hex(
@@ -135,7 +129,7 @@ pub async fn manage(
             let mut room = if let Some(raw) = raw {
                 Room::checked(&id, &raw)?
             } else {
-                if action != "open" {
+                if !matches!(&body, RadioManage::Open(_)) {
                     return Err(ProjectsError::Invalid("Open the shared chat first"));
                 }
                 let project = ProjectsRepository::get(db, &path)?
@@ -191,12 +185,16 @@ pub async fn manage(
                     "The shared chat belongs to another project",
                 ));
             }
-            if let Some(denial) = validate(db, &room, &prepared, matches!(action, "send" | "pass"))?
-                && action != "stop"
+            if let Some(denial) = validate(
+                db,
+                &room,
+                &prepared,
+                matches!(&body, RadioManage::Send(_) | RadioManage::Pass(_)),
+            )? && !matches!(&body, RadioManage::Stop(_))
             {
                 return Err(ProjectsError::Invalid(denial));
             }
-            if action != "open" {
+            if !matches!(&body, RadioManage::Open(_)) {
                 if body.revision() != Some(room.radio.revision) {
                     return Err(ProjectsError::Invalid(
                         "The shared chat changed. Reload before sending",
@@ -207,30 +205,27 @@ pub async fn manage(
                     .revision
                     .checked_add(1)
                     .ok_or_else(|| invalid(room.id()))?;
-                if matches!(action, "send" | "pass") {
+                let turn = match &body {
+                    RadioManage::Send(v) => Some((
+                        v.target.as_deref().unwrap_or("both"),
+                        v.rounds.as_ref(),
+                        Some(v.text.as_str()),
+                    )),
+                    RadioManage::Pass(v) => Some((v.target.as_str(), v.rounds.as_ref(), None)),
+                    RadioManage::Open(_) | RadioManage::Stop(_) => None,
+                };
+                if let Some((target, rounds, text)) = turn {
                     let members = room.members();
-                    let target = match &body {
-                        RadioManage::Send(v) => v.target.as_deref().unwrap_or("both"),
-                        RadioManage::Pass(v) => v.target.as_str(),
-                        _ => "both",
-                    };
                     if target != "both" && !members.iter().any(|id| id == target) {
                         return Err(ProjectsError::Invalid(
                             "Select a participant in this shared chat",
                         ));
                     }
-                    let rounds = match &body {
-                        RadioManage::Send(v) => v.rounds.as_ref(),
-                        RadioManage::Pass(v) => v.rounds.as_ref(),
-                        _ => None,
-                    }
-                    .map_or(Some(1), |v| v.as_u64())
-                    .ok_or(ProjectsError::Invalid("Select one or two rounds"))?;
-                    let text = if action == "send" {
-                        match &body {
-                            RadioManage::Send(v) => bounded_text(&v.text, MAX_TEXT)?,
-                            _ => return Err(ProjectsError::Invalid("Unknown shared chat action")),
-                        }
+                    let rounds = rounds
+                        .map_or(Some(1), |v| v.as_u64())
+                        .ok_or(ProjectsError::Invalid("Select one or two rounds"))?;
+                    let text = if let Some(text) = text {
+                        bounded_text(text, MAX_TEXT)?
                     } else {
                         if target == "both" {
                             return Err(ProjectsError::Invalid("Select the next speaker"));
@@ -561,7 +556,7 @@ mod tests {
             })
             .await
             .expect("legacy replay fixture");
-        let typed = serde_json::from_str(&body.to_string()).expect("radio request");
+        let typed = serde::Deserialize::deserialize(body).expect("radio request");
         assert!(manage(store, &typed).await.is_err());
     }
 

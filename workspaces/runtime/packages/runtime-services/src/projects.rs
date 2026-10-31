@@ -745,6 +745,7 @@ fn folder_fold(value: &str) -> String {
     value.to_lowercase()
 }
 
+// Project writes retain Value until ProjectLive preserves stored field presence.
 fn load_project(
     tx: &studio_runtime_store::Transaction<'_>,
     id: &str,
@@ -1386,7 +1387,7 @@ mod account_order_tests {
         );
         let project = write(
             Arc::clone(&store),
-            serde_json::from_value(json!({"action":"register","path":path}))
+            serde::Deserialize::deserialize(json!({"action":"register","path":path}))
                 .expect("project request"),
             "default".to_owned(),
             Vec::new(),
@@ -1426,8 +1427,10 @@ mod account_order_tests {
             async move {
                 write(
                     store,
-                    serde_json::from_value(json!({"action":"set_account_groups","path":path,
-                        "account_groups":groups,"expected_revision":revision}))
+                    serde::Deserialize::deserialize(
+                        json!({"action":"set_account_groups","path":path,
+                        "account_groups":groups,"expected_revision":revision}),
+                    )
                     .map_err(|_| ProjectsError::Invalid("account order is invalid"))?,
                     "default".to_owned(),
                     Vec::new(),

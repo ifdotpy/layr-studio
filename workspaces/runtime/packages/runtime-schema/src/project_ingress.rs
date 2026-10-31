@@ -157,6 +157,7 @@ pub struct LocationWrite {
 #[cfg(test)]
 mod tests {
     use super::{AccountGroup, ProjectWrite};
+    use serde::Deserialize;
 
     #[test]
     fn account_group_uses_shared_pattern() {
@@ -170,7 +171,7 @@ mod tests {
     fn project_groups_obey_ingress_limit() {
         let groups = vec!["group"; crate::shared_values::ACCOUNT_GROUPS_MAX + 1];
         let body = serde_json::json!({"path":"/project", "account_groups":groups});
-        assert!(serde_json::from_value::<ProjectWrite>(body).is_err());
+        assert!(ProjectWrite::deserialize(body).is_err());
     }
 }
 
@@ -234,13 +235,13 @@ impl ProjectRequest {
     pub fn name(&self) -> Option<&str> {
         match self {
             Self::Project(body) => body.name.value().map(String::as_str),
-            _ => None,
+            Self::Location(_) | Self::Sidebar(_) => None,
         }
     }
     pub fn project(&self) -> Option<&str> {
         match self {
             Self::Location(body) => Some(body.project.as_str()),
-            _ => None,
+            Self::Project(_) | Self::Sidebar(_) => None,
         }
     }
 }
