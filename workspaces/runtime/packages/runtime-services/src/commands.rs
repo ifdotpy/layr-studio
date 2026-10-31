@@ -259,28 +259,91 @@ pub fn agent_reference(tx: &Transaction<'_>, id: &str) -> Result<RequestReferenc
     })
 }
 
-/// Step 2 for `withdraw`: delete a queued message and return its text.
+/// The facts of a withdraw, read from the rows by `read_withdraw`. `decide_withdraw` uses
+/// only these facts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WithdrawInput {
+    pub chat: String,
+    pub deleted: bool,
+    /// The chat runs on another server (a remote worker or anchor).
+    pub remote: bool,
+    /// The pending event with the message id, in this chat and epoch. Pending is the
+    /// only status the read returns.
+    pub queued: Option<QueuedMessage>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct QueuedMessage {
+    pub id: String,
+    pub kind: String,
+    pub valid: bool,
+    pub text: String,
+}
+
+/// What `apply_withdraw` writes: the queue status and the server draft.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WithdrawDecision {
+    pub chat: String,
+    pub message: String,
+    pub text: String,
+}
+
+/// Step 2 for `withdraw`, read part: gather the facts that `decide_withdraw` needs.
+pub fn read_withdraw(
+    tx: &Transaction<'_>,
+    chat: &str,
+    message: &str,
+) -> Result<WithdrawInput, CommandError> {
+    let agent = AgentRepository::get(tx, &AgentId::from(chat))?.ok_or(CommandError::NotFound)?;
+    let queued = match QueueWriteRepository::pending_events(tx, chat, agent.epoch)?
+        .into_iter()
+        .find(|event| event.id == message)
+    {
+        Some(event) => {
+            let text: String = tx.query_row(
+                "SELECT text FROM runtime_events WHERE id=?1",
+                [message],
+                |row| row.get(0),
+            )?;
+            Some(QueuedMessage {
+                id: event.id,
+                kind: event.kind,
+                valid: event.valid,
+                text,
+            })
+        }
+        None => None,
+    };
+    Ok(WithdrawInput {
+        chat: chat.into(),
+        deleted: agent.is_deleted(),
+        remote: truthy(agent.extra.get("remoteWorker")) || truthy(agent.extra.get("remoteAnchor")),
+        queued,
+    })
+}
+
+/// Step 2 for `withdraw`, decide part: no I/O. The refusals keep this order: deleted,
+/// remote, not queued, invalid or not a user message.
 ///
 /// TODO(#630): a message that already left the queue is held by a turn. The command must
 /// then interrupt that turn and return the text the same way. That needs the Turn table of
 /// the domain model; until it is on main, such a message is a conflict.
-pub fn withdraw(
-    tx: &Transaction<'_>,
-    chat: &str,
+pub fn decide_withdraw(
+    input: &WithdrawInput,
     message: &str,
-) -> Result<(RequestReference, String), CommandError> {
-    let agent = AgentRepository::get(tx, &AgentId::from(chat))?.ok_or(CommandError::NotFound)?;
-    if agent.is_deleted() {
+) -> Result<WithdrawDecision, CommandError> {
+    if input.deleted {
         return Err(CommandError::Invalid("This agent was deleted"));
     }
-    if truthy(agent.extra.get("remoteWorker")) || truthy(agent.extra.get("remoteAnchor")) {
+    if input.remote {
         return Err(CommandError::Invalid(
             "Not implemented: requires cross-server/remote-events",
         ));
     }
-    let queued = QueueWriteRepository::pending_events(tx, chat, agent.epoch)?
-        .into_iter()
-        .find(|event| event.id == message)
+    let queued = input
+        .queued
+        .as_ref()
+        .filter(|queued| queued.id == message)
         .ok_or(CommandError::Conflict(
             "This message already left the queue",
         ))?;
@@ -289,13 +352,24 @@ pub fn withdraw(
             "Only a user message can be withdrawn",
         ));
     }
-    let text: String = tx.query_row(
-        "SELECT text FROM runtime_events WHERE id=?1",
-        [message],
-        |row| row.get(0),
-    )?;
-    QueueWriteRepository::update_status(tx, message, "cancelled")?;
-    Ok((message_reference(tx, message)?, text))
+    Ok(WithdrawDecision {
+        chat: input.chat.clone(),
+        message: queued.id.clone(),
+        text: queued.text.clone(),
+    })
+}
+
+/// Step 2 for `withdraw`, apply part: write the queue status and the server draft. The
+/// reference is read after the status write, because the status change moves its revision.
+pub fn apply_withdraw(
+    tx: &Transaction<'_>,
+    decision: &WithdrawDecision,
+    now_ms: i64,
+) -> Result<RequestReference, CommandError> {
+    QueueWriteRepository::update_status(tx, &decision.message, "cancelled")?;
+    let reference = message_reference(tx, &decision.message)?;
+    server_draft(tx, &decision.chat, &decision.text, now_ms)?;
+    Ok(reference)
 }
 
 /// Step 4. Read the referenced rows now. `ids` are the entities that the command changed:
@@ -406,9 +480,9 @@ pub fn execute_sync(
     let mut reply = serde_json::Value::Null;
     let reference = match &request.command {
         Command::Withdraw { target, body } => {
-            let (reference, text) = withdraw(tx, target, &body.message)?;
-            server_draft(tx, target, &text, now_ms)?;
-            reference
+            let input = read_withdraw(tx, target, &body.message)?;
+            let decision = decide_withdraw(&input, &body.message)?;
+            apply_withdraw(tx, &decision, now_ms)?
         }
         Command::Stop { target, body } => {
             let (sender, sender_epoch) = match principal {
@@ -492,5 +566,130 @@ pub fn agent_request(agent: &str, id: &str, command: Command) -> CommandRequest 
         // The server numbers the commands of an agent.
         number: 1,
         command,
+    }
+}
+
+#[cfg(test)]
+mod withdraw_decision_tests {
+    use super::{CommandError, QueuedMessage, WithdrawInput, decide_withdraw};
+
+    fn queued(id: &str, kind: &str, valid: bool) -> QueuedMessage {
+        QueuedMessage {
+            id: id.into(),
+            kind: kind.into(),
+            valid,
+            text: "draft text".into(),
+        }
+    }
+
+    fn input(deleted: bool, remote: bool, queued: Option<QueuedMessage>) -> WithdrawInput {
+        WithdrawInput {
+            chat: "chat-1".into(),
+            deleted,
+            remote,
+            queued,
+        }
+    }
+
+    #[test]
+    fn a_queued_user_message_is_withdrawn_with_its_text() {
+        let decision =
+            decide_withdraw(&input(false, false, Some(queued("m1", "user", true))), "m1")
+                .expect("withdraw");
+        assert_eq!(decision.chat, "chat-1");
+        assert_eq!(decision.message, "m1");
+        assert_eq!(decision.text, "draft text");
+    }
+
+    #[test]
+    fn a_deleted_chat_is_refused() {
+        let error = decide_withdraw(&input(true, false, None), "m1").expect_err("deleted");
+        assert!(matches!(
+            error,
+            CommandError::Invalid("This agent was deleted")
+        ));
+    }
+
+    #[test]
+    fn a_remote_chat_is_refused() {
+        let error = decide_withdraw(&input(false, true, Some(queued("m1", "user", true))), "m1")
+            .expect_err("remote");
+        assert!(matches!(
+            error,
+            CommandError::Invalid("Not implemented: requires cross-server/remote-events")
+        ));
+    }
+
+    #[test]
+    fn a_message_that_is_not_queued_is_a_conflict() {
+        let error = decide_withdraw(&input(false, false, None), "m1").expect_err("not queued");
+        assert!(matches!(
+            error,
+            CommandError::Conflict("This message already left the queue")
+        ));
+    }
+
+    #[test]
+    fn a_queued_event_with_another_id_is_a_conflict() {
+        let error = decide_withdraw(&input(false, false, Some(queued("m2", "user", true))), "m1")
+            .expect_err("other id");
+        assert!(matches!(
+            error,
+            CommandError::Conflict("This message already left the queue")
+        ));
+    }
+
+    #[test]
+    fn an_invalid_queued_event_is_refused() {
+        let error = decide_withdraw(
+            &input(false, false, Some(queued("m1", "user", false))),
+            "m1",
+        )
+        .expect_err("invalid");
+        assert!(matches!(
+            error,
+            CommandError::Invalid("Only a user message can be withdrawn")
+        ));
+    }
+
+    #[test]
+    fn a_queued_event_that_is_not_a_user_message_is_refused() {
+        let error = decide_withdraw(
+            &input(false, false, Some(queued("m1", "followup", true))),
+            "m1",
+        )
+        .expect_err("kind");
+        assert!(matches!(
+            error,
+            CommandError::Invalid("Only a user message can be withdrawn")
+        ));
+    }
+
+    #[test]
+    fn the_deleted_check_comes_before_the_remote_and_queue_checks() {
+        let error = decide_withdraw(&input(true, true, None), "m1").expect_err("deleted first");
+        assert!(matches!(
+            error,
+            CommandError::Invalid("This agent was deleted")
+        ));
+    }
+
+    #[test]
+    fn the_remote_check_comes_before_the_queue_checks() {
+        let error = decide_withdraw(
+            &input(false, true, Some(queued("m1", "followup", false))),
+            "m1",
+        )
+        .expect_err("remote first");
+        assert!(
+            matches!(error, CommandError::Invalid(text) if text.starts_with("Not implemented"))
+        );
+    }
+
+    #[test]
+    fn the_queue_check_comes_before_the_kind_check() {
+        let error =
+            decide_withdraw(&input(false, false, None), "m1").expect_err("not queued first");
+        assert!(matches!(error, CommandError::Conflict(_)));
     }
 }
