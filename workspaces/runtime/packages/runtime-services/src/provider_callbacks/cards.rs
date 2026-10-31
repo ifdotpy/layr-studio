@@ -265,17 +265,13 @@ pub(super) fn save_historical(tx: &Transaction<'_>, card: &Value) -> Result<(), 
 
 pub(super) fn save(tx: &Transaction<'_>, card: &RequestRecord) -> Result<(), CallbackError> {
     let id = card.id.as_str();
+    let value = crate::request_projection::project_request_record(card)
+        .map_err(|_| CallbackError::Invalid("Invalid provider request payload"))?;
     Table::<RequestRecord>::new(tx).put(card)?;
     if let Some(actor) = records::get(tx, "runtime_agents", &card.agent)? {
         crate::tool_requests::reconcile_request_effect(tx, card, &actor)?;
     }
     let deleted = card.status != RequestCardStatus::Pending;
-    let value = if deleted {
-        json!({})
-    } else {
-        crate::sync_views::project_persisted_record("request", &json!(card))
-            .ok_or_else(|| CallbackError::Stored(format!("runtime_requests/{id}")))?
-    };
     studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "request", id, value, deleted)?;
     Ok(())
 }

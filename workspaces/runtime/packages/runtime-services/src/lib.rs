@@ -177,6 +177,7 @@ pub mod recovery_store;
 pub mod relocation;
 pub mod remote_access;
 pub mod remote_transport;
+pub mod request_projection;
 pub mod resource_notify;
 pub mod rules;
 pub mod rules_engine;
