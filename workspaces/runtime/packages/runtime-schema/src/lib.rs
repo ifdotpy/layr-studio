@@ -513,7 +513,8 @@ pub fn table_schema(table: &str) -> Option<&'static str> {
         "runtime_requests" => "PersistedRequestRecord",
         "runtime_rooms" => "PersistedRoomRecord",
         "runtime_rules" => "PersistedRuleRecord",
-        "runtime_server_inbox" => "PersistedServerDelivery",
+        // Shared row shape of the server request rows in runtime_outbox (project locations decode it).
+        "runtime_server_inbox" | "runtime_server_outbox" => "PersistedServerDelivery",
         "runtime_tasks" => "PersistedTaskRecord",
         "runtime_tool_request_aliases" => "PersistedToolAlias",
         "runtime_tool_requests" => "PersistedToolRequestRecord",
@@ -1278,6 +1279,7 @@ mod tests {
         for (table, schema) in [
             ("runtime_access_clients", "PersistedAccessClient"),
             ("runtime_access_discovered", "PersistedAccessClient"),
+            ("runtime_server_outbox", "PersistedServerDelivery"),
             ("runtime_federation_rooms", "PersistedFederationRoom"),
             ("runtime_agents", "PersistedAgentRecord"),
             ("runtime_tasks", "PersistedTaskRecord"),
