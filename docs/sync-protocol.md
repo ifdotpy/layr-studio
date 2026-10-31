@@ -18,9 +18,8 @@ forbidden.
 
 Local storage and IndexedDB may contain device keys, credentials and pairing
 secrets, the monitor input journal, outbox request identities, the unsent input
-buffer, and the thin remote subscription cache. Secret answer fields remain in
-memory only. Existing implementation descriptions below
-are migration targets where they conflict with this rule.
+buffer, and the remote frontend's subscription cache. Secret answer fields remain
+in memory only. The cache is never used to decide whether to send or retry a command.
 
 Message send receipts and queue projections use the Rust-owned `MessageSendStatus`
 contract generated into the web API. `buffered` means the device holds a send

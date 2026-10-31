@@ -221,6 +221,23 @@ beforeEach(async () => {
 });
 
 describe("shared resource event transport", () => {
+  it("sends an applied subscription cursor when opening the stream", async () => {
+    syncDatabase.mockResolvedValue({ workspaceId });
+    const { readSubscriptionCursor } = await import("./client");
+    vi.mocked(readSubscriptionCursor).mockResolvedValue({
+      workspaceId,
+      seq: 4,
+    });
+    const transport = await loadTransport();
+    const ref = { kind: "agentDetail", agentId: "lead" } as const;
+    const stop = transport.watchResourceChanges(ref, vi.fn());
+    await vi.advanceTimersByTimeAsync(20);
+    const url = new URL(Source.instances[0]!.url, "http://studio.test");
+    expect(JSON.parse(url.searchParams.get("since")!)).toEqual([
+      { resource: ref, since: { workspaceId, seq: 4 } },
+    ]);
+    stop();
+  });
   it("delivers rename failure as transient progress for its exact agent and request", async () => {
     syncDatabase.mockResolvedValue({ workspaceId });
     const transport = await loadTransport();

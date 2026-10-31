@@ -11,6 +11,12 @@ import {
 } from "../generated/sharedValues";
 
 import { LocalCollection, type Row } from "./localCollection";
+import {
+  cacheableSubscription,
+  createSubscriptionCache,
+  subscriptionRows,
+  type SubscriptionCacheStorage,
+} from "./subscriptionCache";
 
 import {
   applyEntityRows,
@@ -132,6 +138,7 @@ export type { TranscriptProjectionPayload } from "../apiTypes.ts";
 
 import { clearTranscript } from "./transcriptCache";
 export type SyncClientOptions = {
+  cacheStorage?: SubscriptionCacheStorage | undefined;
   api: Pick<
     import("../api").ServerApi,
     | "syncGet"
@@ -176,6 +183,7 @@ export function createSyncClient(options: SyncClientOptions) {
   }
 
   let pending: ReturnType<typeof open> | undefined;
+  let subscriptionCache: ReturnType<typeof createSubscriptionCache> | undefined;
 
   async function open() {
     const cached = saved<string>("codex-sync-workspace", "");
@@ -241,6 +249,12 @@ export function createSyncClient(options: SyncClientOptions) {
         ),
       ),
     };
+    if (options.cacheStorage)
+      subscriptionCache = createSubscriptionCache(
+        options.cacheStorage,
+        db.projections,
+        workspaceId,
+      );
     db.projections.$.subscribe((event) => {
       const doc = event.documentData;
       if (doc.id.startsWith("transcript:") && doc.id.split(":").length === 2)
@@ -405,6 +419,8 @@ export function createSyncClient(options: SyncClientOptions) {
 
   async function readSubscriptionCursor(resource: ResourceRef) {
     const { db, workspaceId } = await syncDatabase();
+    if (cacheableSubscription(resource))
+      await subscriptionCache?.load(resource);
     if (resource.kind === "state") {
       // Both paginated bootstrap/recovery and inline state deliveries own this
       // checkpoint. A separate per-ref row cannot prove a pull's applied base.
@@ -448,6 +464,19 @@ export function createSyncClient(options: SyncClientOptions) {
         return undefined;
     }
     return cursor;
+  }
+
+  async function cacheSubscription(resource: ResourceRef) {
+    const cache = subscriptionCache;
+    if (!cache || !cacheableSubscription(resource)) return;
+    const cursor = await readSubscriptionCursor(resource);
+    if (!cursor) return;
+    const { db } = await syncDatabase();
+    cache.save(
+      resource,
+      cursor,
+      await subscriptionRows(resource, db.projections),
+    );
   }
 
   async function persistSubscriptionCursor(
@@ -2543,6 +2572,8 @@ export function createSyncClient(options: SyncClientOptions) {
   }
   return {
     syncDatabase,
+    cacheSubscription,
+    disposeCache: () => subscriptionCache?.stop(),
     applyCommandRows,
     persistResourceEntityChanges,
     persistStagedEntityTransfer,

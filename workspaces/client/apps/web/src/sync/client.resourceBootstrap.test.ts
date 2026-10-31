@@ -1,6 +1,7 @@
 import type { ConnectionActivity, ConnectionHealth } from "./connectionState";
 import { backgroundDisplay } from "../components/componentTestFixtures";
 import {
+  MessageSendStatus,
   SubscriptionReplyKind,
   AgentStatus,
   TaskKind,
@@ -306,6 +307,121 @@ it("opens workspace and writes projections without IndexedDB", async () => {
     _deleted: false,
   });
   expect(open).not.toHaveBeenCalled();
+});
+
+it("reloads a scoped projection before exposing its resume cursor", async () => {
+  const f = await setup();
+  const { createEntitySequenceScope } = await import("./entitySequence");
+  const { createTranscriptCache } = await import("./transcriptCache");
+  const values = new Map<string, unknown>();
+  const storage = {
+    get: async (key: string) => values.get(key),
+    put: async (key: string, value: unknown) => {
+      values.set(key, value);
+    },
+    delete: async (key: string) => {
+      values.delete(key);
+    },
+  };
+  const makeClient = () =>
+    f.client.createSyncClient({
+      api: {
+        syncGet: mocks.syncGet,
+        syncPost: vi.fn(),
+        saved: (_key, fallback) => fallback,
+        save: vi.fn(),
+        setWorkspace: vi.fn(),
+        isApiSchemaMismatch: () => false,
+      },
+      resources: {
+        watchResourceChanges: () => () => {},
+        watchResourceConnection: () => () => {},
+      },
+      sequences: createEntitySequenceScope(),
+      transcripts: createTranscriptCache(),
+      databaseSuffix: "cache-test",
+      cacheStorage: storage,
+    });
+  const first = makeClient();
+  const ref = { kind: "agentDetail", agentId: "lead" } as const;
+  const frame = f.frame(3);
+  frame.resources = [ref];
+  assert.ok(frame.resourceVersions[0]);
+  frame.resourceVersions[0].resource = ref;
+  frame.resourceVersions[0].entityChanges!.documents = [
+    {
+      op: "upsert",
+      collection: "agentDetail",
+      id: "lead",
+      seq: 3,
+      value: { id: "lead", canSend: true },
+    },
+  ];
+  await first.persistResourceEntityChanges(frame, () => true);
+  const state = { kind: "state" } as const;
+  const baseline = f.frame(4);
+  assert.ok(baseline.resourceVersions[0]?.entityChanges);
+  baseline.resourceVersions[0].entityChanges.documents = [
+    {
+      op: "upsert",
+      collection: "messageReceipt",
+      id: "message",
+      seq: 4,
+      value: {
+        id: "message",
+        agent: "lead",
+        status: "pending",
+        materialized: false,
+      },
+    },
+  ];
+  await first.persistResourceEntityChanges(baseline, () => true);
+  vi.useFakeTimers();
+  await first.cacheSubscription(ref);
+  await first.cacheSubscription(state);
+  await vi.advanceTimersByTimeAsync(5_000);
+  first.disposeCache();
+  vi.useRealTimers();
+  const reloaded = makeClient();
+  expect(await reloaded.readSubscriptionCursor(ref)).toEqual({
+    workspaceId: f.workspaceId,
+    seq: 3,
+  });
+  const { db } = await reloaded.syncDatabase();
+  expect(
+    (await db.projections.findOne("entity:agentDetail:lead").exec())?.entity
+      ?.value,
+  ).toMatchObject({ canSend: true });
+  expect(await reloaded.readSubscriptionCursor(state)).toEqual({
+    workspaceId: f.workspaceId,
+    seq: 4,
+  });
+  const receipt = () =>
+    db.projections.findOne("entity:messageReceipt:message").exec();
+  expect((await receipt())?.entity?.value).toMatchObject({ status: "pending" });
+  const delta = f.frame(5);
+  assert.ok(delta.resourceVersions[0]?.entityChanges);
+  delta.resourceVersions[0].replyKind = SubscriptionReplyKind.delta;
+  delta.resourceVersions[0].entityChanges.after = 4;
+  delta.resourceVersions[0].entityChanges.documents = [
+    {
+      op: "upsert",
+      collection: "messageReceipt",
+      id: "message",
+      seq: 5,
+      value: {
+        id: "message",
+        agent: "lead",
+        status: MessageSendStatus.delivered,
+        materialized: true,
+      },
+    },
+  ];
+  await reloaded.persistResourceEntityChanges(delta, () => true);
+  expect((await receipt())?.entity?.value).toMatchObject({
+    status: MessageSendStatus.delivered,
+  });
+  reloaded.disposeCache();
 });
 
 it("keeps the newer row when command replies arrive out of order", async () => {

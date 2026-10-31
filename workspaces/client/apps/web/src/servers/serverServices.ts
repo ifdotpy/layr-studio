@@ -29,6 +29,11 @@ import type { StudioServer } from "./registry";
 import { createServerTransport } from "./serverTransport";
 import { serverCredentialAdapter } from "./transport";
 import { scopedSessionOutbox } from "../browserPersistence";
+import { indexedDb } from "../indexedDb";
+import { frontendIsLocal } from "../sync/localFrontend";
+
+/** Disable all remote subscription persistence here. */
+const SUBSCRIPTION_CACHE_ENABLED = true;
 
 /** Services belong to a server, never to the currently visible chat. */
 export function createServerServices(server: StudioServer) {
@@ -77,12 +82,22 @@ export function createServerServices(server: StudioServer) {
       sync: () => sync,
       owner: transport.owner,
       nativeCore: localNativeClient,
+      cacheApplied: (refs) => {
+        for (const ref of refs) void sync.cacheSubscription(ref);
+      },
     });
     sync = createSyncClient({
       api,
       resources,
       sequences,
       transcripts,
+      cacheStorage:
+        SUBSCRIPTION_CACHE_ENABLED && !frontendIsLocal(transport.owner.id)
+          ? indexedDb(
+              `studio-subscription-cache:${transport.owner.id}`,
+              "subscriptions",
+            )
+          : undefined,
       databaseSuffix:
         transport.owner.id === "local"
           ? ""
@@ -184,6 +199,7 @@ export function createServerServices(server: StudioServer) {
       audio.close();
       stopName();
       runtime?.resources.dispose();
+      runtime?.sync.disposeCache();
       transport.close();
     },
   };
