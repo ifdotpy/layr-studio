@@ -1144,9 +1144,9 @@ fn publish_direct(
         if record.status != studio_runtime_schema::persistence::RequestCardStatus::Pending {
             return retire_if_live(transaction, collection, id, validate);
         }
-        if let Some(projected) = project_persisted_record(collection, &serde_json::json!(record)) {
-            put_projection(transaction, collection, id, projected, false, validate)?;
-        }
+        let projected = crate::request_projection::project_request_record(&record)
+            .map_err(|_| StoreError::RecordContract("invalid request projection"))?;
+        SyncDocumentsRepository::put_entity(transaction, collection, id, projected, false)?;
         return Ok(());
     }
     let record = serde_json::from_str::<Value>(raw)?;
