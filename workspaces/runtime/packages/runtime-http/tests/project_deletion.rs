@@ -484,10 +484,9 @@ async fn project_deletion_one_commit_and_room_rebuild_cannot_revive() {
             })
             .expect("retained room");
         let room: Value = serde_json::from_str(&raw).expect("room");
-        assert!(
-            studio_runtime_services::sync_views::room_entity_view(&room, &Default::default())
-                .is_none()
-        );
+        assert!(studio_runtime_store::ProjectsRepository::room_retired(
+            &room
+        ));
         assert!(
             reader
                 .query_row(
