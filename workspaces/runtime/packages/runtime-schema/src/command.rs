@@ -255,9 +255,9 @@ mod tests {
 
     #[test]
     fn stop_descendants_default_to_true() {
-        let request: CommandRequest = serde_json::from_value(serde_json::json!(
-            {"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"stop","target":"t","body":{}}
-        ))
+        let request: CommandRequest = serde_json::from_str(
+            r#"{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"stop","target":"t","body":{}}"#,
+        )
         .expect("parse");
         assert_eq!(
             request.command,

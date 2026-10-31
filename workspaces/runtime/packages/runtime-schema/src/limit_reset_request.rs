@@ -16,6 +16,12 @@ pub const DEFAULT_RESET_ACCOUNT_KEY: &str = "default";
 #[derive(Clone, Debug)]
 pub struct ResetRequestId(Uuid);
 
+impl From<Uuid> for ResetRequestId {
+    fn from(value: Uuid) -> Self {
+        Self(value)
+    }
+}
+
 impl ResetRequestId {
     pub fn canonical(&self) -> String {
         self.0.to_string()

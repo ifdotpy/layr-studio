@@ -64,19 +64,16 @@ async fn costs(
         .map_err(|_| ApiError::internal())?
         .as_secs_f64();
     let state_dir = std::path::PathBuf::from(&state.state_dir);
-    let mut result = studio_runtime_process::blocking_pool::spawn_blocking(
+    let result = studio_runtime_process::blocking_pool::spawn_blocking(
         "runtime-http/routes/usage",
         move || usage::account_cost_snapshot(&state_dir, &account_key, &account, now),
     )
     .await
     .map_err(|_| ApiError::internal())?
     .map_err(cost_error)?;
-    if let Some(fields) = result.as_object_mut() {
-        fields.remove("_refreshDue");
-    }
-    Ok(Json(super::generated_json::<
-        crate::generated::AccountCostResponse,
-    >(result)?))
+    let snapshot: crate::bounded_entities::CostSnapshot<crate::generated::AccountCostResponse> =
+        super::generated_json(result)?;
+    Ok(Json(snapshot.public))
 }
 
 async fn cost_interest(
