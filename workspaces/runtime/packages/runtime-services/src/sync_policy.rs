@@ -3543,7 +3543,9 @@ mod tests {
                 maintain_task_window_after_write(
                     transaction,
                     Some(&previous),
-                    &serde_json::from_value(updated.clone())?,
+                    &<studio_runtime_store::TaskRecord as serde::Deserialize>::deserialize(
+                        &updated,
+                    )?,
                     &|_, _, _, _| true,
                 )?;
                 assert!(
@@ -3582,7 +3584,7 @@ mod tests {
                 maintain_task_window_after_write(
                     transaction,
                     Some(&task),
-                    &serde_json::from_value(task.clone())?,
+                    &<studio_runtime_store::TaskRecord as serde::Deserialize>::deserialize(&task)?,
                     &|_, _, _, _| true,
                 )?;
                 assert!(
@@ -3659,7 +3661,7 @@ mod tests {
                         maintain_task_window_after_write(
                             transaction,
                             previous.as_ref(),
-                            &serde_json::from_value(task.clone())?,
+                            &<studio_runtime_store::TaskRecord as serde::Deserialize>::deserialize(&task)?,
                             &|_, _, _, _| true,
                         )?;
                         assert!(
@@ -3700,7 +3702,9 @@ mod tests {
                 maintain_task_window_after_write(
                     transaction,
                     Some(&previous),
-                    &serde_json::from_value(previous.clone())?,
+                    &<studio_runtime_store::TaskRecord as serde::Deserialize>::deserialize(
+                        &previous,
+                    )?,
                     &|_, _, _, _| true,
                 )?;
                 assert!(
@@ -3753,7 +3757,7 @@ mod tests {
         maintain_task_window_after_write(
             transaction,
             previous.as_ref(),
-            &serde_json::from_value(task.clone())?,
+            &<studio_runtime_store::TaskRecord as serde::Deserialize>::deserialize(task)?,
             &|_, _, _, _| true,
         )
     }
