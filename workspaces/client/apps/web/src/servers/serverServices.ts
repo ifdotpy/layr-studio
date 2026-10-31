@@ -98,6 +98,7 @@ export function createServerServices(server: StudioServer) {
   };
   const outbox = createOutbox({
     api,
+    serverId: transport.owner.id,
     watchResourceConnection: (...args) =>
       synchronization().resources.watchResourceConnection(...args),
     storage,

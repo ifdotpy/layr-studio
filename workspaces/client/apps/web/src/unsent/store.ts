@@ -73,3 +73,24 @@ export function unsentStore(server: string, feature: string) {
     },
   };
 }
+
+// Remove this localStorage migration after release 0.2.0 has shipped.
+export async function migrateMessageSends(
+  storage: Storage,
+  buffer: ReturnType<typeof unsentStore>,
+) {
+  if (!UNSENT_BUFFER_ENABLED) return;
+  const prefix = "studio-message-send:";
+  const existing = new Set((await buffer.loadAll()).map(([key]) => key));
+  const keys = Array.from({ length: storage.length }, (_, index) =>
+    storage.key(index),
+  );
+  for (const key of keys) {
+    if (!key?.startsWith(prefix)) continue;
+    const value = storage.getItem(key);
+    if (value === null) continue;
+    const id = key.slice(prefix.length);
+    if (!existing.has(id)) await buffer.put(id, value);
+    storage.removeItem(key);
+  }
+}

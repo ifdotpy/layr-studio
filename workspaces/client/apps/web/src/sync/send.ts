@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { outboxRequestKeys, outboxRequests } from "../browserPersistence";
+import { migrateMessageSends, unsentStore } from "../unsent/store";
+import { serverViewId } from "../servers/environment";
 import { serverLocalStorage } from "../servers/storage";
 import { serverMutationResponseIsUncertain } from "../servers/mutationIdentity";
 import { ApiError, command, errorText, getStreamSession } from "../api";
@@ -75,16 +76,28 @@ export function matchesMessageDelivery(value: unknown, id: string) {
 export function createOutbox(options: {
   api: Pick<import("../api").ServerApi, "command" | "getStreamSession">;
   storage: Storage;
+  buffer?: ReturnType<typeof unsentStore>;
+  serverId?: string;
   watchResourceConnection: typeof watchResourceConnection;
 }) {
   const { command } = options.api;
-  const outbox = outboxRequests(options.storage);
+  const buffer =
+    options.buffer ??
+    unsentStore(options.serverId ?? serverViewId ?? "local", "message");
+  const saved = new Map<string, string>();
+  let initialization: Promise<void> | undefined;
+  const ready = () =>
+    (initialization ??= (async () => {
+      await migrateMessageSends(options.storage, buffer);
+      for (const [id, value] of await buffer.loadAll())
+        if (typeof value === "string") saved.set(id, value);
+    })());
   const listeners = new Set<() => void>();
   const active = new Map<string, Promise<SendResult>>();
   const key = (room: string, id: string) => JSON.stringify([room, id]);
   const publish = () => listeners.forEach((listener) => listener());
   function list(): OutboxEntry[] {
-    return outboxRequestKeys(options.storage, "messageSend", "")
+    return [...saved.keys()]
       .flatMap((suffix) => {
         let identity: unknown;
         try {
@@ -117,7 +130,7 @@ export function createOutbox(options: {
       .sort((a, b) => a.created - b.created);
   }
   function read(room: string, id: string): SavedSend | undefined {
-    const raw = outbox.get("messageSend", key(room, id));
+    const raw = saved.get(key(room, id));
     if (!raw) return;
     try {
       const row: unknown = JSON.parse(raw);
@@ -150,16 +163,16 @@ export function createOutbox(options: {
     }
   }
   function write(value: SavedSend) {
-    outbox.set(
-      "messageSend",
-      key(value.body.room, value.body.id),
-      JSON.stringify(value),
-    );
+    const id = key(value.body.room, value.body.id);
+    const text = JSON.stringify(value);
+    saved.set(id, text);
     publish();
+    return buffer.put(id, text);
   }
-  function remove(room: string, id: string) {
-    outbox.remove("messageSend", key(room, id));
+  async function remove(room: string, id: string) {
+    saved.delete(key(room, id));
     publish();
+    await buffer.delete(key(room, id));
   }
   function find(id: string) {
     return list().find((entry) => entry.id === id);
@@ -176,11 +189,13 @@ export function createOutbox(options: {
   function send(
     value: SavedSend,
     onPersist?: () => void | Promise<void>,
+    persisted?: Promise<void>,
   ): Promise<SendResult> {
     const id = value.body.id;
     const existing = active.get(id);
     if (existing) return existing;
     const task = (async (): Promise<SendResult> => {
+      await persisted;
       await onPersist?.();
       try {
         if (!read(value.body.room, id))
@@ -188,11 +203,12 @@ export function createOutbox(options: {
         const current = options.api.getStreamSession();
         if (!current) throw new Error("The server connection is not ready.");
         if (current.workspaceId !== value.workspaceId)
-          throw new ApiError(
+          throw new Error(
             "The server workspace changed. Reload before sending.",
-            409,
           );
-        write({ ...value, attempted: true });
+        await write({ ...value, attempted: true });
+        if (!read(value.body.room, id))
+          return { kind: "local", id, queued: false, status: "cancelled" };
         const response = await command.run(value.request, {
           workspaceId: value.workspaceId,
         });
@@ -212,10 +228,10 @@ export function createOutbox(options: {
             attempted: true,
             error: receipt.error || "The message was not sent.",
           };
-          if (read(value.body.room, id)) write(failed);
+          if (read(value.body.room, id)) await remove(value.body.room, id);
           return result(failed);
         }
-        remove(value.body.room, id);
+        await remove(value.body.room, id);
         return {
           ...receipt,
           kind: "server",
@@ -231,7 +247,10 @@ export function createOutbox(options: {
           status: definitive ? ("failed" as const) : ("uncertain" as const),
           error: errorText(error),
         };
-        if (read(value.body.room, id)) write(failed);
+        if (read(value.body.room, id)) {
+          if (definitive) await remove(value.body.room, id);
+          else await write(failed);
+        }
         return result(failed);
       }
     })().finally(() => active.delete(id));
@@ -243,12 +262,13 @@ export function createOutbox(options: {
     attachments: Attachment[] = [],
     onPersist?: () => void | Promise<void>,
   ) {
+    await ready();
     if (!body.id) throw new Error("A message identity is required");
     let value = read(body.room, body.id);
     if (value && JSON.stringify(value.body) !== JSON.stringify(body))
       throw new Error("Message identity already has different content");
     if (!value) {
-      if (outbox.get("messageSend", key(body.room, body.id)) !== null)
+      if (saved.has(key(body.room, body.id)))
         throw new Error(
           "This saved message cannot be read. Discard it to remove it.",
         );
@@ -275,32 +295,40 @@ export function createOutbox(options: {
         displayPending: true,
         attachments,
       };
-      write(value);
+      const persisted = write(value).catch((error) => {
+        saved.delete(key(body.room, body.id));
+        publish();
+        throw error;
+      });
+      return send(value, onPersist, persisted);
     }
     return send(value, onPersist);
   }
   async function changeOutbox(id: string, action: "cancel" | "resume") {
+    await ready();
     const entry = find(id);
     if (!entry) throw new Error("This message is no longer on this device.");
     const value = read(entry.body.room, id);
     if (action === "cancel") {
-      remove(entry.body.room, id);
+      await remove(entry.body.room, id);
       return;
     }
     if (!value) throw new Error("This saved message cannot be retried.");
     return send(value);
   }
   async function stopRemovedMessage(id: string) {
+    await ready();
     const entry = find(id);
     if (!entry) return false;
     const neverAttempted = entry.attempted === false;
-    remove(entry.body.room, id);
+    await remove(entry.body.room, id);
     return neverAttempted;
   }
   async function acknowledgeOutbox(ids: string[]) {
+    await ready();
     for (const id of ids) {
       const entry = find(id);
-      if (entry) remove(entry.body.room, id);
+      if (entry) await remove(entry.body.room, id);
     }
   }
   async function reconcileOutboxReceipts(
@@ -309,16 +337,18 @@ export function createOutbox(options: {
     workspaceId: string,
     signal?: AbortSignal,
   ) {
+    await ready();
     if (signal?.aborted) return;
     for (const receipt of receipts) {
       const value = read(room, receipt.id);
-      if (value?.workspaceId === workspaceId) remove(room, receipt.id);
+      if (value?.workspaceId === workspaceId) await remove(room, receipt.id);
     }
   }
   async function editOutboxDisplay(id: string, text: string) {
+    await ready();
     const entry = find(id);
     const value = entry && read(entry.body.room, id);
-    if (value) write({ ...value, displayText: text });
+    if (value) await write({ ...value, displayText: text });
   }
   function useOutbox() {
     const [entries, setEntries] = useState<OutboxEntry[]>([]);
@@ -354,7 +384,12 @@ export function createOutbox(options: {
         wasLive = status === "live";
         if (reconnected) retry();
       });
-      update();
+      void ready()
+        .then(() => {
+          update();
+          if (wasLive) retry();
+        })
+        .catch((failure) => setError(errorText(failure)));
       return () => {
         listeners.delete(update);
         window.removeEventListener("storage", update);
