@@ -262,15 +262,13 @@ pub(crate) fn refresh_project_rooms(
     drop(statement);
     for id in ids {
         ProjectsRepository::refresh_private_room(tx, &id)?;
-        let raw = tx.query_row(
-            "SELECT record FROM runtime_rooms WHERE id=?1",
-            [&id],
-            |row| row.get::<_, String>(0),
-        )?;
-        let room: Value = serde_json::from_str(&raw).map_err(|_| ProjectsError::InvalidStored {
-            table: "runtime_rooms",
-            id: id.clone(),
-        })?;
+        let room =
+            studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(tx)
+                .get(&id)?
+                .ok_or_else(|| ProjectsError::InvalidStored {
+                    table: "runtime_rooms",
+                    id: id.clone(),
+                })?;
         crate::radio_runtime::publish_room(tx, &room, prepared)?;
     }
     Ok(())

@@ -52,11 +52,8 @@ pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
 pub struct ProjectsRepository;
 
 impl ProjectsRepository {
-    /// Durable Unix timestamp in seconds marking permanent project-owned room retirement.
-    pub const ROOM_RETIRED_FIELD: &'static str = "projectDeletedAt";
-
     pub fn room_retired(room: &Value) -> bool {
-        room.get(Self::ROOM_RETIRED_FIELD)
+        room.get(studio_runtime_schema::room_record::PROJECT_DELETED_AT)
             .is_some_and(|value| !value.is_null())
     }
 
@@ -379,36 +376,20 @@ impl ProjectsRepository {
     }
 
     pub fn refresh_private_room(transaction: &Transaction<'_>, id: &str) -> StoreResult<()> {
-        let room = transaction
-            .query_row(
-                "SELECT record FROM runtime_rooms WHERE id=?1",
-                [id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        let Some(raw) = room else {
+        let Some(mut room) =
+            crate::Table::<studio_runtime_schema::room_record::RoomRecord>::new(transaction)
+                .get(&id.to_owned())?
+        else {
             return Ok(());
         };
-        let mut room: Value =
-            serde_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredRecord {
-                object: "runtime_rooms",
-                id: id.to_owned(),
-            })?;
-        if Self::room_retired(&room) {
+        if room.project_deleted_at.is_some() {
             SyncDocumentsRepository::put_entity(transaction, "room", id, json!({}), true)?;
             return Ok(());
         }
-        let members = room
-            .get("members")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
+        let members = room.members.clone().unwrap_or_default();
         let mut live = Vec::new();
         for member in &members {
-            let Some(member_id) = member.as_str() else {
-                continue;
-            };
-            if let Some((key, agent)) = Self::agent(transaction, member_id)? {
+            if let Some((key, agent)) = Self::agent(transaction, member)? {
                 if agent.get("id").and_then(Value::as_str) != Some(key.as_str()) {
                     return Err(StoreError::InvalidStoredRecord {
                         object: "runtime_agents",
@@ -424,8 +405,8 @@ impl ProjectsRepository {
             SyncDocumentsRepository::put_entity(transaction, "room", id, json!({}), true)?;
             return Ok(());
         }
-        room["members"] = Value::Array(live.clone());
-        let project_path = room.get("projectPath").and_then(Value::as_str);
+        room.members = Some(live.clone());
+        let project_path = room.project_path.as_ref().and_then(|path| path.as_deref());
         let teams = if let Some(path) = project_path {
             Self::get(transaction, path)?
                 .filter(|(_, project)| {
@@ -440,15 +421,19 @@ impl ProjectsRepository {
         };
         if let Some(team) = teams.iter().find(|team| {
             let team_members = team.get("members").and_then(Value::as_array);
-            team_members.is_some_and(|members| live.iter().all(|member| members.contains(member)))
+            team_members.is_some_and(|members| {
+                live.iter().all(|member| {
+                    members
+                        .iter()
+                        .any(|id| id.as_str() == Some(member.as_str()))
+                })
+            })
         }) {
-            room["peerTeamId"] = team.get("id").cloned().unwrap_or(Value::Null);
-            room["peerTeamName"] = team.get("name").cloned().unwrap_or(Value::Null);
+            room.peer_team_id = Some(team.get("id").and_then(Value::as_str).map(str::to_owned));
+            room.peer_team_name = Some(team.get("name").and_then(Value::as_str).map(str::to_owned));
         } else {
-            if let Some(record) = room.as_object_mut() {
-                record.remove("peerTeamId");
-                record.remove("peerTeamName");
-            }
+            room.peer_team_id = None;
+            room.peer_team_name = None;
         }
         SyncDocumentsRepository::put_entity(transaction, "room", id, room, false)?;
         Ok(())

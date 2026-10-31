@@ -55,6 +55,7 @@ pub mod records;
 pub mod recovery_record;
 pub mod request_projection;
 pub mod request_record;
+pub mod room_record;
 pub mod rule_record;
 pub mod shared_values;
 pub mod shell_policy;

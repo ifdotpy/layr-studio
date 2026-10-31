@@ -43,7 +43,7 @@ pub fn tick(
             let agent = all_agents.get(&active.agent_id);
             let event = event(db, &active)?;
             if let Some(agent) = agent {
-                bind(&mut active, agent);
+                bind(&mut active, agent)?;
                 room.radio.active = Some(active.clone());
             }
             if agent.is_none_or(|a| {
@@ -53,7 +53,7 @@ pub fn tick(
             } else if let (Some(agent), Some(event)) = (agent, event.as_ref()) {
                 let turn_id = turn(agent, &active, Some(event));
                 if let Some(turn_id) = &turn_id {
-                    active.extra.insert("turnId".to_owned(), json!(turn_id));
+                    active.turn_id = Some(Some(turn_id.clone()));
                     room.radio.active = Some(active.clone());
                 }
                 if let Some(turn_id) = turn_id.as_deref()
@@ -98,7 +98,10 @@ pub fn tick(
                                 if success {
                                     room.radio.seen.insert(
                                         active.agent_id.clone(),
-                                        json!({"identity":active.identity,"seq":active.through}),
+                                        studio_runtime_schema::room_record::RoomRadioSeen {
+                                            identity: active.identity.clone(),
+                                            seq: safe_integer(active.through)?,
+                                        },
                                     );
                                 }
                                 room.radio.active = None;
@@ -122,20 +125,14 @@ pub fn tick(
                     }
                 } else if room.radio.status == Status::Stopping {
                     if let Some(turn_id) = turn_id {
-                        let state = active
-                            .extra
-                            .get("interruptState")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned);
+                        let state = active.interrupt_state;
                         if state.is_none() {
-                            active
-                                .extra
-                                .insert("interruptState".to_owned(), json!("pending"));
+                            active.interrupt_state = Some(InterruptState::Pending);
                             room.radio.active = Some(active.clone());
                         }
                         // Pending is a durable intent. If the process died before
                         // claiming it, the next scheduler tick reconstructs the effect.
-                        if state.is_none() || state.as_deref() == Some("pending") {
+                        if state.is_none() || state == Some(InterruptState::Pending) {
                             effects.push(Interrupt {
                                 request_id: format!("radio-interrupt:{}", active.event_id),
                                 agent: agent.clone(),
@@ -169,11 +166,11 @@ pub fn tick(
             let id = agent["id"].as_str().ok_or_else(|| invalid(room.id()))?;
             let busy = truthy(agent.get("inFlight")) || matches!(agent["status"].as_str(),Some("starting"|"running"|"approval")) || db.query_row("SELECT EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND status IN ('pending','reserved','dispatching','uncertain'))",[id],|r|r.get::<_,bool>(0))?;
             if !busy {
-                let identity = identity(agent);
+                let identity = identity(agent)?;
                 let seen = room.radio.seen.get(id);
                 let cursor = seen
-                    .filter(|s| s["identity"] == identity)
-                    .and_then(|s| s["seq"].as_u64())
+                    .filter(|s| s.identity == identity)
+                    .and_then(|s| s.seq.as_u64())
                     .unwrap_or(0);
                 let (count,characters)=db.query_row("SELECT count(*),coalesce(sum(length(text)),0) FROM runtime_chat_messages WHERE room=?1 AND seq>?2",params![room.id(),i64::try_from(cursor).map_err(|_|invalid(room.id()))?],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?)))?;
                 if count > MAX_INPUT as i64 || characters > MAX_INPUT as i64 {
@@ -230,7 +227,11 @@ pub fn tick(
                             .last()
                             .and_then(|m| m["seq"].as_u64())
                             .unwrap_or(cursor),
-                        extra: Map::new(),
+                        turn_id: None,
+                        interrupt_requested: None,
+                        question_continuation_planned: None,
+                        interrupt_state: None,
+                        extra: BTreeMap::new(),
                     });
                 }
             }
@@ -246,14 +247,26 @@ pub fn tick(
     }
     Ok(effects)
 }
-fn identity(a: &Value) -> Value {
-    json!([
-        a["threadId"],
-        a["epoch"],
-        a.get("compactions").unwrap_or(&json!(0))
-    ])
+fn safe_integer(
+    value: u64,
+) -> Result<studio_runtime_schema::recovery_record::SafeInteger, ProjectsError> {
+    i64::try_from(value)
+        .ok()
+        .and_then(studio_runtime_schema::recovery_record::SafeInteger::from_i64)
+        .ok_or(ProjectsError::Invalid(
+            "radio identity exceeds the safe integer range",
+        ))
 }
-fn bind(active: &mut Active, a: &Value) {
+fn identity(
+    a: &Value,
+) -> Result<studio_runtime_schema::room_record::RoomRadioIdentity, ProjectsError> {
+    Ok((
+        a["threadId"].as_str().map(str::to_owned),
+        a["epoch"].as_u64().map(safe_integer).transpose()?,
+        safe_integer(a["compactions"].as_u64().unwrap_or(0))?,
+    ))
+}
+fn bind(active: &mut Active, a: &Value) -> Result<(), ProjectsError> {
     let attempt = &a["startAttempt"];
     if active.thread_id.is_none()
         && a["threadId"].as_str().is_some_and(|s| !s.is_empty())
@@ -263,8 +276,9 @@ fn bind(active: &mut Active, a: &Value) {
         && (attempt["threadId"].is_null() || attempt["threadId"] == a["threadId"])
     {
         active.thread_id = a["threadId"].as_str().map(str::to_owned);
-        active.identity = identity(a);
+        active.identity = identity(a)?;
     }
+    Ok(())
 }
 fn reconcile(
     db: &Transaction<'_>,
@@ -405,11 +419,9 @@ pub fn route_question_answer(
                     .active
                     .as_mut()
                     .ok_or(ProjectsError::Invalid("radio floor missing"))?;
-                if !truthy(active.extra.get("questionContinuationPlanned")) {
+                if active.question_continuation_planned != Some(Some(true)) {
                     room.radio.next.insert(0, active.agent_id.clone());
-                    active
-                        .extra
-                        .insert("questionContinuationPlanned".to_owned(), json!(true));
+                    active.question_continuation_planned = Some(Some(true));
                 }
                 room.radio.revision = room
                     .radio
@@ -585,13 +597,11 @@ pub fn claim_interrupt(
             continue;
         };
         if room.radio.status != Status::Stopping
-            || active.extra.get("interruptState").and_then(Value::as_str) != Some("pending")
+            || active.interrupt_state != Some(InterruptState::Pending)
         {
             return Ok(false);
         }
-        active
-            .extra
-            .insert("interruptState".to_owned(), json!("unknown"));
+        active.interrupt_state = Some(InterruptState::Unknown);
         save(db, &mut room, prepared, now)?;
         return Ok(true);
     }
@@ -621,18 +631,16 @@ pub fn settle_interrupt(
             continue;
         };
         if room.radio.status != Status::Stopping
-            || active.extra.get("interruptState").and_then(Value::as_str) != Some("unknown")
+            || active.interrupt_state != Some(InterruptState::Unknown)
         {
             return Ok(false);
         }
         let state = match receipt.outcome {
-            InterruptOutcome::Accepted => "accepted",
-            InterruptOutcome::Rejected => "rejected",
+            InterruptOutcome::Accepted => InterruptState::Accepted,
+            InterruptOutcome::Rejected => InterruptState::Rejected,
             InterruptOutcome::Unknown => return Ok(true),
         };
-        active
-            .extra
-            .insert("interruptState".to_owned(), json!(state));
+        active.interrupt_state = Some(state);
         save(db, &mut room, prepared, now)?;
         return Ok(true);
     }
@@ -686,7 +694,11 @@ pub fn bind_reserved(
                     .as_mut()
                     .ok_or(ProjectsError::Invalid("radio floor missing"))?;
                 active.thread_id = Some(binding.thread_id.clone());
-                active.identity = json!([binding.thread_id, binding.epoch, binding.compactions]);
+                active.identity = (
+                    Some(binding.thread_id),
+                    Some(safe_integer(binding.epoch)?),
+                    safe_integer(binding.compactions.unwrap_or(0))?,
+                );
                 save(db, &mut room, prepared, now)?;
             }
             Ok(())
@@ -736,7 +748,7 @@ pub fn observe_item(
             .active
             .as_mut()
             .ok_or(ProjectsError::Invalid("radio floor missing"))?;
-        bind(active, &agent);
+        bind(active, &agent)?;
         if agent["epoch"] != active.epoch || agent["threadId"] != json!(active.thread_id) {
             continue;
         }

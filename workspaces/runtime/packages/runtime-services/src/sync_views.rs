@@ -664,7 +664,7 @@ pub struct RoomViewContext {
     pub agents: Arc<Vec<AgentAuthorityRow>>,
     pub peer_teams: Arc<Vec<PeerTeamRow>>,
     pub active_agent_indices: Arc<HashMap<String, usize>>,
-    pub last_message: Option<Value>,
+    pub last_message: Option<studio_runtime_schema::room_record::RoomLastMessage>,
     pub federation: Option<Value>,
 }
 
@@ -805,10 +805,7 @@ pub fn room_entity_view(record: &Value, context: &RoomViewContext) -> Option<Val
         }
     }
     view.insert("members".to_owned(), json!(members));
-    view.insert(
-        "lastMessage".to_owned(),
-        context.last_message.clone().unwrap_or(Value::Null),
-    );
+    view.insert("lastMessage".to_owned(), json!(context.last_message));
     project_persisted_record("room", &Value::Object(view))
 }
 
