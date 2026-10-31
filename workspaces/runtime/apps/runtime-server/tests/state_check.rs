@@ -46,11 +46,7 @@ fn state_check_reads_fixture_rows_without_changing_or_disclosing_them() {
             .iter()
             .any(|table| table["table"] == "runtime_workspace_operations")
     );
-    for name in [
-        "runtime_agent_moves",
-        "runtime_projects",
-        "runtime_server_outbox",
-    ] {
+    for name in ["runtime_agent_moves", "runtime_projects"] {
         let table = tables
             .iter()
             .find(|table| table["table"] == name)

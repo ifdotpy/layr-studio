@@ -14,10 +14,6 @@ pub(crate) fn check(connection: &Connection) -> StoreResult<Vec<StateCheckTable>
             "runtime_server_inbox",
             "json_object('id',id,'signature',signature,'state',state,'result',result,'created_at',created_at,'completed_at',completed_at)",
         ),
-        (
-            "runtime_server_outbox",
-            "json_object('id',id,'server',server,'body',body,'state',state,'result',result,'fingerprint',fingerprint,'attempts',attempts,'created_at',created_at,'completed_at',completed_at)",
-        ),
     ] {
         let mut report = StateCheckTable {
             table,
