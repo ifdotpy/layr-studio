@@ -2128,6 +2128,16 @@ fn compare_created_desc(
     right.created.seconds().total_cmp(&left.created.seconds())
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PeerTeamProjection {
+    id: String,
+    name: String,
+    project_path: String,
+    members: Vec<String>,
+    revision: Option<u64>,
+}
+
 fn maintain_peer_team_entities(
     transaction: &Transaction<'_>,
     agent_records: &[(String, String)],
@@ -2151,7 +2161,7 @@ fn maintain_peer_team_entities(
             (live && lead).then_some((id, agent))
         })
         .collect::<BTreeMap<_, _>>();
-    let mut current = BTreeMap::<String, Value>::new();
+    let mut current = BTreeMap::<String, PeerTeamProjection>::new();
     for (_, raw) in project_records {
         let Ok(studio_runtime_schema::project_record::ProjectRecord::Live(project)) =
             serde_json::from_str(raw)
@@ -2184,20 +2194,30 @@ fn maintain_peer_team_entities(
                     selected.push(member.clone());
                 }
             }
-            if selected.len() >= 2 {
+            if selected.len() >= 2 && !team.id.is_empty() {
+                let bound =
+                    |value: &str, field| crate::sync_views::bound_sync_text(value, field, false);
                 current.insert(
                     team.id.clone(),
-                    json!({"id":team.id,"name":team.name,"projectPath":project_path,"members":selected,"revision":revision}),
+                    PeerTeamProjection {
+                        id: bound(&team.id, "id"),
+                        name: bound(&team.name, "name"),
+                        project_path: bound(&project_path.to_string_lossy(), "projectPath"),
+                        members: selected
+                            .into_iter()
+                            .take(crate::sync_views::SYNC_ARRAY_ITEMS)
+                            .map(|member| bound(&member, ""))
+                            .collect(),
+                        revision,
+                    },
                 );
             }
         }
     }
     let mut kept = BTreeSet::new();
     for (id, record) in current {
-        if let Some(projected) = project_persisted_record("peerTeam", &record) {
-            kept.insert(id.clone());
-            put_projection(transaction, "peerTeam", &id, projected, false, validate)?;
-        }
+        kept.insert(id.clone());
+        SyncDocumentsRepository::put_entity(transaction, "peerTeam", &id, record, false)?;
     }
     retire_unkept(transaction, "peerTeam", &kept, None, validate)
 }
