@@ -373,7 +373,6 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
         "agent" => "AgentEntityDto",
         "agentSummary" => "AgentSummaryEntityDto",
         "agentDetail" => "AgentDetailEntityDto",
-        "room" => "RoomEntityDto",
         "task" => "TaskEntityDto",
         "taskDetail" => "TaskDetailResponse",
         "messageReceipt" => "MessageReceiptEntityDto",
@@ -722,129 +721,6 @@ impl RoomViewContext {
             federation: None,
         }
     }
-}
-
-fn active_agent<'a>(context: &'a RoomViewContext, id: &str) -> Option<&'a AgentAuthorityRow> {
-    context
-        .active_agent_indices
-        .get(id)
-        .and_then(|index| context.agents.get(*index))
-}
-
-/// Build the viewer-independent renderer view for one persisted room.
-pub fn room_entity_view(record: &Value, context: &RoomViewContext) -> Option<Value> {
-    if studio_runtime_store::ProjectsRepository::room_retired(record) {
-        return None;
-    }
-    let kind = record.get("kind").and_then(Value::as_str)?;
-    let mut view = record.as_object()?.clone();
-
-    let members: Vec<String>;
-    if kind == "federated" {
-        let federation = context.federation.as_ref()?;
-        if federation.get("status").and_then(Value::as_str) != Some("approved")
-            || federation.get("localApproved").and_then(Value::as_bool) != Some(true)
-            || federation.get("remoteApproved").and_then(Value::as_bool) != Some(true)
-        {
-            return None;
-        }
-        let local = federation.get("localMembers").and_then(Value::as_array)?;
-        let mut selected = local.iter().filter_map(Value::as_str).collect::<Vec<_>>();
-        selected.sort_unstable();
-        selected.dedup();
-        if selected.is_empty()
-            || selected
-                .iter()
-                .any(|id| active_agent(context, id).is_none())
-        {
-            return None;
-        }
-        members = selected.into_iter().map(str::to_owned).collect();
-        view.insert("localMembers".to_owned(), json!(members));
-        view.insert(
-            "name".to_owned(),
-            record
-                .get("customName")
-                .filter(|name| truthy(Some(name)))
-                .or_else(|| federation.get("name"))
-                .cloned()
-                .unwrap_or(Value::Null),
-        );
-        view.insert(
-            "peerLabel".to_owned(),
-            federation.get("peerLabel").cloned().unwrap_or(Value::Null),
-        );
-    } else if kind == "broadcast" {
-        let root = record.get("rootId").and_then(Value::as_str)?;
-        members = context
-            .agents
-            .iter()
-            .filter(|agent| !agent.deleted_at.as_ref().is_some_and(Deletion::is_deleted))
-            .filter(|agent| root == "all" || agent.root_id.as_deref() == Some(root))
-            .filter_map(|agent| agent.id.clone())
-            .collect();
-        if root != "all" && active_agent(context, root).is_none() {
-            return None;
-        }
-        let name = if root == "all" {
-            "All agents".to_owned()
-        } else {
-            format!(
-                "{} · Broadcast",
-                active_agent(context, root)?.name.value_or(None)?
-            )
-        };
-        view.insert(
-            "name".to_owned(),
-            record
-                .get("customName")
-                .filter(|name| truthy(Some(name)))
-                .cloned()
-                .unwrap_or(Value::String(name)),
-        );
-    } else {
-        let stored = record.get("members").and_then(Value::as_array)?;
-        members = stored
-            .iter()
-            .map(Value::as_str)
-            .collect::<Option<Vec<_>>>()?
-            .into_iter()
-            .map(str::to_owned)
-            .collect();
-        if members.is_empty() || members.iter().any(|id| active_agent(context, id).is_none()) {
-            return None;
-        }
-        let name = members
-            .iter()
-            .filter_map(|id| active_agent(context, id))
-            .filter_map(|agent| agent.name.value_or(None).map(String::as_str))
-            .collect::<Vec<_>>()
-            .join(" ↔ ");
-        view.insert(
-            "name".to_owned(),
-            record
-                .get("customName")
-                .filter(|name| truthy(Some(name)))
-                .cloned()
-                .unwrap_or(Value::String(name)),
-        );
-        if kind == "private" && members.len() == 2 {
-            if let Some(team) = context
-                .peer_teams
-                .iter()
-                .find(|team| members.iter().all(|member| team.members.contains(member)))
-            {
-                view.insert("peerTeamId".to_owned(), json!(team.id));
-                view.insert("peerTeamName".to_owned(), json!(team.name));
-            } else {
-                view.remove("peerTeamId");
-                view.remove("peerTeamName");
-            }
-        }
-    }
-    view.insert("members".to_owned(), json!(members));
-    view.insert("lastMessage".to_owned(), json!(context.last_message));
-    project_persisted_record("room", &Value::Object(view))
 }
 
 #[derive(Clone, Debug, Default)]
