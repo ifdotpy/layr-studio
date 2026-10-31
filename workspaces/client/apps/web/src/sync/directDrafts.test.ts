@@ -94,3 +94,53 @@ it("keeps both texts when the server returns a concurrent master", async () => {
   expect(version.alternatives).toContain("mine");
   expect(post).toHaveBeenCalledTimes(2);
 });
+
+it("restores an unconfirmed edit after reload and removes it on confirmation", async () => {
+  const rows = new Map<string, string>();
+  const buffer = {
+    loadAll: async () => [...rows.entries()],
+    put: async (key: string, value: string) => {
+      rows.set(key, value);
+    },
+    delete: async (key: string) => {
+      rows.delete(key);
+    },
+  };
+  const first = createDirectDrafts({ post: vi.fn(), changed: vi.fn(), buffer });
+  first.edit(row("pending", 2));
+  await vi.waitFor(() => expect(rows.size).toBe(1));
+  const restored = createDirectDrafts({
+    post: vi.fn(async () => []),
+    changed: vi.fn(),
+    buffer,
+  });
+  await restored.restore();
+  expect(JSON.parse(restored.records()[0]!.payload).text).toBe("pending");
+  restored.snapshot([], true, 1);
+  await restored.flush();
+  expect(rows.size).toBe(0);
+});
+
+it("removes a refused edit from the buffer", async () => {
+  const rows = new Map<string, string>();
+  const buffer = {
+    loadAll: async () => [...rows.entries()],
+    put: async (key: string, value: string) => {
+      rows.set(key, value);
+    },
+    delete: async (key: string) => {
+      rows.delete(key);
+    },
+  };
+  const { ApiError } = await import("../api.ts");
+  const store = createDirectDrafts({
+    post: vi.fn().mockRejectedValue(new ApiError("refused", 403)),
+    changed: vi.fn(),
+    buffer,
+  });
+  store.snapshot([], true, 1);
+  store.edit(row("pending", 2));
+  await vi.waitFor(() => expect(rows.size).toBe(1));
+  await expect(store.flush()).rejects.toThrow("refused");
+  expect(rows.size).toBe(0);
+});

@@ -105,6 +105,7 @@ export function createServerServices(server: StudioServer) {
   let browserDrafts: ReturnType<typeof createBrowserDrafts> | undefined;
   const drafts = () => {
     return (browserDrafts ??= createBrowserDrafts({
+      serverId: transport.owner.id,
       api,
       resources: {
         watchResourceChanges: (...args) =>

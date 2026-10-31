@@ -5,6 +5,8 @@ import {
   useState,
   type SetStateAction,
 } from "react";
+import { unsentStore } from "../unsent/store.ts";
+import { serverViewId } from "../servers/environment.ts";
 import { syncPost } from "../api.ts";
 import { randomUUID } from "../uuid.ts";
 import type { DraftVersion } from "../generated/rustOwned.ts";
@@ -23,6 +25,7 @@ type Drafts = Record<string, string>;
 const incompleteDrafts = "Some saved drafts could not be loaded.";
 
 export function createBrowserDrafts(options: {
+  serverId?: string;
   api: {
     syncPost: (
       path: "/api/sync/drafts",
@@ -115,6 +118,10 @@ export function createBrowserDrafts(options: {
       store.current = createDirectDrafts({
         post: (rows) => options.api.syncPost("/api/sync/drafts", { rows }),
         changed: reconcile,
+        buffer: unsentStore(
+          options.serverId ?? serverViewId ?? "local",
+          "draft",
+        ),
       });
     const flush = () => {
       clearTimeout(quiet.current);
@@ -209,6 +216,10 @@ export function createBrowserDrafts(options: {
       [writer],
     );
     useEffect(() => {
+      void store.current
+        ?.restore()
+        .then(schedule)
+        .catch(() => setError("Draft changes could not be restored."));
       const stop = options.resources.watchResourceChanges(
         { kind: "drafts" },
         (version) => {

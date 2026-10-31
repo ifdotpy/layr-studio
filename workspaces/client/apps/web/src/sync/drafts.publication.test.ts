@@ -14,7 +14,17 @@ vi.mock("react", () => ({
     return [typeof value === "function" ? value() : value, setter];
   },
 }));
-vi.mock("../api.ts", () => ({ syncPost: vi.fn() }));
+vi.mock("../api.ts", () => ({
+  syncPost: vi.fn(),
+  ApiError: class extends Error {},
+}));
+vi.mock("../unsent/store.ts", () => ({
+  unsentStore: () => ({
+    put: async () => {},
+    delete: async () => {},
+    loadAll: async () => [],
+  }),
+}));
 vi.mock("./subscriptions/events.ts", () => ({ watchResourceChanges: vi.fn() }));
 vi.mock("./resourceEvents.ts", () => ({ replaceStream: vi.fn() }));
 import { createBrowserDrafts } from "./drafts.ts";

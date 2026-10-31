@@ -1,3 +1,5 @@
+import { ApiError } from "../api.ts";
+import { serverMutationResponseIsUncertain } from "../servers/mutationIdentity.ts";
 import type { components } from "../generated/api.ts";
 import { resolveDraftConflict } from "./conflicts.ts";
 
@@ -15,9 +17,15 @@ const input = (document: Document) => ({
 export function createDirectDrafts(options: {
   post: (rows: PushRow[]) => Promise<Document[]>;
   changed: () => void;
+  buffer?: {
+    put: (key: string, value: string) => Promise<void>;
+    delete: (key: string) => Promise<void>;
+    loadAll: () => Promise<[string, string | Blob][]>;
+  };
 }) {
   const masters = new Map<string, Document>();
   const pending = new Map<string, Document>();
+  const writes = new Map<string, Promise<void>>();
   let sequence = -1;
   let flushing: Promise<void> | undefined;
 
@@ -41,7 +49,23 @@ export function createDirectDrafts(options: {
             ...(master ? { assumedMasterState: input(master) } : {}),
           };
         });
-        const conflicts = await options.post(rows);
+        const document = sent[0]!;
+        const write = writes.get(document.id);
+        if (write) await write;
+        let conflicts: Document[];
+        try {
+          conflicts = await options.post(rows);
+        } catch (error) {
+          if (
+            error instanceof ApiError &&
+            !serverMutationResponseIsUncertain(error.status, error.response) &&
+            pending.get(document.id) === document
+          ) {
+            pending.delete(document.id);
+            await options.buffer?.delete(document.id);
+          }
+          throw error;
+        }
         const rejected = new Map(conflicts.map((row) => [row.id, row]));
         for (const [index, document] of sent.entries()) {
           const master = rejected.get(document.id);
@@ -51,6 +75,8 @@ export function createDirectDrafts(options: {
             if (local) {
               const resolved = await resolveDraftConflict(master, local);
               pending.set(local.id, resolved);
+              if (options.buffer)
+                await options.buffer.put(local.id, JSON.stringify(resolved));
             }
           } else {
             const existing = masters.get(document.id);
@@ -65,8 +91,10 @@ export function createDirectDrafts(options: {
                 ...document,
                 seq: existing?.seq ?? 0,
               });
-            if (pending.get(document.id) === document)
+            if (pending.get(document.id) === document) {
               pending.delete(document.id);
+              await options.buffer?.delete(document.id);
+            }
           }
         }
         options.changed();
@@ -92,6 +120,33 @@ export function createDirectDrafts(options: {
     },
     edit(row: Document) {
       pending.set(row.id, row);
+      if (options.buffer) {
+        const write = (
+          writes.get(row.id)?.catch(() => {}) ?? Promise.resolve()
+        ).then(() => options.buffer!.put(row.id, JSON.stringify(row)));
+        writes.set(row.id, write);
+        void write.catch(() => {});
+      }
+    },
+    async restore() {
+      for (const [id, value] of (await options.buffer?.loadAll()) ?? []) {
+        if (typeof value !== "string" || pending.has(id)) continue;
+        const row: unknown = JSON.parse(value);
+        if (
+          row &&
+          typeof row === "object" &&
+          "id" in row &&
+          row.id === id &&
+          "payload" in row &&
+          typeof row.payload === "string" &&
+          "seq" in row &&
+          typeof row.seq === "number" &&
+          "_deleted" in row &&
+          typeof row._deleted === "boolean"
+        )
+          pending.set(id, row as Document);
+      }
+      options.changed();
     },
     records: () =>
       [...new Map([...masters, ...pending]).values()].filter(
