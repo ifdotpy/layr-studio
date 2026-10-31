@@ -487,7 +487,13 @@ impl Controls {
                         | ControlReply::FileBackups(_) => return Err(ControlError::Unknown),
                     }
                 } else {
-                    json!({"settings":agent.get("claudeOptions").cloned().unwrap_or(json!({})),"turns":[],"tasks":[]})
+                    let mut settings = agent.get("claudeOptions").cloned().unwrap_or(json!({}));
+                    if let (Some(options), Some(mode)) =
+                        (settings.as_object_mut(), agent.get("permissionMode"))
+                    {
+                        options.insert("permissionMode".into(), mode.clone());
+                    }
+                    json!({"settings":settings,"turns":[],"tasks":[]})
                 };
                 if !result.is_object() {
                     return Err(ControlError::Unknown);

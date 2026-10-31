@@ -1509,7 +1509,7 @@ pub fn source_settings_snapshot(agent: &Value) -> Result<Value, PortableHistoryE
         "effort",
         "nativeEffort",
         "fastMode",
-        "yoloMode",
+        "permissionMode",
         "profileInstructions",
         "role",
         "workerDefaults",

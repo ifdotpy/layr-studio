@@ -3701,30 +3701,6 @@
             ],
             "title": "Cansend"
           },
-          "claudeOptions": {
-            "anyOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "permissionMode": {
-                    "enum": [
-                      "default",
-                      "acceptEdits",
-                      "auto",
-                      "plan",
-                      "bypassPermissions"
-                    ],
-                    "type": "string"
-                  }
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Claude permission mode for the worker launch preview. Other session options remain private."
-          },
           "commandProgress": {
             "default": [],
             "items": {
@@ -4212,6 +4188,23 @@
             ],
             "title": "Pendingsettingsaccountkey"
           },
+          "permissionMode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "default",
+                  "acceptEdits",
+                  "auto",
+                  "plan",
+                  "bypassPermissions"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "projectServerId": {
             "anyOf": [
               {
@@ -4450,17 +4443,6 @@
               }
             ],
             "title": "Worktreepreparation"
-          },
-          "yoloMode": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Yolomode"
           }
         },
         "required": [
@@ -4786,30 +4768,6 @@
                 "type": "null"
               }
             ]
-          },
-          "claudeOptions": {
-            "anyOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "permissionMode": {
-                    "enum": [
-                      "default",
-                      "acceptEdits",
-                      "auto",
-                      "plan",
-                      "bypassPermissions"
-                    ],
-                    "type": "string"
-                  }
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Claude permission mode for the worker launch preview. Other session options remain private."
           },
           "commandProgress": {
             "default": [],
@@ -5507,6 +5465,23 @@
             ],
             "title": "Pendingsettingsaccountkey"
           },
+          "permissionMode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "default",
+                  "acceptEdits",
+                  "auto",
+                  "plan",
+                  "bypassPermissions"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "pinned": {
             "anyOf": [
               {
@@ -5969,17 +5944,6 @@
               }
             ],
             "title": "Worktreepreparation"
-          },
-          "yoloMode": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Yolomode"
           }
         },
         "required": [
@@ -7543,6 +7507,23 @@
             "default": null,
             "title": "Pendingsettingsaccountkey"
           },
+          "permissionMode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "default",
+                  "acceptEdits",
+                  "auto",
+                  "plan",
+                  "bypassPermissions"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "pinned": {
             "default": null,
             "title": "Pinned",
@@ -8081,11 +8062,6 @@
             ],
             "default": null,
             "title": "Worktreewarning"
-          },
-          "yoloMode": {
-            "default": null,
-            "title": "Yolomode",
-            "type": "boolean"
           }
         },
         "required": [
@@ -9193,6 +9169,23 @@
             "default": null,
             "title": "Pendingsettingsaccountkey"
           },
+          "permissionMode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "default",
+                  "acceptEdits",
+                  "auto",
+                  "plan",
+                  "bypassPermissions"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "pinned": {
             "anyOf": [
               {
@@ -9682,18 +9675,6 @@
             ],
             "default": null,
             "title": "Worktreepreparation"
-          },
-          "yoloMode": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Yolomode"
           }
         },
         "required": [

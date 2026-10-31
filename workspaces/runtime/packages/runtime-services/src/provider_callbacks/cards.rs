@@ -79,7 +79,9 @@ pub async fn admit_native(
             }
             // Read the mode once; Ask can race an approval already admitted.
             if snapshot.actor()["provider"] != ProviderKind::Claude.key()
-                && snapshot.actor()["yoloMode"] == true
+                && snapshot.actor()["permissionMode"]
+                    == studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
+                        .as_str()
                 && let Some(result) = full_access_answer(&request.method, &request.params)?
             {
                 return Ok(NativeAdmission::Answer(ResponseBody::Result(result)));

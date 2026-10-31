@@ -366,7 +366,7 @@ mod tests {
         store.transaction(move |tx| {
             for id in ["lead", "worker", "dependent"] {
                 AgentRepository::put(tx, &AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":id,"rootId":"lead","isLead":id=="lead",
-                    "epoch":1,"status":"running","autoWake":true,"agentMode":"multi","concurrency":8,"cwd":cwd,"yoloMode":approved}))?)?;
+                    "epoch":1,"status":"running","autoWake":true,"agentMode":"multi","concurrency":8,"cwd":cwd,"permissionMode":studio_runtime_schema::claude_permissions::PermissionMode::from_full_access(approved)}))?)?;
             }
             for (id, owner, deps) in [("task","worker",json!([])),("next","dependent",json!(["task"]))] {
                 WorkItemsRepository::put_work(tx, id, &json!({"id":id,"rootId":"lead","title":id,"description":"",

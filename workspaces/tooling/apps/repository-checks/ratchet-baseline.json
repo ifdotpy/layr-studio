@@ -3200,10 +3200,6 @@
       "fingerprint": "ad3857efd77e2c68df3e2e3769523323078df4a2bce162303af80e15b7756a79:0"
     },
     {
-      "file": "workspaces/client/apps/web/src/components/shell/WorkerPermissions.test.ts",
-      "fingerprint": "c2f64c59a6bd90c6ed8bbaeed42b85975e9eda3f4b036864029a4ecfb03cd1a0:0"
-    },
-    {
       "file": "workspaces/client/apps/web/src/components/sidebar/services.test.ts",
       "fingerprint": "b82160817a0c5d578825d701a5483cae958e3466610c06e5a8e3dc15ad1ce717:0"
     },

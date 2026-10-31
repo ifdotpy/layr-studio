@@ -804,7 +804,9 @@ pub(crate) async fn spawn_agents(
             record["profileInstructions"] = json!(profile.instructions);
         }
         record["name"] = json!(name.trim());
-        record["yoloMode"] = root_value.get("yoloMode").cloned().unwrap_or(json!(true));
+        record["permissionMode"] = root_value.get("permissionMode").cloned().unwrap_or(json!(
+            studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
+        ));
         record["maxAgents"] = root_value
             .get("maxAgents")
             .cloned()
@@ -1505,7 +1507,8 @@ pub(crate) async fn request_review(
         .map_err(map_create_error)?
         .value();
     record["provider"] = json!(ProviderKind::Codex.key());
-    record["yoloMode"] = json!(false);
+    record["permissionMode"] =
+        json!(studio_runtime_schema::claude_permissions::PermissionMode::Default);
     record["worktree"] = json!(false);
     record["workspaceMode"] = json!("shared");
     record["workspaceInGit"] = json!(false);

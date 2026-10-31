@@ -443,12 +443,22 @@ for (const provider of ["Future Provider", "codex", "claude"]) {
 }
 
 const unsupportedAgents: Agent[] = [
-  { ...initial, id: "missing-provider", provider: undefined, yoloMode: false },
-  { ...initial, id: "null-provider", provider: null, yoloMode: false },
+  {
+    ...initial,
+    id: "missing-provider",
+    provider: undefined,
+    permissionMode: "default",
+  },
+  {
+    ...initial,
+    id: "null-provider",
+    provider: null,
+    permissionMode: "default",
+  },
   {
     ...initial,
     id: "unknown-provider",
-    yoloMode: false,
+    permissionMode: "default",
     // @ts-expect-error A future wire identity must not gain Codex permission actions.
     provider: "future-provider",
   },
@@ -537,7 +547,7 @@ for (const agent of unsupportedAgents) {
     ).toEqual([]);
   });
   test(`${agent.id} cannot post Full access from the actual permissions consumer`, async () => {
-    h.post.mockResolvedValue({ ...agent, yoloMode: true });
+    h.post.mockResolvedValue({ ...agent, permissionMode: "bypassPermissions" });
     const permission = children(render(agent, true).controls).find(
       (node): node is ReactElement<SwitchFixtureProps> =>
         node.props["aria-label"] === "Full access without approval",
@@ -551,7 +561,7 @@ for (const agent of unsupportedAgents) {
 
 test("chat settings retains the known Codex permission caller and the Claude settings branch", () => {
   expect(
-    children(chatSettings({ ...initial, yoloMode: false })).some(
+    children(chatSettings({ ...initial, permissionMode: "default" })).some(
       (node) => node.type === ExecutionPermissions,
     ),
   ).toBe(true);
@@ -718,7 +728,7 @@ for (const role of ["implementer", "reviewer"] as const) {
       id: role,
       isLead: false,
       role,
-      yoloMode: false,
+      permissionMode: "default",
       status: AgentStatus.running,
       nextTurnSettingsSupported: true,
     };
@@ -738,7 +748,7 @@ for (const role of ["implementer", "reviewer"] as const) {
     expect(required(required(h.post.mock.calls[0])[1])).not.toHaveProperty(
       "yolo_mode",
     );
-    expect(render(agent).triggerAgent.yoloMode).toBe(false);
+    expect(render(agent).triggerAgent.permissionMode).toBe("default");
     expect(render(agent).model).toBe("Luna 6");
     expect(render(agent).label).toContain("Agent Luna 6 High");
   });
@@ -1236,7 +1246,7 @@ for (const status of ["running", "approval"] as const) {
         ...initial,
         status,
         inFlight: true,
-        yoloMode: false,
+        permissionMode: "default",
       },
       true,
     ).controls;
@@ -1283,7 +1293,7 @@ test("Codex explains when Ask takes effect for a turn started with Full", () => 
       ...initial,
       status: AgentStatus.running,
       inFlight: true,
-      yoloMode: false,
+      permissionMode: "default",
     },
     true,
   ).controls;
@@ -1297,7 +1307,10 @@ test("Codex explains when Ask takes effect for a turn started with Full", () => 
 });
 
 test("Codex describes the selected Ask mode truthfully", () => {
-  const controls = render({ ...initial, yoloMode: false }, true).controls;
+  const controls = render(
+    { ...initial, permissionMode: "default" },
+    true,
+  ).controls;
   const permission = children(controls).find(
     (node): node is ReactElement<SwitchFixtureProps> =>
       node.props["aria-label"] === "Full access without approval",
@@ -1311,8 +1324,8 @@ test("a superseding Ask intent prevents reuse of a lost Full request identity", 
       (node): node is ReactElement<SwitchFixtureProps> =>
         node.props["aria-label"] === "Full access without approval",
     )!;
-  const ask = { ...initial, yoloMode: false };
-  const full = { ...initial, yoloMode: true };
+  const ask = { ...initial, permissionMode: "default" as const };
+  const full = { ...initial, permissionMode: "bypassPermissions" as const };
   h.post.mockRejectedValueOnce(new Error("response lost"));
   control(ask).props.onChange({ currentTarget: { checked: true } });
   await vi.waitFor(() => expect(control(full).props.disabled).toBe(false));

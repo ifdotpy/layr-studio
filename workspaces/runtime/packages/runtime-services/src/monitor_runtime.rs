@@ -1068,7 +1068,7 @@ const MONITOR_START_ACTOR_INPUTS: &[&str] = &[
     "/cwd",
     "/provider",
     "/executionMode",
-    "/yoloMode",
+    "/permissionMode",
     "/approvalPolicy",
     "/sandbox",
     "/profile/id",

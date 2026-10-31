@@ -1802,7 +1802,7 @@ fn settings_snapshot(agent: &Value) -> Value {
         "effort",
         "nativeEffort",
         "fastMode",
-        "yoloMode",
+        "permissionMode",
         "profileInstructions",
         "role",
         "workerDefaults",

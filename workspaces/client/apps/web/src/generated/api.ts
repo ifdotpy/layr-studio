@@ -3780,20 +3780,6 @@ export interface components {
       agentModeSupported?: boolean | null | undefined;
       /** Cansend */
       canSend?: boolean | null | undefined;
-      /** @description Claude permission mode for the worker launch preview. Other session options remain private. */
-      claudeOptions?:
-        | {
-            /** @enum {string} */
-            permissionMode?:
-              | "default"
-              | "acceptEdits"
-              | "auto"
-              | "plan"
-              | "bypassPermissions"
-              | undefined;
-          }
-        | null
-        | undefined;
       /**
        * Commandprogress
        * @default []
@@ -3913,6 +3899,10 @@ export interface components {
         | undefined;
       /** Pendingsettingsaccountkey */
       pendingSettingsAccountKey?: null | string | undefined;
+      permissionMode?:
+        | ("default" | "acceptEdits" | "auto" | "plan" | "bypassPermissions")
+        | null
+        | undefined;
       /** Projectserverid */
       projectServerId?: null | string | undefined;
       queuedSettings?:
@@ -3967,8 +3957,6 @@ export interface components {
       worktree?: boolean | null | string | undefined;
       /** Worktreepreparation */
       worktreePreparation?: ("waiting" | "preparing") | null | undefined;
-      /** Yolomode */
-      yoloMode?: boolean | null | undefined;
     };
     /** AgentDetailResource */
     AgentDetailResource: {
@@ -4071,20 +4059,6 @@ export interface components {
       canSend?: boolean | null | undefined;
       capacityRetry?:
         | components["schemas"]["AgentEntityCapacityRetryDto"]
-        | null
-        | undefined;
-      /** @description Claude permission mode for the worker launch preview. Other session options remain private. */
-      claudeOptions?:
-        | {
-            /** @enum {string} */
-            permissionMode?:
-              | "default"
-              | "acceptEdits"
-              | "auto"
-              | "plan"
-              | "bypassPermissions"
-              | undefined;
-          }
         | null
         | undefined;
       /**
@@ -4248,6 +4222,10 @@ export interface components {
         | undefined;
       /** Pendingsettingsaccountkey */
       pendingSettingsAccountKey?: null | string | undefined;
+      permissionMode?:
+        | ("default" | "acceptEdits" | "auto" | "plan" | "bypassPermissions")
+        | null
+        | undefined;
       /** Pinned */
       pinned?: boolean | null | undefined;
       /** Project */
@@ -4344,8 +4322,6 @@ export interface components {
       worktree?: boolean | null | string | undefined;
       /** Worktreepreparation */
       worktreePreparation?: ("waiting" | "preparing") | null | undefined;
-      /** Yolomode */
-      yoloMode?: boolean | null | undefined;
     };
     /**
      * @description One epoch-scoped wait. `until` is a retry deadline in Unix seconds.
@@ -5309,6 +5285,10 @@ export interface components {
        * @default null
        */
       pendingSettingsAccountKey?: null | string | undefined;
+      permissionMode?:
+        | ("default" | "acceptEdits" | "auto" | "plan" | "bypassPermissions")
+        | null
+        | undefined;
       /**
        * Pinned
        * @default null
@@ -5668,11 +5648,6 @@ export interface components {
        * @default null
        */
       worktreeWarning?: null | string | undefined;
-      /**
-       * Yolomode
-       * @default null
-       */
-      yoloMode?: boolean | undefined;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
@@ -6139,6 +6114,10 @@ export interface components {
        * @default null
        */
       pendingSettingsAccountKey?: null | string | undefined;
+      permissionMode?:
+        | ("default" | "acceptEdits" | "auto" | "plan" | "bypassPermissions")
+        | null
+        | undefined;
       /**
        * Pinned
        * @default null
@@ -6317,11 +6296,6 @@ export interface components {
        * @default null
        */
       worktreePreparation?: ("waiting" | "preparing") | null | undefined;
-      /**
-       * Yolomode
-       * @default null
-       */
-      yoloMode?: boolean | null | undefined;
     };
     /**
      * AgentRole

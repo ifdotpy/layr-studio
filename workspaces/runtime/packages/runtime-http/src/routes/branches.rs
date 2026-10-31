@@ -134,8 +134,13 @@ fn branch_draft_request(
         account_key: Some(account),
         cwd: serde_json::from_value(source["cwd"].clone()).map_err(|_| ApiError::internal())?,
         model: Some(Some(model.to_owned())),
-        yolo_mode: serde_json::from_value(source["yoloMode"].clone())
-            .map_err(|_| ApiError::internal())?,
+        yolo_mode: source
+            .get("permissionMode")
+            .and_then(Value::as_str)
+            .map(|mode| {
+                mode == studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
+                    .as_str()
+            }),
         ..Default::default()
     })
 }
@@ -1018,7 +1023,7 @@ async fn copy_branch_history(
             return Err(studio_runtime_store::StoreError::SchemaMismatch("branch source changed before local copy".into()));
         }
         let mut child=AgentRepository::get(tx,&AgentId::from(target.as_str()))?.ok_or(studio_runtime_store::StoreError::SchemaMismatch("missing branch draft".into()))?;
-        child.extra.insert("yoloMode".into(), current.extra.get("yoloMode").cloned().unwrap_or(Value::Null));
+        child.permission_mode = current.permission_mode;
         child.sandbox = provider.get("sandbox").map(Option::<studio_runtime_store::AgentSandbox>::deserialize).transpose()?.unwrap_or_else(|| current.sandbox.clone());
         child.approval_policy = provider.get("approvalPolicy").map(Option::<String>::deserialize).transpose()?.unwrap_or_else(|| current.approval_policy.clone());
         child.extra.insert("profileId".into(), provider.get("activePermissionProfile").cloned().or_else(|| current.extra.get("profileId").cloned()).unwrap_or(Value::Null));
@@ -1651,11 +1656,11 @@ mod tests {
     fn branch_draft_keeps_the_historical_generated_request_identity() {
         for (source, historical_request) in [
             (
-                json!({"cwd":"/project", "yoloMode":true, "workspaceMode":"worktree", "profileId":"profile"}),
+                json!({"cwd":"/project", "permissionMode":"bypassPermissions", "workspaceMode":"worktree", "profileId":"profile"}),
                 json!({"id":"child","account_key":"account","cwd":"/project","model":"model","yolo_mode":true}),
             ),
             (
-                json!({"cwd":null, "yoloMode":null}),
+                json!({"cwd":null, "permissionMode":null}),
                 json!({"id":"child","account_key":"account","model":"model"}),
             ),
         ] {
