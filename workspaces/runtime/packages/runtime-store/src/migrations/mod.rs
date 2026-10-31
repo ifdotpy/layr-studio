@@ -36,6 +36,7 @@ mod m2026_10_30_text_blobs;
 mod m2026_10_30_unused_agent_columns;
 mod m2026_10_30_unused_start_action;
 mod m2026_10_30_vm_stream_owners;
+mod m2026_10_31_access_invites;
 mod m2026_10_31_agent_core;
 mod m2026_10_31_agent_permissions;
 mod m2026_10_31_current_checks;
@@ -863,6 +864,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_10_31_current_checks::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-access-invites",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Stores with open invitation records",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_access_invites::apply(c.transaction),
     },
 ];
 

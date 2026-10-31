@@ -541,12 +541,26 @@ impl AccessSnapshot {
             .transpose()?;
         let invite = invite
             .map(|v| {
-                let value = stored_value("runtime_access_invites", invite_id, v)?;
-                PersistedAccessInvite::from_value(&value).map_err(|location| AccessError::Stored {
+                let invalid = |location| AccessError::Stored {
                     table: "runtime_access_invites",
                     id: invite_id.to_owned(),
                     location,
-                })
+                };
+                if v.len() > remote_transport::MAX_RESPONSE_BYTES {
+                    return Err(invalid("record size".into()));
+                }
+                let mut decoder = serde_json::Deserializer::from_str(v);
+                let decoded: studio_runtime_schema::http_ingress::Object<PersistedAccessInvite> =
+                    serde_path_to_error::deserialize(&mut decoder).map_err(|error| {
+                        let path = error.path().to_string();
+                        invalid(if path == "." {
+                            String::new()
+                        } else {
+                            format!("/{path}")
+                        })
+                    })?;
+                decoder.end().map_err(|_| invalid("JSON".into()))?;
+                Ok(decoded.0)
             })
             .transpose()?;
         if client
@@ -951,8 +965,8 @@ mod snapshot_tests {
     }
 
     #[test]
-    fn invite_snapshot_retains_extensions_and_refuses_invalid_identity() {
-        let invite = json!({"inviteId":"i", "status":"open", "expires":9007199254740993_u64, "tokenHash":digest(b"secret"), "tailscaleUser":"owner", "extra":{"opaque":true}});
+    fn invite_snapshot_refuses_invalid_identity() {
+        let invite = json!({"inviteId":"i", "status":"open", "expires":9007199254740993_u64, "tokenHash":digest(b"secret"), "tailscaleUser":"owner", "grant":"observe"});
         let raw = invite.to_string();
         let snapshot = AccessSnapshot::from_records("c", None, "i", Some(&raw), false).unwrap();
         check_invite(
@@ -965,7 +979,7 @@ mod snapshot_tests {
         assert_eq!(
             serde_json::to_string(snapshot.invite().unwrap()).unwrap(),
             format!(
-                r#"{{"inviteId":"i","status":"open","expires":9007199254740993,"tokenHash":"{}","tailscaleUser":"owner","extra":{{"opaque":true}}}}"#,
+                r#"{{"inviteId":"i","status":"open","expires":9007199254740993,"tokenHash":"{}","tailscaleUser":"owner","grant":"observe"}}"#,
                 digest(b"secret")
             )
         );

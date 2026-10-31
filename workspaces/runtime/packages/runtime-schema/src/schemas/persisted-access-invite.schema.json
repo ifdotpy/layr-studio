@@ -2,10 +2,15 @@
   "$defs": {
     "JsonValue": {}
   },
-  "additionalProperties": {
-    "$ref": "#/$defs/JsonValue"
-  },
+  "additionalProperties": false,
   "properties": {
+    "protocol": { "type": ["integer", "null"], "minimum": 0 },
+    "serverId": { "type": ["string", "null"] },
+    "label": { "type": ["string", "null"] },
+    "origin": { "type": ["string", "null"] },
+    "publicKey": { "type": ["string", "null"] },
+    "created": { "type": ["number", "null"] },
+    "grant": { "type": ["string", "null"] },
     "expires": {
       "minimum": 0,
       "title": "Expires",
