@@ -45,7 +45,10 @@ export type AgentSetupPickerProps = {
   onDaybreak: () => void;
 };
 export function AgentSetupPicker(p: AgentSetupPickerProps) {
-  const capabilityProvider = p.capabilityProvider ?? p.provider;
+  // No provider picked yet (empty) keeps both fields visible.
+  const capabilityProvider = p.capabilityProvider || p.provider;
+  const gated = (capability: "model_change" | "effort") =>
+    !capabilityProvider || providerSupports(capabilityProvider, capability);
   return (
     <Stack gap="sm" className="execution-profile">
       <SegmentedControl
@@ -89,7 +92,7 @@ export function AgentSetupPicker(p: AgentSetupPickerProps) {
           automatic={p.automaticAccount}
         />
       )}
-      {providerSupports(capabilityProvider, "model_change") && (
+      {gated("model_change") && (
         <ModelField
           retainCurrent={p.retainCurrentModel}
           id={p.modelId || (p.role === "review" ? "review-model" : "model")}
@@ -100,7 +103,7 @@ export function AgentSetupPicker(p: AgentSetupPickerProps) {
           disabled={!!p.readOnlyReason || p.disabled}
         />
       )}
-      {providerSupports(capabilityProvider, "effort") && (
+      {gated("effort") && (
         <EffortField
           label={p.effortLabel}
           options={p.efforts}

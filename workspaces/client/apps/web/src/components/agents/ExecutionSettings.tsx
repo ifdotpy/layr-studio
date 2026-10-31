@@ -1563,7 +1563,7 @@ function ScopedExecutionSettings({
         roleSwitchId={roleSwitchId}
         readOnlyReason={readOnlyReason}
         provider={pickerProvider}
-        capabilityProvider={agent.provider}
+        capabilityProvider={agent.provider || undefined}
         providers={pickerProviders}
         onProvider={setBrowsedProvider}
         accounts={inheritedUnavailable ? [] : connectedAccounts}

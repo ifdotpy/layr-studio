@@ -63,3 +63,9 @@ test("capabilityProvider gates the fields instead of the picked provider", () =>
     render({ provider: "future", capabilityProvider: "claude" }),
   ).toContain("Test reasoning");
 });
+
+test("no provider picked yet keeps both fields visible", () => {
+  const markup = render({ provider: "" });
+  expect(markup).toContain("Test model");
+  expect(markup).toContain("Test reasoning");
+});

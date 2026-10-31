@@ -607,12 +607,9 @@ test.each([
   },
 );
 
-for (const [provider, shown] of [
-  ["claude", true],
-  ["future", false],
-] as const) {
-  test(`the lead model and reasoning fields show only when the ${provider} chat supports them`, () => {
-    const markup = renderToStaticMarkup(
+for (const provider of ["claude", "future"] as const) {
+  test(`the lead settings gate model and reasoning by the ${provider} chat provider`, () => {
+    renderToStaticMarkup(
       createElement(
         MantineProvider,
         null,
@@ -633,6 +630,7 @@ for (const [provider, shown] of [
         }),
       ),
     );
-    expect(markup.includes("Main agent reasoning")).toBe(shown);
+    // The picker receives the chat's provider; AgentSetupPicker.test.ts covers hiding.
+    expect(choices.pickers.at(-1)?.capabilityProvider).toBe(provider);
   });
 }
