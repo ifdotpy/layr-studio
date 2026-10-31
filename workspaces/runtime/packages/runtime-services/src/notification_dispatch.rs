@@ -949,7 +949,7 @@ pub(crate) fn put_checked_task_record(
     tx: &Transaction<'_>,
     task: &studio_runtime_store::TaskRecord,
 ) -> Result<(), NotificationDispatchError> {
-    kinds::put_checked_task(tx, task, &studio_runtime_store::projection_value(task))
+    kinds::put_checked_task(tx, task)
 }
 
 /// Shared completion formatter for recovery; its caller owns the recovery receipt.
@@ -997,7 +997,7 @@ pub fn recover_task_in_transaction(
             true,
             at,
         )? {
-            kinds::put_checked_task(tx, &task, &studio_runtime_store::projection_value(&task))?;
+            kinds::put_checked_task(tx, &task)?;
             kinds::write_historical_item(
                 tx,
                 agent["id"]

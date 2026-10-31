@@ -101,7 +101,7 @@ pub(crate) fn submit_agent_complaint(
             serde::Deserialize::deserialize(lead.value())?,
         ],
     };
-    let view = crate::sync_views::complaint_entity_view(&record, &context)
+    let view = crate::sync_views::project_complaint_record(&typed, &context)
         .ok_or_else(|| stored("runtime_complaints", &complaint_id))?;
     SyncDocumentsRepository::put_entity(tx, "complaint", &complaint_id, view, false)?;
     if recipient == ComplaintRecipient::Lead {
@@ -404,7 +404,7 @@ fn save_complaint_projection(
         .map(serde::Deserialize::deserialize)
         .collect::<Result<_, _>>()?;
     let context = crate::sync_views::ComplaintViewContext { agents: &agents };
-    let view = crate::sync_views::complaint_entity_view(&complaint.clone().into_value(), &context)
+    let view = crate::sync_views::project_complaint_record(complaint, &context)
         .ok_or_else(|| stored("runtime_complaints", id))?;
     SyncDocumentsRepository::put_entity(tx, "complaint", id, view, false)?;
     Ok(())
