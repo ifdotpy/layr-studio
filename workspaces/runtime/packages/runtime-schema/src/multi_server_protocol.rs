@@ -22,17 +22,46 @@ pub fn identity_proof_message(server_id: &str, nonce: &str) -> Option<String> {
     valid.then(|| format!("{MULTI_SERVER_SIGNING_DOMAIN}\nidentity\n{server_id}\n{nonce}"))
 }
 
-/// Fields of a schema-validated discovery response. Validate the complete
-/// DiscoveryIdentity schema before deserializing this view.
+/// A complete discovery response, checked while decoding.
 #[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DiscoveryIdentity {
     pub server_id: String,
     pub label: String,
+    #[serde(deserialize_with = "required_nullable")]
     pub origin: Option<String>,
     pub public_key: String,
+    #[serde(deserialize_with = "required_nullable")]
     pub tailscale_user: Option<String>,
     pub auto_pair: bool,
+    #[serde(rename = "protocol")]
+    _protocol: AccessProtocol,
+    #[serde(default, rename = "proof", deserialize_with = "optional_proof")]
+    _proof: Option<String>,
+}
+
+struct AccessProtocol;
+impl<'de> serde::Deserialize<'de> for AccessProtocol {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let number = <serde_json::Number as serde::Deserialize>::deserialize(deserializer)?;
+        if number.as_f64() == Some(ACCESS_PROTOCOL_VERSION as f64) {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom("unsupported access protocol"))
+        }
+    }
+}
+
+fn required_nullable<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    <Option<String> as serde::Deserialize>::deserialize(deserializer)
+}
+
+fn optional_proof<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    <String as serde::Deserialize>::deserialize(deserializer).map(Some)
 }
 
 /// A validated stored invitation. Extra fields are preserved when it is used.
@@ -221,10 +250,24 @@ mod tests {
                 !crate::validate("DiscoveryIdentity", &bad).unwrap(),
                 "{field}"
             );
+            assert!(
+                serde_json::from_value::<crate::http_ingress::Object<super::DiscoveryIdentity>>(
+                    bad
+                )
+                .is_err(),
+                "{field}"
+            );
             let mut missing = valid.clone();
             missing.as_object_mut().unwrap().remove(field);
             assert!(
                 !crate::validate("DiscoveryIdentity", &missing).unwrap(),
+                "missing {field}"
+            );
+            assert!(
+                serde_json::from_value::<crate::http_ingress::Object<super::DiscoveryIdentity>>(
+                    missing
+                )
+                .is_err(),
                 "missing {field}"
             );
         }
@@ -235,9 +278,22 @@ mod tests {
             assert!(serde_json::from_value::<super::DiscoveryIdentity>(input).is_ok());
         }
         assert!(!crate::validate("DiscoveryIdentity", &json!([])).unwrap());
+        let mut bad_proof = valid.clone();
+        bad_proof["proof"] = json!(null);
+        assert!(!crate::validate("DiscoveryIdentity", &bad_proof).unwrap());
+        assert!(
+            serde_json::from_value::<crate::http_ingress::Object<super::DiscoveryIdentity>>(
+                bad_proof
+            )
+            .is_err()
+        );
         let mut extra = valid;
         extra["unexpected"] = json!(true);
         assert!(!crate::validate("DiscoveryIdentity", &extra).unwrap());
+        assert!(
+            serde_json::from_value::<crate::http_ingress::Object<super::DiscoveryIdentity>>(extra)
+                .is_err()
+        );
     }
 
     #[test]
