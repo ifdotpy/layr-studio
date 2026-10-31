@@ -894,8 +894,10 @@ impl Snapshot {
                             vec![],
                         ));
                     }
-                    Some("not_sent") => {}
-                    Some("unknown") | None => {
+                    // No receipt: the retained ledger keys the call, so asking again
+                    // replays its recorded answer or holds it; it never sends twice.
+                    Some("not_sent") | None => {}
+                    Some("unknown") => {
                         return Err(TransferError::Refused(
                             "The provider read outcome is unknown; it was not repeated",
                         ));
@@ -2406,6 +2408,29 @@ mod provider_receipt_tests {
         );
         assert_eq!(held.operation["members"]["agent"]["phase"], "unknown");
         assert!(intent(&held).is_err());
+    }
+
+    #[test]
+    fn intent_without_receipt_may_ask_the_retained_ledger_again() {
+        let reading = after(snapshot().begin_read("agent").expect("fixture"));
+        let params = json!({"threadId":"source-thread"});
+        let scope = json!({"account":"source","connection":"source-conn","generation":2});
+        let operation = "transfer:transfer:agent:unsubscribe";
+        let ask = |snapshot: &Snapshot| {
+            snapshot.provider_read_intent(
+                "agent",
+                operation,
+                "source",
+                scope.clone(),
+                "thread/unsubscribe",
+                params.clone(),
+            )
+        };
+        let intent = after(ask(&reading).expect("fixture"));
+        assert!(
+            ask(&intent).is_ok(),
+            "the retained ledger replays or holds the call by its key"
+        );
     }
 
     #[test]
