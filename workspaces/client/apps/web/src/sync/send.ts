@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
-import { migrateMessageSends, unsentStore } from "../unsent/store";
+import {
+  migrateMessageSends,
+  reportUnsentFailure,
+  unsentStore,
+} from "../unsent/store";
 import { serverViewId } from "../servers/environment";
 import { serverLocalStorage } from "../servers/storage";
 import { serverMutationResponseIsUncertain } from "../servers/mutationIdentity";
@@ -85,13 +89,19 @@ export function createOutbox(options: {
     options.buffer ??
     unsentStore(options.serverId ?? serverViewId ?? "local", "message");
   const saved = new Map<string, string>();
+  const removed = new Set<string>();
+  const initialWrites = new Map<string, Promise<void>>();
   let initialization: Promise<void> | undefined;
   const ready = () =>
     (initialization ??= (async () => {
       await migrateMessageSends(options.storage, buffer);
       for (const [id, value] of await buffer.loadAll())
-        if (typeof value === "string") saved.set(id, value);
-    })());
+        if (typeof value === "string" && !saved.has(id) && !removed.has(id))
+          saved.set(id, value);
+    })().catch((error: unknown) => {
+      initialization = undefined;
+      throw error;
+    }));
   const listeners = new Set<() => void>();
   const active = new Map<string, Promise<SendResult>>();
   const key = (room: string, id: string) => JSON.stringify([room, id]);
@@ -162,17 +172,38 @@ export function createOutbox(options: {
       return;
     }
   }
-  function write(value: SavedSend) {
+  function write(value: SavedSend, initial = false) {
     const id = key(value.body.room, value.body.id);
     const text = JSON.stringify(value);
     saved.set(id, text);
     publish();
-    return buffer.put(id, text);
+    const pending = initial
+      ? buffer.put(id, text)
+      : (initialWrites.get(id) ?? Promise.resolve()).then(() =>
+          buffer.putIfExists(id, text),
+        );
+    if (initial) {
+      initialWrites.set(id, pending);
+      void pending.then(
+        () => {
+          if (initialWrites.get(id) === pending) initialWrites.delete(id);
+        },
+        () => {
+          if (initialWrites.get(id) === pending) initialWrites.delete(id);
+        },
+      );
+    }
+    void pending.catch(reportUnsentFailure);
+    return pending;
   }
   async function remove(room: string, id: string) {
-    saved.delete(key(room, id));
+    const identity = key(room, id);
+    removed.add(identity);
+    saved.delete(identity);
     publish();
-    await buffer.delete(key(room, id));
+    await initialWrites.get(identity)?.catch(() => {});
+    initialWrites.delete(identity);
+    await buffer.delete(identity);
   }
   function find(id: string) {
     return list().find((entry) => entry.id === id);
@@ -195,8 +226,17 @@ export function createOutbox(options: {
     const existing = active.get(id);
     if (existing) return existing;
     const task = (async (): Promise<SendResult> => {
-      await persisted;
-      await onPersist?.();
+      let notified = false;
+      let refused = false;
+      const notifyPersisted = () => {
+        if (notified || refused) return;
+        notified = true;
+        void Promise.resolve()
+          .then(() => onPersist?.())
+          .catch(reportUnsentFailure);
+      };
+      if (persisted) void persisted.then(notifyPersisted, reportUnsentFailure);
+      else notifyPersisted();
       try {
         if (!read(value.body.room, id))
           return { kind: "local", id, queued: false, status: "cancelled" };
@@ -206,7 +246,7 @@ export function createOutbox(options: {
           throw new Error(
             "The server workspace changed. Reload before sending.",
           );
-        await write({ ...value, attempted: true });
+        void write({ ...value, attempted: true });
         if (!read(value.body.room, id))
           return { kind: "local", id, queued: false, status: "cancelled" };
         const response = await command.run(value.request, {
@@ -222,16 +262,19 @@ export function createOutbox(options: {
         if (!receipt || !matchesMessageDelivery(receipt, id))
           throw new Error("The delivery response does not match this message.");
         if (receipt.status === "failed" || receipt.status === "cancelled") {
+          refused = true;
           const failed = {
             ...value,
             status: "failed" as const,
             attempted: true,
             error: receipt.error || "The message was not sent.",
           };
-          if (read(value.body.room, id)) await remove(value.body.room, id);
+          if (read(value.body.room, id))
+            void remove(value.body.room, id).catch(reportUnsentFailure);
           return result(failed);
         }
-        await remove(value.body.room, id);
+        notifyPersisted();
+        void remove(value.body.room, id).catch(reportUnsentFailure);
         return {
           ...receipt,
           kind: "server",
@@ -241,6 +284,7 @@ export function createOutbox(options: {
         const definitive =
           error instanceof ApiError &&
           !serverMutationResponseIsUncertain(error.status, error.response);
+        if (definitive) refused = true;
         const failed = {
           ...value,
           attempted: true,
@@ -248,8 +292,9 @@ export function createOutbox(options: {
           error: errorText(error),
         };
         if (read(value.body.room, id)) {
-          if (definitive) await remove(value.body.room, id);
-          else await write(failed);
+          if (definitive)
+            void remove(value.body.room, id).catch(reportUnsentFailure);
+          else void write(failed);
         }
         return result(failed);
       }
@@ -262,7 +307,7 @@ export function createOutbox(options: {
     attachments: Attachment[] = [],
     onPersist?: () => void | Promise<void>,
   ) {
-    await ready();
+    void ready().catch(reportUnsentFailure);
     if (!body.id) throw new Error("A message identity is required");
     let value = read(body.room, body.id);
     if (value && JSON.stringify(value.body) !== JSON.stringify(body))
@@ -295,16 +340,15 @@ export function createOutbox(options: {
         displayPending: true,
         attachments,
       };
-      const persisted = write(value).catch((error) => {
-        saved.delete(key(body.room, body.id));
-        publish();
-        throw error;
-      });
+      removed.delete(key(body.room, body.id));
+      const persisted = write(value, true);
       return send(value, onPersist, persisted);
     }
     return send(value, onPersist);
   }
   async function changeOutbox(id: string, action: "cancel" | "resume") {
+    const inFlight = active.get(id);
+    if (action === "resume" && inFlight) return inFlight;
     await ready();
     const entry = find(id);
     if (!entry) throw new Error("This message is no longer on this device.");
@@ -377,7 +421,6 @@ export function createOutbox(options: {
         }
       };
       listeners.add(update);
-      window.addEventListener("storage", update);
       let wasLive = false;
       const stopConnection = options.watchResourceConnection((status) => {
         const reconnected = status === "live" && !wasLive;
@@ -392,7 +435,6 @@ export function createOutbox(options: {
         .catch((failure) => setError(errorText(failure)));
       return () => {
         listeners.delete(update);
-        window.removeEventListener("storage", update);
         stopConnection();
       };
     }, []);

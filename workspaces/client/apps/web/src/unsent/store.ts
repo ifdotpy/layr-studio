@@ -4,7 +4,11 @@ import { indexedDb } from "../indexedDb.ts";
 export const UNSENT_BUFFER_ENABLED = true;
 export const UNSENT_FAILURE_EVENT = "studio-unsent-input-failure";
 export function reportUnsentFailure() {
-  window.dispatchEvent(new Event(UNSENT_FAILURE_EVENT));
+  if (
+    typeof window !== "undefined" &&
+    typeof window.dispatchEvent === "function"
+  )
+    window.dispatchEvent(new Event(UNSENT_FAILURE_EVENT));
 }
 const DATABASE = "studio-unsent-input";
 const STORE = "input";
@@ -24,6 +28,18 @@ export function unsentStore(server: string, feature: string) {
     },
     async delete(id: string) {
       if (UNSENT_BUFFER_ENABLED) await db.delete(prefix(id));
+    },
+    async putIfExists(id: string, value: string) {
+      if (UNSENT_BUFFER_ENABLED)
+        await db.update(prefix(id), (current) =>
+          current === undefined ? undefined : value,
+        );
+    },
+    async deleteIfEqual(id: string, value: string) {
+      if (UNSENT_BUFFER_ENABLED)
+        await db.update(prefix(id), (current) =>
+          current === value ? undefined : current,
+        );
     },
     async loadAll(): Promise<[string, string | Blob][]> {
       if (!UNSENT_BUFFER_ENABLED) return [];

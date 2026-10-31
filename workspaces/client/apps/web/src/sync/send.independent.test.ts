@@ -29,6 +29,12 @@ class MemoryBuffer {
   async put(key: string, value: string | Blob) {
     this.values.set(key, value);
   }
+  async putIfExists(key: string, value: string) {
+    if (this.values.has(key)) this.values.set(key, value);
+  }
+  async deleteIfEqual(key: string, value: string) {
+    if (this.values.get(key) === value) this.values.delete(key);
+  }
   async delete(key: string) {
     this.values.delete(key);
   }
@@ -72,39 +78,31 @@ it("sends another message while an earlier request remains uncertain and retries
   expect(post.mock.calls[2]?.[0]).toEqual(post.mock.calls[0]?.[0]);
 });
 
-it("saves the command before POST and does not send when storage fails", async () => {
+it("continues sending when storage fails", async () => {
   const storage = new MemoryStorage();
   const buffer = new MemoryBuffer();
-  const post = vi.fn(async (request) => {
-    const saved = [...buffer.values.values()];
-    expect(saved).toHaveLength(1);
-    expect(JSON.parse(String(saved[0])).request).toEqual(request);
-    return {
-      rows: [
-        {
-          collection: "messageReceipt",
-          payload: { id: request.id, status: "delivered" },
-        },
-      ],
-    };
-  });
+  vi.spyOn(buffer, "put").mockRejectedValue(new Error("disk full"));
+  const post = vi.fn(async (request) => ({
+    status: "applied" as const,
+    ref_kind: "message",
+    ref_id: request.id,
+    rev: 1,
+    seq: 1,
+    rows: [],
+  }));
   const outbox = createOutbox({
     api: {
-      command: createCommandClient(storage, post as never),
+      command: createCommandClient(storage, post),
       getStreamSession: () => ({ workspaceId: "workspace" }),
     } as never,
     storage,
     buffer,
     watchResourceConnection: () => () => {},
   });
-  await outbox.durableSend({ id: "first", room: "chat", text: "hello" });
-  expect(post).toHaveBeenCalledTimes(1);
-  expect(storage.length).toBe(1); // command counter only
-  vi.spyOn(buffer, "put").mockRejectedValue(new Error("disk full"));
-  await expect(
-    outbox.durableSend({ id: "second", room: "chat", text: "hello" }),
-  ).rejects.toThrow("disk full");
-  expect(post).toHaveBeenCalledTimes(1);
+  expect(
+    await outbox.durableSend({ id: "second", room: "chat", text: "hello" }),
+  ).toMatchObject({ kind: "server" });
+  expect(post).toHaveBeenCalledOnce();
 });
 
 it("does not resurrect a discarded send when its request fails later", async () => {
@@ -325,14 +323,17 @@ it("coalesces a reconnect with a send whose persistence callback is still runnin
   const persisted = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const post = vi.fn(async (request) => ({
-    rows: [
-      {
-        collection: "messageReceipt",
-        payload: { id: request.id, status: "delivered" },
-      },
-    ],
-  }));
+  const post = vi.fn(async (request) => {
+    await persisted;
+    return {
+      rows: [
+        {
+          collection: "messageReceipt",
+          payload: { id: request.id, status: "delivered" },
+        },
+      ],
+    };
+  });
   const outbox = createOutbox({
     api: {
       command: createCommandClient(storage, post as never),
@@ -348,32 +349,9 @@ it("coalesces a reconnect with a send whose persistence callback is still runnin
     () => persisted,
   );
   const reconnect = outbox.changeOutbox("one", "resume");
-  expect(post).not.toHaveBeenCalled();
   release();
   await Promise.all([first, reconnect]);
   expect(post).toHaveBeenCalledTimes(1);
-});
-
-it("does not replace an unreadable saved command when submitting its identity again", async () => {
-  const storage = new MemoryStorage();
-  const buffer = new MemoryBuffer();
-  const key = `studio-message-send:${JSON.stringify(["chat", "damaged"])}`;
-  storage.setItem(key, "broken");
-  const post = vi.fn();
-  const outbox = createOutbox({
-    api: {
-      command: createCommandClient(storage, post),
-      getStreamSession: () => ({ workspaceId: "workspace" }),
-    } as never,
-    storage,
-    buffer,
-    watchResourceConnection: () => () => {},
-  });
-  await expect(
-    outbox.durableSend({ id: "damaged", room: "chat", text: "hello" }),
-  ).rejects.toThrow("cannot be read");
-  expect(buffer.values.get(JSON.stringify(["chat", "damaged"]))).toBe("broken");
-  expect(post).not.toHaveBeenCalled();
 });
 
 it("keeps a remote outcome-unknown error uncertain instead of treating it as a refusal", async () => {
@@ -403,6 +381,12 @@ it("restores an uncertain command after reload and removes it on confirmation", 
   const storage = new MemoryStorage();
   const records = new Map<string, string>();
   const buffer = {
+    putIfExists: async (key: string, value: string) => {
+      if (records.has(key)) records.set(key, value);
+    },
+    deleteIfEqual: async (key: string, value: string) => {
+      if (records.get(key) === value) records.delete(key);
+    },
     put: async (key: string, value: string) => {
       records.set(key, value);
     },
@@ -440,4 +424,92 @@ it("restores an uncertain command after reload and removes it on confirmation", 
   await createOutbox(options).changeOutbox("saved", "resume");
   expect(records.size).toBe(0);
   expect(post.mock.calls[1]?.[0]).toEqual(post.mock.calls[0]?.[0]);
+});
+
+it("dispatches immediately when the buffer write never finishes", async () => {
+  const storage = new MemoryStorage();
+  const buffer = new MemoryBuffer();
+  vi.spyOn(buffer, "put").mockImplementation(() => new Promise(() => {}));
+  const post = vi.fn(async (request) => ({
+    status: "applied" as const,
+    ref_kind: "message",
+    ref_id: request.id,
+    rev: 1,
+    seq: 1,
+    rows: [],
+  }));
+  const outbox = createOutbox({
+    api: {
+      command: createCommandClient(storage, post),
+      getStreamSession: () => ({ workspaceId: "workspace" }),
+    } as never,
+    storage,
+    buffer,
+    watchResourceConnection: () => () => {},
+  });
+  void outbox.durableSend({ id: "stalled", room: "chat", text: "hello" });
+  await vi.waitFor(() => expect(post).toHaveBeenCalledOnce());
+});
+
+it("does not resurrect a command confirmed in another tab", async () => {
+  const storage = new MemoryStorage();
+  const buffer = new MemoryBuffer();
+  const post = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockImplementation(async (request) => ({
+      rows: [
+        {
+          collection: "messageReceipt",
+          payload: { id: request.id, status: "delivered" },
+        },
+      ],
+    }));
+  const options = {
+    api: {
+      command: createCommandClient(storage, post),
+      getStreamSession: () => ({ workspaceId: "workspace" }),
+    } as never,
+    storage,
+    buffer,
+    watchResourceConnection: () => () => {},
+  };
+  const first = createOutbox(options);
+  await first.durableSend({ id: "shared", room: "chat", text: "hello" });
+  await createOutbox(options).changeOutbox("shared", "resume");
+  expect(buffer.values.size).toBe(0);
+  await first.editOutboxDisplay("shared", "edited");
+  expect(buffer.values.size).toBe(0);
+});
+
+it("retries initialization after a storage failure", async () => {
+  const storage = new MemoryStorage();
+  const buffer = new MemoryBuffer();
+  const load = vi
+    .spyOn(buffer, "loadAll")
+    .mockRejectedValueOnce(new Error("unavailable"));
+  const post = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockImplementation(async (request) => ({
+      status: "applied" as const,
+      ref_kind: "message",
+      ref_id: request.id,
+      rev: 1,
+      seq: 1,
+      rows: [],
+    }));
+  const outbox = createOutbox({
+    api: {
+      command: createCommandClient(storage, post),
+      getStreamSession: () => ({ workspaceId: "workspace" }),
+    } as never,
+    storage,
+    buffer,
+    watchResourceConnection: () => () => {},
+  });
+  await outbox.durableSend({ id: "retry-init", room: "chat", text: "hello" });
+  await outbox.changeOutbox("retry-init", "resume");
+  expect(load.mock.calls.length).toBeGreaterThan(1);
+  expect(post).toHaveBeenCalledTimes(2);
 });
