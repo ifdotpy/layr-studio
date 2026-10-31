@@ -680,10 +680,29 @@ mod tests {
     }
 
     fn body() -> studio_runtime_schema::peer_team_ingress::RadioCreate {
-        serde_json::from_value(json!({"action":"radio", "radio_action":"create", "path":"/project", "request_id":"request", "name":"Pair","participants":[
-            {"account_key":"one","model":"model-one"},
-            {"account_key":"two","model":"model-two","effort":"high"}
-        ]})).expect("radio request")
+        use studio_runtime_schema::peer_team_ingress::{
+            CreateRadioAction, Participant, RadioAction, RadioCreate,
+        };
+        use studio_runtime_schema::queue_command::Field;
+        RadioCreate {
+            action: RadioAction::Radio,
+            radio_action: CreateRadioAction::Create,
+            path: "/project".to_owned().try_into().expect("path"),
+            request_id: "request".to_owned().try_into().expect("request ID"),
+            name: "Pair".to_owned().try_into().expect("name"),
+            participants: [
+                Participant {
+                    account_key: "one".to_owned().try_into().expect("account"),
+                    model: "model-one".to_owned().try_into().expect("model"),
+                    effort: Field::Missing,
+                },
+                Participant {
+                    account_key: "two".to_owned().try_into().expect("account"),
+                    model: "model-two".to_owned().try_into().expect("model"),
+                    effort: Field::Value("high".to_owned()),
+                },
+            ],
+        }
     }
 
     struct WorkerDraftFixture {
