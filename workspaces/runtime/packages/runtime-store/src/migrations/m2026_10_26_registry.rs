@@ -63,8 +63,12 @@ fn prepare(root: &std::path::Path) -> StoreResult<Option<PreparedRegistry>> {
     }
     let mut value = serde_json::from_slice(&original)?;
     let changed = super::m2026_10_26_provider_identity::migrate_registry_2026_10_26(&mut value)?;
-    let order = RegistryOrder::deserialize(&mut serde_json::Deserializer::from_slice(&original))
-        .map_err(|_| invalid())?;
+    let mut order =
+        RegistryOrder::deserialize(&mut serde_json::Deserializer::from_slice(&original))
+            .map_err(|_| invalid())?;
+    let changed =
+        super::m2026_10_31_claude_home_account::migrate_registry(&mut value, &mut order, root)
+            || changed;
     let accounts = value["accounts"]
         .as_object()
         .ok_or_else(invalid)?

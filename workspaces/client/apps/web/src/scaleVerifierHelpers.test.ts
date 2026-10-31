@@ -230,10 +230,10 @@ describe("scale verifier helpers", () => {
   it("keeps workspace selection outside the worker execution defaults", () => {
     expect(
       scaleWorkerDefaults("claude-haiku-fixture", SCALE_PROVIDER, [
-        "claude-local",
+        "claude-profile-fixture",
       ]),
     ).toEqual({
-      account_key: "claude-local",
+      account_key: "claude-profile-fixture",
       model: "claude-haiku-fixture",
       effort: "low",
       fast_mode: false,
@@ -252,7 +252,7 @@ describe("scale verifier helpers", () => {
   });
   it("restricts paid model calls to the approved cheap Claude profile", () => {
     expect(SCALE_PROVIDER).toMatchObject({
-      accountKey: "claude-local",
+      accountKey: "claude-profile-fixture",
       model: "haiku",
       effort: "low",
       fastMode: false,
@@ -267,7 +267,7 @@ describe("scale verifier helpers", () => {
         provider: ProviderKind.codex,
       },
       {
-        id: "claude-local",
+        id: "claude-profile-fixture",
         status: AccountStatus.ready,
         provider: ProviderKind.claude,
       },
@@ -289,7 +289,7 @@ describe("scale verifier helpers", () => {
       "default",
     );
     expect(scaleAccountKeys(accounts, scaleProfile("claude-sonnet"))).toEqual([
-      "claude-local",
+      "claude-profile-fixture",
     ]);
   });
   it("selects the cheapest Codex model without a resolved id", () => {

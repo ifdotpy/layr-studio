@@ -243,8 +243,9 @@ pub(crate) fn codex_location(profile: &AuthProfile) -> auth_cache::CredentialLoc
     }
 }
 
-/// The directory that `claude auth status` reads: the profile's `configDir`,
-/// else `CLAUDE_CONFIG_DIR`, else `~/.claude` (whose account file is `~/.claude.json`).
+/// The directory that `claude auth status` reads: the profile's `configDir`
+/// in the Studio state. Without one, no directory is read; Studio never reads
+/// `~/.claude` or `CLAUDE_CONFIG_DIR`.
 pub(crate) fn claude_location(profile: &AuthProfile) -> auth_cache::CredentialLocation {
     let options = profile.claude_options.as_ref();
     let configured = |name: &str| {
@@ -254,14 +255,13 @@ pub(crate) fn claude_location(profile: &AuthProfile) -> auth_cache::CredentialLo
             .filter(|value| !value.trim().is_empty())
             .map(|value| value.trim().to_owned())
     };
-    let home = env::var_os("HOME").map(PathBuf::from);
-    let config_dir = configured("configDir")
+    let source = configured("configDir")
         .map(PathBuf::from)
-        .or_else(|| env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from));
-    let (directories, source) = match (config_dir, home) {
-        (Some(config), _) => (vec![config.clone()], config),
-        (None, Some(home)) => (vec![home.join(".claude"), home.clone()], home),
-        (None, None) => (Vec::new(), PathBuf::new()),
+        .unwrap_or_default();
+    let directories = if source.as_os_str().is_empty() {
+        Vec::new()
+    } else {
+        vec![source.clone()]
     };
     auth_cache::CredentialLocation {
         identity: format!(
@@ -1967,48 +1967,10 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
         Ok(())
     }
 
-    /// Register local accounts: Codex homes, then the default Claude profile
-    /// at `<user_home>/.claude` when the Claude CLI is installed. Registration
-    /// reads the credentials as they are now, never a cached status.
-    pub fn discover_local(&self, user_home: &Path) -> Result<(), AccountMutationError> {
+    /// Register local Codex homes. Claude accounts live only in Studio profile
+    /// folders created by sign-in; Studio never registers `~/.claude`.
+    pub fn discover_local(&self, _user_home: &Path) -> Result<(), AccountMutationError> {
         self.discover_codex()?;
-        if AccountDriver::<SystemProviderAuthReader>::claude_discovery_available() {
-            let home = user_home.join(".claude");
-            let profile = AuthProfile {
-                provider: studio_runtime_providers::ProviderKind::Claude,
-                home: home.clone(),
-                claude_options: None,
-            };
-            self.reader.invalidate(&profile);
-            let metadata = self.reader.read(&profile);
-            self.discover_claude_verified(&home, &metadata)?;
-        }
-        Ok(())
-    }
-
-    pub fn discover_claude_verified(
-        &self,
-        home: &Path,
-        metadata: &AuthMetadata,
-    ) -> Result<(), AccountMutationError> {
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| AccountDriverError::Poisoned)?;
-        if state.value["accounts"].get("claude-local").is_some() {
-            return Ok(());
-        }
-        let mut value = state.value.clone();
-        let mut row = serde_json::json!({"id":"claude-local","provider":ProviderKind::Claude.key(),"home":home,"label":"Claude Code","source":"Claude Code","status":"signedOut"});
-        apply_metadata(
-            row.as_object_mut()
-                .ok_or(AccountDriverError::InvalidRegistry)?,
-            metadata,
-        );
-        value["accounts"]["claude-local"] = row;
-        let mut order = state.order.clone();
-        order.accounts.push("claude-local".into());
-        self.persist_registry(&mut state, value, &order)?;
         Ok(())
     }
 }
@@ -2558,23 +2520,6 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
             self.persist_registry(&mut state, updated, &order)?;
         }
         state.public_snapshot()
-    }
-
-    pub fn claude_discovery_available() -> bool {
-        let configured = env::var_os(CLAUDE_BIN_OVERRIDE).map(PathBuf::from);
-        let local = env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_default()
-            .join(".local/bin/claude");
-        let Some(configured) = configured else {
-            return find_executable("claude", env::var_os("PATH").as_deref()).is_some()
-                || is_executable(&local);
-        };
-        find_executable(
-            configured.to_string_lossy().as_ref(),
-            env::var_os("PATH").as_deref(),
-        )
-        .is_some()
     }
 
     pub fn terminal_login_receipt(&self, login_id: &str) -> Result<Value, AccountDriverError> {

@@ -99,7 +99,7 @@ import { fileURLToPath } from "node:url";
 export const SCALE_PROFILES = Object.freeze({
   "claude-haiku": Object.freeze({
     provider: ProviderKind.Claude,
-    accountKey: "claude-local",
+    accountKey: "claude-profile-fixture",
     model: "haiku",
     effort: "low",
     fastMode: false,
@@ -109,7 +109,7 @@ export const SCALE_PROFILES = Object.freeze({
   }),
   "claude-sonnet": Object.freeze({
     provider: ProviderKind.Claude,
-    accountKey: "claude-local",
+    accountKey: "claude-profile-fixture",
     model: "sonnet",
     effort: "low",
     fastMode: false,

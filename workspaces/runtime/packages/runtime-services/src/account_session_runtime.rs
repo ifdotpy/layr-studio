@@ -1068,8 +1068,9 @@ impl AccountSessionRuntime {
                 .get("configDir")
                 .and_then(Value::as_str)
                 .map(PathBuf::from)
-                .or_else(|| std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from))
-                .unwrap_or_else(|| self.home.join(".claude"));
+                .ok_or(AccountSessionError::Refused(
+                    "A Claude profile needs its own config folder",
+                ))?;
             let profile = AuthProfile {
                 provider: studio_runtime_providers::ProviderKind::Claude,
                 home: home.clone(),

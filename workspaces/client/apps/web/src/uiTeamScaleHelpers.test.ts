@@ -384,7 +384,7 @@ describe("current New chat setup", () => {
   };
   const claude = (model: string): Omit<RoleSettings, "model"> => ({
     profile: { provider: "claude", fastMode: false },
-    accountKey: "claude-local",
+    accountKey: "claude-profile-fixture",
     uiModel: model,
     effort: "low",
   });
@@ -411,7 +411,7 @@ describe("current New chat setup", () => {
   it("switches both roles to Claude and accepts absent optional modes and a read-only selected account", async () => {
     const dialog = setupDialog({
       fast: false,
-      selectedAccount: "claude-local",
+      selectedAccount: "claude-profile-fixture",
     });
     await configureNewChat(dialog, claude("sonnet"), claude("haiku"));
     expect(dialog.actions).toEqual([
