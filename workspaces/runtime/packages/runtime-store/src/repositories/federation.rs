@@ -32,10 +32,6 @@ const TABLES: &[TableRequirement] = &[
         name: "runtime_federation_rooms",
         columns: &["id", "record"],
     },
-    TableRequirement {
-        name: "runtime_federation_outbox",
-        columns: &["id", "peer_id", "record"],
-    },
 ];
 pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     tables: &[],
