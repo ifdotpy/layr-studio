@@ -68,6 +68,7 @@ const TYPED_BODIES: &[(&str, &str)] = &[
     ("POST", "/api/processes/action"),
     ("POST", "/api/queue"),
     ("POST", "/api/orchestration/settings"),
+    ("POST", "/api/sync/drafts"),
 ];
 
 #[derive(Debug, Clone)]

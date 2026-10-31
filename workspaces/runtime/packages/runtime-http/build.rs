@@ -39,6 +39,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let document: serde_json::Value = serde_json::from_slice(&fs::read(&spec_path)?)?;
     let mut analyzer = SchemaAnalyzer::new(document)?;
     let mut analysis = analyzer.analyze()?;
+    // Draft ingress has a single bounded Rust owner in routes/sync_documents.
+    for name in ["DraftPushRequest", "DraftPushRow", "DraftDocumentInput"] {
+        analysis
+            .schemas
+            .remove(name)
+            .ok_or("missing draft ingress schema")?;
+    }
     // The OpenAPI leaves own integer bounds. Preserve JSON number spellings
     // such as 7.0; the pull-output ingress validates them before typed decoding.
     for (name, owner) in [
