@@ -8,7 +8,8 @@ test("direct screens keep overlapping chat drafts and sends with their owner", a
   context,
 }, testInfo) => {
   const local = await fixture("Local");
-  const remote = await fixture("Remote", true);
+  // Versioned frames carry the drafts baseline that lets unsent edits post.
+  const remote = await fixture("Remote", true, { entityFrames: true });
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   try {

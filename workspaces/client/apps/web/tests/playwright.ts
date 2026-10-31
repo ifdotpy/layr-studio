@@ -2253,6 +2253,13 @@ export function handleEntitySyncFixtureRequest(
         const key = JSON.stringify(resource);
         const next = (resourceRevisions.get(key) || 0) + (advance ? 1 : 0);
         resourceRevisions.set(key, next || 1);
+        // An empty draft baseline lets the client post its unsent edits.
+        if (resource.kind === "drafts")
+          return {
+            resource,
+            revision: next || 1,
+            draftSnapshot: { complete: true, documents: [] },
+          };
         if (resource.kind === "multi-server" && fixture.discoverySnapshot)
           return {
             resource,
