@@ -659,11 +659,15 @@ impl<S: TerminalSession> TerminalDriver<S> {
 
     #[cfg(test)]
     async fn action(&self, action: &str, data: &Value) -> Result<Value, TerminalError> {
+        use serde::Deserialize;
+        use studio_runtime_schema::terminal_ingress::{
+            TerminalClose, TerminalInput, TerminalRename, TerminalResize,
+        };
         let parsed = match action {
-            "input" => serde_json::from_value(data.clone()).map(TerminalAction::Input),
-            "resize" => serde_json::from_value(data.clone()).map(TerminalAction::Resize),
-            "rename" => serde_json::from_value(data.clone()).map(TerminalAction::Rename),
-            "close" => serde_json::from_value(data.clone()).map(TerminalAction::Close),
+            "input" => TerminalInput::deserialize(data).map(TerminalAction::Input),
+            "resize" => TerminalResize::deserialize(data).map(TerminalAction::Resize),
+            "rename" => TerminalRename::deserialize(data).map(TerminalAction::Rename),
+            "close" => TerminalClose::deserialize(data).map(TerminalAction::Close),
             _ => return Err(TerminalError::InvalidRequest),
         }
         .map_err(|_| TerminalError::InvalidRequest)?;

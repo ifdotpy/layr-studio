@@ -782,6 +782,7 @@ fn valid_identifier(value: &str) -> bool {
 mod tests {
     use super::MultiServerError;
     use crate::federation_credentials::Credentials;
+    use serde::Deserialize;
     use serde_json::json;
     use std::sync::Arc;
     use studio_runtime_store::RuntimeStore;
@@ -793,8 +794,9 @@ mod tests {
         actor: &str,
         user: Option<&str>,
     ) -> Result<serde_json::Value, MultiServerError> {
-        let request = serde_json::from_value(body.clone())
-            .map_err(|_| MultiServerError::Refused("invalid test request".into()))?;
+        let request =
+            studio_runtime_schema::multi_server_ingress::ManagementRequest::deserialize(body)
+                .map_err(|_| MultiServerError::Refused("invalid test request".into()))?;
         super::create_invite(store, identity, &request, actor, user).await
     }
     async fn manage(
@@ -803,8 +805,9 @@ mod tests {
         body: &serde_json::Value,
         actor: &str,
     ) -> Result<serde_json::Value, MultiServerError> {
-        let request = serde_json::from_value(body.clone())
-            .map_err(|_| MultiServerError::Refused("invalid test request".into()))?;
+        let request =
+            studio_runtime_schema::multi_server_ingress::ManagementRequest::deserialize(body)
+                .map_err(|_| MultiServerError::Refused("invalid test request".into()))?;
         super::manage(store, identity, &request, actor).await
     }
 

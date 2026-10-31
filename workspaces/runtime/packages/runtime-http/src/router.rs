@@ -1458,11 +1458,15 @@ mod tests {
         let notifications = state.resource_notifications_handle();
         notifications
             .publish_once(
-                &serde_json::from_value(serde_json::json!({
-                    "requestId": "named-resource",
-                    "resources": [{"kind": "multi-server"}],
-                }))
-                .expect("notification fixture"),
+                &studio_runtime_schema::resource_notification::ResourceNotifyRequest::new(
+                    "named-resource".to_owned(),
+                    vec![
+                        studio_runtime_schema::resource_ref::ResourceRef::MultiServerResource(
+                            studio_runtime_schema::resource_ref::EmptyResource {},
+                        ),
+                    ],
+                )
+                .unwrap(),
             )
             .expect("named resource publication succeeds");
         let view = notifications

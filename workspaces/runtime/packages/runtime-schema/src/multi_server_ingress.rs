@@ -36,10 +36,16 @@ impl Origin {
         self.0 = value;
     }
 }
+impl TryFrom<String> for Origin {
+    type Error = &'static str;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        BoundedText::<0, ORIGIN_MAX_CODEPOINTS>::try_from(value)
+            .map(|value| Self(value.as_str().to_owned()))
+    }
+}
 impl<'de> Deserialize<'de> for Origin {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        BoundedText::<0, ORIGIN_MAX_CODEPOINTS>::deserialize(d)
-            .map(|value| Self(value.as_str().to_owned()))
+        Self::try_from(String::deserialize(d)?).map_err(serde::de::Error::custom)
     }
 }
 type PublicKey = BoundedText<0, PUBLIC_KEY_MAX_CODEPOINTS>;

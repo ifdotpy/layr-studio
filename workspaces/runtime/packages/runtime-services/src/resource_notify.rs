@@ -647,8 +647,8 @@ mod tests {
         );
         notifications
             .publish_once(
-                &serde_json::from_value(
-                    json!({"requestId":"changed-account","resources":[{"kind":"accounts"}]}),
+                &serde_json::from_str(
+                    r#"{"requestId":"changed-account","resources":[{"kind":"accounts"}]}"#,
                 )
                 .expect("notification fixture"),
             )
@@ -797,8 +797,8 @@ mod tests {
             }));
         notifications
             .publish_once(
-                &serde_json::from_value(
-                    json!({"requestId":"boundary","resources":[{"kind":"accounts"}]}),
+                &serde_json::from_str(
+                    r#"{"requestId":"boundary","resources":[{"kind":"accounts"}]}"#,
                 )
                 .expect("notification fixture"),
             )
@@ -834,10 +834,14 @@ mod tests {
             .expect("multi-server revision after unrelated commit");
         assert!(broad_commit.resources.is_empty());
 
-        let request = serde_json::from_value(json!({
-            "requestId": "multi-server-change",
-            "resources": [multi_server.clone()],
-        }))
+        let request = studio_runtime_schema::resource_notification::ResourceNotifyRequest::new(
+            "multi-server-change".to_owned(),
+            vec![
+                studio_runtime_schema::resource_ref::ResourceRef::MultiServerResource(
+                    studio_runtime_schema::resource_ref::EmptyResource {},
+                ),
+            ],
+        )
         .unwrap();
         assert!(notifications.publish_once(&request).expect("publish"));
 
@@ -872,8 +876,8 @@ mod tests {
             std::thread::spawn(move || {
                 entered.send(()).expect("admitted");
                 notifications.publish_once(
-                    &serde_json::from_value(
-                        json!({"requestId":"race","resources":[{"kind":"accounts"}]}),
+                    &serde_json::from_str(
+                        r#"{"requestId":"race","resources":[{"kind":"accounts"}]}"#,
                     )
                     .expect("notification fixture"),
                 )
