@@ -1353,4 +1353,171 @@ mod tests {
         complete_turn(&db, "c", "p9").unwrap();
         assert!(turn_completed(&db, "c", "p9").unwrap());
     }
+
+    /// Chat columns that come from the record: status, auto_wake, execution_mode,
+    /// usage_resume_enabled and turn_epoch.
+    type ChatFields = (
+        String,
+        Option<bool>,
+        Option<AgentExecutionMode>,
+        Option<bool>,
+        Option<i64>,
+    );
+
+    fn chat_fields(
+        status: &str,
+        auto_wake: bool,
+        mode: AgentExecutionMode,
+        usage_resume: Option<bool>,
+        turn_epoch: i64,
+    ) -> Option<ChatFields> {
+        Some((
+            status.to_owned(),
+            Some(auto_wake),
+            Some(mode),
+            usage_resume,
+            Some(turn_epoch),
+        ))
+    }
+
+    /// One agent record write, or the agent delete, and the rows that must follow it.
+    struct RowsStep {
+        command: &'static str,
+        /// `None` deletes the agent.
+        record: Option<Value>,
+        /// `None` when the agent has no chat row.
+        chat: Option<ChatFields>,
+        busy: bool,
+        /// `None`: no unfinished turn. `Some(None)`: unfinished turn without a provider turn.
+        unfinished: Option<Option<&'static str>>,
+        /// Kind of the newest turn row.
+        last_turn: Option<&'static str>,
+    }
+
+    #[test]
+    fn the_domain_rows_follow_each_agent_record_write() {
+        use AgentExecutionMode::{Native, Vm};
+        let steps = [
+            RowsStep {
+                command: "queued",
+                record: Some(agent(
+                    "c",
+                    json!({"status":"queued","autoWake":true,"executionMode":"native","turnEpoch":1}),
+                )),
+                chat: chat_fields("queued", true, Native, None, 1),
+                busy: false,
+                unfinished: None,
+                last_turn: None,
+            },
+            RowsStep {
+                command: "starting",
+                record: Some(agent(
+                    "c",
+                    json!({"status":"starting","inFlight":true,"autoWake":false,"executionMode":"vm","turnEpoch":2}),
+                )),
+                chat: chat_fields("starting", false, Vm, None, 2),
+                busy: true,
+                unfinished: Some(None),
+                last_turn: Some("starting"),
+            },
+            RowsStep {
+                command: "running",
+                record: Some(agent(
+                    "c",
+                    json!({"status":"running","inFlight":true,"turnId":"p1","threadId":"th",
+                        "autoWake":true,"executionMode":"vm","usageResumeEnabled":true,"turnEpoch":2}),
+                )),
+                chat: chat_fields("running", true, Vm, Some(true), 2),
+                busy: true,
+                unfinished: Some(Some("p1")),
+                last_turn: Some("running"),
+            },
+            RowsStep {
+                command: "interrupted",
+                record: Some(agent(
+                    "c",
+                    json!({"status":"interrupted","threadId":"th","lastCompletedTurn":"p1",
+                        "lastCompletedTurnStatus":"interrupted","autoWake":false,
+                        "executionMode":"native","usageResumeEnabled":false,"turnEpoch":3}),
+                )),
+                chat: chat_fields("interrupted", false, Native, Some(false), 3),
+                busy: false,
+                unfinished: None,
+                last_turn: Some("interrupted"),
+            },
+            RowsStep {
+                command: "running again",
+                record: Some(agent(
+                    "c",
+                    json!({"status":"running","inFlight":true,"turnId":"p2","threadId":"th",
+                        "autoWake":true,"executionMode":"vm","usageResumeEnabled":true,"turnEpoch":4}),
+                )),
+                chat: chat_fields("running", true, Vm, Some(true), 4),
+                busy: true,
+                unfinished: Some(Some("p2")),
+                last_turn: Some("running"),
+            },
+            RowsStep {
+                command: "completed",
+                record: Some(agent(
+                    "c",
+                    json!({"status":"completed","threadId":"th","lastCompletedTurn":"p2",
+                        "lastCompletedTurnStatus":"completed","autoWake":false,
+                        "executionMode":"native","turnEpoch":4}),
+                )),
+                chat: chat_fields("completed", false, Native, None, 4),
+                busy: false,
+                unfinished: None,
+                last_turn: Some("completed"),
+            },
+            RowsStep {
+                command: "delete",
+                record: None,
+                chat: None,
+                busy: false,
+                unfinished: None,
+                // The owner trigger deletes the chat and sessions; finished turns stay.
+                last_turn: Some("completed"),
+            },
+        ];
+        let db = crate::fresh_state::test_canvas();
+        for step in steps {
+            match &step.record {
+                Some(value) => put(&db, value),
+                None => {
+                    db.execute("DELETE FROM runtime_agents WHERE id='c'", [])
+                        .unwrap();
+                }
+            }
+            let command = step.command;
+            let chat = read_chat(&db, "c").unwrap().map(|chat| {
+                (
+                    chat.status.as_str().to_owned(),
+                    chat.auto_wake,
+                    chat.execution_mode,
+                    chat.usage_resume_enabled,
+                    chat.turn_epoch,
+                )
+            });
+            assert_eq!(chat, step.chat, "chats after {command}");
+            assert_eq!(
+                chat_busy(&db, "c").unwrap(),
+                step.busy,
+                "chat_busy after {command}"
+            );
+            let unfinished = unfinished_turn(&db, "c")
+                .unwrap()
+                .map(|turn| turn.provider_turn);
+            assert_eq!(
+                unfinished,
+                step.unfinished.map(|turn| turn.map(str::to_owned)),
+                "unfinished turn after {command}"
+            );
+            let last = read_turns(&db, "c")
+                .unwrap()
+                .last()
+                .map(|turn| turn.state.kind());
+            assert_eq!(last, step.last_turn, "newest turn after {command}");
+        }
+    }
 }
