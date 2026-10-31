@@ -97,17 +97,13 @@ async fn command(
                 Start::Replay(reference) => reference,
                 Start::Fresh(begun) => {
                     // The command id is the message id: the message row is the receipt.
-                    let mut wire = serde_json::json!({
-                        "id": request.id,
-                        "room": target,
-                        "text": body.text,
-                        "assets": body.assets,
-                    });
-                    if let Some(delivery) = body.delivery {
-                        wire["delivery"] = serde_json::json!(delivery);
-                    }
-                    let message: crate::generated::ManagedMessageBody =
-                        serde_json::from_value(wire).map_err(|_| ApiError::internal())?;
+                    let message = crate::generated::ManagedMessageBody {
+                        id: request.id.as_str().to_owned(),
+                        room: target.as_str().to_owned(),
+                        text: body.text.as_str().to_owned(),
+                        assets: Some(body.assets.as_slice().to_vec()),
+                        delivery: body.delivery,
+                    };
                     let Json(receipt) = super::messages::send_message(state.clone(), message)
                         .await
                         .map_err(same_id_conflict)?;
@@ -115,11 +111,11 @@ async fn command(
                     // `GET /api/messages/receipts`. It is not an entity row, so its seq is 0.
                     extra_rows.push(CommandRow {
                         collection: "messageReceipt".into(),
-                        id: request.id.clone(),
+                        id: request.id.as_str().to_owned(),
                         seq: 0,
                         payload: serde_json::to_value(&receipt).map_err(ApiError::json)?,
                     });
-                    let id = request.id.clone();
+                    let id = request.id.as_str().to_owned();
                     store
                         .transaction_with_error(move |tx| {
                             let reference = commands::message_reference(tx, &id)?;
@@ -241,9 +237,10 @@ mod tests {
                 .await
                 .expect("store"),
         );
-        store.transaction(|tx| {
+        let cwd = directory.path().to_string_lossy().into_owned();
+        store.transaction(move |tx| {
             for id in ["workspace", "other"] {
-                AgentRepository::put(tx, &AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","id":id,"rootId":id,"epoch":0,"status":"idle","provider":studio_runtime_schema::ProviderKind::Codex}))?)?;
+                AgentRepository::put(tx, &AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","id":id,"rootId":id,"epoch":0,"status":"idle","cwd":cwd,"provider":studio_runtime_schema::ProviderKind::Codex}))?)?;
             }
             tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) VALUES('a','workspace','user','A','pending',1,0),('b','workspace','user','B','pending',2,0)", [])?;
             Ok(())
@@ -273,6 +270,116 @@ mod tests {
             .expect("status")
     }
 
+    #[test]
+    fn command_wire_matches_schema_boundaries() {
+        use studio_runtime_schema::command::{
+            COMMAND_CLIENT_ID_MAX_CHARS, COMMAND_SEND_MAX_ASSETS, COMMAND_TARGET_MAX_CHARS,
+            CommandRequest,
+        };
+        let document = crate::schema::openapi_document();
+        for name in [
+            "CommandRequestSend",
+            "CommandRequestWithdraw",
+            "CommandRequestStop",
+        ] {
+            assert_eq!(
+                document.pointer(&format!(
+                    "/components/schemas/{name}/properties/client/maxLength"
+                )),
+                Some(&json!(COMMAND_CLIENT_ID_MAX_CHARS))
+            );
+            assert_eq!(
+                document.pointer(&format!(
+                    "/components/schemas/{name}/properties/target/maxLength"
+                )),
+                Some(&json!(COMMAND_TARGET_MAX_CHARS))
+            );
+            assert_eq!(
+                document.pointer(&format!(
+                    "/components/schemas/{name}/properties/number/maximum"
+                )),
+                Some(&json!(
+                    studio_runtime_schema::shared_values::MAX_SAFE_INTEGER
+                ))
+            );
+        }
+        assert_eq!(
+            document.pointer("/components/schemas/CommandSendBody/properties/assets/maxItems"),
+            Some(&json!(COMMAND_SEND_MAX_ASSETS))
+        );
+        assert_eq!(
+            document.pointer("/components/schemas/CommandSendBody/properties/text/maxLength"),
+            Some(&json!(
+                studio_runtime_schema::shared_values::MAX_MANAGED_MESSAGE_CODEPOINTS
+            ))
+        );
+        let registry = studio_runtime_schema::registry_for_document(document)
+            .expect("request schema registry");
+        let schema = json!({"$ref":format!("{}#/components/schemas/CommandRequest", studio_runtime_schema::OPENAPI_URI)});
+        let validator = jsonschema::options()
+            .with_registry(&registry)
+            .build(&schema)
+            .expect("command schema");
+        let base = withdraw("0192f3a0-0000-7000-8000-000000000001", 1, "m");
+        let mut cases = vec![base.clone()];
+        for (field, value) in [
+            ("id", json!("bad")),
+            ("client", json!("")),
+            ("client", json!("x".repeat(129))),
+            ("target", json!("")),
+            ("target", json!("x".repeat(201))),
+            ("number", json!(0)),
+            ("number", json!(9007199254740992u64)),
+            ("extra", json!(true)),
+        ] {
+            let mut case = base.clone();
+            case[field] = value;
+            cases.push(case);
+        }
+        let mut empty = base.clone();
+        empty["body"]["message"] = json!("");
+        cases.push(empty);
+        let mut send = base;
+        send["kind"] = json!("send");
+        send["body"] = json!({"text":"hello"});
+        cases.push(send.clone());
+        send["body"]["assets"] = json!(vec!["a"; 9]);
+        cases.push(send.clone());
+        send["body"] = json!({"text":"hello", "delivery":null});
+        cases.push(send);
+        for case in cases {
+            let schema = validator.is_valid(&case);
+            let typed = serde_json::from_str::<CommandRequest>(&case.to_string()).is_ok();
+            assert_eq!(typed, schema, "{case}");
+        }
+    }
+
+    #[tokio::test]
+    async fn command_wire_rejects_unknown_and_out_of_range_fields() {
+        let (app, _store, _directory) = app_with_queue().await;
+        let id = RequestIdentity::issue_root();
+        let base = withdraw(&id, 1, "a");
+        let mut cases = Vec::new();
+        let mut extra = base.clone();
+        extra["extra"] = json!(true);
+        cases.push(extra);
+        let mut client = base.clone();
+        client["client"] = json!("x".repeat(129));
+        cases.push(client);
+        let mut number = base.clone();
+        number["number"] = json!(studio_runtime_schema::shared_values::MAX_SAFE_INTEGER + 1);
+        cases.push(number);
+        let mut body = base;
+        body["body"]["extra"] = json!(true);
+        cases.push(body);
+        for case in cases {
+            let (status, response) = post(&app, None, case).await;
+            assert_eq!(status, 400, "{response}");
+            assert_eq!(response["error"], "Invalid request");
+            assert_eq!(response["location"][0], "body");
+        }
+    }
+
     #[tokio::test]
     async fn replay_returns_the_same_reference_and_runs_once() {
         let (app, store, _directory) = app_with_queue().await;
@@ -290,6 +397,15 @@ mod tests {
             assert_eq!(first[field], again[field], "{field}");
         }
         assert_eq!(status_of(&store, "b").await, "pending");
+    }
+
+    #[tokio::test]
+    async fn send_command_uses_the_typed_message_path() {
+        let (app, _store, _directory) = app_with_queue().await;
+        let id = RequestIdentity::issue_root();
+        let (status, response) = post(&app, None, json!({"id":id,"client":"web-1","number":1,"kind":"send","target":"workspace","body":{"text":"hello"}})).await;
+        assert_eq!(status, 200, "{response}");
+        assert_eq!(response["ref_id"], id);
     }
 
     #[tokio::test]
@@ -482,12 +598,13 @@ mod tests {
             "workspace",
             "call_123",
             studio_runtime_schema::command::Command::Withdraw {
-                target: "kid".into(),
+                target: "kid".to_owned().try_into().expect("target"),
                 body: studio_runtime_schema::command::WithdrawBody {
-                    message: "k".into(),
+                    message: "k".to_owned().try_into().expect("message"),
                 },
             },
-        );
+        )
+        .expect("agent request");
         let now = now_ms();
         let run = |request: studio_runtime_schema::command::CommandRequest| {
             let parent = parent.clone();

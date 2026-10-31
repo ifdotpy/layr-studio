@@ -65,6 +65,7 @@ pub(crate) struct MatchedOperation {
 
 // Temporary migration marker; remove when every body uses a typed extractor.
 const TYPED_BODIES: &[(&str, &str)] = &[
+    ("POST", "/api/commands"),
     ("POST", "/api/processes/action"),
     ("POST", "/api/queue"),
     ("POST", "/api/orchestration/settings"),
