@@ -159,7 +159,7 @@ impl MultiServerBoundary {
         logins: &[String],
         now: f64,
     ) -> Result<PreparedAccessRequest, AccessError> {
-        let invite_id = text(request.body(), "inviteId").to_owned();
+        let invite_id = request.invite_id().to_owned();
         let invite_id_for_read = invite_id.clone();
         let client_id = request.client_id().to_owned();
         let (client, invite, auto_pair) = store
@@ -229,7 +229,7 @@ impl MultiServerBoundary {
         now: f64,
     ) -> Result<PreparedServerRequest, AccessError> {
         if !(request.is_orchestration() || request.is_name() || request.is_management_invite())
-            || text(request.body(), "requestId") != request.request_id()
+            || request.body_request_id() != request.request_id()
         {
             return Err(refused(
                 400,
@@ -500,9 +500,7 @@ impl MultiServerBoundary {
             .lookup(
                 address,
                 logins,
-                request
-                    .is_auto_pairing()
-                    .then(|| text(request.body(), "origin")),
+                request.is_auto_pairing().then(|| request.origin()),
             )
             .await?;
         if address.parse::<std::net::IpAddr>().ok() != Some(owner.address()) {
@@ -599,7 +597,7 @@ impl MultiServerBoundary {
         store
             .transaction_with(move |tx| {
                 let client = read_record(tx, "runtime_access_clients", request.client_id())?;
-                let invite_id = text(request.body(), "inviteId");
+                let invite_id = request.invite_id();
                 let invite = if request.is_pairing() {
                     read_record(tx, "runtime_access_invites", invite_id)?
                 } else {
@@ -723,7 +721,6 @@ fn apply_pair(
         CallerAdmission::Fresh(admitted) => admitted,
         CallerAdmission::Replay(saved) => return pairing_reply(&saved, request.client_id()),
     };
-    let body = request.body();
     let mut result = identity.clone();
     let fields = result.as_object_mut().ok_or_else(|| {
         refused(
@@ -744,7 +741,7 @@ fn apply_pair(
     let mut client = if request.is_pairing() {
         auth::check_invite(
             snapshot.invite(),
-            body,
+            request.token(),
             Some(principal.tailscale_user()),
             now,
         )?;
@@ -774,7 +771,7 @@ fn apply_pair(
         })?;
         tx.execute(
             "UPDATE runtime_access_invites SET record=?1 WHERE id=?2",
-            params![invite, text(body, "inviteId")],
+            params![invite, request.invite_id()],
         )?;
         let mut client = new_client(request, principal, now);
         // The owner chose the grant when making the invitation; the device cannot.
@@ -879,7 +876,7 @@ fn save_receipt(
 }
 fn new_client(request: &SignedRequest, principal: &VerifiedPrincipal, now: f64) -> Value {
     let server = principal.kind() == "server";
-    json!({"id":request.client_id(),"clientId":request.client_id(),"serverId":if server {Some(request.client_id())} else {None},"kind":principal.kind(),"label":text(request.body(),"label"),"origin":if server {Some(text(request.body(),"origin"))}else{None},"publicKey":text(request.body(),"publicKey"),"tailscaleUser":principal.tailscale_user(),"status":"paired","created":now,"lastAccess":if request.is_pairing(){Some(now)}else{None},"revoked":null})
+    json!({"id":request.client_id(),"clientId":request.client_id(),"serverId":if server {Some(request.client_id())} else {None},"kind":principal.kind(),"label":request.label(),"origin":if server {Some(request.origin())}else{None},"publicKey":request.public_key(),"tailscaleUser":principal.tailscale_user(),"status":"paired","created":now,"lastAccess":if request.is_pairing(){Some(now)}else{None},"revoked":null})
 }
 pub(crate) fn read_record(
     tx: &Transaction<'_>,

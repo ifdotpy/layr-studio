@@ -326,51 +326,26 @@ fn previous_local_identities(
 pub async fn manage(
     store: &RuntimeStore,
     identity: &Value,
-    body: &Value,
+    body: &studio_runtime_schema::multi_server_ingress::ManagementRequest,
     actor: &str,
 ) -> Result<Value, MultiServerError> {
-    let action = body
-        .get("action")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let server = body
-        .get("serverId")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let target = body
-        .get("clientId")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let request = body
-        .get("requestId")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let alias = body
-        .get("alias")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let auto = body
-        .get("autoPair")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    use studio_runtime_schema::multi_server_ingress::ManagementRequest;
     let identity = identity.clone();
     let body = body.clone();
     let actor = actor.to_owned();
     store.transaction_with(move |tx| -> Result<Value, MultiServerError> {
-        match action.as_str() {
-            "settings" => { tx.execute("UPDATE runtime_access_settings SET auto_pair=?1 WHERE id=1",[i64::from(auto)])?; audit_write(tx,"local",&actor,"settings")?; }
-            "revoke" => { let id=body.get("clientId").and_then(Value::as_str).unwrap_or_default(); let mut client=stored(tx,"runtime_access_clients",id)?.ok_or_else(||MultiServerError::Refused("client does not exist".into()))?; if client.get("status").and_then(Value::as_str)!=Some("revoked") { client["status"]=json!("revoked"); client["revoked"]=json!(unix_time()?); tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2",rusqlite::params![client.to_string(),id])?; audit_write(tx,id,&actor,"revoke")?; } }
-            "alias" => {
-                if !valid_identifier(&server) || !valid_identifier(&request) || !valid_alias(&alias) {
+        match &body {
+            ManagementRequest::Settings { auto_pair, .. } => { tx.execute("UPDATE runtime_access_settings SET auto_pair=?1 WHERE id=1",[i64::from(auto_pair.value().copied().unwrap_or(false))])?; audit_write(tx,"local",&actor,"settings")?; }
+            ManagementRequest::Revoke { client_id, .. } => { let id=client_id.as_str(); let mut client=stored(tx,"runtime_access_clients",id)?.ok_or_else(||MultiServerError::Refused("client does not exist".into()))?; if client.get("status").and_then(Value::as_str)!=Some("revoked") { client["status"]=json!("revoked"); client["revoked"]=json!(unix_time()?); tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2",rusqlite::params![client.to_string(),id])?; audit_write(tx,id,&actor,"revoke")?; } }
+            ManagementRequest::Alias { server_id, request_id, alias } => {
+                let server = server_id.as_str();
+                let request = request_id.as_str();
+                let alias = alias.as_str();
+                if !valid_identifier(server) || !valid_identifier(request) {
                     return Err(MultiServerError::Refused("invalid server alias request".into()));
                 }
                 let local = server == "local" || server == identity["serverId"].as_str().unwrap_or_default();
-                let target = if local { "local" } else { server.as_str() };
+                let target = if local { "local" } else { server };
                 let prior=tx.query_row("SELECT server,alias FROM runtime_access_alias_requests WHERE id=?1",[&request],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).optional()?;
                 if let Some((saved_target,saved_alias)) = prior {
                     if saved_target != target || saved_alias != alias {
@@ -379,11 +354,11 @@ pub async fn manage(
                 } else {
                     let aliases = ensure_server_aliases(tx, &identity)?;
                     let local_id = identity["serverId"].as_str().unwrap_or_default();
-                    if !local && !aliases.contains_key(&server) {
+                    if !local && !aliases.contains_key(server) {
                         return Err(MultiServerError::Refused("server does not exist".into()));
                     }
                     let collision = aliases.iter().any(|(id, existing)| {
-                        existing == &alias && id != target && !(local && id == local_id)
+                        existing == alias && id != target && !(local && id == local_id)
                     });
                     if collision {
                         return Err(MultiServerError::Conflict("server alias is already in use".into()));
@@ -391,7 +366,7 @@ pub async fn manage(
                     if local {
                         tx.execute("INSERT INTO runtime_access_local_alias VALUES(1,?) ON CONFLICT(id) DO UPDATE SET alias=excluded.alias", [&alias])?;
                     } else {
-                        let mut peer = stored(tx, "runtime_access_clients", &server)?
+                        let mut peer = stored(tx, "runtime_access_clients", server)?
                             .ok_or_else(|| MultiServerError::Refused("server does not exist".into()))?;
                         peer["alias"] = json!(alias);
                         tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2", rusqlite::params![peer.to_string(), server])?;
@@ -400,8 +375,8 @@ pub async fn manage(
                     audit_write(tx,target,&actor,"alias")?;
                 }
             }
-            "unrevoke" => { let prior=tx.query_row("SELECT client FROM runtime_access_unrevokes WHERE id=?1",[&request],|r|r.get::<_,String>(0)).optional()?; if let Some(saved)=prior {if saved!=target{return Err(MultiServerError::Conflict("request ID selected another server".into()));}} else {let v=stored(tx,"runtime_access_clients",&target)?.ok_or_else(||MultiServerError::Refused("select a revoked server".into()))?;if v.get("status").and_then(Value::as_str)!=Some("revoked")||v.get("kind").and_then(Value::as_str)!=Some("server"){return Err(MultiServerError::Refused("select a revoked server".into()));}tx.execute("DELETE FROM runtime_access_clients WHERE id=?1",[&target])?;tx.execute("DELETE FROM runtime_access_auto_attempts WHERE id=?1",[&target])?;tx.execute("INSERT INTO runtime_access_unrevokes VALUES(?1,?2)",rusqlite::params![request,target])?;audit_write(tx,&target,&actor,"unrevoke")?;} }
-            _ => return Err(MultiServerError::Refused(format!("unsupported local multi-server action: {action}"))),
+            ManagementRequest::Unrevoke { request_id, client_id } => { let request = request_id.as_str(); let target = client_id.as_str(); let prior=tx.query_row("SELECT client FROM runtime_access_unrevokes WHERE id=?1",[&request],|r|r.get::<_,String>(0)).optional()?; if let Some(saved)=prior {if saved!=target{return Err(MultiServerError::Conflict("request ID selected another server".into()));}} else {let v=stored(tx,"runtime_access_clients",&target)?.ok_or_else(||MultiServerError::Refused("select a revoked server".into()))?;if v.get("status").and_then(Value::as_str)!=Some("revoked")||v.get("kind").and_then(Value::as_str)!=Some("server"){return Err(MultiServerError::Refused("select a revoked server".into()));}tx.execute("DELETE FROM runtime_access_clients WHERE id=?1",[&target])?;tx.execute("DELETE FROM runtime_access_auto_attempts WHERE id=?1",[&target])?;tx.execute("INSERT INTO runtime_access_unrevokes VALUES(?1,?2)",rusqlite::params![request,target])?;audit_write(tx,&target,&actor,"unrevoke")?;} }
+            _ => return Err(MultiServerError::Refused(format!("unsupported local multi-server action: {}", body.action()))),
         }
         let clients=project_records(tx,"runtime_access_clients")?;
         let records=MultiServerRepository::audit(tx)?;
@@ -416,15 +391,23 @@ pub async fn manage(
 pub async fn create_invite(
     store: Arc<RuntimeStore>,
     identity: &Value,
-    body: &Value,
+    body: &studio_runtime_schema::multi_server_ingress::ManagementRequest,
     actor: &str,
     tailscale_user: Option<&str>,
 ) -> Result<Value, MultiServerError> {
-    let request_id = body
-        .get("requestId")
-        .and_then(Value::as_str)
-        .filter(|value| valid_identifier(value))
-        .ok_or_else(|| MultiServerError::Refused("Invalid request ID".into()))?;
+    use studio_runtime_schema::multi_server_ingress::ManagementRequest;
+    let ManagementRequest::CreateInvite {
+        request_id,
+        label,
+        grant,
+    } = body
+    else {
+        return Err(MultiServerError::Refused("Invalid pairing request".into()));
+    };
+    let request_id = request_id.as_str();
+    if !valid_identifier(request_id) {
+        return Err(MultiServerError::Refused("Invalid request ID".into()));
+    }
     let origin = identity
         .get("origin")
         .and_then(Value::as_str)
@@ -436,10 +419,10 @@ pub async fn create_invite(
         .get("label")
         .and_then(Value::as_str)
         .ok_or_else(|| MultiServerError::Refused("The local server label is unavailable".into()))?;
-    let label = match body.get("label") {
-        None | Some(Value::Null) => saved_label,
-        Some(Value::String(label)) => {
-            let label = label.trim();
+    let label = match label.value() {
+        None => saved_label,
+        Some(value) => {
+            let label = value.as_str().trim();
             if label.is_empty() || label.chars().count() > 80 {
                 return Err(MultiServerError::Refused(
                     "Server label must be 1 to 80 characters".into(),
@@ -447,27 +430,8 @@ pub async fn create_invite(
             }
             label
         }
-        Some(_) => {
-            return Err(MultiServerError::Refused(
-                "Server label must be 1 to 80 characters".into(),
-            ));
-        }
     };
-    // The owner picks the grant of the device that will use this invitation.
-    let grant = match body.get("grant") {
-        None | Some(Value::Null) => None,
-        Some(Value::String(grant))
-            if grant == crate::device_trust::GRANT_FULL
-                || grant == crate::device_trust::GRANT_OBSERVE =>
-        {
-            Some(grant.as_str())
-        }
-        Some(_) => {
-            return Err(MultiServerError::Refused(
-                "Grant must be full or observe".into(),
-            ));
-        }
-    };
+    let grant = grant.value().map(|value| value.as_str());
     let tailscale_user = tailscale_user
         .filter(|user| !user.is_empty() && user.len() <= 254)
         .ok_or_else(|| {
@@ -484,9 +448,8 @@ pub async fn create_invite(
         MultiServerError::Refused("The local server credentials are unavailable".into())
     })?;
     let fingerprint = studio_runtime_store::sha256_hex(
-        crate::remote_transport::canonical_json(body)
-            .map_err(|_| MultiServerError::Refused("Invalid pairing request".into()))?
-            .as_bytes(),
+        &serde_json::to_vec(body)
+            .map_err(|_| MultiServerError::Refused("Invalid pairing request".into()))?,
     );
     let request_id_for_read = request_id.to_owned();
     let prior = store
@@ -812,17 +775,36 @@ fn valid_identifier(value: &str) -> bool {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || b"_.:-".contains(&byte))
 }
-fn valid_alias(alias: &str) -> bool {
-    !alias.is_empty() && alias.len() <= 3 && alias.bytes().all(|b| b.is_ascii_uppercase())
-}
 
 #[cfg(test)]
 mod tests {
-    use super::{create_invite, manage};
+    use super::MultiServerError;
     use crate::federation_credentials::Credentials;
     use serde_json::json;
     use std::sync::Arc;
     use studio_runtime_store::RuntimeStore;
+
+    async fn create_invite(
+        store: Arc<RuntimeStore>,
+        identity: &serde_json::Value,
+        body: &serde_json::Value,
+        actor: &str,
+        user: Option<&str>,
+    ) -> Result<serde_json::Value, MultiServerError> {
+        let request = serde_json::from_value(body.clone())
+            .map_err(|_| MultiServerError::Refused("invalid test request".into()))?;
+        super::create_invite(store, identity, &request, actor, user).await
+    }
+    async fn manage(
+        store: &RuntimeStore,
+        identity: &serde_json::Value,
+        body: &serde_json::Value,
+        actor: &str,
+    ) -> Result<serde_json::Value, MultiServerError> {
+        let request = serde_json::from_value(body.clone())
+            .map_err(|_| MultiServerError::Refused("invalid test request".into()))?;
+        super::manage(store, identity, &request, actor).await
+    }
 
     #[tokio::test]
     async fn invitation_uses_injected_owner_identity_and_exact_retry_is_stable() {

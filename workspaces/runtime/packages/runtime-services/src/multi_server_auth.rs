@@ -207,6 +207,20 @@ pub(crate) fn identifier(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b"_.:-".contains(&b))
 }
 
+use studio_runtime_schema::multi_server_ingress::{
+    AutoPairRequest, DevicePairRequest, ManagementRequest, PairKind, RenameServer,
+};
+
+#[derive(Clone)]
+enum SignedBody {
+    Pair(DevicePairRequest),
+    Auto(AutoPairRequest),
+    Rename(RenameServer),
+    Management(ManagementRequest),
+    Orchestration(Value),
+    Other,
+}
+
 /// Owned and bounded wire input. Header multiplicity is retained until checked.
 #[derive(Clone)]
 pub struct SignedRequest {
@@ -219,7 +233,7 @@ pub struct SignedRequest {
     nonce: String,
     request: String,
     signature: String,
-    body: Value,
+    body: SignedBody,
 }
 impl SignedRequest {
     pub fn from_headers(
@@ -252,12 +266,55 @@ impl SignedRequest {
             }
             values.push(value.clone());
         }
-        let body = if raw.is_empty() {
-            Value::Null
-        } else {
-            serde_json::from_slice(raw)
-                .map_err(|_| refused(400, "invalid_request", "Invalid JSON request"))?
+        let path = target.split('?').next().unwrap_or_default();
+        let invalid = |error: serde_json::Error| {
+            let message = if error.is_syntax() || error.is_eof() {
+                "Invalid JSON request"
+            } else {
+                "Invalid multi-server request"
+            };
+            refused(400, "invalid_request", message)
         };
+        let body =
+            match (method, path) {
+                ("POST", PAIR_PATH) => SignedBody::Pair(
+                    serde_json::from_slice::<
+                        studio_runtime_schema::http_ingress::Object<DevicePairRequest>,
+                    >(raw)
+                    .map_err(invalid)?
+                    .0,
+                ),
+                ("POST", AUTO_PAIR_PATH) => SignedBody::Auto(
+                    serde_json::from_slice::<
+                        studio_runtime_schema::http_ingress::Object<AutoPairRequest>,
+                    >(raw)
+                    .map_err(invalid)?
+                    .0,
+                ),
+                ("POST", NAME_PATH) => SignedBody::Rename(
+                    serde_json::from_slice::<
+                        studio_runtime_schema::http_ingress::Object<RenameServer>,
+                    >(raw)
+                    .map_err(invalid)?
+                    .0,
+                ),
+                ("POST", "/api/multi-server") => SignedBody::Management(
+                    serde_json::from_slice::<
+                        studio_runtime_schema::http_ingress::Object<ManagementRequest>,
+                    >(raw)
+                    .map_err(invalid)?
+                    .0,
+                ),
+                ("POST", "/api/servers/orchestration") => {
+                    SignedBody::Orchestration(serde_json::from_slice(raw).map_err(invalid)?)
+                }
+                _ => {
+                    if !raw.is_empty() {
+                        serde_json::from_slice::<Value>(raw).map_err(invalid)?;
+                    }
+                    SignedBody::Other
+                }
+            };
         let mut request = Self {
             method: method.to_owned(),
             target: target.to_owned(),
@@ -273,26 +330,32 @@ impl SignedRequest {
         if !identifier(&request.client) || !identifier(&request.request) {
             return Err(refused(400, "invalid_id", "Invalid request or client ID"));
         }
-        if request.is_pairing() {
-            schema("DevicePairRequest", &request.body)?;
-        }
-        if request.is_auto_pairing() {
-            schema("AutoPairRequest", &request.body)?;
-        }
-        if request.is_name() {
-            schema("RenameServer", &request.body)?;
-        }
-        if request.method == "POST" && request.target.split('?').next() == Some("/api/multi-server")
-        {
-            if let Some(action) = SessionAction::of(text(&request.body, "action")) {
+        if let SignedBody::Management(body) = &request.body {
+            if let Some(action) = SessionAction::of(body.action()) {
                 return Err(action.refusal());
             }
-            schema("CreateInvite", &request.body)?;
+            if !matches!(body, ManagementRequest::CreateInvite { .. }) {
+                return Err(refused(
+                    400,
+                    "invalid_request",
+                    "Invalid multi-server request",
+                ));
+            }
         }
-        if request.is_auto_pairing()
-            || (request.is_pairing() && text(&request.body, "kind") == "server")
-        {
-            request.body["origin"] = json!(normalize_origin(text(&request.body, "origin"))?);
+        match &mut request.body {
+            SignedBody::Pair(body) if matches!(body.kind, PairKind::Server) => {
+                let origin = body.origin.value().map(|v| v.as_str()).unwrap_or_default();
+                let normalized = normalize_origin(origin)?;
+                if let studio_runtime_schema::queue_command::Field::Value(value) = &mut body.origin
+                {
+                    value.set_normalized(normalized);
+                }
+            }
+            SignedBody::Auto(body) => {
+                body.origin
+                    .set_normalized(normalize_origin(body.origin.as_str())?);
+            }
+            _ => {}
         }
         Ok(request)
     }
@@ -302,8 +365,83 @@ impl SignedRequest {
     pub fn request_id(&self) -> &str {
         &self.request
     }
-    pub fn body(&self) -> &Value {
-        &self.body
+    pub fn orchestration_body(&self) -> Option<&Value> {
+        if let SignedBody::Orchestration(body) = &self.body {
+            Some(body)
+        } else {
+            None
+        }
+    }
+    pub fn management_body(&self) -> Option<&ManagementRequest> {
+        if let SignedBody::Management(body) = &self.body {
+            Some(body)
+        } else {
+            None
+        }
+    }
+    pub fn rename_body(&self) -> Option<&RenameServer> {
+        if let SignedBody::Rename(body) = &self.body {
+            Some(body)
+        } else {
+            None
+        }
+    }
+    pub fn body_request_id(&self) -> &str {
+        match &self.body {
+            SignedBody::Pair(body) => body.request_id.as_str(),
+            SignedBody::Auto(body) => body.request_id.as_str(),
+            SignedBody::Rename(body) => body.request_id.as_str(),
+            SignedBody::Management(body) => body.request_id().unwrap_or_default(),
+            SignedBody::Orchestration(body) => text(body, "requestId"),
+            SignedBody::Other => "",
+        }
+    }
+    pub fn invite_id(&self) -> &str {
+        match &self.body {
+            SignedBody::Pair(body) => body.invite_id.as_str(),
+            _ => "",
+        }
+    }
+    pub fn token(&self) -> &str {
+        match &self.body {
+            SignedBody::Pair(body) => body.token.as_str(),
+            _ => "",
+        }
+    }
+    pub fn origin(&self) -> &str {
+        match &self.body {
+            SignedBody::Pair(body) => body.origin.value().map(|v| v.as_str()).unwrap_or_default(),
+            SignedBody::Auto(body) => body.origin.as_str(),
+            _ => "",
+        }
+    }
+    pub fn public_key(&self) -> &str {
+        match &self.body {
+            SignedBody::Pair(body) => body.public_key.as_str(),
+            SignedBody::Auto(body) => body.public_key.as_str(),
+            _ => "",
+        }
+    }
+    pub fn label(&self) -> &str {
+        match &self.body {
+            SignedBody::Pair(body) => body.label.as_str(),
+            SignedBody::Auto(body) => body.label.as_str(),
+            _ => "",
+        }
+    }
+    fn pairing_identity(&self) -> &str {
+        match &self.body {
+            SignedBody::Pair(body) => body.client_id.as_str(),
+            SignedBody::Auto(body) => body.server_id.as_str(),
+            _ => "",
+        }
+    }
+    fn pairing_kind(&self) -> &str {
+        match &self.body {
+            SignedBody::Pair(body) => body.kind.as_str(),
+            SignedBody::Auto(_) => "server",
+            _ => "",
+        }
     }
     pub fn target(&self) -> &str {
         &self.target
@@ -326,7 +464,10 @@ impl SignedRequest {
     pub fn is_management_invite(&self) -> bool {
         self.method == "POST"
             && self.target.split('?').next() == Some("/api/multi-server")
-            && text(&self.body, "action") == "create_invite"
+            && matches!(
+                self.body,
+                SignedBody::Management(ManagementRequest::CreateInvite { .. })
+            )
     }
     pub fn is_orchestration(&self) -> bool {
         self.method == "POST" && self.target.split('?').next() == Some("/api/servers/orchestration")
@@ -660,10 +801,10 @@ pub fn authorize_at(
             )
         })?;
         let probe = discovery_identity(probe)?;
-        if owner.dns.as_deref() != Some(origin_host(text(&request.body, "origin"))?.as_str())
+        if owner.dns.as_deref() != Some(origin_host(request.origin())?.as_str())
             || probe.server_id != request.client
-            || probe.public_key != text(&request.body, "publicKey")
-            || probe.origin.as_deref().unwrap_or_default() != text(&request.body, "origin")
+            || probe.public_key != request.public_key()
+            || probe.origin.as_deref().unwrap_or_default() != request.origin()
             || probe
                 .tailscale_user
                 .as_deref()
@@ -816,9 +957,8 @@ fn verify_access<'a>(
             text(v, "pairingRequestId") == request.request && text(v, "pairingHash") == fingerprint
         });
     let (key, kind) = if pairing || auto {
-        let field = if pairing { "clientId" } else { "serverId" };
-        if text(&request.body, field) != request.client
-            || text(&request.body, "requestId") != request.request
+        if request.pairing_identity() != request.client
+            || request.body_request_id() != request.request
         {
             return Err(refused(
                 400,
@@ -826,16 +966,12 @@ fn verify_access<'a>(
                 "The pairing identity or protocol does not match",
             ));
         }
-        let kind = if auto {
-            "server"
-        } else {
-            text(&request.body, "kind")
-        };
+        let kind = request.pairing_kind();
         if kind == "server" {
-            origin_host(text(&request.body, "origin"))?;
+            origin_host(request.origin())?;
         }
         if pairing && !recovery {
-            check_invite(snapshot.invite.as_ref(), &request.body, None, now)?;
+            check_invite(snapshot.invite.as_ref(), request.token(), None, now)?;
         }
         if auto {
             if !snapshot.auto_pair {
@@ -846,9 +982,9 @@ fn verify_access<'a>(
                 ));
             }
             if client.is_some_and(|v| {
-                text(v, "publicKey") != text(&request.body, "publicKey")
+                text(v, "publicKey") != request.public_key()
                     || text(v, "kind") != "server"
-                    || text(v, "origin") != text(&request.body, "origin")
+                    || text(v, "origin") != request.origin()
             }) {
                 return Err(refused(
                     403,
@@ -857,7 +993,7 @@ fn verify_access<'a>(
                 ));
             }
         }
-        (text(&request.body, "publicKey"), kind)
+        (request.public_key(), kind)
     } else {
         let c = client
             .filter(|v| text(v, "status") == "paired")
@@ -878,7 +1014,7 @@ fn verify_request_signature(
     client: Option<&Value>,
 ) -> Result<(), AccessError> {
     let key = if request.is_pairing() || request.is_auto_pairing() {
-        text(request.body(), "publicKey")
+        request.public_key()
     } else {
         client.map(|v| text(v, "publicKey")).unwrap_or_default()
     };
@@ -901,7 +1037,7 @@ fn verify_request_signature(
 }
 pub(crate) fn check_invite(
     invite: Option<&PersistedAccessInvite>,
-    body: &Value,
+    token: &str,
     owner: Option<&str>,
     now: f64,
 ) -> Result<(), AccessError> {
@@ -916,7 +1052,7 @@ pub(crate) fn check_invite(
         invite
             .token_hash()
             .as_bytes()
-            .ct_eq(digest(text(body, "token").as_bytes()).as_bytes()),
+            .ct_eq(digest(token.as_bytes()).as_bytes()),
     ) {
         return Err(refused(
             403,
@@ -955,13 +1091,7 @@ mod snapshot_tests {
         let invite = json!({"inviteId":"i", "status":"open", "expires":9007199254740993_u64, "tokenHash":digest(b"secret"), "tailscaleUser":"owner", "extra":{"opaque":true}});
         let raw = invite.to_string();
         let snapshot = AccessSnapshot::from_records("c", None, "i", Some(&raw), false).unwrap();
-        check_invite(
-            snapshot.invite(),
-            &json!({"token":"secret"}),
-            Some("owner"),
-            1.0,
-        )
-        .unwrap();
+        check_invite(snapshot.invite(), "secret", Some("owner"), 1.0).unwrap();
         assert_eq!(
             serde_json::to_string(snapshot.invite().unwrap()).unwrap(),
             format!(
