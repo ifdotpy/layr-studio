@@ -416,7 +416,7 @@ mod tests {
         );
         manage_with_origin_and_whoami(
             std::sync::Arc::clone(&store),
-            &serde_json::from_value(json!({"action":"set_enabled","enabled":true})).unwrap(),
+            &serde_json::from_str(r#"{"action":"set_enabled","enabled":true}"#).unwrap(),
             None,
             None,
         )
@@ -425,8 +425,7 @@ mod tests {
         let whoami = json!({"status":"verified","user":"owner@example.test","node":"node-1"});
         let result = manage_with_origin_and_whoami(
             std::sync::Arc::clone(&store),
-            &serde_json::from_value(json!({"action":"create_invite","label":"Test server"}))
-                .unwrap(),
+            &serde_json::from_str(r#"{"action":"create_invite","label":"Test server"}"#).unwrap(),
             Some("https://studio.example.ts.net"),
             Some(&whoami),
         )

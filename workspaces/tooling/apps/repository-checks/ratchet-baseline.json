@@ -1796,10 +1796,6 @@
       "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:1"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/tests/wave7_p14_resources.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/tests/workspace_ready/effects.rs",
       "fingerprint": "834b0b0ae879fcdb4e860e4782b5574ab66db8c60f642f2e499fb9317c2b2724:0"
     },
@@ -2165,10 +2161,6 @@
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/provider_versions.rs",
-      "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/resource_notify.rs",
       "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
     },
     {

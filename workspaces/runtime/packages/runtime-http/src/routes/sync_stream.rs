@@ -2419,6 +2419,22 @@ where
 
 #[cfg(test)]
 mod tests {
+    fn fixture_notification(
+        id: &str,
+        resources: &[serde_json::Value],
+    ) -> studio_runtime_schema::resource_notification::ResourceNotifyRequest {
+        let resources = resources
+            .iter()
+            .cloned()
+            .map(|value| serde_json::from_value(value).expect("resource fixture"))
+            .collect();
+        studio_runtime_schema::resource_notification::ResourceNotifyRequest::new(
+            id.to_owned(),
+            resources,
+        )
+        .expect("notification fixture")
+    }
+
     async fn fixture_resource_content(state: HttpState, value: Value) -> Option<Vec<u8>> {
         crate::routes::subscriptions::resource_content(state, serde_json::from_value(value).ok()?)
             .await
@@ -2439,7 +2455,7 @@ mod tests {
             None,
         );
         let body: studio_runtime_schema::resource_notification::ResourceNotifyRequest =
-            serde_json::from_value(json!({"requestId":"request", "resources":[{"kind":"models"}]}))
+            serde_json::from_str(r#"{"requestId":"request","resources":[{"kind":"models"}]}"#)
                 .unwrap();
         for _ in 0..2 {
             let Json(ack) = notify_resources(state.clone(), body.clone()).await.unwrap();
@@ -2449,8 +2465,8 @@ mod tests {
         assert!(
             notify_resources(
                 state,
-                serde_json::from_value(
-                    json!({"requestId":"request", "resources":[{"kind":"accounts"}]})
+                serde_json::from_str(
+                    r#"{"requestId":"request","resources":[{"kind":"accounts"}]}"#
                 )
                 .unwrap()
             )
@@ -3977,8 +3993,8 @@ mod tests {
         state
             .resource_notifications
             .publish_once(
-                &serde_json::from_value(
-                    json!({"requestId":"interest-draft","resources":[{"kind":"drafts"}]}),
+                &serde_json::from_str(
+                    r#"{"requestId":"interest-draft","resources":[{"kind":"drafts"}]}"#,
                 )
                 .expect("notification fixture"),
             )
@@ -4925,7 +4941,7 @@ mod tests {
         assert!(batch["delta"].get("itemRevisions").is_none());
         assert_eq!(batch["through"], event["resourceVersions"][0]["revision"]);
         state.next_resources_frame_at = None;
-        http.resource_notifications.publish_once(&serde_json::from_value(json!({"requestId":"preflush-empty","resources":[{"kind":"transcript","agentId":"open"}]})).expect("notification fixture")).expect("scoped preflush hint");
+        http.resource_notifications.publish_once(&serde_json::from_str(r#"{"requestId":"preflush-empty","resources":[{"kind":"transcript","agentId":"open"}]}"#).expect("notification fixture")).expect("scoped preflush hint");
         let updates = read_transcript_changes_typed(
             Some(store.clone()),
             &typed_resources(&state.resources),
@@ -5370,12 +5386,7 @@ mod tests {
             .expect("unrelated broad commit");
         state
             .resource_notifications
-            .publish_once(
-                &serde_json::from_value(json!({
-                    "requestId":"unchanged-drafts", "resources":resources
-                }))
-                .expect("notification fixture"),
-            )
+            .publish_once(&fixture_notification("unchanged-drafts", &resources))
             .expect("redundant external hint");
         let unchanged = state
             .resource_notifications
@@ -5630,9 +5641,7 @@ mod tests {
             .await
             .expect("stored conversation revision");
         // A scoped external stream publication can precede the next stored item flush.
-        let publication =
-            serde_json::from_value(json!({"requestId":"stream-delta-1","resources":resources}))
-                .unwrap();
+        let publication = fixture_notification("stream-delta-1", &resources);
         assert!(
             state
                 .resource_notifications
@@ -5677,7 +5686,7 @@ mod tests {
             replay.resources.is_empty(),
             "a retried publication must not cause a repeated pull"
         );
-        state.resource_notifications.publish_once(&serde_json::from_value(json!({"requestId":"other-chat-delta","resources":[{"kind":"transcript","agentId":"other"}]})).expect("notification fixture")).expect("other stream");
+        state.resource_notifications.publish_once(&serde_json::from_str(r#"{"requestId":"other-chat-delta","resources":[{"kind":"transcript","agentId":"other"}]}"#).expect("notification fixture")).expect("other stream");
         let unrelated = state
             .resource_notifications
             .changes_since_with_content(&resources, Some(replay.cursor.revision), |resource| {
@@ -6308,7 +6317,7 @@ mod tests {
             tx.execute("INSERT INTO runtime_access_settings(id,auto_pair) VALUES(1,0) ON CONFLICT(id) DO UPDATE SET auto_pair=0", [])?;
             Ok(())
         }).await.expect("settings change");
-        http.resource_notifications.publish_once(&serde_json::from_value(json!({"requestId":"discovery-settings-change","resources":[{"kind":"multi-server"}]})).expect("notification fixture")).expect("committed discovery hint");
+        http.resource_notifications.publish_once(&serde_json::from_str(r#"{"requestId":"discovery-settings-change","resources":[{"kind":"multi-server"}]}"#).expect("notification fixture")).expect("committed discovery hint");
         let (frame, _) = next_frame(state).await.expect("discovery update");
         let event = event_document(frame).await;
         assert_eq!(
@@ -6779,8 +6788,8 @@ mod tests {
         );
         notifications
             .publish_once(
-                &serde_json::from_value(
-                    json!({"requestId":"account-change","resources":[{"kind":"accounts"}]}),
+                &serde_json::from_str(
+                    r#"{"requestId":"account-change","resources":[{"kind":"accounts"}]}"#,
                 )
                 .expect("notification fixture"),
             )
@@ -6831,7 +6840,12 @@ mod tests {
                         tokens.publish(step["body"].clone()).expect("rates");
                     }
                     "notify" => {
-                        notifications.publish_once(&serde_json::from_value(json!({"requestId":index.to_string(),"resources":step["resources"]})).expect("notification fixture")).expect("notify");
+                        notifications
+                            .publish_once(&fixture_notification(
+                                &index.to_string(),
+                                step["resources"].as_array().expect("resources"),
+                            ))
+                            .expect("notify");
                     }
                     _ => {
                         let expected = expected.next().expect("fixture consumption");

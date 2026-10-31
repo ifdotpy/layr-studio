@@ -1065,7 +1065,22 @@ mod tests {
         let server_id = peer["serverId"].as_str().unwrap().to_owned();
         let public_key = peer["publicKey"].as_str().unwrap().to_owned();
         let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-        let invitation: studio_runtime_schema::multi_server_ingress::AccessInvitation = serde_json::from_value(json!({"serverId":server_id,"origin":peer_origin,"publicKey":public_key,"protocol":studio_runtime_schema::multi_server_protocol::ACCESS_PROTOCOL_VERSION,"inviteId":"invite","token":"fixture","label":"Peer", "tailscaleUser":"owner@example.test", "expires":9007199254740991u64})).unwrap();
+        let invitation = studio_runtime_schema::multi_server_ingress::AccessInvitation {
+            server_id: server_id.clone().try_into().unwrap(),
+            origin: peer_origin.to_owned().try_into().unwrap(),
+            public_key: public_key.clone().try_into().unwrap(),
+            protocol: (studio_runtime_schema::multi_server_protocol::ACCESS_PROTOCOL_VERSION
+                as i64)
+                .try_into()
+                .unwrap(),
+            invite_id: "invite".to_owned().try_into().unwrap(),
+            token: "fixture".to_owned().try_into().unwrap(),
+            label: "Peer".to_owned().try_into().unwrap(),
+            tailscale_user: "owner@example.test".to_owned().try_into().unwrap(),
+            expires: studio_runtime_schema::shared_values::MAX_SAFE_INTEGER
+                .try_into()
+                .unwrap(),
+        };
         let request = json!({"protocol":studio_runtime_schema::multi_server_protocol::ACCESS_PROTOCOL_VERSION,"inviteId":"invite","token":"fixture","clientId":local["serverId"],"label":local["label"],"kind":"server","publicKey":local["publicKey"],"origin":local_origin,"requestId":request_id});
         let raw = remote_transport::canonical_json(&request).unwrap();
         let fingerprint = remote_transport::multi_server_request_fingerprint(
@@ -1260,10 +1275,8 @@ mod tests {
             State(state),
             HeaderMap::new(),
             ApiJson(
-                serde_json::from_value(
-                    serde_json::json!({"action":"discover","requestId":"discovery-fixture"}),
-                )
-                .unwrap(),
+                serde_json::from_str(r#"{"action":"discover","requestId":"discovery-fixture"}"#)
+                    .unwrap(),
             ),
         )
         .await
@@ -1453,11 +1466,7 @@ mod tests {
             State(state),
             HeaderMap::new(),
             ApiJson(
-                serde_json::from_value(serde_json::json!({
-                    "action":"create_invite",
-                    "requestId":"fake-owner-invite",
-                    "label":"Fixture server"
-                }))
+                serde_json::from_str(r#"{"action":"create_invite","requestId":"fake-owner-invite","label":"Fixture server"}"#)
                 .unwrap(),
             ),
         )
