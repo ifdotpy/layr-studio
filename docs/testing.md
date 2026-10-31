@@ -226,10 +226,13 @@ switch is on.
   `.layrattributes`, ignored by Git), so a new line takes them.
 - The step passes with zero selected tests. Its counts come from the line
   `layr-retest: ran N, passed P, failed F, skipped S; ...`.
-- With the switch on, the step sets `STUDIO_SUPERVISOR_BINARY` to
-  `target/retest/debug/codex-process-supervisor`, the build that has coverage, not the
-  plain `target/debug` one. So a change in supervisor code selects the tests that spawn it.
-  Owner: `retestEnvironment` in `workspaces/tooling/apps/repository-checks/facade.ts`.
+- With the switch on, the step sets no `STUDIO_SUPERVISOR_BINARY`. The tests start the
+  `codex-process-supervisor` next to their own binary (owner:
+  `workspaces/runtime/packages/runtime-process/tests/support/supervisor_binary.rs`), which is
+  the build with coverage in `target/retest/debug`. So a change in supervisor code selects the
+  tests that spawn it. The step drops `--no-fail-fast`: layr retest always sets it.
+  Owner of the environment: `retestEnvironment` in
+  `workspaces/tooling/apps/repository-checks/facade.ts`.
 - Owner of the switch name: `RETEST_ENV` in
   `workspaces/tooling/apps/repository-checks/gate-config.ts`.
 - Safety: no Studio Rust test reads `LAYR_ROOT` from the gate or starts `layr` from

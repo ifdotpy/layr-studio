@@ -18,22 +18,14 @@ import {
 } from "node:fs";
 import { createHash } from "node:crypto";
 import { runLogged } from "./owned-process.ts";
-<<<<<<< head
-import { CARGO_BUILD_JOBS, scrubAgentEnvironment } from "./gate-config.ts";
-import { withGateLock } from "./gate-lock.ts";
-import { homedir } from "node:os";
-||||||| base
-import { CARGO_BUILD_JOBS, scrubAgentEnvironment } from "./gate-config.ts";
-import { homedir } from "node:os";
-=======
 import {
   CARGO_BUILD_JOBS,
   RETEST_ENV,
   RETEST_REAL_ROOT_ENV,
   scrubAgentEnvironment,
 } from "./gate-config.ts";
+import { withGateLock } from "./gate-lock.ts";
 import { homedir, tmpdir } from "node:os";
->>>>>>> 1d41be4
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -856,8 +848,17 @@ function isRetest(bin: string, args: string[]): boolean {
   return bin === "layr" && args[0] === "retest";
 }
 
+// layr retest always runs nextest with --no-fail-fast and rejects it in the list phase.
 export function retestCommand([, args]: Command): Command {
-  return ["layr", ["retest", "run", "--", ...args.slice(2)]];
+  return [
+    "layr",
+    [
+      "retest",
+      "run",
+      "--",
+      ...args.slice(2).filter((arg) => arg !== "--no-fail-fast"),
+    ],
+  ];
 }
 
 // The Rust workspace step: per-crate reuse, or layr-retest when STUDIO_RETEST=1.
@@ -878,9 +879,9 @@ function rustTests(step: GateStep): GateStep {
 
 // Tests see an empty layr store. Only layr calls made outside a test (no
 // LAYR_RETEST_PROFILE_DIR) get the real store, through a shim first on PATH.
-// Tests spawn the supervisor from target/retest, where layr-retest builds it with
-// coverage; the plain target/debug build would hide its code from the selection.
-export function retestEnvironment(root: string): NodeJS.ProcessEnv {
+// No supervisor variable: the tests start the supervisor next to their own binary
+// (tests/support/supervisor_binary.rs), which is the build with coverage in target/retest.
+export function retestEnvironment(): NodeJS.ProcessEnv {
   const real = process.env.LAYR_ROOT ?? "";
   const layr = (process.env.PATH ?? "")
     .split(path.delimiter)
@@ -900,15 +901,6 @@ export function retestEnvironment(root: string): NodeJS.ProcessEnv {
   return {
     LAYR_ROOT: empty,
     [RETEST_REAL_ROOT_ENV]: real,
-    STUDIO_SUPERVISOR_BINARY: path.join(
-      root,
-      "target",
-      "retest",
-      "debug",
-      process.platform === "win32"
-        ? "codex-process-supervisor.exe"
-        : "codex-process-supervisor",
-    ),
     PATH: `${shim}${path.delimiter}${process.env.PATH}`,
   };
 }
@@ -1018,19 +1010,11 @@ export function gateSteps(root: string, name: string): GateStep[] {
         item: tooling,
         commands: [["pnpm", ["--dir", root, "run", "test:rust-lint-policy"]]],
       },
-<<<<<<< head
       cargo("rust-fmt", "Rust formatting", ["fmt", "--all", "--", "--check"], {
         buildOnly: true,
       }),
-      {
-        ...cargo("rust-tests", "Rust nextest", [
-||||||| base
-      {
-        ...cargo("rust-tests", "Rust nextest", [
-=======
       rustTests(
         cargo("rust-tests", "Rust nextest", [
->>>>>>> 1d41be4
           "nextest",
           "run",
           "--workspace",
@@ -1931,8 +1915,9 @@ export async function execute(
               : {}),
           }
         : scrubAgentEnvironment({ ...process.env });
-    const retestEnv: NodeJS.ProcessEnv =
-      isRetest(bin, args) ? retestEnvironment(root) : {};
+    const retestEnv: NodeJS.ProcessEnv = isRetest(bin, args)
+      ? retestEnvironment()
+      : {};
     const commandEnv = {
       ...baseEnv,
       CARGO_BUILD_JOBS: String(CARGO_BUILD_JOBS),

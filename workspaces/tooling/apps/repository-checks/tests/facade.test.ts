@@ -1868,7 +1868,7 @@ test("the retest command reuses the nextest arguments", () => {
   assert.deepEqual(
     retestCommand([
       "cargo",
-      ["nextest", "run", "--workspace", "--profile", "fast"],
+      ["nextest", "run", "--workspace", "--no-fail-fast", "--profile", "fast"],
     ]),
     ["layr", ["retest", "run", "--", "--workspace", "--profile", "fast"]],
   );
@@ -1898,26 +1898,15 @@ test("STUDIO_RETEST=1 switches only the Rust workspace step", () => {
   }
 });
 
-test("the retest step spawns the instrumented supervisor build", () => {
+test("the retest step leaves the supervisor choice to the tests", () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), "retest-env-"));
   const savedPath = process.env.PATH;
   try {
     writeFileSync(path.join(dir, "layr"), "#!/bin/sh\n", { mode: 0o755 });
     process.env.PATH = dir;
-    const env = retestEnvironment("/line");
+    const env = retestEnvironment();
     rmSync(path.dirname(env.LAYR_ROOT!), { recursive: true, force: true });
-    assert.equal(
-      env.STUDIO_SUPERVISOR_BINARY,
-      path.join(
-        "/line",
-        "target",
-        "retest",
-        "debug",
-        process.platform === "win32"
-          ? "codex-process-supervisor.exe"
-          : "codex-process-supervisor",
-      ),
-    );
+    assert.equal("STUDIO_SUPERVISOR_BINARY" in env, false);
   } finally {
     process.env.PATH = savedPath;
     rmSync(dir, { recursive: true, force: true });
