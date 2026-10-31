@@ -169,8 +169,7 @@ pub fn profile_dir(account: &crate::account_policy::PublicAccount) -> Option<Pat
                 .as_ref()
                 .and_then(|options| options.config_dir.as_str()),
         )
-        .or_else(|| std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from))
-        .or_else(|| std::env::var_os("HOME").map(|home| Path::new(&home).join(".claude")))
+
     } else {
         text(account.home.as_str())
     }
