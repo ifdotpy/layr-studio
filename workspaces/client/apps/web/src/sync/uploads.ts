@@ -1,3 +1,6 @@
+import { unsentStore } from "../unsent/store.ts";
+import { ApiError } from "../api.ts";
+import { serverMutationResponseIsUncertain } from "../servers/mutationIdentity.ts";
 import { randomUUID } from "../uuid";
 import { serverStorageName } from "../servers/environment";
 import { syncGet, syncPost, refreshSession, type GetResult } from "../api";
@@ -23,6 +26,7 @@ export type PendingUpload = {
 export const UPLOAD_DATABASE_NAME = "codex-studio-uploads";
 export type UploadOptions = {
   databaseName: string;
+  buffer?: ReturnType<typeof unsentStore>;
   syncGet: (
     path: "/api/sync/identity",
   ) => Promise<Pick<GetResult<"/api/sync/identity">, "workspaceId">>;
@@ -84,12 +88,37 @@ export function createUploads(
 
   const rows = new Map<string, PendingUpload>();
   const contents = new Map<string, ArrayBuffer>();
+  const storedKeys = new Map<string, string>();
+  const buffer = options.buffer ?? unsentStore(databaseName, "upload");
+  let loading: Promise<void> | undefined;
+  const ready = () =>
+    (loading ??= (async () => {
+      for (const [key, value] of await buffer.loadAll()) {
+        if (!(value instanceof Blob)) continue;
+        try {
+          const row: PendingUpload = JSON.parse(key);
+          if (
+            typeof row.id !== "string" ||
+            typeof row.workspace !== "string" ||
+            typeof row.stateDir !== "string" ||
+            typeof row.agent !== "string"
+          )
+            continue;
+          rows.set(row.id, row);
+          contents.set(row.id, await value.arrayBuffer());
+          storedKeys.set(row.id, key);
+        } catch {
+          /* Ignore a damaged upload. */
+        }
+      }
+    })());
   async function queueUploads(
     stateDir: string,
     agent: string,
     files: File[],
     expectedWorkspace: string,
   ) {
+    await ready();
     if (!files.length) throw new Error("Select at least one file.");
     for (const file of files)
       if (!file.size || file.size > attachmentLimit)
@@ -121,6 +150,9 @@ export function createUploads(
         })),
       );
     for (const { bytes, ...row } of queued) {
+      const key = JSON.stringify(row);
+      await buffer.put(key, new Blob([bytes], { type: row.mime }));
+      storedKeys.set(row.id, key);
       rows.set(row.id, row);
       contents.set(row.id, bytes);
     }
@@ -128,6 +160,7 @@ export function createUploads(
     return queued.map(({ bytes: _bytes, ...row }) => row);
   }
   async function pendingUploads(stateDir: string, expectedWorkspace?: string) {
+    await ready();
     const { workspaceId } = await syncDatabase();
     if (expectedWorkspace && workspaceId !== expectedWorkspace)
       throw new Error(
@@ -151,6 +184,10 @@ export function createUploads(
     await finishUpload(id);
   }
   async function finishUpload(id: string) {
+    await ready();
+    const stored = storedKeys.get(id);
+    if (stored) await buffer.delete(stored);
+    storedKeys.delete(id);
     cancelled.add(id);
     rows.delete(id);
     contents.delete(id);
@@ -161,6 +198,7 @@ export function createUploads(
     const existing = active.get(row.id);
     if (existing) return existing;
     const promise = (async () => {
+      await ready();
       let current = rows.get(row.id);
       if (!current || uploadCancelled(row.id)) return null;
       const identity = await syncGet("/api/sync/identity");
@@ -195,16 +233,29 @@ export function createUploads(
         };
         reader.readAsDataURL(new Blob([bytes], { type: row.mime }));
       });
-      const response = await syncPost(
-        "/api/assets",
-        {
-          agent: row.agent,
-          name: row.name,
-          base64,
-          id: row.id,
-        },
-        { workspaceId: row.workspace, sessionToken: session.token },
-      );
+      let response: Awaited<ReturnType<typeof syncPost>>;
+      try {
+        response = await syncPost(
+          "/api/assets",
+          {
+            agent: row.agent,
+            name: row.name,
+            base64,
+            id: row.id,
+          },
+          { workspaceId: row.workspace, sessionToken: session.token },
+        );
+      } catch (error) {
+        if (
+          error instanceof ApiError &&
+          !serverMutationResponseIsUncertain(error.status, error.response)
+        ) {
+          const stored = storedKeys.get(row.id);
+          if (stored) await buffer.delete(stored);
+          storedKeys.delete(row.id);
+        }
+        throw error;
+      }
       const asset: Attachment = response;
       if (asset.id !== row.id)
         throw new Error("The upload response does not match the saved file.");

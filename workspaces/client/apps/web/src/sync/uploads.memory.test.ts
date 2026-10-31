@@ -3,15 +3,22 @@ import { createUploads, type UploadOptions } from "./uploads";
 
 afterEach(() => vi.unstubAllGlobals());
 
-it("keeps queued files only for the lifetime of their owner", async () => {
-  const open = vi.fn(() => {
-    throw new Error("unexpected browser persistence");
-  });
-  vi.stubGlobal("indexedDB", { open });
+it("restores queued files after reload", async () => {
+  const records = new Map<string, string | Blob>();
+  const buffer = {
+    put: async (key: string, value: string | Blob) => {
+      records.set(key, value);
+    },
+    delete: async (key: string) => {
+      records.delete(key);
+    },
+    loadAll: async (): Promise<[string, string | Blob][]> => [...records],
+  };
   vi.stubGlobal("window", new EventTarget());
   vi.stubGlobal("BroadcastChannel", undefined);
   const options: UploadOptions = {
     databaseName: "test",
+    buffer,
     syncDatabase: async () => ({ workspaceId: "workspace" }),
     syncGet: async () => ({ workspaceId: "workspace" }),
     refreshSession: vi.fn(),
@@ -25,8 +32,7 @@ it("keeps queued files only for the lifetime of their owner", async () => {
     "workspace",
   );
   expect(await first.pendingUploads("state")).toHaveLength(1);
-  expect(await createUploads(options).pendingUploads("state")).toEqual([]);
-  expect(open).not.toHaveBeenCalled();
+  expect(await createUploads(options).pendingUploads("state")).toHaveLength(1);
 });
 
 it("does not restore an upload removed while its request is in flight", async () => {
@@ -48,8 +54,14 @@ it("does not restore an upload removed while its request is in flight", async ()
     resolve = done;
   });
   const post = vi.fn(() => response);
+  const buffer = {
+    put: async () => {},
+    delete: async () => {},
+    loadAll: async (): Promise<[string, string | Blob][]> => [],
+  };
   const options: UploadOptions = {
     databaseName: "test",
+    buffer,
     syncDatabase: async () => ({ workspaceId: "workspace" }),
     syncGet: async () => ({ workspaceId: "workspace" }),
     refreshSession: vi.fn(async () => ({ token: "session" })),

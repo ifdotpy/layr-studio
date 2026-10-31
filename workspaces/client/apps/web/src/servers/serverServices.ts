@@ -150,7 +150,7 @@ export function createServerServices(server: StudioServer) {
     owner: transport.owner,
     audio,
     chatCreations: createChatCreationStore(storage),
-    recordings: createRecordingStorage(),
+    recordings: createRecordingStorage(transport.owner.id),
     localDrafts,
     uploads,
     storageEventKey: createStorageEventKey(
