@@ -16,21 +16,6 @@ pub const INVITE_ID_MAX_CHARS: usize = 128;
 pub const INVITE_OWNER_MAX_CHARS: usize = 254;
 /// Length of the lower-case SHA-256 token digest, in ASCII bytes.
 pub const INVITE_TOKEN_HASH_BYTES: usize = 64;
-/// Stored invitation fields retained by the legacy-row migration.
-pub const INVITE_FIELDS: &[&str] = &[
-    "inviteId",
-    "status",
-    "expires",
-    "tokenHash",
-    "tailscaleUser",
-    "protocol",
-    "serverId",
-    "label",
-    "origin",
-    "publicKey",
-    "created",
-    "grant",
-];
 
 /// The message a server signs to prove its identity for `nonce`. The nonce is
 /// unpadded base64url of `IDENTITY_PROOF_NONCE_BYTES` bytes; any other value gives `None`.
@@ -84,7 +69,7 @@ fn optional_proof<'de, D: serde::Deserializer<'de>>(
     <String as serde::Deserialize>::deserialize(deserializer).map(Some)
 }
 
-/// A stored invitation. Unknown fields are removed by the store migration.
+/// A stored invitation. Legacy rows that do not decode are discarded.
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PersistedAccessInvite {
