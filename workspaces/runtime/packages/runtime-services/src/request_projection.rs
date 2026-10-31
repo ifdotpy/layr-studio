@@ -43,7 +43,7 @@ fn bound_union(value: &mut Field<Command>, field: &str) {
         match value {
             Command::Text(s) => *s = text(s, field),
             Command::Arguments(items) => {
-                items.truncate(200);
+                items.truncate(crate::sync_views::SYNC_ARRAY_ITEMS);
                 for s in items {
                     *s = text(s, "");
                 }
@@ -56,7 +56,7 @@ fn bound_schema_property(property: &mut RequestSchemaProperty) {
     bound(&mut property.title, "title");
     bound_union(&mut property.kind, "type");
     if let Field::Value(variants) = &mut property.variants {
-        variants.truncate(200);
+        variants.truncate(crate::sync_views::SYNC_ARRAY_ITEMS);
     }
     if let Field::Value(items) = &mut property.items {
         bound_schema_property(items);
@@ -82,12 +82,12 @@ fn bound_params(params: &mut RequestParams) {
         bound(value, field);
     }
     if let Field::Value(items) = &mut params.questions {
-        items.truncate(200);
+        items.truncate(crate::sync_views::SYNC_ARRAY_ITEMS);
         for q in items {
             q.id = text(&q.id, "id");
             q.question = text(&q.question, "question");
             if let Field::Value(options) = &mut q.options {
-                options.truncate(200);
+                options.truncate(crate::sync_views::SYNC_ARRAY_ITEMS);
                 for option in options {
                     bound(&mut option.description, "description");
                     bound(&mut option.label, "label");
@@ -100,7 +100,7 @@ fn bound_params(params: &mut RequestParams) {
             bound_schema_property(property);
         }
         if let Field::Value(required) = &mut schema.required {
-            required.truncate(200);
+            required.truncate(crate::sync_views::SYNC_ARRAY_ITEMS);
             for s in required {
                 *s = text(s, "");
             }
@@ -158,7 +158,8 @@ mod tests {
         let source = json!({"id":"r","agent":"a","method":"item/tool/requestUserInput","status":"pending","createdAt":1.0,"params":{"threadId":"t","command":["echo","ok"],"questions":[{"id":"q","question":"Continue?","header":"Confirm","options":[{"label":"Yes","description":"Proceed","metadata":{"n":1}}]}],"requestedSchema":{"properties":{"thing":{"type":"string","description":"Help"}},"required":["thing"]},"private":"hidden"},"preview":{"command":"echo ok","cwd":"/tmp","private":true},"accountKey":"account"});
         let record: RequestRecord = serde_json::from_value(source.clone()).unwrap();
         let actual = serde_json::to_value(project_request_record(&record).unwrap()).unwrap();
-        let expected = crate::sync_views::project_persisted_record("request", &source).unwrap();
+        // Snapshot of the generic projection before removing its request branch.
+        let expected = json!({"id":"r","agent":"a","method":"item/tool/requestUserInput","status":"pending","createdAt":1.0,"params":{"threadId":"t","command":["echo","ok"],"questions":[{"id":"q","question":"Continue?","header":"Confirm","options":[{"label":"Yes","description":"Proceed","metadata":{"n":1}}]}],"requestedSchema":{"properties":{"thing":{"type":"string","description":"Help"}},"required":["thing"]}},"preview":{"command":"echo ok","cwd":"/tmp"},"accountKey":"account"});
         assert_eq!(actual, expected);
     }
 
