@@ -16,6 +16,8 @@ pub(crate) const AGENT_SUMMARY_ATTENTION_FIELDS: [&str; 3] =
 /// Maximum last-answer text retained in an agent sync view. Unit: Unicode scalar values.
 pub(crate) const AGENT_SYNC_LAST_ANSWER_CHARS: usize = 4_000;
 pub(crate) const SYNC_TEXT_CHARS: usize = 12_000;
+/// Maximum items in a projected sync array. Unit: array elements.
+pub(crate) const SYNC_ARRAY_ITEMS: usize = 200;
 
 const AGENT_SHORT_STRING_OBJECTS: &[&str] = &[
     "activity",
@@ -210,7 +212,11 @@ fn project_schema_value(
         }
         Value::Array(items) => {
             let item_schema = schema.get("items").unwrap_or(&Value::Null);
-            let limit = if field == "sidebarOrder" { 10_000 } else { 200 };
+            let limit = if field == "sidebarOrder" {
+                10_000
+            } else {
+                SYNC_ARRAY_ITEMS
+            };
             Value::Array(
                 items
                     .iter()
