@@ -270,6 +270,12 @@ mod tests {
             schemas["RenameServer"]["properties"]["label"]["maxLength"],
             SERVER_LABEL_MAX_CODEPOINTS
         );
+        for schema in ["RenameServer", "SetServerName"] {
+            assert_eq!(
+                schemas[schema]["properties"]["label"]["pattern"],
+                SERVER_LABEL_PATTERN
+            );
+        }
         for schema in ["DevicePairRequest", "AutoPairRequest"] {
             assert_eq!(
                 schemas[schema]["properties"]["label"]["maxLength"],
