@@ -1,4 +1,3 @@
-import { required } from "../teams/helpers.ts";
 import assert from "node:assert/strict";
 import type { components } from "../../src/generated/api.ts";
 import { fixtureOrigin } from "./browser-fixture.ts";
@@ -10,7 +9,6 @@ import {
   test,
   expect,
   createFixtureViteServer,
-  readCachedRows,
   remoteOrigin,
   REMOTE_FIXTURE_HOST,
 } from "../playwright.ts";
@@ -168,31 +166,17 @@ test("bounded entities render initial and live changes with zero resource GETs",
     await expect(
       page.getByText("Updated desktop stream", { exact: true }),
     ).toBeVisible();
-    // Read the cache record of the mounted server scope. A new default sync
-    // client would create a second subscription with a separate service owner.
-    const readProjection = async () => {
-      const rows = await readCachedRows(page, "entities");
-      return page.evaluate(async (rows) => {
-        const { applyEntityRows, emptyEntityProjection } =
-          await import("/src/sync/entityProjection.ts");
-        return applyEntityRows(emptyEntityProjection(), rows, true).runtime;
-      }, rows);
-    };
-    // The record is written after render; poll until it holds the update.
-    await expect
-      .poll(async () => (await readProjection()).accountCostsByAccount?.default)
-      .toBeDefined();
-    const projection = await readProjection();
-    expect(projection.accountCostsByAccount).toEqual({
-      default: backend.snapshot.runtime.accountCostsByAccount.default,
-    });
-    expect(required(projection.accountsSummary!.accounts[0]).label).toBe(
-      "Updated account",
-    );
-    expect(required(projection.sessionCostsByAgent!.overlap).totalUSD).toBe(
-      0.75,
-    );
-    expect(required(projection.terminals![0]).title).toBe("Updated shell");
+    // Projections live in memory since the thin cache keeps no entity records
+    // (4ef057bef). The updates must show in the UI without a resource read.
+    await expect(
+      page.getByText("Session estimate: $0.75", { exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Show terminals", exact: true })
+      .click();
+    await expect(
+      page.getByText("Updated shell", { exact: true }),
+    ).toBeVisible();
     await page.waitForTimeout(1100);
     expect(reads).toHaveLength(0);
     test.info().annotations.push({

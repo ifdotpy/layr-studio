@@ -10,11 +10,7 @@ test("direct screens keep overlapping chat drafts and sends with their owner", a
   const local = await fixture("Local");
   const remote = await fixture("Remote", true);
   const errors: string[] = [];
-  let quotaFault = false;
-  page.on("pageerror", (error) => {
-    if (quotaFault && error.name === "QuotaExceededError") return;
-    errors.push(error.message);
-  });
+  page.on("pageerror", (error) => errors.push(error.message));
   try {
     await remoteNetwork(context, remote);
     await page.goto(local.origin);
@@ -59,32 +55,15 @@ test("direct screens keep overlapping chat drafts and sends with their owner", a
     await expect.poll(() => remote.writes.length).toBe(1);
     expect(required(remote.writes[0]).text).toBe("remote draft");
     expect(local.writes).toHaveLength(0);
-    quotaFault = true;
-    await page.evaluate(() => {
-      const original = Storage.prototype.setItem;
-      Storage.prototype.setItem = function (key, value) {
-        if (
-          key.includes("codex-chat-draft:") ||
-          (key.includes("codex-drafts:") && key.includes(":pending:"))
-        )
-          throw new DOMException("Full fixture storage", "QuotaExceededError");
-        original.call(this, key, value);
-      };
-      for (const method of ["put", "add"] as const) {
-        const originalMethod = IDBObjectStore.prototype[method];
-        IDBObjectStore.prototype[method] = function (
-          this: IDBObjectStore,
-          ...args: Parameters<IDBObjectStore[typeof method]>
-        ) {
-          if (this.name === "unsent")
-            throw new DOMException(
-              "Full fixture storage",
-              "QuotaExceededError",
-            );
-          return originalMethod.apply(this, args);
-        };
-      }
-    });
+    // Drafts are kept in memory and posted to the server (f130a46d3). A failed
+    // post is the save failure the user must see.
+    await page.route("**/api/sync/drafts", (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: "{}",
+      }),
+    );
     await page.locator("#message").fill("unsaved remote draft");
     await expect(page.locator("[data-draft-sync-status]")).toContainText(
       "Keep this chat open",
