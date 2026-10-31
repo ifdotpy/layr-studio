@@ -1029,7 +1029,7 @@ async fn copy_branch_history(
         child.extra.insert("profileId".into(), provider.get("activePermissionProfile").cloned().or_else(|| current.extra.get("profileId").cloned()).unwrap_or(Value::Null));
         child.thread_id = match &provider["thread"]["id"] { Value::Null => None, Value::String(id) => Some(id.clone()), Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_) => return Err(studio_runtime_store::StoreError::SchemaMismatch("invalid branch thread".into())) };
         child.extra.insert("forkedFrom".into(),json!(source)); child.extra.insert("sourceMessage".into(),json!(selected.id));
-        child.set_status(studio_runtime_store::AgentStatus::Idle); child.auto_wake = Some(true); child.extra.insert("needsTitle".into(),json!(false));
+        child.set_status(studio_runtime_store::AgentStatus::Idle); child.auto_wake = Some(true); child.needs_title = Some(false);
         child.extra.remove("quickCreate"); child.extra.remove("quickCreateRequest");
         let mut stmt=tx.prepare_cached("SELECT id,record,created FROM runtime_items WHERE agent=?1 AND json_extract(record,'$.afterRestore') IS NULL ORDER BY created,id")?;
         let rows=stmt.query_map([source.as_str()],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,f64>(2)?)))?.collect::<Result<Vec<_>,_>>()?;
@@ -1741,6 +1741,7 @@ mod tests {
         .await
         .expect("copy");
         assert_eq!(result["status"], "idle");
+        assert_eq!(result["needsTitle"], false);
         assert_stored_status(&store, "child", "idle");
     }
 

@@ -1382,7 +1382,7 @@ pub(crate) async fn request_review(
         )
         .into());
     }
-    if event_write::truthy(actor_record.extra.get("daybreakEnabled")) {
+    if actor_record.daybreak_enabled == Some(true) {
         return Err(crate::managed_host_tools::Error::Invalid(
             "Native review cannot select Daybreak. Delegate a review task to a subagent instead",
         )

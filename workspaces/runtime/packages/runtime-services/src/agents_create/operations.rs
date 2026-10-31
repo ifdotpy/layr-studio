@@ -1711,9 +1711,6 @@ pub async fn configure(
             if current != limit {
                 root["concurrency"] = json!(limit);
                 root["agentModeRevision"] = json!(revision + 1);
-                root["agentModeChangedAt"] =
-                    json!(crate::event_write::unix_time().map_err(|_| MutationError::Internal)?);
-                root["agentModeChangedBy"] = json!("user");
             }
             if root.get("maxAgentsExplicit").and_then(Value::as_bool) != Some(true) {
                 root["maxAgents"] = json!(prior_max.max(limit + TEAM_AGENT_HEADROOM));

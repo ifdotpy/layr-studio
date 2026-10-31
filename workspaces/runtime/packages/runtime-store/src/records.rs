@@ -372,6 +372,20 @@ pub struct AgentRecord {
     pub name: Option<String>,
     #[serde(deserialize_with = "deserialize_optional_safe_counter")]
     pub compactions: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compactions_observed_only: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fast_mode: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daybreak_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs_title: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manual_name: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_agents_explicit: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mode_supported: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree_ready: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -736,6 +750,13 @@ impl AgentRecord {
             cwd: None,
             name: None,
             compactions: None,
+            compactions_observed_only: None,
+            fast_mode: None,
+            daybreak_enabled: None,
+            needs_title: None,
+            manual_name: None,
+            max_agents_explicit: None,
+            agent_mode_supported: None,
             worktree_ready: None,
             approval_policy: None,
             native_response_turn: None,
@@ -2688,6 +2709,38 @@ mod tests {
         let unknown = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"permissionMode":"unknown"}"#;
         assert!(serde_json::from_str::<AgentRecord>(valid).is_ok());
         assert!(serde_json::from_str::<AgentRecord>(unknown).is_err());
+    }
+
+    #[test]
+    fn agent_compactions_observed_only_is_boolean() {
+        let valid = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"compactionsObservedOnly":false}"#;
+        let invalid = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"compactionsObservedOnly":"false"}"#;
+        let record: AgentRecord = serde_json::from_str(valid).unwrap();
+        assert_eq!(record.value()["compactionsObservedOnly"], false);
+        assert!(serde_json::from_str::<AgentRecord>(invalid).is_err());
+    }
+
+    #[test]
+    fn agent_settings_flags_are_boolean() {
+        for field in [
+            "fastMode",
+            "daybreakEnabled",
+            "needsTitle",
+            "manualName",
+            "maxAgentsExplicit",
+            "agentModeSupported",
+        ] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"{field}":"false"}}"#
+            );
+            assert!(
+                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                "{field}"
+            );
+            let valid = raw.replace("\"false\"", "false");
+            let record: AgentRecord = serde_json::from_str(&valid).unwrap();
+            assert_eq!(record.value()[field], false, "{field}");
+        }
     }
 
     #[test]
