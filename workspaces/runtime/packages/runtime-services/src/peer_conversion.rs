@@ -51,7 +51,7 @@ pub async fn convert(
     {
         return Err(ProjectsError::Invalid("Unknown chat conversion field"));
     }
-    let path_input = body.get("path").cloned();
+    let path_input = body.get("path").and_then(Value::as_str).map(str::to_owned);
     let source = field(body, "member")?;
     let target = field(body, "target")?;
     if source == target {
@@ -92,7 +92,7 @@ pub async fn convert(
     let prepared = studio_runtime_process::blocking_pool::spawn_blocking(
         "runtime-services/peer-conversion",
         move || {
-            let path = project_key(path_input.as_ref(), false)?;
+            let path = project_key(path_input.as_deref(), false)?;
             prepared.recheck_paths()?;
             Ok::<_, ProjectsError>((path, prepared))
         },

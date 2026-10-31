@@ -907,7 +907,17 @@ impl RuntimeOrchestrationEffects {
             }
             let registered = crate::projects::write(
                 Arc::clone(&self.store),
-                json!({"action":"register","path":path,"name":name}),
+                studio_runtime_schema::project_ingress::ProjectWrite::register(
+                    path.to_owned(),
+                    Some(name.to_owned()),
+                )
+                .map_err(|_| {
+                    refused(
+                        400,
+                        "location_unavailable",
+                        "The project folder is unavailable",
+                    )
+                })?,
                 self.default_account.clone(),
                 self.known_accounts.clone(),
             )

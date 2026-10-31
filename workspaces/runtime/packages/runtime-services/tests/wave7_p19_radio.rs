@@ -545,12 +545,21 @@ async fn run(store: std::sync::Arc<RuntimeStore>, case: &Value) -> Result<Value,
     let project_key = host_key(case["body"]["path"].as_str().expect("project path"));
     match mode.as_str() {
         "convert" => studio_runtime_services::peer_conversion::convert(std::sync::Arc::clone(&store), &case["body"]).await.map(|reply| serde_json::from_slice(&serde_json::to_vec(&reply).expect("serialize reply")).expect("reply")),
-        "project" => studio_runtime_services::projects::write(
-            std::sync::Arc::clone(&store),
-            case["body"].clone(),
-            "default".to_owned(),
-            vec![serde::Deserialize::deserialize(json!({"id":"default","status":"ready","canAttemptNativeProof":true})).expect("account fixture")],
-        ).await,
+        "project" => {
+            let mut body = case["body"].clone();
+            if body["action"] == "reorder" {
+                // The corpus adds a path for fixture setup; it is not part of the HTTP body.
+                body.as_object_mut().expect("project body").remove("path");
+                studio_runtime_services::projects::reorder(&store, serde_json::from_value(body).expect("sidebar request")).await
+            } else {
+                studio_runtime_services::projects::write(
+                    std::sync::Arc::clone(&store),
+                    serde_json::from_value(body).expect("project request"),
+                    "default".to_owned(),
+                    vec![serde::Deserialize::deserialize(json!({"id":"default","status":"ready","canAttemptNativeProof":true})).expect("account fixture")],
+                ).await
+            }
+        },
         "peer" => studio_runtime_services::projects::peer_team_write(
             std::sync::Arc::clone(&store),
             case["body"].clone(),
