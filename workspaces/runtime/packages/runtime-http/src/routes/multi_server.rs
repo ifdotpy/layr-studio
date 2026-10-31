@@ -174,7 +174,7 @@ fn semantic_snapshot(snapshot: &Value) -> Value {
 async fn manage(
     State(state): State<HttpState>,
     headers: HeaderMap,
-    ApiJson(body): ApiJson<Value>,
+    ApiJson(body): ApiJson<studio_runtime_schema::multi_server_ingress::ManagementRequest>,
 ) -> Result<Response, ApiError> {
     if !cfg!(unix) {
         return Err(unavailable_for(
@@ -183,10 +183,7 @@ async fn manage(
             MANAGEMENT_DEPENDENCIES,
         ));
     }
-    let action = body
-        .get("action")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+    let action = body.action();
     // Signed principals never reach this handler (`incoming_multi_server`
     // refuses these actions), so only the Serve proxy is checked here. The
     // owner session through Serve may still call `ui_invite`.
@@ -197,8 +194,8 @@ async fn manage(
         return Ok(super::incoming_multi_server::failure(scope.refusal()));
     }
     if action == "create_invite" {
-        let request_id = body["requestId"]
-            .as_str()
+        let request_id = body
+            .request_id()
             .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid request ID"))?
             .to_owned();
         let store = state.store.clone().ok_or_else(ApiError::internal)?;
@@ -238,9 +235,13 @@ async fn manage(
         publish_resource_change(&notifications, &request_id);
         return Ok(Json(result).into_response());
     }
-    if action == "accept_invite" {
-        let request_id = body["requestId"]
-            .as_str()
+    if let studio_runtime_schema::multi_server_ingress::ManagementRequest::AcceptInvite {
+        invitation,
+        request_id: typed_request_id,
+    } = &body
+    {
+        let request_id = body
+            .request_id()
             .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid request ID"))?
             .to_owned();
         let store = state.store.clone().ok_or_else(ApiError::internal)?;
@@ -253,7 +254,8 @@ async fn manage(
             &credentials,
             origin.as_deref(),
             whoami,
-            &body,
+            typed_request_id.as_str(),
+            invitation,
         )
         .await
         {
@@ -268,14 +270,23 @@ async fn manage(
         };
         return Ok(Json(result).into_response());
     }
-    if action == "ui_invite" {
-        let request_id = body["requestId"]
-            .as_str()
+    if let studio_runtime_schema::multi_server_ingress::ManagementRequest::UiInvite {
+        server_id,
+        request_id: typed_request_id,
+    } = &body
+    {
+        let request_id = body
+            .request_id()
             .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid request ID"))?
             .to_owned();
         let store = state.store.clone().ok_or_else(ApiError::internal)?;
         let notifications = state.resource_notifications.clone();
-        let result = ui_invite(Arc::clone(&store), &body).await?;
+        let result = ui_invite(
+            Arc::clone(&store),
+            server_id.as_str(),
+            typed_request_id.as_str(),
+        )
+        .await?;
         publish_resource_change(&notifications, &request_id);
         return Ok(Json(result).into_response());
     }
@@ -283,8 +294,8 @@ async fn manage(
         && let Some(origin) = state.public_origin.clone()
     {
         let before = read_snapshot(&state).await?;
-        let request_id = body["requestId"]
-            .as_str()
+        let request_id = body
+            .request_id()
             .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid request ID"))?
             .to_owned();
         let store = state.store.clone().ok_or_else(ApiError::internal)?;
@@ -324,17 +335,21 @@ async fn manage(
     ) || (action == "discover" && state.public_origin.is_none())
     {
         let before = read_snapshot(&state).await?;
-        let request_id = body["requestId"]
-            .as_str()
+        let request_id = body
+            .request_id()
             .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid request ID"))?
             .to_owned();
         let store = state.store.clone().ok_or_else(ApiError::internal)?;
         let credentials = state.credentials.clone();
         let origin = state.public_origin.clone();
         let notifications = state.resource_notifications.clone();
-        let action = body["action"].as_str().unwrap_or_default();
-        if action == "name" {
-            let target = body["serverId"].as_str().unwrap_or_default();
+        if let studio_runtime_schema::multi_server_ingress::ManagementRequest::Name {
+            server_id,
+            label,
+            request_id,
+        } = &body
+        {
+            let target = server_id.as_str();
             let local_target = credentials
                 .is_local_target(Arc::clone(&store), target)
                 .await
@@ -345,8 +360,8 @@ async fn manage(
                     .rename_with_notification(
                         Arc::clone(&store),
                         target,
-                        body["label"].as_str().unwrap_or_default(),
-                        body["requestId"].as_str().unwrap_or_default(),
+                        label.as_str(),
+                        request_id.as_str(),
                         "local",
                         move |request_id| publish_resource_change(&notification_sink, request_id),
                     )
@@ -358,14 +373,11 @@ async fn manage(
                     &credentials,
                     origin.as_deref(),
                     target,
-                    body["label"].as_str().unwrap_or_default(),
-                    body["requestId"].as_str().unwrap_or_default(),
+                    label.as_str(),
+                    request_id.as_str(),
                 )
                 .await?;
-                publish_resource_change(
-                    &notifications,
-                    body["requestId"].as_str().unwrap_or_default(),
-                );
+                publish_resource_change(&notifications, request_id.as_str());
             }
         }
         let identity = credentials
@@ -422,35 +434,19 @@ async fn accept_invite(
             dyn Fn() -> futures_util::future::BoxFuture<'static, Option<Value>> + Send + Sync,
         >,
     >,
-    body: &Value,
+    request_id: &str,
+    invitation: &studio_runtime_schema::multi_server_ingress::AccessInvitation,
 ) -> Result<Value, ApiError> {
-    let invitation = body
-        .get("invitation")
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "The invitation is invalid"))?;
-    let server_id = invitation["serverId"]
-        .as_str()
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "The invitation is invalid"))?;
-    let origin = invitation["origin"]
-        .as_str()
-        .and_then(|value| remote_transport::validate_federation_origin(value).ok())
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "The invitation is invalid"))?;
-    let public_key = invitation["publicKey"]
-        .as_str()
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "The invitation is invalid"))?;
-    if invitation["protocol"]
-        != studio_runtime_schema::multi_server_protocol::ACCESS_PROTOCOL_VERSION
-    {
+    let server_id = invitation.server_id.as_str();
+    let origin = remote_transport::validate_federation_origin(invitation.origin.as_str())
+        .map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "The invitation is invalid"))?;
+    let public_key = invitation.public_key.as_str();
+    if public_key.is_empty() {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "The invitation is invalid",
         ));
     }
-    let request_id = body["requestId"]
-        .as_str()
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "The invitation is invalid"))?;
     let origin_local = local_origin
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
@@ -478,7 +474,7 @@ async fn accept_invite(
     let local_label = local["label"].as_str().unwrap_or("Studio server");
     let request_body = serde_json::json!({
         "protocol": studio_runtime_schema::multi_server_protocol::ACCESS_PROTOCOL_VERSION,
-        "inviteId": invitation["inviteId"], "token": invitation["token"],
+        "inviteId": invitation.invite_id.as_str(), "token": invitation.token.as_str(),
         "clientId": local_id, "label": local_label, "kind": "server",
         "publicKey": local["publicKey"], "origin": origin_local, "requestId": request_id,
     });
@@ -558,7 +554,7 @@ async fn accept_invite(
             ));
         }
     } else {
-        let record = serde_json::json!({"id":server_id,"clientId":server_id,"serverId":server_id,"kind":"server","origin":origin,"publicKey":public_key,"label":invitation["label"],"tailscaleUser":response["tailscaleUser"],"status":"paired","created":now,"lastAccess":null,"revoked":null});
+        let record = serde_json::json!({"id":server_id,"clientId":server_id,"serverId":server_id,"kind":"server","origin":origin,"publicKey":public_key,"label":invitation.label.as_str(),"tailscaleUser":response["tailscaleUser"],"status":"paired","created":now,"lastAccess":null,"revoked":null});
         let server_id_for_save = server_id.to_owned();
         store
             .transaction_with(move |tx| {
@@ -582,16 +578,9 @@ async fn accept_invite(
 
 async fn ui_invite(
     store: Arc<studio_runtime_store::RuntimeStore>,
-    body: &Value,
+    server_id: &str,
+    request_id: &str,
 ) -> Result<Value, ApiError> {
-    let server_id = body["serverId"]
-        .as_str()
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "The server ID is invalid"))?;
-    let request_id = body["requestId"]
-        .as_str()
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "The request ID is invalid"))?;
     let server_id_for_read = server_id.to_owned();
     let peer = store.read_async("runtime-http/routes/multi_server/ui-invite-peer", move |tx| {
                     tx.query_row("SELECT record FROM runtime_access_clients WHERE id=?1 AND json_extract(record,'$.kind')='server' AND json_extract(record,'$.status')='paired'", [server_id_for_read], |row| row.get::<_, String>(0))
@@ -894,7 +883,9 @@ async fn remote_set_server_name(
     Ok(())
 }
 
-async fn auto_pair(ApiJson(_body): ApiJson<Value>) -> Result<Json<Value>, ApiError> {
+async fn auto_pair(
+    ApiJson(_body): ApiJson<studio_runtime_schema::multi_server_ingress::AutoPairRequest>,
+) -> Result<Json<Value>, ApiError> {
     Err(ApiError::new(
         StatusCode::FORBIDDEN,
         "Auto pairing requires a signed paired-server request",
@@ -915,14 +906,18 @@ async fn identity() -> Response {
         .into_response()
 }
 
-async fn rename(ApiJson(_body): ApiJson<Value>) -> Result<Json<Value>, ApiError> {
+async fn rename(
+    ApiJson(_body): ApiJson<studio_runtime_schema::multi_server_ingress::RenameServer>,
+) -> Result<Json<Value>, ApiError> {
     Err(ApiError::new(
         StatusCode::FORBIDDEN,
         "Renaming requires a signed paired-server request",
     ))
 }
 
-async fn pair(ApiJson(_body): ApiJson<Value>) -> Result<Json<Value>, ApiError> {
+async fn pair(
+    ApiJson(_body): ApiJson<studio_runtime_schema::multi_server_ingress::DevicePairRequest>,
+) -> Result<Json<Value>, ApiError> {
     Err(ApiError::new(
         StatusCode::FORBIDDEN,
         "Pairing requires a signed paired-server request",
@@ -1064,8 +1059,7 @@ mod tests {
         let server_id = peer["serverId"].as_str().unwrap().to_owned();
         let public_key = peer["publicKey"].as_str().unwrap().to_owned();
         let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-        let invitation = json!({"serverId":server_id,"origin":peer_origin,"publicKey":public_key,"protocol":studio_runtime_schema::multi_server_protocol::ACCESS_PROTOCOL_VERSION,"inviteId":"invite","token":"fixture","label":"Peer"});
-        let body = json!({"invitation":invitation,"requestId":request_id});
+        let invitation: studio_runtime_schema::multi_server_ingress::AccessInvitation = serde_json::from_value(json!({"serverId":server_id,"origin":peer_origin,"publicKey":public_key,"protocol":studio_runtime_schema::multi_server_protocol::ACCESS_PROTOCOL_VERSION,"inviteId":"invite","token":"fixture","label":"Peer", "tailscaleUser":"owner@example.test", "expires":9007199254740991u64})).unwrap();
         let request = json!({"protocol":studio_runtime_schema::multi_server_protocol::ACCESS_PROTOCOL_VERSION,"inviteId":"invite","token":"fixture","clientId":local["serverId"],"label":local["label"],"kind":"server","publicKey":local["publicKey"],"origin":local_origin,"requestId":request_id});
         let raw = remote_transport::canonical_json(&request).unwrap();
         let fingerprint = remote_transport::multi_server_request_fingerprint(
@@ -1092,7 +1086,8 @@ mod tests {
             &credentials,
             Some(local_origin),
             Some(Arc::clone(&whoami)),
-            &body,
+            &request_id,
+            &invitation,
         )
         .await
         .unwrap();
@@ -1101,7 +1096,8 @@ mod tests {
             &credentials,
             Some(local_origin),
             Some(Arc::clone(&whoami)),
-            &body,
+            &request_id,
+            &invitation,
         )
         .await
         .unwrap();
@@ -1112,7 +1108,8 @@ mod tests {
             &credentials,
             Some(local_origin),
             Some(whoami),
-            &body,
+            &request_id,
+            &invitation,
         )
         .await
         .unwrap_err();
@@ -1256,7 +1253,12 @@ mod tests {
         let response = manage(
             State(state),
             HeaderMap::new(),
-            ApiJson(serde_json::json!({"action":"discover","requestId":"discovery-fixture"})),
+            ApiJson(
+                serde_json::from_value(
+                    serde_json::json!({"action":"discover","requestId":"discovery-fixture"}),
+                )
+                .unwrap(),
+            ),
         )
         .await
         .expect("fake discovery succeeds");
@@ -1444,11 +1446,14 @@ mod tests {
         let response = manage(
             State(state),
             HeaderMap::new(),
-            ApiJson(serde_json::json!({
-                "action":"create_invite",
-                "requestId":"fake-owner-invite",
-                "label":"Fixture server"
-            })),
+            ApiJson(
+                serde_json::from_value(serde_json::json!({
+                    "action":"create_invite",
+                    "requestId":"fake-owner-invite",
+                    "label":"Fixture server"
+                }))
+                .unwrap(),
+            ),
         )
         .await
         .expect("fake Tailscale identity creates an invite");

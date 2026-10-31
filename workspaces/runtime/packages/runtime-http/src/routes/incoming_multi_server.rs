@@ -371,7 +371,13 @@ async fn serve_inner(state: HttpState, request: Request<Body>, next: Next) -> Re
                 )
             })?;
             let outcome = driver
-                .receive(&principal, request.body(), now as i64)
+                .receive(
+                    &principal,
+                    request.orchestration_body().ok_or_else(|| {
+                        multi_server_auth::refused(400, "invalid_request", "Invalid signed request")
+                    })?,
+                    now as i64,
+                )
                 .await?;
             Ok(IncomingReply::Orchestration(outcome.to_reply(&request_id)))
         } else if is_name {
@@ -384,10 +390,12 @@ async fn serve_inner(state: HttpState, request: Request<Body>, next: Next) -> Re
                 )
                 .await?;
             let label = request
-                .body()
-                .get("label")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
+                .rename_body()
+                .ok_or_else(|| {
+                    multi_server_auth::refused(400, "invalid_request", "Invalid signed request")
+                })?
+                .label
+                .as_str()
                 .to_owned();
             let notification_sink = Arc::clone(&notifications);
             credentials
@@ -438,7 +446,9 @@ async fn serve_inner(state: HttpState, request: Request<Body>, next: Next) -> Re
             studio_runtime_services::multi_server::create_invite(
                 Arc::clone(&store),
                 &identity,
-                request.body(),
+                request.management_body().ok_or_else(|| {
+                    multi_server_auth::refused(400, "invalid_request", "Invalid signed request")
+                })?,
                 &actor,
                 Some(&owner),
             )
