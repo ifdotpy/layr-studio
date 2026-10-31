@@ -788,7 +788,6 @@ pub(crate) fn publish_summary_changes(
                 id,
             });
         }
-        let task = studio_runtime_store::projection_value(&task);
         let prior: Option<String> = transaction
             .query_row(
                 "SELECT payload FROM sync_entities WHERE collection='task' AND id=?1 AND deleted=0",
@@ -1667,7 +1666,7 @@ pub(crate) fn maintain_task_window(
 pub(crate) fn maintain_task_window_after_write(
     transaction: &Transaction<'_>,
     previous: Option<&Value>,
-    task: &Value,
+    task: &studio_runtime_store::TaskRecord,
     validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
     let migration_complete: bool = transaction.query_row(
@@ -1677,14 +1676,14 @@ pub(crate) fn maintain_task_window_after_write(
         |row| row.get(0),
     )?;
     let running = |value: &Value| value.get("status").and_then(Value::as_str) == Some("running");
-    let task_running = running(task);
+    let task_running = task.status() == studio_runtime_schema::task_record::TaskStatus::Running;
+    let task_id = task.id().as_ref();
+    let agent_id = task.agent();
     let previous_finished = previous.is_some_and(|previous| !running(previous));
     if migration_complete
         && !(task_running && previous_finished)
         && table_exists(transaction, "runtime_agents")?
-        && let Some(task_id) = task.get("id").and_then(Value::as_str)
-        && let Some(agent_id) = task.get("agent").and_then(Value::as_str)
-        && let Some(projected) = project_persisted_record("task", task)
+        && let Some(projected) = crate::sync_views::project_task_record(task)
         && transaction.query_row(
             "SELECT EXISTS(SELECT 1 FROM runtime_agents WHERE id=?1 \
              AND deleted_at IS NULL)",
@@ -1695,8 +1694,9 @@ pub(crate) fn maintain_task_window_after_write(
         let unmoved_finished = previous_finished
             && !task_running
             && previous.is_some_and(|previous| {
-                previous.get("agent") == task.get("agent")
-                    && previous.get("created") == task.get("created")
+                previous.get("agent").and_then(Value::as_str) == Some(agent_id)
+                    && previous.get("created").and_then(Value::as_number)
+                        == Some(task.created_number().number())
             });
         if unmoved_finished
             && !transaction.query_row(
@@ -1708,7 +1708,7 @@ pub(crate) fn maintain_task_window_after_write(
         {
             return Ok(());
         }
-        put_projection(transaction, "task", task_id, projected, false, validate)?;
+        SyncDocumentsRepository::put_entity(transaction, "task", task_id, projected, false)?;
         if !task_running {
             let evicted: Option<String> = transaction
                 .query_row(
@@ -3543,7 +3543,7 @@ mod tests {
                 maintain_task_window_after_write(
                     transaction,
                     Some(&previous),
-                    &updated,
+                    &serde_json::from_value(updated.clone())?,
                     &|_, _, _, _| true,
                 )?;
                 assert!(
@@ -3582,7 +3582,7 @@ mod tests {
                 maintain_task_window_after_write(
                     transaction,
                     Some(&task),
-                    &task,
+                    &serde_json::from_value(task.clone())?,
                     &|_, _, _, _| true,
                 )?;
                 assert!(
@@ -3659,7 +3659,7 @@ mod tests {
                         maintain_task_window_after_write(
                             transaction,
                             previous.as_ref(),
-                            &task,
+                            &serde_json::from_value(task.clone())?,
                             &|_, _, _, _| true,
                         )?;
                         assert!(
@@ -3700,7 +3700,7 @@ mod tests {
                 maintain_task_window_after_write(
                     transaction,
                     Some(&previous),
-                    &previous,
+                    &serde_json::from_value(previous.clone())?,
                     &|_, _, _, _| true,
                 )?;
                 assert!(
@@ -3750,7 +3750,12 @@ mod tests {
              ON CONFLICT(id) DO UPDATE SET record=excluded.record",
             rusqlite::params![id, task.to_string()],
         )?;
-        maintain_task_window_after_write(transaction, previous.as_ref(), task, &|_, _, _, _| true)
+        maintain_task_window_after_write(
+            transaction,
+            previous.as_ref(),
+            &serde_json::from_value(task.clone())?,
+            &|_, _, _, _| true,
+        )
     }
 
     async fn task_window_store() -> (tempfile::TempDir, studio_runtime_store::RuntimeStore) {
