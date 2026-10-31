@@ -73,6 +73,7 @@ export default function ClaudeSignIn({
   const refreshed = useRef("");
   const currentRequestId = useRef(requestId);
   const statusReadGeneration = useRef(0);
+  const restarted = useRef("");
   const refreshStatus = useRef<() => void>(() => {});
   const ready = useRef(onReady);
   ready.current = onReady;
@@ -132,8 +133,16 @@ export default function ClaudeSignIn({
           !lock.current &&
           currentRequestId.current === id &&
           statusReadGeneration.current === readGeneration
-        )
+        ) {
+          // The server never accepted this saved id: send its start once.
+          // The same id keeps the start exact if the server did see it.
+          if (codeSubmissionNotApplied(failure) && restarted.current !== id) {
+            restarted.current = id;
+            void run("start");
+            return;
+          }
           throw failure;
+        }
       }
     };
     const stop = subscribeProgress(

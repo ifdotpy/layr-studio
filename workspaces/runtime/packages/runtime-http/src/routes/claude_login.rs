@@ -65,11 +65,13 @@ fn service(state: &HttpState) -> Result<Arc<LoginService>, ApiError> {
 fn error(error: LoginError) -> ApiError {
     match error {
         LoginError::Persistence | LoginError::InvalidRecord(_) => ApiError::internal(),
-        invalid @ (LoginError::InvalidCode | LoginError::InvalidAuthorizationResponse) => {
+        // An unknown id was never accepted, so the request had no effect.
+        invalid @ (LoginError::InvalidCode
+        | LoginError::InvalidAuthorizationResponse
+        | LoginError::Unknown) => {
             ApiError::not_applied(invalid.to_string())
         }
         other @ LoginError::InvalidIdentity
-        | other @ LoginError::Unknown
         | other @ LoginError::Conflict
         | other @ LoginError::Busy
         | other @ LoginError::WaitForLink

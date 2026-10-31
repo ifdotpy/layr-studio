@@ -61,11 +61,15 @@ test("claude login ui", async ({ page: runnerPage }) => {
           };
           unsafeNext = false;
         } else {
-          const status = receipt || {
-            requestId: url.searchParams.get("request_id")!,
-            accountKey: "claude",
-            status: "starting",
-          };
+          if (!receipt)
+            return route.fulfill({
+              status: 400,
+              json: {
+                error: "Unknown Claude sign-in request",
+                outcome: "not_applied",
+              },
+            });
+          const status = receipt;
           assert.equal(status.requestId, url.searchParams.get("request_id"));
           assert.equal(status.accountKey, "claude");
           return route.fulfill({ json: status });
@@ -133,7 +137,7 @@ test("claude login ui", async ({ page: runnerPage }) => {
     const resetToken = String(Date.now());
     await page.addInitScript((token) => {
       if (sessionStorage.getItem("claude-login-ui-reset") === token) return;
-      localStorage.removeItem("claude-sign-in:fixture:claude");
+      localStorage.setItem("claude-sign-in:fixture:claude", '"saved-id"');
       localStorage.removeItem("claude-add-sign-in:fixture");
       sessionStorage.setItem("claude-login-ui-reset", token);
     }, resetToken);
@@ -142,16 +146,22 @@ test("claude login ui", async ({ page: runnerPage }) => {
       .getByRole("button", { name: "Sign in to Claude", exact: true })
       .click();
     assert.equal(await page.evaluate(() => window.signInAccount), "claude");
+    // A saved id the server never accepted (for example lost in a restart)
+    // is started once with the same id when the recovery read says unknown.
     await open();
-    await page
-      .getByRole("button", { name: "Start sign-in", exact: true })
-      .click();
+    await page.getByRole("button", { name: "Check sign-in status" }).click();
     await page
       .getByRole("link", { name: "Open Claude sign-in" })
       .waitFor({ timeout: 3000 });
+    assert.deepEqual(starts, ["saved-id"]);
+    assert.equal(
+      await page.getByText("Unknown Claude sign-in request").count(),
+      0,
+    );
     const first = starts[0];
     await page.reload();
     await open();
+    await page.getByRole("button", { name: "Check sign-in status" }).click();
     await page.getByRole("link", { name: "Open Claude sign-in" }).waitFor();
     assert.equal(starts.length, 1);
     await page.getByLabel("Final authorization response").fill("secret-code");

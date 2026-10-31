@@ -433,3 +433,29 @@ async fn confirmed_provider_rejection_has_safe_terminal_receipt() {
         .await
         .expect("fixture service shuts down");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unknown_request_id_is_reported_as_not_applied() {
+    let f = Fixture::new();
+    let service = f.open_with_change(Arc::new(|| {})).await;
+    let mut state = HttpState::new(
+        "fixture-token".into(),
+        "fixture".into(),
+        f.directory.to_string_lossy().into(),
+        49171,
+        None,
+        None,
+        None,
+    );
+    state.claude_login = Some(service);
+    let app = router(state).expect("valid fixture");
+    let (status, body) = call(
+        &app,
+        "GET",
+        &format!("/api/accounts/claude/login?request_id={ID}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(body["outcome"], "not_applied", "{body}");
+}
