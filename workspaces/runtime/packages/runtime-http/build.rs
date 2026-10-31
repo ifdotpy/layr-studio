@@ -240,6 +240,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     // unevaluatedProperties:false closes the complete schema after its oneOf.
     *additional_properties = ObjectAdditionalProperties::Denied;
     properties.insert("value".to_owned(), value_property);
+    // The generator already emits strict serde for closed untagged branches.
+    // Apply that same rule to every explicitly closed object at this boundary.
+    for (name, schema) in &analysis.schemas {
+        if matches!(&schema.schema_type, SchemaType::Object { additional_properties, variant: None, .. } if additional_properties.denies_unknown_keys())
+        {
+            analysis.untagged_union_branches.insert(name.clone());
+        }
+    }
     let config = GeneratorConfig {
         spec_path: spec_path.clone(),
         output_dir: output_dir.clone(),
