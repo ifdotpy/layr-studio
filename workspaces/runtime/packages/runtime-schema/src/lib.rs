@@ -24,6 +24,7 @@ pub mod creation_intent;
 pub mod delivery;
 pub mod desktop;
 pub mod event_metadata;
+pub mod federation_ingress;
 pub mod federation_limits;
 pub mod http_ingress;
 pub mod idle_compaction;
