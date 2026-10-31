@@ -375,7 +375,6 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
         "agentDetail" => "AgentDetailEntityDto",
         "task" => "TaskEntityDto",
         "taskDetail" => "TaskDetailResponse",
-        "messageReceipt" => "MessageReceiptEntityDto",
         "retainedWorktree" => "RetainedWorktreeEntityDto",
         "questionHistory" => "AgentRequest",
         "plan" => "PlanSummaryEntityDto",
