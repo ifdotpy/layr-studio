@@ -512,6 +512,17 @@ impl SchedulerRepository {
             return Ok(false);
         };
         let original = claim_result::<HistoricalAgentSnapshot>(&saved)?.agent;
+        let role_matches = match &original.role {
+            HistoricalField::Missing => agent.role.is_missing(),
+            HistoricalField::Null => matches!(
+                agent.role,
+                studio_runtime_schema::queue_command::Field::Null
+            ),
+            HistoricalField::Present(role) => agent
+                .role
+                .value()
+                .is_some_and(|current| current.as_str() == role),
+        };
         if original.id != agent.id
             || original.root_id != agent.root_id
             || original.epoch != agent.epoch
@@ -524,7 +535,7 @@ impl SchedulerRepository {
             || original.parent_id != agent.parent_id
             || historical_text(&original.provider, |provider| provider.key().to_owned()).as_ref()
                 != agent.extra.get("provider")
-            || historical_text(&original.role, Clone::clone).as_ref() != agent.extra.get("role")
+            || !role_matches
             || historical_text(&original.real_cwd, Clone::clone).as_ref()
                 != agent.extra.get("realCwd")
             || original

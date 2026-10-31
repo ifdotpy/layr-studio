@@ -2355,7 +2355,7 @@ async fn automatic_recovery_case(restart: bool, child: bool, stopped: bool) {
                 agent.root_id = AgentId::from("parent");
                 agent.parent_id = Some(("parent").to_string());
                 agent.is_lead = Some(false);
-                agent.extra.insert("role".into(), json!("implementer"));
+                agent.role = studio_runtime_schema::queue_command::Field::Value(studio_runtime_schema::creation_intent::AgentRole::Implementer);
             }
             agent.status = studio_runtime_store::AgentStatus::Running;
             agent.turn_id = Some("old-turn".to_string());

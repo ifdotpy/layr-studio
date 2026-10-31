@@ -406,6 +406,13 @@ pub struct AgentRecord {
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
     pub effort: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub role: studio_runtime_schema::queue_command::Field<
+        studio_runtime_schema::creation_intent::AgentRole,
+    >,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree_ready: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -781,6 +788,7 @@ impl AgentRecord {
             profile_id: Default::default(),
             profile_instructions: Default::default(),
             effort: Default::default(),
+            role: Default::default(),
             worktree_ready: None,
             approval_policy: None,
             native_response_turn: None,
@@ -2784,6 +2792,19 @@ mod tests {
             let record: AgentRecord = serde_json::from_str(missing).unwrap();
             assert!(record.value().get(field).is_none(), "{field}");
         }
+    }
+
+    #[test]
+    fn agent_role_is_closed_and_preserves_null() {
+        let bad = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"role":"future"}"#;
+        let null = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"role":null}"#;
+        assert!(serde_json::from_str::<AgentRecord>(bad).is_err());
+        let agent: AgentRecord = serde_json::from_str(null).unwrap();
+        assert!(
+            serde_json::to_string(&agent)
+                .unwrap()
+                .contains("\"role\":null")
+        );
     }
 
     #[test]

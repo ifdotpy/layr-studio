@@ -4843,7 +4843,9 @@ async fn vm_actor_turn_with_host_mcp(child: bool) {
                         record.root_id = parent.id.clone();
                         record.parent_id = Some(parent.id.0);
                         record.is_lead = Some(false);
-                        record.extra.insert("role".into(), json!("implementer"));
+                        record.role = studio_runtime_schema::queue_command::Field::Value(
+                            studio_runtime_schema::creation_intent::AgentRole::Implementer,
+                        );
                     }
                     record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
                     record.extra.insert("layrReady".into(), json!(true));

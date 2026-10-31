@@ -460,7 +460,9 @@ pub(crate) async fn spawn_agents(
     environment: &dyn ManagedCreationEnvironment,
 ) -> Result<crate::managed_host_tools::DispatchedOperation, Error> {
     let actor_record = actor.record().clone();
-    if actor_record.extra.get("role").and_then(Value::as_str) == Some("reviewer") {
+    if actor_record.role.value().copied()
+        == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer)
+    {
         return Err(
             crate::managed_host_tools::Error::Invalid("Reviewers cannot create agents").into(),
         );
@@ -1146,7 +1148,9 @@ fn can_delegate(
     actor: &AgentRecord,
     root: &AgentRecord,
 ) -> Result<bool, crate::managed_host_tools::Error> {
-    if actor.extra.get("role").and_then(Value::as_str) == Some("reviewer") {
+    if actor.role.value().copied()
+        == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer)
+    {
         return Ok(false);
     }
     let limit = root

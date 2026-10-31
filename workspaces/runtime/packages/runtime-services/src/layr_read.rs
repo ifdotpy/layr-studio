@@ -154,7 +154,8 @@ pub(crate) async fn run(
 ) -> DispatchedOperation {
     let record = actor.record();
     let reviewer = record.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
-        && record.extra.get("role").and_then(Value::as_str) == Some("reviewer")
+        && record.role.value().copied()
+            == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer)
         && studio_runtime_store::truthy(record.extra.get("layrReady"));
     if !reviewer {
         return crate::host_exec::refused(REFUSAL.into());

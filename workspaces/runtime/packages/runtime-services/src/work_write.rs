@@ -1371,7 +1371,8 @@ fn vm_result_needs_merge(lead_id: &str, owner: &AgentRecord) -> bool {
         && (owner.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
             || owner.workspace_mode
                 == Some(studio_runtime_schema::records::WorkspaceMode::LayrNative))
-        && owner.extra.get("role").and_then(Value::as_str) != Some("reviewer")
+        && owner.role.value().copied()
+            != Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer)
 }
 
 pub async fn prepare_vm_accept(
