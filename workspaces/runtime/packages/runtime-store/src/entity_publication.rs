@@ -92,14 +92,10 @@ impl WorkHistoryKind {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct WorkSourceChanges {
     histories: BTreeMap<WorkHistoryKind, BTreeSet<usize>>,
-    refusal: bool,
 }
 impl WorkSourceChanges {
     pub fn histories(&self) -> &BTreeMap<WorkHistoryKind, BTreeSet<usize>> {
         &self.histories
-    }
-    pub fn refusal_changed(&self) -> bool {
-        self.refusal
     }
 }
 
@@ -506,9 +502,8 @@ pub(crate) fn pending(
             Event::WorkRefusalOwner(id) => {
                 pending.work_refusal_owners.insert(id);
             }
-            Event::WorkRefusalTask(id) => {
-                work_changes.entry(id).or_default().refusal = true;
-            }
+            // The submission refusal is derived on every work publication.
+            Event::WorkRefusalTask(_) => {}
         }
     }
     for ((source, id), index) in changed {

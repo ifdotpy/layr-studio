@@ -718,13 +718,7 @@ pub fn publish_entity_changes(
         })? {
             let (id, raw) = row?;
             if !changes.work.contains(&id) {
-                publish_work_metadata(
-                    transaction,
-                    &id,
-                    &serde_json::from_str(&raw)?,
-                    true,
-                    validate,
-                )?;
+                publish_work_metadata(transaction, &id, &serde_json::from_str(&raw)?, validate)?;
             }
         }
     }
@@ -740,17 +734,7 @@ pub fn publish_entity_changes(
             let empty = Default::default();
             let source = source.get(id).unwrap_or(&empty);
             publish_work_history(transaction, id, &record, Some(source), validate)?;
-            let owner_changed = record
-                .get("owner")
-                .and_then(Value::as_str)
-                .is_some_and(|owner| changes.work_refusal_owners.contains(owner));
-            publish_work_metadata(
-                transaction,
-                id,
-                &record,
-                source.refusal_changed() || owner_changed,
-                validate,
-            )?;
+            publish_work_metadata(transaction, id, &record, validate)?;
             if let Some(summary) = project_persisted_record("work", &record) {
                 put_projection(transaction, "work", id, summary, false, validate)?;
             }
@@ -1127,14 +1111,13 @@ fn publish_work_detail(
     validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
     publish_work_history(transaction, id, record, None, validate)?;
-    publish_work_metadata(transaction, id, record, true, validate)
+    publish_work_metadata(transaction, id, record, validate)
 }
 
 fn publish_work_metadata(
     transaction: &Transaction<'_>,
     id: &str,
     record: &Value,
-    recompute_refusal: bool,
     validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
     #[cfg(test)]
@@ -1153,28 +1136,20 @@ fn publish_work_metadata(
     for field in ["results", "decisions", "releases"] {
         detail[field] = json!([]);
     }
-    let prior = if recompute_refusal {
-        None
-    } else {
-        transaction.query_row("SELECT json_extract(payload,'$.value.submissionRefusal') FROM sync_entities WHERE collection='workDetail' AND id=?1 AND deleted=0", [id], |row| row.get::<_, Option<String>>(0)).optional()?.flatten()
-    };
-    detail["submissionRefusal"] =
-        match prior {
-            Some(raw) => serde_json::from_str(&raw)?,
-            None => crate::work_write::current_submission_refusal(transaction, record).map_err(
-                |error| match error {
-                    crate::work_write::WorkWriteError::Expired => {
-                        studio_runtime_store::request_results::RequestResultError::Expired.into()
-                    }
-                    crate::work_write::WorkWriteError::Store(error) => error,
-                    other @ crate::work_write::WorkWriteError::Event(_)
-                    | other @ crate::work_write::WorkWriteError::NotImplemented(_)
-                    | other @ crate::work_write::WorkWriteError::PreparationWorker => {
-                        StoreError::SchemaValidation(other.to_string())
-                    }
-                },
-            )?,
-        };
+    let refusal = crate::work_write::current_submission_refusal(transaction, record).map_err(
+        |error| match error {
+            crate::work_write::WorkWriteError::Expired => {
+                studio_runtime_store::request_results::RequestResultError::Expired.into()
+            }
+            crate::work_write::WorkWriteError::Store(error) => error,
+            other @ crate::work_write::WorkWriteError::Event(_)
+            | other @ crate::work_write::WorkWriteError::NotImplemented(_)
+            | other @ crate::work_write::WorkWriteError::PreparationWorker => {
+                StoreError::SchemaValidation(other.to_string())
+            }
+        },
+    )?;
+    detail["submissionRefusal"] = refusal;
     put_projection(transaction, "workDetail", id, detail, false, validate)
 }
 
