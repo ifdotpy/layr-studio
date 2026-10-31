@@ -5,17 +5,24 @@ use super::extractors::{ApiJson, QueryParams};
 use super::manifest::Dependency;
 use super::manifest::{OperationStatus, RouteGroup, get, post};
 use axum::Json;
-use axum::extract::{MatchedPath, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+#[cfg(test)]
+use studio_runtime_schema::terminal_ingress::{
+    TERMINAL_COLS_MAX, TERMINAL_COLS_MIN, TERMINAL_CREATE_AGENT_ID_MAX_CODEPOINTS,
+    TERMINAL_CREATE_REQUEST_ID_MAX_CODEPOINTS, TERMINAL_ROWS_MAX, TERMINAL_ROWS_MIN,
+};
+use studio_runtime_schema::terminal_ingress::{
+    TerminalAction, TerminalClose, TerminalCreateBody, TerminalInput, TerminalRename,
+    TerminalResize,
+};
 #[cfg(unix)]
 use studio_runtime_services::terminal_driver::TerminalCreate;
 use studio_runtime_services::terminal_driver::{
-    self, TERMINAL_COLS_DEFAULT, TERMINAL_COLS_MAX, TERMINAL_COLS_MIN,
-    TERMINAL_CREATE_REQUEST_ID_MAX_CODEPOINTS, TERMINAL_ROWS_DEFAULT, TERMINAL_ROWS_MAX,
-    TERMINAL_ROWS_MIN, TerminalError,
+    self, TERMINAL_COLS_DEFAULT, TERMINAL_ROWS_DEFAULT, TerminalError,
 };
 use studio_runtime_store::path_identity::CanonicalPath;
 use studio_runtime_store::{AgentId, AgentRepository};
@@ -50,16 +57,12 @@ pub(crate) fn routes() -> RouteGroup {
             output,
         ),
     ];
-    routes.extend(
-        [
-            "/api/terminals/input",
-            "/api/terminals/resize",
-            "/api/terminals/rename",
-            "/api/terminals/close",
-        ]
-        .into_iter()
-        .map(|path| post(path, live_operation_status(), action)),
-    );
+    routes.extend([
+        post("/api/terminals/input", live_operation_status(), input),
+        post("/api/terminals/resize", live_operation_status(), resize),
+        post("/api/terminals/rename", live_operation_status(), rename),
+        post("/api/terminals/close", live_operation_status(), close),
+    ]);
     routes.push(post(
         "/api/terminals/create",
         live_operation_status(),
@@ -127,49 +130,6 @@ async fn output(
     Ok(Json(super::generated_json::<
         crate::generated::TerminalOutput,
     >(result)?))
-}
-
-const TERMINAL_CREATE_AGENT_ID_MAX_CODEPOINTS: usize = 200;
-
-#[derive(serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-struct TerminalCreateBody {
-    id: studio_runtime_schema::bounded_text::BoundedText<
-        1,
-        TERMINAL_CREATE_REQUEST_ID_MAX_CODEPOINTS,
-    >,
-    agent: studio_runtime_schema::bounded_text::BoundedText<
-        1,
-        TERMINAL_CREATE_AGENT_ID_MAX_CODEPOINTS,
-    >,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    cols: Option<
-        studio_runtime_schema::bounded_integer::BoundedInteger<
-            TERMINAL_COLS_MIN,
-            TERMINAL_COLS_MAX,
-        >,
-    >,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    rows: Option<
-        studio_runtime_schema::bounded_integer::BoundedInteger<
-            TERMINAL_ROWS_MIN,
-            TERMINAL_ROWS_MAX,
-        >,
-    >,
-}
-
-fn present<'de, D: serde::Deserializer<'de>, T: serde::Deserialize<'de>>(
-    deserializer: D,
-) -> Result<Option<T>, D::Error> {
-    T::deserialize(deserializer).map(Some)
 }
 
 async fn create(
@@ -240,10 +200,34 @@ async fn create(
     }
 }
 
-async fn action(
-    path: MatchedPath,
+async fn input(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Value>,
+    ApiJson(body): ApiJson<TerminalInput>,
+) -> Result<Json<TerminalActionResponse>, ApiError> {
+    action(state, TerminalAction::Input(body), "/api/terminals/input").await
+}
+async fn resize(
+    State(state): State<HttpState>,
+    ApiJson(body): ApiJson<TerminalResize>,
+) -> Result<Json<TerminalActionResponse>, ApiError> {
+    action(state, TerminalAction::Resize(body), "/api/terminals/resize").await
+}
+async fn rename(
+    State(state): State<HttpState>,
+    ApiJson(body): ApiJson<TerminalRename>,
+) -> Result<Json<TerminalActionResponse>, ApiError> {
+    action(state, TerminalAction::Rename(body), "/api/terminals/rename").await
+}
+async fn close(
+    State(state): State<HttpState>,
+    ApiJson(body): ApiJson<TerminalClose>,
+) -> Result<Json<TerminalActionResponse>, ApiError> {
+    action(state, TerminalAction::Close(body), "/api/terminals/close").await
+}
+async fn action(
+    state: HttpState,
+    body: TerminalAction,
+    _path: &'static str,
 ) -> Result<Json<TerminalActionResponse>, ApiError> {
     #[cfg(unix)]
     {
@@ -251,15 +235,9 @@ async fn action(
         let driver = state
             .terminal_driver_handle()
             .ok_or_else(ApiError::internal)?;
-        let action = path
-            .as_str()
-            .rsplit('/')
-            .next()
-            .unwrap_or_default()
-            .to_owned();
-        let is_input = action == "input";
+        let is_input = matches!(body, TerminalAction::Input(_));
         let result = driver
-            .action(&action, &body)
+            .perform_action(&body)
             .await
             .map_err(terminal_body_error)?;
         if is_input {
@@ -276,7 +254,7 @@ async fn action(
     {
         let _ = (state, body);
         Err(
-            super::manifest::dependency_unavailable("POST", path.as_str(), &PLATFORM_DEPENDENCIES)
+            super::manifest::dependency_unavailable("POST", _path, &PLATFORM_DEPENDENCIES)
                 .unwrap_or_else(|_| ApiError::internal()),
         )
     }
@@ -477,7 +455,11 @@ mod tests {
                 [127, 0, 0, 1],
                 54321,
             ))));
-        let response = app.oneshot(request).await.expect("terminal response");
+        let response = app
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("terminal response");
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         let bytes = to_bytes(response.into_body(), 4096)
             .await
@@ -487,6 +469,38 @@ mod tests {
             body,
             json!({"error":"Terminal restart cleanup is still pending"})
         );
+        for (path, body) in [
+            (
+                "input",
+                json!({"id":"terminal", "text":"x", "request_id":"request"}),
+            ),
+            ("resize", json!({"id":"terminal", "cols":80, "rows":24})),
+            ("rename", json!({"id":"terminal", "title":"Shell"})),
+            ("close", json!({"id":"terminal"})),
+        ] {
+            let request = Request::builder()
+                .method("POST")
+                .uri(format!("/api/terminals/{path}"))
+                .header("host", "127.0.0.1:12345")
+                .header("content-type", "application/json")
+                .header("x-canvas-token", "token")
+                .header("x-canvas-workspace", "workspace")
+                .header(
+                    crate::schema::API_SCHEMA_HASH_HEADER,
+                    crate::schema::api_schema_hash(),
+                )
+                .extension(ConnectInfo(std::net::SocketAddr::from((
+                    [127, 0, 0, 1],
+                    54321,
+                ))))
+                .body(Body::from(body.to_string()))
+                .unwrap();
+            assert_eq!(
+                app.clone().oneshot(request).await.unwrap().status(),
+                StatusCode::SERVICE_UNAVAILABLE,
+                "{path}"
+            );
+        }
         let after = TerminalsRepository::list(&store.test_reader().expect("read after request"))
             .expect("read terminal rows after request");
         assert_eq!(after.len(), before.len());
