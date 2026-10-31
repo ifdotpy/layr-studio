@@ -26,7 +26,7 @@ export type PendingUpload = {
 export const UPLOAD_DATABASE_NAME = "codex-studio-uploads";
 export type UploadOptions = {
   databaseName: string;
-  buffer?: ReturnType<typeof unsentStore>;
+  buffer?: Pick<ReturnType<typeof unsentStore>, "put" | "delete" | "loadAll">;
   syncGet: (
     path: "/api/sync/identity",
   ) => Promise<Pick<GetResult<"/api/sync/identity">, "workspaceId">>;

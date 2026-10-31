@@ -1,9 +1,18 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createDirectDrafts } from "../../src/sync/directDrafts.ts";
+import { useUnsentText } from "../../src/unsent/useUnsentText.ts";
 import { unsentStore } from "../../src/unsent/store.ts";
 
 const buffer = unsentStore("fixture", "draft");
+declare global {
+  interface Window {
+    unsentFixture: typeof buffer;
+    unsentFormFixture: typeof buffer;
+  }
+}
+window.unsentFixture = buffer;
+window.unsentFormFixture = unsentStore("local", "form");
 const store = createDirectDrafts({
   post: async () => [],
   changed: () => {},
@@ -12,6 +21,9 @@ const store = createDirectDrafts({
 function Fixture() {
   const [text, setText] = useState("");
   const [status, setStatus] = useState("loading");
+  const [form, saveForm, clearForm] = useUnsentText("form", "review");
+  const [submitted, setSubmitted] = useState<string | null>(null);
+  const [refused, setRefused] = useState(false);
   useEffect(() => {
     void store.restore().then(() => {
       const row = store.records()[0];
@@ -56,6 +68,23 @@ function Fixture() {
       >
         Confirm
       </button>
+      <label>
+        Form
+        <input
+          value={form ?? ""}
+          onChange={(event) => saveForm(event.currentTarget.value)}
+        />
+      </label>
+      <button onClick={() => setSubmitted(form)}>Begin request</button>
+      <button
+        onClick={() => {
+          if (submitted !== null)
+            void clearForm(submitted).then(() => setRefused(true));
+        }}
+      >
+        Refuse
+      </button>
+      {refused && <span>Refusal processed</span>}
       <output>{status}</output>
     </>
   );

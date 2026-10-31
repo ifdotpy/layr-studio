@@ -8,9 +8,13 @@ export function useUnsentText(feature: string, id: string) {
   const server = useServerServices()?.owner.id ?? serverViewId ?? "local";
   const identity = JSON.stringify([server, feature, id]);
   const [value, setValue] = useState<string | null>(null);
-  const current = useRef({ identity, changed: false });
+  const current = useRef<{
+    identity: string;
+    changed: boolean;
+    value: string | null;
+  }>({ identity, changed: false, value: null });
   if (current.current.identity !== identity)
-    current.current = { identity, changed: false };
+    current.current = { identity, changed: false, value: null };
   useEffect(() => {
     let active = true;
     const owner = current.current;
@@ -19,29 +23,39 @@ export function useUnsentText(feature: string, id: string) {
       .loadAll()
       .then((rows) => {
         const saved = rows.find(([key]) => key === id)?.[1];
-        if (active && !owner.changed && typeof saved === "string")
+        if (active && !owner.changed && typeof saved === "string") {
+          owner.value = saved;
           setValue(saved);
+        }
       })
       .catch(reportUnsentFailure);
     return () => {
       active = false;
     };
   }, [identity]);
-  const clear = useCallback(() => {
-    current.current.changed = true;
-    return unsentStore(server, feature)
-      .delete(id)
-      .catch((error: unknown) => {
-        reportUnsentFailure();
-        throw error;
-      });
-  }, [identity]);
+  const clear = useCallback(
+    (expected = current.current.value) => {
+      current.current.changed = true;
+      if (expected === null) return Promise.resolve();
+      return unsentStore(server, feature)
+        .deleteIfEqual(id, expected)
+        .catch((error: unknown) => {
+          reportUnsentFailure();
+          throw error;
+        });
+    },
+    [identity],
+  );
   const update = useCallback(
     (next: string | null) => {
+      const previous = current.current.value;
       current.current.changed = true;
+      current.current.value = next;
       setValue(next);
       const operation =
-        next === null ? clear() : unsentStore(server, feature).put(id, next);
+        next === null
+          ? clear(previous)
+          : unsentStore(server, feature).put(id, next);
       void operation.catch(reportUnsentFailure);
     },
     [identity],

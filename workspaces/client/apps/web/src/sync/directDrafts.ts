@@ -1,3 +1,4 @@
+import { reportUnsentFailure } from "../unsent/store.ts";
 import { ApiError } from "../api.ts";
 import { serverMutationResponseIsUncertain } from "../servers/mutationIdentity.ts";
 import type { components } from "../generated/api.ts";
@@ -125,7 +126,15 @@ export function createDirectDrafts(options: {
           writes.get(row.id)?.catch(() => {}) ?? Promise.resolve()
         ).then(() => options.buffer!.put(row.id, JSON.stringify(row)));
         writes.set(row.id, write);
-        void write.catch(() => {});
+        void write.then(
+          () => {
+            if (writes.get(row.id) === write) writes.delete(row.id);
+          },
+          () => {
+            if (writes.get(row.id) === write) writes.delete(row.id);
+            reportUnsentFailure();
+          },
+        );
       }
     },
     async restore() {

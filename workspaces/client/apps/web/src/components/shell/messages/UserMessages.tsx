@@ -125,7 +125,7 @@ function MessageResponse({
       requests.delete(detail.id);
       setRetry(false);
       replyDrafts.delete(draftKey);
-      await clearReply();
+      await clearReply(text);
       setText("");
       if ("detail" in outcome) onResponse(outcome.detail);
       else notify(errorText(outcome.reloadError));
@@ -137,7 +137,7 @@ function MessageResponse({
     } catch (failure) {
       if (failure instanceof ApiError) {
         if (isDefinitiveComplaintRefusal(failure.status)) {
-          await clearReply();
+          await clearReply(text);
           const remaining = new Map(requests);
           remaining.delete(detail.id);
           try {

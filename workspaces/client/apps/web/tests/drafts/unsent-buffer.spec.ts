@@ -1,3 +1,4 @@
+import type {} from "./unsent-buffer.fixture.tsx";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { test, expect, createFixtureViteServer } from "../playwright.ts";
@@ -41,6 +42,60 @@ test("unconfirmed draft survives reload and disappears after confirmation", asyn
     await page.reload();
     await expect(page.locator("output")).toHaveText("ready");
     await expect(page.getByLabel("Draft")).toHaveValue("");
+    const second = await page.context().newPage();
+    await second.goto(page.url());
+    await expect(second.locator("output")).toHaveText("ready");
+    await page.evaluate(() => window.unsentFixture.put("race", "submitted"));
+    await second.evaluate(() => window.unsentFixture.put("race", "newer edit"));
+    await page.evaluate(() =>
+      window.unsentFixture.deleteIfEqual("race", "submitted"),
+    );
+    expect(
+      await second.evaluate(
+        async () =>
+          (await window.unsentFixture.loadAll()).find(
+            ([key]) => key === "race",
+          )?.[1],
+      ),
+    ).toBe("newer edit");
+    await page.getByLabel("Form").fill("submitted form");
+    await expect
+      .poll(async () =>
+        page.evaluate(
+          async () =>
+            (await window.unsentFormFixture.loadAll()).find(
+              ([key]) => key === "review",
+            )?.[1],
+        ),
+      )
+      .toBe("submitted form");
+    await page.getByRole("button", { name: "Begin request" }).click();
+    await second.getByLabel("Form").fill("newer form");
+    await expect
+      .poll(async () =>
+        second.evaluate(
+          async () =>
+            (await window.unsentFormFixture.loadAll()).find(
+              ([key]) => key === "review",
+            )?.[1],
+        ),
+      )
+      .toBe("newer form");
+    await page.getByRole("button", { name: "Refuse" }).click();
+    await expect(page.getByText("Refusal processed")).toBeVisible();
+    await expect
+      .poll(async () =>
+        second.evaluate(
+          async () =>
+            (await window.unsentFormFixture.loadAll()).find(
+              ([key]) => key === "review",
+            )?.[1],
+        ),
+      )
+      .toBe("newer form");
+    await second.reload();
+    await expect(second.getByLabel("Form")).toHaveValue("newer form");
+    await second.close();
   } finally {
     await server.close();
   }

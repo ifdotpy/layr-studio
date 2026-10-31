@@ -1,5 +1,5 @@
 import { useUnsentText } from "../../unsent/useUnsentText";
-import { unsentStore } from "../../unsent/store";
+import { reportUnsentFailure, unsentStore } from "../../unsent/store";
 import { serverViewId } from "../../servers/environment";
 import { serverMutationResponseIsUncertain } from "../../servers/mutationIdentity";
 import { QuestionDecision } from "../../generated/api";
@@ -14,7 +14,7 @@ import { Button } from "@mantine/core";
 import { MessageCircleQuestion, ShieldQuestion } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, errorText } from "../../api";
-import { requestDraftsForStorage } from "./requestDrafts";
+import { removeAnswerDraft, requestDraftsForStorage } from "./requestDrafts";
 import type { components } from "../../generated/api";
 import type { Json, JsonValue, Agent } from "../../types";
 import "./request-questions.css";
@@ -153,15 +153,12 @@ export function AnswerForm({
   draftKey: string;
   request: RequestDto;
   sending: boolean;
-  post: (body: Json) => Promise<boolean>;
+  post: (body: Json, saved?: string) => Promise<boolean>;
   close: () => void;
   notify: Props["notify"];
 }) {
   const answerDrafts = useAnswerDrafts();
-  const [savedAnswer, saveAnswer, clearAnswer] = useUnsentText(
-    "answer",
-    draftKey,
-  );
+  const [savedAnswer, saveAnswer] = useUnsentText("answer", draftKey);
 
   const [values, setValues] = useState<AnswerValues>(
     () => answerDrafts.get(draftKey) || {},
@@ -277,9 +274,14 @@ export function AnswerForm({
       } else {
         throw new Error("Unsupported question type.");
       }
-      void post(answer.data).then((accepted) => {
-        if (accepted) void clearAnswer();
-      });
+      const submitted = JSON.stringify(
+        Object.fromEntries(
+          questions
+            .filter((q) => !q.isSecret)
+            .map((q) => [q.id, values[q.id] ?? ""]),
+        ),
+      );
+      void post(answer.data, submitted);
     } catch (e) {
       notify(errorText(e));
     }
@@ -344,7 +346,7 @@ export function RequestCard({
 }) {
   const { post: apiPost } = useServerApi();
   const services = useServerServices();
-  const answerDrafts = useAnswerDrafts();
+  const answerStorage = useServerStorage();
 
   const draftKey = answerKey(scope, r);
   const owner = agents.find((a) => a.id === r.agent);
@@ -407,7 +409,7 @@ export function RequestCard({
     trigger.current?.focus();
   };
   /** Send one answer; true when the server accepted it. */
-  const post = async (body: Json): Promise<boolean> => {
+  const post = async (body: Json, submitted?: string): Promise<boolean> => {
     if (blocked) {
       notify("This chat stopped as a precaution. Open another chat.");
       return false;
@@ -430,20 +432,28 @@ export function RequestCard({
             ),
         });
       else await approve();
-      answerDrafts.delete(draftKey);
+      void removeAnswerDraft(
+        answerStorage,
+        services?.owner.id ?? serverViewId ?? "local",
+        draftKey,
+        submitted,
+      ).catch(reportUnsentFailure);
       if (!mounted.current) return true;
       setOpen(false);
       await refresh();
       return true;
     } catch (e) {
       if (
+        submitted !== undefined &&
         e instanceof ApiError &&
         !serverMutationResponseIsUncertain(e.status, e.response)
       )
-        await unsentStore(
+        void unsentStore(
           services?.owner.id ?? serverViewId ?? "local",
           "answer",
-        ).delete(draftKey);
+        )
+          .deleteIfEqual(draftKey, submitted)
+          .catch(reportUnsentFailure);
       if (mounted.current) {
         setRequestError(errorText(e));
         notify(errorText(e));
@@ -460,8 +470,14 @@ export function RequestCard({
     setSending(true);
     setRequestError("");
     try {
-      if (remove) await apiPost("/api/questions/delete", { id: r.id });
-      else
+      if (remove) {
+        await apiPost("/api/questions/delete", { id: r.id });
+        void removeAnswerDraft(
+          answerStorage,
+          services?.owner.id ?? serverViewId ?? "local",
+          draftKey,
+        ).catch(reportUnsentFailure);
+      } else
         await apiPost("/api/questions/defer", {
           id: r.id,
           deferred: !r.deferred,

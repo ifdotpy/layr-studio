@@ -16,7 +16,10 @@ export type Recording = {
 };
 export function createRecordingStorage(
   server = serverViewId ?? "local",
-  buffer = unsentStore(server, "recording"),
+  buffer: Pick<
+    ReturnType<typeof unsentStore>,
+    "put" | "delete" | "loadAll"
+  > = unsentStore(server, "recording"),
 ) {
   const records = new Map<string, Recording>();
   const chunks = new Map<string, Map<number, Int16Array>>();

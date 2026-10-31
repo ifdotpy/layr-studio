@@ -1213,7 +1213,7 @@ function Profiles(c: Context) {
                     error.response,
                   )
                 )
-                  await clearDraft();
+                  await clearDraft(JSON.stringify(draft));
               } finally {
                 setBusy(false);
               }
@@ -1504,7 +1504,7 @@ function Rules(c: Context) {
                     error.response,
                   )
                 )
-                  await clearDraft();
+                  await clearDraft(JSON.stringify(submittedDraft));
               } finally {
                 setBusy(false);
               }

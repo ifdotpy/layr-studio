@@ -215,7 +215,9 @@ function ScopedMessageQueue(p: Props) {
           error instanceof ApiError &&
           !serverMutationResponseIsUncertain(error.status, error.response)
         )
-          await clearEdit();
+          await clearEdit(
+            JSON.stringify({ id: draft.item.id, text: draft.text }),
+          );
         throw error;
       }
     });
