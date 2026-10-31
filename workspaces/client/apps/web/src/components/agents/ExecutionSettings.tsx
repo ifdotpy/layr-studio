@@ -5,7 +5,11 @@ import {
   AccountTransferStatus as GeneratedAccountTransferStatus,
 } from "../../generated/api";
 import { randomUUID } from "../../uuid";
-import { ProviderKind, providerLabel } from "../../generated/providerKind.ts";
+import {
+  ProviderKind,
+  providerLabel,
+  providerSupports,
+} from "../../generated/providerKind.ts";
 import { clearSettingsRequest, settingsRequestId } from "../settingsRequestId";
 import { isModelEnabled, useModelChoices } from "../models/modelChoices";
 import { useServerApi } from "../../servers/ServerServicesContext";
@@ -1559,6 +1563,7 @@ function ScopedExecutionSettings({
         roleSwitchId={roleSwitchId}
         readOnlyReason={readOnlyReason}
         provider={pickerProvider}
+        capabilityProvider={agent.provider}
         providers={pickerProviders}
         onProvider={setBrowsedProvider}
         accounts={inheritedUnavailable ? [] : connectedAccounts}
@@ -1741,7 +1746,9 @@ function ScopedExecutionSettings({
   const askingNextTurn =
     (!!agent.inFlight || busy.has(agent.status ?? "")) && !fullAccess;
   const permissions =
-    agent.isLead && agent.provider === ProviderKind.Codex ? (
+    agent.isLead &&
+    agent.provider === ProviderKind.Codex &&
+    providerSupports(agent.provider, "approvals") ? (
       settingsRow ? (
         <div className="execution-setting">
           <Text size="sm" fw={500}>

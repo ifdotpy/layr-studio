@@ -606,3 +606,33 @@ test.each([
     expect(fixture.children).toEqual(fixture.originalChildren);
   },
 );
+
+for (const [provider, shown] of [
+  ["claude", true],
+  ["future", false],
+] as const) {
+  test(`the lead model and reasoning fields show only when the ${provider} chat supports them`, () => {
+    const markup = renderToStaticMarkup(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(ExecutionSettings, {
+          presentation: "panel",
+          initialRole: "orchestrator",
+          agent: {
+            id: "capability-gate",
+            name: "Lead",
+            isLead: true,
+            provider,
+            source: AgentSource.managed,
+            model: "gpt-6-astra",
+            status: AgentStatus.idle,
+          },
+          catalog: { models: [], loading: false, error: "", retry: () => {} },
+          refresh: async () => {},
+        }),
+      ),
+    );
+    expect(markup.includes("Main agent reasoning")).toBe(shown);
+  });
+}
