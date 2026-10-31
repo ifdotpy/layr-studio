@@ -17,6 +17,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use studio_runtime_schema::peer_team_ingress::{RadioCreate, RadioManage};
 use studio_runtime_schema::queue_command::Field;
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, ProjectsRepository, QueueEvent, QueueEventId,
@@ -56,17 +57,21 @@ pub(crate) fn publish_room(
 }
 
 /// Local open/send/pass/stop; direct creation is injected separately by P02.
-pub async fn manage(store: Arc<RuntimeStore>, body: &Value) -> Result<RadioReply, ProjectsError> {
-    let action = body["radio_action"].as_str().unwrap_or_default().to_owned();
-    if action == "create" {
-        return Err(ProjectsError::Requires("host-project/radio-create"));
-    }
-    if !matches!(action.as_str(), "open" | "send" | "pass" | "stop") {
-        return Err(ProjectsError::Invalid("Unknown shared chat action"));
-    }
-    let key = request_key(body)?;
-    let signature = event_write::request_signature(&json!({"operation":"radio","body":body}));
-    let root = bounded_text(&body["request_id"], 255)?;
+pub async fn manage(
+    store: Arc<RuntimeStore>,
+    body: &RadioManage,
+) -> Result<RadioReply, ProjectsError> {
+    let action = match body {
+        RadioManage::Open(_) => "open",
+        RadioManage::Send(_) => "send",
+        RadioManage::Pass(_) => "pass",
+        RadioManage::Stop(_) => "stop",
+    };
+    let root = bounded_text(body.request_id(), 255)?;
+    let key = format!("radio:{root}");
+    let signature = studio_runtime_store::sha256_hex(
+        &serde_json::to_vec(body).map_err(studio_runtime_store::StoreError::from)?,
+    );
     let replay_root = root.clone();
     let replay_key = key.clone();
     let replay_signature = signature.clone();
@@ -90,14 +95,10 @@ pub async fn manage(store: Arc<RuntimeStore>, body: &Value) -> Result<RadioReply
     let (path, team, prepared) = studio_runtime_process::blocking_pool::spawn_blocking(
         "runtime-services/radio_runtime",
         move || {
-            let path = project_key(
-                body_for_preparation.get("path").and_then(Value::as_str),
-                false,
-            )?;
-            let team =
-                Uuid::parse_str(body_for_preparation["team_id"].as_str().unwrap_or_default())
-                    .map_err(|_| ProjectsError::Invalid("peer team ID is invalid"))?
-                    .to_string();
+            let path = project_key(Some(body_for_preparation.path()), false)?;
+            let team = Uuid::parse_str(body_for_preparation.team_id())
+                .map_err(|_| ProjectsError::Invalid("peer team ID is invalid"))?
+                .to_string();
             prepared.recheck_paths()?;
             Ok::<_, ProjectsError>((path, team, prepared))
         },
@@ -190,17 +191,13 @@ pub async fn manage(store: Arc<RuntimeStore>, body: &Value) -> Result<RadioReply
                     "The shared chat belongs to another project",
                 ));
             }
-            if let Some(denial) = validate(
-                db,
-                &room,
-                &prepared,
-                matches!(action.as_str(), "send" | "pass"),
-            )? && action != "stop"
+            if let Some(denial) = validate(db, &room, &prepared, matches!(action, "send" | "pass"))?
+                && action != "stop"
             {
                 return Err(ProjectsError::Invalid(denial));
             }
             if action != "open" {
-                if body["expected_revision"].as_u64() != Some(room.radio.revision) {
+                if body.revision() != Some(room.radio.revision) {
                     return Err(ProjectsError::Invalid(
                         "The shared chat changed. Reload before sending",
                     ));
@@ -210,21 +207,30 @@ pub async fn manage(store: Arc<RuntimeStore>, body: &Value) -> Result<RadioReply
                     .revision
                     .checked_add(1)
                     .ok_or_else(|| invalid(room.id()))?;
-                if matches!(action.as_str(), "send" | "pass") {
+                if matches!(action, "send" | "pass") {
                     let members = room.members();
-                    let target = body["target"].as_str().unwrap_or("both");
+                    let target = match &body {
+                        RadioManage::Send(v) => v.target.as_deref().unwrap_or("both"),
+                        RadioManage::Pass(v) => v.target.as_str(),
+                        _ => "both",
+                    };
                     if target != "both" && !members.iter().any(|id| id == target) {
                         return Err(ProjectsError::Invalid(
                             "Select a participant in this shared chat",
                         ));
                     }
-                    let rounds = body
-                        .get("rounds")
-                        .map_or(Some(1), Value::as_u64)
-                        .filter(|n| [1, 2].contains(n))
-                        .ok_or(ProjectsError::Invalid("Select one or two rounds"))?;
+                    let rounds = match &body {
+                        RadioManage::Send(v) => v.rounds.as_ref(),
+                        RadioManage::Pass(v) => v.rounds.as_ref(),
+                        _ => None,
+                    }
+                    .map_or(Some(1), |v| v.as_u64())
+                    .ok_or(ProjectsError::Invalid("Select one or two rounds"))?;
                     let text = if action == "send" {
-                        bounded_text(&body["text"], MAX_TEXT)?
+                        match &body {
+                            RadioManage::Send(v) => bounded_text(&v.text, MAX_TEXT)?,
+                            _ => return Err(ProjectsError::Invalid("Unknown shared chat action")),
+                        }
                     } else {
                         if target == "both" {
                             return Err(ProjectsError::Invalid("Select the next speaker"));
@@ -272,16 +278,12 @@ pub async fn manage(store: Arc<RuntimeStore>, body: &Value) -> Result<RadioReply
         })
         .await
 }
-fn request_key(body: &Value) -> Result<String, ProjectsError> {
-    Ok(format!("radio:{}", bounded_text(&body["request_id"], 255)?))
-}
-fn bounded_text(value: &Value, bound: usize) -> Result<String, ProjectsError> {
-    value
-        .as_str()
-        .map(event_write::python_strip)
-        .filter(|v| !v.is_empty() && v.chars().count() <= bound)
-        .map(str::to_owned)
-        .ok_or(ProjectsError::Invalid("text is empty or exceeds its limit"))
+fn bounded_text(value: &str, bound: usize) -> Result<String, ProjectsError> {
+    let value = event_write::python_strip(value);
+    if value.is_empty() || value.chars().count() > bound {
+        return Err(ProjectsError::Invalid("text is empty or exceeds its limit"));
+    }
+    Ok(value.to_owned())
 }
 
 /// The admission owner supplies a port holding preparation loaded before BEGIN.
@@ -358,7 +360,7 @@ pub async fn handoff_interrupt(
 pub trait RadioCreation {
     fn prepare(
         &mut self,
-        body: &Value,
+        body: &RadioCreate,
         path: &std::path::Path,
         ids: [AgentId; 2],
     ) -> Result<[AgentRecord; 2], ProjectsError>;
@@ -371,12 +373,14 @@ pub trait RadioCreation {
 
 pub async fn create_with(
     store: Arc<RuntimeStore>,
-    body: &Value,
+    body: &RadioCreate,
     mut creation: Box<dyn RadioCreation + Send>,
 ) -> Result<RadioReply, ProjectsError> {
-    let key = request_key(body)?;
-    let signature = event_write::request_signature(&json!({"operation":"radio","body":body}));
-    let root = bounded_text(&body["request_id"], 255)?;
+    let root = bounded_text(body.request_id.as_str(), 255)?;
+    let key = format!("radio:{root}");
+    let signature = studio_runtime_store::sha256_hex(
+        &serde_json::to_vec(body).map_err(studio_runtime_store::StoreError::from)?,
+    );
     let replay_root = root.clone();
     let replay_key = key.clone();
     let replay_signature = signature.clone();
@@ -400,12 +404,9 @@ pub async fn create_with(
         studio_runtime_process::blocking_pool::spawn_blocking(
             "runtime-services/radio_runtime",
             move || {
-                let path = project_key(
-                    body_for_preparation.get("path").and_then(Value::as_str),
-                    true,
-                )?;
-                let name = bounded_text(&body_for_preparation["name"], 80)?;
-                let request = bounded_text(&body_for_preparation["request_id"], 255)?;
+                let path = project_key(Some(body_for_preparation.path.as_str()), true)?;
+                let name = bounded_text(body_for_preparation.name.as_str(), 80)?;
+                let request = bounded_text(body_for_preparation.request_id.as_str(), 255)?;
                 let namespace = Uuid::new_v5(
                     &Uuid::NAMESPACE_URL,
                     format!("codex-studio:radio:{request}").as_bytes(),
@@ -526,7 +527,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn legacy_radio_receipt_replays_exact_bytes() {
+    async fn legacy_radio_receipt_signature_is_refused() {
         let dir = tempfile::tempdir().expect("legacy replay fixture");
         let store = Arc::new(
             RuntimeStore::open(Some(dir.path()))
@@ -534,7 +535,7 @@ mod tests {
                 .expect("legacy replay fixture"),
         );
         let root = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-        let body = json!({"radio_action":"open","request_id":root});
+        let body = json!({"action":"radio","radio_action":"open","path":"/project","team_id":"a8b5b7aa-6459-4023-b148-0ad5a4f0ba56","request_id":root});
         let signature = event_write::request_signature(&json!({"operation":"radio","body":body}));
         let raw = r#"{"room":{"id":"radio:old","radio":{"active":null}}}"#;
         let saved: RadioReply = serde_json::from_str(raw).expect("legacy replay fixture");
@@ -560,8 +561,8 @@ mod tests {
             })
             .await
             .expect("legacy replay fixture");
-        let reply = manage(store, &body).await.expect("legacy replay fixture");
-        assert_eq!(reply.get(), raw);
+        let typed = serde_json::from_str(&body.to_string()).expect("radio request");
+        assert!(manage(store, &typed).await.is_err());
     }
 
     #[test]
