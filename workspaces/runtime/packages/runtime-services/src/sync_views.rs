@@ -382,7 +382,6 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
         "plan" => "PlanSummaryEntityDto",
         "annotation" => "AnnotationEntityDto",
         "monitor" => "MonitorEntityDto",
-        "complaint" => "ComplaintEntityDto",
         "request" => "RequestEntityDto",
         "rule" => "RuleEntityDto",
         "project" => "ProjectEntityDto",
@@ -935,85 +934,6 @@ pub fn project_complaint_record(
     })
 }
 
-/// Build the viewer-independent renderer view for one stored complaint.
-pub fn complaint_entity_view(record: &Value, context: &ComplaintViewContext) -> Option<Value> {
-    let id = record.get("id").and_then(Value::as_str)?;
-    let author = record.get("author").and_then(Value::as_str);
-    let lead_id = record.get("leadId").and_then(Value::as_str);
-    let recipient = if record.get("recipient").and_then(Value::as_str) == Some("user") {
-        "user"
-    } else {
-        "lead"
-    };
-    let responses = record
-        .get("responses")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|response| response.get("author").and_then(Value::as_str).is_some())
-        .collect::<Vec<_>>();
-    let status = record.get("status").and_then(Value::as_str);
-    let responsible = if recipient == "user" {
-        Some("user")
-    } else {
-        lead_id
-    };
-    let needs_response = recipient == "user"
-        && !matches!(status, Some("resolved" | "declined"))
-        && ((record.get("sourceType").and_then(Value::as_str) == Some("user_task")
-            && status == Some("open"))
-            || !responses
-                .iter()
-                .any(|response| response.get("author").and_then(Value::as_str) == responsible));
-    let agent_name = |key: Option<&str>, fallback: Option<&str>| {
-        let agent = key.and_then(|key| {
-            context
-                .agents
-                .iter()
-                .find(|agent| agent.id.as_deref() == Some(key))
-        });
-        match agent.map(|agent| &agent.name) {
-            None | Some(StoredField::Missing) => json!(fallback),
-            Some(name) => json!(name),
-        }
-    };
-    let mut view = Map::new();
-    view.insert("id".to_owned(), Value::String(id.to_owned()));
-    for field in ["leadId", "author", "status", "created", "updated", "readAt"] {
-        view.insert(
-            field.to_owned(),
-            record.get(field).cloned().unwrap_or(Value::Null),
-        );
-    }
-    view.insert(
-        "title".to_owned(),
-        Value::String(
-            record
-                .get("text")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .chars()
-                .take(140)
-                .collect(),
-        ),
-    );
-    view.insert("recipient".to_owned(), Value::String(recipient.to_owned()));
-    view.insert(
-        "version".to_owned(),
-        record.get("version").cloned().unwrap_or(Value::Null),
-    );
-    view.insert("needsUserResponse".to_owned(), Value::Bool(needs_response));
-    view.insert(
-        "authorName".to_owned(),
-        agent_name(
-            author,
-            author.map(|value| if value == "user" { "You" } else { value }),
-        ),
-    );
-    view.insert("leadName".to_owned(), agent_name(lead_id, lead_id));
-    project_persisted_record("complaint", &Value::Object(view))
-}
-
 /// Build project renderer fields from persisted records and optional live context.
 pub fn project_entity_view(
     record: &Value,
@@ -1094,17 +1014,22 @@ mod projection_plan_tests {
     use serde_json::json;
 
     #[test]
-    fn complaint_projection_matches_legacy_view() {
+    fn complaint_projection_preserves_public_fields() {
         let context = super::ComplaintViewContext::default();
         for recipient in ["user", "lead"] {
-            let raw = json!({"id":"c","leadId":"lead","author":"user","text":"hello","recipient":recipient,"version":1,"status":"open","created":1.0,"updated":1.0,"readAt":null,"responses":[]});
+            let raw = format!(
+                r#"{{"id":"c","leadId":"lead","author":"user","text":"hello","recipient":"{recipient}","version":1,"status":"open","created":1.0,"updated":1.0,"readAt":null,"responses":[]}}"#
+            );
             let record: studio_runtime_schema::complaint_record::ComplaintRecord =
-                serde_json::from_value(raw.clone()).unwrap();
-            let old = super::complaint_entity_view(&raw, &context).unwrap();
-            let new =
-                serde_json::to_value(super::project_complaint_record(&record, &context).unwrap())
+                serde_json::from_str(&raw).unwrap();
+            let encoded =
+                serde_json::to_string(&super::project_complaint_record(&record, &context).unwrap())
                     .unwrap();
-            assert_eq!(new, old);
+            let actual: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(
+                actual,
+                json!({"id":"c","leadId":"lead","leadName":"lead","author":"user","authorName":"You","title":"hello","recipient":recipient,"version":1,"status":"open","created":1.0,"updated":1.0,"readAt":null,"needsUserResponse":recipient == "user"})
+            );
         }
     }
 
@@ -1117,7 +1042,9 @@ mod projection_plan_tests {
             let record: studio_runtime_store::WorkItemRecord = serde_json::from_str(raw).unwrap();
             let old =
                 project_persisted_record("work", &serde_json::from_str(raw).unwrap()).unwrap();
-            let new = serde_json::to_value(super::project_work_record(&record).unwrap()).unwrap();
+            let encoded =
+                serde_json::to_string(&super::project_work_record(&record).unwrap()).unwrap();
+            let new: serde_json::Value = serde_json::from_str(&encoded).unwrap();
             assert_eq!(new, old);
         }
     }
@@ -1196,18 +1123,23 @@ mod projection_plan_tests {
 
     #[test]
     fn complaint_names_preserve_missing_and_null() {
+        let raw = r#"{"id":"complaint","author":"author","leadId":null,"text":"Question","recipient":"lead","status":"open","created":null,"updated":null,"readAt":null,"version":null,"responses":[]}"#;
+        let record: studio_runtime_schema::complaint_record::ComplaintRecord =
+            serde_json::from_str(raw).unwrap();
         for (agent, expected) in [
             (r#"{"id":"author"}"#, json!("author")),
             (r#"{"id":"author","name":null}"#, json!(null)),
             (r#"{"id":"author","name":"Author"}"#, json!("Author")),
         ] {
             let agents = [serde_json::from_str(agent).expect("typed agent")];
-            let view = super::complaint_entity_view(
-                &json!({"id":"complaint","author":"author","text":"Question"}),
+            let view = super::project_complaint_record(
+                &record,
                 &super::ComplaintViewContext { agents: &agents },
             )
             .expect("complaint view");
-            assert_eq!(view["authorName"], expected);
+            let encoded = serde_json::to_string(&view).unwrap();
+            let actual: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(actual["authorName"], expected);
         }
     }
 

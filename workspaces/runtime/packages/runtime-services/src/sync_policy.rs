@@ -3,8 +3,8 @@ use studio_runtime_schema::shared_values::MODEL_CHOICES_PREFERENCE_KEY;
 
 use crate::event_write::truthy;
 pub use crate::sync_views::{
-    AgentViewContext, ComplaintViewContext, RoomViewContext, agent_entity_view,
-    complaint_entity_view, openapi_document, project_entity_view, project_persisted_record,
+    AgentViewContext, ComplaintViewContext, RoomViewContext, agent_entity_view, openapi_document,
+    project_entity_view, project_persisted_record,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use serde_json::{Map, Value, json};
