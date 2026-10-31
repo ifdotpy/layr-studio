@@ -980,9 +980,11 @@ mod projection_plan_tests {
         for length in [12, 2_100] {
             let raw = json!({"id":"a:item", "agent":"a", "created":1.0, "itemId":"item", "kind":"command", "status":"running", "turnId":"turn", "type":"commandExecution", "name":"run", "tail":"雪".repeat(length), "outputTruncated":false, "command":"x".repeat(length), "sourceThreadId":"private", "interactive":true});
             let task: studio_runtime_store::TaskRecord =
-                serde_json::from_value(raw.clone()).unwrap();
+                serde::Deserialize::deserialize(&raw).unwrap();
             let old = project_persisted_record("task", &raw).unwrap();
-            let new = serde_json::to_value(super::project_task_record(&task).unwrap()).unwrap();
+            let encoded =
+                serde_json::to_string(&super::project_task_record(&task).unwrap()).unwrap();
+            let new: serde_json::Value = serde_json::from_str(&encoded).unwrap();
             assert_eq!(new, old);
         }
     }
