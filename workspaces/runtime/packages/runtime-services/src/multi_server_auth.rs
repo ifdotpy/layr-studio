@@ -310,7 +310,7 @@ impl SignedRequest {
                 }
                 _ => {
                     if !raw.is_empty() {
-                        serde_json::from_slice::<Value>(raw).map_err(invalid)?;
+                        serde_json::from_slice::<serde::de::IgnoredAny>(raw).map_err(invalid)?;
                     }
                     SignedBody::Other
                 }
@@ -1114,6 +1114,25 @@ pub(crate) fn check_invite(
 #[cfg(test)]
 mod snapshot_tests {
     use super::*;
+
+    #[test]
+    fn generic_signed_request_checks_json_syntax_before_admission() {
+        let headers: Vec<_> = SIGNED_HEADERS
+            .iter()
+            .map(|name| ((*name).to_owned(), "valid".to_owned()))
+            .collect();
+        assert!(
+            SignedRequest::from_headers("POST", "/api/other", &headers, br#"{"x":[1,true]}"#)
+                .is_ok()
+        );
+        assert!(matches!(
+            SignedRequest::from_headers("POST", "/api/other", &headers, br#"{"x":]"#),
+            Err(AccessError::Refused {
+                code: "invalid_request",
+                ..
+            })
+        ));
+    }
 
     #[test]
     fn trusted_owner_projection_keeps_string_user_ids_and_strict_tags() {
