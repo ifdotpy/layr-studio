@@ -20,14 +20,13 @@ use thiserror::Error;
 pub const OUTPUT_LIMIT: usize = 1_048_576;
 pub const OUTPUT_CHUNK: usize = 65_536;
 pub const INPUT_LIMIT: usize = 65_536;
-pub const MAX_TITLE_CHARS: usize = 120;
-pub const TERMINAL_CREATE_REQUEST_ID_MAX_CODEPOINTS: usize = 200;
-pub const TERMINAL_COLS_MIN: i64 = 2;
-pub const TERMINAL_COLS_MAX: u64 = 1000;
-pub const TERMINAL_ROWS_MIN: i64 = 1;
-pub const TERMINAL_ROWS_MAX: u64 = 500;
-pub const TERMINAL_COLS_DEFAULT: u64 = 100;
-pub const TERMINAL_ROWS_DEFAULT: u64 = 28;
+pub use studio_runtime_schema::terminal_ingress::TERMINAL_TITLE_MAX_CODEPOINTS as MAX_TITLE_CHARS;
+pub use studio_runtime_schema::terminal_ingress::{
+    TERMINAL_COLS_DEFAULT, TERMINAL_COLS_MAX, TERMINAL_COLS_MIN,
+    TERMINAL_CREATE_REQUEST_ID_MAX_CODEPOINTS, TERMINAL_ROWS_DEFAULT, TERMINAL_ROWS_MAX,
+    TERMINAL_ROWS_MIN,
+};
+use studio_runtime_schema::terminal_ingress::{TerminalAction, TerminalInput};
 
 pub trait TerminalSession: Send + Sync + 'static {
     fn send_request(
@@ -502,12 +501,8 @@ impl<S: TerminalSession> TerminalDriver<S> {
         }
     }
 
-    pub async fn action(&self, action: &str, data: &Value) -> Result<Value, TerminalError> {
-        let id = data
-            .get("id")
-            .and_then(Value::as_str)
-            .ok_or(TerminalError::InvalidRequest)?
-            .to_owned();
+    pub async fn perform_action(&self, action: &TerminalAction) -> Result<Value, TerminalError> {
+        let id = action.id().to_owned();
         let lookup_id = id.clone();
         let row = self
             .store
@@ -519,12 +514,8 @@ impl<S: TerminalSession> TerminalDriver<S> {
             .await?;
         let record = row.record;
         match action {
-            "rename" => {
-                let title = data
-                    .get("title")
-                    .and_then(Value::as_str)
-                    .ok_or(TerminalError::InvalidRequest)?;
-                let title = terminal_title(title)?.to_owned();
+            TerminalAction::Rename(data) => {
+                let title = terminal_title(data.title.as_str())?.to_owned();
                 let terminal_id = id.clone();
                 let updated_time = self.now();
                 let updated = self
@@ -547,10 +538,10 @@ impl<S: TerminalSession> TerminalDriver<S> {
                 hide_process_identity(&mut value);
                 Ok(value)
             }
-            "input" => self.send_input(&id, data).await,
-            "resize" => {
-                let columns = size(data, "cols", TERMINAL_COLS_DEFAULT)?;
-                let rows = size(data, "rows", TERMINAL_ROWS_DEFAULT)?;
+            TerminalAction::Input(data) => self.send_input(&id, data).await,
+            TerminalAction::Resize(data) => {
+                let columns = data.cols.map_or(TERMINAL_COLS_DEFAULT, |v| v.get() as u64);
+                let rows = data.rows.map_or(TERMINAL_ROWS_DEFAULT, |v| v.get() as u64);
                 self.require_running(&record)?;
                 let operation_id = format!("terminal-resize:{id}:{}:{}", columns, rows);
                 let params = json!({"processHandle": id, "size": {"rows": rows, "cols": columns}});
@@ -572,7 +563,7 @@ impl<S: TerminalSession> TerminalDriver<S> {
                     .await
                     .map_err(TerminalError::Store)
             }
-            "close" => {
+            TerminalAction::Close(_) => {
                 let terminal_id = id.clone();
                 let closed_at = self.now();
                 let (root, send, response) = self
@@ -663,8 +654,20 @@ impl<S: TerminalSession> TerminalDriver<S> {
                     }
                 }
             }
-            _ => Err(TerminalError::InvalidRequest),
         }
+    }
+
+    #[cfg(test)]
+    async fn action(&self, action: &str, data: &Value) -> Result<Value, TerminalError> {
+        let parsed = match action {
+            "input" => serde_json::from_value(data.clone()).map(TerminalAction::Input),
+            "resize" => serde_json::from_value(data.clone()).map(TerminalAction::Resize),
+            "rename" => serde_json::from_value(data.clone()).map(TerminalAction::Rename),
+            "close" => serde_json::from_value(data.clone()).map(TerminalAction::Close),
+            _ => return Err(TerminalError::InvalidRequest),
+        }
+        .map_err(|_| TerminalError::InvalidRequest)?;
+        self.perform_action(&parsed).await
     }
 
     pub async fn apply_notification(
@@ -816,20 +819,28 @@ impl<S: TerminalSession> TerminalDriver<S> {
         Ok(())
     }
 
-    async fn send_input(&self, id: &str, data: &Value) -> Result<Value, TerminalError> {
-        let request_id = data
-            .get("request_id")
-            .and_then(Value::as_str)
-            .ok_or(TerminalError::InvalidRequest)?;
-        let text = data
-            .get("text")
-            .and_then(Value::as_str)
-            .ok_or(TerminalError::InvalidRequest)?;
-        if text.len() > INPUT_LIMIT || request_id.is_empty() || request_id.chars().count() > 200 {
+    async fn send_input(&self, id: &str, data: &TerminalInput) -> Result<Value, TerminalError> {
+        let request_id = data.request_id.as_str();
+        let text = data.text.as_str();
+        if text.len() > INPUT_LIMIT {
             return Err(TerminalError::InvalidRequest);
         }
-        let body = json!({"action":"input", "id":id, "text":text, "request_id":request_id});
-        let signature = receipt_signature(&body);
+        #[derive(serde::Serialize)]
+        struct InputSignature<'a> {
+            action: &'static str,
+            id: &'a str,
+            text: &'a str,
+            request_id: &'a str,
+        }
+        let body = InputSignature {
+            action: "input",
+            id,
+            text,
+            request_id,
+        };
+        let signature = studio_runtime_schema::json_compat::python_json_serialized(&body)
+            .map(|canonical| studio_runtime_store::sha256_hex(canonical.as_bytes()))
+            .map_err(|_| TerminalError::InvalidRequest)?;
         let uncertain = json!({"ok":false,"delivery":"uncertain","error":"Input delivery is uncertain. Check the terminal before sending it again."});
         let terminal_id = id.to_owned();
         let request_id = request_id.to_owned();
@@ -1110,19 +1121,6 @@ enum InputReservation {
     NotRunning,
 }
 
-fn size(data: &Value, key: &str, default: u64) -> Result<u64, TerminalError> {
-    let value = match data.get(key) {
-        None => default,
-        Some(value) => value.as_u64().ok_or(TerminalError::InvalidRequest)?,
-    };
-    let valid = match key {
-        "cols" => (TERMINAL_COLS_MIN as u64..=TERMINAL_COLS_MAX).contains(&value),
-        "rows" => (TERMINAL_ROWS_MIN as u64..=TERMINAL_ROWS_MAX).contains(&value),
-        _ => false,
-    };
-    valid.then_some(value).ok_or(TerminalError::InvalidRequest)
-}
-
 fn terminal_title(title: &str) -> Result<&str, TerminalError> {
     if title.trim().is_empty() || title.chars().count() > MAX_TITLE_CHARS {
         Err(TerminalError::InvalidRequest)
@@ -1215,7 +1213,7 @@ mod tests {
     use super::{
         INPUT_LIMIT, OUTPUT_LIMIT, SessionError, TerminalCreate, TerminalDriver, TerminalError,
         TerminalEvent, TerminalNotification, TerminalOutcome, TerminalSession, decode_utf8,
-        history_output, new_id, output, receipt_signature, size, terminal_title,
+        history_output, new_id, output, receipt_signature, terminal_title,
     };
     use serde_json::Value;
     use studio_runtime_store::path_identity::CanonicalPath;
@@ -1441,22 +1439,19 @@ mod tests {
 
     #[tokio::test]
     async fn explicit_invalid_dimensions_and_untrimmed_long_titles_are_refused() {
-        assert!(size(&serde_json::json!({"cols":true}), "cols", 100).is_err());
-        assert!(size(&serde_json::json!({"rows":-1}), "rows", 28).is_err());
-        assert_eq!(
-            size(&serde_json::json!({}), "cols", 100).expect("default"),
-            100
-        );
-        assert_eq!(
-            size(&serde_json::json!({"cols":2}), "cols", 100).expect("minimum columns"),
-            2
-        );
-        assert_eq!(
-            size(&serde_json::json!({"cols":1000}), "cols", 100).expect("maximum columns"),
-            1000
-        );
-        assert!(size(&serde_json::json!({"cols":1001}), "cols", 100).is_err());
-        assert!(size(&serde_json::json!({"rows":501}), "rows", 28).is_err());
+        for value in [
+            serde_json::json!({"id":"i","cols":true}),
+            serde_json::json!({"id":"i","rows":-1}),
+            serde_json::json!({"id":"i","cols":1001}),
+            serde_json::json!({"id":"i","rows":501}),
+        ] {
+            assert!(
+                serde_json::from_value::<studio_runtime_schema::terminal_ingress::TerminalResize>(
+                    value
+                )
+                .is_err()
+            );
+        }
         assert!(terminal_title(&format!("{}x", " ".repeat(120))).is_err());
     }
 
