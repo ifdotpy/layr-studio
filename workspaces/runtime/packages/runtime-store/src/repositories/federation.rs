@@ -446,11 +446,15 @@ impl FederationRepository {
             studio_runtime_schema::room_record::RoomKind::Federated,
         );
         local_room.members = Some(unique);
-        local_room.updated = Some(serde_json::Number::from_f64(now));
+        local_room.updated = serde_json::Number::from_f64(now).map_or(
+            studio_runtime_schema::queue_command::Field::Null,
+            studio_runtime_schema::queue_command::Field::Value,
+        );
         local_room.name = room["name"].as_str().map(str::to_owned);
         local_room.federation = Some(true);
         local_room.peer_id = Some(peer_state.to_owned());
-        local_room.peer_label = Some(Some(peer_label.to_owned()));
+        local_room.peer_label =
+            studio_runtime_schema::queue_command::Field::Value(peer_label.to_owned());
         crate::Table::new(tx).put(&local_room)?;
         let key = if approve {
             format!("room-accept:{room_id}")

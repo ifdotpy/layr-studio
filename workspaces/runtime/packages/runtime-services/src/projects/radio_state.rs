@@ -1,5 +1,6 @@
 //! Checked radio records and transactional store projections.
 use super::*;
+use studio_runtime_schema::queue_command::Field;
 
 pub(crate) use studio_runtime_schema::room_record::{Active, InterruptState, Radio, Status};
 pub(super) struct Room {
@@ -31,7 +32,10 @@ impl Room {
         id: &str,
         mut record: studio_runtime_schema::room_record::RoomRecord,
     ) -> Result<Self, ProjectsError> {
-        let radio = record.radio.take().flatten().ok_or_else(|| invalid(id))?;
+        let radio = match std::mem::take(&mut record.radio) {
+            Field::Value(radio) => radio,
+            Field::Missing | Field::Null => return Err(invalid(id)),
+        };
         let room = Self { record, radio };
         if room.record.id != id {
             return Err(invalid(id));
@@ -75,7 +79,7 @@ pub(super) fn rooms(db: &Connection) -> Result<Vec<Room>, ProjectsError> {
         if record.id != id {
             return Err(invalid(&id));
         }
-        if id.starts_with("radio:") && record.radio.as_ref().and_then(Option::as_ref).is_some() {
+        if id.starts_with("radio:") && record.radio.as_ref().is_some() {
             rooms.push(Room::from_record(&id, record)?);
         }
     }
@@ -160,7 +164,7 @@ pub(super) fn save(
     prepared: &PreparedHost,
     now: f64,
 ) -> Result<(), ProjectsError> {
-    room.record.updated = Some(serde_json::Number::from_f64(now));
+    room.record.updated = serde_json::Number::from_f64(now).map_or(Field::Null, Field::Value);
     let raw = serde_json::to_string(&*room).map_err(studio_runtime_store::StoreError::from)?;
     db.execute("INSERT INTO runtime_rooms(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![room.id(),raw])?;
     publish_radio_room(db, room, prepared)
@@ -358,7 +362,7 @@ pub(super) fn unsent_cancelled(db: &Connection, active: &Active) -> Result<bool,
         || active
             .turn_id
             .as_ref()
-            .and_then(|v| v.as_deref())
+            .map(String::as_str)
             .is_some_and(|v| !v.is_empty())
     {
         return Ok(false);

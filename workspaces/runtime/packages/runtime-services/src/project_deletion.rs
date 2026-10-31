@@ -550,13 +550,13 @@ fn retire_rooms(
             || room
                 .project_path
                 .as_ref()
-                .and_then(|path| path.as_deref())
+                .map(String::as_str)
                 .is_some_and(|p| projects.contains(p) || paths.contains(p));
         let broadcast = room.kind == studio_runtime_schema::room_record::RoomKind::Broadcast
             && room
                 .root_id
                 .as_ref()
-                .and_then(|root| root.as_deref())
+                .map(String::as_str)
                 .is_some_and(|root| root != "all" && agents.contains(root));
         if bound || broadcast {
             room.project_deleted_at = Some(

@@ -1,5 +1,6 @@
 //! Scheduler, answer, notification and account-worker hooks for local radio.
 use super::*;
+use studio_runtime_schema::queue_command::Field;
 
 /// One scheduler tick. Preparation happens outside the transaction; the owner
 /// publishes changes and hands off returned interrupts only after commit.
@@ -53,7 +54,7 @@ pub fn tick(
             } else if let (Some(agent), Some(event)) = (agent, event.as_ref()) {
                 let turn_id = turn(agent, &active, Some(event));
                 if let Some(turn_id) = &turn_id {
-                    active.turn_id = Some(Some(turn_id.clone()));
+                    active.turn_id = Field::Value(turn_id.clone());
                     room.radio.active = Some(active.clone());
                 }
                 if let Some(turn_id) = turn_id.as_deref()
@@ -227,9 +228,9 @@ pub fn tick(
                             .last()
                             .and_then(|m| m["seq"].as_u64())
                             .unwrap_or(cursor),
-                        turn_id: None,
-                        interrupt_requested: None,
-                        question_continuation_planned: None,
+                        turn_id: Field::Missing,
+                        interrupt_requested: Field::Missing,
+                        question_continuation_planned: Field::Missing,
                         interrupt_state: None,
                         extra: BTreeMap::new(),
                     });
@@ -419,9 +420,9 @@ pub fn route_question_answer(
                     .active
                     .as_mut()
                     .ok_or(ProjectsError::Invalid("radio floor missing"))?;
-                if active.question_continuation_planned != Some(Some(true)) {
+                if active.question_continuation_planned != Field::Value(true) {
                     room.radio.next.insert(0, active.agent_id.clone());
-                    active.question_continuation_planned = Some(Some(true));
+                    active.question_continuation_planned = Field::Value(true);
                 }
                 room.radio.revision = room
                     .radio

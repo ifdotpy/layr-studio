@@ -7,6 +7,7 @@ use rusqlite::{OptionalExtension, Transaction};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use studio_runtime_schema::persistence::{DeliveryStatus, EventStatus, RecipientDelivery};
+use studio_runtime_schema::queue_command::Field;
 use studio_runtime_store::{SyncDocumentsRepository, system_reads as records};
 
 pub fn delivery_receipts(
@@ -102,8 +103,8 @@ pub(crate) enum ChatRoom {
     Room {
         #[serde(flatten)]
         view: Box<crate::room_projection::RoomProjection>,
-        #[serde(rename = "customName", skip_serializing_if = "Option::is_none")]
-        custom_name: Option<Option<String>>,
+        #[serde(rename = "customName", skip_serializing_if = "Field::is_missing")]
+        custom_name: Field<String>,
         #[serde(flatten)]
         federation: Option<ChatFederation>,
     },
@@ -124,8 +125,8 @@ pub(crate) struct BriefChatRoom<'a> {
     id: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     kind: Option<studio_runtime_schema::room_record::RoomKind>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    root_id: Option<Option<&'a str>>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    root_id: Field<&'a str>,
     name: Option<&'a str>,
 }
 
@@ -135,13 +136,17 @@ impl ChatRoom {
             Self::Feed { id, name, .. } => BriefChatRoom {
                 id,
                 kind: None,
-                root_id: None,
+                root_id: Field::Missing,
                 name: name.as_deref(),
             },
             Self::Room { view, .. } => BriefChatRoom {
                 id: &view.id,
                 kind: Some(view.kind),
-                root_id: view.root_id.as_ref().map(|root| root.as_deref()),
+                root_id: match &view.root_id {
+                    Field::Missing => Field::Missing,
+                    Field::Null => Field::Null,
+                    Field::Value(root) => Field::Value(root.as_str()),
+                },
                 name: view.name.as_deref(),
             },
         }
@@ -406,8 +411,8 @@ pub fn delete_room(
         studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(tx)
             .get(&id.to_owned())?
             .ok_or(CoordinationError::InvalidRequest("Unknown agent chat"))?;
-    let changed = room.user_hidden != Some(Some(true));
-    room.user_hidden = Some(Some(true));
+    let changed = room.user_hidden != Field::Value(true);
+    room.user_hidden = Field::Value(true);
     let directory = RoomDirectory::load(tx)?;
     let context = directory.for_room_identity(
         tx,

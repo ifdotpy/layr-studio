@@ -965,8 +965,7 @@ pub(crate) fn search_work_in_transaction(
                 continue;
             }
             if room.kind != studio_runtime_schema::room_record::RoomKind::Federated {
-                if caller_root.is_none()
-                    || room.root_id.as_ref().and_then(|id| id.as_deref()) == Some("all")
+                if caller_root.is_none() || room.root_id.as_ref().map(String::as_str) == Some("all")
                 {
                     continue;
                 }
@@ -977,7 +976,7 @@ pub(crate) fn search_work_in_transaction(
                             a.id.as_deref() == Some(id.as_str())
                                 && a.shared_room_id.as_deref() == Some(room.id.as_str())
                                 && a.cwd.as_deref()
-                                    == room.project_path.as_ref().and_then(|path| path.as_deref())
+                                    == room.project_path.as_ref().map(String::as_str)
                         })
                     });
                 if foreign

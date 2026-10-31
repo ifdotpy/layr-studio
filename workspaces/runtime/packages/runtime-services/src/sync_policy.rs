@@ -1377,7 +1377,7 @@ fn publish_rooms_of(
         if room.id != id {
             continue;
         }
-        let root = room.root_id.as_ref().and_then(|root| root.as_deref());
+        let root = room.root_id.as_ref().map(String::as_str);
         let affected = match room.kind {
             RoomKind::Broadcast => root.is_some_and(|root| root == "all" || roots.contains(root)),
             // Federated membership lives in another table; these rooms are few.

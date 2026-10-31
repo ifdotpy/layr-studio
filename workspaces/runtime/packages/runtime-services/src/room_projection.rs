@@ -4,6 +4,7 @@ use crate::sync_views::{RoomViewContext, SYNC_ARRAY_ITEMS, bound_sync_text};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
+use studio_runtime_schema::queue_command::Field;
 use studio_runtime_schema::recovery_record::SafeInteger;
 use studio_runtime_schema::room_record::{
     Radio, RoomKind, RoomLastMessage, RoomRadioIdentity, RoomRadioSeen, RoomRecord, Status,
@@ -16,39 +17,34 @@ pub(crate) struct RoomProjection {
     pub(crate) kind: RoomKind,
     pub(crate) members: Vec<String>,
     pub(crate) name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_message: Option<Option<RoomLastMessage>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) local_members: Option<Option<Vec<String>>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) peer_team_id: Option<Option<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) peer_team_name: Option<Option<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) peer_label: Option<Option<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) root_id: Option<Option<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    project_path: Option<Option<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    updated: Option<Option<serde_json::Number>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    user_hidden: Option<Option<bool>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    radio: Option<Option<RadioProjection>>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    last_message: Field<RoomLastMessage>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    pub(crate) local_members: Field<Vec<String>>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    pub(crate) peer_team_id: Field<String>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    pub(crate) peer_team_name: Field<String>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    pub(crate) peer_label: Field<String>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    pub(crate) root_id: Field<String>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    project_path: Field<String>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    updated: Field<serde_json::Number>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    user_hidden: Field<bool>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    radio: Field<RadioProjection>,
 }
 
 impl RoomProjection {
     pub(crate) fn omit_last_message(&mut self) {
-        self.last_message = None;
+        self.last_message = Field::Missing;
     }
     pub(crate) fn direct_radio(&self) -> bool {
-        self.radio
-            .as_ref()
-            .and_then(Option::as_ref)
-            .and_then(|radio| radio.direct)
-            .flatten()
-            == Some(true)
+        self.radio.as_ref().and_then(|radio| radio.direct.as_ref()) == Some(&true)
     }
 }
 
@@ -61,12 +57,12 @@ struct RadioActive {
     epoch: SafeInteger,
     thread_id: Option<String>,
     through: SafeInteger,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    turn_id: Option<Option<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    interrupt_requested: Option<Option<bool>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    question_continuation_planned: Option<Option<bool>>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    turn_id: Field<String>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    interrupt_requested: Field<bool>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    question_continuation_planned: Field<bool>,
 }
 
 #[derive(Serialize)]
@@ -79,10 +75,10 @@ struct RadioProjection {
     next: Vec<String>,
     active: Option<RadioActive>,
     error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    direct: Option<Option<bool>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    seen: Option<Option<BTreeMap<String, RoomRadioSeen>>>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    direct: Field<bool>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    seen: Field<BTreeMap<String, RoomRadioSeen>>,
 }
 
 fn bounded(text: &str, field: &str) -> String {
@@ -103,9 +99,9 @@ pub(crate) fn project_room(
         return Ok(None);
     }
     match &record.radio {
-        Some(Some(state)) => project_radio_room(record, context, state),
-        Some(None) => Ok(project_room_view(record, context, Some(None))),
-        None => Ok(project_room_view(record, context, None)),
+        Field::Value(state) => project_radio_room(record, context, state),
+        Field::Null => Ok(project_room_view(record, context, Field::Null)),
+        Field::Missing => Ok(project_room_view(record, context, Field::Missing)),
     }
 }
 
@@ -135,8 +131,8 @@ pub(crate) fn project_radio_room(
                 thread_id: active.thread_id.clone(),
                 through: safe(active.through)?,
                 turn_id: active.turn_id.clone(),
-                interrupt_requested: active.interrupt_requested,
-                question_continuation_planned: active.question_continuation_planned,
+                interrupt_requested: active.interrupt_requested.clone(),
+                question_continuation_planned: active.question_continuation_planned.clone(),
             })
         })
         .transpose()?;
@@ -148,25 +144,25 @@ pub(crate) fn project_radio_room(
         next: state.next.clone(),
         active,
         error: state.error.clone(),
-        direct: Some(Some(state.direct)),
-        seen: Some(Some(state.seen.clone())),
+        direct: Field::Value(state.direct),
+        seen: Field::Value(state.seen.clone()),
     };
     Ok(project_room_view(
         record,
         context,
-        Some(Some(bound_radio(radio))),
+        Field::Value(bound_radio(radio)),
     ))
 }
 
 fn project_room_view(
     record: &RoomRecord,
     context: &RoomViewContext,
-    radio: Option<Option<RadioProjection>>,
+    radio: Field<RadioProjection>,
 ) -> Option<RoomProjection> {
     let custom = record
         .custom_name
         .as_ref()
-        .and_then(|name| name.as_deref())
+        .map(String::as_str)
         .filter(|s| !s.is_empty());
     let mut local_members = record.local_members.clone();
     let mut peer_team_id = record.peer_team_id.clone();
@@ -193,13 +189,11 @@ fn project_room_view(
             if members.is_empty() || members.iter().any(|id| active_agent(context, id).is_none()) {
                 return None;
             }
-            local_members = Some(Some(members.clone()));
-            peer_label = Some(
-                federation
-                    .get("peerLabel")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-            );
+            local_members = Field::Value(members.clone());
+            peer_label = match federation.get("peerLabel").and_then(Value::as_str) {
+                Some(label) => Field::Value(label.to_owned()),
+                None => Field::Null,
+            };
             let name = custom.map(str::to_owned).or_else(|| {
                 federation
                     .get("name")
@@ -209,7 +203,7 @@ fn project_room_view(
             (members, name)
         }
         RoomKind::Broadcast => {
-            let root = record.root_id.as_ref()?.as_deref()?;
+            let root = record.root_id.as_ref()?.as_str();
             let members = context
                 .agents
                 .iter()
@@ -244,11 +238,11 @@ fn project_room_view(
                     .iter()
                     .find(|team| members.iter().all(|member| team.members.contains(member)))
                 {
-                    peer_team_id = Some(Some(team.id.clone()));
-                    peer_team_name = Some(Some(team.name.clone()));
+                    peer_team_id = Field::Value(team.id.clone());
+                    peer_team_name = Field::Value(team.name.clone());
                 } else {
-                    peer_team_id = None;
-                    peer_team_name = None;
+                    peer_team_id = Field::Missing;
+                    peer_team_name = Field::Missing;
                 }
             }
             (members, Some(custom.unwrap_or(&fallback).to_owned()))
@@ -263,8 +257,10 @@ fn project_room_view(
             sender: bounded(&message.sender, "sender"),
             created: message.created.clone(),
         });
-    let optional = |v: &Option<Option<String>>, field| {
-        v.as_ref().map(|v| v.as_deref().map(|s| bounded(s, field)))
+    let optional = |v: &Field<String>, field| match v {
+        Field::Missing => Field::Missing,
+        Field::Null => Field::Null,
+        Field::Value(v) => Field::Value(bounded(v, field)),
     };
     let bounded_members = |v: Vec<String>| {
         v.into_iter()
@@ -277,15 +273,22 @@ fn project_room_view(
         kind: record.kind,
         members: bounded_members(members),
         name: name.map(|s| bounded(&s, "name")),
-        last_message: Some(last_message),
-        local_members: local_members.map(|v| v.map(bounded_members)),
+        last_message: match last_message {
+            Some(v) => Field::Value(v),
+            None => Field::Null,
+        },
+        local_members: match local_members {
+            Field::Missing => Field::Missing,
+            Field::Null => Field::Null,
+            Field::Value(v) => Field::Value(bounded_members(v)),
+        },
         peer_team_id: optional(&peer_team_id, "peerTeamId"),
         peer_team_name: optional(&peer_team_name, "peerTeamName"),
         peer_label: optional(&peer_label, "peerLabel"),
         root_id: optional(&record.root_id, "rootId"),
         project_path: optional(&record.project_path, "projectPath"),
         updated: record.updated.clone(),
-        user_hidden: record.user_hidden,
+        user_hidden: record.user_hidden.clone(),
         radio,
     })
 }
@@ -304,13 +307,12 @@ fn bound_radio(mut state: RadioProjection) -> RadioProjection {
         active.event_id = bounded(&active.event_id, "eventId");
         active.agent_id = bounded(&active.agent_id, "agentId");
         active.thread_id = active.thread_id.take().map(|s| bounded(&s, "threadId"));
-        active.turn_id = active
-            .turn_id
-            .take()
-            .map(|s| s.map(|s| bounded(&s, "turnId")));
+        if let Field::Value(turn_id) = &mut active.turn_id {
+            *turn_id = bounded(turn_id, "turnId");
+        }
         active.identity.0 = active.identity.0.take().map(|s| bounded(&s, ""));
     }
-    if let Some(Some(seen)) = &mut state.seen {
+    if let Field::Value(seen) = &mut state.seen {
         for cursor in seen.values_mut() {
             cursor.identity.0 = cursor.identity.0.take().map(|s| bounded(&s, ""));
         }
@@ -351,7 +353,7 @@ mod tests {
             let actual =
                 serde_json::to_value(project_room(&record, &context).unwrap().unwrap()).unwrap();
             assert_eq!(actual, expected);
-            if let Some(Some(state)) = &record.radio {
+            if let Field::Value(state) = &record.radio {
                 let direct = serde_json::to_value(
                     project_radio_room(&record, &context, state)
                         .unwrap()

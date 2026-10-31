@@ -319,7 +319,7 @@ fn authorize_room_with(
         RoomKind::Broadcast => Some(
             room.root_id
                 .as_ref()
-                .and_then(|id| id.as_deref())
+                .map(String::as_str)
                 .unwrap_or_default(),
         ),
         RoomKind::Private => None,
@@ -530,7 +530,7 @@ fn send_as_actor(
     let mut room = if target == "broadcast" {
         let root = text(actor, "rootId")?;
         let mut room = RoomRecord::new(format!("broadcast:{root}"), RoomKind::Broadcast);
-        room.root_id = Some(Some(root.to_owned()));
+        room.root_id = studio_runtime_schema::queue_command::Field::Value(root.to_owned());
         room
     } else {
         let mut ids = vec![who, target];
@@ -634,8 +634,11 @@ fn send_as_actor(
         }
         room = previous;
     }
-    room.updated = Some(serde_json::Number::from_f64(now));
-    room.user_hidden = Some(Some(false));
+    room.updated = serde_json::Number::from_f64(now).map_or(
+        studio_runtime_schema::queue_command::Field::Null,
+        studio_runtime_schema::queue_command::Field::Value,
+    );
+    room.user_hidden = studio_runtime_schema::queue_command::Field::Value(false);
     studio_runtime_store::Table::new(tx).put(&room)?;
     // Python projects the room immediately after writing runtime_rooms, before
     // it enqueues recipient events. Keep the shared global sync sequence in
@@ -916,7 +919,7 @@ pub(super) fn peers(
             else {
                 continue;
             };
-            rooms.push(json!({"id":room.id,"kind":room.kind,"members":room.members,"rootId":room.root_id.flatten(),"peerTeamId":room.peer_team_id.flatten(),"peerTeamName":room.peer_team_name.flatten(),"federated":null,"peerId":null,"peerLabel":room.peer_label.flatten(),"localMembers":room.local_members.flatten()}));
+            rooms.push(json!({"id":room.id,"kind":room.kind,"members":room.members,"rootId":room.root_id.as_ref(),"peerTeamId":room.peer_team_id.as_ref(),"peerTeamName":room.peer_team_name.as_ref(),"federated":null,"peerId":null,"peerLabel":room.peer_label.as_ref(),"localMembers":room.local_members.as_ref()}));
         }
     }
     rooms.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));

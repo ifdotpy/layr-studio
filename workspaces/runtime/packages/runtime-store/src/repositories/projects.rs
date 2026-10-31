@@ -406,7 +406,7 @@ impl ProjectsRepository {
             return Ok(());
         }
         room.members = Some(live.clone());
-        let project_path = room.project_path.as_ref().and_then(|path| path.as_deref());
+        let project_path = room.project_path.as_ref().map(String::as_str);
         let teams = if let Some(path) = project_path {
             Self::get(transaction, path)?
                 .filter(|(_, project)| {
@@ -429,11 +429,21 @@ impl ProjectsRepository {
                 })
             })
         }) {
-            room.peer_team_id = Some(team.get("id").and_then(Value::as_str).map(str::to_owned));
-            room.peer_team_name = Some(team.get("name").and_then(Value::as_str).map(str::to_owned));
+            room.peer_team_id = team
+                .get("id")
+                .and_then(Value::as_str)
+                .map_or(studio_runtime_schema::queue_command::Field::Null, |s| {
+                    studio_runtime_schema::queue_command::Field::Value(s.to_owned())
+                });
+            room.peer_team_name = team
+                .get("name")
+                .and_then(Value::as_str)
+                .map_or(studio_runtime_schema::queue_command::Field::Null, |s| {
+                    studio_runtime_schema::queue_command::Field::Value(s.to_owned())
+                });
         } else {
-            room.peer_team_id = None;
-            room.peer_team_name = None;
+            room.peer_team_id = studio_runtime_schema::queue_command::Field::Missing;
+            room.peer_team_name = studio_runtime_schema::queue_command::Field::Missing;
         }
         SyncDocumentsRepository::put_entity(transaction, "room", id, room, false)?;
         Ok(())

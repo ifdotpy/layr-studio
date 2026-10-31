@@ -80,11 +80,11 @@ mod tests {
             .unwrap();
         assert_eq!(first, second);
         let room: RoomRecord = serde_json::from_str(&first).unwrap();
+        assert_eq!(room.custom_name.as_ref().map(String::as_str), Some("new"));
         assert_eq!(
-            room.custom_name.as_ref().and_then(|name| name.as_deref()),
-            Some("new")
+            room.user_hidden,
+            studio_runtime_schema::queue_command::Field::Value(false)
         );
-        assert_eq!(room.user_hidden, Some(Some(false)));
         assert!(!first.contains("extra"));
     }
 

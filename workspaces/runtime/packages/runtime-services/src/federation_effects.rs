@@ -551,11 +551,18 @@ pub(crate) fn save_room(tx: &Transaction<'_>, peer: &str, room: &Value) -> Resul
             .map(str::to_owned)
             .collect()
     });
-    standard.updated = Some(room["updated"].as_number().cloned());
+    standard.updated = room["updated"].as_number().cloned().map_or(
+        studio_runtime_schema::queue_command::Field::Null,
+        studio_runtime_schema::queue_command::Field::Value,
+    );
     standard.name = room["name"].as_str().map(str::to_owned);
     standard.federation = Some(true);
     standard.peer_id = room["peerId"].as_str().map(str::to_owned);
-    standard.peer_label = Some(room["peerLabel"].as_str().map(str::to_owned));
+    standard.peer_label = room["peerLabel"]
+        .as_str()
+        .map_or(studio_runtime_schema::queue_command::Field::Null, |s| {
+            studio_runtime_schema::queue_command::Field::Value(s.to_owned())
+        });
     studio_runtime_store::Table::new(tx).put(&standard)?;
     let directory = crate::sync_entity_context::RoomDirectory::load(tx)?;
     let context = directory.for_room_identity(tx, id, true, true)?;

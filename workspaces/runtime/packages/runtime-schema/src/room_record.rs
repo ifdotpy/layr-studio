@@ -1,4 +1,5 @@
 //! Stored room fields shared by room writers and projections.
+use crate::queue_command::Field;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -115,12 +116,15 @@ pub struct Active {
     pub identity: RoomRadioIdentity,
     #[schemars(range(max = crate::shared_values::MAX_SAFE_INTEGER))]
     pub through: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub turn_id: Option<Option<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub interrupt_requested: Option<Option<bool>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub question_continuation_planned: Option<Option<bool>>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub turn_id: Field<String>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<bool>")]
+    pub interrupt_requested: Field<bool>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<bool>")]
+    pub question_continuation_planned: Field<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(with = "InterruptState")]
     pub interrupt_state: Option<InterruptState>,
@@ -209,9 +213,11 @@ impl<'de> Deserialize<'de> for Active {
             thread_id: required(&mut fields, "threadId")?,
             identity: required(&mut fields, "identity")?,
             through: required_safe(&mut fields, "through")?,
-            turn_id: optional(&mut fields, "turnId")?,
-            interrupt_requested: optional(&mut fields, "interruptRequested")?,
-            question_continuation_planned: optional(&mut fields, "questionContinuationPlanned")?,
+            turn_id: optional(&mut fields, "turnId")?.unwrap_or(Field::Missing),
+            interrupt_requested: optional(&mut fields, "interruptRequested")?
+                .unwrap_or(Field::Missing),
+            question_continuation_planned: optional(&mut fields, "questionContinuationPlanned")?
+                .unwrap_or(Field::Missing),
             interrupt_state: optional(&mut fields, "interruptState")?,
             extra: fields,
         })
@@ -284,78 +290,48 @@ pub struct RoomRecord {
     )]
     #[schemars(with = "Vec<String>")]
     pub members: Option<Vec<String>>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub local_members: Option<Option<Vec<String>>>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub peer_team_id: Option<Option<String>>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub peer_team_name: Option<Option<String>>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub root_id: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<Vec<String>>")]
+    pub local_members: Field<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub peer_team_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub peer_team_name: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub root_id: Field<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub project_path: Option<Option<String>>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub custom_name: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub project_path: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub custom_name: Field<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created: Option<serde_json::Number>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub updated: Option<Option<serde_json::Number>>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub user_hidden: Option<Option<bool>>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<serde_json::Number>")]
+    pub updated: Field<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<bool>")]
+    pub user_hidden: Field<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_deleted_at: Option<serde_json::Number>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub radio: Option<Option<Radio>>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<Radio>")]
+    pub radio: Field<Radio>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub federation: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub peer_id: Option<String>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub peer_label: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub peer_label: Field<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<RoomStatus>,
 }
@@ -391,31 +367,25 @@ impl RoomRecord {
             id,
             kind,
             members: None,
-            local_members: None,
-            peer_team_id: None,
-            peer_team_name: None,
-            root_id: None,
+            local_members: Field::Missing,
+            peer_team_id: Field::Missing,
+            peer_team_name: Field::Missing,
+            root_id: Field::Missing,
             project_id: None,
-            project_path: None,
-            custom_name: None,
+            project_path: Field::Missing,
+            custom_name: Field::Missing,
             name: None,
             created: None,
-            updated: None,
-            user_hidden: None,
+            updated: Field::Missing,
+            user_hidden: Field::Missing,
             project_deleted_at: None,
-            radio: None,
+            radio: Field::Missing,
             federation: None,
             peer_id: None,
-            peer_label: None,
+            peer_label: Field::Missing,
             status: None,
         }
     }
-}
-
-fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
-    d: D,
-) -> Result<Option<Option<T>>, D::Error> {
-    Option::<T>::deserialize(d).map(Some)
 }
 
 fn present_nonnull<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(

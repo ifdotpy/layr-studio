@@ -17,6 +17,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use studio_runtime_schema::queue_command::Field;
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, ProjectsRepository, QueueEvent, QueueEventId,
     QueueEventRepository, RuntimeStore, SyncDocumentsRepository, system_reads as records,
@@ -169,25 +170,19 @@ pub async fn manage(store: Arc<RuntimeStore>, body: &Value) -> Result<RadioReply
                         .map(str::to_owned)
                         .collect(),
                 );
-                record.project_path = Some(Some(path.clone()));
-                record.custom_name = Some(Some(format!(
+                record.project_path = Field::Value(path.clone());
+                record.custom_name = Field::Value(format!(
                     "{} · Shared chat",
                     team_row["name"].as_str().unwrap_or_default()
-                )));
+                ));
                 record.created = serde_json::Number::from_f64(now);
-                record.user_hidden = Some(Some(false));
+                record.user_hidden = Field::Value(false);
                 Room {
                     record,
                     radio: Radio::new(team, false),
                 }
             };
-            if room
-                .record
-                .project_path
-                .as_ref()
-                .and_then(|value| value.as_deref())
-                != Some(path.as_str())
-            {
+            if room.record.project_path.as_ref().map(String::as_str) != Some(path.as_str()) {
                 return Err(ProjectsError::Invalid(
                     "The shared chat belongs to another project",
                 ));
@@ -499,10 +494,10 @@ pub async fn create_with(
                 studio_runtime_schema::room_record::RoomKind::Private,
             );
             record.members = Some(ids.iter().map(|id| id.0.clone()).collect());
-            record.project_path = Some(Some(path));
-            record.custom_name = Some(Some(name));
+            record.project_path = Field::Value(path);
+            record.custom_name = Field::Value(name);
             record.created = serde_json::Number::from_f64(now);
-            record.user_hidden = Some(Some(false));
+            record.user_hidden = Field::Value(false);
             let mut room = Room {
                 record,
                 radio: Radio::new(namespace.to_string(), true),
