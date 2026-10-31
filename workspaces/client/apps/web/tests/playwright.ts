@@ -417,6 +417,15 @@ export function protocol3SseEvent(name: string, value: unknown) {
   return `event: ${name}\ndata: ${JSON.stringify(value)}\n\n`;
 }
 
+/** The `session` event with the full SyncSessionEvent shape the server sends. */
+export function syncSessionSse(sessionId: string, workspaceId: string) {
+  return protocol3SseEvent("session", {
+    sessionId,
+    routes: [],
+    workspaceId,
+  } satisfies import("../src/generated/api.ts").components["schemas"]["SyncSessionEvent"]);
+}
+
 type FixtureScope = {
   children: Set<ChildProcess>;
   scratchDirs: Map<ChildProcess, string>;
@@ -2337,13 +2346,7 @@ export function handleEntitySyncFixtureRequest(
       "X-Accel-Buffering": "no",
     });
     const sessionId = randomUUID();
-    response.write(
-      protocol3SseEvent("session", {
-        sessionId,
-        routes: [],
-        workspaceId: identity.workspaceId,
-      } satisfies import("../src/generated/api.ts").components["schemas"]["SyncSessionEvent"]),
-    );
+    response.write(syncSessionSse(sessionId, identity.workspaceId));
     response.write(apiSchemaHandshakeSse());
 
     const writeFrame = (
