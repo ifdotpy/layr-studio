@@ -331,7 +331,8 @@ async fn project_deletion_registry_only_remove_allows_fresh_creation() {
     let path = project["id"].as_str().expect("id");
     let response = studio_runtime_services::projects::write(
         store.clone(),
-        serde_json::from_value(json!({"action":"remove","path":path})).expect("project request"),
+        serde::Deserialize::deserialize(json!({"action":"remove","path":path}))
+            .expect("project request"),
         "default".into(),
         vec![],
     )

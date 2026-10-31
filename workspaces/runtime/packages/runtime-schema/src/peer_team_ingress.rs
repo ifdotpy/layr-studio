@@ -312,11 +312,12 @@ impl RadioManage {
 #[cfg(test)]
 mod tests {
     use super::PeerTeamRequest;
+    use serde::Deserialize;
 
     #[test]
     fn send_rounds_are_bounded_and_non_nullable() {
         let base = serde_json::json!({"action":"radio","radio_action":"send","path":"p","team_id":"t","request_id":"r","expected_revision":1,"text":"hi"});
-        assert!(serde_json::from_value::<PeerTeamRequest>(base.clone()).is_ok());
+        assert!(PeerTeamRequest::deserialize(base.clone()).is_ok());
         for rounds in [
             serde_json::json!(null),
             serde_json::json!(0),
@@ -324,7 +325,7 @@ mod tests {
         ] {
             let mut bad = base.clone();
             bad["rounds"] = rounds;
-            assert!(serde_json::from_value::<PeerTeamRequest>(bad).is_err());
+            assert!(PeerTeamRequest::deserialize(bad).is_err());
         }
     }
 }
