@@ -355,7 +355,11 @@ impl SignedRequest {
                 body.origin
                     .set_normalized(normalize_origin(body.origin.as_str())?);
             }
-            _ => {}
+            SignedBody::Pair(_)
+            | SignedBody::Rename(_)
+            | SignedBody::Management(_)
+            | SignedBody::Orchestration(_)
+            | SignedBody::Other => {}
         }
         Ok(request)
     }
@@ -399,48 +403,71 @@ impl SignedRequest {
     pub fn invite_id(&self) -> &str {
         match &self.body {
             SignedBody::Pair(body) => body.invite_id.as_str(),
-            _ => "",
+            SignedBody::Auto(_)
+            | SignedBody::Rename(_)
+            | SignedBody::Management(_)
+            | SignedBody::Orchestration(_)
+            | SignedBody::Other => "",
         }
     }
     pub fn token(&self) -> &str {
         match &self.body {
             SignedBody::Pair(body) => body.token.as_str(),
-            _ => "",
+            SignedBody::Auto(_)
+            | SignedBody::Rename(_)
+            | SignedBody::Management(_)
+            | SignedBody::Orchestration(_)
+            | SignedBody::Other => "",
         }
     }
     pub fn origin(&self) -> &str {
         match &self.body {
             SignedBody::Pair(body) => body.origin.value().map(|v| v.as_str()).unwrap_or_default(),
             SignedBody::Auto(body) => body.origin.as_str(),
-            _ => "",
+            SignedBody::Rename(_)
+            | SignedBody::Management(_)
+            | SignedBody::Orchestration(_)
+            | SignedBody::Other => "",
         }
     }
     pub fn public_key(&self) -> &str {
         match &self.body {
             SignedBody::Pair(body) => body.public_key.as_str(),
             SignedBody::Auto(body) => body.public_key.as_str(),
-            _ => "",
+            SignedBody::Rename(_)
+            | SignedBody::Management(_)
+            | SignedBody::Orchestration(_)
+            | SignedBody::Other => "",
         }
     }
     pub fn label(&self) -> &str {
         match &self.body {
             SignedBody::Pair(body) => body.label.as_str(),
             SignedBody::Auto(body) => body.label.as_str(),
-            _ => "",
+            SignedBody::Rename(_)
+            | SignedBody::Management(_)
+            | SignedBody::Orchestration(_)
+            | SignedBody::Other => "",
         }
     }
     fn pairing_identity(&self) -> &str {
         match &self.body {
             SignedBody::Pair(body) => body.client_id.as_str(),
             SignedBody::Auto(body) => body.server_id.as_str(),
-            _ => "",
+            SignedBody::Rename(_)
+            | SignedBody::Management(_)
+            | SignedBody::Orchestration(_)
+            | SignedBody::Other => "",
         }
     }
     fn pairing_kind(&self) -> &str {
         match &self.body {
             SignedBody::Pair(body) => body.kind.as_str(),
             SignedBody::Auto(_) => "server",
-            _ => "",
+            SignedBody::Rename(_)
+            | SignedBody::Management(_)
+            | SignedBody::Orchestration(_)
+            | SignedBody::Other => "",
         }
     }
     pub fn target(&self) -> &str {

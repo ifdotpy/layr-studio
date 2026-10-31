@@ -61,7 +61,13 @@ pub async fn manage_with_origin_and_whoami(
         FederationRequest::AcceptPeer { invitation } => {
             return accept_peer(store, invitation, public_origin).await;
         }
-        _ => {}
+        FederationRequest::Status {}
+        | FederationRequest::SetEnabled { .. }
+        | FederationRequest::ApprovePeer { .. }
+        | FederationRequest::RevokePeer { .. }
+        | FederationRequest::RoomOptions { .. }
+        | FederationRequest::CreateRoom { .. }
+        | FederationRequest::ApproveRoom { .. } => {}
     }
     let body = body.clone();
     store
@@ -84,7 +90,9 @@ pub async fn manage_with_origin_and_whoami(
                 FederationRequest::CreateRoom { .. } | FederationRequest::ApproveRoom { .. } => {
                     FederationRepository::room_action(tx, &body)?
                 }
-                _ => {
+                FederationRequest::Status {}
+                | FederationRequest::CreateInvite { .. }
+                | FederationRequest::AcceptPeer { .. } => {
                     return Err(FederationError::Refused(
                         "unsupported local federation action".to_owned(),
                     ));

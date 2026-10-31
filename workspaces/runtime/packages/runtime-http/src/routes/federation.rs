@@ -335,11 +335,40 @@ mod ingress_tests {
             ))))
             .body(Body::from(r#"{"action":"set_enabled","enabled":true}"#))
             .unwrap();
-        let response = app.oneshot(request).await.unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let snapshot = studio_runtime_services::federation::snapshot(&store)
             .await
             .unwrap();
         assert_eq!(snapshot["enabled"], true);
+        store.transaction(|tx| {
+            tx.execute("INSERT INTO runtime_federation_rooms(id,record) VALUES(?1,?2)", rusqlite::params!["room", serde_json::json!({"id":"room", "peerId":"peer", "peerLabel":"Peer", "name":"Room", "status":"pending", "localMembers":[], "remoteMembers":[], "shareNames":false, "shareStatus":false, "created":1}).to_string()])?;
+            Ok(())
+        }).await.unwrap();
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/federation")
+            .header("host", "127.0.0.1:12345")
+            .header("content-type", "application/json")
+            .header("x-canvas-token", "token")
+            .header("x-canvas-workspace", "workspace")
+            .header(
+                crate::schema::API_SCHEMA_HASH_HEADER,
+                crate::schema::api_schema_hash(),
+            )
+            .extension(ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                54321,
+            ))))
+            .body(Body::from(
+                r#"{"action":"room_options","room_id":"room","disclosure":{"shareNames":true}}"#,
+            ))
+            .unwrap();
+        assert_eq!(app.oneshot(request).await.unwrap().status(), StatusCode::OK);
+        let snapshot = studio_runtime_services::federation::snapshot(&store)
+            .await
+            .unwrap();
+        assert_eq!(snapshot["rooms"][0]["shareNames"], true);
+        assert_eq!(snapshot["rooms"][0]["shareStatus"], false);
     }
 }
