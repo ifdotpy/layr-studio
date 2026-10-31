@@ -1268,11 +1268,9 @@ mod tests {
         .expect("lead lookup succeeds")
         .expect("lead exists");
         lead.auto_wake = Some(true);
-        lead.extra.insert("profileId".into(), json!("profile-1"));
-        lead.extra.insert(
-            "profileInstructions".into(),
-            json!("Use the project profile."),
-        );
+        lead.profile_id = studio_runtime_schema::queue_command::Field::Value("profile-1".into());
+        lead.profile_instructions =
+            studio_runtime_schema::queue_command::Field::Value("Use the project profile.".into());
         studio_runtime_store::AgentRepository::put(&connection, &lead)
             .expect("profile fields persist");
 
@@ -1298,10 +1296,13 @@ mod tests {
         )
         .expect("lead lookup succeeds after write")
         .expect("lead remains");
-        assert_eq!(saved.extra.get("profileId"), Some(&json!("profile-1")));
         assert_eq!(
-            saved.extra.get("profileInstructions"),
-            Some(&json!("Use the project profile."))
+            saved.profile_id.value().map(String::as_str),
+            Some("profile-1")
+        );
+        assert_eq!(
+            saved.profile_instructions.value().map(String::as_str),
+            Some("Use the project profile.")
         );
     }
 

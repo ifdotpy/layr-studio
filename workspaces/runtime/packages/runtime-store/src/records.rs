@@ -386,6 +386,26 @@ pub struct AgentRecord {
     pub max_agents_explicit: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_mode_supported: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub prompt: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub profile_id: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub profile_instructions: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub effort: studio_runtime_schema::queue_command::Field<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree_ready: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -757,6 +777,10 @@ impl AgentRecord {
             manual_name: None,
             max_agents_explicit: None,
             agent_mode_supported: None,
+            prompt: Default::default(),
+            profile_id: Default::default(),
+            profile_instructions: Default::default(),
+            effort: Default::default(),
             worktree_ready: None,
             approval_policy: None,
             native_response_turn: None,
@@ -2740,6 +2764,25 @@ mod tests {
             let valid = raw.replace("\"false\"", "false");
             let record: AgentRecord = serde_json::from_str(&valid).unwrap();
             assert_eq!(record.value()[field], false, "{field}");
+        }
+    }
+
+    #[test]
+    fn agent_text_settings_are_strings_with_distinct_null_and_absence() {
+        for field in ["prompt", "profileId", "profileInstructions", "effort"] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"{field}":42}}"#
+            );
+            assert!(
+                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                "{field}"
+            );
+            let null = raw.replace("42", "null");
+            let record: AgentRecord = serde_json::from_str(&null).unwrap();
+            assert_eq!(record.value().get(field), Some(&Value::Null), "{field}");
+            let missing = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0}"#;
+            let record: AgentRecord = serde_json::from_str(missing).unwrap();
+            assert!(record.value().get(field).is_none(), "{field}");
         }
     }
 

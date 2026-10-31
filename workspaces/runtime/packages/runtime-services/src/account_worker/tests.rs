@@ -2980,8 +2980,8 @@ async fn scenario_loaded_thread_follow_up_starts_the_turn_directly(
         .run(move |s| async move {
             scheduler::lifecycle_transaction_with(s.as_ref(), move |tx| {
                 let mut row = AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
-                row.extra
-                    .insert("profileInstructions".into(), json!("changed profile"));
+                row.profile_instructions =
+                    studio_runtime_schema::queue_command::Field::Value("changed profile".into());
                 AgentRepository::put(tx, &row)?;
                 Ok(())
             })
