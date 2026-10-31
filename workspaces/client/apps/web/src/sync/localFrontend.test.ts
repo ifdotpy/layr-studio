@@ -6,10 +6,10 @@ describe("local frontend", () => {
     expect(frontendIsLocal("local", false, "127.0.0.1")).toBe(true);
     expect(frontendIsLocal("local", false, "studio-abc.localhost")).toBe(true);
     expect(frontendIsLocal("local", false, "remote-fixture.localhost")).toBe(
-      false,
+      true,
     );
     expect(frontendIsLocal("local", true, "")).toBe(true);
     expect(frontendIsLocal("local", false, "phone.example.ts.net")).toBe(false);
-    expect(frontendIsLocal("serverabc", true, "localhost")).toBe(false);
+    expect(frontendIsLocal("serverabc", true, "localhost")).toBe(true);
   });
 });

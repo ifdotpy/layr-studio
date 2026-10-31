@@ -379,7 +379,7 @@ A server never decodes data in a form that it does not know.
 ### Frontend cache
 
 - The IndexedDB uses are the thin cache, the unsent input buffer, and the device key.
-- A frontend on the same machine as its server keeps no cache.
+- Native and loopback frontends keep no cache; a browser on the server machine using a LAN address may cache.
 - A remote frontend (phone, UI-only computer) keeps one IndexedDB record for each
   subscription: its data and its cursor in one value. It writes at most every 5 seconds
   and when the page becomes hidden, after the UI has shown the data. RxDB and Dexie are not used.

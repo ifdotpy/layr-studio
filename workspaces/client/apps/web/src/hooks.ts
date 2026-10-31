@@ -1,4 +1,5 @@
 import { useSubscription } from "./sync/subscriptions";
+import { useCacheAfterPaint } from "./sync/subscriptions/useCacheAfterPaint";
 import { SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS } from "./generated/sharedValues";
 import {
   useServerApi,
@@ -55,6 +56,7 @@ import {
   retainArray,
   retainUsageAccounts,
 } from "./hooks/snapshotSelection";
+const STATE_REF = { kind: "state" } as const;
 // Event callbacks see the latest committed selection without invalidating
 // consumers when another chat changes. Never call these during render.
 export function useCommittedCallback<Args extends unknown[], Result>(
@@ -201,6 +203,7 @@ export function useSnapshot(
       },
     };
   }, [data, created, scope]);
+  useCacheAfterPaint(STATE_REF, visibleData);
   const generation = useRef(0);
   const replicated = useRef(false);
   const sessionToken = useRef("");

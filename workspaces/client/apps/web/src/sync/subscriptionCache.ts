@@ -4,12 +4,15 @@ import type { LocalCollection, Row } from "./localCollection";
 import { subscriptionKey, type ResourceRef } from "./subscriptions/contracts";
 import { SUBSCRIPTION_ENTITY_SCOPES } from "../generated/subscriptionEntities";
 import { cursorDocumentId, parseAppliedCursor } from "./subscriptions/cursors";
+import { parseEntityPayload } from "./entityProjection";
 
 /** Minimum delay between scheduled cache writes, in milliseconds. */
 export const SUBSCRIPTION_CACHE_WRITE_MS = 5_000;
 const VERSION = 1;
 /** Only these subscriptions have a cursor and a resumable local projection. */
 export function cacheableSubscription(ref: ResourceRef) {
+  if (ref.kind === "tasks" || ref.kind === "monitors" || ref.kind === "work")
+    return false;
   return (
     ref.kind in SUBSCRIPTION_ENTITY_SCOPES ||
     ref.kind === "transcript" ||
@@ -19,6 +22,7 @@ export function cacheableSubscription(ref: ResourceRef) {
 type Cursor = components["schemas"]["SubscriptionCursor"];
 type RecordValue = {
   version: typeof VERSION;
+  contractHash: typeof API_SCHEMA_HASH;
   kind: ResourceRef["kind"];
   cursor: Cursor;
   data: Row[];
@@ -34,11 +38,19 @@ function decode(
   ref: ResourceRef,
   workspace: string,
 ): RecordValue | undefined {
+  const scopes: Record<
+    string,
+    { collections: readonly string[]; idField: string | null }
+  > = SUBSCRIPTION_ENTITY_SCOPES;
+  const scope = scopes[ref.kind];
+  const selector: Readonly<Record<string, unknown>> = ref;
   if (
     !value ||
     typeof value !== "object" ||
     !("version" in value) ||
     value.version !== VERSION ||
+    !("contractHash" in value) ||
+    value.contractHash !== API_SCHEMA_HASH ||
     !("kind" in value) ||
     value.kind !== ref.kind ||
     !("cursor" in value) ||
@@ -63,7 +75,31 @@ function decode(
         Number.isSafeInteger(row.seq) &&
         row.seq >= 0 &&
         "payload" in row &&
-        typeof row.payload === "string",
+        typeof row.payload === "string" &&
+        (!row.id.startsWith("entity:") ||
+          (() => {
+            const parts = row.id.split(":");
+            const collection = parts[1];
+            const id = parts.slice(2).join(":");
+            if (
+              !scope ||
+              !collection ||
+              !id ||
+              !scope.collections.includes(collection) ||
+              (scope.idField && selector[scope.idField] !== id) ||
+              !("_deleted" in row) ||
+              typeof row._deleted !== "boolean"
+            )
+              return false;
+            if (row._deleted) return true;
+            const entity =
+              "entity" in row ? parseEntityPayload(row.entity) : null;
+            return (
+              entity !== null &&
+              entity.collection === collection &&
+              entity.id === id
+            );
+          })()),
     )
   )
     return undefined;
@@ -77,7 +113,7 @@ export function createSubscriptionCache(
   workspace: string,
 ) {
   const key = (ref: ResourceRef) =>
-    JSON.stringify([workspace, API_SCHEMA_HASH, subscriptionKey(ref)]);
+    JSON.stringify([workspace, subscriptionKey(ref)]);
   const pending = new Map<string, RecordValue>();
   const loaded = new Map<string, Promise<Cursor | undefined>>();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -119,6 +155,21 @@ export function createSubscriptionCache(
           );
           if (
             !value ||
+            !value.data.every(
+              (row) =>
+                row.id === awaitCursorId ||
+                (ref.kind === "state" &&
+                  [
+                    "state:entities:checkpoint",
+                    "state:entities:ready",
+                    "state:entities:complete",
+                  ].includes(row.id)) ||
+                (ref.kind === "transcript" &&
+                  (row.id === `transcript:${ref.agentId}` ||
+                    row.id.startsWith(`transcript:item:${ref.agentId}:`))) ||
+                (ref.kind in SUBSCRIPTION_ENTITY_SCOPES &&
+                  row.id.startsWith("entity:")),
+            ) ||
             !cursorRow ||
             cursorRow._deleted ||
             (ref.kind === "state"
@@ -152,10 +203,15 @@ export function createSubscriptionCache(
       return result;
     },
     save(ref: ResourceRef, cursor: Cursor, data: Row[]) {
-      pending.set(key(ref), { version: VERSION, kind: ref.kind, cursor, data });
+      pending.set(key(ref), {
+        version: VERSION,
+        contractHash: API_SCHEMA_HASH,
+        kind: ref.kind,
+        cursor,
+        data,
+      });
       timer ??= setTimeout(() => void flush(), SUBSCRIPTION_CACHE_WRITE_MS);
     },
-    flush,
     stop() {
       clearTimeout(timer);
       if (typeof document !== "undefined")
@@ -187,34 +243,15 @@ export async function subscriptionRows(
     {
       collections: readonly string[];
       idField: string | null;
-      agentField: string | null;
-      includeTeamMembers: boolean;
     }
   > = SUBSCRIPTION_ENTITY_SCOPES;
   const scope = scopes[ref.kind];
   if (!scope) return [];
   const selector: Readonly<Record<string, unknown>> = ref;
-  const agent = scope.agentField ? selector[scope.agentField] : undefined;
-  const agents = new Set<unknown>([agent]);
-  if (agent && scope.includeTeamMembers)
-    for (const row of rows) {
-      if (
-        row.entity?.collection === "agentSummary" &&
-        row.entity.value.rootId === agent
-      )
-        agents.add(row.entity.id);
-    }
   return rows.filter((row) => {
     if (
       row.id === cursorId ||
       (ref.kind === "state" && row.id.startsWith("state:entities:"))
-    )
-      return true;
-    if (
-      agent &&
-      scope.includeTeamMembers &&
-      row.entity?.collection === "agentSummary" &&
-      row.entity.value.rootId === agent
     )
       return true;
     const collectionName = row.id.split(":")[1];
@@ -228,11 +265,6 @@ export async function subscriptionRows(
       row.id !== `entity:${collectionName}:${selector[scope.idField]}`
     )
       return false;
-    if (!agent || !row.entity) return true;
-    const value = row.entity.value;
-    return (
-      ("agent" in value && agents.has(value.agent)) ||
-      ("rootId" in value && value.rootId === agent)
-    );
+    return true;
   });
 }

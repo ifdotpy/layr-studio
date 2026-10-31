@@ -21,26 +21,21 @@ type ServerSubscriptionOptions = {
   owner: { id: string; origin: string };
   /** The native core owns this server's stream and projections: no browser storage, locks or channels. */
   nativeCore?: () => boolean;
-  cacheApplied?: (refs: readonly import("./contracts").ResourceRef[]) => void;
 };
 
 /** The server service supplies ownership and cache access, never stream details. */
 export function createServerSubscriptions(options: ServerSubscriptionOptions) {
-  const { api, tokenRates, sync, owner, nativeCore, cacheApplied } = options;
+  const { api, tokenRates, sync, owner, nativeCore } = options;
   const transport = createResourceEvents({
     api,
     tokenRates,
     sync: {
       syncDatabase: () => sync().syncDatabase(),
-      persistResourceEntityChanges: async (...args) => {
-        await sync().persistResourceEntityChanges(...args);
-        if (cacheApplied) setTimeout(() => cacheApplied(args[0].resources), 0);
-      },
+      persistResourceEntityChanges: (...args) =>
+        sync().persistResourceEntityChanges(...args),
       readSubscriptionCursor: (ref) => sync().readSubscriptionCursor(ref),
-      persistStagedEntityTransfer: async (...args) => {
-        await sync().persistStagedEntityTransfer(...args);
-        if (cacheApplied) setTimeout(() => cacheApplied([args[0].resource]), 0);
-      },
+      persistStagedEntityTransfer: (...args) =>
+        sync().persistStagedEntityTransfer(...args),
     },
     // The local server's requests use the native client there (serverServices.ts).
     transferStorage: () =>

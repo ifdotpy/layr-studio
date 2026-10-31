@@ -82,9 +82,6 @@ export function createServerServices(server: StudioServer) {
       sync: () => sync,
       owner: transport.owner,
       nativeCore: localNativeClient,
-      cacheApplied: (refs) => {
-        for (const ref of refs) void sync.cacheSubscription(ref);
-      },
     });
     sync = createSyncClient({
       api,
