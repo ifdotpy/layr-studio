@@ -1136,19 +1136,20 @@ fn publish_work_metadata(
     for field in ["results", "decisions", "releases"] {
         detail[field] = json!([]);
     }
-    let refusal = crate::work_write::current_submission_refusal(transaction, record).map_err(
-        |error| match error {
-            crate::work_write::WorkWriteError::Expired => {
-                studio_runtime_store::request_results::RequestResultError::Expired.into()
+    let refusal =
+        crate::work_write::current_submission_refusal(transaction, record).map_err(|error| {
+            match error {
+                crate::work_write::WorkWriteError::Expired => {
+                    studio_runtime_store::request_results::RequestResultError::Expired.into()
+                }
+                crate::work_write::WorkWriteError::Store(error) => error,
+                other @ crate::work_write::WorkWriteError::Event(_)
+                | other @ crate::work_write::WorkWriteError::NotImplemented(_)
+                | other @ crate::work_write::WorkWriteError::PreparationWorker => {
+                    StoreError::SchemaValidation(other.to_string())
+                }
             }
-            crate::work_write::WorkWriteError::Store(error) => error,
-            other @ crate::work_write::WorkWriteError::Event(_)
-            | other @ crate::work_write::WorkWriteError::NotImplemented(_)
-            | other @ crate::work_write::WorkWriteError::PreparationWorker => {
-                StoreError::SchemaValidation(other.to_string())
-            }
-        },
-    )?;
+        })?;
     detail["submissionRefusal"] = refusal;
     put_projection(transaction, "workDetail", id, detail, false, validate)
 }

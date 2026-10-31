@@ -297,11 +297,10 @@ async fn work_detail_refusal_is_derived_on_every_publish() {
     let derived = |store: &studio_runtime_store::RuntimeStore| {
         store
             .test_read_transaction(move |tx| {
-                let raw: String = tx.query_row(
-                    "SELECT record FROM runtime_work WHERE id=?1",
-                    [id],
-                    |row| row.get(0),
-                )?;
+                let raw: String =
+                    tx.query_row("SELECT record FROM runtime_work WHERE id=?1", [id], |row| {
+                        row.get(0)
+                    })?;
                 let record: Value = serde_json::from_str(&raw).expect("stored work record");
                 Ok(crate::work_write::current_submission_refusal(tx, &record)
                     .expect("derived refusal"))
@@ -321,8 +320,18 @@ async fn work_detail_refusal_is_derived_on_every_publish() {
     assert_eq!(published(&store)["failedSubmits"], 0);
     assert_eq!(published(&store), derived(&store));
     // A routine write must publish the same derived value, not a copy of the prior one.
-    write(&store, "UPDATE runtime_work SET record=json_set(record,'$.title','Routine write') WHERE id=?1", vec![id.into()]).await;
-    assert_eq!(client_entity(&store, "workDetail", id).expect("routine detail").1["title"], "Routine write");
+    write(
+        &store,
+        "UPDATE runtime_work SET record=json_set(record,'$.title','Routine write') WHERE id=?1",
+        vec![id.into()],
+    )
+    .await;
+    assert_eq!(
+        client_entity(&store, "workDetail", id)
+            .expect("routine detail")
+            .1["title"],
+        "Routine write"
+    );
     assert_eq!(published(&store), derived(&store));
 }
 
