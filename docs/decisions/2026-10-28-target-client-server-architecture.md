@@ -293,8 +293,12 @@ history, but they do not control state.
 
 The adapter translates commands to the provider protocol and reports its capabilities:
 steer, rewind, fork, model change, effort, compaction, approvals. The UI shows only the
-controls in that list. The queue, the steer queue (`unappliedSteers`), and rollback move
-from the Claude bridge to the server.
+controls in that list. The queue, the steer requeue decision, and rollback are on the
+server. The Claude bridge keeps only the SDK input stream of one query. At the end of a
+turn it reports `unappliedSteers`, the steer inputs that the SDK proves it did not read,
+because only the bridge can read the SDK input queue and transcript. The server requeues
+such an input once. The bridge keeps its check that a repeated steer id carries the same
+content.
 
 ### Two streams to the UI
 
