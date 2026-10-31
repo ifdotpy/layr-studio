@@ -41,6 +41,50 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut analysis = analyzer.analyze()?;
     analysis
         .schemas
+        .get_mut("ResourceRef")
+        .ok_or("missing resource identity schema")?
+        .schema_type = SchemaType::Primitive {
+        rust_type: "studio_runtime_schema::resource_ref::ResourceRef".to_owned(),
+        serde_with: None,
+    };
+    // The resource union owns these payloads; progress events still use their
+    // separately generated resource schemas until those events are migrated.
+    for name in [
+        "AccountsResource",
+        "CostsResource",
+        "DesktopResource",
+        "DraftsResource",
+        "LimitsResource",
+        "ModelsResource",
+        "MultiServerResource",
+        "QueueResource",
+        "ReceiptsResource",
+        "RoomResource",
+        "SessionCostResource",
+        "StateResource",
+        "TaskResource",
+        "TasksResource",
+        "TerminalResource",
+        "TerminalsResource",
+        "TranscriptResource",
+        "TranscriptsResource",
+        "VoiceResource",
+        "WorkspaceResource",
+        "AgentDetailResource",
+        "MonitorsResource",
+        "ProcessesResource",
+        "WorkResource",
+        "ComplaintResource",
+        "TerminalOutputResource",
+    ] {
+        analysis
+            .schemas
+            .remove(name)
+            .ok_or("missing resource payload schema")?;
+        drop(analysis.schemas.remove(&format!("{name}Kind")));
+    }
+    analysis
+        .schemas
         .get_mut("ResetRequest")
         .ok_or("missing reset request schema")?
         .schema_type = SchemaType::Primitive {
