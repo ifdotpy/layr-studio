@@ -2079,25 +2079,43 @@ fn maintain_event_window(
     {
         return Ok(());
     }
+    #[derive(serde::Serialize)]
+    struct EventProjection {
+        id: String,
+        agent: Option<String>,
+        kind: Option<String>,
+        status: Option<String>,
+        created: Option<f64>,
+        error: Option<String>,
+    }
     let mut statement = transaction.prepare(
         &format!("SELECT id,agent,kind,status,created,error FROM runtime_events ORDER BY created DESC,id LIMIT {EVENT_WINDOW_ROWS}"),
     )?;
     let events = statement
         .query_map([], |row| {
+            let id: String = row.get(0)?;
+            let bound = |value: Option<String>, field| {
+                value.map(|text| crate::sync_views::bound_sync_text(&text, field, false))
+            };
             Ok((
-                row.get::<_, String>(0)?,
-                json!({"id":row.get::<_, String>(0)?,"agent":row.get::<_, Option<String>>(1)?,
-                    "kind":row.get::<_, Option<String>>(2)?,"status":row.get::<_, Option<String>>(3)?,
-                    "created":row.get::<_, Option<f64>>(4)?,"error":row.get::<_, Option<String>>(5)?}),
+                id.clone(),
+                EventProjection {
+                    id: crate::sync_views::bound_sync_text(&id, "id", false),
+                    agent: bound(row.get(1)?, "agent"),
+                    kind: bound(row.get(2)?, "kind"),
+                    status: bound(row.get(3)?, "status"),
+                    created: row.get(4)?,
+                    error: bound(row.get(5)?, "error"),
+                },
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     drop(statement);
     let mut kept = BTreeSet::new();
     for (id, record) in events {
-        if let Some(projected) = project_persisted_record("event", &record) {
+        if !id.is_empty() {
             kept.insert(id.clone());
-            put_projection(transaction, "event", &id, projected, false, validate)?;
+            SyncDocumentsRepository::put_entity(transaction, "event", &id, record, false)?;
         }
     }
     retire_unkept(
@@ -2789,6 +2807,25 @@ mod tests {
                 .is_none()
         );
         assert!(super::checked_owned_work("w", "{").unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn event_window_publishes_bounded_typed_event() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store.transaction_with(|tx| {
+            let error = "é".repeat(2_100);
+            tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch,error) VALUES('event','agent','user','text','pending',1,1,?1)", [&error])?;
+            tx.execute("DELETE FROM sync_entity_meta WHERE key='event_window_seq'", [])?;
+            maintain_event_window(tx, &|_, _, _, _| true)?;
+            let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='event' AND id='event'", [], |row| row.get(0))?;
+            let actual: Value = serde_json::from_str(&payload)?;
+            let old = crate::sync_views::project_persisted_record("event", &json!({"id":"event","agent":"agent","kind":"user","status":"pending","created":1.0,"error":error})).unwrap();
+            assert_eq!(actual["value"], old);
+            Ok::<_, StoreError>(())
+        }).await.unwrap();
     }
 
     #[tokio::test]
