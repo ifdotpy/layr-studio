@@ -159,8 +159,8 @@ pub(crate) fn schema(schema: &str, value: &Value) -> Result<(), AccessError> {
     }
 }
 pub(crate) fn discovery_identity(value: &Value) -> Result<DiscoveryIdentity, AccessError> {
-    schema("DiscoveryIdentity", value)?;
-    DiscoveryIdentity::deserialize(value)
+    studio_runtime_schema::http_ingress::Object::<DiscoveryIdentity>::deserialize(value)
+        .map(|object| object.0)
         .map_err(|_| refused(400, "invalid_request", "Invalid multi-server request"))
 }
 pub(crate) fn stored(
