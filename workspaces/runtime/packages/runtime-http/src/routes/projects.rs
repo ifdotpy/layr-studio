@@ -11,6 +11,9 @@ use std::path::Path;
 use std::sync::Arc;
 use studio_runtime_schema::json_compat::python_json_compact as canonical_json;
 use studio_runtime_schema::model_catalog::ModelCatalog;
+use studio_runtime_schema::peer_team_ingress::{
+    PeerTeamRequest, RadioCreate, RadioManage, TeamMutation,
+};
 use studio_runtime_schema::project_ingress::ProjectRequest;
 use studio_runtime_services::agents_create::CreateError;
 use studio_runtime_services::host_worker_create::{
@@ -193,21 +196,13 @@ impl CreationCatalog for RadioCreationAdapter {
 impl studio_runtime_services::radio_runtime::RadioCreation for RadioCreationAdapter {
     fn prepare(
         &mut self,
-        body: &Value,
+        body: &RadioCreate,
         path: &Path,
         ids: [studio_runtime_store::AgentId; 2],
     ) -> Result<[studio_runtime_store::AgentRecord; 2], ProjectsError> {
-        let participants = body
-            .get("participants")
-            .and_then(Value::as_array)
-            .ok_or(ProjectsError::Invalid("participants"))?;
         let identities = (0..2)
             .map(|index| {
-                let key = participants
-                    .get(index)
-                    .and_then(|p| p.get("account_key"))
-                    .and_then(Value::as_str)
-                    .ok_or(ProjectsError::Invalid("account_key"))?;
+                let key = body.participants[index].account_key.as_str();
                 let row = self
                     .rows
                     .iter()
@@ -259,15 +254,14 @@ impl studio_runtime_services::radio_runtime::RadioCreation for RadioCreationAdap
 /// so blocking preparation never waits on a future.
 async fn radio_model_lists(
     service: &studio_runtime_services::model_catalog::ModelCatalogService,
-    body: &Value,
+    body: &RadioCreate,
     rows: &[studio_runtime_services::account_policy::PublicAccount],
 ) -> std::collections::BTreeMap<String, ModelCatalog> {
     let mut lists = std::collections::BTreeMap::new();
-    let participants = body.get("participants").and_then(Value::as_array);
-    for key in participants
-        .into_iter()
-        .flatten()
-        .filter_map(|participant| participant.get("account_key").and_then(Value::as_str))
+    for key in body
+        .participants
+        .iter()
+        .map(|participant| participant.account_key.as_str())
     {
         let Some(row) = rows.iter().find(|row| {
             row.id.as_str() == Some(key)
@@ -1276,7 +1270,7 @@ fn remote_location_action(
 
 async fn peer_teams(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Value>,
+    ApiJson(body): ApiJson<PeerTeamRequest>,
 ) -> Result<Json<PeerTeamWriteResponse>, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let account_policy = state
@@ -1290,46 +1284,78 @@ async fn peer_teams(
         .as_str()
         .ok_or_else(ApiError::internal)?
         .to_owned();
-    if body.get("action").and_then(Value::as_str) == Some("radio")
-        && body.get("radio_action").and_then(Value::as_str) == Some("create")
-    {
-        let rows = state
-            .account_driver
-            .as_ref()
-            .ok_or_else(ApiError::internal)?
-            .snapshot()
-            .map_err(|_| ApiError::internal())?
-            .accounts;
-        let model_lists = radio_model_lists(&state.model_catalog, &body, &rows).await;
-        let creation = RadioCreationAdapter {
-            model_lists,
-            rows,
-            identities: None,
-        };
-        let value = studio_runtime_services::radio_runtime::create_with(
-            store.clone(),
-            &body,
-            Box::new(creation),
-        )
+    match body {
+        PeerTeamRequest::RadioCreate(body) => {
+            let rows = state
+                .account_driver
+                .as_ref()
+                .ok_or_else(ApiError::internal)?
+                .snapshot()
+                .map_err(|_| ApiError::internal())?
+                .accounts;
+            let model_lists = radio_model_lists(&state.model_catalog, &body, &rows).await;
+            let creation = RadioCreationAdapter {
+                model_lists,
+                rows,
+                identities: None,
+            };
+            let value = studio_runtime_services::radio_runtime::create_with(
+                store,
+                &body,
+                Box::new(creation),
+            )
+            .await
+            .map_err(projects_error)?;
+            state.event_wake.notify_one();
+            Ok(Json(PeerTeamWriteResponse::Radio(value)))
+        }
+        PeerTeamRequest::RadioOpen(body) => {
+            radio_manage(&state, store, RadioManage::Open(body)).await
+        }
+        PeerTeamRequest::RadioSend(body) => {
+            radio_manage(&state, store, RadioManage::Send(body)).await
+        }
+        PeerTeamRequest::RadioPass(body) => {
+            radio_manage(&state, store, RadioManage::Pass(body)).await
+        }
+        PeerTeamRequest::RadioStop(body) => {
+            radio_manage(&state, store, RadioManage::Stop(body)).await
+        }
+        PeerTeamRequest::Convert(body) => {
+            let reply = studio_runtime_services::peer_conversion::convert(store, &body)
+                .await
+                .map_err(projects_error)?;
+            Ok(Json(PeerTeamWriteResponse::Conversion(reply)))
+        }
+        PeerTeamRequest::Save(body) => {
+            peer_team_mutation(store, TeamMutation::Save(body), default_account, known).await
+        }
+        PeerTeamRequest::Delete(body) => {
+            peer_team_mutation(store, TeamMutation::Delete(body), default_account, known).await
+        }
+        PeerTeamRequest::Move(body) => {
+            peer_team_mutation(store, TeamMutation::Move(body), default_account, known).await
+        }
+    }
+}
+async fn radio_manage(
+    state: &HttpState,
+    store: Arc<studio_runtime_store::RuntimeStore>,
+    body: RadioManage,
+) -> Result<Json<PeerTeamWriteResponse>, ApiError> {
+    let result = studio_runtime_services::radio_runtime::manage(store, &body)
         .await
         .map_err(projects_error)?;
-        state.event_wake.notify_one();
-        return Ok(Json(PeerTeamWriteResponse::Radio(value)));
-    }
-    if body.get("action").and_then(Value::as_str) == Some("radio") {
-        let result = studio_runtime_services::radio_runtime::manage(store, &body)
-            .await
-            .map_err(projects_error)?;
-        state.event_wake.notify_one();
-        return Ok(Json(PeerTeamWriteResponse::Radio(result)));
-    }
-    if body.get("action").and_then(Value::as_str) == Some("convert") {
-        let reply = studio_runtime_services::peer_conversion::convert(store, &body)
-            .await
-            .map_err(projects_error)?;
-        return Ok(Json(PeerTeamWriteResponse::Conversion(reply)));
-    }
-    let value = projects::peer_team_write(store.clone(), body, default_account, known)
+    state.event_wake.notify_one();
+    Ok(Json(PeerTeamWriteResponse::Radio(result)))
+}
+async fn peer_team_mutation(
+    store: Arc<studio_runtime_store::RuntimeStore>,
+    body: TeamMutation,
+    default_account: String,
+    known: Vec<studio_runtime_services::account_policy::PublicAccount>,
+) -> Result<Json<PeerTeamWriteResponse>, ApiError> {
+    let value = projects::peer_team_write(store, body, default_account, known)
         .await
         .map_err(projects_error)?;
     let result = super::generated_json::<crate::generated::PeerProjectResponse>(value)
@@ -1398,6 +1424,37 @@ mod local_registration_tests {
         ] {
             let valid = validator.is_valid(&body);
             let decoded = serde_json::from_value::<super::ProjectRequest>(body.clone()).is_ok();
+            assert_eq!(decoded, valid, "{body}");
+        }
+    }
+
+    #[test]
+    fn peer_team_body_matches_committed_schema_examples() {
+        let document = crate::schema::openapi_document();
+        let schema = json!({"$ref":"#/paths/~1api~1peer-teams/post/requestBody/content/application~1json/schema", "paths":document["paths"], "components":document["components"]});
+        let validator = jsonschema::validator_for(&schema).expect("peer team schema");
+        let create = json!({"action":"radio","radio_action":"create","path":"/p","request_id":"r","name":"Pair","participants":[{"account_key":"a","model":"m"},{"account_key":"b","model":"m"}]});
+        let send = json!({"action":"radio","radio_action":"send","path":"p","team_id":"t","request_id":"r","expected_revision":1,"text":"hello"});
+        let mut bad_participant = create.clone();
+        bad_participant["participants"][0] = json!(["a", "m"]);
+        let mut bad_rounds = send.clone();
+        bad_rounds["rounds"] = json!(3);
+        for body in [
+            json!({"action":"save","path":"p","expected_revision":0,"request_id":"r","name":"team","members":["a","b"]}),
+            json!({"action":"delete","path":"p","expected_revision":0,"request_id":"r","team_id":"t"}),
+            json!({"action":"move","path":"p","expected_revision":0,"request_id":"r","member":"a","team_id":null}),
+            json!({"action":"convert","path":"p","expected_revision":0,"request_id":"r","member":"a","target":"b"}),
+            create,
+            send,
+            json!({"action":"radio","radio_action":"open","path":"p","team_id":"t","request_id":"r"}),
+            json!({"action":"radio","radio_action":"pass","path":"p","team_id":"t","request_id":"r","expected_revision":1,"target":"a"}),
+            json!({"action":"radio","radio_action":"stop","path":"p","team_id":"t","request_id":"r","expected_revision":1}),
+            bad_participant,
+            bad_rounds,
+            json!({"action":"move","path":"p","expected_revision":0,"request_id":"r","member":"a","extra":true}),
+        ] {
+            let valid = validator.is_valid(&body);
+            let decoded = serde_json::from_value::<super::PeerTeamRequest>(body.clone()).is_ok();
             assert_eq!(decoded, valid, "{body}");
         }
     }

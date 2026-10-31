@@ -10,6 +10,7 @@ use rusqlite::{Connection, Transaction, params};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use studio_runtime_schema::peer_team_ingress::Convert;
 use studio_runtime_store::{
     ProjectsRepository, RuntimeStore, SyncDocumentsRepository, system_reads as records,
 };
@@ -35,38 +36,26 @@ const MOVE_FIELDS: &[(&str, &[&str])] = &[
 /// Called only by the authenticated user HTTP route, never by model tools.
 pub async fn convert(
     store: Arc<RuntimeStore>,
-    body: &Value,
+    body: &Convert,
 ) -> Result<ConversionReply, ProjectsError> {
-    let allowed = [
-        "action",
-        "path",
-        "member",
-        "target",
-        "expected_revision",
-        "request_id",
-    ];
-    if body
-        .as_object()
-        .is_none_or(|object| object.keys().any(|key| !allowed.contains(&key.as_str())))
-    {
-        return Err(ProjectsError::Invalid("Unknown chat conversion field"));
-    }
-    let path_input = body.get("path").and_then(Value::as_str).map(str::to_owned);
-    let source = field(body, "member")?;
-    let target = field(body, "target")?;
+    let path_input = body.path.clone();
+    let source = field(&body.member)?;
+    let target = field(&body.target)?;
     if source == target {
         return Err(ProjectsError::Invalid("Select two different chats"));
     }
-    let request = field(body, "request_id")?;
+    let request = field(&body.request_id)?;
     let request_id = request.to_owned();
-    let revision = body["expected_revision"]
+    let revision = body
+        .expected_revision
         .as_u64()
         .ok_or(ProjectsError::Invalid(
             "Supply the current peer team revision",
         ))?;
     let key = format!("peer-convert:{request}");
-    let signature =
-        event_write::request_signature(&json!({"operation":"peer-convert","body":body}));
+    let signature = studio_runtime_store::sha256_hex(
+        &serde_json::to_vec(body).map_err(studio_runtime_store::StoreError::from)?,
+    );
     let replay_root = request_id.clone();
     let replay_key = key.clone();
     let replay_signature = signature.clone();
@@ -92,7 +81,7 @@ pub async fn convert(
     let prepared = studio_runtime_process::blocking_pool::spawn_blocking(
         "runtime-services/peer-conversion",
         move || {
-            let path = project_key(path_input.as_deref(), false)?;
+            let path = project_key(Some(&path_input), false)?;
             prepared.recheck_paths()?;
             Ok::<_, ProjectsError>((path, prepared))
         },
@@ -193,12 +182,12 @@ pub async fn convert(
         Ok(result)
     }).await
 }
-fn field<'a>(body: &'a Value, field: &str) -> Result<&'a str, ProjectsError> {
-    body[field]
-        .as_str()
-        .map(event_write::python_strip)
-        .filter(|v| !v.is_empty() && v.chars().count() <= 255)
-        .ok_or(ProjectsError::Invalid("chat conversion field invalid"))
+fn field(value: &str) -> Result<&str, ProjectsError> {
+    let value = event_write::python_strip(value);
+    if value.is_empty() || value.chars().count() > 255 {
+        return Err(ProjectsError::Invalid("chat conversion field invalid"));
+    }
+    Ok(value)
 }
 fn event_error(error: event_write::EventWriteError) -> ProjectsError {
     match error {
@@ -340,6 +329,29 @@ pub(crate) fn idle(
 #[cfg(test)]
 mod receipt_tests {
     use super::ConversionReply;
+
+    #[test]
+    fn equivalent_typed_requests_have_identical_signatures() {
+        use studio_runtime_schema::peer_team_ingress::{Convert, RadioManage, TeamMutation};
+        fn signature<T: serde::Serialize>(body: &T) -> String {
+            studio_runtime_store::sha256_hex(&serde_json::to_vec(body).expect("request encoding"))
+        }
+        let conversion: Convert = serde_json::from_str(r#"{"action":"convert","path":"p","request_id":"r","member":"a","target":"b","expected_revision":1}"#).unwrap();
+        let conversion_reordered: Convert = serde_json::from_str(r#"{"expected_revision":1,"target":"b","member":"a","request_id":"r","path":"p","action":"convert"}"#).unwrap();
+        assert_eq!(signature(&conversion), signature(&conversion_reordered));
+        let team: TeamMutation = serde_json::from_str(r#"{"action":"delete","path":"p","request_id":"r","team_id":"t","expected_revision":1}"#).unwrap();
+        let team_reordered: TeamMutation = serde_json::from_str(r#"{"expected_revision":1,"team_id":"t","request_id":"r","path":"p","action":"delete"}"#).unwrap();
+        assert_eq!(signature(&team), signature(&team_reordered));
+        let radio: RadioManage = serde_json::from_str(
+            r#"{"action":"radio","radio_action":"open","path":"p","team_id":"t","request_id":"r"}"#,
+        )
+        .unwrap();
+        let radio_reordered: RadioManage = serde_json::from_str(
+            r#"{"request_id":"r","team_id":"t","path":"p","radio_action":"open","action":"radio"}"#,
+        )
+        .unwrap();
+        assert_eq!(signature(&radio), signature(&radio_reordered));
+    }
 
     #[test]
     fn conversion_receipt_keeps_persisted_fields() {

@@ -35,6 +35,7 @@ pub mod model_catalog;
 pub mod monitor_record;
 pub mod multi_server_protocol;
 pub mod notification_text;
+pub mod peer_team_ingress;
 pub mod persistence;
 pub mod plan_record;
 pub mod pricing;

@@ -1,91 +1,66 @@
 use super::*;
 use crate::event_write::{CallerAdmission, RequestKey, begin_request};
 use std::sync::Arc;
+use studio_runtime_schema::peer_team_ingress::TeamMutation;
 
 pub async fn peer_team_write(
     store: Arc<RuntimeStore>,
-    body: Value,
+    body: TeamMutation,
     default_account: String,
     known_accounts: Vec<crate::account_policy::PublicAccount>,
 ) -> Result<Value, ProjectsError> {
-    let action = body
-        .get("action")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    if !matches!(action.as_str(), "save" | "delete" | "move") {
-        return Err(ProjectsError::Invalid("unknown peer team action"));
-    }
-    let path_value = body.get("path").and_then(Value::as_str).map(str::to_owned);
+    let action = match &body {
+        TeamMutation::Save(_) => "save",
+        TeamMutation::Delete(_) => "delete",
+        TeamMutation::Move(_) => "move",
+    };
+    let path_value = Some(body.path().to_owned());
     let revision = body
-        .get("expected_revision")
-        .and_then(Value::as_u64)
+        .expected_revision()
+        .as_u64()
         .ok_or(ProjectsError::Invalid("peer team revision is invalid"))?;
-    let raw_request = body
-        .get("request_id")
-        .and_then(Value::as_str)
-        .ok_or(ProjectsError::Invalid("peer team request ID is required"))?;
-    let request_id = python_strip(raw_request).to_owned();
+    let request_id = python_strip(body.request_id()).to_owned();
     if request_id.is_empty() || request_id.chars().count() > 255 {
         return Err(ProjectsError::Invalid("peer team request ID is invalid"));
     }
     let team_id = body
-        .get("team_id")
-        .and_then(Value::as_str)
+        .team_id()
         .map(|value| {
             Uuid::parse_str(value)
                 .map(|id| id.to_string())
                 .map_err(|_| ProjectsError::Invalid("peer team ID is invalid"))
         })
         .transpose()?;
-    let member = body
-        .get("member")
-        .and_then(Value::as_str)
-        .map(|value| python_strip(value).to_owned());
-    if (action != "move" || body.get("team_id").is_some_and(|value| !value.is_null()))
-        && team_id.is_none()
-    {
+    let member = match &body {
+        TeamMutation::Move(v) => Some(python_strip(&v.member).to_owned()),
+        _ => None,
+    };
+    if action != "move" && team_id.is_none() {
         return Err(ProjectsError::Invalid("peer team ID is invalid"));
     }
-    let name = if action == "save" {
-        let value = body
-            .get("name")
-            .and_then(Value::as_str)
-            .ok_or(ProjectsError::Invalid("peer team name is invalid"))?;
-        let value = python_strip(value);
-        if value.is_empty() || value.chars().count() > 80 {
-            return Err(ProjectsError::Invalid("peer team name is invalid"));
+    let (name, members) = match &body {
+        TeamMutation::Save(v) => {
+            let name = python_strip(&v.name);
+            if name.is_empty() || name.chars().count() > 80 {
+                return Err(ProjectsError::Invalid("peer team name is invalid"));
+            }
+            if v.members.len() < 2
+                || v.members.iter().any(String::is_empty)
+                || v.members
+                    .iter()
+                    .collect::<std::collections::HashSet<_>>()
+                    .len()
+                    != v.members.len()
+            {
+                return Err(ProjectsError::Invalid(
+                    "select at least two different lead chats",
+                ));
+            }
+            (Some(name.to_owned()), v.members.clone())
         }
-        Some(value.to_owned())
-    } else {
-        None
+        _ => (None, Vec::new()),
     };
-    let members = body
-        .get("members")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    if action == "save"
-        && (members.len() < 2
-            || members
-                .iter()
-                .any(|value| value.as_str().is_none_or(str::is_empty))
-            || members
-                .iter()
-                .collect::<std::collections::HashSet<_>>()
-                .len()
-                != members.len())
-    {
-        return Err(ProjectsError::Invalid(
-            "select at least two different lead chats",
-        ));
-    }
-    let signature = sha256_hex(
-        studio_runtime_schema::json_compat::python_json_compact(
-            &json!({"operation":"peer-team","body":body}),
-        )
-        .as_bytes(),
-    );
+    let signature = sha256_hex(&serde_json::to_vec(&body).map_err(StoreError::from)?);
     let key = format!("peer-team:{request_id}");
     let (prepared, path) = super::prepare_path(store.clone(), path_value, false).await?;
     store.transaction_with(move |tx| {
@@ -114,15 +89,15 @@ pub async fn peer_team_write(
         let mut statement = tx.prepare_cached("SELECT id FROM sync_entities WHERE collection='peerTeam' AND json_extract(payload,'$.value.projectPath')=?1")?;
         previous_ids.extend(statement.query_map([&path], |row| row.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?);
         drop(statement);
-        match action.as_str() {
+        match action {
             "save" => {
                 let team_id = team_id.as_deref().ok_or(ProjectsError::Invalid("peer team ID is invalid"))?;
                 for member in &members {
-                    let id = member.as_str().unwrap_or_default();
+                    let id = member.as_str();
                     if !agents.get(id).is_some_and(|agent| is_project_lead(agent, &path, &prepared)) { return Err(ProjectsError::Invalid("select live lead chats from this project only")); }
                 }
                 if teams.iter().any(|team| team.get("id").and_then(Value::as_str) != Some(team_id)
-                    && team.get("members").and_then(Value::as_array).is_some_and(|existing| existing.iter().any(|member| members.contains(member)))) {
+                    && team.get("members").and_then(Value::as_array).is_some_and(|existing| existing.iter().any(|member| member.as_str().is_some_and(|member| members.iter().any(|selected| selected == member))))) {
                     return Err(ProjectsError::Invalid("a chat already belongs to another peer team"));
                 }
                 let selected = json!({"id":team_id,"name":name,"members":members});

@@ -18,7 +18,6 @@ use studio_runtime_schema::agent_limits::{DEFAULT_MAX_TEAM_AGENTS, DEFAULT_SUBAG
 use studio_runtime_store::path_identity::CanonicalPath;
 use studio_runtime_store::{AgentId, AgentRecord, AgentStatus, ProjectsRepository, Transaction};
 
-const MAX_ACCOUNT_KEY_CHARS: usize = 255;
 const COMMIT_HEX_LENGTHS: [usize; 2] = [40, 64];
 
 /// Freeze the parent repository's current commit before the caller opens a writer.
@@ -145,7 +144,7 @@ pub trait CreationCatalog: Send + Sync {
 /// Explicit model settings require the P18 catalog adapter; simple defaults are
 /// available without a provider request.
 pub fn prepare(
-    body: &Value,
+    body: &studio_runtime_schema::peer_team_ingress::RadioCreate,
     path: &Path,
     ids: [AgentId; 2],
     accounts: &[AccountIdentity; 2],
@@ -155,15 +154,10 @@ pub fn prepare(
         .map_err(|_| CreateError::InvalidCreation("path"))?
         .to_string_lossy()
         .into_owned();
-    let name = required_string_value(body, "name")?;
-    if name.trim().is_empty() || name.chars().count() > 80 {
+    if body.name.as_str().trim().is_empty() {
         return Err(CreateError::InvalidCreation("chat name is invalid"));
     }
-    let participants = body
-        .get("participants")
-        .and_then(Value::as_array)
-        .filter(|participants| participants.len() == 2)
-        .ok_or(CreateError::InvalidCreation("participants"))?;
+    let participants = &body.participants;
     if ids[0] == ids[1] {
         return Err(CreateError::InvalidCreation("participant ids"));
     }
@@ -171,21 +165,12 @@ pub fn prepare(
     let mut drafts = Vec::with_capacity(2);
     for index in 0..2 {
         let participant = &participants[index];
-        if participant.as_object().is_none_or(|object| {
-            object
-                .keys()
-                .any(|key| !["account_key", "model", "effort"].contains(&key.as_str()))
-        }) {
-            return Err(CreateError::InvalidCreation("participant"));
-        }
-        let account_key = required_string_value(participant, "account_key")?;
-        let model = required_string_value(participant, "model")?;
-        let effort = optional_string(participant, "effort")?;
-        if account_key.chars().count() > MAX_ACCOUNT_KEY_CHARS
-            || model.chars().count() > MAX_ACCOUNT_KEY_CHARS
-        {
+        let account_key = participant.account_key.as_str().trim();
+        let model = participant.model.as_str().trim();
+        if account_key.is_empty() || model.is_empty() {
             return Err(CreateError::InvalidCreation("account key is invalid"));
         }
+        let effort = participant.effort.value().map(String::as_str);
         let settings =
             catalog.resolve(account_key, &accounts[index], model, effort, false, false)?;
         let mut value = build_agent_record(
@@ -694,11 +679,11 @@ mod tests {
         ]
     }
 
-    fn body() -> Value {
-        json!({"name":"Pair","participants":[
+    fn body() -> studio_runtime_schema::peer_team_ingress::RadioCreate {
+        serde_json::from_value(json!({"action":"radio", "radio_action":"create", "path":"/project", "request_id":"request", "name":"Pair","participants":[
             {"account_key":"one","model":"model-one"},
             {"account_key":"two","model":"model-two","effort":"high"}
-        ]})
+        ]})).expect("radio request")
     }
 
     struct WorkerDraftFixture {
@@ -1090,18 +1075,13 @@ mod tests {
 
     #[test]
     fn malformed_participant_is_refused_before_any_store_access() {
-        let directory = tempdir().expect("temporary project directory");
-        let result = prepare(
-            &json!({"name":"Pair","participants":[{"account_key":"one","model":"m"}]}),
-            directory.path(),
-            [AgentId::from(IDS[0]), AgentId::from(IDS[1])],
-            &accounts(),
-            &Catalog,
+        let result = serde_json::from_value::<studio_runtime_schema::peer_team_ingress::RadioCreate>(
+            json!({
+                "action":"radio", "radio_action":"create", "path":"/project", "request_id":"request", "name":"Pair",
+                "participants":[{"account_key":"one","model":"m"}]
+            }),
         );
-        assert!(matches!(
-            result,
-            Err(CreateError::InvalidCreation("participants"))
-        ));
+        assert!(result.is_err());
     }
 
     #[test]
