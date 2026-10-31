@@ -532,7 +532,9 @@ BEGIN SELECT RAISE(ABORT, 'invalid delivery state'); END;
 - Do not delete a "copy" of data before a check shows that the data exists elsewhere
   (transcript rows in `sync_entities`, client stores).
 - Rewind, restore, and delete make a layr snapshot first. Items are hidden, not deleted.
-- The device keeps unsent input until the server confirms it.
+- The device keeps unsent input until the server confirms or refuses it. Secret answer
+  fields remain in memory only.
+- Owner note (2026-11-01): old RxDB unsent messages are intentionally not migrated.
 - Blob order: write the blob, fsync, then write the row. Blob collection uses mark and sweep with a delay.
 - Move client drafts, uploads, and recordings to the server before the client store is deleted.
 - Move a receipt table in one transaction. Keep the old table read-only until it is empty.

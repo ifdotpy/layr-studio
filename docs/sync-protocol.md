@@ -16,9 +16,10 @@ lagging revision announced by the stream, or a link too slow for SSE. Startup
 fetch chains, focus probes, periodic refresh, and automatic mark-read are
 forbidden.
 
-Local storage and IndexedDB may contain only device keys, credentials and
-pairing secrets, the monitor input journal, and outbox request identities. No
-other data may be persisted there. Existing implementation descriptions below
+Local storage and IndexedDB may contain device keys, credentials and pairing
+secrets, the monitor input journal, outbox request identities, the unsent input
+buffer, and the thin remote subscription cache. Secret answer fields remain in
+memory only. Existing implementation descriptions below
 are migration targets where they conflict with this rule.
 
 ## Routes and reconnect
@@ -136,9 +137,10 @@ changes with the wire contract. Draft and outbox storage keep their workspace id
 The old RxDB migration is removed. A browser that did not open Studio after the
 migration was introduced cannot recover unresolved sends left in that old store.
 
-The browser saves each pending message command and workspace identity before its
-POST. A reconnect or explicit retry reuses the exact command; a failed or damaged
-entry can be discarded without blocking other messages. The retired
+The browser saves each pending message command and workspace identity in the
+unsent input buffer before its POST. A reconnect or explicit retry reuses the
+exact command; confirmation or definitive refusal removes the buffered command.
+A damaged entry can be discarded without blocking other messages. The retired
 `studio-thin-cache` database is deleted on startup. Its unsent messages and drafts
 are not migrated.
 
