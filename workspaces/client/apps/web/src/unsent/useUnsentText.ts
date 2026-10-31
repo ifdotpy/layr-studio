@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useServerServices } from "../servers/ServerServicesContext.tsx";
 import { serverViewId } from "../servers/environment.ts";
-import { unsentStore } from "./store.ts";
+import { reportUnsentFailure, unsentStore } from "./store.ts";
 
 /** Keep a text edit on this device until its caller clears it. */
 export function useUnsentText(feature: string, id: string) {
@@ -22,16 +22,19 @@ export function useUnsentText(feature: string, id: string) {
         if (active && !owner.changed && typeof saved === "string")
           setValue(saved);
       })
-      .catch((error: unknown) =>
-        console.error("Could not restore unsent input", error),
-      );
+      .catch(reportUnsentFailure);
     return () => {
       active = false;
     };
   }, [identity]);
   const clear = useCallback(() => {
     current.current.changed = true;
-    return unsentStore(server, feature).delete(id);
+    return unsentStore(server, feature)
+      .delete(id)
+      .catch((error: unknown) => {
+        reportUnsentFailure();
+        throw error;
+      });
   }, [identity]);
   const update = useCallback(
     (next: string | null) => {
@@ -39,9 +42,7 @@ export function useUnsentText(feature: string, id: string) {
       setValue(next);
       const operation =
         next === null ? clear() : unsentStore(server, feature).put(id, next);
-      void operation.catch((error: unknown) =>
-        console.error("Could not save unsent input", error),
-      );
+      void operation.catch(reportUnsentFailure);
     },
     [identity],
   );

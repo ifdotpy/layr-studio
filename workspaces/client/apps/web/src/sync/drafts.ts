@@ -5,7 +5,7 @@ import {
   useState,
   type SetStateAction,
 } from "react";
-import { unsentStore } from "../unsent/store.ts";
+import { UNSENT_FAILURE_EVENT, unsentStore } from "../unsent/store.ts";
 import { serverViewId } from "../servers/environment.ts";
 import { syncPost } from "../api.ts";
 import { randomUUID } from "../uuid.ts";
@@ -46,6 +46,7 @@ export function createBrowserDrafts(options: {
     const dismissed = useRef(new Set<string>());
     const [conflicts, setConflicts] = useState<DraftVersion[]>([]);
     const [error, setError] = useState("");
+    const [unsentError, setUnsentError] = useState("");
     const quiet = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     const maximum = useRef<ReturnType<typeof setTimeout> | undefined>(
       undefined,
@@ -216,6 +217,12 @@ export function createBrowserDrafts(options: {
       [writer],
     );
     useEffect(() => {
+      const fail = () =>
+        setUnsentError(
+          "Draft changes could not be saved. Keep this chat open.",
+        );
+      if (typeof window !== "undefined")
+        window.addEventListener(UNSENT_FAILURE_EVENT, fail);
       void store.current
         ?.restore()
         .then(schedule)
@@ -262,6 +269,8 @@ export function createBrowserDrafts(options: {
       );
       return () => {
         stop();
+        if (typeof window !== "undefined")
+          window.removeEventListener(UNSENT_FAILURE_EVENT, fail);
         clearTimeout(quiet.current);
         clearTimeout(maximum.current);
       };
@@ -275,8 +284,9 @@ export function createBrowserDrafts(options: {
       subscribeDraft,
       conflicts,
       dismissDraft,
-      error,
-      localPersistenceFailed: !!error && error !== incompleteDrafts,
+      error: unsentError || error,
+      localPersistenceFailed:
+        !!unsentError || (!!error && error !== incompleteDrafts),
     };
   };
 }

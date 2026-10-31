@@ -2,6 +2,10 @@ import { indexedDb } from "../indexedDb.ts";
 
 // One device buffer for input that has not yet been confirmed by its server.
 export const UNSENT_BUFFER_ENABLED = true;
+export const UNSENT_FAILURE_EVENT = "studio-unsent-input-failure";
+export function reportUnsentFailure() {
+  window.dispatchEvent(new Event(UNSENT_FAILURE_EVENT));
+}
 const DATABASE = "studio-unsent-input";
 const STORE = "input";
 
