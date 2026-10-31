@@ -2,6 +2,7 @@ use crate::StoreResult;
 use rusqlite::Transaction;
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
+    use studio_runtime_schema::creation_intent::AgentRole;
     const FLAGS: &[&str] = &[
         "compactionsObservedOnly",
         "fastMode",
@@ -16,28 +17,56 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         .map(|field| format!("'{field}'"))
         .collect::<Vec<_>>()
         .join(",");
-    let mut query = tx.prepare(&format!("SELECT id,record FROM runtime_agents WHERE json_valid(record) AND EXISTS (SELECT 1 FROM json_each(record) j WHERE j.key IN ('nativeNameSynced','agentModeChangedAt','agentModeChangedBy','tokenBudget') OR (j.key IN ({flags}) AND (j.type NOT IN ('true','false') OR (SELECT count(*) FROM json_each(record) d WHERE d.key=j.key)>1)))"))?;
+    const TEXT: &[&str] = &["prompt", "profileId", "profileInstructions", "effort"];
+    let text = TEXT
+        .iter()
+        .map(|field| format!("'{field}'"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let roles = [
+        AgentRole::Orchestrator,
+        AgentRole::Implementer,
+        AgentRole::Reviewer,
+    ]
+    .map(|role| format!("'{}'", role.as_str()))
+    .join(",");
+    let mut query = tx.prepare(&format!("SELECT id,record FROM runtime_agents WHERE json_valid(record) AND EXISTS (SELECT 1 FROM json_each(record) j WHERE j.key IN ('nativeNameSynced','agentModeChangedAt','agentModeChangedBy','tokenBudget') OR (j.key IN ({flags}) AND j.type NOT IN ('true','false')) OR (j.key IN ({text}) AND j.type NOT IN ('text','null')) OR (j.key='role' AND (j.type NOT IN ('text','null') OR (j.type='text' AND j.value NOT IN ({roles})))) OR (j.key IN ({flags},{text},'role') AND (SELECT count(*) FROM json_each(record) d WHERE d.key=j.key)>1))"))?;
     let rows = query.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
     for row in rows {
         let (id, raw) = row?;
-        let mut record: serde_json::Value = serde_json::from_str(&raw)?;
-        let Some(object) = record.as_object_mut() else {
-            continue;
-        };
+        let mut record: std::collections::BTreeMap<String, Box<serde_json::value::RawValue>> =
+            serde_json::from_str(&raw)?;
         for field in [
             "nativeNameSynced",
             "agentModeChangedAt",
             "agentModeChangedBy",
             "tokenBudget",
         ] {
-            object.remove(field);
+            record.remove(field);
         }
         for field in FLAGS {
-            if object.get(*field).is_some_and(|value| !value.is_boolean()) {
-                object.remove(*field);
+            if record
+                .get(*field)
+                .is_some_and(|value| serde_json::from_str::<bool>(value.get()).is_err())
+            {
+                record.remove(*field);
             }
+        }
+        for field in TEXT {
+            if record
+                .get(*field)
+                .is_some_and(|value| serde_json::from_str::<Option<String>>(value.get()).is_err())
+            {
+                record.remove(*field);
+            }
+        }
+        if record
+            .get("role")
+            .is_some_and(|value| serde_json::from_str::<Option<AgentRole>>(value.get()).is_err())
+        {
+            record.remove("role");
         }
         tx.execute(
             "UPDATE runtime_agents SET record=?1 WHERE id=?2",
@@ -52,34 +81,19 @@ mod tests {
     use rusqlite::Connection;
 
     #[test]
-    fn removes_unused_fields_and_normalizes_compaction_flag() {
+    fn agent_batch_migration_normalizes_all_owned_fields() {
         let mut db = Connection::open_in_memory().unwrap();
-        db.execute_batch(r#"CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL);
-        INSERT INTO runtime_agents VALUES
-          ('legacy','{"id":"legacy","nativeNameSynced":true,"agentModeChangedAt":1,"agentModeChangedBy":"user","tokenBudget":1000,"compactionsObservedOnly":"bad","fastMode":"bad","daybreakEnabled":1,"needsTitle":[],"manualName":{},"maxAgentsExplicit":null,"agentModeSupported":"bad"}'),
-          ('duplicate','{"id":"duplicate","compactionsObservedOnly":false,"compactionsObservedOnly":true}');"#).unwrap();
+        db.execute_batch(r#"CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+        INSERT INTO runtime_agents VALUES('legacy','{"id":"legacy","nativeNameSynced":true,"agentModeChangedAt":1,"agentModeChangedBy":"user","tokenBudget":1000,"compactionsObservedOnly":"bad","fastMode":1,"daybreakEnabled":[],"needsTitle":{},"manualName":null,"maxAgentsExplicit":"bad","agentModeSupported":3,"prompt":42,"profileId":null,"profileInstructions":[],"effort":"low","effort":"high","role":"future","role":"reviewer"}');"#).unwrap();
         let tx = db.transaction().unwrap();
         super::apply(&tx).unwrap();
         super::apply(&tx).unwrap();
-        let legacy: String = tx
-            .query_row(
-                "SELECT record FROM runtime_agents WHERE id='legacy'",
-                [],
-                |row| row.get(0),
-            )
+        let raw: String = tx
+            .query_row("SELECT record FROM runtime_agents", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(legacy, r#"{"id":"legacy"}"#);
-        let duplicate: String = tx
-            .query_row(
-                "SELECT record FROM runtime_agents WHERE id='duplicate'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(duplicate.matches("compactionsObservedOnly").count(), 1);
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&duplicate).unwrap()["compactionsObservedOnly"],
-            true
+            raw,
+            r#"{"effort":"high","id":"legacy","profileId":null,"role":"reviewer"}"#
         );
     }
 

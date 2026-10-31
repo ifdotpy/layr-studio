@@ -38,8 +38,6 @@ mod m2026_10_30_unused_start_action;
 mod m2026_10_30_vm_stream_owners;
 mod m2026_10_31_agent_core;
 mod m2026_10_31_agent_permissions;
-mod m2026_10_31_agent_role;
-mod m2026_10_31_agent_text;
 mod m2026_10_31_current_checks;
 mod m2026_10_31_native_status_error;
 mod m2026_10_31_project_record_kind;
@@ -717,30 +715,10 @@ static CATALOG: &[&dyn Migration] = &[
             id: "2026-10-31-agent-core",
             introduced: OCTOBER_31,
             target: MigrationTarget::Canvas,
-            supported_source: "Agent records with retired core fields or malformed compaction flags",
+            supported_source: "Agent records with retired core fields or malformed typed fields",
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_10_31_agent_core::apply(c.transaction),
-    },
-    &SqlMigration {
-        definition: MigrationDefinition {
-            id: "2026-10-31-agent-text",
-            introduced: OCTOBER_31,
-            target: MigrationTarget::Canvas,
-            supported_source: "Agent records with malformed text fields",
-            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
-        },
-        apply: |c| m2026_10_31_agent_text::apply(c.transaction),
-    },
-    &SqlMigration {
-        definition: MigrationDefinition {
-            id: "2026-10-31-agent-role",
-            introduced: OCTOBER_31,
-            target: MigrationTarget::Canvas,
-            supported_source: "Agent records with malformed roles",
-            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
-        },
-        apply: |c| m2026_10_31_agent_role::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {
