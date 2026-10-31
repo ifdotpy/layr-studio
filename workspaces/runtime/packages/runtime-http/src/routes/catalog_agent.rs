@@ -716,7 +716,7 @@ pub(super) fn native_command_error(
 
 async fn sync_notify(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Value>,
+    ApiJson(body): ApiJson<studio_runtime_schema::resource_notification::ResourceNotifyRequest>,
 ) -> Result<Json<crate::generated::ResourceNotifyAck>, ApiError> {
     super::sync_stream::notify_resources(state, body).await
 }
@@ -1119,5 +1119,66 @@ mod native_command_tests {
             .query_row("SELECT count(*) FROM runtime_events", [], |row| row.get(0))
             .expect("event count");
         assert_eq!(events, 0, "replay never enqueues a new native input");
+    }
+}
+
+#[cfg(test)]
+mod resource_notify_ingress_tests {
+    use axum::{
+        body::Body,
+        extract::ConnectInfo,
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn notification_http_ingress_keeps_replay_and_conflict() {
+        let root = tempfile::tempdir().unwrap();
+        let state = crate::router::HttpState::new(
+            "token".into(),
+            "workspace".into(),
+            root.path().to_string_lossy().into_owned(),
+            12345,
+            None,
+            None,
+            None,
+        );
+        let app = crate::router::router(state).unwrap();
+        for (body, expected) in [
+            (
+                r#"{"requestId":"one","resources":[{"kind":"accounts"}]}"#,
+                StatusCode::OK,
+            ),
+            (
+                r#"{"requestId":"one","resources":[{"kind":"accounts"}]}"#,
+                StatusCode::OK,
+            ),
+            (
+                r#"{"requestId":"one","resources":[{"kind":"models"}]}"#,
+                StatusCode::CONFLICT,
+            ),
+        ] {
+            let request = Request::builder()
+                .method("POST")
+                .uri("/api/sync/notify")
+                .header("host", "127.0.0.1:12345")
+                .header("content-type", "application/json")
+                .header("x-canvas-token", "token")
+                .header("x-canvas-workspace", "workspace")
+                .header(
+                    crate::schema::API_SCHEMA_HASH_HEADER,
+                    crate::schema::api_schema_hash(),
+                )
+                .extension(ConnectInfo(std::net::SocketAddr::from((
+                    [127, 0, 0, 1],
+                    54321,
+                ))))
+                .body(Body::from(body))
+                .unwrap();
+            assert_eq!(
+                app.clone().oneshot(request).await.unwrap().status(),
+                expected
+            );
+        }
     }
 }

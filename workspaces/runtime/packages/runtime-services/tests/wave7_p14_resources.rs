@@ -7,8 +7,12 @@ use studio_runtime_services::resource_notify::{
 };
 use studio_runtime_services::token_rate::TokenRateHub;
 
-fn request(id: &str, resources: Value) -> Value {
-    json!({"requestId": id, "resources": resources})
+fn request(
+    id: &str,
+    resources: Value,
+) -> studio_runtime_schema::resource_notification::ResourceNotifyRequest {
+    serde_json::from_value(json!({"requestId": id, "resources": resources}))
+        .expect("notification fixture")
 }
 
 fn rates(index: usize) -> Value {
@@ -52,13 +56,15 @@ fn normalized_resource_replay_and_conflict_preserve_the_publication() {
         Err(ResourceNotifyError::Conflict)
     );
     for body in [
-        request("", json!([{"kind":"accounts"}])),
-        request("empty", json!([])),
-        request("unknown", json!([{"kind":"unknown"}])),
+        json!({"requestId":"", "resources":[{"kind":"accounts"}]}),
+        json!({"requestId":"empty", "resources":[]}),
+        json!({"requestId":"unknown", "resources":[{"kind":"unknown"}]}),
     ] {
-        assert_eq!(
-            publisher.publish_once(&body),
-            Err(ResourceNotifyError::Invalid)
+        assert!(
+            serde_json::from_value::<
+                studio_runtime_schema::resource_notification::ResourceNotifyRequest,
+            >(body)
+            .is_err()
         );
     }
     // State reset and targeted resources each advance the broad cursor once.

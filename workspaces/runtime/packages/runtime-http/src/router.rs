@@ -702,10 +702,17 @@ impl HttpState {
                     request_id: request_id.to_owned(),
                 },
             );
-            if let Err(error) = notifications.publish_once(&serde_json::json!({
-                "requestId": format!("claude-login:{}", uuid::Uuid::new_v4()),
-                "resources": [{"kind":"accounts"}],
-            })) {
+            let result = studio_runtime_schema::resource_notification::ResourceNotifyRequest::new(
+                format!("claude-login:{}", uuid::Uuid::new_v4()),
+                vec![
+                    studio_runtime_schema::resource_ref::ResourceRef::AccountsResource(
+                        studio_runtime_schema::resource_ref::EmptyResource {},
+                    ),
+                ],
+            )
+            .map_err(|_| studio_runtime_services::resource_notify::ResourceNotifyError::Invalid)
+            .and_then(|request| notifications.publish_once(&request));
+            if let Err(error) = result {
                 eprintln!("Claude login resource publication failed: {error}");
             }
             // A completed login can also change models, costs, and desktop status.
@@ -1450,10 +1457,13 @@ mod tests {
 
         let notifications = state.resource_notifications_handle();
         notifications
-            .publish_once(&serde_json::json!({
-                "requestId": "named-resource",
-                "resources": [{"kind": "multi-server"}],
-            }))
+            .publish_once(
+                &serde_json::from_value(serde_json::json!({
+                    "requestId": "named-resource",
+                    "resources": [{"kind": "multi-server"}],
+                }))
+                .expect("notification fixture"),
+            )
             .expect("named resource publication succeeds");
         let view = notifications
             .changes_since(&[serde_json::json!({"kind": "multi-server"})], Some(0))
