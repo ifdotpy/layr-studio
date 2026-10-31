@@ -131,6 +131,10 @@ unsupported boundary and retain recovery evidence. A Studio storage migration
 does not convert external vendor-owned history. These requirements do not imply
 that every existing format has already been migrated.
 
+[Typed sidebar reorder requests](../workspaces/runtime/packages/runtime-services/src/projects/operations.rs)
+use deterministic Serde JSON bytes for new receipt signatures. A retry of a request admitted before this change can be refused as a
+signature mismatch; it is not executed again.
+
 ## Enforcement owners
 
 | Concern                                           | Authoritative source                                                                                                                                                                              |

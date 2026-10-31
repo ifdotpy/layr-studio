@@ -16,7 +16,7 @@ pub async fn peer_team_write(
     if !matches!(action.as_str(), "save" | "delete" | "move") {
         return Err(ProjectsError::Invalid("unknown peer team action"));
     }
-    let path_value = body.get("path").cloned();
+    let path_value = body.get("path").and_then(Value::as_str).map(str::to_owned);
     let revision = body
         .get("expected_revision")
         .and_then(Value::as_u64)
@@ -274,58 +274,38 @@ pub(crate) fn refresh_project_rooms(
     Ok(())
 }
 
-pub(super) async fn reorder(store: &RuntimeStore, mut body: Value) -> Result<Value, ProjectsError> {
-    let request_id = python_strip(
-        body.get("request_id")
-            .and_then(Value::as_str)
-            .ok_or(ProjectsError::Invalid("request ID is required"))?,
-    );
-    if request_id.is_empty() || request_id.chars().count() > 255 {
+pub async fn reorder(
+    store: &RuntimeStore,
+    body: studio_runtime_schema::project_ingress::SidebarReorder,
+) -> Result<Value, ProjectsError> {
+    let request_id = python_strip(body.request_id.as_str());
+    if request_id.is_empty() {
         return Err(ProjectsError::Invalid("request ID is invalid"));
     }
     let expected = body
-        .get("expected_revision")
-        .and_then(Value::as_u64)
+        .expected_revision
+        .as_u64()
         .ok_or(ProjectsError::Invalid("sidebar revision is invalid"))?;
-    let groups = body
-        .get("groups")
-        .filter(|value| value.is_object())
-        .ok_or(ProjectsError::Invalid("sidebar groups are invalid"))?;
-    let Some(group_map) = groups.as_object() else {
-        return Err(ProjectsError::Invalid("sidebar groups are invalid"));
-    };
-    let total = group_map
-        .values()
-        .filter_map(Value::as_array)
-        .map(Vec::len)
-        .sum::<usize>();
-    if group_map.len() > 500
+    let groups = &body.groups;
+    let total = groups.values().map(Vec::len).sum::<usize>();
+    if groups.len() > 500
         || total > 10_000
         || serde_json::to_string(groups).map_or(true, |value| value.len() > 5_000_000)
-        || group_map.iter().any(|(key, items)| {
+        || groups.iter().any(|(key, items)| {
             key.chars().count() > 4096
-                || items.as_array().is_none_or(|items| {
-                    items.len() > 10_000
-                        || items.iter().any(|item| {
-                            item.as_str().is_none_or(|item| item.chars().count() > 4096)
-                        })
-                        || items.iter().collect::<std::collections::HashSet<_>>().len()
-                            != items.len()
-                })
+                || items.len() > 10_000
+                || items.iter().any(|item| item.chars().count() > 4096)
+                || items.iter().collect::<std::collections::HashSet<_>>().len() != items.len()
         })
     {
         return Err(ProjectsError::Invalid("sidebar order is invalid"));
     }
-    let signature = sha256_hex(
-        studio_runtime_schema::json_compat::python_json_compact(
-            &json!({"operation":"sidebar-order","body":body}),
-        )
-        .as_bytes(),
-    );
+    // New typed requests use deterministic serde JSON; pre-deployment signatures can differ.
+    let signature = sidebar_signature(&body)?;
     let key = format!("sidebar-order:{request_id}");
     let request_id = request_id.to_owned();
-    let groups = body["groups"].take();
-    let migration = body.get("migration").and_then(Value::as_bool) == Some(true);
+    let migration = body.migration.value() == Some(&true);
+    let groups = body.groups;
     store
         .transaction_with(move |tx| -> Result<Value, ProjectsError> {
             let server = RuntimeStore::transaction_local_server_id(tx)?
@@ -376,4 +356,33 @@ pub(super) async fn reorder(store: &RuntimeStore, mut body: Value) -> Result<Val
             Ok(result)
         })
         .await
+}
+
+fn sidebar_signature(
+    body: &studio_runtime_schema::project_ingress::SidebarReorder,
+) -> Result<String, ProjectsError> {
+    Ok(sha256_hex(
+        &serde_json::to_vec(body).map_err(StoreError::from)?,
+    ))
+}
+
+#[cfg(test)]
+mod sidebar_signature_tests {
+    use super::sidebar_signature;
+    use studio_runtime_schema::project_ingress::SidebarReorder;
+
+    #[test]
+    fn equivalent_requests_have_the_same_signature() {
+        let a: SidebarReorder = serde_json::from_str(r#"{"action":"reorder","request_id":"r","expected_revision":1,"groups":{"b":["2"],"a":["1"]}}"#).unwrap();
+        let b: SidebarReorder = serde_json::from_str(r#"{"groups":{"a":["1"],"b":["2"]},"expected_revision":1,"request_id":"r","action":"reorder"}"#).unwrap();
+        let changed: SidebarReorder = serde_json::from_str(r#"{"action":"reorder","request_id":"r","expected_revision":2,"groups":{"a":["1"],"b":["2"]}}"#).unwrap();
+        assert_eq!(
+            sidebar_signature(&a).unwrap(),
+            sidebar_signature(&b).unwrap()
+        );
+        assert_ne!(
+            sidebar_signature(&a).unwrap(),
+            sidebar_signature(&changed).unwrap()
+        );
+    }
 }

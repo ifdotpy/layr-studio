@@ -90,7 +90,10 @@ pub async fn manage(store: Arc<RuntimeStore>, body: &Value) -> Result<RadioReply
     let (path, team, prepared) = studio_runtime_process::blocking_pool::spawn_blocking(
         "runtime-services/radio_runtime",
         move || {
-            let path = project_key(body_for_preparation.get("path"), false)?;
+            let path = project_key(
+                body_for_preparation.get("path").and_then(Value::as_str),
+                false,
+            )?;
             let team =
                 Uuid::parse_str(body_for_preparation["team_id"].as_str().unwrap_or_default())
                     .map_err(|_| ProjectsError::Invalid("peer team ID is invalid"))?
@@ -397,7 +400,10 @@ pub async fn create_with(
         studio_runtime_process::blocking_pool::spawn_blocking(
             "runtime-services/radio_runtime",
             move || {
-                let path = project_key(body_for_preparation.get("path"), true)?;
+                let path = project_key(
+                    body_for_preparation.get("path").and_then(Value::as_str),
+                    true,
+                )?;
                 let name = bounded_text(&body_for_preparation["name"], 80)?;
                 let request = bounded_text(&body_for_preparation["request_id"], 255)?;
                 let namespace = Uuid::new_v5(
@@ -435,7 +441,7 @@ pub async fn create_with(
         .await
         .map_err(|_| ProjectsError::PreparationWorker)??;
     let (prepared, _) =
-        crate::projects::prepare_path(Arc::clone(&store), Some(json!(path.clone())), true).await?;
+        crate::projects::prepare_path(Arc::clone(&store), Some(path.clone()), true).await?;
     let replay_key = key.clone();
     let replay_signature = signature.clone();
     store

@@ -42,6 +42,7 @@ pub mod plan_record;
 pub mod pricing;
 pub mod process_controls;
 pub mod progress_selector;
+pub mod project_ingress;
 pub mod project_record;
 pub mod provider_call_contract;
 pub mod provider_diagnostics;
