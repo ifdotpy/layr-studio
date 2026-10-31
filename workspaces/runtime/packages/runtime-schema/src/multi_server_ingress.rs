@@ -229,6 +229,34 @@ pub struct AutoPairRequest {
     pub request_id: RequestId,
 }
 
+impl ManagementRequest {
+    pub fn action(&self) -> &'static str {
+        match self {
+            Self::AcceptInvite { .. } => "accept_invite",
+            Self::CreateInvite { .. } => "create_invite",
+            Self::Discover { .. } => "discover",
+            Self::Revoke { .. } => "revoke",
+            Self::Settings { .. } => "settings",
+            Self::Alias { .. } => "alias",
+            Self::Name { .. } => "name",
+            Self::UiInvite { .. } => "ui_invite",
+            Self::Unrevoke { .. } => "unrevoke",
+        }
+    }
+    pub fn request_id(&self) -> Option<&str> {
+        match self {
+            Self::Settings { request_id, .. } => request_id.value().map(|v| v.as_str()),
+            Self::AcceptInvite { request_id, .. }
+            | Self::CreateInvite { request_id, .. }
+            | Self::Discover { request_id }
+            | Self::Revoke { request_id, .. }
+            | Self::Alias { request_id, .. }
+            | Self::Name { request_id, .. }
+            | Self::UiInvite { request_id, .. }
+            | Self::Unrevoke { request_id, .. } => Some(request_id.as_str()),
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::ServerLabel;
@@ -392,35 +420,6 @@ mod tests {
             let old =
                 crate::validate("RenameServer", &json!({"requestId":"r", "label":label})).unwrap();
             assert_eq!(typed, old, "{label:?}");
-        }
-    }
-}
-
-impl ManagementRequest {
-    pub fn action(&self) -> &'static str {
-        match self {
-            Self::AcceptInvite { .. } => "accept_invite",
-            Self::CreateInvite { .. } => "create_invite",
-            Self::Discover { .. } => "discover",
-            Self::Revoke { .. } => "revoke",
-            Self::Settings { .. } => "settings",
-            Self::Alias { .. } => "alias",
-            Self::Name { .. } => "name",
-            Self::UiInvite { .. } => "ui_invite",
-            Self::Unrevoke { .. } => "unrevoke",
-        }
-    }
-    pub fn request_id(&self) -> Option<&str> {
-        match self {
-            Self::Settings { request_id, .. } => request_id.value().map(|v| v.as_str()),
-            Self::AcceptInvite { request_id, .. }
-            | Self::CreateInvite { request_id, .. }
-            | Self::Discover { request_id }
-            | Self::Revoke { request_id, .. }
-            | Self::Alias { request_id, .. }
-            | Self::Name { request_id, .. }
-            | Self::UiInvite { request_id, .. }
-            | Self::Unrevoke { request_id, .. } => Some(request_id.as_str()),
         }
     }
 }

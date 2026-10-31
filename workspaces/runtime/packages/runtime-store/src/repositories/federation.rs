@@ -299,7 +299,13 @@ impl FederationRepository {
                 *share_status,
                 true,
             ),
-            _ => {
+            FederationRequest::Status {}
+            | FederationRequest::SetEnabled { .. }
+            | FederationRequest::ApprovePeer { .. }
+            | FederationRequest::RevokePeer { .. }
+            | FederationRequest::RoomOptions { .. }
+            | FederationRequest::CreateInvite { .. }
+            | FederationRequest::AcceptPeer { .. } => {
                 return Err(StoreError::SchemaMismatch(
                     "invalid federation room action".into(),
                 ));
