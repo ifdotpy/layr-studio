@@ -1388,8 +1388,10 @@ mod tests {
         /// `None` when the agent has no chat row.
         chat: Option<ChatFields>,
         busy: bool,
-        /// `None`: no unfinished turn. `Some(None)`: unfinished turn without a provider turn.
-        unfinished: Option<Option<&'static str>>,
+        /// Whether a turn is unfinished (`Starting` or `Running`).
+        unfinished: bool,
+        /// Provider turn of that unfinished turn; `None` before the provider reports one.
+        provider_turn: Option<&'static str>,
         /// Kind of the newest turn row.
         last_turn: Option<&'static str>,
     }
@@ -1406,7 +1408,8 @@ mod tests {
                 )),
                 chat: chat_fields("queued", true, Native, None, 1),
                 busy: false,
-                unfinished: None,
+                unfinished: false,
+                provider_turn: None,
                 last_turn: None,
             },
             RowsStep {
@@ -1417,7 +1420,8 @@ mod tests {
                 )),
                 chat: chat_fields("starting", false, Vm, None, 2),
                 busy: true,
-                unfinished: Some(None),
+                unfinished: true,
+                provider_turn: None,
                 last_turn: Some("starting"),
             },
             RowsStep {
@@ -1429,7 +1433,8 @@ mod tests {
                 )),
                 chat: chat_fields("running", true, Vm, Some(true), 2),
                 busy: true,
-                unfinished: Some(Some("p1")),
+                unfinished: true,
+                provider_turn: Some("p1"),
                 last_turn: Some("running"),
             },
             RowsStep {
@@ -1442,7 +1447,8 @@ mod tests {
                 )),
                 chat: chat_fields("interrupted", false, Native, Some(false), 3),
                 busy: false,
-                unfinished: None,
+                unfinished: false,
+                provider_turn: None,
                 last_turn: Some("interrupted"),
             },
             RowsStep {
@@ -1454,7 +1460,8 @@ mod tests {
                 )),
                 chat: chat_fields("running", true, Vm, Some(true), 4),
                 busy: true,
-                unfinished: Some(Some("p2")),
+                unfinished: true,
+                provider_turn: Some("p2"),
                 last_turn: Some("running"),
             },
             RowsStep {
@@ -1467,7 +1474,8 @@ mod tests {
                 )),
                 chat: chat_fields("completed", false, Native, None, 4),
                 busy: false,
-                unfinished: None,
+                unfinished: false,
+                provider_turn: None,
                 last_turn: Some("completed"),
             },
             RowsStep {
@@ -1475,7 +1483,8 @@ mod tests {
                 record: None,
                 chat: None,
                 busy: false,
-                unfinished: None,
+                unfinished: false,
+                provider_turn: None,
                 // The owner trigger deletes the chat and sessions; finished turns stay.
                 last_turn: Some("completed"),
             },
@@ -1505,13 +1514,17 @@ mod tests {
                 step.busy,
                 "chat_busy after {command}"
             );
-            let unfinished = unfinished_turn(&db, "c")
-                .unwrap()
-                .map(|turn| turn.provider_turn);
+            let unfinished = unfinished_turn(&db, "c").unwrap();
             assert_eq!(
-                unfinished,
-                step.unfinished.map(|turn| turn.map(str::to_owned)),
+                unfinished.is_some(),
+                step.unfinished,
                 "unfinished turn after {command}"
+            );
+            let provider = unfinished.and_then(|turn| turn.provider_turn);
+            assert_eq!(
+                provider.as_deref(),
+                step.provider_turn,
+                "provider turn after {command}"
             );
             let last = read_turns(&db, "c")
                 .unwrap()
