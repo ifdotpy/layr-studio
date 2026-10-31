@@ -2902,8 +2902,11 @@ pub(super) fn interrupt_intent(
     let Some(a) = AgentRepository::get(connection, &AgentId::from(agent))? else {
         return Ok(None);
     };
-    let provider = studio_runtime_providers::ProviderKind::of_field(a.extra.get("provider"))
-        .map_err(|_| WorkerError::PreparationRefused("agent/provider".into()))?;
+    let provider = a
+        .provider
+        .value()
+        .copied()
+        .ok_or_else(|| WorkerError::PreparationRefused("agent/provider".into()))?;
     let Some(attempt) = a.start_attempt.as_ref() else {
         return Ok(None);
     };

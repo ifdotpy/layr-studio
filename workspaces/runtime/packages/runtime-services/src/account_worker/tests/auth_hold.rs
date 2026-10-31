@@ -130,7 +130,9 @@ pub(super) async fn agents(state: &State, kind: ProviderKind, others: usize) -> 
                 let mut template =
                     AgentRepository::get(tx, &AgentId::from(first.as_str()))?.unwrap();
                 if kind == ProviderKind::Claude {
-                    template.extra.insert("provider".into(), json!("claude"));
+                    template.provider = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_schema::ProviderKind::Claude,
+                    );
                     template
                         .extra
                         .insert("nativeEffort".into(), json!("medium"));

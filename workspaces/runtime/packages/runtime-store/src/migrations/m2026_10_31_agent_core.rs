@@ -2,7 +2,7 @@ use crate::StoreResult;
 use rusqlite::Transaction;
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
-    use studio_runtime_schema::creation_intent::AgentRole;
+    use studio_runtime_schema::{ProviderKind, creation_intent::AgentRole};
     const FLAGS: &[&str] = &[
         "compactionsObservedOnly",
         "fastMode",
@@ -30,7 +30,10 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     ]
     .map(|role| format!("'{}'", role.as_str()))
     .join(",");
-    let mut query = tx.prepare(&format!("SELECT id,record FROM runtime_agents WHERE json_valid(record) AND EXISTS (SELECT 1 FROM json_each(record) j WHERE j.key IN ('nativeNameSynced','agentModeChangedAt','agentModeChangedBy','tokenBudget') OR (j.key IN ({flags}) AND j.type NOT IN ('true','false')) OR (j.key IN ({text}) AND j.type NOT IN ('text','null')) OR (j.key='role' AND (j.type NOT IN ('text','null') OR (j.type='text' AND j.value NOT IN ({roles})))) OR (j.key IN ({flags},{text},'role') AND (SELECT count(*) FROM json_each(record) d WHERE d.key=j.key)>1))"))?;
+    let providers = ProviderKind::ALL
+        .map(|provider| format!("'{}'", provider.key()))
+        .join(",");
+    let mut query = tx.prepare(&format!("SELECT id,record FROM runtime_agents WHERE json_valid(record) AND EXISTS (SELECT 1 FROM json_each(record) j WHERE j.key IN ('nativeNameSynced','agentModeChangedAt','agentModeChangedBy','tokenBudget') OR (j.key IN ({flags}) AND j.type NOT IN ('true','false')) OR (j.key IN ({text}) AND j.type NOT IN ('text','null')) OR (j.key='role' AND (j.type NOT IN ('text','null') OR (j.type='text' AND j.value NOT IN ({roles})))) OR (j.key='provider' AND (j.type NOT IN ('text','null') OR (j.type='text' AND j.value NOT IN ({providers})))) OR (j.key IN ({flags},{text},'role','provider') AND (SELECT count(*) FROM json_each(record) d WHERE d.key=j.key)>1))"))?;
     let rows = query.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
@@ -83,6 +86,12 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             };
             record.insert("role".into(), serde_json::value::to_raw_value(&inferred)?);
         }
+        if record
+            .get("provider")
+            .is_some_and(|value| serde_json::from_str::<Option<ProviderKind>>(value.get()).is_err())
+        {
+            record.remove("provider");
+        }
         tx.execute(
             "UPDATE runtime_agents SET record=?1 WHERE id=?2",
             rusqlite::params![serde_json::to_string(&record)?, id],
@@ -130,7 +139,7 @@ mod tests {
     fn agent_batch_migration_normalizes_all_owned_fields() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(r#"CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-        INSERT INTO runtime_agents VALUES('legacy','{"id":"legacy","nativeNameSynced":true,"agentModeChangedAt":1,"agentModeChangedBy":"user","tokenBudget":1000,"compactionsObservedOnly":"bad","fastMode":1,"daybreakEnabled":[],"needsTitle":{},"manualName":null,"maxAgentsExplicit":"bad","agentModeSupported":3,"prompt":42,"profileId":null,"profileInstructions":[],"effort":"low","effort":"high","role":"future","role":"reviewer"}');"#).unwrap();
+        INSERT INTO runtime_agents VALUES('legacy','{"id":"legacy","nativeNameSynced":true,"agentModeChangedAt":1,"agentModeChangedBy":"user","tokenBudget":1000,"compactionsObservedOnly":"bad","fastMode":1,"daybreakEnabled":[],"needsTitle":{},"manualName":null,"maxAgentsExplicit":"bad","agentModeSupported":3,"prompt":42,"profileId":null,"profileInstructions":[],"effort":"low","effort":"high","role":"future","role":"reviewer","provider":"future"}');"#).unwrap();
         let tx = db.transaction().unwrap();
         super::apply(&tx).unwrap();
         super::apply(&tx).unwrap();

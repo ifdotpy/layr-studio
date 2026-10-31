@@ -3048,10 +3048,7 @@ impl Worker {
                         else {
                             return Ok(None);
                         };
-                        let Ok(provider) = studio_runtime_providers::ProviderKind::of_field(
-                            record.extra.get("provider"),
-                        )
-                        .map(|kind| kind.key()) else {
+                        let Some(provider) = record.provider.value().map(|kind| kind.key()) else {
                             return Ok(None);
                         };
                         if !crate::linux_vm_provider::vm_actor_matches(

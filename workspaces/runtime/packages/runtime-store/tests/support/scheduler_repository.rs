@@ -33,8 +33,6 @@ fn database() -> Connection {
     connection
         .execute_batch(crate::agent_volatile::agent_volatile_table_sql())
         .expect("volatile agent table creates");
-    let mut extra = BTreeMap::new();
-    extra.insert("provider".to_owned(), json!("codex"));
     AgentRepository::put(
         &connection,
         &AgentRecord {
@@ -44,7 +42,9 @@ fn database() -> Connection {
             root_id: AgentId::from("agent"),
             epoch: 4,
             status: AgentStatus::Queued,
-            extra,
+            provider: studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_schema::ProviderKind::Codex,
+            ),
             ..AgentRecord::test_defaults()
         },
     )

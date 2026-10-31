@@ -1019,7 +1019,7 @@ fn recheck_actor(
     if current.epoch != actor.epoch
         || current.root_id != actor.root_id
         || current.account_key != actor.account_key
-        || current.extra.get("provider") != actor.extra.get("provider")
+        || current.provider != actor.provider
         || current.is_deleted()
         || current.auto_wake != Some(true)
     {
@@ -1368,8 +1368,7 @@ pub(crate) async fn request_review(
             crate::managed_host_tools::Error::Unavailable("workspace-state/vm-workspace").into(),
         );
     }
-    if studio_runtime_providers::ProviderKind::of_field(actor_record.extra.get("provider"))
-        != Ok(studio_runtime_providers::ProviderKind::Codex)
+    if actor_record.provider.value().copied() != Some(studio_runtime_providers::ProviderKind::Codex)
     {
         return Err(crate::managed_host_tools::Error::Invalid(
             "Native review requires a Codex agent",

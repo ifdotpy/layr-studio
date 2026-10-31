@@ -2139,10 +2139,9 @@ mod bounded_reconcile_tests {
                         turn_epoch: None,
                         thread_id: None,
                         turn_id: None,
-                        extra: BTreeMap::from([(
-                            "provider".to_owned(),
-                            serde_json::json!(studio_runtime_schema::ProviderKind::Codex),
-                        )]),
+                        provider: studio_runtime_schema::queue_command::Field::Value(
+                            studio_runtime_schema::ProviderKind::Codex,
+                        ),
                         ..AgentRecord::test_defaults()
                     },
                 )?;
@@ -2321,9 +2320,7 @@ mod bounded_reconcile_tests {
                         usage_resume_enabled: None,
                         in_flight: Some(false),
                         execution_mode: None, turn_epoch: None, thread_id: None, turn_id: None,
-                        extra: BTreeMap::from([
-                            ("provider".to_owned(), serde_json::json!(studio_runtime_schema::ProviderKind::Codex)),
-                        ]),
+                        provider: studio_runtime_schema::queue_command::Field::Value(studio_runtime_schema::ProviderKind::Codex),
                         ..AgentRecord::test_defaults()
                     },
                 )?;

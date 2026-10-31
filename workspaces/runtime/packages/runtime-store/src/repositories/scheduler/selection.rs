@@ -523,6 +523,14 @@ impl SchedulerRepository {
                 .value()
                 .is_some_and(|current| current.as_str() == role),
         };
+        let provider_matches = match &original.provider {
+            HistoricalField::Missing => agent.provider.is_missing(),
+            HistoricalField::Null => matches!(
+                agent.provider,
+                studio_runtime_schema::queue_command::Field::Null
+            ),
+            HistoricalField::Present(provider) => agent.provider.value() == Some(provider),
+        };
         if original.id != agent.id
             || original.root_id != agent.root_id
             || original.epoch != agent.epoch
@@ -533,8 +541,7 @@ impl SchedulerRepository {
             || original.workspace_mode != agent.workspace_mode
             || original.cwd != agent.cwd
             || original.parent_id != agent.parent_id
-            || historical_text(&original.provider, |provider| provider.key().to_owned()).as_ref()
-                != agent.extra.get("provider")
+            || !provider_matches
             || !role_matches
             || historical_text(&original.real_cwd, Clone::clone).as_ref()
                 != agent.extra.get("realCwd")

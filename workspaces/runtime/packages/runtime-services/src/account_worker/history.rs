@@ -1,5 +1,5 @@
 //! Terminal transcript effects share the lifecycle transaction and its replay receipt.
-use crate::notification_dispatch::notices::{error_message as message, provider_label};
+use crate::notification_dispatch::notices::error_message as message;
 use serde_json::{Value, json};
 use studio_runtime_store::{AgentRecord, NotificationDispatchRepository, StoreResult, Transaction};
 pub(crate) fn terminal(
@@ -11,7 +11,11 @@ pub(crate) fn terminal(
     at: f64,
 ) -> StoreResult<()> {
     if status == "failed" {
-        let label = provider_label(&agent.value());
+        let label = agent
+            .provider
+            .value()
+            .copied()
+            .map_or("Provider", studio_runtime_schema::ProviderKind::label);
         let error = error.cloned().unwrap_or_else(
             || json!({"message": format!("{label} ended this turn with an error.")}),
         );
@@ -53,13 +57,12 @@ mod tests {
     async fn provider_identity_failed_turn_notice_keeps_unknown_identity_generic() {
         let root = tempfile::tempdir().expect("state directory");
         let store = RuntimeStore::open(Some(root.path())).await.expect("store");
-        for (index, provider) in [
-            None,
-            Some(Value::Null),
-            Some(json!("future")),
-            Some(json!(7)),
-            Some(json!("codex")),
-            Some(json!("claude")),
+        use studio_runtime_schema::{ProviderKind, queue_command::Field};
+        for (index, (provider, expected)) in [
+            (Field::Missing, "Provider"),
+            (Field::Null, "Provider"),
+            (Field::Value(ProviderKind::Codex), "Codex"),
+            (Field::Value(ProviderKind::Claude), "Claude"),
         ]
         .into_iter()
         .enumerate()
@@ -68,14 +71,7 @@ mod tests {
                 json!({"compactions":0,"accountKey":"default","id":"a","rootId":"a","epoch":0,"status":"failed"}),
             )
             .expect("agent");
-            if let Some(provider) = provider {
-                agent.extra.insert("provider".into(), provider);
-            }
-            let expected = match agent.extra.get("provider").and_then(Value::as_str) {
-                Some("codex") => "Codex",
-                Some("claude") => "Claude",
-                _ => "Provider",
-            };
+            agent.provider = provider;
             store
                 .transaction(move |tx| {
                     terminal(tx, &agent, &format!("turn-{index}"), "failed", None, 1.0)

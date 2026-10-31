@@ -570,13 +570,11 @@ pub(crate) fn settle_terminal_in_transaction(
     // Studio can write a steer to a turn that the provider already ended,
     // before it reads that turn's end. Such a steer was never applied.
     let end_closes_steer = agent.as_ref().is_some_and(|agent| {
-        studio_runtime_providers::ProviderKind::of_field(agent.extra.get("provider")).is_ok_and(
-            |kind| {
-                crate::provider_adapter::adapter(kind)
-                    .capabilities()
-                    .turn_end_closes_steer
-            },
-        )
+        agent.provider.value().is_some_and(|kind| {
+            crate::provider_adapter::adapter(*kind)
+                .capabilities()
+                .turn_end_closes_steer
+        })
     });
     if end_closes_steer && let Some(ended_at) = params["turn"]["completedAt"].as_f64() {
         SchedulerRepository::release_steers_written_after_turn_end(

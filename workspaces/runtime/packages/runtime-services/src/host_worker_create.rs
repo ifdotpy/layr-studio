@@ -353,10 +353,7 @@ pub fn recheck(
         recheck_record(transaction, draft)?;
         let frozen = field(draft, "_p02CreationIdentity").ok_or(CreateError::IdentityChanged)?;
         let observed = identity_value(&accounts[index]);
-        if frozen != &observed
-            || field(draft, "provider").and_then(Value::as_str)
-                != Some(accounts[index].provider.key())
-        {
+        if frozen != &observed || draft.provider.value() != Some(&accounts[index].provider) {
             return Err(CreateError::IdentityChanged);
         }
     }
@@ -395,7 +392,7 @@ pub fn recheck_worker(
     recheck_record(transaction, draft)?;
     let observed = identity_value(account);
     if field(draft, "_p02CreationIdentity") != Some(&observed)
-        || field(draft, "provider").and_then(Value::as_str) != Some(account.provider.key())
+        || draft.provider.value() != Some(&account.provider)
     {
         return Err(CreateError::IdentityChanged);
     }
@@ -550,7 +547,10 @@ fn validate_agent(record: &AgentRecord) -> Result<(), CreateError> {
             id: record.id.0.clone(),
         });
     }
-    required_string(record, "provider")?;
+    record
+        .provider
+        .value()
+        .ok_or(CreateError::InvalidCreation("provider"))?;
     record
         .cwd
         .as_deref()
@@ -575,12 +575,6 @@ fn validate_agent(record: &AgentRecord) -> Result<(), CreateError> {
 
 fn field<'a>(record: &'a AgentRecord, key: &str) -> Option<&'a Value> {
     record.extra.get(key)
-}
-
-fn required_string<'a>(record: &'a AgentRecord, key: &'static str) -> Result<&'a str, CreateError> {
-    field(record, key)
-        .and_then(Value::as_str)
-        .ok_or(CreateError::InvalidCreation(key))
 }
 
 fn required_string_value<'a>(value: &'a Value, key: &'static str) -> Result<&'a str, CreateError> {

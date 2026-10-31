@@ -358,7 +358,9 @@ async fn lazy_history_receipt_is_adopted_before_ordinary_preparation_returns() {
     store
         .transaction(|tx| {
             let mut row = AgentRepository::get(tx, &AgentId::from("lead"))?.expect("lead");
-            row.extra.insert("provider".into(), json!("codex"));
+            row.provider = studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_schema::ProviderKind::Codex,
+            );
             row.model = Some("gpt-6-astra".into());
             row.extra.insert("nativeEffort".into(), Value::Null);
             AgentRepository::put(tx, &row)

@@ -211,8 +211,6 @@ fn database() -> Connection {
 }
 
 fn running() -> AgentRecord {
-    let mut extra = BTreeMap::new();
-    extra.insert("provider".to_owned(), json!("claude"));
     AgentRecord {
         start_attempt: Some(Box::new(crate::StartAttemptView {
             id: Some("start".into()),
@@ -235,7 +233,9 @@ fn running() -> AgentRecord {
         root_id: AgentId::from(AGENT),
         epoch: 4,
         status: AgentStatus::Running,
-        extra,
+        provider: studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::ProviderKind::Claude,
+        ),
         ..AgentRecord::test_defaults()
     }
 }
@@ -367,7 +367,8 @@ fn explicitly_identified_codex_and_claude_turns_are_steered() {
     for provider in ["codex", "claude"] {
         let mut connection = database();
         let mut record = running();
-        record.extra.insert("provider".into(), json!(provider));
+        record.provider =
+            studio_runtime_schema::queue_command::Field::Value(provider.parse().unwrap());
         put_agent(&connection, record);
         let claimed = claim(&mut connection, "s1").expect("running turn claims");
         assert_eq!(claimed.turn_id, TURN, "{provider:?}");
@@ -796,7 +797,9 @@ fn wake_page_selects_running_turns_of_every_provider_with_queued_user_input() {
     put_agent(&connection, rejected);
     assert!(page(&connection).is_empty());
     let mut codex = running();
-    codex.extra.insert("provider".into(), json!("codex"));
+    codex.provider = studio_runtime_schema::queue_command::Field::Value(
+        studio_runtime_schema::ProviderKind::Codex,
+    );
     // A submitted Codex attempt with a generation is a recovery candidate.
     codex
         .start_attempt

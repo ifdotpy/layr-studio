@@ -116,10 +116,9 @@ impl Actor {
             reviewer: record.role.value().copied()
                 == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer),
             provider: record
-                .extra
-                .get("provider")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
+                .provider
+                .value()
+                .map(|provider| provider.key().to_owned()),
             remote_origin: truthy(record.extra.get("remoteOrigin")),
             execution_move: truthy(record.extra.get("executionMove")),
             record,

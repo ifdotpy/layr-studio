@@ -2830,7 +2830,9 @@ async fn provider_worker(
         .run(move |s| async move {
             scheduler::lifecycle_transaction_with(s.as_ref(), move |tx| {
                 let mut row = AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
-                row.extra.insert("provider".into(), json!("claude"));
+                row.provider = studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_schema::ProviderKind::Claude,
+                );
                 row.extra.insert("nativeEffort".into(), json!("medium"));
                 row.extra.insert("claudeOptions".into(), json!({}));
                 AgentRepository::put(tx, &row)?;
@@ -5344,7 +5346,9 @@ async fn vm_claude_refresh_copies_rotation_to_active_guest_without_restart() {
                     let mut record = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
                         .expect("fixture agent");
                     record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
-                    record.extra.insert("provider".into(), json!("claude"));
+                    record.provider = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_schema::ProviderKind::Claude,
+                    );
                     record.extra.insert("layrReady".into(), json!(true));
                     record.cwd = Some("/home/studio/project".into());
                     record.workspace_mode =
