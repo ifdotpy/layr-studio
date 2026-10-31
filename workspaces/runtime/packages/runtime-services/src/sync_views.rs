@@ -853,6 +853,88 @@ pub struct ComplaintViewContext<'a> {
     pub agents: &'a [AgentAuthorityRow],
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComplaintProjection {
+    id: String,
+    author: Option<String>,
+    lead_id: Option<String>,
+    status: studio_runtime_schema::complaint_record::ComplaintStatus,
+    created: Option<f64>,
+    updated: Option<f64>,
+    read_at: Option<f64>,
+    title: String,
+    recipient: studio_runtime_schema::complaint_record::ComplaintRecipient,
+    version: Option<i64>,
+    needs_user_response: bool,
+    author_name: Option<String>,
+    lead_name: Option<String>,
+}
+
+pub fn project_complaint_record(
+    record: &studio_runtime_schema::complaint_record::ComplaintRecord,
+    context: &ComplaintViewContext,
+) -> Option<ComplaintProjection> {
+    use studio_runtime_schema::complaint_record::{
+        ComplaintRecipient, ComplaintSource, ComplaintStatus,
+    };
+    if record.id.is_empty() {
+        return None;
+    }
+    let author = record.author.as_deref();
+    let lead = record.lead_id.as_deref();
+    let needs_user_response = record.recipient == ComplaintRecipient::User
+        && !matches!(
+            record.status,
+            ComplaintStatus::Resolved | ComplaintStatus::Declined
+        )
+        && ((record.source_type == Some(ComplaintSource::UserTask)
+            && record.status == ComplaintStatus::Open)
+            || !record
+                .responses
+                .iter()
+                .any(|response| response.author == "user"));
+    let bound = |value: &str, field| bound_sync_text(value, field, false);
+    let name = |id: Option<&str>, fallback: Option<&str>, field| {
+        let value = id.and_then(|id| {
+            context
+                .agents
+                .iter()
+                .find(|agent| agent.id.as_deref() == Some(id))
+        });
+        match value.map(|agent| &agent.name) {
+            None | Some(StoredField::Missing) => fallback.map(|name| bound(name, field)),
+            Some(StoredField::Null) => None,
+            Some(StoredField::Value(name)) => Some(bound(name, field)),
+        }
+    };
+    Some(ComplaintProjection {
+        id: bound(&record.id, "id"),
+        author: author.map(|value| bound(value, "author")),
+        lead_id: lead.map(|value| bound(value, "leadId")),
+        status: record.status,
+        created: record.created,
+        updated: record.updated,
+        read_at: record.read_at,
+        title: record
+            .text
+            .as_deref()
+            .unwrap_or_default()
+            .chars()
+            .take(140)
+            .collect(),
+        recipient: record.recipient,
+        version: record.version,
+        needs_user_response,
+        author_name: name(
+            author,
+            author.map(|v| if v == "user" { "You" } else { v }),
+            "authorName",
+        ),
+        lead_name: name(lead, lead, "leadName"),
+    })
+}
+
 /// Build the viewer-independent renderer view for one stored complaint.
 pub fn complaint_entity_view(record: &Value, context: &ComplaintViewContext) -> Option<Value> {
     let id = record.get("id").and_then(Value::as_str)?;
@@ -1010,6 +1092,21 @@ mod projection_plan_tests {
         schema_projection_properties,
     };
     use serde_json::json;
+
+    #[test]
+    fn complaint_projection_matches_legacy_view() {
+        let context = super::ComplaintViewContext::default();
+        for recipient in ["user", "lead"] {
+            let raw = json!({"id":"c","leadId":"lead","author":"user","text":"hello","recipient":recipient,"version":1,"status":"open","created":1.0,"updated":1.0,"readAt":null,"responses":[]});
+            let record: studio_runtime_schema::complaint_record::ComplaintRecord =
+                serde_json::from_value(raw.clone()).unwrap();
+            let old = super::complaint_entity_view(&raw, &context).unwrap();
+            let new =
+                serde_json::to_value(super::project_complaint_record(&record, &context).unwrap())
+                    .unwrap();
+            assert_eq!(new, old);
+        }
+    }
 
     #[test]
     fn work_projection_preserves_presence_and_opaque_archive() {

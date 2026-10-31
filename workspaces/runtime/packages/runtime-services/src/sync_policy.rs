@@ -476,14 +476,27 @@ pub fn maintain_entity_projections_with_server_id(
                     }
                     continue;
                 }
+                if collection == "complaint" {
+                    let complaint: studio_runtime_schema::complaint_record::ComplaintRecord =
+                        serde_json::from_str(raw)?;
+                    let context = ComplaintViewContext {
+                        agents: rooms.agents(),
+                    };
+                    if let Some(view) =
+                        crate::sync_views::project_complaint_record(&complaint, &context)
+                    {
+                        SyncDocumentsRepository::put_entity(
+                            transaction,
+                            collection,
+                            id,
+                            view,
+                            false,
+                        )?;
+                    }
+                    continue;
+                }
                 let record = serde_json::from_str::<Value>(raw)?;
                 let projected = match collection {
-                    "complaint" => complaint_entity_view(
-                        &record,
-                        &ComplaintViewContext {
-                            agents: rooms.agents(),
-                        },
-                    ),
                     "project" => {
                         let prior = transaction.query_row(
                         "SELECT payload FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=0",
