@@ -2375,10 +2375,30 @@ async fn rename(
                 .await;
                 // Receipt-only commits deliberately do not wake entity readers.
                 // Publish this exact selector after every finisher exit, including failure.
-                if let Err(error) = notifications.publish_once(&serde_json::json!({
-                    "requestId":format!("rename-result:{request_id}"),
-                    "resources":[{"kind":"rename-progress", "agentId":agent_id, "requestId":request_id}]
-                })) {
+                let result = (|| {
+                    use studio_runtime_schema::{
+                        resource_notification::ResourceNotifyRequest,
+                        resource_ref::{RenameResource, ResourceRef},
+                    };
+                    use studio_runtime_services::resource_notify::ResourceNotifyError;
+                    let resource = RenameResource {
+                        agent_id: agent_id
+                            .clone()
+                            .try_into()
+                            .map_err(|_| ResourceNotifyError::Invalid)?,
+                        request_id: request_id
+                            .clone()
+                            .try_into()
+                            .map_err(|_| ResourceNotifyError::Invalid)?,
+                    };
+                    let request = ResourceNotifyRequest::new(
+                        format!("rename-result:{request_id}"),
+                        vec![ResourceRef::RenameProgressResource(resource)],
+                    )
+                    .map_err(|_| ResourceNotifyError::Invalid)?;
+                    notifications.publish_once(&request)
+                })();
+                if let Err(error) = result {
                     eprintln!("Could not publish rename completion: {error}");
                 }
                 notifications.publish_progress(

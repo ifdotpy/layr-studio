@@ -123,11 +123,17 @@ pub(super) async fn read_snapshot(state: &HttpState) -> Result<Value, ApiError> 
 }
 
 pub(super) fn publish_resource_change(notifications: &ResourceNotifications, request_id: &str) {
-    let request = serde_json::json!({
-        "requestId": request_id,
-        "resources": [{"kind": "multi-server"}],
-    });
-    if let Err(error) = notifications.publish_once(&request) {
+    use studio_runtime_schema::{
+        resource_notification::ResourceNotifyRequest,
+        resource_ref::{EmptyResource, ResourceRef},
+    };
+    let result = ResourceNotifyRequest::new(
+        request_id.to_owned(),
+        vec![ResourceRef::MultiServerResource(EmptyResource {})],
+    )
+    .map_err(|_| studio_runtime_services::resource_notify::ResourceNotifyError::Invalid)
+    .and_then(|request| notifications.publish_once(&request));
+    if let Err(error) = result {
         // The in-memory publisher is unavailable only while its stream hub is
         // closing or its publication state is poisoned. Closing forces streams
         // to reconnect and receive the current baseline. Never fail the already
