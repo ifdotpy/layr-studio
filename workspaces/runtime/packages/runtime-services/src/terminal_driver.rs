@@ -21,6 +21,13 @@ pub const OUTPUT_LIMIT: usize = 1_048_576;
 pub const OUTPUT_CHUNK: usize = 65_536;
 pub const INPUT_LIMIT: usize = 65_536;
 pub const MAX_TITLE_CHARS: usize = 120;
+pub const TERMINAL_CREATE_REQUEST_ID_MAX_CODEPOINTS: usize = 200;
+pub const TERMINAL_COLS_MIN: i64 = 2;
+pub const TERMINAL_COLS_MAX: u64 = 1000;
+pub const TERMINAL_ROWS_MIN: i64 = 1;
+pub const TERMINAL_ROWS_MAX: u64 = 500;
+pub const TERMINAL_COLS_DEFAULT: u64 = 100;
+pub const TERMINAL_ROWS_DEFAULT: u64 = 28;
 
 pub trait TerminalSession: Send + Sync + 'static {
     fn send_request(
@@ -101,7 +108,7 @@ pub struct TerminalDriver<S: TerminalSession> {
     id_factory: fn() -> Result<String, TerminalError>,
 }
 
-pub struct TerminalCreate<'a> {
+pub struct TerminalCreate<'a, T: ?Sized> {
     pub request_id: &'a str,
     pub agent: &'a str,
     pub agent_cwd: &'a str,
@@ -110,7 +117,7 @@ pub struct TerminalCreate<'a> {
     pub rows: u64,
     pub shell: &'a str,
     pub environment: Value,
-    pub submitted_request: &'a Value,
+    pub submitted_request: &'a T,
 }
 
 fn replay_action(
@@ -333,7 +340,10 @@ impl<S: TerminalSession> TerminalDriver<S> {
         (self.clock)()
     }
 
-    pub async fn create(&self, request: TerminalCreate<'_>) -> Result<Value, TerminalError> {
+    pub async fn create<T: serde::Serialize + ?Sized>(
+        &self,
+        request: TerminalCreate<'_, T>,
+    ) -> Result<Value, TerminalError> {
         let TerminalCreate {
             request_id,
             agent,
@@ -346,9 +356,9 @@ impl<S: TerminalSession> TerminalDriver<S> {
             submitted_request,
         } = request;
         if request_id.is_empty()
-            || request_id.chars().count() > 200
-            || !(2..=1000).contains(&columns)
-            || !(1..=500).contains(&rows)
+            || request_id.chars().count() > TERMINAL_CREATE_REQUEST_ID_MAX_CODEPOINTS
+            || !(TERMINAL_COLS_MIN as u64..=TERMINAL_COLS_MAX).contains(&columns)
+            || !(TERMINAL_ROWS_MIN as u64..=TERMINAL_ROWS_MAX).contains(&rows)
         {
             return Err(TerminalError::InvalidRequest);
         }
@@ -356,7 +366,10 @@ impl<S: TerminalSession> TerminalDriver<S> {
         if !run_blocking(move || Ok(cwd_for_check.is_dir())).await? {
             return Err(TerminalError::InvalidRequest);
         }
-        let signature = receipt_signature(submitted_request);
+        let signature =
+            studio_runtime_schema::json_compat::python_json_serialized(submitted_request)
+                .map(|canonical| studio_runtime_store::sha256_hex(canonical.as_bytes()))
+                .map_err(|_| TerminalError::InvalidRequest)?;
         let lookup_request_id = request_id.to_owned();
         if let Some((prior_signature, result)) = self
             .store
@@ -536,8 +549,8 @@ impl<S: TerminalSession> TerminalDriver<S> {
             }
             "input" => self.send_input(&id, data).await,
             "resize" => {
-                let columns = size(data, "cols", 100)?;
-                let rows = size(data, "rows", 28)?;
+                let columns = size(data, "cols", TERMINAL_COLS_DEFAULT)?;
+                let rows = size(data, "rows", TERMINAL_ROWS_DEFAULT)?;
                 self.require_running(&record)?;
                 let operation_id = format!("terminal-resize:{id}:{}:{}", columns, rows);
                 let params = json!({"processHandle": id, "size": {"rows": rows, "cols": columns}});
@@ -1103,8 +1116,8 @@ fn size(data: &Value, key: &str, default: u64) -> Result<u64, TerminalError> {
         Some(value) => value.as_u64().ok_or(TerminalError::InvalidRequest)?,
     };
     let valid = match key {
-        "cols" => (2..=1000).contains(&value),
-        "rows" => (1..=500).contains(&value),
+        "cols" => (TERMINAL_COLS_MIN as u64..=TERMINAL_COLS_MAX).contains(&value),
+        "rows" => (TERMINAL_ROWS_MIN as u64..=TERMINAL_ROWS_MAX).contains(&value),
         _ => false,
     };
     valid.then_some(value).ok_or(TerminalError::InvalidRequest)
