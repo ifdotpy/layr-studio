@@ -21,10 +21,76 @@ pub enum QuestionsReadsError {
     InvalidStoredObject { object: &'static str, id: String },
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct QuestionHistory<'a> {
+    id: String,
+    agent: String,
+    method: studio_runtime_schema::request_record::RequestMethod,
+    status: studio_runtime_schema::persistence::RequestCardStatus,
+    created_at: f64,
+    answered_at: Option<f64>,
+    answered_by: Option<String>,
+    decision: Option<studio_runtime_schema::request_record::RequestDecision>,
+    deferred: Option<bool>,
+    deferred_at: Option<f64>,
+    deferred_by: Option<String>,
+    answer_history: Option<Vec<HistoryAnswer<'a>>>,
+    answer_error: Option<String>,
+    item_id: Option<String>,
+    turn_id: Option<String>,
+    questions: Vec<QuestionView>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HistoryAnswer<'a> {
+    id: String,
+    question: String,
+    is_secret: bool,
+    answer: Option<&'a serde_json::value::RawValue>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+enum QuestionView {
+    Elicitation {
+        id: String,
+        question: String,
+        #[serde(rename = "isSecret")]
+        is_secret: bool,
+    },
+    Input {
+        id: String,
+        question: String,
+        #[serde(rename = "isSecret")]
+        is_secret: bool,
+        header: Option<String>,
+        options: Vec<QuestionOption>,
+        #[serde(rename = "multiSelect")]
+        multi_select: bool,
+        #[serde(rename = "isOther")]
+        is_other: bool,
+    },
+}
+
+#[derive(serde::Serialize)]
+struct QuestionOption {
+    label: String,
+    description: Option<String>,
+}
+
+fn history_text(value: &str, field: &str) -> String {
+    crate::sync_views::bound_sync_text(value, field, false)
+}
+fn history_optional(value: Option<&str>, field: &str) -> Option<String> {
+    value.map(|value| history_text(value, field))
+}
+
 /// Question history projection published per request.
 pub(crate) fn question_history_entity(
     record: &studio_runtime_store::RequestRecord,
-) -> Result<Option<Value>, QuestionsReadsError> {
+) -> Result<Option<QuestionHistory<'_>>, QuestionsReadsError> {
     use studio_runtime_schema::request_record::RequestMethod;
     if record.deleted_at.is_some_and(|at| at != 0.0)
         || matches!(
@@ -54,12 +120,72 @@ pub(crate) fn question_history_entity(
         return Ok(None);
     }
     let questions = if record.method == RequestMethod::Elicitation {
-        params.requested_schema.as_ref().and_then(|s| s.properties.as_ref()).map(|properties| properties.0.iter().map(|(id, p)| json!({"id":id,"question":p.title.as_deref().unwrap_or(id),"isSecret":p.is_secret.unwrap_or(false) || p.write_only.unwrap_or(false) || p.format.as_deref() == Some("password")})).collect::<Vec<_>>()).unwrap_or_default()
+        params
+            .requested_schema
+            .as_ref()
+            .and_then(|schema| schema.properties.as_ref())
+            .map(|properties| {
+                properties
+                    .0
+                    .iter()
+                    .take(crate::sync_views::SYNC_ARRAY_ITEMS)
+                    .map(|(id, property)| QuestionView::Elicitation {
+                        id: history_text(id, "id"),
+                        question: history_text(property.title.as_deref().unwrap_or(id), "question"),
+                        is_secret: property.is_secret.unwrap_or(false)
+                            || property.write_only.unwrap_or(false)
+                            || property.format.as_deref() == Some("password"),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     } else {
-        params.questions.as_ref().map(|questions| questions.iter().map(|q| {
-            let options = q.options.as_ref().map(|items| items.iter().map(|option| match option { HistoryOption::Label(label) => json!({"label":label,"description":null}), HistoryOption::Detailed { label, description } => json!({"label":label,"description":description}) }).collect::<Vec<_>>()).unwrap_or_default();
-            json!({"id":q.id,"question":q.question.as_deref().unwrap_or(&q.id),"isSecret":q.is_secret.unwrap_or(false),"header":q.header,"options":options,"multiSelect":q.multi_select.unwrap_or(false),"isOther":q.is_other.unwrap_or(false)})
-        }).collect::<Vec<_>>()).unwrap_or_default()
+        params
+            .questions
+            .as_ref()
+            .map(|questions| {
+                questions
+                    .iter()
+                    .take(crate::sync_views::SYNC_ARRAY_ITEMS)
+                    .map(|question| QuestionView::Input {
+                        id: history_text(&question.id, "id"),
+                        question: history_text(
+                            question.question.as_deref().unwrap_or(&question.id),
+                            "question",
+                        ),
+                        is_secret: question.is_secret.unwrap_or(false),
+                        header: history_optional(question.header.as_deref(), "header"),
+                        options: question
+                            .options
+                            .as_ref()
+                            .map(|options| {
+                                options
+                                    .iter()
+                                    .take(crate::sync_views::SYNC_ARRAY_ITEMS)
+                                    .map(|option| match option {
+                                        HistoryOption::Label(label) => QuestionOption {
+                                            label: history_text(label, "label"),
+                                            description: None,
+                                        },
+                                        HistoryOption::Detailed { label, description } => {
+                                            QuestionOption {
+                                                label: history_text(label, "label"),
+                                                description: history_optional(
+                                                    description.as_deref(),
+                                                    "description",
+                                                ),
+                                            }
+                                        }
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                        multi_select: question.multi_select.unwrap_or(false),
+                        is_other: question.is_other.unwrap_or(false),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     };
     let item_id = params
         .item_id
@@ -81,12 +207,39 @@ pub(crate) fn question_history_entity(
         .as_deref()
         .filter(|s| !s.is_empty())
         .or(record.turn_id.as_deref().filter(|s| !s.is_empty()));
-    let history = record.answer_history.as_ref().map(|entries| entries.iter().map(|entry| json!({"id":entry.id,"question":entry.question,"isSecret":entry.is_secret,"answer":if entry.is_secret { json!(null) } else { json!(entry.answer) }})).collect::<Vec<_>>());
-    let projected = json!({"id":record.id,"agent":record.agent,"method":record.method,"status":record.status,"createdAt":record.created_at,"answeredAt":record.answered_at,"answeredBy":record.answered_by,"decision":record.decision,"deferred":record.deferred,"deferredAt":record.deferred_at,"deferredBy":record.deferred_by,"answerHistory":history,"answerError":record.answer_error,"itemId":item_id,"turnId":turn_id,"questions":questions});
-    Ok(crate::sync_views::project_persisted_record(
-        "questionHistory",
-        &projected,
-    ))
+    let answer_history = record.answer_history.as_ref().map(|entries| {
+        entries
+            .iter()
+            .take(crate::sync_views::SYNC_ARRAY_ITEMS)
+            .map(|entry| HistoryAnswer {
+                id: history_text(&entry.id, "id"),
+                question: history_text(&entry.question, "question"),
+                is_secret: entry.is_secret,
+                answer: (!entry.is_secret).then_some(entry.answer.as_ref()),
+            })
+            .collect()
+    });
+    if record.id.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(QuestionHistory {
+        id: history_text(&record.id, "id"),
+        agent: history_text(&record.agent, "agent"),
+        method: record.method,
+        status: record.status,
+        created_at: record.created_at,
+        answered_at: record.answered_at,
+        answered_by: history_optional(record.answered_by.as_deref(), "answeredBy"),
+        decision: record.decision,
+        deferred: record.deferred,
+        deferred_at: record.deferred_at,
+        deferred_by: history_optional(record.deferred_by.as_deref(), "deferredBy"),
+        answer_history,
+        answer_error: history_optional(record.answer_error.as_deref(), "answerError"),
+        item_id: history_optional(item_id, "itemId"),
+        turn_id: history_optional(turn_id, "turnId"),
+        questions,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -219,7 +372,7 @@ mod tests {
     fn history_retains_property_order_and_redacts_secret_answers() {
         let raw = r#"{"id":"r","agent":"a","method":"mcpServer/elicitation/request","status":"answered","createdAt":1,"params":{"mode":"form","requestedSchema":{"properties":{"z":{"title":"Last","writeOnly":true},"a":{"title":"First"}}}},"answerHistory":[{"id":"z","question":"Last","isSecret":true,"answer":"secret"}]}"#;
         let record = serde_json::from_str(raw).unwrap();
-        let result = super::question_history_entity(&record).unwrap().unwrap();
+        let result = json!(super::question_history_entity(&record).unwrap().unwrap());
         assert_eq!(result["questions"][0]["id"], "z");
         assert_eq!(result["questions"][1]["id"], "a");
         assert_eq!(result["answerHistory"][0]["answer"], json!(null));

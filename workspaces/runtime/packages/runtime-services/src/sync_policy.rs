@@ -1147,7 +1147,13 @@ fn publish_direct(
             .map_err(|_| StoreError::RecordContract("invalid question history entity"))?;
         match question {
             Some(value) => {
-                put_projection(transaction, "questionHistory", id, value, false, validate)?
+                SyncDocumentsRepository::put_entity(
+                    transaction,
+                    "questionHistory",
+                    id,
+                    value,
+                    false,
+                )?;
             }
             None => retire_if_live(transaction, "questionHistory", id, validate)?,
         }
