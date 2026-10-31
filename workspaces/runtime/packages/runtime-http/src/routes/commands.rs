@@ -271,6 +271,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test compares the external request schema compiler with the typed ingress"
+    )]
     fn command_wire_matches_schema_boundaries() {
         use studio_runtime_schema::command::{
             COMMAND_CLIENT_ID_MAX_CHARS, COMMAND_SEND_MAX_ASSETS, COMMAND_TARGET_MAX_CHARS,
