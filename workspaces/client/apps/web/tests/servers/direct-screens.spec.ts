@@ -111,7 +111,7 @@ test("direct screens keep overlapping chat drafts and sends with their owner", a
   }
 });
 
-test("direct screens automatically include paired servers on phones", async ({
+test("direct screens pair discovered servers on phones only on request", async ({
   page,
   context,
 }, testInfo) => {
@@ -177,6 +177,29 @@ test("direct screens automatically include paired servers on phones", async ({
         await toggle.click();
     };
     await page.goto(home);
+    await openChats();
+    await expect(chat("Local")).toBeVisible();
+    // A discovered server is not paired until the phone asks for it.
+    await expect(chat("Remote")).toHaveCount(0);
+    expect(remote.pairs).toHaveLength(0);
+    await page
+      .getByRole("button", { name: "Studio settings", exact: true })
+      .click();
+    const dialog = page.getByRole("dialog", { name: "Studio settings" });
+    await dialog.getByRole("tab", { name: "Servers", exact: true }).click();
+    await dialog
+      .getByRole("button", { name: "Add with an invitation", exact: true })
+      .click();
+    await dialog
+      .getByRole("textbox", { name: /^Server address/ })
+      .fill(remote.invitation.origin);
+    await dialog
+      .getByLabel("Pairing invitation")
+      .fill(JSON.stringify(remote.invitation));
+    await dialog
+      .getByRole("button", { name: "Pair server", exact: true })
+      .click();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await openChats();
     await expect(chat("Remote")).toBeVisible();
     await expect(chat("Local")).toBeVisible();

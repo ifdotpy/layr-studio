@@ -162,7 +162,13 @@ test("selected Studio chat recovers after slow cursor preparation without reload
             "Cache-Control": "no-cache",
           }),
         );
-        res.write(protocol3SseEvent("session", { sessionId }));
+        res.write(
+          protocol3SseEvent("session", {
+            sessionId,
+            routes: [],
+            workspaceId,
+          }),
+        );
         res.write(apiSchemaHandshakeSse());
         res.write(baseline(resources));
         return;

@@ -2337,7 +2337,13 @@ export function handleEntitySyncFixtureRequest(
       "X-Accel-Buffering": "no",
     });
     const sessionId = randomUUID();
-    response.write(protocol3SseEvent("session", { sessionId }));
+    response.write(
+      protocol3SseEvent("session", {
+        sessionId,
+        routes: [],
+        workspaceId: identity.workspaceId,
+      } satisfies import("../src/generated/api.ts").components["schemas"]["SyncSessionEvent"]),
+    );
     response.write(apiSchemaHandshakeSse());
 
     const writeFrame = (
