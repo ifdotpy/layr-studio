@@ -320,7 +320,8 @@ pub fn project_task_record(record: &studio_runtime_store::TaskRecord) -> Option<
         },
         process_id: record.process_id().map(|pid| match pid {
             ProcessId::Text(text) => ProcessId::Text(bounded(text, "processId")),
-            other => other.clone(),
+            ProcessId::Signed(value) => ProcessId::Signed(*value),
+            ProcessId::Unsigned(value) => ProcessId::Unsigned(*value),
         }),
         query: optional(&record.query, "query"),
         tail,
