@@ -10,11 +10,32 @@ use studio_runtime_schema::persistence::{DeliveryStatus, EventStatus, RecipientD
 use studio_runtime_schema::queue_command::Field;
 use studio_runtime_store::{SyncDocumentsRepository, system_reads as records};
 
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+pub enum ReceiptStatus {
+    Event(EventStatus),
+    Delivery(DeliveryStatus),
+}
+
+#[derive(serde::Serialize)]
+pub struct MessageReceipt {
+    pub id: String,
+    pub status: ReceiptStatus,
+    pub error: Option<String>,
+    pub materialized: bool,
+}
+
+#[derive(serde::Serialize)]
+pub struct MessageReceipts {
+    pub agent: String,
+    pub items: Vec<MessageReceipt>,
+}
+
 pub fn delivery_receipts(
     connection: &Transaction<'_>,
     agent: &str,
     ids: &[String],
-) -> Result<Value, CoordinationError> {
+) -> Result<MessageReceipts, CoordinationError> {
     if ids.len() > 100
         || ids
             .iter()
@@ -53,11 +74,24 @@ pub fn delivery_receipts(
         )?
         .map(|row| {
             let (id, status, error, metadata, item_id, item) = row?;
-            let mut event = records::validate(
+            records::validate(
                 "runtime_events",
                 &id,
                 json!({"id":id,"status":status,"error":error}),
             )?;
+            let status = status
+                .parse::<EventStatus>()
+                .map(ReceiptStatus::Event)
+                .or_else(|()| {
+                    status
+                        .parse::<DeliveryStatus>()
+                        .map(ReceiptStatus::Delivery)
+                })
+                .map_err(|()| {
+                    studio_runtime_store::StoreError::RecordContract(
+                        "invalid message receipt status",
+                    )
+                })?;
             if let Some(raw) = metadata {
                 records::decode("runtime_event_meta", &id, &raw)?;
             }
@@ -67,7 +101,7 @@ pub fn delivery_receipts(
                     records::decode("runtime_items", &key, &raw).map(|value| (key, value))
                 })
                 .transpose()?;
-            event["materialized"] = json!(item.is_some_and(|(key, item)| {
+            let materialized = item.is_some_and(|(key, item)| {
                 (key == format!("{agent}:{id}")
                     && item["role"] == "user"
                     && item.get("inputs").is_none())
@@ -76,11 +110,19 @@ pub fn delivery_receipts(
                         .into_iter()
                         .flatten()
                         .any(|input| input["id"] == id && input["kind"] == "user")
-            }));
-            Ok(event)
+            });
+            Ok(MessageReceipt {
+                id,
+                status,
+                error,
+                materialized,
+            })
         })
         .collect::<Result<Vec<_>, studio_runtime_store::StoreError>>()?;
-    Ok(json!({"agent":agent,"items":items}))
+    Ok(MessageReceipts {
+        agent: agent.to_owned(),
+        items,
+    })
 }
 
 #[derive(serde::Serialize)]

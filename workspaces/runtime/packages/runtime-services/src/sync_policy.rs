@@ -905,18 +905,30 @@ pub(crate) fn publish_summary_changes(
             std::slice::from_ref(&id),
         )
         .map_err(|_| StoreError::RecordContract("message receipt projection failed"))?;
-        for mut receipt in response["items"].as_array().into_iter().flatten().cloned() {
-            receipt["agent"] = json!(agent);
-            if let Some(projected) = project_persisted_record("messageReceipt", &receipt) {
-                put_projection(
-                    transaction,
-                    "messageReceipt",
-                    &id,
-                    projected,
-                    false,
-                    &|_, _, _, _| true,
-                )?;
+        for receipt in response.items {
+            #[derive(serde::Serialize)]
+            struct ReceiptProjection {
+                agent: String,
+                id: String,
+                status: crate::coordination_reads::ReceiptStatus,
+                error: Option<String>,
+                materialized: bool,
             }
+            SyncDocumentsRepository::put_entity(
+                transaction,
+                "messageReceipt",
+                &id,
+                ReceiptProjection {
+                    agent: crate::sync_views::bound_sync_text(&agent, "agent", false),
+                    id: crate::sync_views::bound_sync_text(&receipt.id, "id", false),
+                    status: receipt.status,
+                    error: receipt
+                        .error
+                        .map(|error| crate::sync_views::bound_sync_text(&error, "error", false)),
+                    materialized: receipt.materialized,
+                },
+                false,
+            )?;
         }
     }
     Ok(())

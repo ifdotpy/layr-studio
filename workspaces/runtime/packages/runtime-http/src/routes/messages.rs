@@ -268,7 +268,7 @@ pub(super) async fn room_snapshot(
 async fn receipts(
     State(state): State<HttpState>,
     query: QueryParams,
-) -> Result<Json<crate::generated::MessageReceipts>, ApiError> {
+) -> Result<Json<MessageReceiptsResponse>, ApiError> {
     let agent = query
         .typed_value("agent")
         .and_then(Value::as_str)
@@ -285,14 +285,24 @@ async fn receipts(
     let store = state.store.ok_or_else(ApiError::internal)?;
     let value = store
         .read_async("runtime-http/routes/messages", move |tx| {
-            let mut value =
+            let value =
                 studio_runtime_services::coordination_reads::delivery_receipts(tx, &agent, &ids)
                     .map_err(coordination_error)?;
-            value["workspaceId"] = Value::String(workspace);
-            super::generated_json::<crate::generated::MessageReceipts>(value)
+            Ok::<_, ApiError>(MessageReceiptsResponse {
+                workspace_id: workspace,
+                receipts: value,
+            })
         })
         .await?;
     Ok(Json(value))
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MessageReceiptsResponse {
+    workspace_id: String,
+    #[serde(flatten)]
+    receipts: studio_runtime_services::coordination_reads::MessageReceipts,
 }
 async fn delete_room(
     State(state): State<HttpState>,

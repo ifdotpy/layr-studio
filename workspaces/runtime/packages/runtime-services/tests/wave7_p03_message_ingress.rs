@@ -312,6 +312,7 @@ async fn python_send_and_receipt_corpus() {
                 )
             })
             .await
+            .map(|value| json!(value))
             .unwrap_or_else(|error| json!({"error":error.to_string()}));
         normalize_id(&mut receipts, &request_id);
         assert_eq!(receipts, expected.receipts, "{name}: complete receipts");
