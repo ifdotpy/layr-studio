@@ -612,7 +612,12 @@ fn build(tx: &Transaction<'_>, now: f64) -> Result<(Vec<StudioError>, Baseline),
             .activity
             .as_ref()
             .and_then(|activity| activity.at)
-            .or_else(|| record.extra.get("created").and_then(Value::as_f64))
+            .or_else(|| {
+                record
+                    .created
+                    .value()
+                    .and_then(|number| number.number().as_f64())
+            })
             .unwrap_or(0.0);
         push(
             &mut rows,

@@ -33,7 +33,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     let providers = ProviderKind::ALL
         .map(|provider| format!("'{}'", provider.key()))
         .join(",");
-    let mut query = tx.prepare(&format!("SELECT id,record FROM runtime_agents WHERE json_valid(record) AND EXISTS (SELECT 1 FROM json_each(record) j WHERE j.key IN ('nativeNameSynced','agentModeChangedAt','agentModeChangedBy','tokenBudget') OR (j.key IN ({flags}) AND j.type NOT IN ('true','false')) OR (j.key IN ({text}) AND j.type NOT IN ('text','null')) OR (j.key='role' AND (j.type NOT IN ('text','null') OR (j.type='text' AND j.value NOT IN ({roles})))) OR (j.key='provider' AND (j.type NOT IN ('text','null') OR (j.type='text' AND j.value NOT IN ({providers})))) OR (j.key IN ({flags},{text},'role','provider') AND (SELECT count(*) FROM json_each(record) d WHERE d.key=j.key)>1))"))?;
+    let mut query = tx.prepare(&format!("SELECT id,record FROM runtime_agents WHERE json_valid(record) AND EXISTS (SELECT 1 FROM json_each(record) j WHERE j.key IN ('nativeNameSynced','agentModeChangedAt','agentModeChangedBy','tokenBudget') OR (j.key IN ({flags}) AND j.type NOT IN ('true','false')) OR (j.key IN ({text}) AND j.type NOT IN ('text','null')) OR (j.key='role' AND (j.type NOT IN ('text','null') OR (j.type='text' AND j.value NOT IN ({roles})))) OR (j.key='provider' AND (j.type NOT IN ('text','null') OR (j.type='text' AND j.value NOT IN ({providers})))) OR (j.key='created' AND (j.type NOT IN ('integer','real','null') OR j.atom < 0)) OR (j.key IN ({flags},{text},'role','provider','created') AND (SELECT count(*) FROM json_each(record) d WHERE d.key=j.key)>1))"))?;
     let rows = query.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
@@ -92,6 +92,12 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         {
             record.remove("provider");
         }
+        if record.get("created").is_some_and(|value| {
+            serde_json::from_str::<Option<studio_runtime_schema::NonnegativeNumber>>(value.get())
+                .is_err()
+        }) {
+            record.remove("created");
+        }
         tx.execute(
             "UPDATE runtime_agents SET record=?1 WHERE id=?2",
             rusqlite::params![serde_json::to_string(&record)?, id],
@@ -139,7 +145,7 @@ mod tests {
     fn agent_batch_migration_normalizes_all_owned_fields() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(r#"CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-        INSERT INTO runtime_agents VALUES('legacy','{"id":"legacy","nativeNameSynced":true,"agentModeChangedAt":1,"agentModeChangedBy":"user","tokenBudget":1000,"compactionsObservedOnly":"bad","fastMode":1,"daybreakEnabled":[],"needsTitle":{},"manualName":null,"maxAgentsExplicit":"bad","agentModeSupported":3,"prompt":42,"profileId":null,"profileInstructions":[],"effort":"low","effort":"high","role":"future","role":"reviewer","provider":"future"}');"#).unwrap();
+        INSERT INTO runtime_agents VALUES('legacy','{"id":"legacy","nativeNameSynced":true,"agentModeChangedAt":1,"agentModeChangedBy":"user","tokenBudget":1000,"compactionsObservedOnly":"bad","fastMode":1,"daybreakEnabled":[],"needsTitle":{},"manualName":null,"maxAgentsExplicit":"bad","agentModeSupported":3,"prompt":42,"profileId":null,"profileInstructions":[],"effort":"low","effort":"high","role":"future","role":"reviewer","provider":"future","created":-1}');"#).unwrap();
         let tx = db.transaction().unwrap();
         super::apply(&tx).unwrap();
         super::apply(&tx).unwrap();

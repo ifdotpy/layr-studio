@@ -418,6 +418,12 @@ pub struct AgentRecord {
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
     pub provider: studio_runtime_schema::queue_command::Field<studio_runtime_schema::ProviderKind>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub created:
+        studio_runtime_schema::queue_command::Field<studio_runtime_schema::NonnegativeNumber>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree_ready: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -795,6 +801,7 @@ impl AgentRecord {
             effort: Default::default(),
             role: Default::default(),
             provider: Default::default(),
+            created: Default::default(),
             worktree_ready: None,
             approval_policy: None,
             native_response_turn: None,
@@ -2826,6 +2833,19 @@ mod tests {
             serde_json::to_string(&agent)
                 .unwrap()
                 .contains("\"role\":null")
+        );
+    }
+
+    #[test]
+    fn agent_created_is_nonnegative_and_preserves_null() {
+        let bad = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"created":-1}"#;
+        let null = bad.replace("-1", "null");
+        assert!(serde_json::from_str::<AgentRecord>(bad).is_err());
+        let agent: AgentRecord = serde_json::from_str(&null).unwrap();
+        assert!(
+            serde_json::to_string(&agent)
+                .unwrap()
+                .contains("\"created\":null")
         );
     }
 
