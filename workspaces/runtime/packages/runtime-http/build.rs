@@ -208,6 +208,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             )
     });
     // Claude settings deserialize through their validated tagged command owner.
+    // The session route owns its strict request union directly.
+    analysis
+        .schemas
+        .remove("ClaudeSessionApiClaudeSessionPostRequest");
     for (name, owner) in [
         (
             "ClaudeSessionSettingsRequest",
