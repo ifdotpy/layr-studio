@@ -235,6 +235,92 @@ fn project_schema_value(
     }
 }
 
+/// Bounded public task fields, serialized directly from the stored task.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskProjection {
+    id: String,
+    agent: String,
+    created: studio_runtime_schema::task_record::NonnegativeNumber,
+    kind: studio_runtime_schema::task_record::TaskKind,
+    status: studio_runtime_schema::task_record::TaskStatus,
+    turn_id: String,
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duration_ms: Option<studio_runtime_schema::task_record::NonnegativeNumber>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exit_code: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    finished: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    interactive: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output_file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output_truncated: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    process_id: Option<studio_runtime_schema::task_record::ProcessId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    query: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tail: Option<String>,
+}
+
+pub fn project_task_record(record: &studio_runtime_store::TaskRecord) -> Option<TaskProjection> {
+    use studio_runtime_schema::task_record::ProcessId;
+    let id = record.id().as_ref();
+    if id.is_empty() {
+        return None;
+    }
+    let bounded = |text: &str, field| bound_sync_text(text, field, false);
+    let optional =
+        |value: &Option<String>, field| value.as_deref().map(|text| bounded(text, field));
+    let (tail, truncated) = record.tail.as_deref().map_or((None, false), |text| {
+        let summary = bounded(text, "tail");
+        if summary == text {
+            (Some(summary), false)
+        } else {
+            let length = summary.chars().count();
+            let suffix = text.chars().rev().take(length).collect::<String>();
+            (Some(suffix.chars().rev().collect()), true)
+        }
+    });
+    Some(TaskProjection {
+        id: bounded(id, "id"),
+        agent: bounded(record.agent(), "agent"),
+        created: record.created_number().clone(),
+        kind: record.kind(),
+        status: record.status(),
+        turn_id: bounded(record.turn_id(), "turnId"),
+        name: bounded(&record.name, "name"),
+        command: optional(&record.command, "command"),
+        cwd: optional(&record.cwd, "cwd"),
+        duration_ms: record.duration_ms.clone(),
+        error: optional(&record.error, "error"),
+        exit_code: record.exit_code,
+        finished: record.finished,
+        interactive: record.interactive(),
+        output_file: optional(&record.output_file, "outputFile"),
+        output_truncated: if truncated {
+            Some(true)
+        } else {
+            record.output_truncated
+        },
+        process_id: record.process_id().map(|pid| match pid {
+            ProcessId::Text(text) => ProcessId::Text(bounded(text, "processId")),
+            other => other.clone(),
+        }),
+        query: optional(&record.query, "query"),
+        tail,
+    })
+}
+
 /// Filter a stored record through the committed renderer DTO schema.
 pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Value> {
     let schema_name = match collection {
@@ -881,6 +967,18 @@ mod projection_plan_tests {
         schema_projection_properties,
     };
     use serde_json::json;
+
+    #[test]
+    fn task_projection_matches_schema_projection() {
+        for length in [12, 2_100] {
+            let raw = json!({"id":"a:item", "agent":"a", "created":1.0, "itemId":"item", "kind":"command", "status":"running", "turnId":"turn", "type":"commandExecution", "name":"run", "tail":"雪".repeat(length), "outputTruncated":false, "command":"x".repeat(length), "sourceThreadId":"private", "interactive":true});
+            let task: studio_runtime_store::TaskRecord =
+                serde_json::from_value(raw.clone()).unwrap();
+            let old = project_persisted_record("task", &raw).unwrap();
+            let new = serde_json::to_value(super::project_task_record(&task).unwrap()).unwrap();
+            assert_eq!(new, old);
+        }
+    }
 
     #[test]
     fn retained_cleanup_admission_preserves_partial_legacy_fields() {
