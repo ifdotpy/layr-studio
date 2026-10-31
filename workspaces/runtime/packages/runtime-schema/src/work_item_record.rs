@@ -1,6 +1,7 @@
 //! Complete checked storage shape for work items; operation evidence is opaque.
 use crate::{
-    persistence::WorkStatus, queue_command::Field, rule_record::RuleInteger, task_record::TaskId,
+    persistence::WorkStatus, queue_command::Field, raw_json::RawJson, rule_record::RuleInteger,
+    task_record::TaskId,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
@@ -46,6 +47,12 @@ pub struct WorkItem {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<String>")]
     owner: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    agent: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<Value>")]
+    archive: Field<RawJson>,
     #[serde(
         default,
         deserialize_with = "present",
@@ -104,6 +111,18 @@ impl WorkItem {
     pub fn owner(&self) -> Option<&str> {
         self.owner.value().map(String::as_str)
     }
+    pub fn agent_field(&self) -> &Field<String> {
+        &self.agent
+    }
+    pub fn archive_field(&self) -> &Field<RawJson> {
+        &self.archive
+    }
+    pub fn root_id_field(&self) -> &Field<String> {
+        &self.root_id
+    }
+    pub fn title_field(&self) -> &Field<String> {
+        &self.title
+    }
     pub fn root_id(&self) -> Option<&str> {
         self.root_id.value().map(String::as_str)
     }
@@ -149,6 +168,8 @@ impl WorkItem {
             "status" => self.status = status(value)?,
             "dependencies" => self.dependencies = Some(Vec::<String>::deserialize(value)?),
             "owner" => self.owner = Field::deserialize(value)?,
+            "agent" => self.agent = Field::deserialize(value)?,
+            "archive" => self.archive = Field::deserialize(value)?,
             "updated" => self.updated = Some(Number::deserialize(value)?),
             "rootId" => self.root_id = Field::deserialize(value)?,
             "title" => self.title = Field::deserialize(value)?,
@@ -181,6 +202,11 @@ impl WorkItem {
             );
         }
         insert_field(&mut fields, "owner", self.owner, Value::String);
+        insert_field(&mut fields, "agent", self.agent, Value::String);
+        insert_field(&mut fields, "archive", self.archive, |raw| {
+            // RawJson contains valid JSON by construction.
+            serde_json::from_str(raw.0.get()).expect("valid raw archive")
+        });
         if let Some(v) = self.updated {
             fields.insert("updated".into(), Value::Number(v));
         }
@@ -252,6 +278,8 @@ mod tests {
             "status",
             "dependencies",
             "owner",
+            "agent",
+            "archive",
             "updated",
             "rootId",
             "title",

@@ -328,6 +328,45 @@ pub fn project_task_record(record: &studio_runtime_store::TaskRecord) -> Option<
     })
 }
 
+/// Public work summary; archive is opaque server-produced JSON.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkProjection {
+    id: String,
+    status: studio_runtime_schema::persistence::WorkStatus,
+    #[serde(skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing")]
+    root_id: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing")]
+    title: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing")]
+    agent: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing")]
+    archive: studio_runtime_schema::queue_command::Field<studio_runtime_schema::raw_json::RawJson>,
+}
+
+pub fn project_work_record(
+    record: &studio_runtime_store::WorkItemRecord,
+) -> Option<WorkProjection> {
+    use studio_runtime_schema::queue_command::Field;
+    let id = record.id().as_ref();
+    if id.is_empty() {
+        return None;
+    }
+    let field = |value: &Field<String>, name| match value {
+        Field::Missing => Field::Missing,
+        Field::Null => Field::Null,
+        Field::Value(value) => Field::Value(bound_sync_text(value, name, false)),
+    };
+    Some(WorkProjection {
+        id: bound_sync_text(id, "id", false),
+        status: record.status(),
+        root_id: field(record.root_id_field(), "rootId"),
+        title: field(record.title_field(), "title"),
+        agent: field(record.agent_field(), "agent"),
+        archive: record.archive_field().clone(),
+    })
+}
+
 /// Filter a stored record through the committed renderer DTO schema.
 pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Value> {
     let schema_name = match collection {
@@ -971,6 +1010,20 @@ mod projection_plan_tests {
         schema_projection_properties,
     };
     use serde_json::json;
+
+    #[test]
+    fn work_projection_preserves_presence_and_opaque_archive() {
+        for raw in [
+            r#"{"id":"w","status":"ready"}"#,
+            r#"{"id":"w","status":"ready","agent":null,"rootId":"r","title":"work","archive":{"reason":"kept"}}"#,
+        ] {
+            let record: studio_runtime_store::WorkItemRecord = serde_json::from_str(raw).unwrap();
+            let old =
+                project_persisted_record("work", &serde_json::from_str(raw).unwrap()).unwrap();
+            let new = serde_json::to_value(super::project_work_record(&record).unwrap()).unwrap();
+            assert_eq!(new, old);
+        }
+    }
 
     #[test]
     fn task_projection_matches_schema_projection() {

@@ -1806,6 +1806,21 @@ impl WorkItemRecord {
     pub fn owner(&self) -> Option<&str> {
         self.0.owner()
     }
+    pub fn agent_field(&self) -> &studio_runtime_schema::queue_command::Field<String> {
+        self.0.agent_field()
+    }
+    pub fn archive_field(
+        &self,
+    ) -> &studio_runtime_schema::queue_command::Field<studio_runtime_schema::raw_json::RawJson>
+    {
+        self.0.archive_field()
+    }
+    pub fn root_id_field(&self) -> &studio_runtime_schema::queue_command::Field<String> {
+        self.0.root_id_field()
+    }
+    pub fn title_field(&self) -> &studio_runtime_schema::queue_command::Field<String> {
+        self.0.title_field()
+    }
     pub fn root_id(&self) -> Option<&str> {
         self.0.root_id()
     }

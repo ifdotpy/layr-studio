@@ -43,6 +43,7 @@ mod m2026_10_31_retired_start_indexes;
 mod m2026_10_31_room_record;
 mod m2026_10_31_sync_project;
 mod m2026_10_31_transfer_history_pages;
+mod m2026_10_31_work_projection;
 mod m2026_10_31_work_records;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -212,6 +213,16 @@ impl Migration for RegistryMigration {
 // Explicit dependency order: provider leaves precede strict generated columns;
 // columns precede indexes; volatile data moves before its new triggers exist.
 static CATALOG: &[&dyn Migration] = &[
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-work-projection-agent",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Work records with non-string agent fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_work_projection::apply(c.transaction),
+    },
     &SqlMigration {
         definition: MigrationDefinition {
             id: "2026-10-31-work-records",
