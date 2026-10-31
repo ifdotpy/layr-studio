@@ -2138,6 +2138,8 @@ export function handleEntitySyncFixtureRequest(
     workspaceId: string;
     unixSocket?: boolean | undefined;
     versionedResources?: boolean;
+    /** The multi-server discovery snapshot the real server attaches to its resource version. */
+    discoverySnapshot?: () => unknown;
     epoch?: string | undefined;
     onPull?: () => void;
     subscriptionUpdate?:
@@ -2251,6 +2253,14 @@ export function handleEntitySyncFixtureRequest(
         const key = JSON.stringify(resource);
         const next = (resourceRevisions.get(key) || 0) + (advance ? 1 : 0);
         resourceRevisions.set(key, next || 1);
+        if (resource.kind === "multi-server" && fixture.discoverySnapshot)
+          return {
+            resource,
+            revision: next || 1,
+            discoverySnapshot: fixture.discoverySnapshot() as NonNullable<
+              FixtureResourceVersions[number]["discoverySnapshot"]
+            >,
+          };
         if (
           resource.kind === "state" &&
           fixture.snapshot.runtime.viewScopedAgents &&
