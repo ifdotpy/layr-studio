@@ -294,7 +294,7 @@ fn settle_delivery(
     Ok(())
 }
 
-use crate::multi_server_auth::{AccessError, digest, refused, schema, stored, text};
+use crate::multi_server_auth::{AccessError, digest, refused, schema, stored_client, text};
 use crate::remote_transport::{
     MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, MultiServerRequest, PairedRequest, canonical_json,
     exchange_paired_request, learn_paired_request_link, load_multi_server_identity,
@@ -480,25 +480,19 @@ impl HttpsPairedTransport {
             )
             .optional()?;
         let value = raw
-            .map(|raw| {
-                stored(
-                    "PersistedAccessClient",
-                    "runtime_access_clients",
-                    server,
-                    &raw,
-                )
-            })
+            .map(|raw| stored_client("runtime_access_clients", server, &raw))
             .transpose()?
             .ok_or_else(|| refused(403, "client_revoked", "The server is not paired"))?;
-        if text(&value, "id") != server
-            || text(&value, "status") != "paired"
-            || text(&value, "kind") != "server"
+        if value.id.as_str() != server
+            || value.status
+                != studio_runtime_schema::multi_server_access::AccessClientStatus::Paired
+            || value.kind != studio_runtime_schema::multi_server_access::AccessClientKind::Server
         {
             return Err(refused(403, "client_revoked", "The server is not paired"));
         }
         Ok((
-            text(&value, "origin").to_owned(),
-            text(&value, "publicKey").to_owned(),
+            value.origin.value().cloned().unwrap_or_default(),
+            value.public_key.as_str().to_owned(),
         ))
     }
 }
@@ -3686,12 +3680,12 @@ fn require_paired(tx: &Transaction<'_>, id: &str) -> Result<(), AccessError> {
         )
         .optional()?;
     let value = raw
-        .map(|s| stored("PersistedAccessClient", "runtime_access_clients", id, &s))
+        .map(|s| stored_client("runtime_access_clients", id, &s))
         .transpose()?
         .ok_or_else(|| refused(403, "client_revoked", "The server is not paired"))?;
-    if text(&value, "id") != id
-        || text(&value, "status") != "paired"
-        || text(&value, "kind") != "server"
+    if value.id.as_str() != id
+        || value.status != studio_runtime_schema::multi_server_access::AccessClientStatus::Paired
+        || value.kind != studio_runtime_schema::multi_server_access::AccessClientKind::Server
     {
         return Err(refused(403, "client_revoked", "The server is not paired"));
     }

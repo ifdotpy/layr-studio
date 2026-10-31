@@ -2190,9 +2190,63 @@ async fn python_authentication_outputs_match_complete_principal_and_writes() {
             assert_eq!(rows(&store), before, "{}: refusal writes", case["name"]);
         } else {
             let actual = result.unwrap_or_else(|e| panic!("{}: {e}", case["name"]));
+            let principal = &actual.principal;
+            let expected = &case["expected"]["principal"];
             assert_eq!(
-                json!({"principal":actual.principal.value(),"clientWrite":actual.client_write}),
-                case["expected"],
+                principal.client_id(),
+                expected["clientId"].as_str().unwrap(),
+                "{}",
+                case["name"]
+            );
+            assert_eq!(
+                principal.request_id(),
+                expected["requestId"].as_str().unwrap(),
+                "{}",
+                case["name"]
+            );
+            assert_eq!(
+                principal.target_server_id(),
+                expected["targetServerId"].as_str().unwrap(),
+                "{}",
+                case["name"]
+            );
+            assert_eq!(
+                principal.kind(),
+                expected["kind"].as_str().unwrap(),
+                "{}",
+                case["name"]
+            );
+            assert_eq!(
+                principal.public_key(),
+                expected["publicKey"].as_str().unwrap(),
+                "{}",
+                case["name"]
+            );
+            assert_eq!(
+                principal.tailscale_user(),
+                expected["tailscaleUser"].as_str().unwrap(),
+                "{}",
+                case["name"]
+            );
+            assert_eq!(
+                principal.pairing(),
+                expected["pairing"].as_bool().unwrap(),
+                "{}",
+                case["name"]
+            );
+            assert_eq!(
+                principal.auto_pairing(),
+                expected["autoPairing"].as_bool().unwrap(),
+                "{}",
+                case["name"]
+            );
+            let mut expected_write = case["expected"]["clientWrite"].clone();
+            if let Some(object) = expected_write.as_object_mut() {
+                object.remove("pairingReceipt");
+            }
+            assert_eq!(
+                json!(actual.client_write),
+                expected_write,
                 "{}",
                 case["name"]
             );
@@ -2347,7 +2401,7 @@ fn discovery_includes_local_other_port_and_only_online_owner_nodes() {
         data["now"].as_i64().expect("now"),
     )
     .expect("probe");
-    assert_eq!(decision.record(), Some(&data["discovered"]));
+    assert_eq!(json!(decision.record()), data["discovered"]);
     assert!(!decision.auto_pair());
     assert_eq!(
         snapshot.candidates(),

@@ -7,12 +7,17 @@ use std::sync::Arc;
 use rusqlite::params;
 use serde::Deserialize;
 use serde::de::IgnoredAny;
-use serde_json::{Value, json};
-use studio_runtime_schema::queue_command::Field as PresentField;
+use serde_json::Value;
+use studio_runtime_schema::{
+    multi_server_access::{AccessClientKind, AccessClientStatus, PersistedAccessClient},
+    multi_server_protocol::NonNegativeNumber,
+    queue_command::Field as PresentField,
+};
 use studio_runtime_store::RuntimeStore;
 
 use crate::multi_server_auth::{
-    AccessError, MAX_OBSERVATION_BYTES, discovery_identity, origin_host, refused, stored, text,
+    AccessError, MAX_OBSERVATION_BYTES, discovery_identity, origin_host, refused, stored_client,
+    text,
 };
 use crate::multi_server_pairing::read_record;
 
@@ -20,62 +25,43 @@ pub const MAX_CANDIDATES: usize = 64;
 pub const DISCOVERY_PORTS: [Option<u16>; 2] = [None, Some(8443)];
 const MAX_DISCOVERED: i64 = 256;
 
-/// Partial stored peer evidence used by readers that historically tolerate
-/// missing and malformed fields. Other properties survive status updates.
-#[derive(Deserialize, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StoredPeer {
-    #[serde(default, skip_serializing_if = "PresentField::is_missing")]
-    origin: PresentField<Value>,
-    #[serde(default, skip_serializing_if = "PresentField::is_missing")]
-    public_key: PresentField<Value>,
-    #[serde(default, skip_serializing_if = "PresentField::is_missing")]
-    status: PresentField<Value>,
-    #[serde(flatten)]
-    extra: serde_json::Map<String, Value>,
-}
+/// Typed stored peer used by the discovery driver.
+#[derive(serde::Serialize)]
+#[serde(transparent)]
+pub struct StoredPeer(PersistedAccessClient);
 
 impl StoredPeer {
-    /// Scalars have no fields, as in the historical JSON readers.
-    pub fn from_value(value: Value) -> Option<Self> {
-        studio_runtime_schema::json_object::JsonObject::<Self>::deserialize(value)
-            .ok()
-            .map(|object| object.0)
+    pub fn from_raw(raw: &str) -> Option<Self> {
+        serde_json::from_str::<studio_runtime_schema::http_ingress::Object<PersistedAccessClient>>(
+            raw,
+        )
+        .ok()
+        .map(|value| Self(value.0))
     }
-
     pub fn origin(&self) -> &str {
-        self.origin
-            .value()
-            .and_then(Value::as_str)
-            .unwrap_or_default()
+        self.0.origin.value().map_or("", String::as_str)
     }
-
     pub fn public_key(&self) -> &str {
-        self.public_key
-            .value()
-            .and_then(Value::as_str)
-            .unwrap_or_default()
+        self.0.public_key.as_str()
     }
-
     pub fn is_paired(&self) -> bool {
-        self.status.value().and_then(Value::as_str) == Some("paired")
+        self.0.status == AccessClientStatus::Paired
     }
-
     pub fn is_revoked(&self) -> bool {
-        self.status.value().and_then(Value::as_str) == Some("revoked")
+        self.0.status == AccessClientStatus::Revoked
     }
-
-    /// Retains explicit null and arbitrary historical creation evidence.
-    pub fn created(&self) -> Option<&Value> {
-        self.extra.get("created")
+    pub fn created(&self) -> &NonNegativeNumber {
+        &self.0.created
     }
-
+    pub fn record(&self) -> &PersistedAccessClient {
+        &self.0
+    }
     pub fn mark_unreachable(&mut self) {
-        self.status = PresentField::Value(Value::String("unreachable".into()));
+        self.0.status = AccessClientStatus::Unreachable;
     }
-
-    pub fn set_label(&mut self, label: String) {
-        self.extra.insert("label".into(), Value::String(label));
+    pub fn set_label(&mut self, label: String) -> Result<(), &'static str> {
+        self.0.label = label.try_into().map_err(|_| "invalid label")?;
+        Ok(())
     }
 }
 
@@ -247,11 +233,11 @@ impl DiscoverySnapshot {
     }
 }
 pub struct DiscoveryDecision {
-    record: Option<Value>,
+    record: Option<PersistedAccessClient>,
     auto_pair: bool,
 }
 impl DiscoveryDecision {
-    pub fn record(&self) -> Option<&Value> {
+    pub fn record(&self) -> Option<&PersistedAccessClient> {
         self.record.as_ref()
     }
     pub fn auto_pair(&self) -> bool {
@@ -282,10 +268,10 @@ pub fn decide_probe(
     }
     let id = identity.server_id.as_str();
     let previous = previous
-        .map(|r| stored("PersistedAccessClient", "runtime_access_discovered", id, r))
+        .map(|r| stored_client("runtime_access_discovered", id, r))
         .transpose()?;
     let client = client
-        .map(|r| stored("PersistedAccessClient", "runtime_access_clients", id, r))
+        .map(|r| stored_client("runtime_access_clients", id, r))
         .transpose()?;
     if id == snapshot.local_id
         || identity
@@ -296,7 +282,8 @@ pub fn decide_probe(
             .to_lowercase()
             != snapshot.owner
         || client.as_ref().is_some_and(|v| {
-            text(v, "publicKey") != identity.public_key || text(v, "origin") != origin
+            v.public_key.as_str() != identity.public_key
+                || v.origin.value().map(String::as_str) != Some(origin)
         })
     {
         return Ok(DiscoveryDecision {
@@ -306,16 +293,44 @@ pub fn decide_probe(
     }
     let label = client
         .as_ref()
-        .filter(|v| text(v, "status") == "paired")
-        .and_then(|v| v.get("label"))
-        .cloned()
-        .unwrap_or_else(|| json!(identity.label));
+        .filter(|v| v.status == AccessClientStatus::Paired)
+        .map(|v| v.label.clone())
+        .map(Ok)
+        .unwrap_or_else(|| identity.label.clone().try_into())
+        .map_err(|_| refused(400, "invalid_peer", "The peer identity is invalid"))?;
     let created = previous
         .as_ref()
-        .and_then(|v| v.get("created"))
-        .cloned()
-        .unwrap_or(json!(now));
-    let record = json!({"id":id,"clientId":id,"serverId":id,"kind":"server","label":label,"origin":origin,"publicKey":identity.public_key,"tailscaleUser":snapshot.owner,"status":"discovered","created":created,"lastAccess":null,"revoked":null,"lastSeen":now,"autoPair":identity.auto_pair});
+        .map(|v| v.created.clone())
+        .map(Ok)
+        .unwrap_or_else(|| NonNegativeNumber::try_from(serde_json::Number::from(now)))
+        .map_err(|_| refused(400, "invalid_peer", "The peer identity is invalid"))?;
+    let invalid = || refused(400, "invalid_peer", "The peer identity is invalid");
+    let record = PersistedAccessClient {
+        id: id.to_owned().try_into().map_err(|_| invalid())?,
+        client_id: id.to_owned().try_into().map_err(|_| invalid())?,
+        server_id: PresentField::Value(id.to_owned()),
+        kind: AccessClientKind::Server,
+        label,
+        origin: PresentField::Value(origin.to_owned()),
+        public_key: identity
+            .public_key
+            .clone()
+            .try_into()
+            .map_err(|_| invalid())?,
+        tailscale_user: PresentField::Value(snapshot.owner.clone()),
+        status: AccessClientStatus::Discovered,
+        created,
+        last_access: PresentField::Null,
+        revoked: PresentField::Null,
+        last_seen: PresentField::Value(now.into()),
+        auto_pair: PresentField::Value(identity.auto_pair),
+        reachability: PresentField::Missing,
+        alias: PresentField::Missing,
+        replaced_by: PresentField::Missing,
+        grant: PresentField::Missing,
+        pairing_request_id: PresentField::Missing,
+        pairing_hash: PresentField::Missing,
+    };
     Ok(DiscoveryDecision {
         record: Some(record),
         auto_pair: client.is_none() && auto_pair && identity.auto_pair,
@@ -341,7 +356,8 @@ pub async fn record_probe(
         let enabled:bool=tx.query_row("SELECT auto_pair FROM runtime_access_settings WHERE id=1",[],|r|r.get(0))?;
         let decision=decide_probe(&snapshot,&origin,&peer,previous.as_deref(),client.as_deref(),enabled,now)?;
         if let Some(record)=&decision.record {
-            tx.execute("INSERT INTO runtime_access_discovered(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![id,record.to_string()])?;
+            let raw=serde_json::to_string(record).map_err(|_| refused(500,"invalid_peer","The peer identity is invalid"))?;
+            tx.execute("INSERT INTO runtime_access_discovered(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![id,raw])?;
             tx.execute("DELETE FROM runtime_access_discovered WHERE id IN (SELECT id FROM runtime_access_discovered ORDER BY json_extract(record,'$.lastSeen') DESC,id LIMIT -1 OFFSET ?1)",[MAX_DISCOVERED])?;
         }
         Ok(decision)
@@ -351,28 +367,7 @@ pub async fn record_probe(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn stored_peer_projection_preserves_partial_and_opaque_fields() {
-        for raw in ["null", "[]", "7", r#""text""#] {
-            assert!(StoredPeer::from_value(serde_json::from_str(raw).unwrap()).is_none());
-        }
-        let malformed =
-            StoredPeer::from_value(serde_json::from_str(r#"{"status":{"paired":null}}"#).unwrap())
-                .unwrap();
-        assert!(!malformed.is_paired());
-        let raw = r#"{"origin":false,"publicKey":["opaque"],"status":{"paired":null},"unknown":{"v":3},"status":"paired"}"#;
-        let mut peer = StoredPeer::from_value(serde_json::from_str(raw).unwrap()).unwrap();
-        assert_eq!(peer.origin(), "");
-        assert_eq!(peer.public_key(), "");
-        assert!(peer.is_paired());
-        peer.mark_unreachable();
-        let saved = serde_json::to_string(&peer).unwrap();
-        let saved: Value = serde_json::from_str(&saved).unwrap();
-        assert_eq!(saved["status"], "unreachable");
-        assert_eq!(saved["publicKey"], json!(["opaque"]));
-        assert_eq!(saved["unknown"]["v"], 3);
-    }
+    use serde_json::json;
 
     #[test]
     fn discovery_tolerates_bad_peer_fields_and_rejects_tags() {

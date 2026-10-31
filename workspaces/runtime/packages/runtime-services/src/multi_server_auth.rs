@@ -5,7 +5,11 @@ use std::net::IpAddr;
 
 use serde::Deserialize;
 use serde_json::{Value, json};
+use studio_runtime_schema::multi_server_access::{
+    AccessClientKind, AccessClientStatus, PersistedAccessClient,
+};
 use studio_runtime_schema::multi_server_protocol::{DiscoveryIdentity, PersistedAccessInvite};
+use studio_runtime_schema::queue_command::Field;
 use studio_runtime_store::StoreError;
 use subtle::ConstantTimeEq;
 use thiserror::Error;
@@ -163,25 +167,11 @@ pub(crate) fn discovery_identity(value: &Value) -> Result<DiscoveryIdentity, Acc
         .map(|object| object.0)
         .map_err(|_| refused(400, "invalid_request", "Invalid multi-server request"))
 }
-pub(crate) fn stored(
-    schema: &str,
+pub(crate) fn stored_client(
     table: &'static str,
     id: &str,
     raw: &str,
-) -> Result<Value, AccessError> {
-    let value = stored_value(table, id, raw)?;
-    let invalid = |location: String| AccessError::Stored {
-        table,
-        id: id.to_owned(),
-        location,
-    };
-    match studio_runtime_schema::first_error(schema, &value) {
-        Ok(None) => Ok(value),
-        Ok(Some((location, _))) => Err(invalid(location)),
-        Err(_) => Err(invalid("schema".into())),
-    }
-}
-fn stored_value(table: &'static str, id: &str, raw: &str) -> Result<Value, AccessError> {
+) -> Result<PersistedAccessClient, AccessError> {
     let invalid = |location: String| AccessError::Stored {
         table,
         id: id.to_owned(),
@@ -190,7 +180,18 @@ fn stored_value(table: &'static str, id: &str, raw: &str) -> Result<Value, Acces
     if raw.len() > remote_transport::MAX_RESPONSE_BYTES {
         return Err(invalid("record size".into()));
     }
-    serde_json::from_str(raw).map_err(|_| invalid("JSON".into()))
+    let mut decoder = serde_json::Deserializer::from_str(raw);
+    let decoded: studio_runtime_schema::http_ingress::Object<PersistedAccessClient> =
+        serde_path_to_error::deserialize(&mut decoder).map_err(|error| {
+            let path = error.path().to_string();
+            invalid(if path == "." {
+                String::new()
+            } else {
+                format!("/{path}")
+            })
+        })?;
+    decoder.end().map_err(|_| invalid("JSON".into()))?;
+    Ok(decoded.0)
 }
 pub(crate) fn text<'a>(value: &'a Value, field: &str) -> &'a str {
     value.get(field).and_then(Value::as_str).unwrap_or_default()
@@ -514,10 +515,10 @@ pub(crate) fn origin_host(origin: &str) -> Result<String, AccessError> {
         .ok_or_else(|| refused(400, "invalid_origin", "Invalid Tailscale origin"))
 }
 
-/// Only constructed from validated stored records, preserving unknown fields.
+/// Only constructed from strict stored records and matching access identities.
 #[derive(Clone)]
 pub struct AccessSnapshot {
-    client: Option<Value>,
+    client: Option<PersistedAccessClient>,
     invite: Option<PersistedAccessInvite>,
     auto_pair: bool,
 }
@@ -530,14 +531,7 @@ impl AccessSnapshot {
         auto_pair: bool,
     ) -> Result<Self, AccessError> {
         let client = client
-            .map(|v| {
-                stored(
-                    "PersistedAccessClient",
-                    "runtime_access_clients",
-                    client_id,
-                    v,
-                )
-            })
+            .map(|v| stored_client("runtime_access_clients", client_id, v))
             .transpose()?;
         let invite = invite
             .map(|v| {
@@ -565,7 +559,7 @@ impl AccessSnapshot {
             .transpose()?;
         if client
             .as_ref()
-            .is_some_and(|v| text(v, "id") != client_id || text(v, "clientId") != client_id)
+            .is_some_and(|v| v.id.as_str() != client_id || v.client_id.as_str() != client_id)
             || invite.as_ref().is_some_and(|v| v.invite_id() != invite_id)
         {
             return Err(refused(
@@ -580,7 +574,7 @@ impl AccessSnapshot {
             auto_pair,
         })
     }
-    pub(crate) fn client(&self) -> Option<&Value> {
+    pub(crate) fn client(&self) -> Option<&PersistedAccessClient> {
         self.client.as_ref()
     }
     pub(crate) fn invite(&self) -> Option<&PersistedAccessInvite> {
@@ -589,19 +583,19 @@ impl AccessSnapshot {
 }
 #[derive(Clone)]
 pub struct VerifiedPrincipal {
-    record: Value,
     client: String,
     request: String,
     server: String,
     kind: String,
+    public_key: String,
     login: String,
     fingerprint: String,
     pairing: bool,
     auto_pairing: bool,
 }
 impl VerifiedPrincipal {
-    pub fn value(&self) -> &Value {
-        &self.record
+    pub fn public_key(&self) -> &str {
+        &self.public_key
     }
     pub fn client_id(&self) -> &str {
         &self.client
@@ -630,7 +624,7 @@ impl VerifiedPrincipal {
 }
 pub struct AuthDecision {
     pub principal: VerifiedPrincipal,
-    pub client_write: Option<Value>,
+    pub client_write: Option<PersistedAccessClient>,
     pub unpaired_attempt: bool,
 }
 
@@ -701,8 +695,8 @@ pub fn authorize_at(
         }
     }
     if client
-        .and_then(|v| v.get("tailscaleUser"))
-        .and_then(Value::as_str)
+        .and_then(|v| v.tailscale_user.value())
+        .map(String::as_str)
         .is_some_and(|v| v != owner.login)
     {
         return Err(refused(
@@ -712,43 +706,26 @@ pub fn authorize_at(
         ));
     }
     let client_write = if !pairing && !auto {
-        client.cloned().map(|mut v| {
-            v["lastAccess"] = json!(now);
-            v
-        })
+        client
+            .cloned()
+            .map(|mut v| {
+                v.last_access = Field::Value(
+                    serde_json::Number::from_f64(now)
+                        .ok_or_else(|| refused(400, "invalid_request", "Invalid request time"))?,
+                );
+                Ok::<_, AccessError>(v)
+            })
+            .transpose()?
     } else {
         None
     };
-    let mut record = if pairing || auto {
-        json!({"clientId":request.client,"kind":kind,"publicKey":key})
-    } else {
-        client.cloned().unwrap_or(Value::Null)
-    };
-    if let Some(fields) = record.as_object_mut() {
-        fields.extend(serde_json::Map::from_iter([
-            ("clientId".to_owned(), json!(request.client)),
-            (
-                "serverId".to_owned(),
-                if kind == "server" {
-                    json!(request.client)
-                } else {
-                    Value::Null
-                },
-            ),
-            ("targetServerId".to_owned(), json!(local_server)),
-            ("requestId".to_owned(), json!(request.request)),
-            ("tailscaleUser".to_owned(), json!(owner.login)),
-            ("pairing".to_owned(), json!(pairing)),
-            ("autoPairing".to_owned(), json!(auto)),
-        ]));
-    }
     Ok(AuthDecision {
         principal: VerifiedPrincipal {
-            record,
             client: request.client.clone(),
             request: request.request.clone(),
             server: local_server.to_owned(),
             kind: kind.to_owned(),
+            public_key: key.to_owned(),
             login: owner.login.clone(),
             fingerprint,
             pairing,
@@ -811,7 +788,7 @@ fn verify_access<'a>(
     let pairing = request.is_pairing();
     let auto = request.is_auto_pairing();
     let client = snapshot.client.as_ref();
-    if client.is_some_and(|v| text(v, "status") == "revoked") {
+    if client.is_some_and(|v| v.status == AccessClientStatus::Revoked) {
         return Err(refused(
             403,
             "client_revoked",
@@ -827,7 +804,10 @@ fn verify_access<'a>(
     let fingerprint = request.fingerprint();
     let recovery = pairing
         && client.is_some_and(|v| {
-            text(v, "pairingRequestId") == request.request && text(v, "pairingHash") == fingerprint
+            v.pairing_request_id
+                .value()
+                .is_some_and(|s| s == &request.request)
+                && v.pairing_hash.value().is_some_and(|s| s == &fingerprint)
         });
     let (key, kind) = if pairing || auto {
         let field = if pairing { "clientId" } else { "serverId" };
@@ -860,9 +840,10 @@ fn verify_access<'a>(
                 ));
             }
             if client.is_some_and(|v| {
-                text(v, "publicKey") != text(&request.body, "publicKey")
-                    || text(v, "kind") != "server"
-                    || text(v, "origin") != text(&request.body, "origin")
+                v.public_key.as_str() != text(&request.body, "publicKey")
+                    || v.kind != AccessClientKind::Server
+                    || v.origin.value().map(String::as_str).unwrap_or_default()
+                        != text(&request.body, "origin")
             }) {
                 return Err(refused(
                     403,
@@ -874,7 +855,7 @@ fn verify_access<'a>(
         (text(&request.body, "publicKey"), kind)
     } else {
         let c = client
-            .filter(|v| text(v, "status") == "paired")
+            .filter(|v| v.status == AccessClientStatus::Paired)
             .ok_or_else(|| {
                 refused(
                     403,
@@ -882,19 +863,19 @@ fn verify_access<'a>(
                     "The client is not paired or is revoked",
                 )
             })?;
-        (text(c, "publicKey"), text(c, "kind"))
+        (c.public_key.as_str(), c.kind.as_str())
     };
     verify_request_signature(request, client)?;
     Ok((key, kind, recovery))
 }
 fn verify_request_signature(
     request: &SignedRequest,
-    client: Option<&Value>,
+    client: Option<&PersistedAccessClient>,
 ) -> Result<(), AccessError> {
     let key = if request.is_pairing() || request.is_auto_pairing() {
         text(request.body(), "publicKey")
     } else {
-        client.map(|v| text(v, "publicKey")).unwrap_or_default()
+        client.map(|v| v.public_key.as_str()).unwrap_or_default()
     };
     remote_transport::verify_signature(
         key,
@@ -951,6 +932,18 @@ pub(crate) fn check_invite(
 #[cfg(test)]
 mod snapshot_tests {
     use super::*;
+
+    #[test]
+    fn client_snapshot_rejects_mismatched_request_identity() {
+        let raw = r#"{"id":"peer","clientId":"different","kind":"server","label":"Peer","created":1,"publicKey":"key","status":"paired"}"#;
+        assert!(matches!(
+            AccessSnapshot::from_records("peer", Some(raw), "", None, false),
+            Err(AccessError::Refused {
+                code: "invalid_record",
+                ..
+            })
+        ));
+    }
 
     #[test]
     fn trusted_owner_projection_keeps_string_user_ids_and_strict_tags() {
