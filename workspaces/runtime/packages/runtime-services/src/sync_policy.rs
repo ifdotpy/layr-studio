@@ -791,9 +791,7 @@ pub fn publish_entity_changes(
                 source.refusal_changed() || owner_changed,
                 validate,
             )?;
-            if let Some(summary) = project_persisted_record("work", &record) {
-                put_projection(transaction, "work", id, summary, false, validate)?;
-            }
+            publish_work_summary(transaction, id, raw)?;
         } else {
             publish_direct(transaction, "work", id, raw, validate)?;
         }
@@ -1149,14 +1147,32 @@ fn publish_direct(
         SyncDocumentsRepository::put_entity(transaction, collection, id, projected, false)?;
         return Ok(());
     }
-    let record = serde_json::from_str::<Value>(raw)?;
     if collection == "work" {
+        let record = serde_json::from_str::<Value>(raw)?;
         publish_work_detail(transaction, id, &record, validate)?;
+        return publish_work_summary(transaction, id, raw);
     }
+    let record = serde_json::from_str::<Value>(raw)?;
     match project_persisted_record(collection, &record) {
         Some(projected) => put_projection(transaction, collection, id, projected, false, validate),
         None => Ok(()),
     }
+}
+
+fn publish_work_summary(transaction: &Transaction<'_>, id: &str, raw: &str) -> StoreResult<()> {
+    let invalid = || StoreError::InvalidStoredRecord {
+        object: "work",
+        id: id.to_owned(),
+    };
+    let record: studio_runtime_store::WorkItemRecord =
+        serde_json::from_str(raw).map_err(|_| invalid())?;
+    if record.id().as_ref() != id {
+        return Err(invalid());
+    }
+    if let Some(projected) = crate::sync_views::project_work_record(&record) {
+        SyncDocumentsRepository::put_entity(transaction, "work", id, projected, false)?;
+    }
+    Ok(())
 }
 
 fn publish_work_detail(
