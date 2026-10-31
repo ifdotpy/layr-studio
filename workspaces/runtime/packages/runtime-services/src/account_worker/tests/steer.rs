@@ -410,6 +410,9 @@ async fn transport_close_before_reply_is_unconfirmed_and_never_resent(provider: 
     assert_eq!(input(&state).await.0, "failed");
     let mut peer = Peer::identity("default", 2, None);
     let mut worker = peer.worker(state.bridge.clone()).await;
+    // Startup recovery reads the thread on this new connection. Wait for it
+    // (answering its read) so that read cannot race the no-write check.
+    worker_barrier_with_history(&worker, &mut peer).await;
     state.wake(&worker).await;
     no_write(&mut peer).await;
     assert_eq!(input(&state).await.0, "failed");
