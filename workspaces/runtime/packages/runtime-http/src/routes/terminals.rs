@@ -12,7 +12,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 #[cfg(unix)]
 use studio_runtime_services::terminal_driver::TerminalCreate;
-use studio_runtime_services::terminal_driver::{self, TerminalError};
+use studio_runtime_services::terminal_driver::{
+    self, TERMINAL_COLS_DEFAULT, TERMINAL_COLS_MAX, TERMINAL_COLS_MIN,
+    TERMINAL_CREATE_REQUEST_ID_MAX_CODEPOINTS, TERMINAL_ROWS_DEFAULT, TERMINAL_ROWS_MAX,
+    TERMINAL_ROWS_MIN, TerminalError,
+};
 use studio_runtime_store::path_identity::CanonicalPath;
 use studio_runtime_store::{AgentId, AgentRepository};
 
@@ -125,19 +129,58 @@ async fn output(
     >(result)?))
 }
 
+const TERMINAL_CREATE_AGENT_ID_MAX_CODEPOINTS: usize = 200;
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct TerminalCreateBody {
+    id: studio_runtime_schema::bounded_text::BoundedText<
+        1,
+        TERMINAL_CREATE_REQUEST_ID_MAX_CODEPOINTS,
+    >,
+    agent: studio_runtime_schema::bounded_text::BoundedText<
+        1,
+        TERMINAL_CREATE_AGENT_ID_MAX_CODEPOINTS,
+    >,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    cols: Option<
+        studio_runtime_schema::bounded_integer::BoundedInteger<
+            TERMINAL_COLS_MIN,
+            TERMINAL_COLS_MAX,
+        >,
+    >,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    rows: Option<
+        studio_runtime_schema::bounded_integer::BoundedInteger<
+            TERMINAL_ROWS_MIN,
+            TERMINAL_ROWS_MAX,
+        >,
+    >,
+}
+
+fn present<'de, D: serde::Deserializer<'de>, T: serde::Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
+
 async fn create(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Value>,
+    ApiJson(body): ApiJson<TerminalCreateBody>,
 ) -> Result<Json<crate::generated::TerminalRecord>, ApiError> {
     #[cfg(unix)]
     {
         require_reconciled_driver(&state).await?;
         let store = state.store.clone().ok_or_else(ApiError::internal)?;
-        let agent_id = body
-            .get("agent")
-            .and_then(Value::as_str)
-            .ok_or_else(|| ApiError::validation(vec![Value::String("body".into())]))?
-            .to_owned();
+        let agent_id = body.agent.as_str().to_owned();
         let stored = store
             .read_async("runtime-http/routes/terminals", move |connection| {
                 AgentRepository::get(connection, &AgentId::from(agent_id.as_str()))
@@ -152,17 +195,13 @@ async fn create(
         .await
         .map_err(|_| ApiError::internal())?
         .map_err(terminal_body_error)?;
-        let dimension = |name: &str, default| match body.get(name) {
-            None => Ok(default),
-            Some(value) => value.as_u64().ok_or(TerminalError::InvalidRequest),
-        };
-        let columns = dimension("cols", 100).map_err(terminal_body_error)?;
-        let rows = dimension("rows", 28).map_err(terminal_body_error)?;
-        let request_id = body
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned();
+        let columns = body
+            .cols
+            .map_or(TERMINAL_COLS_DEFAULT, |value| value.get() as u64);
+        let rows = body
+            .rows
+            .map_or(TERMINAL_ROWS_DEFAULT, |value| value.get() as u64);
+        let request_id = body.id.as_str();
         let shell = terminal_shell().await;
         let environment = serde_json::json!({
             "TERM":"xterm-256color",
@@ -173,7 +212,7 @@ async fn create(
             .ok_or_else(ApiError::internal)?;
         let result = driver
             .create(TerminalCreate {
-                request_id: &request_id,
+                request_id,
                 agent: &agent,
                 agent_cwd: &agent_cwd,
                 cwd: &cwd,
@@ -351,6 +390,43 @@ mod tests {
     use serde_json::{Value, json};
     use studio_runtime_store::{RuntimeStore, TerminalsRepository};
     use tower::ServiceExt;
+
+    #[test]
+    fn typed_create_preserves_receipt_identity_and_bounds() {
+        for value in [
+            json!({"id":"i", "agent":"a"}),
+            json!({"id":"i", "agent":"a", "cols":100, "rows":28}),
+        ] {
+            let body: super::TerminalCreateBody = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(
+                studio_runtime_schema::json_compat::python_json_serialized(&body).unwrap(),
+                studio_runtime_schema::json_compat::python_json(&value)
+            );
+        }
+        for value in [
+            json!({"id":"i", "agent":"a", "cols":null}),
+            json!({"id":"i", "agent":"a", "cols":1}),
+            json!({"id":"i", "agent":"a", "extra":true}),
+        ] {
+            assert!(serde_json::from_value::<super::TerminalCreateBody>(value).is_err());
+        }
+        let doc: Value = serde_json::from_str(include_str!("../../openapi.json")).unwrap();
+        let p = &doc["components"]["schemas"]["TerminalCreate"]["properties"];
+        assert_eq!(
+            p["id"]["maxLength"],
+            super::TERMINAL_CREATE_REQUEST_ID_MAX_CODEPOINTS
+        );
+        assert_eq!(
+            p["agent"]["maxLength"],
+            super::TERMINAL_CREATE_AGENT_ID_MAX_CODEPOINTS
+        );
+        assert_eq!(p["cols"]["minimum"], super::TERMINAL_COLS_MIN);
+        assert_eq!(p["cols"]["maximum"], super::TERMINAL_COLS_MAX);
+        assert_eq!(p["cols"]["default"], super::TERMINAL_COLS_DEFAULT);
+        assert_eq!(p["rows"]["minimum"], super::TERMINAL_ROWS_MIN);
+        assert_eq!(p["rows"]["maximum"], super::TERMINAL_ROWS_MAX);
+        assert_eq!(p["rows"]["default"], super::TERMINAL_ROWS_DEFAULT);
+    }
 
     #[tokio::test]
     async fn pending_restart_cleanup_returns_retryable_error_without_terminal_writes() {
