@@ -620,7 +620,8 @@ for (const provider of ["claude", "future"] as const) {
             id: "capability-gate",
             name: "Lead",
             isLead: true,
-            provider,
+            // "future" is not a known provider on purpose: it checks the unknown-provider path.
+            provider: provider as never,
             source: AgentSource.managed,
             model: "gpt-6-astra",
             status: AgentStatus.idle,
