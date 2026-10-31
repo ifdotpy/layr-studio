@@ -864,7 +864,7 @@ function rustTests(step: GateStep): GateStep {
     requires: "workspace",
     ...(retest
       ? {
-          commands: [retestCommand(step.commands![0])],
+          commands: [retestCommand(step.commands![0]!)],
           // A run with no stale test executes zero tests.
           options: { allowZeroTests: true },
         }
@@ -1916,7 +1916,8 @@ export async function execute(
               : {}),
           }
         : scrubAgentEnvironment({ ...process.env });
-    const retestEnv = bin === "layr-retest" ? retestEnvironment() : {};
+    const retestEnv: NodeJS.ProcessEnv =
+      bin === "layr-retest" ? retestEnvironment() : {};
     const commandEnv = {
       ...baseEnv,
       CARGO_BUILD_JOBS: String(CARGO_BUILD_JOBS),
@@ -1933,7 +1934,7 @@ export async function execute(
       signal: options.signal,
     });
     if (bin === "layr-retest")
-      rmSync(path.dirname(env.LAYR_ROOT!), {
+      rmSync(path.dirname(retestEnv.LAYR_ROOT!), {
         recursive: true,
         force: true,
       });
