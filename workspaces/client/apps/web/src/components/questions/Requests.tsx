@@ -1,3 +1,7 @@
+import { useUnsentText } from "../../unsent/useUnsentText";
+import { unsentStore } from "../../unsent/store";
+import { serverViewId } from "../../servers/environment";
+import { serverMutationResponseIsUncertain } from "../../servers/mutationIdentity";
 import { QuestionDecision } from "../../generated/api";
 import {
   useServerApi,
@@ -9,7 +13,7 @@ import ErrorDescription from "../ErrorDescription";
 import { Button } from "@mantine/core";
 import { MessageCircleQuestion, ShieldQuestion } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { errorText } from "../../api";
+import { ApiError, errorText } from "../../api";
 import { requestDraftsForStorage } from "./requestDrafts";
 import type { components } from "../../generated/api";
 import type { Json, JsonValue, Agent } from "../../types";
@@ -154,11 +158,44 @@ export function AnswerForm({
   notify: Props["notify"];
 }) {
   const answerDrafts = useAnswerDrafts();
+  const [savedAnswer, saveAnswer, clearAnswer] = useUnsentText(
+    "answer",
+    draftKey,
+  );
 
   const [values, setValues] = useState<AnswerValues>(
     () => answerDrafts.get(draftKey) || {},
   );
   const questions = requestQuestions(request);
+  useEffect(() => {
+    if (!savedAnswer) return;
+    try {
+      const saved: unknown = JSON.parse(savedAnswer);
+      if (!saved || typeof saved !== "object" || Array.isArray(saved)) return;
+      const restored: AnswerValues = {};
+      for (const question of questions) {
+        if (question.isSecret || !(question.id in saved)) continue;
+        const value = Reflect.get(saved, question.id);
+        if (typeof value === "string") restored[question.id] = value;
+        else if (
+          value &&
+          typeof value === "object" &&
+          "other" in value &&
+          typeof value.other === "string" &&
+          "selected" in value &&
+          Array.isArray(value.selected) &&
+          value.selected.every((item: unknown) => typeof item === "string")
+        )
+          restored[question.id] = {
+            other: value.other,
+            selected: value.selected,
+          };
+      }
+      setValues((current) => ({ ...current, ...restored }));
+    } catch {
+      /* Ignore a damaged answer. */
+    }
+  }, [savedAnswer]);
   const method = request.method || "";
   const schema = request.params?.requestedSchema;
   const properties = schema?.properties ?? {};
@@ -171,6 +208,15 @@ export function AnswerForm({
     const next = { ...values, [id]: value };
     answerDrafts.set(draftKey, next);
     setValues(next);
+    saveAnswer(
+      JSON.stringify(
+        Object.fromEntries(
+          questions
+            .filter((q) => !q.isSecret)
+            .map((q) => [q.id, next[q.id] ?? ""]),
+        ),
+      ),
+    );
   };
   const ready =
     !missingRequired &&
@@ -231,7 +277,9 @@ export function AnswerForm({
       } else {
         throw new Error("Unsupported question type.");
       }
-      void post(answer.data);
+      void post(answer.data).then((accepted) => {
+        if (accepted) void clearAnswer();
+      });
     } catch (e) {
       notify(errorText(e));
     }
@@ -388,6 +436,14 @@ export function RequestCard({
       await refresh();
       return true;
     } catch (e) {
+      if (
+        e instanceof ApiError &&
+        !serverMutationResponseIsUncertain(e.status, e.response)
+      )
+        await unsentStore(
+          services?.owner.id ?? serverViewId ?? "local",
+          "answer",
+        ).delete(draftKey);
       if (mounted.current) {
         setRequestError(errorText(e));
         notify(errorText(e));

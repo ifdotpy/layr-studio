@@ -1,4 +1,6 @@
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { useUnsentText } from "../unsent/useUnsentText";
+import { serverMutationResponseIsUncertain } from "../servers/mutationIdentity";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -10,7 +12,7 @@ import {
   Send,
   Trash2,
 } from "lucide-react";
-import { errorText, type QueueItemDto } from "../api";
+import { ApiError, errorText, type QueueItemDto } from "../api";
 import type { Message } from "../types";
 import "./message-queue.css";
 import { copyText } from "../clipboard/clipboard";
@@ -122,6 +124,32 @@ export default function MessageQueue(props: Props) {
 
 function ScopedMessageQueue(p: Props) {
   const [current, setCurrent] = useState<EditDraft | null>(null);
+  const [savedEdit, saveEditText, clearEdit] = useUnsentText(
+    "queue-edit",
+    p.scope,
+  );
+  useEffect(() => {
+    if (!savedEdit) return;
+    try {
+      const saved: unknown = JSON.parse(savedEdit);
+      if (
+        !saved ||
+        typeof saved !== "object" ||
+        !("id" in saved) ||
+        typeof saved.id !== "string" ||
+        !("text" in saved) ||
+        typeof saved.text !== "string"
+      )
+        return;
+      const item = p.items.find(
+        (entry) => entry.id === saved.id && isServerQueueItem(entry),
+      );
+      if (item && isServerQueueItem(item))
+        setCurrent({ item, text: saved.text });
+    } catch {
+      /* Ignore a damaged edit. */
+    }
+  }, [savedEdit, p.items]);
   const [collapsed, setCollapsed] = useState(false);
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
@@ -140,18 +168,21 @@ function ScopedMessageQueue(p: Props) {
   const disabled = busy || !!p.refreshing || !!p.loading;
 
   const dismiss = () => {
+    saveEditText(null);
     setCurrent(null);
     setError("");
   };
   const beginEdit = (item: QueueItem) => {
     if (!isServerQueueItem(item)) return;
     setCurrent({ item, text: item.text });
+    saveEditText(JSON.stringify({ id: item.id, text: item.text }));
     setCollapsed(false);
     setError("");
     setCopied(false);
   };
   const updateDraft = (draft: EditDraft, text: string) => {
     setCurrent({ ...draft, text });
+    saveEditText(JSON.stringify({ id: draft.item.id, text }));
     setCopied(false);
   };
   const mutate = async (operation: () => Promise<void>) => {
@@ -176,8 +207,17 @@ function ScopedMessageQueue(p: Props) {
     )
       return;
     void mutate(async () => {
-      await p.onEdit(draft.item, draft.text);
-      dismiss();
+      try {
+        await p.onEdit(draft.item, draft.text);
+        dismiss();
+      } catch (error) {
+        if (
+          error instanceof ApiError &&
+          !serverMutationResponseIsUncertain(error.status, error.response)
+        )
+          await clearEdit();
+        throw error;
+      }
     });
   };
   const move = (id: string, targetIndex: number) => {
