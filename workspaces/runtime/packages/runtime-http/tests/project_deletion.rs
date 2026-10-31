@@ -184,7 +184,7 @@ async fn project_deletion_membership_and_retention() {
             agent("other", None, "/prefix"),
         ],
         vec![
-            json!({"id":"shared","kind":"shared","projectPath":"/p","members":["lead"]}),
+            json!({"id":"shared","kind":"private","projectPath":"/p","members":["lead"]}),
             json!({"id":"broadcast","kind":"broadcast","rootId":"lead"}),
             json!({"id":"global","kind":"broadcast","rootId":"all"}),
         ],
@@ -262,7 +262,7 @@ async fn project_deletion_rolls_back_every_write_boundary() {
     ] {
         let f = Fixture::new(
             vec![agent("a", None, "/p"), agent("z", None, "/p")],
-            vec![json!({"id":"shared","kind":"shared","projectPath":"/p","members":["a"]})],
+            vec![json!({"id":"shared","kind":"private","projectPath":"/p","members":["a"]})],
             false,
         )
         .await;
@@ -431,7 +431,7 @@ async fn project_deletion_one_commit_and_room_rebuild_cannot_revive() {
     let f = Fixture::new(
         vec![agent("a", None, "/p"), agent("b", None, "/p")],
         vec![
-            json!({"id":"shared","kind":"shared","projectPath":"/p","members":["a","b"]}),
+            json!({"id":"shared","kind":"private","projectPath":"/p","members":["a","b"]}),
             json!({"id":"broadcast","kind":"broadcast","rootId":"a"}),
         ],
         false,
@@ -503,7 +503,7 @@ async fn project_deletion_one_commit_and_room_rebuild_cannot_revive() {
 async fn project_deletion_prunes_sidebar_and_preserves_history() {
     let f = Fixture::new(
         vec![agent("lead", None, "/p"), agent("other", None, "/prefix")],
-        vec![json!({"id":"shared","kind":"shared","projectPath":"/p","members":["lead"]})],
+        vec![json!({"id":"shared","kind":"private","projectPath":"/p","members":["lead"]})],
         false,
     )
     .await;
