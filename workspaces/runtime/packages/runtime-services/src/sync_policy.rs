@@ -1621,10 +1621,9 @@ pub(crate) fn maintain_task_window(
                 id,
             });
         }
-        let record = studio_runtime_store::projection_value(&record);
-        if let Some(projected) = project_persisted_record("task", &record) {
+        if let Some(projected) = crate::sync_views::project_task_record(&record) {
             kept.insert(id.clone());
-            put_projection(transaction, "task", &id, projected, false, validate)?;
+            SyncDocumentsRepository::put_entity(transaction, "task", &id, projected, false)?;
         }
     }
     let mut statement = transaction
@@ -2120,35 +2119,26 @@ fn maintain_peer_team_entities(
         .collect::<BTreeMap<_, _>>();
     let mut current = BTreeMap::<String, Value>::new();
     for (_, raw) in project_records {
-        let Ok(project) = serde_json::from_str::<Value>(raw) else {
-            continue;
-        };
-        let Some(project_path) = project
-            .get("path")
-            .and_then(Value::as_str)
-            .filter(|path| !path.trim().is_empty())
-            .and_then(studio_runtime_store::path_identity::lexical_text)
+        let Ok(studio_runtime_schema::project_record::ProjectRecord::Live(project)) =
+            serde_json::from_str(raw)
         else {
             continue;
         };
-        let Some(teams) = project.get("peerTeams").and_then(Value::as_array) else {
+        let Some(project_path) = (!project.path.trim().is_empty())
+            .then(|| studio_runtime_store::path_identity::lexical_text(&project.path))
+            .flatten()
+        else {
             continue;
         };
-        let revision = project
-            .get("peerTeamsRevision")
-            .cloned()
-            .unwrap_or(json!(0));
-        for team in teams {
-            let (Some(id), Some(name), Some(members)) = (
-                team.get("id").and_then(Value::as_str),
-                team.get("name").and_then(Value::as_str),
-                team.get("members").and_then(Value::as_array),
-            ) else {
-                continue;
-            };
+        let revision = match project.peer_teams_revision {
+            studio_runtime_schema::queue_command::Field::Missing => Some(0),
+            studio_runtime_schema::queue_command::Field::Null => None,
+            studio_runtime_schema::queue_command::Field::Value(value) => Some(value),
+        };
+        for team in &project.peer_teams {
             let mut selected = Vec::new();
-            for member in members.iter().filter_map(Value::as_str) {
-                if agents.get(member).is_some_and(|agent| {
+            for member in &team.members {
+                if agents.get(member.as_str()).is_some_and(|agent| {
                     agent
                         .get("cwd")
                         .and_then(Value::as_str)
@@ -2157,13 +2147,13 @@ fn maintain_peer_team_entities(
                         == Some(project_path.as_path())
                 }) && !selected.iter().any(|prior| prior == member)
                 {
-                    selected.push(member.to_owned());
+                    selected.push(member.clone());
                 }
             }
             if selected.len() >= 2 {
                 current.insert(
-                    id.to_owned(),
-                    json!({"id":id,"name":name,"projectPath":project_path,"members":selected,"revision":revision}),
+                    team.id.clone(),
+                    json!({"id":team.id,"name":team.name,"projectPath":project_path,"members":selected,"revision":revision}),
                 );
             }
         }
@@ -2745,6 +2735,27 @@ mod tests {
                 .is_none()
         );
         assert!(super::checked_owned_work("w", "{").unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn peer_team_projection_preserves_revision_presence() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store.transaction_with(|tx| {
+            let agents = ["a", "b"].map(|id| (id.to_owned(), json!({"id":id,"rootId":id,"isLead":true,"cwd":"/project"}).to_string()));
+            for (revision, expected) in [(None, json!(0)), (Some(Value::Null), Value::Null), (Some(json!(3)), json!(3))] {
+                let mut project = json!({"recordKind":"live","id":"p","path":"/project","peerTeams":[{"id":"team","name":"Team","members":["a","b"]}]});
+                if let Some(revision) = revision { project["peerTeamsRevision"] = revision; }
+                maintain_peer_team_entities(tx, &agents, &[("p".into(), project.to_string())], &|_, _, _, _| true)?;
+                let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='peerTeam' AND id='team'", [], |row| row.get(0))?;
+                let value: Value = serde_json::from_str(&payload)?;
+                assert_eq!(value["value"]["revision"], expected);
+                assert_eq!(value["value"]["members"], json!(["a", "b"]));
+            }
+            Ok::<_, StoreError>(())
+        }).await.unwrap();
     }
 
     #[test]

@@ -40,6 +40,7 @@ mod m2026_10_31_current_checks;
 mod m2026_10_31_native_status_error;
 mod m2026_10_31_project_record_kind;
 mod m2026_10_31_retired_start_indexes;
+mod m2026_10_31_sync_project;
 mod m2026_10_31_transfer_history_pages;
 mod m2026_10_31_work_records;
 
@@ -675,6 +676,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_10_30_branch_phase::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-sync-project-duplicates",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Project records with duplicate fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_sync_project::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {
