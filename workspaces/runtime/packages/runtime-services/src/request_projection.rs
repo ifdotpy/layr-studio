@@ -155,9 +155,10 @@ mod tests {
 
     #[test]
     fn request_projection_matches_existing_projection() {
-        let source = json!({"id":"r","agent":"a","method":"item/tool/requestUserInput","status":"pending","createdAt":1.0,"params":{"threadId":"t","command":["echo","ok"],"questions":[{"id":"q","question":"Continue?","header":"Confirm","options":[{"label":"Yes","description":"Proceed","metadata":{"n":1}}]}],"requestedSchema":{"properties":{"thing":{"type":"string","description":"Help"}},"required":["thing"]},"private":"hidden"},"preview":{"command":"echo ok","cwd":"/tmp","private":true},"accountKey":"account"});
-        let record: RequestRecord = serde_json::from_value(source.clone()).unwrap();
-        let actual = serde_json::to_value(project_request_record(&record).unwrap()).unwrap();
+        let source = r#"{"id":"r","agent":"a","method":"item/tool/requestUserInput","status":"pending","createdAt":1.0,"params":{"threadId":"t","command":["echo","ok"],"questions":[{"id":"q","question":"Continue?","header":"Confirm","options":[{"label":"Yes","description":"Proceed","metadata":{"n":1}}]}],"requestedSchema":{"properties":{"thing":{"type":"string","description":"Help"}},"required":["thing"]},"private":"hidden"},"preview":{"command":"echo ok","cwd":"/tmp","private":true},"accountKey":"account"}"#;
+        let record: RequestRecord = serde_json::from_str(source).unwrap();
+        let encoded = serde_json::to_vec(&project_request_record(&record).unwrap()).unwrap();
+        let actual: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
         // Snapshot of the generic projection before removing its request branch.
         let expected = json!({"id":"r","agent":"a","method":"item/tool/requestUserInput","status":"pending","createdAt":1.0,"params":{"threadId":"t","command":["echo","ok"],"questions":[{"id":"q","question":"Continue?","header":"Confirm","options":[{"label":"Yes","description":"Proceed","metadata":{"n":1}}]}],"requestedSchema":{"properties":{"thing":{"type":"string","description":"Help"}},"required":["thing"]}},"preview":{"command":"echo ok","cwd":"/tmp"},"accountKey":"account"});
         assert_eq!(actual, expected);
@@ -165,7 +166,7 @@ mod tests {
 
     #[test]
     fn request_projection_refuses_invalid_known_fields() {
-        let source = json!({"id":"r","agent":"a","method":"item/tool/requestUserInput","status":"pending","createdAt":1.0,"params":{"command":42}});
-        assert!(serde_json::from_value::<RequestRecord>(source).is_err());
+        let source = r#"{"id":"r","agent":"a","method":"item/tool/requestUserInput","status":"pending","createdAt":1.0,"params":{"command":42}}"#;
+        assert!(serde_json::from_str::<RequestRecord>(source).is_err());
     }
 }
