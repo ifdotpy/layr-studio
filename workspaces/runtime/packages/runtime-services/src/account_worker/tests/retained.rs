@@ -731,12 +731,9 @@ async fn reset_service_holds_lost_response_without_resending() {
     });
     let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
     let body: studio_runtime_schema::limit_reset_request::ResetRequest =
-        serde_json::from_value(json!({
-            "account_key":"default",
-            "account_id":"account-A",
-            "credit_id":"credit-A",
-            "request_id":request_id
-        }))
+        serde_json::from_str(&format!(
+            r#"{{"account_key":"default","account_id":"account-A","credit_id":"credit-A","request_id":"{request_id}"}}"#
+        ))
         .expect("valid reset request");
     let first_session = session.clone();
     let first_body = body.clone();

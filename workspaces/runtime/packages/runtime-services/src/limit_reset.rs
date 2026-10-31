@@ -514,6 +514,7 @@ mod tests {
         AccountSessionError, AccountSessionFuture, AccountSessionPort, ConnectionScope,
         ProviderRequest, ProviderResponse, RequestCertainty, SessionReceipt,
     };
+    use serde::Deserialize;
     use serde_json::{Value, json};
     use std::collections::VecDeque;
     use std::future::Future;
@@ -669,7 +670,7 @@ mod tests {
         session: &dyn AccountSessionPort,
         data: &Value,
     ) -> Result<Value, super::ResetError> {
-        let typed = serde_json::from_value(data.clone())
+        let typed = studio_runtime_schema::limit_reset_request::ResetRequest::deserialize(data)
             .map_err(|_| super::ResetError::Invalid("Invalid reset request"))?;
         run_async(consume_reset_async(store, session, &typed))
     }
