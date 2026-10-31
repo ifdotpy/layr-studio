@@ -1,9 +1,9 @@
 {
-  "effects": [],
   "writes": [
     {"table": "runtime_agents", "record": {"id": "lead", "rootId": "lead", "parentId": null, "epoch": 3, "status": "idle", "compactions": 0, "name": "Lead", "isLead": true, "autoWake": true, "inFlight": false, "created": 1.0}},
     {"table": "runtime_agents", "record": {"id": "worker", "rootId": "lead", "parentId": "lead", "epoch": 8, "status": "completed", "compactions": 0, "name": "Worker", "isLead": false, "autoWake": true, "inFlight": false, "created": 1.0}}
   ],
   "cancel_pending": [],
+  "effects": [],
   "result": {"stopped": ["lead", "worker"]}
 }

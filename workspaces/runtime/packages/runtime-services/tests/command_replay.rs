@@ -1,11 +1,11 @@
-//! Replays recorded management commands through the pure `decide` function.
+//! Replays recorded management commands through the pure `decide_with_effects` function.
 //! Each case is `command_replay/<case>.json` with `records`, `action` and `now`;
 //! its expected outcome is `command_replay/<case>.expected.json`.
 
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use studio_runtime_services::agent_management::{
-    Action, ManagementError, ManagementSnapshot, Records, decide,
+    Action, ManagementSnapshot, Records, decide_with_effects,
 };
 
 fn read_json(path: &Path) -> Value {
@@ -13,32 +13,27 @@ fn read_json(path: &Path) -> Value {
     serde_json::from_str(&text).expect("replay fixture JSON")
 }
 
-/// Canonical outcome. Writes and cancel_pending are sorted by agent id. A
-/// decision with effects is refused by `decide`, so only the first effect
-/// dependency is visible here.
+/// Canonical outcome: writes and cancel_pending sorted by agent id, every
+/// lifecycle effect in emission order with its full contents, and the result.
 fn outcome(name: &str, records: Records, action: &Action, now: f64) -> Value {
     let snapshot = ManagementSnapshot::from_records(records)
         .unwrap_or_else(|error| panic!("{name}: snapshot: {error}"));
-    match decide(&snapshot, action, now) {
-        Ok(decision) => {
-            let mut writes: Vec<Value> = decision
-                .writes
-                .iter()
-                .map(|write| json!({"table": write.table, "record": write.record}))
-                .collect();
-            writes.sort_by_key(|write| write["record"]["id"].to_string());
-            let mut cancel_pending = decision.cancel_pending;
-            cancel_pending.sort();
-            json!({
-                "effects": [],
-                "writes": writes,
-                "cancel_pending": cancel_pending,
-                "result": decision.result,
-            })
-        }
-        Err(ManagementError::Unavailable(dependency)) => json!({"effects": [dependency]}),
-        Err(error) => panic!("{name}: unexpected refusal: {error}"),
-    }
+    let decision = decide_with_effects(&snapshot, action, now)
+        .unwrap_or_else(|error| panic!("{name}: refused: {error}"));
+    let mut writes: Vec<Value> = decision
+        .writes
+        .iter()
+        .map(|write| json!({"table": write.table, "record": write.record}))
+        .collect();
+    writes.sort_by_key(|write| write["record"]["id"].to_string());
+    let mut cancel_pending = decision.cancel_pending;
+    cancel_pending.sort();
+    json!({
+        "writes": writes,
+        "cancel_pending": cancel_pending,
+        "effects": serde_json::to_value(&decision.effects).expect("effects"),
+        "result": decision.result,
+    })
 }
 
 #[test]

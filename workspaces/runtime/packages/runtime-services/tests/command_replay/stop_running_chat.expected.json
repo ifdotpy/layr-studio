@@ -1,1 +1,15 @@
-{"effects": ["account-worker/agent-interrupt"]}
+{
+  "writes": [
+    {"table": "runtime_agents", "record": {"id": "lead", "rootId": "lead", "parentId": null, "epoch": 3, "status": "running", "compactions": 0, "name": "Lead", "isLead": true, "autoWake": true, "inFlight": true, "turnId": "turn-1", "created": 1.0}}
+  ],
+  "cancel_pending": [],
+  "effects": [
+    {
+      "kind": "interrupt",
+      "before": {"id": "lead", "rootId": "lead", "parentId": null, "epoch": 3, "status": "running", "compactions": 0, "name": "Lead", "isLead": true, "autoWake": true, "inFlight": true, "turnId": "turn-1", "created": 1.0},
+      "stopped": {"id": "lead", "rootId": "lead", "parentId": null, "epoch": 3, "status": "interrupted", "compactions": 0, "name": "Lead", "isLead": true, "autoWake": true, "inFlight": true, "turnId": "turn-1", "created": 1.0, "error": "Stopped by user"},
+      "at": 1234567.5
+    }
+  ],
+  "result": {"stopped": ["lead"]}
+}

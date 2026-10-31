@@ -1,8 +1,8 @@
 {
-  "effects": [],
   "writes": [
     {"table": "runtime_agents", "record": {"id": "worker", "rootId": "lead", "parentId": "lead", "epoch": 9, "status": "paused", "compactions": 0, "name": "Worker", "isLead": false, "autoWake": false, "inFlight": false, "created": 1.0, "error": "Conversation deleted", "deletedAt": 1234567.5, "workspaceCleanupIntent": {"operationId": "591db7f5-6f37-5b35-ab63-107e873f80af", "action": "delete", "phase": "queued"}}}
   ],
   "cancel_pending": ["worker"],
+  "effects": [],
   "result": {"deleted": ["worker"]}
 }
