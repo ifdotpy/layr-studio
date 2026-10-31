@@ -760,7 +760,7 @@ fn apply_pair(
             .cloned()
             .ok_or_else(|| refused(403, "invite_unavailable", "The invitation is unavailable"))?;
         let grant = invite
-            .extra_str("grant")
+            .grant()
             .filter(|grant| *grant == crate::device_trust::GRANT_OBSERVE)
             .unwrap_or(crate::device_trust::GRANT_FULL)
             .to_owned();

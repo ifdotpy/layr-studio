@@ -11,6 +11,26 @@ pub const IDENTITY_PROOF_NONCE_BYTES: usize = 24;
 pub const REMOTE_ACCESS_FILE: &str = "remote-access.json";
 /// Environment variable that overrides the public origin of this server.
 pub const PUBLIC_ORIGIN_ENVIRONMENT: &str = "CODEX_CANVAS_PUBLIC_ORIGIN";
+/// Maximum invitation ID and owner lengths, in Unicode code points.
+pub const INVITE_ID_MAX_CHARS: usize = 128;
+pub const INVITE_OWNER_MAX_CHARS: usize = 254;
+/// Length of the lower-case SHA-256 token digest, in ASCII bytes.
+pub const INVITE_TOKEN_HASH_BYTES: usize = 64;
+/// Stored invitation fields retained by the legacy-row migration.
+pub const INVITE_FIELDS: &[&str] = &[
+    "inviteId",
+    "status",
+    "expires",
+    "tokenHash",
+    "tailscaleUser",
+    "protocol",
+    "serverId",
+    "label",
+    "origin",
+    "publicKey",
+    "created",
+    "grant",
+];
 
 /// The message a server signs to prove its identity for `nonce`. The nonce is
 /// unpadded base64url of `IDENTITY_PROOF_NONCE_BYTES` bytes; any other value gives `None`.
@@ -64,72 +84,133 @@ fn optional_proof<'de, D: serde::Deserializer<'de>>(
     <String as serde::Deserialize>::deserialize(deserializer).map(Some)
 }
 
-/// A validated stored invitation. Extra fields are preserved when it is used.
-#[derive(Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
+/// A stored invitation. Unknown fields are removed by the store migration.
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PersistedAccessInvite {
-    invite_id: String,
-    status: InviteStatus,
-    expires: serde_json::Number,
-    token_hash: String,
-    tailscale_user: String,
-    #[serde(flatten)]
-    extra: serde_json::Map<String, serde_json::Value>,
+    pub invite_id: crate::bounded_text::BoundedText<1, INVITE_ID_MAX_CHARS>,
+    pub status: InviteStatus,
+    pub expires: NonNegativeNumber,
+    pub token_hash: InviteTokenHash,
+    pub tailscale_user: crate::bounded_text::BoundedText<1, INVITE_OWNER_MAX_CHARS>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    pub protocol: crate::queue_command::Field<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    pub server_id: crate::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    pub label: crate::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    pub origin: crate::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    pub public_key: crate::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    pub created: crate::queue_command::Field<serde_json::Number>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    pub grant: crate::queue_command::Field<String>,
 }
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
-enum InviteStatus {
+pub enum InviteStatus {
     Open,
     Used,
 }
+impl InviteStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Used => "used",
+        }
+    }
+}
 
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct InviteWire {
-    invite_id: String,
-    status: InviteStatus,
-    expires: serde_json::Number,
-    token_hash: String,
-    tailscale_user: String,
-    #[serde(flatten)]
-    extra: serde_json::Map<String, serde_json::Value>,
+#[derive(Clone, serde::Serialize)]
+#[serde(transparent)]
+pub struct NonNegativeNumber(serde_json::Number);
+impl NonNegativeNumber {
+    pub fn as_i64(&self) -> Option<i64> {
+        self.0.as_i64()
+    }
+}
+impl TryFrom<serde_json::Number> for NonNegativeNumber {
+    type Error = &'static str;
+    fn try_from(value: serde_json::Number) -> Result<Self, Self::Error> {
+        if value.as_f64().is_some_and(|number| number >= 0.0) {
+            Ok(Self(value))
+        } else {
+            Err("negative invitation expiry")
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for NonNegativeNumber {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = <serde_json::Number as serde::Deserialize>::deserialize(deserializer)?;
+        Self::try_from(value).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(transparent)]
+pub struct InviteTokenHash(String);
+impl TryFrom<String> for InviteTokenHash {
+    type Error = &'static str;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.len() == INVITE_TOKEN_HASH_BYTES
+            && value
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            Ok(Self(value))
+        } else {
+            Err("invalid invitation token hash")
+        }
+    }
+}
+impl<'de> serde::Deserialize<'de> for InviteTokenHash {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        Self::try_from(value).map_err(serde::de::Error::custom)
+    }
 }
 
 impl PersistedAccessInvite {
-    /// Construct a domain invitation only after checking the authoritative schema.
-    pub fn from_value(value: &serde_json::Value) -> Result<Self, String> {
-        match crate::first_error("PersistedAccessInvite", value) {
-            Ok(None) => {}
-            Ok(Some((location, _))) => return Err(location),
-            Err(_) => return Err("schema".to_owned()),
-        }
-        let wire = <InviteWire as serde::Deserialize>::deserialize(value)
-            .map_err(|_| "schema".to_owned())?;
-        Ok(Self {
-            invite_id: wire.invite_id,
-            status: wire.status,
-            expires: wire.expires,
-            token_hash: wire.token_hash,
-            tailscale_user: wire.tailscale_user,
-            extra: wire.extra,
-        })
-    }
     pub fn invite_id(&self) -> &str {
-        &self.invite_id
+        self.invite_id.as_str()
     }
     pub fn is_open_at(&self, now: f64) -> bool {
-        matches!(self.status, InviteStatus::Open) && self.expires.as_f64().is_some_and(|v| v >= now)
+        matches!(self.status, InviteStatus::Open)
+            && self.expires.0.as_f64().is_some_and(|v| v >= now)
     }
     pub fn token_hash(&self) -> &str {
-        &self.token_hash
+        &self.token_hash.0
     }
     pub fn tailscale_user(&self) -> &str {
-        &self.tailscale_user
+        self.tailscale_user.as_str()
     }
-    /// A text field beyond the typed ones, such as the `grant` of the device that pairs.
-    pub fn extra_str(&self, key: &str) -> Option<&str> {
-        self.extra.get(key).and_then(serde_json::Value::as_str)
+    pub fn grant(&self) -> Option<&str> {
+        self.grant.value().map(String::as_str)
     }
     pub fn mark_used(&mut self) {
         self.status = InviteStatus::Used;
@@ -297,7 +378,7 @@ mod tests {
     }
 
     #[test]
-    fn invite_view_tracks_schema_and_preserves_extensions() {
+    fn invite_record_tracks_schema_and_rejects_unknown_fields() {
         let schema: Value =
             serde_json::from_str(include_str!("schemas/persisted-access-invite.schema.json"))
                 .unwrap();
@@ -312,7 +393,14 @@ mod tests {
                 "status":{"type":"string","enum":["open","used"]},
                 "expires":{"type":"number","minimum":0},
                 "tokenHash":{"type":"string","pattern":"^[0-9a-f]{64}$"},
-                "tailscaleUser":{"type":"string","minLength":1,"maxLength":254}
+                "tailscaleUser":{"type":"string","minLength":1,"maxLength":254},
+                "protocol":{"type":["integer","null"],"minimum":0},
+                "serverId":{"type":["string","null"]},
+                "label":{"type":["string","null"]},
+                "origin":{"type":["string","null"]},
+                "publicKey":{"type":["string","null"]},
+                "created":{"type":["number","null"]},
+                "grant":{"type":["string","null"]}
             })
         );
         assert_eq!(
@@ -325,13 +413,11 @@ mod tests {
                 "tailscaleUser"
             ])
         );
-        assert_eq!(
-            schema["additionalProperties"],
-            json!({"$ref":"#/$defs/JsonValue"})
-        );
-        let valid = json!({"inviteId":"i", "status":"open", "expires":9007199254740993_u64, "tokenHash":"a".repeat(64), "tailscaleUser":"owner", "extension":{"opaque":[null,1]}});
+        assert_eq!(schema["additionalProperties"], false);
+        let valid = json!({"inviteId":"i", "status":"open", "expires":9007199254740993_u64, "tokenHash":"a".repeat(64), "tailscaleUser":"owner", "grant":"observe"});
         assert!(crate::validate("PersistedAccessInvite", &valid).unwrap());
-        let mut invite = super::PersistedAccessInvite::from_value(&valid).unwrap();
+        let mut invite: super::PersistedAccessInvite =
+            serde::Deserialize::deserialize(&valid).unwrap();
         assert_eq!(serde_json::to_value(&invite).unwrap(), valid);
         invite.mark_used();
         let mut expected = valid;
@@ -347,9 +433,14 @@ mod tests {
             let mut input = expected.clone();
             input[field] = invalid;
             assert!(
-                super::PersistedAccessInvite::from_value(&input).is_err(),
+                <super::PersistedAccessInvite as serde::Deserialize>::deserialize(&input).is_err(),
                 "{field}"
             );
         }
+        let mut unknown = expected;
+        unknown["extension"] = json!(true);
+        assert!(
+            <super::PersistedAccessInvite as serde::Deserialize>::deserialize(&unknown).is_err()
+        );
     }
 }

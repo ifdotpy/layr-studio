@@ -5,7 +5,9 @@ use rusqlite::OptionalExtension;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use studio_runtime_schema::multi_server_protocol::ACCESS_PROTOCOL_VERSION;
+use studio_runtime_schema::multi_server_protocol::{
+    ACCESS_PROTOCOL_VERSION, PersistedAccessInvite,
+};
 use studio_runtime_store::{MultiServerRepository, RuntimeStore, StoreError};
 use thiserror::Error;
 
@@ -67,27 +69,12 @@ fn snapshot_in_transaction(
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
         .map(|r| {
             let (id, raw) = r?;
-            let v = parse("runtime_access_invites", &id, &raw)?;
-            let invite_id = v
-                .get("inviteId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| invalid("runtime_access_invites", &id, "inviteId"))?;
-            let expires = v
-                .get("expires")
-                .and_then(Value::as_i64)
+            let v = decode_invite(&id, &raw)?;
+            let expires = v.expires.as_i64()
                 .ok_or_else(|| invalid("runtime_access_invites", &id, "expires"))?;
-            let created = v
-                .get("created")
-                .and_then(Value::as_i64)
+            let created = v.created.value().and_then(serde_json::Number::as_i64)
                 .ok_or_else(|| invalid("runtime_access_invites", &id, "created"))?;
-            let status = v
-                .get("status")
-                .and_then(Value::as_str)
-                .ok_or_else(|| invalid("runtime_access_invites", &id, "status"))?;
-            if !["open", "used"].contains(&status) {
-                return Err(invalid("runtime_access_invites", &id, "status"));
-            }
-            Ok(json!({"inviteId":invite_id,"expires":expires,"created":created,"status":status}))
+            Ok(json!({"inviteId":v.invite_id(),"expires":expires,"created":created,"status":v.status.as_str()}))
         })
         .collect::<Result<Vec<_>, StoreError>>()?;
     let auto_pair = tx
@@ -491,22 +478,15 @@ pub async fn create_invite(
     let request_id_for_read = request_id.to_owned();
     let prior = store
         .read_async("runtime-services/multi_server", move |tx| {
-            let saved: Option<(String, String)> = tx
+            let saved: Option<(String, String, String)> = tx
                 .query_row(
-                    "SELECT hash,record FROM runtime_access_invites WHERE request_id=?1",
+                    "SELECT id,hash,record FROM runtime_access_invites WHERE request_id=?1",
                     [&request_id_for_read],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .optional()?;
             saved
-                .map(|(hash, raw)| {
-                    let record: Value = serde_json::from_str(&raw).map_err(|_| {
-                        StoreError::SchemaMismatch(format!(
-                            "invalid stored object runtime_access_invites/{request_id_for_read}"
-                        ))
-                    })?;
-                    Ok::<_, StoreError>((hash, record))
-                })
+                .map(|(id, hash, raw)| decode_invite(&id, &raw).map(|record| (hash, record)))
                 .transpose()
         })
         .await?;
@@ -528,22 +508,38 @@ pub async fn create_invite(
             )
             .as_ref(),
         );
-        let mut invite = json!({
-            "protocol": ACCESS_PROTOCOL_VERSION,
-            "inviteId": invite_id,
-            "serverId": identity["serverId"],
-            "label": label,
-            "origin": origin,
-            "publicKey": identity["publicKey"],
-            "tailscaleUser": tailscale_user,
-            "expires": now as i64 + INVITATION_TTL_SECONDS,
-            "created": now,
-            "status": "open",
-            "tokenHash": studio_runtime_store::sha256_hex(token.as_bytes()),
-        });
-        if let Some(grant) = grant {
-            invite["grant"] = json!(grant);
-        }
+        use studio_runtime_schema::{multi_server_protocol::InviteStatus, queue_command::Field};
+        let invalid_invite =
+            |_| MultiServerError::Refused("Invalid local invitation identity".into());
+        let optional_identity = |name: &str| {
+            <Field<String> as serde::Deserialize>::deserialize(
+                identity.get(name).unwrap_or(&Value::Null),
+            )
+            .map_err(|_| MultiServerError::Refused("Invalid local invitation identity".into()))
+        };
+        let invite = PersistedAccessInvite {
+            protocol: Field::Value(ACCESS_PROTOCOL_VERSION),
+            invite_id: invite_id.clone().try_into().map_err(invalid_invite)?,
+            server_id: optional_identity("serverId")?,
+            label: Field::Value(label.to_owned()),
+            origin: Field::Value(origin.to_owned()),
+            public_key: optional_identity("publicKey")?,
+            tailscale_user: tailscale_user
+                .to_owned()
+                .try_into()
+                .map_err(invalid_invite)?,
+            expires: serde_json::Number::from(now as i64 + INVITATION_TTL_SECONDS)
+                .try_into()
+                .map_err(invalid_invite)?,
+            created: Field::Value(serde_json::Number::from_f64(now).ok_or_else(|| {
+                MultiServerError::Refused("Invalid local invitation time".into())
+            })?),
+            status: InviteStatus::Open,
+            token_hash: studio_runtime_store::sha256_hex(token.as_bytes())
+                .try_into()
+                .map_err(invalid_invite)?,
+            grant: grant.map_or(Field::Missing, |value| Field::Value(value.to_owned())),
+        };
         let invite_id = invite_id.clone();
         let request_id = request_id.to_owned();
         let fingerprint = fingerprint.clone();
@@ -553,7 +549,7 @@ pub async fn create_invite(
             .transaction_with(move |tx| {
                 tx.execute(
                 "INSERT INTO runtime_access_invites(id,request_id,hash,record) VALUES(?1,?2,?3,?4)",
-                rusqlite::params![invite_id, request_id, fingerprint, invite_for_write.to_string()],
+                rusqlite::params![invite_id, request_id, fingerprint, serde_json::to_string(&invite_for_write)?],
             )?;
                 audit_write(tx, "local", &actor, "create_invite")?;
                 Ok::<_, StoreError>(())
@@ -561,7 +557,7 @@ pub async fn create_invite(
             .await?;
         invite
     };
-    let invite_id = invite["inviteId"].as_str().unwrap_or_default();
+    let invite_id = invite.invite_id();
     let token_data = format!("invite-v1\n{invite_id}\n{request_id}");
     let token = URL_SAFE_NO_PAD.encode(
         hmac::sign(
@@ -571,15 +567,15 @@ pub async fn create_invite(
         .as_ref(),
     );
     let invitation = json!({
-        "protocol": invite["protocol"], "inviteId": invite["inviteId"],
-        "serverId": invite["serverId"], "label": invite["label"],
-        "origin": invite["origin"], "publicKey": invite["publicKey"],
-        "tailscaleUser": invite["tailscaleUser"], "expires": invite["expires"],
+        "protocol": invite.protocol, "inviteId": invite.invite_id,
+        "serverId": invite.server_id, "label": invite.label,
+        "origin": invite.origin, "publicKey": invite.public_key,
+        "tailscaleUser": invite.tailscale_user, "expires": invite.expires,
         "token": token,
     });
     Ok(json!({
         "invitation": invitation,
-        "expires": invite["expires"]
+        "expires": invite.expires
     }))
 }
 
@@ -781,6 +777,17 @@ fn parse(table: &str, id: &str, raw: &str) -> Result<Value, StoreError> {
         return Err(invalid(table, id, "record"));
     }
     Ok(v)
+}
+fn decode_invite(id: &str, raw: &str) -> Result<PersistedAccessInvite, StoreError> {
+    let invite = serde_json::from_str::<
+        studio_runtime_schema::http_ingress::Object<PersistedAccessInvite>,
+    >(raw)
+    .map_err(|_| invalid("runtime_access_invites", id, "record"))?
+    .0;
+    if invite.invite_id() != id {
+        return Err(invalid("runtime_access_invites", id, "inviteId"));
+    }
+    Ok(invite)
 }
 fn invalid(t: &str, id: &str, field: &str) -> StoreError {
     StoreError::SchemaMismatch(format!("invalid stored object {t}/{id}: {field}"))
