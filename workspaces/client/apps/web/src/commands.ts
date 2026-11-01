@@ -30,14 +30,6 @@ export type MessageDelivery =
 export function messageReceipt(
   response: CommandResponse,
 ): MessageDelivery | undefined {
-<<<<<<< head
-||||||| base
-  return response.rows.find((row) => row.collection === "messageReceipt")
-    ?.payload as MessageDelivery | undefined;
-=======
-  // The rows can hold the stored stream row of the receipt too. It keeps the receipt under
-  // `value`, so only the receipt of the answer has an id and a status at the top.
->>>>>>> 4a87ee1
   return response.rows.find(
     (row) =>
       row.collection === "messageReceipt" &&
