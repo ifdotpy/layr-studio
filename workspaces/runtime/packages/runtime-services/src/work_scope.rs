@@ -280,7 +280,7 @@ fn work_units(
                         index as usize,
                         &value,
                     );
-                    vec![upsert(collection, &id, seq, entry)]
+                    vec![upsert(collection, &id, seq, &entry)]
                 }
                 _ => Vec::new(),
             };
@@ -380,7 +380,7 @@ fn work_docs(
         && wanted.contains("work")
         && let Some(summary) = crate::sync_views::project_work_record(&item)
     {
-        rows.push(upsert("work", id, seq, serde_json::to_value(summary)?));
+        rows.push(upsert("work", id, seq, &serde_json::to_value(summary)?));
     }
     if wanted.contains("workDetail") {
         let refusal = current_submission_refusal(transaction, &record).map_err(work_error)?;
@@ -393,7 +393,12 @@ fn work_docs(
             }
         }
         let detail = crate::sync_views::work_detail_view(&item, &record, refusal, &statuses)?;
-        rows.push(upsert("workDetail", id, seq, serde_json::to_value(detail)?));
+        rows.push(upsert(
+            "workDetail",
+            id,
+            seq,
+            &serde_json::to_value(detail)?,
+        ));
     }
     Ok(rows)
 }
@@ -419,7 +424,7 @@ fn tombstones(
 }
 
 /// A live row in the envelope shape that `sync_entities` rows use.
-fn upsert(collection: &str, id: &str, seq: i64, value: Value) -> EntityRow {
+fn upsert(collection: &str, id: &str, seq: i64, value: &Value) -> EntityRow {
     EntityRow {
         collection: collection.to_owned(),
         id: id.to_owned(),
