@@ -95,22 +95,6 @@ export default function LimitRecoveryNotice({
               ? "Studio will continue this chat when the account works again."
               : "Turn on automatic resume to continue this chat after sign-in works."}
           </p>
-          {scheduled &&
-            (typeof plannedAt === "number" ||
-              typeof nextCheckAt === "number") && (
-              <p>
-                {typeof plannedAt === "number"
-                  ? "Automatic resume planned for "
-                  : "Next account check "}
-                <time
-                  dateTime={new Date(
-                    (plannedAt ?? nextCheckAt!) * 1000,
-                  ).toISOString()}
-                >
-                  {localDateTime(new Date((plannedAt ?? nextCheckAt!) * 1000))}
-                </time>
-              </p>
-            )}
         </>
       ) : (
         <p>
@@ -138,6 +122,21 @@ export default function LimitRecoveryNotice({
           )}
         </p>
       )}
+      {scheduled &&
+        (typeof plannedAt === "number" || typeof nextCheckAt === "number") && (
+          <p>
+            {typeof plannedAt === "number"
+              ? "Automatic resume planned for "
+              : "Next account check "}
+            <time
+              dateTime={new Date(
+                (plannedAt ?? nextCheckAt!) * 1000,
+              ).toISOString()}
+            >
+              {localDateTime(new Date((plannedAt ?? nextCheckAt!) * 1000))}
+            </time>
+          </p>
+        )}
       {resume?.reason === "Automatic resume is off for this chat." && (
         <p>Automatic resume is off for this chat.</p>
       )}

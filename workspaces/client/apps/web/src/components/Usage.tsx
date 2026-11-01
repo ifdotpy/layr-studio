@@ -1079,6 +1079,11 @@ export default function Usage({
                         ? "Stale estimate"
                         : "Saved estimate"}
                 </p>
+                {number(costs?.at) && (
+                  <p className="account-cost-caption">
+                    {`Updated ${Math.max(0, Math.round(Date.now() / 1000 - costs.at))} seconds ago`}
+                  </p>
+                )}
                 {(costs?.data?.coverage === "partial" ||
                   costs?.stale ||
                   costs?.error) && (

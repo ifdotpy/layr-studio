@@ -856,12 +856,15 @@ mod tests {
     }
 
     #[test]
-    fn startup_preserves_vendor_window_and_reset_credit_extensions() {
+    fn startup_drops_unread_vendor_window_and_reset_credit_extensions() {
         let input = json!({"accountKey":"default","at":1.0,"data":{"rateLimits":{"primary":{"usedPercent":12,"providerWindow":{"x":1}}},"rateLimitResetCredits":{"providerOwned":true}}});
         let state =
             AccountPolicyState::from_startup(Some(REGISTRY), [("default".into(), input.clone())])
                 .expect("provider extensions survive startup");
-        assert_eq!(state.limits("default"), input);
+        assert_eq!(
+            state.limits("default"),
+            json!({"accountKey":"default","at":1.0,"data":{"rateLimits":{"primary":{"usedPercent":12.0}},"rateLimitResetCredits":{"credits":[]}}})
+        );
         assert!(state.limits_diagnostics().is_empty());
     }
 

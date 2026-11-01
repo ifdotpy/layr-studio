@@ -341,13 +341,17 @@ pub(crate) fn publish_agent_change(
     agent_id: &str,
     deleted: bool,
 ) -> Result<(), StoreError> {
+    let now = timestamp().map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
+    let views = decoded_account_views(tx, now)?;
+    if views.is_empty() {
+        return Ok(());
+    }
     let agent = if deleted {
         None
     } else {
         studio_runtime_store::AgentRepository::get(tx, &agent_id.into())?
     };
-    let now = timestamp().map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
-    for (account, mut value, unreadable) in decoded_account_views(tx, now)? {
+    for (account, mut value, unreadable) in views {
         if unreadable {
             tx.execute(
                 "DELETE FROM sync_entities WHERE collection='rateLimit' AND id=?1",

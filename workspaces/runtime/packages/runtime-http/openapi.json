@@ -2188,10 +2188,7 @@
             "$ref": "#/components/schemas/WeeklyRunway"
           },
           "status": {
-            "$ref": "#/components/schemas/AccountLimitsStatus",
-            "default": {
-              "kind": "current"
-            }
+            "$ref": "#/components/schemas/AccountLimitsStatus"
           }
         },
         "required": [

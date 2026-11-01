@@ -446,7 +446,6 @@ impl RateLimitView {
 #[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AccountLimitsProjection {
-    #[serde(default)]
     pub status: AccountLimitsStatus,
     pub runway: WeeklyRunway,
     pub reset: ResetProjection,

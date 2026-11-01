@@ -289,7 +289,10 @@ mod tests {
             .expect("body");
         let body: Value = serde_json::from_slice(&body).expect("JSON");
         assert_eq!(body["accountKey"], "default");
-        assert_eq!(body["data"], data);
+        assert_eq!(
+            body["data"],
+            json!({"accountId":"native-account","ordinaryUsageAllowed":false,"rateLimitResetCredits":{"credits":[{"id":"credit","resetType":"five_hour","status":"available"}]},"rateLimits":{"planType":"plus","primary":{"usedPercent":42.0},"spendControlReached":true}})
+        );
         assert!(body.get("eligibility").is_none());
     }
 

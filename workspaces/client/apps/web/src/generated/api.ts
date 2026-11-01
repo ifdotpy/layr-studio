@@ -3072,11 +3072,6 @@ export interface components {
       buckets: components["schemas"]["BucketProjection"];
       reset: components["schemas"]["ResetProjection"];
       runway: components["schemas"]["WeeklyRunway"];
-      /**
-       * @default {
-       *       "kind": "current"
-       *     }
-       */
       status: components["schemas"]["AccountLimitsStatus"];
     };
     AccountLimitsStatus:

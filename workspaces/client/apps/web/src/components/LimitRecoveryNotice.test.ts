@@ -68,6 +68,10 @@ test("a limit shows one line with the local reset time and a Refresh button", ()
 test("automatic resume can be controlled while waiting", () => {
   const html = render({ agentId: "a", usageResume: scheduled });
   expect(html).toContain("Resets at Fixture reset time");
+  expect(html).toContain("Automatic resume planned for");
+  expect(html).toContain(
+    `<time dateTime="${new Date((RESET + 60) * 1000).toISOString()}">`,
+  );
   expect(html).not.toContain(">Refresh<");
 });
 
