@@ -2013,6 +2013,10 @@ impl JsonRecord for EventMetadataRecord {
 }
 
 impl WorkItemRecord {
+    /// The record as stored JSON, for the history rows that follow its arrays.
+    pub(crate) fn value_for_history(&self) -> StoreResult<Value> {
+        Ok(serde_json::to_value(self)?)
+    }
     pub fn from_value(value: Value) -> Result<Self, serde_json::Error> {
         Self::deserialize(value)
     }

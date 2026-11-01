@@ -162,7 +162,11 @@ impl WorkItemsRepository {
                 id: id.to_owned(),
             });
         }
-        Table::<WorkItemRecord>::new(connection).insert_new(&record)
+        let inserted = Table::<WorkItemRecord>::new(connection).insert_new(&record)?;
+        if inserted {
+            crate::work_history::reconcile(connection, id, &record.value_for_history()?)?;
+        }
+        Ok(inserted)
     }
 
     pub fn update_work(connection: &Connection, id: &str, value: &Value) -> StoreResult<()> {
@@ -182,6 +186,7 @@ impl WorkItemsRepository {
             });
         }
         Table::<WorkItemRecord>::new(connection).update(record)?;
+        crate::work_history::reconcile(connection, id, &record.value_for_history()?)?;
         Ok(())
     }
 
