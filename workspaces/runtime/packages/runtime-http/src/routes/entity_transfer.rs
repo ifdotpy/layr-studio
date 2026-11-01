@@ -11,26 +11,28 @@ use studio_runtime_schema::shared_values::{
 use studio_runtime_store::SyncDocumentsRepository;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-use crate::error::ApiError;
+use crate::error::{ApiError, InternalErrorKind};
 use crate::generated::{
     EntityChangeBatch, ResourceChangeEvent, ResourceRef, ResourceRevisionEntry, SubscriptionCursor,
 };
 use crate::router::HttpState;
 
+fn io_error() -> ApiError {
+    ApiError::internal_with_cause(InternalErrorKind::StoreIo)
+}
+
+fn data_error() -> ApiError {
+    ApiError::internal_with_cause(InternalErrorKind::StoreData)
+}
+
 pub(super) struct TransferReader(BufReader<tokio::fs::File>);
 impl TransferReader {
     pub(super) async fn next(&mut self) -> Result<Option<Event>, ApiError> {
         let mut line = String::new();
-        if self
-            .0
-            .read_line(&mut line)
-            .await
-            .map_err(|_| ApiError::internal())?
-            == 0
-        {
+        if self.0.read_line(&mut line).await.map_err(|_| io_error())? == 0 {
             return Ok(None);
         }
-        let data = line.strip_suffix('\n').ok_or_else(ApiError::internal)?;
+        let data = line.strip_suffix('\n').ok_or_else(data_error)?;
         Ok(Some(Event::default().event("entity-transfer").data(data)))
     }
 }
@@ -59,7 +61,7 @@ pub(super) async fn attach(
             entries.push(entry);
             continue;
         }
-        let key = serde_json::to_string(&resource).map_err(|_| ApiError::internal())?;
+        let key = serde_json::to_string(&resource).map_err(ApiError::json)?;
         let cursor = since
             .get(&key)
             .or_else(|| sequences.get(&key))
@@ -108,9 +110,8 @@ async fn prepare(
     ApiError,
 > {
     let (scope, id, agent) =
-        super::subscription_entities::selection(&resource).ok_or_else(ApiError::internal)?;
-    let collections =
-        serde_json::to_string(&scope.collections).map_err(|_| ApiError::internal())?;
+        super::subscription_entities::selection(&resource).ok_or_else(data_error)?;
+    let collections = serde_json::to_string(&scope.collections).map_err(ApiError::json)?;
     let id = id.map(str::to_owned);
     let agent = agent.map(str::to_owned);
     let workspace = state.workspace_id.clone();
@@ -118,13 +119,13 @@ async fn prepare(
     let revision = event.revision;
     let reason = event.reason.clone();
     let validators = state.validators.clone();
-    state.store.as_ref().ok_or_else(ApiError::internal)?.read_async("runtime-http/entity-transfer", move |tx| {
+    state.store.as_ref().ok_or_else(|| ApiError::internal_with_cause(InternalErrorKind::StoreConfiguration))?.read_async("runtime-http/entity-transfer", move |tx| {
         let after = since.as_ref().map(|cursor| cursor.seq);
         // Only actual ownership/team movement or expired cursors replace a scope.
         // Ordinary writes and tombstones retain indexed sequence deltas.
-        let visibility = agent.as_deref().map(|agent| SyncDocumentsRepository::entity_scope_visibility_revision(tx, &collections, agent, scope.include_team_members)).transpose().map_err(|_| ApiError::internal())?.unwrap_or(0);
+        let visibility = agent.as_deref().map(|agent| SyncDocumentsRepository::entity_scope_visibility_revision(tx, &collections, agent, scope.include_team_members)).transpose()?.unwrap_or(0);
         let after = after.filter(|after| *after >= visibility);
-        let mut page = SyncDocumentsRepository::resume_entity_scope(tx, after, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS).map_err(|_| ApiError::internal())?;
+        let mut page = SyncDocumentsRepository::resume_entity_scope(tx, after, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
         let through = page.max_sequence;
         let snapshot = page.reset;
         let mut after = if snapshot { 0 } else { since.as_ref().map_or(0, |cursor| cursor.seq) };
@@ -138,6 +139,8 @@ async fn prepare(
             let final_sql_page = checkpoint == through;
             // A stored row the current contract cannot read is skipped with a log line,
             // so one legacy row cannot stop the whole stream.
+            // A stored row the current contract cannot read is skipped with a log line,
+            // so one legacy row cannot stop the whole stream.
             let documents = page.rows.iter().filter(|row| !snapshot || !row.deleted).filter_map(|row| {
                 let document = super::sync_documents::entity_document(row);
                 if document.is_none() {
@@ -148,22 +151,22 @@ async fn prepare(
             let batches = byte_pages(after, checkpoint, documents)?;
             for (index, batch) in batches.iter().enumerate() {
                 let complete = final_sql_page && index + 1 == batches.len();
-                if cfg!(debug_assertions) && !serde_json::to_value(batch).is_ok_and(|value| validators.validate_component("EntityChangeBatch", &value)) { return Err(ApiError::internal()); }
+                if cfg!(debug_assertions) && !serde_json::to_value(batch).is_ok_and(|value| validators.validate_component("EntityChangeBatch", &value)) { return Err(data_error()); }
                 if page_index == 0 && complete {
                     let entry = ResourceRevisionEntry { resource: Some(Some(resource.clone())), revision: through, cursor: Some(cursor.clone()), reply_kind: Some(if snapshot { crate::generated::SubscriptionReplyKind::Snapshot } else { crate::generated::SubscriptionReplyKind::Delta }), entity_changes: Some(Some(batch.clone())), discovery_snapshot: None, voice_records: None, view_snapshot: None, draft_changes: None, draft_snapshot: None, entity_sequence_reset: None, entity_sequences: None, terminal_base_offset: None, transcript_changes: None, transcript_snapshot: None };
                     let ordinary = ResourceChangeEvent { protocol: i64::from(studio_runtime_schema::SYNC_PROTOCOL_VERSION), workspace_id: workspace.clone(), epoch: epoch.clone(), revision, reason: reason.clone(), resources: vec![resource.clone()], resource_versions: vec![entry.clone()] };
-                    if "event: resources\nid: \ndata: \n\n".len() + revision.to_string().len() + serde_json::to_vec(&ordinary).map_err(|_| ApiError::internal())?.len() <= SYNC_STREAM_EVENT_MAX_BYTES { return Ok((Some(entry), None, cursor)); }
+                    if "event: resources\nid: \ndata: \n\n".len() + revision.to_string().len() + serde_json::to_vec(&ordinary).map_err(ApiError::json)?.len() <= SYNC_STREAM_EVENT_MAX_BYTES { return Ok((Some(entry), None, cursor)); }
                 }
-                let file = match &mut spool { Some(file) => file, None => spool.insert(tempfile::tempfile().map_err(|_| ApiError::internal())?) };
+                let file = match &mut spool { Some(file) => file, None => spool.insert(tempfile::tempfile().map_err(|_| io_error())?) };
                 spool_page(file, &metadata, page_index, complete, batch, &validators)?;
                 page_index += 1;
             }
             if final_sql_page { break; }
             after = checkpoint;
-            page = SyncDocumentsRepository::continue_entity_scope(tx, &page, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS).map_err(|_| ApiError::internal())?;
+            page = SyncDocumentsRepository::continue_entity_scope(tx, &page, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
         }
-        let mut file = spool.ok_or_else(ApiError::internal)?;
-        file.rewind().map_err(|_| ApiError::internal())?;
+        let mut file = spool.ok_or_else(data_error)?;
+        file.rewind().map_err(|_| io_error())?;
         Ok((None, Some(TransferReader(BufReader::new(tokio::fs::File::from_std(file)))), cursor))
     }).await
 }
@@ -183,11 +186,9 @@ fn byte_pages(
     };
     let mut bytes = 0;
     for document in documents {
-        let size = serde_json::to_vec(&document)
-            .map_err(|_| ApiError::internal())?
-            .len();
+        let size = serde_json::to_vec(&document).map_err(ApiError::json)?.len();
         if !batch.documents.is_empty() && bytes + size > SYNC_STREAM_EVENT_MAX_BYTES / 2 {
-            batch.through = batch.documents.last().ok_or_else(ApiError::internal)?.seq;
+            batch.through = batch.documents.last().ok_or_else(data_error)?.seq;
             let next = EntityChangeBatch {
                 after: batch.through,
                 through,
@@ -211,23 +212,23 @@ fn spool_page(
     page: &EntityChangeBatch,
     validators: &crate::validation::Registry,
 ) -> Result<(), ApiError> {
-    let data = serde_json::to_string(page).map_err(|_| ApiError::internal())?;
+    let data = serde_json::to_string(page).map_err(ApiError::json)?;
     let mut direct = metadata.clone();
-    let fields = direct.as_object_mut().ok_or_else(ApiError::internal)?;
+    let fields = direct.as_object_mut().ok_or_else(data_error)?;
     fields.insert("pageIndex".into(), json!(page_index));
     fields.insert("partIndex".into(), json!(0));
     fields.insert("partCount".into(), json!(1));
     fields.insert("complete".into(), json!(complete));
     fields.insert("data".into(), json!(&data));
-    let encoded = serde_json::to_vec(&direct).map_err(|_| ApiError::internal())?;
+    let encoded = serde_json::to_vec(&direct).map_err(ApiError::json)?;
     if "event: entity-transfer\ndata: \n\n".len() + encoded.len() <= SYNC_STREAM_EVENT_MAX_BYTES {
         if cfg!(debug_assertions)
             && !validators.validate_component("ResourceEntityTransferEvent", &direct)
         {
-            return Err(ApiError::internal());
+            return Err(data_error());
         }
-        file.write_all(&encoded).map_err(|_| ApiError::internal())?;
-        file.write_all(b"\n").map_err(|_| ApiError::internal())?;
+        file.write_all(&encoded).map_err(|_| io_error())?;
+        file.write_all(b"\n").map_err(|_| io_error())?;
         return Ok(());
     }
     // JSON string escaping can expand each source byte sixfold. Leave room for
@@ -245,7 +246,7 @@ fn spool_page(
     }
     for (index, part) in parts.iter().enumerate() {
         let mut frame = metadata.clone();
-        let fields = frame.as_object_mut().ok_or_else(ApiError::internal)?;
+        let fields = frame.as_object_mut().ok_or_else(data_error)?;
         fields.insert("pageIndex".into(), json!(page_index));
         fields.insert("partIndex".into(), json!(index));
         fields.insert("partCount".into(), json!(parts.len()));
@@ -254,15 +255,15 @@ fn spool_page(
             json!(complete && index + 1 == parts.len()),
         );
         fields.insert("data".into(), json!(part));
-        let encoded = serde_json::to_vec(&frame).map_err(|_| ApiError::internal())?;
+        let encoded = serde_json::to_vec(&frame).map_err(ApiError::json)?;
         if "event: entity-transfer\ndata: \n\n".len() + encoded.len() > SYNC_STREAM_EVENT_MAX_BYTES
             || (cfg!(debug_assertions)
                 && !validators.validate_component("ResourceEntityTransferEvent", &frame))
         {
-            return Err(ApiError::internal());
+            return Err(data_error());
         }
-        file.write_all(&encoded).map_err(|_| ApiError::internal())?;
-        file.write_all(b"\n").map_err(|_| ApiError::internal())?;
+        file.write_all(&encoded).map_err(|_| io_error())?;
+        file.write_all(b"\n").map_err(|_| io_error())?;
     }
     Ok(())
 }
@@ -724,6 +725,59 @@ mod tests {
             )
             .expect("typed task projection");
         assert_eq!(projection.agent, "beta");
+    }
+
+    #[tokio::test]
+    async fn snapshot_streams_the_other_rows_when_one_stored_row_is_unreadable() {
+        let (_directory, state) = fixture().await;
+        let store = state.store.as_ref().expect("store");
+        store
+            .transaction(|tx| {
+                SyncDocumentsRepository::put_entity(
+                    tx,
+                    "workspace",
+                    "readable",
+                    json!({"stateDir":"fixture"}),
+                    false,
+                )?;
+                SyncDocumentsRepository::put_entity(
+                    tx,
+                    "workspace",
+                    "unreadable",
+                    json!({"stateDir":"fixture"}),
+                    false,
+                )?;
+                // A stored payload the current contract rejects, as a legacy row can be.
+                tx.execute(
+                    "UPDATE sync_entities SET payload=json_object('collection','workspace','id','unreadable','value','not-an-object') WHERE collection='workspace' AND id='unreadable'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("one stored row the current contract cannot read");
+        let resource =
+            ResourceRef::StateResource(studio_runtime_schema::resource_ref::EmptyResource {});
+        let (entry, reader, _) = prepare(&state, &event(&state), resource, None)
+            .await
+            .expect("snapshot must not fail for one unreadable row");
+        assert!(reader.is_none(), "a small snapshot is delivered inline");
+        let entry = entry.expect("inline snapshot");
+        let batch = entry
+            .entity_changes
+            .as_ref()
+            .and_then(Option::as_ref)
+            .expect("changes");
+        let ids: Vec<&str> = batch
+            .documents
+            .iter()
+            .map(|document| document.id.as_str())
+            .collect();
+        assert!(ids.contains(&"readable"), "readable rows stream: {ids:?}");
+        assert!(
+            !ids.contains(&"unreadable"),
+            "the unreadable row is skipped: {ids:?}"
+        );
     }
 
     #[tokio::test]

@@ -62,6 +62,7 @@ mod m2026_11_01_annotation_record;
 mod m2026_11_01_approval_secrets;
 mod m2026_11_01_chat_busy_deleted_index;
 mod m2026_11_01_chat_busy_indexes;
+mod m2026_11_01_legacy_question_history;
 mod m2026_11_01_plan_record;
 mod m2026_11_01_project_context;
 mod m2026_11_01_project_revisions;
@@ -1263,6 +1264,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| crate::work_history::migrate(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-legacy-question-history",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent questions in runtime_requests that the approvals migration skipped for a missing createdAt",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_legacy_question_history::apply(c.transaction),
     },
 ];
 
