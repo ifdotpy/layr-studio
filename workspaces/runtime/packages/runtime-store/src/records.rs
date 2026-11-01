@@ -573,15 +573,13 @@ pub struct AgentRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
-    pub worker_defaults: studio_runtime_schema::queue_command::Field<
-        StoredTransferValue<studio_runtime_schema::agent_entity_nested::WorkerDefaultsDto>,
-    >,
+    pub worker_defaults: studio_runtime_schema::queue_command::Field<StoredWorkerDefaults>,
     #[serde(
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
     pub portable_history: studio_runtime_schema::queue_command::Field<
-        StoredTransferValue<crate::transfer_record::PortableHistory>,
+        StoredTransferObject<crate::transfer_record::PortableHistory>,
     >,
     #[serde(
         default,
@@ -589,7 +587,7 @@ pub struct AgentRecord {
     )]
     pub account_history: studio_runtime_schema::queue_command::Field<
         StoredTransferValue<
-            Vec<StoredTransferValue<crate::transfer_record::TransferAccountHistoryEntry>>,
+            Vec<StoredTransferObject<crate::transfer_record::TransferAccountHistoryEntry>>,
         >,
     >,
     #[serde(
@@ -603,7 +601,7 @@ pub struct AgentRecord {
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
     pub claude_options: studio_runtime_schema::queue_command::Field<
-        StoredTransferValue<crate::transfer_record::TransferClaudeOptions>,
+        StoredTransferObject<crate::transfer_record::TransferClaudeOptions>,
     >,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_mode: Option<AgentExecutionMode>,
@@ -681,6 +679,47 @@ pub enum NativeFailureHold {
 pub enum StoredTransferValue<T> {
     Known(T),
     Unreadable(Value),
+}
+
+pub(crate) fn deserialize_object<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let value = Value::deserialize(deserializer)?;
+    if !value.is_object() {
+        return Err(serde::de::Error::custom("expected an object"));
+    }
+    serde_json::from_value(value).map_err(serde::de::Error::custom)
+}
+
+/// An object-shaped typed value or its unchanged legacy representation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged, bound(deserialize = "T: serde::de::DeserializeOwned"))]
+pub enum StoredTransferObject<T> {
+    Known(#[serde(deserialize_with = "deserialize_object")] T),
+    Unreadable(Value),
+}
+
+/// Complete defaults, a typed partial override, or an unreadable legacy value.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum StoredWorkerDefaults {
+    Known(
+        #[serde(deserialize_with = "deserialize_object")]
+        studio_runtime_schema::agent_entity_nested::WorkerDefaultsDto,
+    ),
+    Partial(
+        #[serde(deserialize_with = "deserialize_object")]
+        crate::transfer_record::TransferWorkerDefaults,
+    ),
+    Unreadable(Value),
+}
+
+impl From<crate::transfer_record::TransferWorkerDefaults> for StoredWorkerDefaults {
+    fn from(value: crate::transfer_record::TransferWorkerDefaults) -> Self {
+        Self::Partial(value)
+    }
 }
 
 impl AgentRecord {
@@ -3535,18 +3574,66 @@ mod tests {
         assert!(!record.extra.contains_key("portableHistory"));
         assert!(matches!(
             record.portable_history.value(),
-            Some(super::StoredTransferValue::Known(_))
+            Some(super::StoredTransferObject::Known(_))
         ));
         let legacy = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
             "epoch":2, "status":"idle", "accountKey":"default", "portableHistory":{"legacy":42}}));
         assert!(matches!(
             legacy.portable_history.value(),
-            Some(super::StoredTransferValue::Unreadable(_))
+            Some(super::StoredTransferObject::Unreadable(_))
         ));
         assert_eq!(
             legacy.value().get("portableHistory"),
             Some(&json!({"legacy":42}))
         );
+    }
+
+    #[test]
+    fn portable_history_source_preserves_missing_and_null() {
+        for source in [
+            json!({"agentId":"agent","accountKey":"default"}),
+            json!({"agentId":"agent","accountKey":"default","epoch":null,"threadId":null}),
+        ] {
+            let history = json!({"version":1,"path":"archive","sha256":"hash","bytes":1,
+                "counts":{},"source":source,"transferId":"transfer"});
+            let record = agent(json!({"compactions":0,"id":"agent","rootId":"agent",
+                "epoch":2,"status":"idle","accountKey":"default","portableHistory":history}));
+            assert_eq!(record.value().get("portableHistory"), Some(&history));
+        }
+    }
+
+    #[test]
+    fn transfer_objects_preserve_positional_arrays() {
+        for (key, value) in [
+            ("claudeOptions", json!([null, null, "profile", null, null])),
+            ("claudeOptions", json!({"customModels":[["model","label"]]})),
+            (
+                "portableHistory",
+                json!([
+                    1,
+                    "archive",
+                    "hash",
+                    1,
+                    {},
+                    ["agent", "default", null, null],
+                    "transfer"
+                ]),
+            ),
+            (
+                "portableHistory",
+                json!({"version":1,"path":"archive","sha256":"hash","bytes":1,
+                "counts":{},"source":["agent","default",null,null],"transferId":"transfer"}),
+            ),
+        ] {
+            let mut input = json!({"compactions":0,"id":"agent","rootId":"agent",
+                "epoch":2,"status":"idle","accountKey":"default"});
+            input
+                .as_object_mut()
+                .unwrap()
+                .insert(key.into(), value.clone());
+            let record = agent(input);
+            assert_eq!(record.value().get(key), Some(&value));
+        }
     }
 
     #[test]
@@ -3564,7 +3651,7 @@ mod tests {
             "epoch":2, "status":"idle", "accountKey":"default", "accountHistory":[{"future":true}]}));
         assert!(
             matches!(legacy.account_history.value(), Some(super::StoredTransferValue::Known(entries))
-            if matches!(entries.as_slice(), [super::StoredTransferValue::Unreadable(_)]))
+            if matches!(entries.as_slice(), [super::StoredTransferObject::Unreadable(_)]))
         );
         assert_eq!(
             legacy.value().get("accountHistory"),
@@ -3596,7 +3683,7 @@ mod tests {
         );
         assert!(matches!(
             record.claude_options.value(),
-            Some(super::StoredTransferValue::Known(_))
+            Some(super::StoredTransferObject::Known(_))
         ));
         let legacy = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
             "epoch":2, "status":"idle", "accountKey":"default", "cyberAccessProgram":42,
@@ -3607,7 +3694,7 @@ mod tests {
         ));
         assert!(matches!(
             legacy.claude_options.value(),
-            Some(super::StoredTransferValue::Unreadable(_))
+            Some(super::StoredTransferObject::Unreadable(_))
         ));
         assert_eq!(
             legacy.value().get("claudeOptions"),
@@ -3621,6 +3708,32 @@ mod tests {
             "epoch":2, "status":"idle", "accountKey":"default",
             "workerDefaults":{"model":"m","effort":null,"fastMode":false}}));
         assert!(!record.extra.contains_key("workerDefaults"));
+    }
+
+    #[test]
+    fn partial_worker_defaults_are_typed() {
+        let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+            "epoch":2, "status":"idle", "accountKey":"default", "workerDefaults":{"accountKey":"source"}}));
+        assert!(matches!(
+            record.worker_defaults.value(),
+            Some(super::StoredWorkerDefaults::Partial(_))
+        ));
+        assert_eq!(
+            record.value().get("workerDefaults"),
+            Some(&json!({"accountKey":"source"}))
+        );
+    }
+
+    #[test]
+    fn transfer_defaults_enforce_shared_delegation_depth() {
+        for depth in [0, 4] {
+            assert!(
+                serde_json::from_value::<crate::transfer_record::TransferWorkerDefaults>(
+                    json!({"delegationDepth":depth})
+                )
+                .is_err()
+            );
+        }
     }
 
     #[test]
@@ -3639,12 +3752,12 @@ mod tests {
             assert_eq!(
                 matches!(
                     record.worker_defaults.value(),
-                    Some(super::StoredTransferValue::Known(_))
+                    Some(super::StoredWorkerDefaults::Known(_))
                 ),
                 known
             );
             assert_eq!(record.value().get("workerDefaults"), Some(&value));
-            if let Some(super::StoredTransferValue::Known(defaults)) =
+            if let Some(super::StoredWorkerDefaults::Known(defaults)) =
                 record.worker_defaults.value()
             {
                 let transfer: crate::transfer_record::TransferWorkerDefaults =

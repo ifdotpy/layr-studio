@@ -1809,10 +1809,13 @@ pub fn typed_enroll(
         worker_defaults: match &agent.worker_defaults {
             Field::Missing => Field::Missing,
             Field::Null => Field::Null,
-            Field::Value(studio_runtime_store::StoredTransferValue::Known(defaults)) => {
+            Field::Value(studio_runtime_store::StoredWorkerDefaults::Known(defaults)) => {
                 Field::Value(defaults.clone().into())
             }
-            Field::Value(studio_runtime_store::StoredTransferValue::Unreadable(raw)) => {
+            Field::Value(studio_runtime_store::StoredWorkerDefaults::Partial(defaults)) => {
+                Field::Value(defaults.clone())
+            }
+            Field::Value(studio_runtime_store::StoredWorkerDefaults::Unreadable(raw)) => {
                 Field::Value(
                     serde_json::from_value(raw.clone())
                         .map_err(|_| invalid("transfer agent", "/workerDefaults"))?,
@@ -2531,6 +2534,40 @@ mod provider_receipt_tests {
                 defaults
             );
         }
+    }
+
+    #[test]
+    fn enrollment_reads_typed_worker_defaults_without_projecting_agent() {
+        let mut agent: studio_runtime_store::AgentRecord =
+            serde_json::from_value(serde_json::json!({
+                "id":"agent","rootId":"agent","provider":"codex","accountKey":"source",
+                "epoch":0,"status":"idle","compactions":0,
+                "workerDefaults":{"model":"typed","effort":null,"fastMode":false}
+            }))
+            .unwrap();
+        // A stale extension must not replace the typed owner during enrollment.
+        agent.extra.insert(
+            "workerDefaults".into(),
+            serde_json::json!({"model":"stale"}),
+        );
+        let id = "move".to_owned().try_into().unwrap();
+        let target = "target".to_owned().try_into().unwrap();
+        super::typed_enroll(
+            &mut agent,
+            &id,
+            &target,
+            studio_runtime_schema::ProviderKind::Codex,
+            true,
+        )
+        .unwrap();
+        let lazy = agent
+            .lazy_account_transfer
+            .value()
+            .and_then(|value| value.pending())
+            .unwrap();
+        let source = lazy.source_state.value().unwrap();
+        let defaults = source.worker_defaults.value().unwrap();
+        assert_eq!(defaults.model.value().map(String::as_str), Some("typed"));
     }
 
     #[test]

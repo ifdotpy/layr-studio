@@ -178,6 +178,9 @@ fn optional_nonnull<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     T::deserialize(deserializer).map(Some)
 }
 
+/// Maximum delegation depth for worker defaults.
+pub type WorkerDelegationDepth = crate::bounded_integer::BoundedInteger<1, 3>;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkerDefaultsDto {
@@ -201,8 +204,8 @@ pub struct WorkerDefaultsDto {
         deserialize_with = "optional_nonnull",
         skip_serializing_if = "Option::is_none"
     )]
-    #[schemars(with = "crate::bounded_integer::BoundedInteger<1, 3>")]
-    pub delegation_depth: Option<crate::bounded_integer::BoundedInteger<1, 3>>,
+    #[schemars(with = "WorkerDelegationDepth")]
+    pub delegation_depth: Option<WorkerDelegationDepth>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<String>")]
     pub cyber_access_program: Field<String>,
