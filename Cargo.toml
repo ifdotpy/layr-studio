@@ -17,6 +17,7 @@ members = [
     "workspaces/runtime/packages/runtime-process",
     "workspaces/runtime/packages/runtime-http",
     "workspaces/runtime/packages/runtime-services",
+    "workspaces/runtime/packages/request-signing",
     "workspaces/runtime/packages/runtime-schema",
     "workspaces/runtime/packages/runtime-store",
     "workspaces/runtime/packages/test-deps",
