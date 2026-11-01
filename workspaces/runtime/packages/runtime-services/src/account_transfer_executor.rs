@@ -338,7 +338,7 @@ mod reconnect_read_tests {
         let session = ReconnectedSession(AtomicUsize::new(0));
         let before = store
             .read_async("before replay", |tx| {
-                driver::load(tx, "move").map(|s| s.operation().clone())
+                driver::load(tx, "move").map(|s| s.record().clone())
             })
             .await
             .expect("operation");
@@ -358,11 +358,14 @@ mod reconnect_read_tests {
         assert_eq!(session.0.load(Ordering::SeqCst), 0);
         let after = store
             .read_async("after replay", |tx| {
-                driver::load(tx, "move").map(|s| s.operation().clone())
+                driver::load(tx, "move").map(|s| s.record().clone())
             })
             .await
             .expect("operation");
-        assert_eq!(after, before);
+        assert_eq!(
+            serde_json::to_vec(&after).unwrap(),
+            serde_json::to_vec(&before).unwrap()
+        );
     }
 
     #[tokio::test]
@@ -418,7 +421,7 @@ mod reconnect_read_tests {
         let session = ReconnectedSession(AtomicUsize::new(0));
         let before = store
             .read_async("before unsubscribe replay", |tx| {
-                driver::load(tx, "move").map(|s| s.operation().clone())
+                driver::load(tx, "move").map(|s| s.record().clone())
             })
             .await
             .expect("operation");
@@ -453,20 +456,33 @@ mod reconnect_read_tests {
         assert_eq!(session.0.load(Ordering::SeqCst), 0);
         let after = store
             .read_async("after unsubscribe replay", |tx| {
-                driver::load(tx, "move").map(|s| s.operation().clone())
+                driver::load(tx, "move").map(|s| s.record().clone())
             })
             .await
             .expect("operation");
-        assert_eq!(after, before);
+        assert_eq!(
+            serde_json::to_vec(&after).unwrap(),
+            serde_json::to_vec(&before).unwrap()
+        );
         for field in ["sourceAccountKey", "sourceThreadId"] {
             let mut changed = before.clone();
-            changed["members"]["member"][field] = json!("another-source");
+            let member = changed.members.get_mut("member").unwrap();
+            match field {
+                "sourceAccountKey" => {
+                    member.source_account_key = "another-source".to_owned().try_into().unwrap()
+                }
+                "sourceThreadId" => {
+                    member.source_thread_id =
+                        studio_runtime_schema::queue_command::Field::Value("another-source".into())
+                }
+                _ => unreachable!("fixture field"),
+            }
             store
                 .transaction(move |tx| {
                     studio_runtime_store::AccountTransferRepository::put(
                         tx,
                         "move",
-                        &changed.to_string(),
+                        &serde_json::to_string(&changed).unwrap(),
                     )
                 })
                 .await

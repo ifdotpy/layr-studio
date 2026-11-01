@@ -9,6 +9,10 @@ fn before_start(value: &Value) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+fn payload(value: Value) -> Box<serde_json::value::RawValue> {
+    serde_json::value::to_raw_value(&value).expect("provider payload")
+}
+
 fn fixture() -> (Value, Value, Ticket) {
     let op = json!({"id":"op","leadId":"a","targetAccountKey":"target","status":"pending","created":1.0,"members":{"a":{"phase":"waiting","sourceAccountKey":"source","lazy":false}}});
     let agent = json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"a","rootId":"a","epoch":3,"status":"idle","accountKey":"source","accountTransferId":"op"});
@@ -24,6 +28,16 @@ fn fixture() -> (Value, Value, Ticket) {
 }
 fn snapshot(op: &Value, agent: &Value) -> Snapshot {
     Snapshot::read(&op.to_string(), [("a".into(), agent.to_string())]).expect("snapshot")
+}
+fn snapshot_record(
+    op: &studio_runtime_store::transfer_record::TransferRecord,
+    agent: &Value,
+) -> Snapshot {
+    Snapshot::read(
+        &serde_json::to_string(op).expect("operation"),
+        [("a".into(), agent.to_string())],
+    )
+    .expect("snapshot")
 }
 #[test]
 fn transfer_snapshot_accepts_configured_team_ceiling_and_rejects_one_more_record() {
@@ -70,45 +84,83 @@ fn exact_native_receipt_survives_restart_without_resubmission() {
     let preparing = snapshot(&op, &agent)
         .begin_read("a")
         .expect("begin preparation");
-    let mut submitted = snapshot(&preparing.operation, &agent)
-        .submit(&ticket, "thread/fork", json!({"threadId":"source"}))
+    let mut submitted = snapshot_record(&preparing.operation, &agent)
+        .submit(
+            &ticket,
+            studio_runtime_store::transfer_record::TransferMethod::Fork,
+            &payload(json!({"threadId":"source"})),
+        )
         .expect("reserve");
-    submitted.operation["members"]["a"]["submittedAt"] = json!(10.0);
-    let restarted = snapshot(&submitted.operation, &agent)
+    submitted
+        .operation
+        .members
+        .get_mut("a")
+        .expect("valid fixture")
+        .submitted_at = studio_runtime_schema::queue_command::Field::Value(
+        serde_json::Number::from_f64(10.0).expect("valid fixture"),
+    );
+    let restarted = snapshot_record(&submitted.operation, &agent)
         .decide(Transition::Restart)
         .expect("restart");
-    assert_eq!(restarted.operation["members"]["a"]["phase"], "unknown");
-    let restored = snapshot(&restarted.operation, &agent);
-    assert!(restored.submit(&ticket, "thread/fork", json!({})).is_err());
+    assert_eq!(
+        restarted
+            .operation
+            .members
+            .get("a")
+            .expect("valid fixture")
+            .phase,
+        studio_runtime_store::transfer_record::TransferPhase::Unknown
+    );
+    let restored = snapshot_record(&restarted.operation, &agent);
+    assert!(
+        restored
+            .submit(
+                &ticket,
+                studio_runtime_store::transfer_record::TransferMethod::Fork,
+                &payload(json!({}))
+            )
+            .is_err()
+    );
     let mut foreign = ticket.clone();
     foreign.connection = "c2".into();
     assert!(
         restored
-            .receive(&foreign, Some(json!({"thread":{"id":"fork"}})))
+            .typed_receive(&foreign, Some(payload(json!({"thread":{"id":"fork"}}))))
             .is_err()
     );
     let received = restored
-        .receive(&ticket, Some(json!({"thread":{"id":"fork"}})))
+        .typed_receive(&ticket, Some(payload(json!({"thread":{"id":"fork"}}))))
         .expect("late exact receipt");
-    assert_eq!(received.operation["members"]["a"]["phase"], "ready");
-    let saved = snapshot(&received.operation, &agent);
+    assert_eq!(
+        received
+            .operation
+            .members
+            .get("a")
+            .expect("valid fixture")
+            .phase,
+        studio_runtime_store::transfer_record::TransferPhase::Ready
+    );
+    let saved = snapshot_record(&received.operation, &agent);
     assert!(
         !saved
-            .receive(&ticket, Some(json!({"thread":{"id":"fork"}})))
+            .typed_receive(&ticket, Some(payload(json!({"thread":{"id":"fork"}}))))
             .expect("replay")
             .changed
     );
     assert!(
         saved
-            .receive(&ticket, Some(json!({"thread":{"id":"different-fork"}})))
+            .typed_receive(
+                &ticket,
+                Some(payload(json!({"thread":{"id":"different-fork"}})))
+            )
             .is_err()
     );
     assert!(before_start(&agent).is_err());
     let mut newer = agent.clone();
     newer["epoch"] = json!(4);
     assert!(
-        snapshot(&restarted.operation, &newer)
-            .receive(&ticket, Some(json!({"thread":{"id":"fork"}})))
+        snapshot_record(&restarted.operation, &newer)
+            .typed_receive(&ticket, Some(payload(json!({"thread":{"id":"fork"}}))))
             .is_err()
     );
 }
@@ -197,10 +249,16 @@ fn subagents_summary_bypasses_only_an_unenrolled_leads_summary_hold() {
 #[test]
 fn unreadable_summary_or_lazy_state_keeps_start_held() {
     let (_, mut agent, _) = fixture();
-    agent.as_object_mut().unwrap().remove("accountTransferId");
+    agent
+        .as_object_mut()
+        .expect("valid fixture")
+        .remove("accountTransferId");
     agent["accountTransfer"] = json!({"kind":"unreadable","reason":"Unknown transfer field"});
     assert!(before_start(&agent).is_err());
-    agent.as_object_mut().unwrap().remove("accountTransfer");
+    agent
+        .as_object_mut()
+        .expect("valid fixture")
+        .remove("accountTransfer");
     agent["lazyAccountTransfer"] = json!({"kind":"unreadable","reason":"Unknown lazy field"});
     assert!(before_start(&agent).is_err());
 }
@@ -235,7 +293,7 @@ fn selection_rejects_account_published_as_unavailable() {
     let agent = json!({"compactions":0,"provider":"codex","id":"lead","rootId":"lead","epoch":0,"status":"idle","isLead":true,"accountKey":"source","cwd":"/project"});
     let snapshot =
         studio_runtime_services::account_selection::SelectionSnapshot::read(&agent.to_string())
-            .unwrap();
+            .expect("valid fixture");
     assert!(
         snapshot
             .decide(
@@ -299,18 +357,27 @@ fn retry_only_resets_blocked_members() {
         .expect("snapshot")
         .decide(Transition::Action(Action::Retry))
         .expect("retry");
-        assert_eq!(result.operation["members"]["a"], ready);
-        let blocked = &result.operation["members"]["b"];
-        assert_eq!(blocked["phase"], phase);
-        assert_eq!(blocked["error"], Value::Null);
-        assert_eq!(blocked["nextCheck"], 0);
-        for field in [
-            "interruptTurnId",
-            "interruptSubmittedAt",
-            "interruptOutcome",
-        ] {
-            assert!(blocked.get(field).is_none(), "{field}");
-        }
+        assert_eq!(
+            serde_json::to_value(result.operation.members.get("a").expect("valid fixture"))
+                .expect("valid fixture"),
+            ready
+        );
+        let blocked = result.operation.members.get("b").expect("valid fixture");
+        assert_eq!(
+            serde_json::to_value(blocked.phase).expect("valid fixture"),
+            phase
+        );
+        assert!(matches!(
+            blocked.error,
+            studio_runtime_schema::queue_command::Field::Null
+        ));
+        assert_eq!(
+            blocked.next_check.value().expect("valid fixture").as_i64(),
+            Some(0)
+        );
+        assert!(blocked.interrupt_turn_id.is_missing());
+        assert!(blocked.interrupt_submitted_at.is_missing());
+        assert!(blocked.interrupt_outcome.is_missing());
     }
 }
 

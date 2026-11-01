@@ -89,9 +89,10 @@ pub enum TransferStatus {
     Completed,
     Cancelled,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TransferScope {
+    #[default]
     Team,
     Subagents,
 }
@@ -157,7 +158,7 @@ pub struct ProviderIntent {
     pub method: TransferMethod,
     pub params: ProviderPayload,
 }
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProviderTicket {
     pub generation: u64,
@@ -177,13 +178,13 @@ pub struct ProviderReceipt {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub result: Field<ProviderPayload>,
 }
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PayloadBlob {
     pub sha256: String,
     pub size: u64,
 }
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResponseKind {
     Reply,
@@ -394,6 +395,53 @@ pub struct TransferMember {
     pub source_empty_proof: Field<SourceEmptyProof>,
 }
 
+impl TransferMember {
+    pub fn new(phase: TransferPhase, source_account_key: AccountKey) -> Self {
+        Self {
+            phase,
+            source_account_key,
+            source_thread_id: Field::Missing,
+            target_thread_id: Field::Missing,
+            provider: Field::Missing,
+            name: Field::Missing,
+            lazy: Field::Missing,
+            waiting: Field::Missing,
+            error: Field::Missing,
+            reason: Field::Missing,
+            continue_after_transfer: Field::Missing,
+            archive_invalidated: Field::Missing,
+            archive_source_thread: Field::Missing,
+            interrupt_outcome: Field::Missing,
+            interrupt_reason: Field::Missing,
+            interrupt_turn_id: Field::Missing,
+            interrupt_submitted_at: Field::Missing,
+            interrupt_confirmed_at: Field::Missing,
+            source: Field::Missing,
+            settings: Field::Missing,
+            target_settings: Field::Missing,
+            pending_settings: Field::Missing,
+            source_pending_settings: Field::Missing,
+            pending_settings_account_key: Field::Missing,
+            source_claude_options: Field::Missing,
+            submitted_at: Field::Missing,
+            target_connection: Field::Missing,
+            next_check: Field::Missing,
+            native_method: Field::Missing,
+            native_params: Field::Missing,
+            result: Field::Missing,
+            transport_ticket: Field::Missing,
+            provider_intent: Field::Missing,
+            provider_admission: Field::Missing,
+            provider_read_intents: Field::Missing,
+            provider_read_admissions: Field::Missing,
+            provider_read_receipts: Field::Missing,
+            provider_receipts: Field::Missing,
+            portable_history: Field::Missing,
+            source_empty_proof: Field::Missing,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EmptyNativeHistory {
@@ -454,6 +502,7 @@ pub struct SavedTransferResponse {
     pub target_account_key: AccountKey,
     pub status: TransferStatus,
     pub created: serde_json::Number,
+    #[serde(default)]
     pub scope: TransferScope,
     pub members: BTreeMap<String, SavedTransferMember>,
     pub total: usize,

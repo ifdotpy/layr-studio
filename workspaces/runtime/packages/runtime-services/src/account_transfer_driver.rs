@@ -1833,11 +1833,14 @@ mod request_tests {
         assert_eq!(lead["accountTransfer"]["waitingCount"], 0);
         assert_eq!(lead["accountTransfer"]["nativeHistoryPending"], 1);
         let member = run_async(store.transaction_with_error(move |tx| {
-            Ok::<_, TransferError>(load(tx, id)?.operation()["members"]["lead"].clone())
+            Ok::<_, TransferError>(load(tx, id)?.record().members.get("lead").unwrap().clone())
         }))
         .expect("transfer reads");
-        assert_eq!(member["phase"], "lazy");
-        assert_eq!(member["lazy"], true);
+        assert_eq!(
+            member.phase,
+            studio_runtime_store::transfer_record::TransferPhase::Lazy
+        );
+        assert_eq!(member.lazy.value(), Some(&true));
         assert!(
             !run_async(release_waiting(&store, "lead", 13.0)).expect("release reads"),
             "a released member is not released again"
@@ -1955,7 +1958,17 @@ mod provider_admission_tests {
         let first = snapshot(false, None);
         let mut decision = first.decide(Command::Restart).expect("decision");
         admit_mutation(&first, &mut decision, "agent").expect("new obligation");
-        let saved = decision.operation["members"]["agent"]["providerAdmission"].clone();
+        let saved = serde_json::to_value(
+            decision
+                .operation
+                .members
+                .get("agent")
+                .unwrap()
+                .provider_admission
+                .value()
+                .unwrap(),
+        )
+        .unwrap();
         let admission: ProviderAdmission =
             serde_json::from_value(saved.clone()).expect("admission");
         assert!(admission.admitted_request.value().is_none());
@@ -1970,12 +1983,31 @@ mod provider_admission_tests {
         let mut decision = retry.decide(Command::Restart).expect("retry decision");
         admit_mutation(&retry, &mut decision, "agent").expect("saved identity");
         assert_eq!(
-            decision.operation["members"]["agent"]["providerAdmission"],
+            serde_json::to_value(
+                decision
+                    .operation
+                    .members
+                    .get("agent")
+                    .unwrap()
+                    .provider_admission
+                    .value()
+                    .unwrap()
+            )
+            .unwrap(),
             saved
         );
         let missing = snapshot(true, None);
         let mut decision = missing.decide(Command::Restart).expect("held decision");
         assert!(admit_mutation(&missing, &mut decision, "agent").is_err());
-        assert!(decision.operation["members"]["agent"]["providerAdmission"].is_null());
+        assert!(
+            decision
+                .operation
+                .members
+                .get("agent")
+                .unwrap()
+                .provider_admission
+                .value()
+                .is_none()
+        );
     }
 }

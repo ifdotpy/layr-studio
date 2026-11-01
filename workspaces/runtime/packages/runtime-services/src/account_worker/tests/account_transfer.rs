@@ -191,9 +191,12 @@ async fn bridge_startup_recovers_transfer_phases_before_exposing_workers() {
         let mut operation = studio_runtime_store::AccountTransferRepository::get(tx, TRANSFER)?.expect("operation");
         // The request enrolls the chat only. Enroll the other agents as older records did.
         for id in ["submitted", "lazy-submitted", "interrupting"] {
-            let mut agent = AgentRepository::get(tx, &AgentId::from(id))?.expect("agent").value();
-            operation["members"][id] = crate::account_transfer::enroll(&mut agent, TRANSFER, "target", "codex", false).expect("enroll");
-            AgentRepository::put(tx, &AgentRecord::from_value(agent)?)?;
+            let mut agent = AgentRepository::get(tx, &AgentId::from(id))?.expect("agent");
+            let transfer = TRANSFER.to_owned().try_into().expect("transfer id");
+            let target = "target".to_owned().try_into().expect("target account");
+            let member = crate::account_transfer::typed_enroll(&mut agent, &transfer, &target, studio_runtime_schema::ProviderKind::Codex, false).expect("enroll");
+            operation["members"][id] = serde_json::to_value(member)?;
+            AgentRepository::put(tx, &agent)?;
         }
         for (id, phase) in [("lead","reading"), ("submitted","submitted"), ("lazy-submitted","lazy_submitted"), ("interrupting","interrupting")] {
             operation["members"][id]["phase"] = json!(phase);
