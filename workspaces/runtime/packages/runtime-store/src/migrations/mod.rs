@@ -1112,8 +1112,15 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| {
-            c.transaction
-                .execute_batch(crate::repositories::command_watermarks::SEND_ADMISSIONS_SCHEMA)?;
+            let now = c.transaction.query_row(
+                "SELECT CAST((julianday('now')-2440587.5)*86400000 AS INTEGER)",
+                [],
+                |row| row.get(0),
+            )?;
+            crate::repositories::command_watermarks::CommandWatermarks::install_send_admissions(
+                c.transaction,
+                now,
+            )?;
             Ok(())
         },
     },

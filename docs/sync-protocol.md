@@ -75,6 +75,7 @@ that point. The snapshot is bounded by the shared [draft row and stream byte
 limits](../workspaces/runtime/packages/runtime-schema/src/shared_values.rs); its
 `complete` flag is false when either limit truncates it.
 Legacy drafts above the current text limit are refused visibly while other drafts remain available.
+Pre-upgrade command retries retain pre-upgrade semantics, including cross-owner identity behavior, and never convert text to a file.
 
 Large entity baselines and deltas use typed `entity-transfer` frames on the same
 connection. Each page is a canonical `EntityChangeBatch` within the shared

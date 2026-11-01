@@ -98,9 +98,9 @@ async fn command(
                 Start::Replay(reference) => reference,
                 Start::Fresh(begun) => {
                     let mut assets = body.assets.as_slice().to_vec();
-                    let as_file = body.as_text_file
+                    let as_file = !begun.legacy_send() && (body.as_text_file
                         || body.text.as_str().chars().count()
-                            > studio_runtime_schema::shared_values::MAX_MANAGED_MESSAGE_CODEPOINTS;
+                            > studio_runtime_schema::shared_values::MAX_MANAGED_MESSAGE_CODEPOINTS);
                     let text = if as_file {
                         if assets.len() >= studio_runtime_schema::command::COMMAND_SEND_MAX_ASSETS {
                             return Err(ApiError::new(
@@ -453,6 +453,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pre_upgrade_send_skips_admission_and_file_conversion() {
+        let (app, store, _directory) = app_with_queue().await;
+        let id = RequestIdentity::issue_root();
+        store.transaction(|tx| { tx.execute("INSERT INTO runtime_orchestration_settings(id,record) VALUES('global',json_object('sendAdmissionCutoverMs',?1)) ON CONFLICT(id) DO UPDATE SET record=json_set(record,'$.sendAdmissionCutoverMs',?1)", [now_ms() + 60_000])?; Ok(()) }).await.expect("cutover");
+        let (status, response) = post(&app, None, json!({"id":id,"client":"web-1","number":1,"kind":"send","target":"workspace","body":{"text":"hello","asTextFile":true}})).await;
+        assert_eq!(status, 200, "{response}");
+        let state = store
+            .read_async("legacy-test", move |db| {
+                Ok::<_, studio_runtime_store::StoreError>((
+                    db.query_row(
+                        "SELECT text FROM runtime_events WHERE id=?1",
+                        [&id],
+                        |row| row.get::<_, String>(0),
+                    )?,
+                    db.query_row("SELECT count(*) FROM command_send_admissions", [], |row| {
+                        row.get::<_, i64>(0)
+                    })?,
+                    db.query_row("SELECT count(*) FROM runtime_assets", [], |row| {
+                        row.get::<_, i64>(0)
+                    })?,
+                ))
+            })
+            .await
+            .expect("state");
+        assert_eq!(state, ("hello".to_owned(), 0, 0));
+    }
+
+    #[tokio::test]
+    async fn pre_upgrade_normalized_retry_never_reserves_fingerprint() {
+        let (app, store, _directory) = app_with_queue().await;
+        let id = RequestIdentity::issue_root();
+        let request = json!({"id":id,"client":"web-1","number":1,"kind":"send","target":"workspace","body":{"text":"hello","delivery":"current_turn"}});
+        assert_eq!(post(&app, None, request.clone()).await.0, 200);
+        store.transaction(|tx| { tx.execute("DELETE FROM command_send_admissions", [])?; tx.execute("INSERT INTO runtime_orchestration_settings(id,record) VALUES('global',json_object('sendAdmissionCutoverMs',?1)) ON CONFLICT(id) DO UPDATE SET record=json_set(record,'$.sendAdmissionCutoverMs',?1)", [now_ms() + 60_000])?; Ok(()) }).await.expect("cutover");
+        let mut omitted = request.clone();
+        omitted["body"]
+            .as_object_mut()
+            .expect("body")
+            .remove("delivery");
+        assert_eq!(post(&app, None, omitted).await.0, 200);
+        assert_eq!(post(&app, None, request).await.0, 200);
+    }
+
+    #[tokio::test]
     async fn pre_upgrade_send_conflict_does_not_poison_original_retry() {
         let (app, store, _directory) = app_with_queue().await;
         let id = RequestIdentity::issue_root();
@@ -461,15 +505,13 @@ mod tests {
         store
             .transaction(|tx| {
                 tx.execute("DELETE FROM command_send_admissions", [])?;
+                tx.execute("INSERT INTO runtime_orchestration_settings(id,record) VALUES('global',json_object('sendAdmissionCutoverMs',?1)) ON CONFLICT(id) DO UPDATE SET record=json_set(record,'$.sendAdmissionCutoverMs',?1)", [now_ms() + 60_000])?;
                 Ok(())
             })
             .await
             .expect("pre-upgrade state");
         let mut changed = request.clone();
         changed["body"]["delivery"] = json!("next_turn");
-        assert_eq!(post(&app, None, changed).await.0, 409);
-        let mut changed = request.clone();
-        changed["body"]["asTextFile"] = json!(true);
         assert_eq!(post(&app, None, changed).await.0, 409);
         let mut changed = request.clone();
         changed["body"]["assets"] = json!(["7f4ed766-564a-4e1c-ae4f-d8e7f9b4d384"]);
