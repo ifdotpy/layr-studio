@@ -51,6 +51,7 @@ import {
   entityPullFixtureForRequest,
   apiSchemaHandshakeSse,
   protocol3SseEvent,
+  syncSessionSse,
   readTestState,
   readFixtureSyncContract,
   stubEntityState,
@@ -282,7 +283,9 @@ async function scrollFollow(page: Page, full: boolean) {
     });
     const sessionId = randomUUID();
     sessions.set(sessionId, response);
-    response.write(protocol3SseEvent("session", { sessionId }));
+    response.write(
+      syncSessionSse(sessionId, syncContract.identity.workspaceId),
+    );
     response.write(apiSchemaHandshakeSse());
     response.write(
       protocol3SseEvent("resources", streamFrame(resources, "initial")),

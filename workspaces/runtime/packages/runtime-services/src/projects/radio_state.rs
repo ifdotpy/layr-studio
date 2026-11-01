@@ -1,90 +1,55 @@
 //! Checked radio records and transactional store projections.
 use super::*;
+use studio_runtime_schema::queue_command::Field;
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub(super) enum Status {
-    Idle,
-    Waiting,
-    Speaking,
-    Blocked,
-    Stopping,
-}
-#[derive(Clone, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct Active {
-    pub(super) event_id: String,
-    pub(super) agent_id: String,
-    pub(super) epoch: u64,
-    pub(super) thread_id: Option<String>,
-    pub(super) identity: Value,
-    pub(super) through: u64,
-    #[serde(flatten)]
-    pub(super) extra: Map<String, Value>,
-}
-#[derive(Clone, Deserialize, Serialize, PartialEq)]
-pub(crate) struct Radio {
-    #[serde(rename = "teamId")]
-    pub(super) team_id: String,
-    pub(super) revision: u64,
-    pub(super) status: Status,
-    pub(super) speaker: Option<String>,
-    pub(super) next: Vec<String>,
-    pub(super) direct: bool,
-    #[serde(deserialize_with = "present_active")]
-    pub(super) active: Option<Active>,
-    pub(super) error: Option<String>,
-    pub(super) seen: BTreeMap<String, Value>,
-    #[serde(flatten)]
-    pub(super) extra: Map<String, Value>,
-}
-impl Radio {
-    pub(super) fn new(team_id: String, direct: bool) -> Self {
-        Self {
-            team_id,
-            revision: 0,
-            status: Status::Idle,
-            speaker: None,
-            next: Vec::new(),
-            direct,
-            active: None,
-            error: None,
-            seen: BTreeMap::new(),
-            extra: Map::new(),
-        }
-    }
-}
-fn present_active<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Active>, D::Error> {
-    Option::<Active>::deserialize(d)
-}
-#[derive(Deserialize, Serialize)]
+pub(crate) use studio_runtime_schema::room_record::{Active, InterruptState, Radio, Status};
 pub(super) struct Room {
-    pub(super) id: String,
+    pub(super) record: studio_runtime_schema::room_record::RoomRecord,
     pub(super) radio: Radio,
-    #[serde(flatten)]
-    pub(super) fields: Map<String, Value>,
+}
+impl Serialize for Room {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct Stored<'a> {
+            #[serde(flatten)]
+            record: &'a studio_runtime_schema::room_record::RoomRecord,
+            radio: &'a Radio,
+        }
+        Stored {
+            record: &self.record,
+            radio: &self.radio,
+        }
+        .serialize(serializer)
+    }
 }
 impl Room {
     pub(super) fn checked(id: &str, raw: &str) -> Result<Self, ProjectsError> {
-        records::decode("runtime_rooms", id, raw)?;
-        let room: Self = serde_json::from_str(raw).map_err(|_| invalid(id))?;
+        let record: studio_runtime_schema::room_record::RoomRecord =
+            serde_json::from_str(raw).map_err(|_| invalid(id))?;
+        Self::from_record(id, record)
+    }
+    fn from_record(
+        id: &str,
+        mut record: studio_runtime_schema::room_record::RoomRecord,
+    ) -> Result<Self, ProjectsError> {
+        let radio = match std::mem::take(&mut record.radio) {
+            Field::Value(radio) => radio,
+            Field::Missing | Field::Null => return Err(invalid(id)),
+        };
+        let room = Self { record, radio };
+        if room.record.id != id {
+            return Err(invalid(id));
+        }
         if !id.starts_with("radio:") || room.radio.next.len() > 5 || room.radio.seen.len() > 2 {
             return Err(invalid(id));
         }
         Ok(room)
     }
     pub(super) fn id(&self) -> &str {
-        &self.id
+        &self.record.id
     }
     pub(super) fn members(&self) -> Vec<String> {
-        self.fields
-            .get("members")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .map(str::to_owned)
-            .collect()
+        self.record.members.clone().unwrap_or_default()
     }
     pub(super) fn blocked(&mut self, text: &str) {
         self.radio.status = Status::Blocked;
@@ -109,9 +74,13 @@ pub(super) fn rooms(db: &Connection) -> Result<Vec<Room>, ProjectsError> {
     let mut rooms = Vec::new();
     for row in rows {
         let (id, raw) = row?;
-        let value = records::decode("runtime_rooms", &id, &raw)?;
-        if id.starts_with("radio:") && value["radio"].is_object() {
-            rooms.push(Room::checked(&id, &raw)?);
+        let record: studio_runtime_schema::room_record::RoomRecord =
+            serde_json::from_str(&raw).map_err(|_| invalid(&id))?;
+        if record.id != id {
+            return Err(invalid(&id));
+        }
+        if id.starts_with("radio:") && record.radio.as_ref().is_some() {
+            rooms.push(Room::from_record(&id, record)?);
         }
     }
     Ok(rooms)
@@ -195,12 +164,10 @@ pub(super) fn save(
     prepared: &PreparedHost,
     now: f64,
 ) -> Result<(), ProjectsError> {
-    room.fields.insert("updated".to_owned(), json!(now));
+    room.record.updated = serde_json::Number::from_f64(now).map_or(Field::Null, Field::Value);
     let raw = serde_json::to_string(&*room).map_err(studio_runtime_store::StoreError::from)?;
-    records::decode("runtime_rooms", room.id(), &raw)?;
     db.execute("INSERT INTO runtime_rooms(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![room.id(),raw])?;
-    let view = studio_runtime_store::projection_value(room);
-    publish_room(db, &view, prepared)
+    publish_radio_room(db, room, prepared)
 }
 fn agent_projection(
     value: &Value,
@@ -262,10 +229,29 @@ fn team_projection(value: &Value) -> Result<crate::submit_gates::PeerTeamRow, Pr
 }
 pub(super) fn publish_room(
     db: &Transaction<'_>,
-    value: &Value,
+    value: &studio_runtime_schema::room_record::RoomRecord,
     prepared: &PreparedHost,
 ) -> Result<(), ProjectsError> {
-    let id = value["id"].as_str().ok_or_else(|| invalid("room/id"))?;
+    let context = room_context(db, &value.id, prepared)?;
+    let view = crate::room_projection::project_room(value, &context)
+        .map_err(studio_runtime_store::StoreError::from)?;
+    put_room_view(db, &value.id, view)
+}
+fn publish_radio_room(
+    db: &Transaction<'_>,
+    room: &Room,
+    prepared: &PreparedHost,
+) -> Result<(), ProjectsError> {
+    let context = room_context(db, room.id(), prepared)?;
+    let view = crate::room_projection::project_radio_room(&room.record, &context, &room.radio)
+        .map_err(studio_runtime_store::StoreError::from)?;
+    put_room_view(db, room.id(), view)
+}
+fn room_context(
+    db: &Transaction<'_>,
+    id: &str,
+    prepared: &PreparedHost,
+) -> Result<RoomViewContext, ProjectsError> {
     let all_agents = project_agents(db)?;
     let mut teams = Vec::new();
     for (_, p) in ProjectsRepository::list(db)? {
@@ -278,7 +264,18 @@ pub(super) fn publish_room(
             )?);
         }
     }
-    let last = db.query_row("SELECT seq,text,created,sender FROM runtime_chat_messages WHERE room=?1 ORDER BY seq DESC LIMIT 1",[id],|r| Ok(json!({"seq":r.get::<_,i64>(0)?,"text":r.get::<_,String>(1)?.chars().take(180).collect::<String>(),"created":r.get::<_,f64>(2)?,"sender":r.get::<_,String>(3)?}))).optional()?;
+    let last = db.query_row("SELECT seq,text,created,sender FROM runtime_chat_messages WHERE room=?1 ORDER BY seq DESC LIMIT 1",[id],|r| Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,f64>(2)?,r.get::<_,String>(3)?))).optional()?;
+    let last = last
+        .map(|(seq, text, created, sender)| {
+            Ok::<_, ProjectsError>(studio_runtime_schema::room_record::RoomLastMessage {
+                seq: studio_runtime_schema::room_record::ChatSequence::from_i64(seq)
+                    .ok_or_else(|| invalid(id))?,
+                text: text.chars().take(180).collect(),
+                created: serde_json::Number::from_f64(created).ok_or_else(|| invalid(id))?,
+                sender,
+            })
+        })
+        .transpose()?;
     let agents = all_agents
         .into_values()
         .map(|value| agent_projection(&value))
@@ -289,14 +286,21 @@ pub(super) fn publish_room(
         .collect::<Result<_, _>>()?;
     let mut context = RoomViewContext::new(agents, teams);
     context.last_message = last;
-    let view = room_entity_view(value, &context);
-    SyncDocumentsRepository::put_entity(
-        db,
-        "room",
-        id,
-        view.clone().unwrap_or(json!({})),
-        view.is_none(),
-    )?;
+    Ok(context)
+}
+fn put_room_view(
+    db: &Transaction<'_>,
+    id: &str,
+    view: Option<crate::room_projection::RoomProjection>,
+) -> Result<(), ProjectsError> {
+    match view {
+        Some(view) => {
+            SyncDocumentsRepository::put_entity(db, "room", id, view, false)?;
+        }
+        None => {
+            SyncDocumentsRepository::put_entity(db, "room", id, json!({}), true)?;
+        }
+    }
     Ok(())
 }
 pub(super) fn message(
@@ -353,7 +357,13 @@ pub(super) fn unsent_cancelled(db: &Connection, active: &Active) -> Result<bool,
     let Some(event) = event(db, active)? else {
         return Ok(false);
     };
-    if event.status != "cancelled" || event.turn_id.is_some() || truthy(active.extra.get("turnId"))
+    if event.status != "cancelled"
+        || event.turn_id.is_some()
+        || active
+            .turn_id
+            .as_ref()
+            .map(String::as_str)
+            .is_some_and(|v| !v.is_empty())
     {
         return Ok(false);
     }
@@ -383,21 +393,6 @@ mod projection_tests {
             serde_json::from_str::<Radio>(&canonical.replace(",\"direct\":false", "")).is_err()
         );
         assert!(serde_json::from_str::<Radio>(&canonical.replace("\"active\":null,", "")).is_err());
-        for (radio, valid) in [
-            (canonical.to_owned(), true),
-            (canonical.replace(",\"direct\":false", ""), false),
-            (canonical.replace("\"active\":null,", ""), false),
-        ] {
-            let room: Value = serde_json::from_str(&format!(
-                r#"{{"id":"radio:t","kind":"private","radio":{radio}}}"#
-            ))
-            .expect("radio schema fixture");
-            assert_eq!(
-                studio_runtime_schema::validate("PersistedRoomRecord", &room)
-                    .expect("radio schema fixture"),
-                valid
-            );
-        }
     }
 
     #[test]

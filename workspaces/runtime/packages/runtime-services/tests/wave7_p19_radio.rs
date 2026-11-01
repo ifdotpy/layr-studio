@@ -351,6 +351,7 @@ async fn seed(store: &RuntimeStore, snapshot: &Value) {
             }
             db.execute("INSERT OR IGNORE INTO runtime_agent_volatile(id) SELECT id FROM runtime_agents", [])?;
             studio_runtime_store::migrations::migrate_radio_room(db)?;
+            studio_runtime_store::migrations::migrate_room_record(db)?;
             studio_runtime_store::migrations::migrate_project_teams(db)?;
             studio_runtime_store::migrations::migrate_project_record_kind(db)?;
             for id in completed_turns {
@@ -544,16 +545,25 @@ async fn run(store: std::sync::Arc<RuntimeStore>, case: &Value) -> Result<Value,
     // Binding callers resolve the client path to a project key before SQL.
     let project_key = host_key(case["body"]["path"].as_str().expect("project path"));
     match mode.as_str() {
-        "convert" => studio_runtime_services::peer_conversion::convert(std::sync::Arc::clone(&store), &case["body"]).await.map(|reply| serde_json::from_slice(&serde_json::to_vec(&reply).expect("serialize reply")).expect("reply")),
-        "project" => studio_runtime_services::projects::write(
-            std::sync::Arc::clone(&store),
-            case["body"].clone(),
-            "default".to_owned(),
-            vec![serde::Deserialize::deserialize(json!({"id":"default","status":"ready","canAttemptNativeProof":true})).expect("account fixture")],
-        ).await,
+        "convert" => studio_runtime_services::peer_conversion::convert(std::sync::Arc::clone(&store), &serde::Deserialize::deserialize(case["body"].clone()).map_err(|_| ProjectsError::Invalid("invalid conversion"))?).await.map(|reply| serde_json::from_slice(&serde_json::to_vec(&reply).expect("serialize reply")).expect("reply")),
+        "project" => {
+            let mut body = case["body"].clone();
+            if body["action"] == "reorder" {
+                // The corpus adds a path for fixture setup; it is not part of the HTTP body.
+                body.as_object_mut().expect("project body").remove("path");
+                studio_runtime_services::projects::reorder(&store, serde::Deserialize::deserialize(body).expect("sidebar request")).await
+            } else {
+                studio_runtime_services::projects::write(
+                    std::sync::Arc::clone(&store),
+                    serde::Deserialize::deserialize(body).expect("project request"),
+                    "default".to_owned(),
+                    vec![serde::Deserialize::deserialize(json!({"id":"default","status":"ready","canAttemptNativeProof":true})).expect("account fixture")],
+                ).await
+            }
+        },
         "peer" => studio_runtime_services::projects::peer_team_write(
             std::sync::Arc::clone(&store),
-            case["body"].clone(),
+            serde::Deserialize::deserialize(case["body"].clone()).map_err(|_| ProjectsError::Invalid("invalid peer team"))?,
             "default".to_owned(),
             vec![serde::Deserialize::deserialize(json!({"id":"default","status":"ready","canAttemptNativeProof":true})).expect("account fixture")],
         ).await,
@@ -570,7 +580,7 @@ async fn run(store: std::sync::Arc<RuntimeStore>, case: &Value) -> Result<Value,
                     value["compactions"] = json!(0);
                     AgentRecord::from_value(value).expect("checked Python agent draft")
                 });
-                radio_runtime::create_with(std::sync::Arc::clone(&store), &case["body"], Box::new(Creation(drafts))).await.map(|reply| serde_json::from_str(&serde_json::to_string(&reply).expect("reply encodes")).expect("reply decodes"))
+                radio_runtime::create_with(std::sync::Arc::clone(&store), &serde::Deserialize::deserialize(case["body"].clone()).map_err(|_| ProjectsError::Invalid("invalid radio create"))?, Box::new(Creation(drafts))).await.map(|reply| serde_json::from_str(&serde_json::to_string(&reply).expect("reply encodes")).expect("reply decodes"))
             }
         },
         "project-binding" => store.transaction_with(move |db| {
@@ -605,7 +615,7 @@ async fn run(store: std::sync::Arc<RuntimeStore>, case: &Value) -> Result<Value,
             )?;
             Ok(Value::Null)
         }).await,
-        _ => radio_runtime::manage(std::sync::Arc::clone(&store), &case["body"]).await.map(|reply| serde_json::from_str(&serde_json::to_string(&reply).expect("reply encodes")).expect("reply decodes")),
+        _ => radio_runtime::manage(std::sync::Arc::clone(&store), &serde::Deserialize::deserialize(case["body"].clone()).map_err(|_| ProjectsError::Invalid("invalid radio command"))?).await.map(|reply| serde_json::from_str(&serde_json::to_string(&reply).expect("reply encodes")).expect("reply decodes")),
     }
 }
 #[tokio::test]
@@ -1126,7 +1136,7 @@ struct Creation([AgentRecord; 2]);
 impl radio_runtime::RadioCreation for Creation {
     fn prepare(
         &mut self,
-        _body: &Value,
+        _body: &studio_runtime_schema::peer_team_ingress::RadioCreate,
         _path: &Path,
         ids: [AgentId; 2],
     ) -> Result<[AgentRecord; 2], ProjectsError> {

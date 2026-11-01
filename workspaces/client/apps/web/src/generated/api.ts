@@ -5826,6 +5826,20 @@ export interface components {
         | components["schemas"]["AgentEntityCapacityRetryDto"]
         | null
         | undefined;
+      /** @description Claude permission mode for the worker launch preview. Other session options remain private. */
+      claudeOptions?:
+        | {
+            /** @enum {string} */
+            permissionMode?:
+              | "default"
+              | "acceptEdits"
+              | "auto"
+              | "plan"
+              | "bypassPermissions"
+              | undefined;
+          }
+        | null
+        | undefined;
       /**
        * Commandprogress
        * @default []

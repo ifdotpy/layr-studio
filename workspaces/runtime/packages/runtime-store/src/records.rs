@@ -1164,7 +1164,16 @@ impl JsonRecord for RequestRecord {
     fn encode_stored(&self, _connection: &Connection, row_id: &str) -> StoreResult<String> {
         if self.id != row_id
             || !self.created_at.is_finite()
-            || !self.params.get().trim_start().starts_with('{')
+            || serde_json::from_str::<studio_runtime_schema::request_projection::RequestParams>(
+                self.params.get(),
+            )
+            .is_err()
+            || self.preview.as_ref().is_some_and(|value| {
+                serde_json::from_str::<studio_runtime_schema::request_projection::RequestPreview>(
+                    value.get(),
+                )
+                .is_err()
+            })
         {
             return Err(crate::StoreError::InvalidStoredObject {
                 table: Self::TABLE,
@@ -1210,6 +1219,25 @@ mod request_typed_tests {
             super::validation_counts::CHECKS.with(|count| count.get()),
             0,
             "typed default must not build a generic JSON value"
+        );
+    }
+
+    #[test]
+    fn request_write_rejects_malformed_known_provider_fields() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE runtime_requests(id TEXT PRIMARY KEY, record TEXT NOT NULL)",
+        )
+        .unwrap();
+        let mut record: RequestRecord = serde_json::from_str(r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{}}"#).unwrap();
+        record.params =
+            serde_json::value::RawValue::from_string(r#"{"command":42}"#.into()).unwrap();
+        assert!(Table::new(&db).put(&record).is_err());
+        assert!(
+            Table::<RequestRecord>::new(&db)
+                .get(&"r".into())
+                .unwrap()
+                .is_none()
         );
     }
 
