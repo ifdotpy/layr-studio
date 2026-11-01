@@ -205,11 +205,7 @@ fn apply_read_state(
     let revision = read.expected_revision.get();
     if agent.thread_id.as_deref() != Some(thread)
         || agent.last_completed_turn.value().map(String::as_str) != Some(turn)
-        || agent
-            .extra
-            .get("lastCompletedTurnStatus")
-            .and_then(Value::as_str)
-            != Some("completed")
+        || agent.last_completed_turn_status.value().map(String::as_str) != Some("completed")
     {
         return Err(EventWriteError::InvalidRequest(
             "The completed result changed. Reload the chat",

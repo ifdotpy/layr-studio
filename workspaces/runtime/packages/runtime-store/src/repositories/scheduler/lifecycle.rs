@@ -514,11 +514,7 @@ impl SchedulerRepository {
                 marker.outcome = Some("settled".into());
                 changed = true;
             }
-            let outcome = match agent
-                .extra
-                .get("lastCompletedTurnStatus")
-                .and_then(Value::as_str)
-            {
+            let outcome = match agent.last_completed_turn_status.value().map(String::as_str) {
                 Some("completed") => Some(AgentStatus::Completed),
                 Some("failed") => Some(AgentStatus::Failed),
                 _ => None,
@@ -1811,9 +1807,8 @@ impl SchedulerRepository {
         crate::domain::complete_turn(transaction, agent_id, turn_id)?;
         agent.last_completed_turn =
             studio_runtime_schema::queue_command::Field::Value(turn_id.to_owned());
-        agent
-            .extra
-            .insert("lastCompletedTurnStatus".into(), json!(outcome));
+        agent.last_completed_turn_status =
+            studio_runtime_schema::queue_command::Field::Value(outcome.to_owned());
         agent.extra.insert(
             "lastCompletedTurnError".into(),
             error.clone().unwrap_or(Value::Null),

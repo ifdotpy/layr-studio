@@ -1336,7 +1336,8 @@ fn notify_parent_of_settled_turn(
     let stopped = matches!(
         agent.status,
         AgentStatus::Failed | AgentStatus::Interrupted | AgentStatus::Paused
-    ) && agent.extra.get("lastCompletedTurnStatus") != Some(&json!("completed"));
+    ) && agent.last_completed_turn_status.value().map(String::as_str)
+        != Some("completed");
     let value = agent.value();
     let safety_retry = value.pointer("/nativeSafetyRetry/turnId") == Some(&json!(turn_id))
         && crate::safety_buffering::active(&value).unwrap_or(true);

@@ -442,6 +442,16 @@ pub struct AgentRecord {
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
     pub host_project_path: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub execution_settings_account_key: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub last_completed_turn_status: studio_runtime_schema::queue_command::Field<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree_ready: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -830,6 +840,8 @@ impl AgentRecord {
             queue_mutation_revision: None,
             last_completed_turn: Default::default(),
             host_project_path: Default::default(),
+            execution_settings_account_key: Default::default(),
+            last_completed_turn_status: Default::default(),
             worktree_ready: None,
             approval_policy: None,
             native_response_turn: None,
@@ -2842,6 +2854,8 @@ mod tests {
             "effort",
             "lastCompletedTurn",
             "hostProjectPath",
+            "lastCompletedTurnStatus",
+            "executionSettingsAccountKey",
         ] {
             let raw = format!(
                 r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"{field}":42}}"#

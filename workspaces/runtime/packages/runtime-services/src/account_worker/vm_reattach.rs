@@ -52,9 +52,10 @@ fn binding(
         || ["remoteWorker", "remoteAnchor"]
             .iter()
             .any(|key| fields.get(*key) == Some(&Value::Bool(true)))
-        || fields
-            .get("executionSettingsAccountKey")
-            .is_some_and(|value| !value.is_null() && value.as_str() != Some(account))
+        || record
+            .execution_settings_account_key
+            .value()
+            .is_some_and(|value| value != account)
     {
         return Ok(None);
     }

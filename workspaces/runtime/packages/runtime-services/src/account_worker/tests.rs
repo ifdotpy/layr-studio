@@ -1197,7 +1197,7 @@ async fn invalid_agent_record_is_held_without_stopping_other_agent_dispatch() {
                     let mut good = AgentRepository::get(tx, &AgentId::from(write_good_id.as_str()))?
                         .expect("valid neighbor agent");
                     good.extra.insert("nativeEffort".into(), Value::Null);
-                    good.extra.insert("executionSettingsAccountKey".into(), json!("default"));
+                    good.execution_settings_account_key = studio_runtime_schema::queue_command::Field::Value("default".into());
                     AgentRepository::put(tx, &good)?;
                     tx.execute(
                         "UPDATE runtime_agents SET record=json_set(record,'$.rootId',json('23')) WHERE id=?1",
