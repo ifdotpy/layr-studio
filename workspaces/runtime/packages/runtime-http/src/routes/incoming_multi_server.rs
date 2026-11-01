@@ -69,11 +69,9 @@ fn link_connection(state: &HttpState, headers: &HeaderMap) -> Option<String> {
 pub(crate) async fn serve(state: HttpState, request: Request<Body>, next: Next) -> Response {
     let mut response = match link_connection(&state, request.headers()) {
         Some(connection) => {
-            LINK_CONNECTION
-                .scope(connection, serve_inner(state, request, next))
-                .await
+            Box::pin(LINK_CONNECTION.scope(connection, serve_inner(state, request, next))).await
         }
-        None => serve_inner(state, request, next).await,
+        None => Box::pin(serve_inner(state, request, next)).await,
     };
     response.headers_mut().insert(
         "access-control-allow-origin",
