@@ -95,7 +95,8 @@ type LiveEntity = Record<string, unknown> &
   Optional<Schema["AgentDetailEntityDto"]> &
   Optional<Pick<Schema["AgentSummaryEntityDto"], "turnId">> &
   Cost &
-  Optional<Pick<Schema["MonitorEntityDto"], "agent" | "exitCode">> & {
+  Optional<Pick<Schema["MonitorEntityDto"], "exitCode">> & {
+    agent?: string | null | undefined;
     status?:
       | Schema["MonitorEntityDto"]["status"]
       | Schema["RequestEntityDto"]["status"]

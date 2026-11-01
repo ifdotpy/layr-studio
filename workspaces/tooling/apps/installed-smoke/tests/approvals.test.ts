@@ -8,6 +8,16 @@ import { test } from "node:test";
 import type { components } from "../../../../client/apps/web/src/generated/api.ts";
 
 type Schema = components["schemas"];
+const display = {
+  kind: "monitor",
+  kindLabel: "monitor",
+  title: "monitor",
+  active: true,
+  indicator: "working",
+  label: "running",
+  inBackgroundList: true,
+  actions: [],
+} as const satisfies Schema["BackgroundTaskDisplay"];
 // Safety bound for a broken fixture; normal completion follows the SSE event.
 const fixtureDeadlineSeconds = 60;
 
@@ -57,14 +67,26 @@ for (const scenario of [
         id: "m1",
         seq: 3,
         op: "upsert",
-        value: { id: "m1", agent: "agent", status: "approval" },
+        value: {
+          id: "m1",
+          agent: "agent",
+          status: "approval",
+          created: 1,
+          display,
+        },
       },
       {
         collection: "monitor",
         id: "m2",
         seq: 4,
         op: "upsert",
-        value: { id: "m2", agent: "agent", status: "approval" },
+        value: {
+          id: "m2",
+          agent: "agent",
+          status: "approval",
+          created: 1,
+          display,
+        },
       },
     ] satisfies Schema["SyncEntity"][];
     const resolved = [
@@ -75,14 +97,27 @@ for (const scenario of [
         id: "m1",
         seq: 7,
         op: "upsert",
-        value: { id: "m1", agent: "agent", status: "completed", exitCode: 0 },
+        value: {
+          id: "m1",
+          agent: "agent",
+          status: "completed",
+          exitCode: 0,
+          created: 1,
+          display,
+        },
       },
       {
         collection: "monitor",
         id: "m2",
         seq: 8,
         op: "upsert",
-        value: { id: "m2", agent: "agent", status: "cancelled" },
+        value: {
+          id: "m2",
+          agent: "agent",
+          status: "cancelled",
+          created: 1,
+          display,
+        },
       },
     ] satisfies Schema["SyncEntity"][];
     const event = (
