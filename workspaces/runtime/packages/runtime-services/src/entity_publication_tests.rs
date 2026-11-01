@@ -11,6 +11,37 @@ use studio_runtime_store::{AgentRecord, AgentRepository, StoreError};
 const CHAT: &str = "published-chat";
 
 #[tokio::test]
+async fn startup_recovers_agent_with_legacy_accounts_projection() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = studio_runtime_store::RuntimeStore::open(Some(dir.path()))
+        .await
+        .unwrap();
+    store.transaction(|tx| {
+        tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('accounts','current',1,'old',?1,0)",
+            [json!({"collection":"accounts","id":"current","value":{"accounts":[{"id":"default"}]}}).to_string()])?;
+        tx.execute("DELETE FROM sync_entity_meta WHERE key='migration_catalog'", [])?;
+        Ok(())
+    }).await.unwrap();
+    drop(store);
+    let store = studio_runtime_store::RuntimeStore::open(Some(dir.path()))
+        .await
+        .unwrap();
+    super::install(&store).await.unwrap();
+    seed_chat(&store, chat(json!({"status":"starting"}))).await;
+    store
+        .transaction(|tx| {
+            tx.execute(
+                "UPDATE runtime_agents SET record=json_set(record,'$.status','idle') WHERE id=?1",
+                [CHAT],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("startup recovery must publish the recovered agent");
+    assert_eq!(chat_view(&store, CHAT)["status"], "idle");
+}
+
+#[tokio::test]
 async fn interrupted_child_turn_end_republishes_lead_cancel_eligibility() {
     let (_dir, store) = store().await;
     let op = json!({"id":"move","leadId":CHAT,"targetAccountKey":"target",
