@@ -1148,12 +1148,20 @@ pub(super) async fn draft_initial_snapshot(
                     SYNC_DRAFT_STREAM_MAX_DOCUMENTS + 1,
                 )
                 .map_err(|_| ApiError::internal())?;
-                let complete = rows.len() as i64 <= SYNC_DRAFT_STREAM_MAX_DOCUMENTS;
+                let mut complete = rows.len() as i64 <= SYNC_DRAFT_STREAM_MAX_DOCUMENTS;
                 rows.truncate(SYNC_DRAFT_STREAM_MAX_DOCUMENTS as usize);
-                let documents = rows
-                    .into_iter()
-                    .map(super::sync_documents::draft_document)
-                    .collect::<Result<Vec<_>, _>>()?;
+                let mut documents = Vec::with_capacity(rows.len());
+                for row in rows {
+                    let oversized = serde_json::from_str::<Value>(&row.payload)
+                        .ok()
+                        .is_some_and(|payload| payload.get("text").and_then(Value::as_str)
+                            .is_some_and(|text| text.chars().count() > studio_runtime_schema::shared_values::MAX_DRAFT_TEXT_CODEPOINTS));
+                    if oversized {
+                        complete = false;
+                        continue;
+                    }
+                    documents.push(super::sync_documents::draft_document(row)?);
+                }
                 Ok::<_, ApiError>((
                     revision,
                     DraftSnapshot {
@@ -5298,6 +5306,52 @@ mod tests {
                     .is_none()
             );
         }
+    }
+
+    #[tokio::test]
+    async fn oversized_legacy_draft_does_not_block_other_drafts() {
+        let root = tempfile::tempdir().expect("isolated state");
+        let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
+        store
+            .transaction(|tx| {
+                for (session, text) in [
+                    (
+                        "large",
+                        "x".repeat(
+                            studio_runtime_schema::shared_values::MAX_DRAFT_TEXT_CODEPOINTS + 1,
+                        ),
+                    ),
+                    ("good", "kept".to_owned()),
+                ] {
+                    let id = format!("phone:{session}");
+                    let payload =
+                        json!({"id":id,"device":"phone","session":session,"text":text,"updated":1})
+                            .to_string();
+                    SyncDocumentsRepository::put_draft(tx, &id, &payload, false)?;
+                }
+                Ok(())
+            })
+            .await
+            .expect("drafts");
+        let state = HttpState::new(
+            "token".into(),
+            "workspace".into(),
+            root.path().display().to_string(),
+            4321,
+            None,
+            Some(store),
+            None,
+        );
+        let resource =
+            ResourceRef::DraftsResource(studio_runtime_schema::resource_ref::EmptyResource {});
+        let snapshot = draft_initial_snapshot(state, resource)
+            .await
+            .expect("snapshot")
+            .draft_snapshot
+            .expect("baseline");
+        assert!(!snapshot.complete);
+        assert_eq!(snapshot.documents.len(), 1);
+        assert_eq!(snapshot.documents[0].id, "phone:good");
     }
 
     #[tokio::test]

@@ -74,6 +74,7 @@ is the draft sequence read with its rows, so later stream batches continue from
 that point. The snapshot is bounded by the shared [draft row and stream byte
 limits](../workspaces/runtime/packages/runtime-schema/src/shared_values.rs); its
 `complete` flag is false when either limit truncates it.
+Legacy drafts above the current text limit are refused visibly while other drafts remain available.
 
 Large entity baselines and deltas use typed `entity-transfer` frames on the same
 connection. Each page is a canonical `EntityChangeBatch` within the shared
