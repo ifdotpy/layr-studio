@@ -375,9 +375,13 @@ fn work_docs(
     let Some(raw) = raw else {
         return Ok(Vec::new());
     };
-    // A row that does not decode has no document; the publisher rejects such records too.
-    let Ok(item) = serde_json::from_str::<WorkItemRecord>(&raw) else {
-        return Ok(Vec::new());
+    // A row that does not decode has no document: the stream skips it and reports it here.
+    let item = match serde_json::from_str::<WorkItemRecord>(&raw) {
+        Ok(item) => item,
+        Err(error) => {
+            eprintln!("work row {id} does not decode, no work document is streamed: {error}");
+            return Ok(Vec::new());
+        }
     };
     let record: Value = serde_json::from_str(&raw)?;
     let mut rows = Vec::new();
@@ -391,10 +395,14 @@ fn work_docs(
         let refusal = current_submission_refusal(transaction, &record).map_err(work_error)?;
         let mut statuses: BTreeMap<String, WorkStatus> = BTreeMap::new();
         for dependency in item.dependencies() {
-            if let Ok(Some(dependency_record)) =
-                WorkItemsRepository::work_record(transaction, dependency)
-            {
-                statuses.insert(dependency.clone(), dependency_record.status());
+            match WorkItemsRepository::work_record(transaction, dependency) {
+                Ok(Some(dependency_record)) => {
+                    statuses.insert(dependency.clone(), dependency_record.status());
+                }
+                Ok(None) => {}
+                Err(error) => eprintln!(
+                    "work row {dependency} does not decode, its status is left out of the dependent document: {error}"
+                ),
             }
         }
         let detail = crate::sync_views::work_detail_view(&item, &record, refusal, &statuses)?;
