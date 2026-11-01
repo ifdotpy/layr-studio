@@ -4,6 +4,7 @@
 pub mod account_destination;
 pub mod account_key;
 pub mod account_registry;
+pub mod agent_entity_nested;
 pub mod agent_limits;
 pub mod agent_progress;
 pub mod annotation_command;
