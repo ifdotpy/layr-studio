@@ -600,6 +600,11 @@ pub struct AgentRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
+    pub yolo_mode: studio_runtime_schema::queue_command::Field<StoredTransferValue<bool>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
     pub claude_options: studio_runtime_schema::queue_command::Field<
         StoredTransferObject<crate::transfer_record::TransferClaudeOptions>,
     >,
@@ -1094,6 +1099,7 @@ impl AgentRecord {
             portable_history: Default::default(),
             account_history: Default::default(),
             cyber_access_program: Default::default(),
+            yolo_mode: Default::default(),
             claude_options: Default::default(),
             execution_mode: None,
             turn_epoch: None,
@@ -3562,6 +3568,24 @@ mod tests {
         let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
             "epoch":2, "status":"idle", "accountKey":"default", "prepareAttempt":"attempt"}));
         assert!(!record.extra.contains_key("prepareAttempt"));
+    }
+
+    #[test]
+    fn yolo_mode_is_not_an_extension() {
+        let record = agent(json!({"compactions":0,"id":"agent","rootId":"agent",
+            "epoch":2,"status":"idle","accountKey":"default","yoloMode":true}));
+        assert!(!record.extra.contains_key("yoloMode"));
+        assert!(matches!(
+            record.yolo_mode.value(),
+            Some(super::StoredTransferValue::Known(true))
+        ));
+        let legacy = agent(json!({"compactions":0,"id":"agent","rootId":"agent",
+            "epoch":2,"status":"idle","accountKey":"default","yoloMode":"legacy"}));
+        assert!(matches!(
+            legacy.yolo_mode.value(),
+            Some(super::StoredTransferValue::Unreadable(_))
+        ));
+        assert_eq!(legacy.value().get("yoloMode"), Some(&json!("legacy")));
     }
 
     #[test]
