@@ -207,6 +207,44 @@ pub async fn action(
         })
         .await
 }
+
+fn replay_in(
+    tx: &Transaction<'_>,
+    id: &str,
+    lead: &str,
+    target: &str,
+    scope: &str,
+) -> Result<Option<Value>, TransferError> {
+    let Some(key) = Repository::request_operation(tx, id)? else {
+        return Ok(None);
+    };
+    let snapshot = load(tx, &key)?;
+    if snapshot.replay(id, lead, target, scope)? {
+        return snapshot.public_view().map(Some);
+    }
+    Err(TransferError::Refused(
+        "This transfer id has different content",
+    ))
+}
+
+/// Return a retained request before consulting mutable account eligibility.
+pub async fn replay(
+    store: &RuntimeStore,
+    id: &str,
+    lead: &str,
+    target: &str,
+    scope: &str,
+) -> Result<Option<Value>, TransferError> {
+    let (id, lead, target, scope) = (
+        id.to_owned(),
+        lead.to_owned(),
+        target.to_owned(),
+        scope.to_owned(),
+    );
+    store
+        .transaction_with_error(move |tx| replay_in(tx, &id, &lead, &target, &scope))
+        .await
+}
 /// No provider submission is repeated by this method. It only replays an exact
 /// durable request; a genuinely new request needs the executor before any write.
 pub async fn request(
@@ -220,26 +258,30 @@ pub async fn request(
 ) -> Result<Value, TransferError> {
     uuid::Uuid::parse_str(id)
         .map_err(|_| TransferError::Refused("Supply a transfer request id"))?;
-    if scope != "team" {
-        return Err(TransferError::Refused(
-            "Choose a valid transfer scope and destination provider",
-        ));
-    }
     let id = id.to_owned();
     let lead = lead.to_owned();
     let target = target.to_owned();
     let scope = scope.to_owned();
-    let target_provider = target_provider
-        .parse::<studio_runtime_providers::ProviderKind>()
-        .map_err(|_| {
-            TransferError::Refused("Choose a valid transfer scope and destination provider")
-        })?;
-    let target_provider = target_provider.key().to_owned();
+    let target_provider = target_provider.to_owned();
     store
         .transaction_with_error(move |tx| {
             if !Repository::available(tx)? {
                 return Err(TransferError::Requires(EXECUTOR_REQUIRED));
             }
+            if let Some(result) = replay_in(tx, &id, &lead, &target, &scope)? {
+                return Ok(result);
+            }
+            if scope != "team" {
+                return Err(TransferError::Refused(
+                    "Choose a valid transfer scope and destination provider",
+                ));
+            }
+            let target_provider = target_provider
+                .parse::<studio_runtime_providers::ProviderKind>()
+                .map_err(|_| {
+                    TransferError::Refused("Choose a valid transfer scope and destination provider")
+                })?;
+            let target_provider = target_provider.key().to_owned();
             drop_orphan_summary_in(tx, &lead)?;
             let actor = crate::event_write::checked_agent(tx, &lead)
                 .map_err(|_| TransferError::Refused("Unknown managed agent"))?;
@@ -257,12 +299,6 @@ pub async fn request(
                 return Err(TransferError::Refused(
                     "This account is disabled for this chat",
                 ));
-            }
-            if let Some(key) = Repository::request_operation(tx, &id)? {
-                let snapshot = load(tx, &key)?;
-                if snapshot.replay(&id, &lead, &target, &scope)? {
-                    return snapshot.public_view();
-                }
             }
             if let Some(active) = actor.extra.get("accountTransfer").filter(|value| {
                 !matches!(value["status"].as_str(), Some("completed" | "cancelled"))
@@ -1569,6 +1605,29 @@ mod request_tests {
             !run_async(release_waiting(&store, "lead", 13.0)).expect("release reads"),
             "a released member is not released again"
         );
+    }
+
+    #[test]
+    fn exact_request_replays_after_target_becomes_excluded() {
+        let (_root, store) = store_with_agents();
+        let id = "5a300f72-4ea6-4d30-8a0e-9b2c13c4226a";
+        let first = request(&store, id, "lead", "target", "team", "codex", 10.0)
+            .expect("initial transfer succeeds");
+        run_async(store.transaction_with_error(|tx| {
+            let mut lead = AgentRepository::get(tx, &AgentId::from("lead"))?.unwrap();
+            lead.extra
+                .insert("excludedAccountKeys".into(), json!(["target"]));
+            AgentRepository::put(tx, &lead)?;
+            Ok::<_, studio_runtime_store::StoreError>(())
+        }))
+        .expect("change eligibility after the request");
+        let before = stored(&store, "lead");
+        assert_eq!(
+            request(&store, id, "lead", "target", "team", "codex", 11.0)
+                .expect("lost response retry replays the accepted request"),
+            first
+        );
+        assert_eq!(stored(&store, "lead"), before);
     }
 
     #[test]
