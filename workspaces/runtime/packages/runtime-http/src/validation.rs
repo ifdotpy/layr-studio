@@ -77,7 +77,16 @@ const TYPED_BODIES: &[(&str, &str)] = &[
 ];
 
 // Temporary migration marker; typed extractors own these query contracts.
-const TYPED_QUERIES: &[(&str, &str)] = &[("GET", "/api/transcript/page"), ("GET", "/api/messages")];
+const TYPED_QUERIES: &[(&str, &str)] = &[
+    ("GET", "/api/messages"),
+    ("GET", "/api/search"),
+    ("GET", "/api/search/item"),
+    ("GET", "/api/transcript"),
+    ("GET", "/api/transcript/blob"),
+    ("GET", "/api/transcript/item"),
+    ("GET", "/api/transcript/page"),
+    ("GET", "/api/transcript/search"),
+];
 
 #[derive(Debug, Clone)]
 pub(crate) struct CompileError {
