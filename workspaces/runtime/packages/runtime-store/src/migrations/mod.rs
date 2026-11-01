@@ -67,6 +67,7 @@ mod m2026_11_01_plan_record;
 mod m2026_11_01_project_context;
 mod m2026_11_01_project_revisions;
 mod m2026_11_01_rate_limit_view;
+mod m2026_11_01_request_reference_outbox;
 mod m2026_11_01_status_turn_indexes;
 mod m2026_11_01_transfer_operations;
 mod m2026_11_01_transfer_pointers;
@@ -1173,6 +1174,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_01_outbox_cancelled::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-request-reference-outbox",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Stores whose request result reference kind CHECK lacks outbox",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_request_reference_outbox::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {

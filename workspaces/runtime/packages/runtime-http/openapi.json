@@ -15352,7 +15352,8 @@
               "message",
               "project",
               "room",
-              "work"
+              "work",
+              "outbox"
             ],
             "type": "string"
           },

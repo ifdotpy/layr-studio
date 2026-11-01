@@ -1197,7 +1197,7 @@
       {
         "create_order": 251,
         "name": "request_results",
-        "sql": "CREATE TABLE request_results (\n           id TEXT PRIMARY KEY,\n           signature TEXT NOT NULL,\n           status TEXT NOT NULL DEFAULT 'applied' CHECK(\"status\" IN ('applied','rejected')),\n           ref_kind TEXT CHECK(\"ref_kind\" IN ('agent','annotation','complaint','message','project','room','work')),\n           ref_id TEXT,\n           ref_rev INTEGER,\n           result TEXT,\n           created INTEGER NOT NULL,\n           CHECK ((result IS NOT NULL AND ref_kind IS NULL AND ref_id IS NULL AND ref_rev IS NULL)\n               OR (result IS NULL AND ref_kind IS NOT NULL AND ref_id IS NOT NULL AND ref_rev IS NOT NULL)\n               OR (result IS NULL AND status = 'rejected' AND ref_kind IS NULL AND ref_id IS NULL AND ref_rev IS NULL))\n         )",
+        "sql": "CREATE TABLE request_results (\n           id TEXT PRIMARY KEY,\n           signature TEXT NOT NULL,\n           status TEXT NOT NULL DEFAULT 'applied' CHECK(\"status\" IN ('applied','rejected')),\n           ref_kind TEXT CHECK(\"ref_kind\" IN ('agent','annotation','complaint','message','project','room','work','outbox')),\n           ref_id TEXT,\n           ref_rev INTEGER,\n           result TEXT,\n           created INTEGER NOT NULL,\n           CHECK ((result IS NOT NULL AND ref_kind IS NULL AND ref_id IS NULL AND ref_rev IS NULL)\n               OR (result IS NULL AND ref_kind IS NOT NULL AND ref_id IS NOT NULL AND ref_rev IS NOT NULL)\n               OR (result IS NULL AND status = 'rejected' AND ref_kind IS NULL AND ref_id IS NULL AND ref_rev IS NULL))\n         )",
         "table": "request_results",
         "type": "table"
       },

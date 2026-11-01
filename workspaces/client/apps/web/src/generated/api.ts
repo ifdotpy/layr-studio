@@ -8093,7 +8093,8 @@ export interface components {
         | "message"
         | "project"
         | "room"
-        | "work";
+        | "work"
+        | "outbox";
       rev: number;
       rows: components["schemas"]["SyncEntity"][];
       /** @enum {string} */
