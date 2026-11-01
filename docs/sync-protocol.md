@@ -16,9 +16,9 @@ lagging revision announced by the stream, or a link too slow for SSE. Startup
 fetch chains, focus probes, periodic refresh, and automatic mark-read are
 forbidden.
 
-Local storage and IndexedDB may contain device keys, credentials and pairing
-secrets, the monitor input journal, outbox request identities, the unsent input
-buffer, and the remote frontend's subscription cache. Secret answer fields remain
+Local storage and IndexedDB may contain only device keys, credentials and pairing
+secrets, unsent user input until the server confirms it, and, on a remote frontend
+only, one thin cache record per subscription. Secret answer fields remain
 in memory only. The cache is never used to decide whether to send or retry a command.
 
 A remote frontend stores one IndexedDB record per cacheable subscription, with
