@@ -1769,14 +1769,7 @@ mod vault_maintenance_tests {
             .expect("source publisher initialized");
         store
             .transaction(|transaction| {
-                transaction.execute(
-                    "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
-                    rusqlite::params![
-                        "agent-1",
-                        json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"agent-1","rootId":"agent-1","epoch":0,"status":"idle"})
-                            .to_string()
-                    ],
-                )?;
+                studio_runtime_store::AgentRepository::put(transaction, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"agent-1","rootId":"agent-1","epoch":0,"status":"idle"}))?)?;
                 Ok(())
             })
             .await
@@ -1830,13 +1823,7 @@ mod vault_maintenance_tests {
             .transaction(|transaction| {
                 for index in 0..ENTITY_COUNT {
                     let id = format!("agent-{index:04}");
-                    transaction.execute(
-                        "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
-                        rusqlite::params![
-                            id,
-                            json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":id,"rootId":id,"epoch":0,"status":"idle"}).to_string()
-                        ],
-                    )?;
+                    studio_runtime_store::AgentRepository::put(transaction, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":id,"rootId":id,"epoch":0,"status":"idle"}))?)?;
                     transaction.execute(
                         "INSERT INTO runtime_work(id,record) VALUES(?1,?2)",
                         rusqlite::params![

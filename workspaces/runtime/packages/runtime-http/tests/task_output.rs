@@ -44,7 +44,7 @@ async fn authorized_task_output_read_and_projection() {
     store.transaction_with(move |tx| {
         let owner = json!({"compactions":0,"accountKey":"default","id":"owner","rootId":"owner","epoch":1,"status":"idle","provider":"claude","cwd":cwd});
         let task = json!({"id":"task","agent":"owner","itemId":"task:native","kind":"tool","type":"mcpToolCall","name":"tool","turnId":"turn","status":"running","created":1,"outputFile":"out.txt"});
-        tx.execute("INSERT INTO runtime_agents(id,record) VALUES('owner',?)",[owner.to_string()])?;
+        studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(owner)?)?;
         tx.execute("INSERT INTO runtime_tasks(id,record) VALUES('task',?)",[task.to_string()])?;
         Ok::<_, StoreError>(())
     }).await.unwrap();

@@ -75,8 +75,7 @@ async fn fixture(port: Arc<dyn AccountSessionPort>) -> (tempfile::TempDir, axum:
     let root = tempfile::tempdir().unwrap();
     let store = Arc::new(RuntimeStore::open(Some(root.path())).await.unwrap());
     store.transaction(|tx| {
-        tx.execute("INSERT INTO runtime_agents(id,record) VALUES('recovery-agent',?1)",
-            [json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"recovery-agent","rootId":"recovery-agent","epoch":1,"status":"idle","accountKey":"default"}).to_string()])?;
+        studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"recovery-agent","rootId":"recovery-agent","epoch":1,"status":"idle","accountKey":"default"}))?)?;
         Ok(())
     }).await.unwrap();
     let mut state = HttpState::new(
