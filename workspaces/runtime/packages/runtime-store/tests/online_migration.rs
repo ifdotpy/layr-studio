@@ -120,4 +120,30 @@ async fn driver_stops_resumes_and_reports_progress() {
         .await
         .expect("progress");
     assert!(progress[0].complete && progress[0].dirty == 0);
+
+    // A completed migration must not copy newly added rows on restart.
+    store
+        .transaction(|tx| {
+            tx.execute("INSERT INTO online_test_src VALUES(2000,2000)", [])?;
+            Ok(())
+        })
+        .await
+        .expect("new row");
+    assert_eq!(
+        online_migration::run(&store, Arc::new(Copy), || false)
+            .await
+            .expect("restart"),
+        Step::Complete
+    );
+    let count = store
+        .read_async("test", |db| {
+            Ok::<_, StoreError>(db.query_row(
+                "SELECT COUNT(*) FROM online_test_dst WHERE id=2000",
+                [],
+                |r| r.get::<_, i64>(0),
+            )?)
+        })
+        .await
+        .expect("target");
+    assert_eq!(count, 0);
 }

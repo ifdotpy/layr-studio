@@ -1427,9 +1427,9 @@ mod tests {
         );
         store
             .transaction(move |transaction| {
-                if !retired {
+                if retired {
                     transaction.execute(
-                        "DELETE FROM sync_entity_meta WHERE key='transcript_copies'",
+                        "INSERT OR REPLACE INTO sync_entity_meta(key,value) VALUES('transcript_copies','retired')",
                         [],
                     )?;
                 }
