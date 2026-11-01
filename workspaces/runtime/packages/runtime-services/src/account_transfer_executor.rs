@@ -1600,7 +1600,7 @@ mod destination_settings_tests {
             "members":{"agent":{"phase":"lazy","sourceAccountKey":"source","lazy":true}}});
         let agent = json!({"compactions":0,"provider":"codex","id":"agent","rootId":"agent",
             "epoch":7,"status":"idle","accountKey":"target","accountTransferId":"transfer",
-            "lazyAccountTransfer":{"id":"transfer"},"model":"source-model"});
+            "lazyAccountTransfer":{"id":"transfer","sourceAccountKey":"source"},"model":"source-model"});
         let snapshot = crate::account_transfer::Snapshot::read(
             &operation.to_string(),
             [("agent".into(), agent.to_string())],
@@ -1612,7 +1612,7 @@ mod destination_settings_tests {
             decision
                 .agents
                 .into_iter()
-                .map(|(id, agent)| (id, agent.to_string())),
+                .map(|(id, agent)| (id, serde_json::to_string(&agent).unwrap())),
         )
         .unwrap();
         let catalog = CatalogObservation {

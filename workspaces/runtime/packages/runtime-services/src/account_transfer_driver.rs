@@ -56,7 +56,7 @@ pub fn load(tx: &Transaction<'_>, id: &str) -> Result<Snapshot, TransferError> {
             Repository::agent(tx, &id)?.ok_or(TransferError::Refused("Unknown transfer member"))?;
         Ok((id, raw))
     });
-    Snapshot::read_typed(op, raw.len(), agents)
+    Snapshot::read_typed(op, &raw, agents)
 }
 
 /// A lead summary mirrors its transfer row. An active summary without the row
@@ -433,7 +433,7 @@ pub async fn request(
                 .map_err(|_| TransferError::Refused("Invalid transfer"))?;
             let snapshot = Snapshot::read_typed(
                 operation.clone(),
-                raw.len(),
+                &raw,
                 agents.iter().map(|(id, value)| {
                     Ok((
                         id.clone(),

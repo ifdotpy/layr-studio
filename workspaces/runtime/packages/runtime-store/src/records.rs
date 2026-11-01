@@ -561,6 +561,13 @@ pub struct AgentRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
+    pub environment: studio_runtime_schema::queue_command::Field<
+        StoredTransferValue<studio_runtime_schema::project_ingress::WorkerEnvironment>,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
     pub usage_resume: studio_runtime_schema::queue_command::Field<
         StoredTransferObject<studio_runtime_schema::continuation_snapshot::UsageContinuation>,
     >,
@@ -1135,6 +1142,7 @@ impl AgentRecord {
             in_flight: None,
             auto_wake: None,
             usage_resume_enabled: None,
+            environment: Default::default(),
             usage_resume: Default::default(),
             native_failure_hold: Default::default(),
             prepare_attempt: Default::default(),
