@@ -170,7 +170,7 @@ pub use repositories::scheduler::{
 pub use repositories::startup_recovery::{self, StartupRecoveryRepository};
 pub use repositories::sync_documents::{
     ENTITY_TOMBSTONE_LIMIT, ENTITY_TOMBSTONE_PRUNE_BATCH, EntityPage, EntityRow, SyncDocument,
-    SyncDocumentsRepository,
+    SyncDocumentsRepository, WORK_COLLECTIONS,
 };
 pub use repositories::terminals::{ArchiveAppend, TerminalRow, TerminalsRepository};
 pub use repositories::transcript::{
