@@ -112,7 +112,7 @@ mod tests {
             assert_eq!(serde_json::to_value(dto).unwrap(), value);
         }
         let null_fast: ReviewDefaultsDto =
-            serde_json::from_value(json!({"model":null,"effort":null,"fastMode":null})).unwrap();
+            serde_json::from_str(r#"{"model":null,"effort":null,"fastMode":null}"#).unwrap();
         assert_eq!(
             serde_json::to_value(null_fast).unwrap(),
             json!({"model":null,"effort":null})

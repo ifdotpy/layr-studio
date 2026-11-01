@@ -518,7 +518,7 @@ mod tests {
     #[test]
     fn buffering_and_attempt_keep_their_distinct_null_rules() {
         let buffering: NativeSafetyBufferingRecord =
-            serde_json::from_value(json!({"dismissed": false})).unwrap();
+            serde_json::from_str(r#"{"dismissed":false}"#).unwrap();
         assert_eq!(
             serde_json::to_value(buffering).unwrap(),
             json!({"dismissed": false})
@@ -527,8 +527,7 @@ mod tests {
             serde_json::from_value::<NativeSafetyBufferingRecord>(json!({"dismissed": null}))
                 .is_err()
         );
-        let attempt: AgentStartAttempt =
-            serde_json::from_value(json!({"retiredEvents": null})).unwrap();
+        let attempt: AgentStartAttempt = serde_json::from_str(r#"{"retiredEvents":null}"#).unwrap();
         assert_eq!(
             serde_json::to_value(attempt).unwrap(),
             json!({"retiredEvents": null})

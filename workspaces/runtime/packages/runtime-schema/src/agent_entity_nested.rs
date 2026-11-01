@@ -165,7 +165,7 @@ pub struct WorkerDefaultsDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daybreak_enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub account_key: Field<crate::account_key::AccountKey>,
+    pub account_key: Field<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delegation_depth: Option<crate::bounded_integer::BoundedInteger<1, 3>>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -498,7 +498,7 @@ mod tests {
     }
 
     #[test]
-    fn worker_defaults_reject_invalid_keys_and_missing_or_null_required_fields() {
+    fn worker_defaults_preserve_keys_and_reject_missing_or_null_required_fields() {
         let valid = json!({"model":null,"effort":null,"fastMode":false});
         assert!(serde_json::from_value::<WorkerDefaultsDto>(valid.clone()).is_ok());
         let null_options = json!({"model":null,"effort":null,"fastMode":false,"daybreakEnabled":null,"delegationDepth":null});
@@ -507,10 +507,14 @@ mod tests {
         for invalid in [
             json!({"effort":null,"fastMode":false}),
             json!({"model":null,"effort":null,"fastMode":null}),
-            json!({"model":null,"effort":null,"fastMode":false,"accountKey":""}),
             json!({"model":null,"effort":null,"fastMode":false,"delegationDepth":4}),
         ] {
             assert!(serde_json::from_value::<WorkerDefaultsDto>(invalid).is_err());
+        }
+        for key in [String::new(), "x".repeat(201)] {
+            let value = json!({"model":null,"effort":null,"fastMode":false,"accountKey":key});
+            let defaults: WorkerDefaultsDto = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(defaults).unwrap(), value);
         }
     }
 

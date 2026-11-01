@@ -330,17 +330,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     // These union branches are owned by agent_progress, not generated DTOs.
     analysis.schemas.retain(|name, _| {
-        ![
-            "AgentEntityStartWaitDtoVariant",
-            "AgentNativeStatusError",
-            "AgentNativeStatusPhase",
-            "AccountChangeVariant",
-            "AccountChangeKind",
-            "AccountTransferProgressVariant",
-            "AccountTransferProgressKind",
-        ]
-        .iter()
-        .any(|prefix| name.starts_with(prefix))
+        name != "ConvertedFromLeadDtoBy"
+            && ![
+                "AgentEntityStartWaitDtoVariant",
+                "AgentNativeStatusError",
+                "AgentNativeStatusPhase",
+                "AccountChangeVariant",
+                "AccountChangeKind",
+                "AccountTransferProgressVariant",
+                "AccountTransferProgressKind",
+            ]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
     });
     analysis
         .schemas
