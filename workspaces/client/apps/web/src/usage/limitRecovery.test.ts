@@ -67,7 +67,7 @@ test("recovery callers retain the generated eligibility contract", () => {
   assert.equal(typeof invalid, "function");
 });
 
-test("restored eligibility retains its identity and expires at use time", () => {
+test("streamed eligibility retains its identity and expires at use time", () => {
   const records = new Map<string, string>();
   const storage = {
     getItem: (key: string) => records.get(key) ?? null,
@@ -82,9 +82,7 @@ test("restored eligibility retains its identity and expires at use time", () => 
     { eligibility: decision({ allowed: true, canRun: true }) },
   );
   cache.cacheAccountLimits(available);
-  const restored = createAccountLimitsCache(storage);
-  restored.configureLimitsCache("server");
-  const snapshot = restored.cachedAccountLimits("work");
+  const snapshot = cache.cachedAccountLimits("work");
   assert.deepEqual(snapshot, available);
   assert.equal(limitRecovered(agent, snapshot, now), true);
   assert.equal(limitRecovered(agent, snapshot, now + 6), false);
