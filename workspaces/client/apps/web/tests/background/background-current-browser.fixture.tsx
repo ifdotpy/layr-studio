@@ -32,11 +32,14 @@ const resources = createSubscriptions({
   watchResourceConnection: () => () => {},
 });
 // Only the services consumed by this fixture are needed.
-const services = {
+function partialServices(value: unknown): ServerServices {
+  return value as ServerServices;
+}
+const services = partialServices({
   owner: { id: "fixture", origin: location.origin },
   resources,
   api,
-} as unknown as ServerServices;
+});
 const root = createRoot(document.getElementById("root")!);
 window.renderFixture = (data, listing, leadId = "lead", initialFocus) => {
   resources.publish({ kind: "processes", agentId: leadId }, listing);
