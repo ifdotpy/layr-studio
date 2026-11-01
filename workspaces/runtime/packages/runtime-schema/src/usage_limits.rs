@@ -36,12 +36,8 @@ pub struct UsageLimitsResponse {
 pub struct UsageLimitsData {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account_id: Option<String>,
-    // The continuation gate denies an explicit null but permits an absent field.
-    #[serde(
-        default,
-        skip_serializing_if = "crate::queue_command::Field::is_missing"
-    )]
-    pub ordinary_usage_allowed: crate::queue_command::Field<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ordinary_usage_allowed: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_limit_reset_credits: Option<JsonObject<RateLimitResetCredits>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -285,7 +281,7 @@ impl<'de> Deserialize<'de> for ClaudeRateLimit {
 fn present_claude_field<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
     deserializer: D,
 ) -> Result<Option<T>, D::Error> {
-    T::deserialize(deserializer).map(Some)
+    Option::<T>::deserialize(deserializer)
 }
 
 fn string_enum<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
@@ -298,13 +294,15 @@ fn string_enum<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
 fn present_claude_enum<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
     deserializer: D,
 ) -> Result<Option<T>, D::Error> {
-    string_enum(deserializer).map(Some)
+    Option::<String>::deserialize(deserializer)?
+        .map(|value| T::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(value)))
+        .transpose()
 }
 
 fn present_claude_rate_limit<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<ClaudeRateLimit>, D::Error> {
-    ClaudeRateLimit::deserialize(deserializer).map(Some)
+    Option::<ClaudeRateLimit>::deserialize(deserializer)
 }
 
 #[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
@@ -1140,17 +1138,21 @@ mod tests {
     }
 
     #[test]
-    fn explicit_null_usage_permission_is_retained_for_continuation_gate() {
-        let raw = serde_json::value::RawValue::from_string(
-            r#"{"accountKey":"a","data":{"ordinaryUsageAllowed":null}}"#.to_owned(),
-        )
-        .unwrap();
-        let view = RateLimitView::read(&raw, "a", 0.0).unwrap();
-        assert_eq!(
-            serde_json::to_value(view).unwrap()["observation"]["data"]["ordinaryUsageAllowed"],
-            Value::Null
+    fn optional_nulls_normalize_to_absence_at_provider_boundary() {
+        let input = json!({"accountKey":"a","data":{"ordinaryUsageAllowed":null,"claudeRateLimit":{"status":"allowed","rateLimitType":null,"overageStatus":null,"resetsAt":null}}});
+        let response: UsageLimitsResponse = serde_json::from_value(input).unwrap();
+        let data = response.data.unwrap().0;
+        assert!(data.ordinary_usage_allowed.is_none());
+        assert!(
+            serde_json::to_value(&data)
+                .unwrap()
+                .get("ordinaryUsageAllowed")
+                .is_none()
         );
-        assert!(serde_json::to_value(RateLimitView::read(&raw, "a", 0.0).unwrap()).unwrap()["observation"]["data"].get("ordinaryUsageAllowed").is_some());
+        assert!(matches!(
+            data.claude_rate_limit,
+            Some(ClaudeRateLimit::Known(_))
+        ));
     }
 
     #[test]
@@ -1196,6 +1198,9 @@ mod tests {
             for value in values {
                 let mut record = json!({"status":"allowed"});
                 record[name] = value;
+                if name != "status" && record[name].is_null() {
+                    record.as_object_mut().unwrap().remove(name);
+                }
                 assert_eq!(
                     serde_json::from_value::<ClaudeRateInfo>(record.clone()).is_ok(),
                     validator.is_valid(&record),

@@ -173,7 +173,10 @@ async fn run_native_action(
     >,
     repair: Option<Extension<Arc<dyn NativeContextRepairPort>>>,
     ApiJson(body): ApiJson<generated::NativeActionRequest>,
-    idle: Option<(studio_runtime_services::idle_compaction::Episode, Value)>,
+    idle: Option<(
+        studio_runtime_services::idle_compaction::Episode,
+        studio_runtime_schema::usage_limits::UsageLimitsResponse,
+    )>,
 ) -> Result<Json<Value>, ApiError> {
     let value = serde_json::to_value(body).map_err(|_| ApiError::internal())?;
     let Some(action) = value.get("action").and_then(Value::as_str) else {
@@ -725,7 +728,7 @@ impl studio_runtime_services::idle_compaction::Host for IdleCompactionHost {
         &'a self,
         agent: &'a str,
         episode: studio_runtime_services::idle_compaction::Episode,
-        limits: Value,
+        limits: studio_runtime_schema::usage_limits::UsageLimitsResponse,
     ) -> studio_runtime_services::idle_compaction::HostFuture<'a> {
         Box::pin(async move {
             let body = serde_json::from_value(serde_json::json!({

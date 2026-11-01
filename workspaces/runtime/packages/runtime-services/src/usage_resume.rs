@@ -42,7 +42,7 @@ pub struct LimitsObservation {
     marker: Option<String>,
 }
 impl LimitsObservation {
-    pub(crate) fn from_response(
+    pub fn from_response(
         response: studio_runtime_schema::usage_limits::UsageLimitsResponse,
     ) -> Self {
         Self {
@@ -95,6 +95,17 @@ impl LimitsObservation {
     }
     pub fn allowed(&self, agent: &AgentRecord, now: f64) -> bool {
         self.data().is_some_and(|data| allowed(data, agent, now))
+    }
+    pub fn permits_idle_compaction(&self, agent: &AgentRecord, now: f64) -> bool {
+        let Some(data) = self.data() else {
+            return false;
+        };
+        let permitted = match data.claude_rate_limit.as_ref() {
+            None => true,
+            Some(ClaudeRateLimit::Known(info)) => info.status == ClaudeRateStatus::Allowed,
+            Some(ClaudeRateLimit::Unsupported(_)) => false,
+        };
+        permitted && eligibility(self, agent, now).state == EligibilityState::Allowed
     }
 }
 /// Read projection of the same model gate used by automatic continuation.
@@ -390,13 +401,7 @@ fn reset_at(data: &UsageLimitsData, agent: &AgentRecord) -> Option<f64> {
         .reduce(f64::max)
 }
 fn allowed(data: &UsageLimitsData, agent: &AgentRecord, now: f64) -> bool {
-    use studio_runtime_schema::queue_command::Field;
-    if !supported(data)
-        || data.rate_limits.is_none()
-        || matches!(
-            data.ordinary_usage_allowed,
-            Field::Null | Field::Value(false)
-        )
+    if !supported(data) || data.rate_limits.is_none() || data.ordinary_usage_allowed == Some(false)
     {
         return false;
     }

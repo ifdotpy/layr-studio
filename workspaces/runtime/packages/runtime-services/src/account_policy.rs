@@ -427,7 +427,7 @@ impl fmt::Debug for AccountsSnapshot {
 #[derive(Clone)]
 pub struct AccountPolicyState {
     accounts: AccountsSnapshot,
-    limits: BTreeMap<String, Value>,
+    limits: BTreeMap<String, studio_runtime_schema::usage_limits::UsageLimitsResponse>,
     limits_diagnostics: Vec<LimitsDiagnostic>,
 }
 
@@ -473,7 +473,9 @@ impl AccountPolicyState {
             if candidate.get("data").is_none_or(Value::is_null) {
                 continue;
             }
-            limits.insert(key, candidate);
+            if let Ok(candidate) = serde_json::from_value(candidate) {
+                limits.insert(key, candidate);
+            }
         }
         Ok(Self {
             accounts,
@@ -486,7 +488,12 @@ impl AccountPolicyState {
         registry_bytes: Option<&[u8]>,
         read: studio_runtime_store::account_state::LimitsRead,
     ) -> Result<Self, AccountPolicyError> {
-        let mut state = Self::from_startup(registry_bytes, read.snapshots)?;
+        let mut state = Self::from_startup(registry_bytes, [])?;
+        state.limits.extend(
+            read.snapshots
+                .into_iter()
+                .filter(|(_, value)| value.data.is_some()),
+        );
         state
             .limits_diagnostics
             .extend(read.diagnostics.into_iter().map(|item| LimitsDiagnostic {
@@ -507,9 +514,12 @@ impl AccountPolicyState {
     }
 
     pub fn limits(&self, account_key: &str) -> Value {
-        self.limits.get(account_key).cloned().unwrap_or_else(
-            || serde_json::json!({"accountKey":account_key,"data":null,"at":null,"error":null}),
-        )
+        self.limits
+            .get(account_key)
+            .map(|value| serde_json::to_value(value).expect("typed limits serialize"))
+            .unwrap_or_else(
+                || serde_json::json!({"accountKey":account_key,"data":null,"at":null,"error":null}),
+            )
     }
 
     pub fn limits_diagnostics(&self) -> &[LimitsDiagnostic] {

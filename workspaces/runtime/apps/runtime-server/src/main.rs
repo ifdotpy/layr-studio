@@ -1768,14 +1768,14 @@ async fn run_continuation_tick(
             let observation = if let Some(mut value) = fresh {
                 // A notification can commit between the read and this transaction.
                 // Prefer that newer snapshot, including a new rejection.
-                if let Some(current) = account_state::latest_limits_snapshot(tx, &account)?
-                    && current["at"].as_f64().unwrap_or(0.0) >= value["at"].as_f64().unwrap_or(0.0)
+                let stamp = account_state::LimitsStamp::read(account_state::limits_observation(tx, &account)?)?;
+                if let Some(current) = account_state::typed_limits_snapshot(tx, &account, &stamp)?
+                    && current.at.unwrap_or(0.0) >= value.at.unwrap_or(0.0)
                 {
                     value = current;
                 }
-                studio_runtime_services::usage_resume::LimitsObservation::from_record(value, None)
-                    .ok()
-                    .filter(|observation| observation.account_key() == account)
+                let observation = studio_runtime_services::usage_resume::LimitsObservation::from_response(value);
+                (observation.account_key() == account).then_some(observation)
             } else {
                 None
             };

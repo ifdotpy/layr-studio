@@ -42,7 +42,10 @@ pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
 };
 
 pub struct LimitsRead {
-    pub snapshots: Vec<(String, Value)>,
+    pub snapshots: Vec<(
+        String,
+        studio_runtime_schema::usage_limits::UsageLimitsResponse,
+    )>,
     pub diagnostics: Vec<LimitsReadDiagnostic>,
 }
 
@@ -60,41 +63,17 @@ pub const LIMITS_OBSERVATION_TIME_FIELDS: &[&str] = &["at", "readAt", "checkedAt
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LimitsStamp {
-    #[serde(
-        default,
-        deserialize_with = "studio_runtime_schema::json_object::optional_field"
-    )]
     pub scope: Option<studio_runtime_schema::provider_call_contract::ConnectionScope>,
-    #[serde(default, deserialize_with = "lenient_cursor")]
+    #[serde(default)]
     pub cursor: u64,
-    #[serde(
-        default,
-        deserialize_with = "studio_runtime_schema::json_object::optional_field",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub at: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "studio_runtime_schema::json_object::optional_field",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub read_at: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "studio_runtime_schema::json_object::optional_field",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub checked_at: Option<f64>,
-    #[serde(
-        default,
-        deserialize_with = "studio_runtime_schema::json_object::optional_field",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub processed_at: Option<f64>,
-}
-
-fn lenient_cursor<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
-    Ok(studio_runtime_schema::json_object::optional_field(deserializer)?.unwrap_or_default())
 }
 
 impl LimitsStamp {
@@ -153,28 +132,6 @@ pub fn typed_limits_snapshot(
         Ok(response)
     })
     .transpose()
-}
-
-/// Move observation times onto a decoded account snapshot without cloning provider data.
-pub fn apply_limits_observation(snapshot: &mut Value, observation: &mut Value) {
-    let (Some(snapshot), Some(observation)) =
-        (snapshot.as_object_mut(), observation.as_object_mut())
-    else {
-        return;
-    };
-    if !LIMITS_OBSERVATION_TIME_FIELDS
-        .iter()
-        .any(|field| observation.contains_key(*field))
-    {
-        return;
-    }
-    for field in LIMITS_OBSERVATION_TIME_FIELDS {
-        if let Some((key, value)) = observation.remove_entry(*field) {
-            snapshot.insert(key, value);
-        } else {
-            snapshot.remove(*field);
-        }
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -438,35 +395,58 @@ pub fn limits_snapshots(connection: &Connection) -> StoreResult<LimitsRead> {
         let receipt: Option<Vec<u8>> = row.get(3)?;
         let receipt_length: Option<i64> = row.get(4)?;
         let decoded = (|| {
-            let mut receipt = receipt
-                .map(|receipt| decode_limits_document(&receipt, receipt_length))
-                .transpose()?
-                .unwrap_or(Value::Null);
+            #[derive(serde::Deserialize)]
+            struct Envelope {
+                value: Projected,
+            }
+            #[derive(serde::Deserialize)]
+            struct Projected {
+                observation: studio_runtime_schema::usage_limits::UsageLimitsResponse,
+            }
+            fn decode<T: serde::de::DeserializeOwned>(
+                bytes: &[u8],
+                length: Option<i64>,
+                prefix: &str,
+            ) -> Result<T, (String, String)> {
+                if length.unwrap_or_default() > MAX_PERSISTED_DOCUMENT_BYTES as i64
+                    || !persisted_document_within_bounds(bytes)
+                {
+                    return Err(("/".into(), "resourceLimit".into()));
+                }
+                let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+                serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
+                    let path = error.path().to_string();
+                    let path = path
+                        .strip_prefix(prefix)
+                        .unwrap_or(&path)
+                        .trim_start_matches('.');
+                    let first = path.split('.').next().unwrap_or("");
+                    let pointer = if first.is_empty() {
+                        "/value".into()
+                    } else {
+                        format!("/{first}")
+                    };
+                    (pointer, "type".into())
+                })
+            }
+            let stamp = match receipt {
+                Some(bytes) => {
+                    decode::<Option<LimitsStamp>>(&bytes, receipt_length, "")?.unwrap_or_default()
+                }
+                None => LimitsStamp::default(),
+            };
             let bytes = bytes.ok_or_else(|| ("/value".to_owned(), "type".to_owned()))?;
-            let mut envelope = decode_limits_document(&bytes, length)?;
-            let mut snapshot = envelope
-                .get_mut("value")
-                .and_then(|value| value.get_mut("observation"))
-                .map(Value::take)
-                .ok_or_else(|| ("/value".to_owned(), "type".to_owned()))?;
-            apply_limits_observation(&mut snapshot, &mut receipt);
-            Ok(snapshot)
+            let mut response = decode::<Envelope>(&bytes, length, "value.observation")?
+                .value
+                .observation;
+            if response.account_key != key {
+                return Err(("/accountKey".into(), "identity".into()));
+            }
+            stamp.apply(&mut response);
+            Ok(response)
         })();
         let (snapshot, invalid) = match decoded {
-            Ok(snapshot) => {
-                let invalid = if snapshot
-                    .get("accountKey")
-                    .is_some_and(|account| account != &key)
-                {
-                    Some(("/accountKey".to_owned(), "identity".to_owned()))
-                } else {
-                    match validate_account_limits(&snapshot) {
-                        Ok(error) => error,
-                        Err(()) => Some(("/".to_owned(), "schemaCompile".to_owned())),
-                    }
-                };
-                (Some(snapshot), invalid)
-            }
+            Ok(snapshot) => (Some(snapshot), None),
             Err(error) => (None, Some(error)),
         };
         if let Some((pointer, keyword)) = invalid {
@@ -481,20 +461,6 @@ pub fn limits_snapshots(connection: &Connection) -> StoreResult<LimitsRead> {
         }
     }
     Ok(result)
-}
-
-fn decode_limits_document(bytes: &[u8], length: Option<i64>) -> Result<Value, (String, String)> {
-    if length.unwrap_or_default() > MAX_PERSISTED_DOCUMENT_BYTES as i64
-        || !persisted_document_within_bounds(bytes)
-    {
-        return Err(("/".to_owned(), "resourceLimit".to_owned()));
-    }
-    serde_json::from_slice(bytes).map_err(|_| ("/".to_owned(), "parse".to_owned()))
-}
-
-fn validate_account_limits(value: &Value) -> Result<Option<(String, String)>, ()> {
-    studio_runtime_schema::first_error("workspace-usage-limits/UsageLimitsResponse", value)
-        .map_err(|_| ())
 }
 
 pub fn persisted_document_within_bounds(bytes: &[u8]) -> bool {
@@ -675,11 +641,21 @@ mod tests {
         .expect("observation");
         let restored = limits_snapshots(&db).expect("read current account owner only");
         assert!(restored.diagnostics.is_empty());
-        assert_eq!(restored.snapshots[0].1["at"], 2.0);
-        assert_eq!(restored.snapshots[0].1["data"]["accountId"], "A");
+        assert_eq!(restored.snapshots[0].1.at, Some(2.0));
+        assert_eq!(
+            restored.snapshots[0]
+                .1
+                .data
+                .as_ref()
+                .unwrap()
+                .0
+                .account_id
+                .as_deref(),
+            Some("A")
+        );
         assert_eq!(
             super::latest_limits_snapshot(&db, "alpha").expect("latest"),
-            Some(restored.snapshots[0].1.clone())
+            Some(serde_json::to_value(&restored.snapshots[0].1).unwrap())
         );
     }
 
@@ -726,6 +702,17 @@ mod tests {
     }
 
     #[test]
+    fn restored_limits_are_typed_observations() {
+        let db = database(
+            &json!({"value":{"rateLimitsByAccount":{"alpha":{"accountKey":"alpha","at":1.0,"data":{"status":"ready"}}}}}),
+        );
+        let restored = limits_snapshots(&db).unwrap();
+        let observation: &studio_runtime_schema::usage_limits::UsageLimitsResponse =
+            &restored.snapshots[0].1;
+        assert_eq!(observation.account_key, "alpha");
+    }
+
+    #[test]
     fn reads_valid_account_map() {
         let alpha = json!({"accountKey":"alpha","at":1.0,"data":{"status":"ready",
             "rateLimits":{"primary":{"usedPercent":12,"providerWindow":{"x":1}}}}
@@ -735,7 +722,14 @@ mod tests {
         );
         let restored = limits_snapshots(&db).expect("read");
         assert!(restored.diagnostics.is_empty());
-        assert!(restored.snapshots.contains(&("alpha".to_owned(), alpha)));
+        let expected: studio_runtime_schema::usage_limits::UsageLimitsResponse =
+            serde_json::from_value(alpha).unwrap();
+        assert!(
+            restored
+                .snapshots
+                .iter()
+                .any(|(key, value)| key == "alpha" && *value == expected)
+        );
         assert!(!restored.snapshots.iter().any(|(key, _)| key == "default"));
         assert!(!restored.snapshots.iter().any(|(key, _)| key == "missing"));
     }
@@ -814,9 +808,19 @@ mod tests {
         .expect("account observation");
         let restored = limits_snapshots(&db).expect("restore");
         assert!(restored.diagnostics.is_empty());
-        assert_eq!(restored.snapshots[0].1["at"], 2.0);
-        assert!(restored.snapshots[0].1.get("readAt").is_none());
-        assert_eq!(restored.snapshots[0].1["data"]["accountId"], "A");
+        assert_eq!(restored.snapshots[0].1.at, Some(2.0));
+        assert!(restored.snapshots[0].1.read_at.is_none());
+        assert_eq!(
+            restored.snapshots[0]
+                .1
+                .data
+                .as_ref()
+                .unwrap()
+                .0
+                .account_id
+                .as_deref(),
+            Some("A")
+        );
         db.execute(
             "UPDATE runtime_account_state SET limits_observation=?1",
             [json!({"at":"private-corrupt-timestamp"}).to_string()],

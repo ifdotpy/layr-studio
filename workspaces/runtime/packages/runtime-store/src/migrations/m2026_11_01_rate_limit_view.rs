@@ -78,6 +78,28 @@ mod tests {
     use rusqlite::Connection;
 
     #[test]
+    fn migration_isolates_unreadable_and_foreign_accounts() {
+        let mut db = crate::fresh_state::test_canvas();
+        for (id, payload) in [
+            ("bad", "not json"),
+            (
+                "wrong",
+                r#"{"collection":"rateLimit","id":"wrong","value":{"accountKey":"other"}}"#,
+            ),
+        ] {
+            db.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('rateLimit',?1,1,'old',?2,0)", [id, payload]).unwrap();
+        }
+        let tx = db.transaction().unwrap();
+        super::super::m2026_11_01_normalize_limits::apply(&tx, 100.0).unwrap();
+        for id in ["bad", "wrong"] {
+            let raw: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0", [id], |row| row.get(0)).unwrap();
+            let entity: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            assert_eq!(entity["value"]["observation"]["accountKey"], id);
+            assert!(entity["value"]["observation"].get("data").is_none());
+        }
+    }
+
+    #[test]
     fn migration_normalizes_legacy_null_observation_times() {
         let mut db = crate::fresh_state::test_canvas();
         db.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('rateLimit','a',1,'old',?1,0)", [r#"{"collection":"rateLimit","id":"a","value":{"accountKey":"a","at":null,"error":"offline"}}"#]).unwrap();
@@ -108,10 +130,7 @@ mod tests {
         let data = &value["value"]["observation"]["data"];
         assert_eq!(data["rateLimits"]["primary"]["usedPercent"], 80.0);
         assert!(data["rateLimits"]["primary"].get("vendor").is_none());
-        assert!(
-            data.get("ordinaryUsageAllowed")
-                .is_some_and(serde_json::Value::is_null)
-        );
+        assert!(data.get("ordinaryUsageAllowed").is_none());
     }
 
     #[test]
@@ -160,7 +179,7 @@ mod tests {
             })
             .unwrap();
         let restored = crate::account_state::limits_snapshots(&db).unwrap();
-        assert_eq!(restored.snapshots[0].1["accountKey"], "a");
+        assert_eq!(restored.snapshots[0].1.account_key, "a");
         super::super::apply_target(&mut db, MigrationTarget::Canvas).unwrap();
         let again: i64 = db
             .query_row("SELECT seq FROM sync_entities WHERE id='a'", [], |row| {

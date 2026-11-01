@@ -2136,16 +2136,11 @@ pub(super) async fn journal_batch(
                 Some(
                     store
                         .read_async("runtime-services/account_worker_journal_snapshot", move |tx| {
-                            let limits = studio_runtime_store::account_state::limits_snapshots(tx)?
-                                .snapshots
-                                .into_iter()
-                                .find(|(key, _)| key == &account_for_read)
-                                .map(|(_, limits)| limits)
-                                .unwrap_or_else(|| {
-                                    json!({"accountKey":account_for_read,"at":null,"error":null,"data":null,"stale":true})
-                                });
-                            crate::usage_resume::LimitsObservation::from_record(limits, None)
-                                .map_err(|error| WorkerError::PreparationRefused(error.to_string()))
+                            let response = studio_runtime_store::account_state::limits_snapshots(tx)?
+                                .snapshots.into_iter().find(|(key, _)| key == &account_for_read)
+                                .map(|(_, response)| response)
+                                .unwrap_or_else(|| studio_runtime_schema::usage_limits::UsageLimitsResponse { account_key: account_for_read, ..Default::default() });
+                            Ok::<_, WorkerError>(crate::usage_resume::LimitsObservation::from_response(response))
                         })
                         .await?,
                 )

@@ -263,8 +263,10 @@ pub trait AccountSessionPort: Send + Sync {
         &'a self,
         account: &'a str,
         _after: f64,
-    ) -> AccountSessionFuture<'a, Value> {
-        self.read_limits(account)
+    ) -> AccountSessionFuture<'a, studio_runtime_schema::usage_limits::UsageLimitsResponse> {
+        Box::pin(async move {
+            Ok(LimitsSnapshot::read(account, self.read_limits(account).await?)?.response)
+        })
     }
     /// Apply one durable notification. Return whether limits or the wake schedule changed.
     fn ingest_limits<'a>(&'a self, _update: LimitsUpdate) -> AccountSessionFuture<'a, bool> {
@@ -859,7 +861,9 @@ enum ResetDeadline {
         at: f64,
         task: tokio::task::AbortHandle,
     },
-    Checking,
+    Checking {
+        at: f64,
+    },
 }
 
 async fn spawn_account_driver<T: Send + 'static>(
@@ -1069,7 +1073,7 @@ impl AccountSessionRuntime {
         let Ok(mut deadlines) = self.reset_deadlines.lock() else {
             return;
         };
-        if matches!(deadlines.get(account), Some(ResetDeadline::Checking)) {
+        if matches!(deadlines.get(account), Some(ResetDeadline::Checking { .. })) {
             return;
         }
         if let Some(ResetDeadline::Scheduled { at, .. }) = deadlines.get(account)
@@ -1091,18 +1095,15 @@ impl AccountSessionRuntime {
             {
                 let Ok(mut deadlines) = runtime.reset_deadlines.lock() else { return };
                 if !matches!(deadlines.get(&key), Some(ResetDeadline::Scheduled { at: current, .. }) if *current == at) { return; }
-                deadlines.insert(key.clone(), ResetDeadline::Checking);
+                deadlines.insert(key.clone(), ResetDeadline::Checking { at });
             }
             if let Some(store) = &runtime.store
-                && limits::publish_checking(store.clone(), key.clone(), at).await.is_err()
+                && limits::persist(store.clone(), runtime.refreshed_limits.clone(), key.clone(), limits::LimitsWrite::Checking { reset_at: at }, runtime.continuation_wake.clone(), runtime.session.clone()).await.is_err()
             {
                 if let Ok(mut deadlines) = runtime.reset_deadlines.lock() { deadlines.remove(&key); }
                 return;
             }
             let _ = read_limits_with_freshness(&runtime, &key, false).await;
-            if let Some(store) = &runtime.store {
-                let _ = limits::publish_finished(store.clone(), key.clone()).await;
-            }
             if let Ok(mut deadlines) = runtime.reset_deadlines.lock() { deadlines.remove(&key); }
             runtime.schedule_reset_after(&key, at);
         });
@@ -1131,10 +1132,7 @@ impl AccountSessionRuntime {
             self.refreshed_limits
                 .lock()
                 .map_err(|_| AccountSessionError::Persistence)?
-                .insert(
-                    account.clone(),
-                    LimitsSnapshot::read(&account, value)?.response,
-                );
+                .insert(account.clone(), value);
             self.schedule_reset(&account);
         }
         Ok(())
@@ -1603,11 +1601,8 @@ impl AccountSessionPort for AccountSessionRuntime {
         &'a self,
         account: &'a str,
         after: f64,
-    ) -> AccountSessionFuture<'a, Value> {
-        Box::pin(async move {
-            let response = limits::read_for_resume(self, account, after).await?;
-            serde_json::to_value(response).map_err(|_| AccountSessionError::Persistence)
-        })
+    ) -> AccountSessionFuture<'a, studio_runtime_schema::usage_limits::UsageLimitsResponse> {
+        Box::pin(limits::read_for_resume(self, account, after))
     }
     fn ingest_limits<'a>(&'a self, update: LimitsUpdate) -> AccountSessionFuture<'a, bool> {
         Box::pin(async move {
@@ -1637,6 +1632,12 @@ impl AccountSessionPort for AccountSessionRuntime {
                         .data
                         .ok_or(AccountSessionError::InvalidResponse("/data".into()))?
                         .0,
+                    checking: self.reset_deadlines.lock().ok().and_then(
+                        |deadlines| match deadlines.get(&account) {
+                            Some(ResetDeadline::Checking { at }) => Some(*at),
+                            _ => None,
+                        },
+                    ),
                 },
                 self.continuation_wake.clone(),
                 self.session.clone(),
@@ -2484,7 +2485,14 @@ mod persistence_tests {
         let restored =
             studio_runtime_store::account_state::limits_snapshots(&store.test_reader().unwrap())
                 .unwrap();
-        assert!(restored.snapshots.iter().any(|(account,value)| account=="other" && value["data"]["accountId"]=="other"));
+        assert!(restored.snapshots.iter().any(|(account, value)| {
+            account == "other"
+                && value
+                    .data
+                    .as_ref()
+                    .and_then(|data| data.0.account_id.as_deref())
+                    == Some("other")
+        }));
     }
 
     #[tokio::test]
@@ -2745,6 +2753,40 @@ mod limits_runtime_tests {
     }
 
     #[tokio::test]
+    async fn provider_result_and_finished_status_commit_together() {
+        let reset_at = super::timestamp().unwrap() + 0.1;
+        let (f, entered, release) = fixture(
+            [Reply::Data(
+                json!({"rateLimits":{"primary":{"usedPercent":0.0}}}),
+            )],
+            true,
+        )
+        .await;
+        let store = f.runtime.store.as_ref().unwrap().clone();
+        let changes = Arc::new(tokio::sync::Notify::new());
+        let observer = changes.clone();
+        store.add_commit_observer(move || observer.notify_one());
+        f.runtime.persist_limits("default", &json!({"accountKey":"default","at":reset_at-1.0,"readAt":reset_at-1.0,"data":{"rateLimits":{"primary":{"usedPercent":100.0,"resetsAt":reset_at}}}})).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), entered)
+            .await
+            .unwrap()
+            .unwrap();
+        store.transaction(|tx| {
+            tx.execute_batch("CREATE TRIGGER reject_checking_result BEFORE UPDATE ON sync_entities WHEN NEW.collection='rateLimit' AND json_extract(NEW.payload,'$.value.projection.status.kind')='checking' AND json_extract(NEW.payload,'$.value.observation.data.rateLimits.primary.usedPercent')=0 BEGIN SELECT RAISE(ABORT,'result must finish atomically'); END;")?;
+            Ok(())
+        }).await.unwrap();
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let payload: String = store.test_reader().unwrap().query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0)).unwrap();
+                let value: Value = serde_json::from_str(&payload).unwrap();
+                if value["value"]["projection"]["status"]["kind"] == "current" && value["value"]["observation"]["data"]["rateLimits"]["primary"]["usedPercent"] == 0.0 { break; }
+                changes.notified().await;
+            }
+        }).await.expect("provider result and completed status publish together");
+    }
+
+    #[tokio::test]
     async fn forced_read_replaces_restored_legacy_null_timestamp() {
         let (f, _, _) = fixture([Reply::Data(json!({"accountId":"fresh"}))], false).await;
         f.runtime
@@ -2818,6 +2860,27 @@ mod limits_runtime_tests {
             .await
             .unwrap()
             .unwrap();
+        let payload: String = store
+            .test_reader()
+            .unwrap()
+            .query_row(
+                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let checking: Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(
+            checking["value"]["projection"]["status"]["kind"],
+            "checking"
+        );
+        assert!(
+            checking["value"]["projection"]["reset"]["credits"]
+                .as_array()
+                .unwrap()
+                .is_empty(),
+            "expired credits disappear before the provider replies"
+        );
         release.send(()).unwrap();
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -3013,7 +3076,8 @@ mod limits_runtime_tests {
             studio_runtime_store::account_state::limits_snapshots(&store.test_reader().unwrap())
                 .unwrap();
         assert_eq!(
-            restored.snapshots[0].1["at"], repeated.observed_at,
+            restored.snapshots[0].1.at,
+            Some(repeated.observed_at),
             "startup restoration retains timestamp-only freshness"
         );
         let raw: String = store
@@ -3191,7 +3255,7 @@ mod limits_runtime_tests {
             .await
             .unwrap();
         assert_eq!(
-            cached["data"]["claudeRateLimit"]["overageStatus"],
+            serde_json::to_value(&cached).unwrap()["data"]["claudeRateLimit"]["overageStatus"],
             "allowed"
         );
         assert_eq!(f.provider.calls.load(Ordering::SeqCst), 0);
@@ -3200,7 +3264,10 @@ mod limits_runtime_tests {
             .read_limits_for_resume("default", at)
             .await
             .unwrap();
-        assert_eq!(fresh["data"]["rateLimits"]["primary"]["usedPercent"], 0.0);
+        assert_eq!(
+            serde_json::to_value(&fresh).unwrap()["data"]["rateLimits"]["primary"]["usedPercent"],
+            0.0
+        );
         assert_eq!(f.provider.calls.load(Ordering::SeqCst), 1);
         // Recent data from a retired generation cannot satisfy a new timer read.
         f.provider
