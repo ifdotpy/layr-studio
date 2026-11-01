@@ -1238,16 +1238,6 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
-<<<<<<< head
-            id: "2026-11-01-work-history-rows",
-            introduced: NOVEMBER_1,
-            target: MigrationTarget::Canvas,
-            supported_source: "Work records whose results, decisions and releases exist only inside the record",
-            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
-        },
-        apply: |c| crate::work_history::migrate(c.transaction),
-||||||| base
-=======
             id: "2026-11-01-chat-busy-deleted-index",
             introduced: NOVEMBER_1,
             target: MigrationTarget::Canvas,
@@ -1255,7 +1245,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_01_chat_busy_deleted_index::apply(c.transaction),
->>>>>>> origin/main
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-work-history-rows",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Work records whose results, decisions and releases exist only inside the record",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| crate::work_history::migrate(c.transaction),
     },
 ];
 
