@@ -1110,55 +1110,14 @@ impl Snapshot {
                 Some(ReceiptCertainty::Written | ReceiptCertainty::NotSent) => {
                     return Ok(self.decision(self.operation.clone(), self.agents.clone(), vec![]));
                 }
-<<<<<<< head
-                Some(ReceiptCertainty::Unknown) | None => {
+                Some(ReceiptCertainty::Unknown) => {
                     return Err(TransferError::Refused(
                         "The provider read outcome is unknown; it was not repeated",
                     ));
-||||||| base
-                let receipt = member
-                    .get("providerReadReceipts")
-                    .and_then(Value::as_object)
-                    .and_then(|receipts| receipts.get(operation));
-                match receipt.and_then(|saved| saved["certainty"].as_str()) {
-                    Some("written") => {
-                        return Ok(self.decision(
-                            self.operation.clone(),
-                            self.agents.clone(),
-                            vec![],
-                        ));
-                    }
-                    Some("not_sent") => {}
-                    Some("unknown") | None => {
-                        return Err(TransferError::Refused(
-                            "The provider read outcome is unknown; it was not repeated",
-                        ));
-                    }
-                    _ => return Err(invalid("account transfer", "/members/providerReadReceipts")),
-=======
-                let receipt = member
-                    .get("providerReadReceipts")
-                    .and_then(Value::as_object)
-                    .and_then(|receipts| receipts.get(operation));
-                match receipt.and_then(|saved| saved["certainty"].as_str()) {
-                    Some("written") => {
-                        return Ok(self.decision(
-                            self.operation.clone(),
-                            self.agents.clone(),
-                            vec![],
-                        ));
-                    }
-                    // No receipt: the retained ledger keys the call, so asking again
-                    // replays its recorded answer or holds it; it never sends twice.
-                    Some("not_sent") | None => {}
-                    Some("unknown") => {
-                        return Err(TransferError::Refused(
-                            "The provider read outcome is unknown; it was not repeated",
-                        ));
-                    }
-                    _ => return Err(invalid("account transfer", "/members/providerReadReceipts")),
->>>>>>> 6bce915
                 }
+                // No receipt: the retained ledger keys the call, so asking again
+                // replays its recorded answer or holds it; it never sends twice.
+                None => {}
             }
         }
         let mut op = self.operation.clone();
