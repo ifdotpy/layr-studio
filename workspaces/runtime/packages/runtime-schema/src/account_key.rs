@@ -9,8 +9,12 @@ pub const ACCOUNT_KEY_MAX_CHARS: usize = 200;
 pub struct AccountKey(crate::bounded_text::BoundedText<1, ACCOUNT_KEY_MAX_CHARS>);
 
 impl schemars::JsonSchema for AccountKey {
-    fn inline_schema() -> bool { true }
-    fn schema_name() -> std::borrow::Cow<'static, str> { "AccountKey".into() }
+    fn inline_schema() -> bool {
+        true
+    }
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "AccountKey".into()
+    }
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         <crate::bounded_text::BoundedText<1, ACCOUNT_KEY_MAX_CHARS> as schemars::JsonSchema>::json_schema(generator)
     }
