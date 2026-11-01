@@ -5,6 +5,46 @@ use crate::queue_command::Field;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// An optional field that accepts a value when present, but not null.
+#[derive(Clone, Debug)]
+pub struct Present<T>(pub Option<T>);
+
+impl<T> Default for Present<T> {
+    fn default() -> Self {
+        Self(None)
+    }
+}
+
+impl<T> Present<T> {
+    pub fn is_missing(&self) -> bool {
+        self.0.is_none()
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Present<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        T::deserialize(d).map(|value| Self(Some(value)))
+    }
+}
+
+impl<T: Serialize> Serialize for Present<T> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<T: JsonSchema> JsonSchema for Present<T> {
+    fn inline_schema() -> bool {
+        true
+    }
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        T::schema_name()
+    }
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        T::json_schema(generator)
+    }
+}
+
 fn nullable<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     d: D,
 ) -> Result<Option<T>, D::Error> {
@@ -78,6 +118,57 @@ pub struct AgentNativeRelease {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeSafetyBufferingRecord {
+    #[serde(default, skip_serializing_if = "Present::is_missing")]
+    pub account_key: Present<String>,
+    #[serde(default, skip_serializing_if = "Present::is_missing")]
+    pub at: Present<f64>,
+    #[serde(default, skip_serializing_if = "Present::is_missing")]
+    pub connection_id: Present<String>,
+    #[serde(default, skip_serializing_if = "Present::is_missing")]
+    pub dismissed: Present<bool>,
+    #[serde(default, skip_serializing_if = "Present::is_missing")]
+    pub faster_model: Present<String>,
+    #[serde(default, skip_serializing_if = "Present::is_missing")]
+    pub response_started: Present<bool>,
+    #[serde(default, skip_serializing_if = "Present::is_missing")]
+    pub show_buffering_ui: Present<bool>,
+    #[serde(default, skip_serializing_if = "Present::is_missing")]
+    pub thread_id: Present<String>,
+    #[serde(default, skip_serializing_if = "Present::is_missing")]
+    pub turn_id: Present<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentStartAttempt {
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub prepare_error: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub response_error: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub retired_events: Field<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+#[schemars(inline)]
+pub enum ConversionActor {
+    User,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConvertedFromLeadDto {
+    pub request_id: String,
+    pub by: ConversionActor,
+    pub at: f64,
+    pub old_root_id: String,
+    pub root_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentEntityCapacityRetryDto {
     pub id: String,
     #[serde(deserialize_with = "nullable")]
@@ -115,7 +206,7 @@ pub struct AgentEntityUsageResumeDto {
     pub due_at: Option<f64>,
 }
 
-pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 8], String> {
+pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 11], String> {
     use crate::agent_entity_nested::{nullable as normalize_nullable, object, property, title};
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
@@ -252,6 +343,78 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 8], String
         return Err("release phase order changed".into());
     }
     entries.swap(2, 3);
+    let mut buffering = NativeSafetyBufferingRecord::json_schema(&mut generator).to_value();
+    title(&mut buffering, "NativeSafetyBufferingRecord")?;
+    for (name, label) in [
+        ("accountKey", "Accountkey"),
+        ("at", "At"),
+        ("connectionId", "Connectionid"),
+        ("dismissed", "Dismissed"),
+        ("fasterModel", "Fastermodel"),
+        ("responseStarted", "Responsestarted"),
+        ("showBufferingUi", "Showbufferingui"),
+        ("threadId", "Threadid"),
+        ("turnId", "Turnid"),
+    ] {
+        let prop = property(&mut buffering, name)?;
+        if name == "at" && object(prop)?.remove("format") != Some(serde_json::json!("double")) {
+            return Err("buffering at must use double format".into());
+        }
+        title(prop, label)?;
+    }
+    let mut attempt = AgentStartAttempt::json_schema(&mut generator).to_value();
+    title(&mut attempt, "AgentStartAttempt")?;
+    for (name, label) in [
+        ("prepareError", "Prepareerror"),
+        ("responseError", "Responseerror"),
+    ] {
+        normalize_nullable(&mut attempt, name, label, true)?;
+    }
+    let prop = property(&mut attempt, "retiredEvents")?;
+    let mut list = prop.clone();
+    let list_object = object(&mut list)?;
+    let kind = list_object
+        .get_mut("type")
+        .ok_or("retiredEvents missing type")?;
+    if *kind != serde_json::json!(["array", "null"]) {
+        return Err("retiredEvents must be a nullable array".into());
+    }
+    *kind = "array".into();
+    *prop =
+        serde_json::json!({"anyOf":[list,{"type":"null"}],"default":null,"title":"Retiredevents"});
+    let mut converted = ConvertedFromLeadDto::json_schema(&mut generator).to_value();
+    title(&mut converted, "ConvertedFromLeadDto")?;
+    object(&mut converted)?.insert(
+        "description".into(),
+        "User conversion provenance persisted when a peer lead becomes a worker.".into(),
+    );
+    for (name, label) in [
+        ("requestId", "Requestid"),
+        ("by", "By"),
+        ("at", "At"),
+        ("oldRootId", "Oldrootid"),
+        ("rootId", "Rootid"),
+    ] {
+        let prop = property(&mut converted, name)?;
+        let obj = object(prop)?;
+        if name == "at" && obj.remove("format") != Some(serde_json::json!("double")) {
+            return Err("conversion at must use double format".into());
+        }
+        if name == "by" {
+            let variants = obj
+                .remove("enum")
+                .and_then(|v| v.as_array().cloned())
+                .ok_or("conversion actor must be an enum")?;
+            if variants.len() != 1 {
+                return Err("conversion actor must have one variant".into());
+            }
+            obj.insert(
+                "const".into(),
+                variants.into_iter().next().ok_or("missing actor")?,
+            );
+        }
+        title(prop, label)?;
+    }
     Ok([
         ("AgentEntityCapacityRetryDto", retry),
         ("CapacityRetryCause", retry_cause),
@@ -261,6 +424,9 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 8], String
         ("AgentRole", role),
         ("AgentNativeRelease", release),
         ("NativeReleasePhase", release_phase),
+        ("NativeSafetyBufferingRecord", buffering),
+        ("AgentStartAttempt", attempt),
+        ("ConvertedFromLeadDto", converted),
     ])
 }
 
@@ -299,6 +465,12 @@ mod tests {
         read: String,
     }
 
+    #[derive(JsonSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct ChangedStartAttempt {
+        prepare_error: Field<bool>,
+    }
+
     #[test]
     fn read_field_change_changes_rendered_schema() {
         let witness = ChangedReadState { read: "x".into() };
@@ -312,6 +484,23 @@ mod tests {
     }
 
     #[test]
+    fn attempt_field_change_changes_derived_schema() {
+        let witness = ChangedStartAttempt {
+            prepare_error: Field::Value(false),
+        };
+        assert!(witness.prepare_error.is_some());
+        let mut generator = schemars::generate::SchemaSettings::openapi3()
+            .for_serialize()
+            .into_generator();
+        let changed = ChangedStartAttempt::json_schema(&mut generator).to_value();
+        let actual = AgentStartAttempt::json_schema(&mut generator).to_value();
+        assert_ne!(
+            changed.pointer("/properties/prepareError"),
+            actual.pointer("/properties/prepareError")
+        );
+    }
+
+    #[test]
     fn context_and_read_state_reject_missing_or_out_of_range_counters() {
         assert!(
             serde_json::from_value::<ContextUsageDto>(json!({"tokens": null, "window": null}))
@@ -321,6 +510,32 @@ mod tests {
         assert!(
             serde_json::from_value::<ReadStateDto>(
                 json!({"threadId":"t", "turnId":"u", "read":true, "revision":-1})
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn buffering_and_attempt_keep_their_distinct_null_rules() {
+        let buffering: NativeSafetyBufferingRecord =
+            serde_json::from_value(json!({"dismissed": false})).unwrap();
+        assert_eq!(
+            serde_json::to_value(buffering).unwrap(),
+            json!({"dismissed": false})
+        );
+        assert!(
+            serde_json::from_value::<NativeSafetyBufferingRecord>(json!({"dismissed": null}))
+                .is_err()
+        );
+        let attempt: AgentStartAttempt =
+            serde_json::from_value(json!({"retiredEvents": null})).unwrap();
+        assert_eq!(
+            serde_json::to_value(attempt).unwrap(),
+            json!({"retiredEvents": null})
+        );
+        assert!(
+            serde_json::from_value::<ConvertedFromLeadDto>(
+                json!({"requestId":"r","by":"agent","at":1,"oldRootId":"old","rootId":"new"})
             )
             .is_err()
         );

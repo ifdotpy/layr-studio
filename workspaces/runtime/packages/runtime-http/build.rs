@@ -123,6 +123,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             "studio_runtime_schema::agent_entity_nested::WorkspaceCleanupSummaryDto",
         ),
         (
+            "NativeSafetyBufferingRecord",
+            "studio_runtime_schema::agent_entity_nested_extra::NativeSafetyBufferingRecord",
+        ),
+        (
+            "AgentStartAttempt",
+            "studio_runtime_schema::agent_entity_nested_extra::AgentStartAttempt",
+        ),
+        (
+            "ConvertedFromLeadDto",
+            "studio_runtime_schema::agent_entity_nested_extra::ConvertedFromLeadDto",
+        ),
+        (
             "AgentNativeRelease",
             "studio_runtime_schema::agent_entity_nested_extra::AgentNativeRelease",
         ),
