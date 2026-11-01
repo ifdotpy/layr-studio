@@ -11,6 +11,47 @@ use studio_runtime_store::{AgentRecord, AgentRepository, StoreError};
 const CHAT: &str = "published-chat";
 
 #[tokio::test]
+async fn interrupted_child_turn_end_republishes_lead_cancel_eligibility() {
+    let (_dir, store) = store().await;
+    let op = json!({"id":"move","leadId":CHAT,"targetAccountKey":"target",
+        "status":"pending","created":1.0,"members":{
+            "published-chat":{"phase":"completed","sourceAccountKey":"default","lazy":false},
+            "child":{"phase":"blocked","sourceAccountKey":"default","lazy":false,
+                "interruptOutcome":"acknowledged","interruptSubmittedAt":1.0,"error":"Waiting"}}});
+    store
+        .transaction(move |tx| {
+            let child =
+                AgentRecord::from_value(json!({"compactions":0,"id":"child","rootId":CHAT,
+            "parentId":CHAT,"epoch":1,"status":"running","inFlight":true,
+            "isLead":false,"provider":"codex","accountKey":"default"}))?;
+            AgentRepository::put(tx, &child)?;
+            studio_runtime_store::AccountTransferRepository::put(tx, "move", &op.to_string())
+        })
+        .await
+        .unwrap();
+    seed_chat(
+        &store,
+        chat(json!({"accountTransferId":"move","accountTransfer":{
+        "id":"move","targetAccountKey":"target","status":"pending","movingNow":0,
+        "canRetry":true,"blocked":[{"id":"child","reason":"Waiting"}]}})),
+    )
+    .await;
+    assert_eq!(
+        chat_view(&store, CHAT)["accountTransferProgress"]["actions"],
+        "retry"
+    );
+    store.transaction(|tx| {
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.inFlight',json('false')) WHERE id='child'", [])?;
+        Ok(())
+    }).await.unwrap();
+    assert_eq!(chat_view(&store, "child")["inFlight"], false);
+    assert_eq!(
+        chat_view(&store, CHAT)["accountTransferProgress"]["actions"],
+        "retry_cancel"
+    );
+}
+
+#[tokio::test]
 async fn legacy_blocked_summary_offers_cancel_when_operation_allows_it() {
     let (_dir, store) = store().await;
     let op = json!({"id":"move","leadId":CHAT,"targetAccountKey":"target",
