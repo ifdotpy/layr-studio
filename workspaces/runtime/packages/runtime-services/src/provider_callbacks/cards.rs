@@ -5,9 +5,7 @@ use studio_runtime_providers::ProviderKind;
 use studio_runtime_providers::{RequestId, ResponseBody};
 use studio_runtime_schema::persistence::RequestCardStatus;
 use studio_runtime_schema::question_answers::QuestionDecision;
-use studio_runtime_store::{
-    QuestionsWriteRepository, RequestRecord, RuntimeStore, Table, system_reads as records,
-};
+use studio_runtime_store::{RequestRecord, RuntimeStore, Table, system_reads as records};
 
 /// The native provider requests that wait for the user as a request card. The
 /// web client renders each of them (`components/questions/Requests.tsx`).
@@ -229,16 +227,9 @@ pub(super) fn save_historical(tx: &Transaction<'_>, card: &Value) -> Result<(), 
     let id = card["id"]
         .as_str()
         .ok_or(CallbackError::Invalid("Invalid callback card identity"))?;
-    if ["agent", "connectionId", "method", "status"]
-        .into_iter()
-        .any(|key| {
-            card.get(key)
-                .is_some_and(|value| !value.is_null() && !value.is_string())
-        })
-    {
-        return Err(CallbackError::Stored(format!("runtime_requests/{id}")));
-    }
-    QuestionsWriteRepository::put_request(tx, id, &card.to_string())?;
+    let record = <RequestRecord as serde::Deserialize>::deserialize(card)
+        .map_err(|_| CallbackError::Stored(format!("runtime_requests/{id}")))?;
+    Table::<RequestRecord>::new(tx).put(&record)?;
     let actor = card["agent"]
         .as_str()
         .map(|id| records::get(tx, "runtime_agents", id))
@@ -253,29 +244,25 @@ pub(super) fn save_historical(tx: &Transaction<'_>, card: &Value) -> Result<(), 
         )?;
     }
     let deleted = status(card)? != RequestCardStatus::Pending;
-    let value = if deleted {
-        json!({})
+    if deleted {
+        studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "request", id, (), true)?;
     } else {
-        crate::sync_views::project_persisted_record("request", card)
-            .ok_or_else(|| CallbackError::Stored(format!("runtime_requests/{id}")))?
-    };
-    studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "request", id, value, deleted)?;
+        let value = crate::request_projection::project_request_record(&record)
+            .map_err(|_| CallbackError::Stored(format!("runtime_requests/{id}")))?;
+        studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "request", id, value, false)?;
+    }
     Ok(())
 }
 
 pub(super) fn save(tx: &Transaction<'_>, card: &RequestRecord) -> Result<(), CallbackError> {
     let id = card.id.as_str();
+    let value = crate::request_projection::project_request_record(card)
+        .map_err(|_| CallbackError::Invalid("Invalid provider request payload"))?;
     Table::<RequestRecord>::new(tx).put(card)?;
     if let Some(actor) = records::get(tx, "runtime_agents", &card.agent)? {
         crate::tool_requests::reconcile_request_effect(tx, card, &actor)?;
     }
     let deleted = card.status != RequestCardStatus::Pending;
-    let value = if deleted {
-        json!({})
-    } else {
-        crate::sync_views::project_persisted_record("request", &json!(card))
-            .ok_or_else(|| CallbackError::Stored(format!("runtime_requests/{id}")))?
-    };
     studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "request", id, value, deleted)?;
     Ok(())
 }

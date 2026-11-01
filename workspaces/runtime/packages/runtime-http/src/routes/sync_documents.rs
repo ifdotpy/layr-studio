@@ -551,13 +551,49 @@ pub(crate) struct PreferencePushRequest {
     fields: serde_json::Map<String, Value>,
 }
 
+/// Maximum documents in one draft push. Unit: documents.
+const DRAFT_PUSH_MAX_ROWS: usize = 100;
+/// Longest draft document identity. Unit: Unicode code points.
+const DRAFT_DOCUMENT_ID_MAX_CHARS: usize = 300;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DraftPushRequest {
+    rows:
+        studio_runtime_schema::continuation_snapshot::BoundedVec<DraftPushRow, DRAFT_PUSH_MAX_ROWS>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DraftPushRow {
+    assumed_master_state: Option<DraftDocumentInput>,
+    new_document_state: DraftDocumentInput,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DraftDocumentInput {
+    id: studio_runtime_schema::bounded_text::BoundedText<0, DRAFT_DOCUMENT_ID_MAX_CHARS>,
+    payload: String,
+    #[serde(default)]
+    deleted: bool,
+    #[serde(rename = "seq")]
+    _seq: Option<
+        studio_runtime_schema::bounded_integer::BoundedInteger<
+            0,
+            { studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64 },
+        >,
+    >,
+}
+
 pub(crate) async fn push_drafts(
     State(state): State<HttpState>,
-    ApiJson(parsed): ApiJson<crate::generated::DraftPushRequest>,
+    ApiJson(parsed): ApiJson<DraftPushRequest>,
 ) -> Result<Json<Vec<crate::generated::SyncDocument>>, ApiError> {
     let validators = state.validators.clone();
-    let mut writes = Vec::with_capacity(parsed.rows.len());
-    for (index, row) in parsed.rows.into_iter().enumerate() {
+    let rows = parsed.rows.as_slice();
+    let mut writes = Vec::with_capacity(rows.len());
+    for (index, row) in rows.iter().enumerate() {
         if sync_policy::contains_unrepresentable_integer(&row.new_document_state.payload) {
             return Err(draft_validation_error(index, "newDocumentState", "payload"));
         }
@@ -567,13 +603,13 @@ pub(crate) async fn push_drafts(
             return Err(draft_validation_error(index, "newDocumentState", "payload"));
         }
         let version = studio_runtime_schema::drafts::DraftVersion::from_stored_value(
-            &row.new_document_state.id,
+            row.new_document_state.id.as_str(),
             payload.clone(),
         )
         .map_err(|_| draft_validation_error(index, "newDocumentState", "id"))?;
         let assumed = row
             .assumed_master_state
-            .flatten()
+            .as_ref()
             .map(|assumed| {
                 if sync_policy::contains_unrepresentable_integer(&assumed.payload) {
                     return Err(draft_validation_error(
@@ -584,20 +620,20 @@ pub(crate) async fn push_drafts(
                 }
                 let payload: Value = serde_json::from_str(&assumed.payload)
                     .map_err(|_| draft_validation_error(index, "assumedMasterState", "payload"))?;
-                if validate_draft_value(&row.new_document_state.id, &payload).is_err() {
+                if validate_draft_value(row.new_document_state.id.as_str(), &payload).is_err() {
                     return Err(draft_validation_error(
                         index,
                         "assumedMasterState",
                         "payload",
                     ));
                 }
-                Ok::<_, ApiError>((payload, assumed.deleted.unwrap_or(false)))
+                Ok::<_, ApiError>((payload, assumed.deleted))
             })
             .transpose()?;
         writes.push(DraftWrite {
             version,
             payload,
-            deleted: row.new_document_state.deleted.unwrap_or(false),
+            deleted: row.new_document_state.deleted,
             assumed_payload: assumed.as_ref().map(|(payload, _)| payload.clone()),
             assumed_deleted: assumed.is_some_and(|(_, deleted)| deleted),
         });
@@ -963,6 +999,52 @@ mod vault_maintenance_tests {
     use serde_json::{Value, json};
     use std::sync::Arc;
     use studio_runtime_store::{ProjectsRepository, RuntimeStore, SyncDocumentsRepository};
+
+    #[test]
+    fn draft_wire_matches_schema_boundaries() {
+        let document_schema = crate::schema::openapi_document();
+        assert_eq!(
+            document_schema
+                .pointer("/components/schemas/DraftPushRequest/properties/rows/maxItems"),
+            Some(&json!(super::DRAFT_PUSH_MAX_ROWS))
+        );
+        assert_eq!(
+            document_schema
+                .pointer("/components/schemas/DraftDocumentInput/properties/id/maxLength"),
+            Some(&json!(super::DRAFT_DOCUMENT_ID_MAX_CHARS))
+        );
+        assert_eq!(
+            document_schema
+                .pointer("/components/schemas/DraftDocumentInput/properties/seq/anyOf/0/maximum"),
+            Some(&json!(
+                studio_runtime_schema::shared_values::MAX_SAFE_INTEGER
+            ))
+        );
+        let registry = studio_runtime_schema::registry_for_document(document_schema)
+            .expect("request schema registry");
+        let schema = json!({"$ref":format!("{}#/components/schemas/DraftPushRequest", studio_runtime_schema::OPENAPI_URI)});
+        let validator = jsonschema::options()
+            .with_registry(&registry)
+            .build(&schema)
+            .expect("draft request schema compiles");
+        let document = json!({"id":"device:session","payload":"{}"});
+        let mut cases = vec![
+            json!({"rows":[]}),
+            json!({"rows":[{"newDocumentState":document}]}),
+            json!({"rows":[],"extra":true}),
+            json!({"rows":[{"newDocumentState":{"id":"x","payload":"{}","deleted":null}}]}),
+            json!({"rows":[{"newDocumentState":{"id":"x","payload":"{}","seq":-1}}]}),
+            json!({"rows":[{"newDocumentState":{"id":"x","payload":"{}","seq":9007199254740992u64}}]}),
+            json!({"rows":[{"newDocumentState":{"id":"x".repeat(301),"payload":"{}"}}]}),
+        ];
+        cases
+            .push(json!({"rows":vec![json!({"newDocumentState":{"id":"x","payload":"{}"}}); 101]}));
+        for case in cases {
+            let schema = validator.is_valid(&case);
+            let typed = serde_json::from_str::<super::DraftPushRequest>(&case.to_string()).is_ok();
+            assert_eq!(typed, schema, "{case}");
+        }
+    }
 
     fn response_value(response: &SyncPullResponseBody) -> Value {
         serde_json::to_value(response).expect("generated sync response serializes")
