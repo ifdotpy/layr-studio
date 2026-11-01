@@ -1299,8 +1299,13 @@ fn chat(extra: Value) -> Value {
 }
 
 /// Raw SQL writes skip the record writers, so a test repeats their history rows here.
-pub(crate) fn reconcile_work_history(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<(), StoreError> {
-    let raw: String = tx.query_row("SELECT record FROM runtime_work WHERE id=?1", [id], |row| row.get(0))?;
+pub(crate) fn reconcile_work_history(
+    tx: &rusqlite::Transaction<'_>,
+    id: &str,
+) -> Result<(), StoreError> {
+    let raw: String = tx.query_row("SELECT record FROM runtime_work WHERE id=?1", [id], |row| {
+        row.get(0)
+    })?;
     studio_runtime_store::work_history::reconcile(tx, id, &serde_json::from_str(&raw)?)
 }
 
