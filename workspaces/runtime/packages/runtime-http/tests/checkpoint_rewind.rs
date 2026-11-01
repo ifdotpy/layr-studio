@@ -192,7 +192,7 @@ async fn checkpoint_rewind_preview_and_restore_enforce_idle_and_preserve_before_
     let (status, preview) = post(&app, "/api/checkpoint/preview", preview_body.clone()).await;
     assert_eq!(status, 200, "{preview}");
     assert_eq!(preview["canRestore"], true, "{preview}");
-    assert!(preview["restoreUnavailableReason"].is_null());
+    assert_eq!(preview.get("restoreUnavailableReason"), Some(&Value::Null));
     let without_provider = router(HttpState::new(
         "fixture-token".into(),
         "fixture".into(),

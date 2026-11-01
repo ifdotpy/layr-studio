@@ -342,8 +342,10 @@ mod tests {
         let text = "hello 世界";
         let (blob, bytes) = studio_runtime_store::text_blobs::encode_blob(text);
         let path = studio_runtime_store::text_blobs::layout(&root.path().join("blobs"), &blob.hash);
-        std::fs::create_dir_all(path.parent().expect("parent")).expect("blob directory");
-        std::fs::write(path, bytes).expect("blob");
+        tokio::fs::create_dir_all(path.parent().expect("parent"))
+            .await
+            .expect("blob directory");
+        tokio::fs::write(path, bytes).await.expect("blob");
         let state = HttpState::new(
             "token".into(),
             "workspace".into(),

@@ -84,6 +84,7 @@ inherits = "ci"
 # Reviewer permissions stay read-only under yolo across preparation, turns, and monitors.
 # Command replay witnesses feed recorded management commands through decide and compare the canonical outcome.
 default-filter = '''
+    (package(=studio-runtime-http) & test(/terminal_bodies_use_only_typed_ingress|typed_create_preserves_receipt_identity_and_bounds|pending_restart_cleanup_returns_retryable_error_without_terminal_writes|identity_http_returns_workspace_and_protocol|blob_http_returns_text_and_utf8_byte_length|profile_input_is_closed_and_bounded|profile_http_accepts_omitted_and_rejects_null_fields|checkpoint_rewind_preview_and_restore_enforce_idle_and_preserve_before_tree|the_state_file_origin_admits_serve_requests_until_it_is_disabled/)) |
     (package(=studio-runtime-store) & kind(lib) & test(=path::tests::missing_state_directory_is_created)) |
     (package(=studio-runtime-server) & (test(templates_use_the_shared_delivery_layout_and_escape_paths) | test(systemd_verifies_rendered_unit_with_specifiers_in_path))) |
     (package(=studio-runtime-services) & kind(lib) & test(/^account_driver::tests::vm_/)) |
@@ -461,6 +462,7 @@ platform = 'cfg(target_os = "linux")'
 # Reviewer permissions stay read-only under yolo across preparation, turns, and monitors.
 # Command replay witnesses feed recorded management commands through decide and compare the canonical outcome.
 default-filter = '''
+    (package(=studio-runtime-http) & test(/terminal_bodies_use_only_typed_ingress|typed_create_preserves_receipt_identity_and_bounds|pending_restart_cleanup_returns_retryable_error_without_terminal_writes|identity_http_returns_workspace_and_protocol|blob_http_returns_text_and_utf8_byte_length|profile_input_is_closed_and_bounded|profile_http_accepts_omitted_and_rejects_null_fields|checkpoint_rewind_preview_and_restore_enforce_idle_and_preserve_before_tree|the_state_file_origin_admits_serve_requests_until_it_is_disabled/)) |
     (package(=studio-runtime-store) & kind(lib) & test(=path::tests::missing_state_directory_is_created)) |
     (package(=studio-runtime-server) & (test(templates_use_the_shared_delivery_layout_and_escape_paths) | test(systemd_verifies_rendered_unit_with_specifiers_in_path))) |
     (package(=studio-runtime-services) & kind(lib) & test(/^account_driver::tests::vm_/)) |
