@@ -857,8 +857,7 @@ mod tests {
         >,
         forced_rollback: bool,
     ) -> Result<studio_runtime_services::commands::Executed, CommandError> {
-        use studio_runtime_schema::command::{Command, WithdrawBody};
-        use studio_runtime_services::commands::{agent_request, execute_sync};
+        use studio_runtime_services::commands::execute_sync;
         store
             .transaction(|tx| {
                 tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.status','running','$.inFlight',json('true'),'$.turnId','turn-1') WHERE id='workspace'", [])?;
@@ -867,17 +866,10 @@ mod tests {
             })
             .await
             .expect("hold a");
-        let request = agent_request(
-            "workspace",
-            "held-a",
-            Command::Withdraw {
-                target: "workspace".to_owned().try_into().expect("target"),
-                body: WithdrawBody {
-                    message: "a".to_owned().try_into().expect("message"),
-                },
-            },
-        )
-        .expect("request");
+        // The owner's command id must be a UUIDv7, as the HTTP edge requires.
+        let id = RequestIdentity::issue_root();
+        let request: studio_runtime_schema::command::CommandRequest =
+            serde_json::from_value(withdraw(&id, 1, "a")).expect("request");
         let now = now_ms();
         store
             .transaction_with_error(move |tx| {
