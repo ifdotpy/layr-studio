@@ -52,8 +52,25 @@ pub enum BackgroundTaskLabel {
     Unknown,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BackgroundTaskAction {
+    Stop,
+    Approve,
+    Input,
+    Resize,
+    ReadOutput,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ProcessStdinState {
+    Open,
+    CloseRequested,
+    Closed,
+}
+
 /// The server's presentation and action decisions for a task row.
-#[expect(clippy::struct_excessive_bools, reason = "independent wire fields")]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BackgroundTaskDisplay {
@@ -64,11 +81,9 @@ pub struct BackgroundTaskDisplay {
     pub indicator: BackgroundTaskIndicator,
     pub label: BackgroundTaskLabel,
     pub in_background_list: bool,
-    pub can_stop: bool,
-    pub can_approve: bool,
-    pub can_input: bool,
-    pub can_resize: bool,
-    pub can_read_output: bool,
+    pub actions: Vec<BackgroundTaskAction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stdin_state: Option<ProcessStdinState>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
@@ -86,16 +101,6 @@ impl ProcessSourceKind {
             Self::ClaudeTask => "claude_task",
         }
     }
-}
-
-#[expect(clippy::struct_excessive_bools, reason = "independent wire fields")]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ProcessCapabilities {
-    pub read_output: bool,
-    pub send_input: bool,
-    pub resize: bool,
-    pub stop: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -122,7 +127,6 @@ fn monitor_status_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema 
 }
 
 /// Complete public process view; private native proof stays on the service record.
-#[expect(clippy::struct_excessive_bools, reason = "independent wire fields")]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProcessView {
@@ -154,8 +158,6 @@ pub struct ProcessView {
     pub timeout_ms: Option<i64>,
     pub error: Option<String>,
     pub stdin_error: Option<String>,
-    pub stdin_closed: bool,
-    pub stdin_close_requested: bool,
     #[schemars(range(min = 0, max = crate::shared_values::MAX_SAFE_INTEGER))]
     pub bytes: u64,
     pub output_truncated: bool,
@@ -164,7 +166,6 @@ pub struct ProcessView {
     pub output_patterns: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_wake_budget: Option<ProcessWakeBudget>,
-    pub capabilities: ProcessCapabilities,
     pub display: BackgroundTaskDisplay,
 }
 
@@ -575,6 +576,12 @@ pub(crate) fn apply_background_views(document: &mut Value) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn background_display_rejects_removed_boolean_shape() {
+        let old = r#"{"kind":"command","kindLabel":"command","title":"Command","active":true,"indicator":"working","label":"running","inBackgroundList":false,"canStop":true,"canInput":false,"canResize":true,"canReadOutput":true,"canApprove":false}"#;
+        assert!(serde_json::from_str::<super::BackgroundTaskDisplay>(old).is_err());
+        assert!(serde_json::from_str::<super::ProcessStdinState>("\"closedAndOpen\"").is_err());
+    }
     use super::*;
 
     #[test]

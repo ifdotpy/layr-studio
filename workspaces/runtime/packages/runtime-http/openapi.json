@@ -16142,26 +16142,27 @@
         "title": "BackgroundShellPolicySettings",
         "type": "object"
       },
+      "BackgroundTaskAction": {
+        "enum": [
+          "stop",
+          "approve",
+          "input",
+          "resize",
+          "readOutput"
+        ],
+        "type": "string"
+      },
       "BackgroundTaskDisplay": {
         "additionalProperties": false,
         "description": "The server's presentation and action decisions for a task row.",
         "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/BackgroundTaskAction"
+            },
+            "type": "array"
+          },
           "active": {
-            "type": "boolean"
-          },
-          "canApprove": {
-            "type": "boolean"
-          },
-          "canInput": {
-            "type": "boolean"
-          },
-          "canReadOutput": {
-            "type": "boolean"
-          },
-          "canResize": {
-            "type": "boolean"
-          },
-          "canStop": {
             "type": "boolean"
           },
           "inBackgroundList": {
@@ -16179,6 +16180,16 @@
           "label": {
             "$ref": "#/components/schemas/BackgroundTaskLabel"
           },
+          "stdinState": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProcessStdinState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "title": {
             "type": "string"
           }
@@ -16191,11 +16202,7 @@
           "indicator",
           "label",
           "inBackgroundList",
-          "canStop",
-          "canApprove",
-          "canInput",
-          "canResize",
-          "canReadOutput"
+          "actions"
         ],
         "type": "object"
       },
@@ -36407,6 +36414,14 @@
           }
         ]
       },
+      "ProcessStdinState": {
+        "enum": [
+          "open",
+          "closeRequested",
+          "closed"
+        ],
+        "type": "string"
+      },
       "ProcessTree": {
         "additionalProperties": false,
         "properties": {
@@ -36465,9 +36480,6 @@
           },
           "cancelRequested": {
             "type": "boolean"
-          },
-          "capabilities": {
-            "$ref": "#/components/schemas/ProcessCapabilities"
           },
           "command": {
             "type": [
@@ -36580,12 +36592,6 @@
           "status": {
             "$ref": "#/components/schemas/ProcessStatus"
           },
-          "stdinCloseRequested": {
-            "type": "boolean"
-          },
-          "stdinClosed": {
-            "type": "boolean"
-          },
           "stdinError": {
             "type": [
               "string",
@@ -36616,12 +36622,9 @@
           "created",
           "name",
           "tail",
-          "stdinClosed",
-          "stdinCloseRequested",
           "bytes",
           "outputTruncated",
           "outputPatterns",
-          "capabilities",
           "display"
         ],
         "type": "object"

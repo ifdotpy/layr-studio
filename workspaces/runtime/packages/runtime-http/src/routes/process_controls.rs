@@ -423,10 +423,13 @@ async fn bind(
             })
             .await?
     };
-    if !processes
-        .iter()
-        .any(|p| controls::matches(p, &expected) && p.view.capabilities.stop)
-    {
+    if !processes.iter().any(|p| {
+        controls::matches(p, &expected)
+            && p.view
+                .display
+                .actions
+                .contains(&studio_runtime_schema::process_controls::BackgroundTaskAction::Stop)
+    }) {
         return Err(invalid("The process changed. Refresh the process list"));
     }
     let owner = &owners[0];

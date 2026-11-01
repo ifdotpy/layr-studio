@@ -29,7 +29,13 @@ fn monitor_budget_and_task_file_survive_renderer_projections() {
         None,
     );
     assert_eq!(process.view.output_file.as_deref(), Some("logs/out.txt"));
-    assert!(process.view.capabilities.read_output);
+    assert!(
+        process
+            .view
+            .display
+            .actions
+            .contains(&studio_runtime_schema::process_controls::BackgroundTaskAction::ReadOutput)
+    );
 }
 
 fn file_fixture(root: &std::path::Path, path: &str) -> (Value, Value) {

@@ -1,11 +1,18 @@
 import { BackgroundTaskKind } from "../generated/api";
 import type { components } from "../generated/api";
 import type { Snapshot } from "../types";
+import type { DeepReadonly } from "../deepReadonly";
 
 export type RendererTaskKind = components["schemas"]["BackgroundTaskKind"];
-export type DisplayLegacyTask = components["schemas"]["TaskRecordView"];
-export type DisplayProcessTask = components["schemas"]["ProcessView"];
-export type DisplayBackgroundTask = components["schemas"]["BackgroundTaskView"];
+export type DisplayLegacyTask = DeepReadonly<
+  components["schemas"]["TaskRecordView"]
+>;
+export type DisplayProcessTask = DeepReadonly<
+  components["schemas"]["ProcessView"]
+>;
+export type DisplayBackgroundTask = DeepReadonly<
+  components["schemas"]["BackgroundTaskView"]
+>;
 
 export function processIdentity(
   task: DisplayProcessTask,

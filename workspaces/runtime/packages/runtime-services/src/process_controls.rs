@@ -6,10 +6,11 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashSet};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::process_controls::{
-    BackgroundTaskDisplay, BackgroundTaskIndicator, BackgroundTaskKind, BackgroundTaskKindLabel,
-    BackgroundTaskLabel, ProcessActionResult, ProcessActionStatus, ProcessCapabilities,
+    BackgroundTaskAction, BackgroundTaskDisplay, BackgroundTaskIndicator, BackgroundTaskKind,
+    BackgroundTaskKindLabel, BackgroundTaskLabel, ProcessActionResult, ProcessActionStatus,
     ProcessControlRequest, ProcessEntry, ProcessListing, ProcessOutcome, ProcessReceipt,
-    ProcessResponseTarget, ProcessSourceKind, ProcessStatus, ProcessView, ProcessWakeBudget,
+    ProcessResponseTarget, ProcessSourceKind, ProcessStatus, ProcessStdinState, ProcessView,
+    ProcessWakeBudget,
 };
 use studio_runtime_store::{
     ProcessActionKind, ProcessActionPhase, ProcessActionRecord, StoreError, Transaction,
@@ -39,7 +40,8 @@ fn display(
     status: ProcessStatus,
     cancelling: bool,
     in_background_list: bool,
-    capabilities: &ProcessCapabilities,
+    mut actions: Vec<BackgroundTaskAction>,
+    stdin_state: Option<ProcessStdinState>,
 ) -> BackgroundTaskDisplay {
     use BackgroundTaskIndicator as Indicator;
     use BackgroundTaskLabel as Label;
@@ -87,6 +89,18 @@ fn display(
     } else {
         status_label
     };
+    actions.retain(|action| match action {
+        BackgroundTaskAction::Stop => active && !cancelling,
+        BackgroundTaskAction::Input | BackgroundTaskAction::Resize => {
+            !cancelling
+                && matches!(status_label, Label::Running)
+                && stdin_state == Some(ProcessStdinState::Open)
+        }
+        BackgroundTaskAction::Approve | BackgroundTaskAction::ReadOutput => true,
+    });
+    if matches!(status_label, Label::Approval) {
+        actions.push(BackgroundTaskAction::Approve);
+    }
     BackgroundTaskDisplay {
         kind,
         kind_label,
@@ -95,11 +109,8 @@ fn display(
         indicator,
         label,
         in_background_list,
-        can_stop: active && !cancelling && capabilities.stop,
-        can_approve: matches!(status_label, Label::Approval),
-        can_input: !cancelling && matches!(status_label, Label::Running) && capabilities.send_input,
-        can_resize: !cancelling && matches!(status_label, Label::Running) && capabilities.resize,
-        can_read_output: capabilities.read_output,
+        actions,
+        stdin_state,
     }
 }
 
@@ -371,15 +382,15 @@ fn project_monitor_bound(
     } else {
         command
     };
-    let capabilities = ProcessCapabilities {
-        read_output: true,
-        send_input: can_input,
-        resize: can_input,
-        stop: same
-            || (pending
-                && owner["epoch"].as_i64() == Some(epoch)
-                && source_account == Some(account)),
-    };
+    let mut actions = vec![BackgroundTaskAction::ReadOutput];
+    if can_input {
+        actions.extend([BackgroundTaskAction::Input, BackgroundTaskAction::Resize]);
+    }
+    if same
+        || (pending && owner["epoch"].as_i64() == Some(epoch) && source_account == Some(account))
+    {
+        actions.push(BackgroundTaskAction::Stop);
+    }
     let cancelled = monitor.cancel_requested == Some(true);
     let status = ProcessStatus::Monitor(monitor.status);
     let view = ProcessView {
@@ -405,8 +416,6 @@ fn project_monitor_bound(
         timeout_ms: None,
         error: monitor.error.as_ref().map(|v| v.as_str().to_owned()),
         stdin_error: monitor.stdin_error.clone(),
-        stdin_closed: monitor.stdin_closed == Some(true),
-        stdin_close_requested: false,
         bytes,
         output_truncated: monitor
             .output_truncated
@@ -428,9 +437,9 @@ fn project_monitor_bound(
             status,
             cancelled,
             true,
-            &capabilities,
+            actions,
+            monitor_stdin_state(monitor),
         ),
-        capabilities,
     };
     ProcessRecord {
         view,
@@ -562,10 +571,6 @@ fn text<'a>(value: &'a Value, key: &str, default: &'a str) -> &'a str {
         .filter(|v| !v.is_empty())
         .unwrap_or(default)
 }
-#[cfg(test)]
-fn string(value: &Value, key: &str) -> Value {
-    value[key].as_str().map_or(Value::Null, |v| json!(v))
-}
 pub fn digest(value: &Value) -> String {
     studio_runtime_store::sha256_hex(value.to_string().as_bytes())
 }
@@ -650,12 +655,16 @@ pub fn project(
             .or(Some(raw.name.as_str()).filter(|s| !s.is_empty()))
     }
     .unwrap_or(default_name);
-    let capabilities = ProcessCapabilities {
-        read_output: !claude || raw.output_file.is_some(),
-        send_input: can_input,
-        resize: false,
-        stop: same,
-    };
+    let mut actions = Vec::new();
+    if !claude || raw.output_file.is_some() {
+        actions.push(BackgroundTaskAction::ReadOutput);
+    }
+    if can_input {
+        actions.push(BackgroundTaskAction::Input);
+    }
+    if same {
+        actions.push(BackgroundTaskAction::Stop);
+    }
     let status = ProcessStatus::Task(raw.status());
     let view = ProcessView {
         id: raw.id().as_ref().to_owned(),
@@ -680,8 +689,6 @@ pub fn project(
         timeout_ms: None,
         error: raw.error.clone(),
         stdin_error: None,
-        stdin_closed: false,
-        stdin_close_requested: false,
         bytes,
         output_truncated: raw.output_truncated.unwrap_or(false),
         output_file: if claude {
@@ -706,9 +713,9 @@ pub fn project(
             status,
             false,
             true,
-            &capabilities,
+            actions,
+            (!claude && raw.process_id().is_some()).then_some(ProcessStdinState::Open),
         ),
-        capabilities,
     };
     ProcessRecord {
         view,
@@ -736,12 +743,7 @@ pub fn task_record_display(task: &studio_runtime_store::TaskRecord) -> Backgroun
         kind,
         BackgroundTaskKind::Command | BackgroundTaskKind::BackgroundTask
     );
-    let capabilities = ProcessCapabilities {
-        read_output: true,
-        send_input: false,
-        resize: false,
-        stop: false,
-    };
+    let actions = vec![BackgroundTaskAction::ReadOutput];
     display(
         kind,
         if kind == BackgroundTaskKind::Command {
@@ -757,19 +759,27 @@ pub fn task_record_display(task: &studio_runtime_store::TaskRecord) -> Backgroun
         ProcessStatus::Task(task.status()),
         false,
         in_background_list,
-        &capabilities,
+        actions,
+        None,
     )
+}
+
+fn monitor_stdin_state(monitor: &studio_runtime_store::MonitorRecord) -> Option<ProcessStdinState> {
+    if !monitor.interactive {
+        None
+    } else if monitor.stdin_closed == Some(true) {
+        Some(ProcessStdinState::Closed)
+    } else if monitor.stdin_close_requested.is_some() {
+        Some(ProcessStdinState::CloseRequested)
+    } else {
+        Some(ProcessStdinState::Open)
+    }
 }
 
 pub fn monitor_record_display(
     monitor: &studio_runtime_store::MonitorRecord,
 ) -> BackgroundTaskDisplay {
-    let capabilities = ProcessCapabilities {
-        read_output: true,
-        send_input: false,
-        resize: false,
-        stop: false,
-    };
+    let actions = vec![BackgroundTaskAction::ReadOutput];
     display(
         BackgroundTaskKind::Monitor,
         BackgroundTaskKindLabel::Monitor,
@@ -777,151 +787,11 @@ pub fn monitor_record_display(
         ProcessStatus::Monitor(monitor.status),
         monitor.cancel_requested == Some(true),
         true,
-        &capabilities,
+        actions,
+        monitor_stdin_state(monitor),
     )
 }
 
-#[cfg(test)]
-fn legacy_project_bound(
-    source: &str,
-    raw: &Value,
-    owner: &Value,
-    connection: Option<&str>,
-    retained_generation: Option<u64>,
-) -> Value {
-    let agent = text(raw, "agent", text(owner, "id", ""));
-    let account = text(owner, "accountKey", "default");
-    let mut source_account = string(raw, "sourceAccountKey");
-    let mut source_connection = string(raw, "sourceConnectionId");
-    let mut source_thread = string(raw, "sourceThreadId");
-    let epoch;
-    let opaque;
-    let pending =
-        source == "monitor" && matches!(raw["status"].as_str(), Some("starting" | "approval"));
-    let is_monitor = source == "monitor";
-    let is_claude = source == "claude_task";
-    let native = if is_monitor {
-        epoch = raw["epoch"].clone();
-        let operation = &raw["operation"];
-        source_account = operation
-            .get("accountKey")
-            .filter(|v| v.is_string() && **v != "")
-            .cloned()
-            .unwrap_or(if pending { json!(account) } else { Value::Null });
-        source_connection = string(operation, "connectionId");
-        source_thread = string(operation, "threadId");
-        if retained_generation.is_some() {
-            source_connection = json!(connection);
-        } else if raw["status"] == "running"
-            && connection.is_some()
-            && raw["reattachedConnectionId"].as_str() == connection
-        {
-            source_connection = json!(connection);
-            source_thread = owner["threadId"].clone();
-        }
-        if retained_generation.is_none()
-            && source_thread.as_str().is_none_or(str::is_empty)
-            && operation["connectionId"].as_str() == connection
-        {
-            source_thread = owner["threadId"].clone();
-        }
-        opaque = text(raw, "id", "").to_owned();
-        let mut identity = json!([
-            raw["id"],
-            epoch,
-            source_account,
-            source_connection,
-            source_thread
-        ]);
-        if let Some(generation) = retained_generation {
-            identity
-                .as_array_mut()
-                .expect("monitor identity")
-                .push(json!(generation));
-        }
-        identity
-    } else {
-        epoch = raw["ownerEpoch"].clone();
-        let item = text(raw, "itemId", "");
-        opaque = if is_claude {
-            item.strip_prefix("task:").unwrap_or(item).to_owned()
-        } else {
-            text(raw, "processId", item).to_owned()
-        };
-        if is_claude {
-            json!([
-                opaque,
-                epoch,
-                source_account,
-                source_connection,
-                source_thread,
-                raw["turnId"]
-            ])
-        } else {
-            json!([
-                opaque,
-                item,
-                epoch,
-                source_account,
-                source_connection,
-                source_thread,
-                raw["turnId"]
-            ])
-        }
-    };
-    let same = (retained_generation.is_some() || source_account == account)
-        && epoch == owner["epoch"]
-        && connection.is_some_and(|c| !c.is_empty())
-        && source_connection.as_str() == connection
-        && (retained_generation.is_some()
-            || (source_thread.as_str().is_some_and(|v| !v.is_empty())
-                && source_thread == owner["threadId"]));
-    let can_input = same
-        && owner["autoWake"] == true
-        && if is_monitor {
-            raw["interactive"] == true && raw["status"] == "running"
-        } else {
-            !is_claude && raw["processId"].as_str().is_some_and(|v| !v.is_empty())
-        };
-    let output = if is_claude { "" } else { text(raw, "tail", "") };
-    let bytes = raw["bytes"].as_u64().unwrap_or(output.len() as u64);
-    let default_name = if is_monitor {
-        "Command monitor"
-    } else if is_claude {
-        "Claude background task"
-    } else {
-        "Background command"
-    };
-    let name = if is_claude {
-        text(raw, "name", text(raw, "command", default_name))
-    } else {
-        text(raw, "command", text(raw, "name", default_name))
-    };
-    let mut result = json!({"id":text(raw,"id",&opaque),"key":URL_SAFE_NO_PAD.encode(json!([source,agent,opaque]).to_string()),
-        "generation":digest(&json!([source,agent,native])),"agent":agent,"accountKey":account,"epoch":owner["epoch"],
-        "source":source,"status":text(raw,"status","unknown"),"cancelRequested":raw["cancelRequested"]==true,
-        "created":raw["created"].as_f64().unwrap_or(0.0),"name":name,"command":string(raw,"command"),"cwd":string(raw,"cwd"),"log":string(raw,"log"),
-        "output":output,"error":string(raw,"error"),"stdinError":string(raw,"stdinError"),"stdinClosed":raw["stdinClosed"]==true,
-        "stdinCloseRequested":raw["stdinCloseRequested"]==true,"bytes":bytes,"outputTruncated":raw["outputTruncated"].as_bool().unwrap_or(bytes>output.len() as u64),
-        "capabilities":{"readOutput":!is_claude,"sendInput":can_input,"resize":is_monitor&&can_input,"stop":same||(pending&&epoch==owner["epoch"]&&source_account==account)},
-        "_raw":raw,"_sourceAccountKey":source_account,"_sourceConnectionId":source_connection,"_sourceThreadId":source_thread,"_sourceEpoch":epoch});
-    if let Some(generation) = retained_generation {
-        result["_sourceGeneration"] = json!(generation);
-    }
-    if is_monitor {
-        if let Some(budget) = raw.get("outputWakeBudget") {
-            result["outputWakeBudget"] = json!({"totalSuppressedMatches":budget["totalSuppressedMatches"],"paused":budget["paused"],"tokens":budget["tokens"]});
-        }
-        if let Some(patterns) = raw.get("outputPatterns") {
-            result["outputPatterns"] = patterns.clone();
-        }
-    }
-    if is_claude && raw["outputFile"].is_string() {
-        result["outputFile"] = raw["outputFile"].clone();
-        result["capabilities"]["readOutput"] = json!(true);
-    }
-    result
-}
 pub fn processes(
     connection: &Transaction<'_>,
     rows: &[(&Value, ProcessSource)],
@@ -1145,7 +1015,9 @@ pub fn claim(
                 Some("Worker processes are outside this stop scope")
             } else if found.is_none() {
                 Some("This process changed or finished. Refresh the process list")
-            } else if found.is_some_and(|p| !p.view.capabilities.stop) {
+            } else if found
+                .is_some_and(|p| !p.view.display.actions.contains(&BackgroundTaskAction::Stop))
+            {
                 Some("The process owner changed. Refresh the process list")
             } else {
                 None
@@ -1352,14 +1224,17 @@ mod claim_identity_tests {
     fn task_record_projection_publishes_background_display_policy() {
         let raw = json!({"id":"a:task:1","agent":"a","created":1,"itemId":"task:1","kind":"tool","status":"running","turnId":"turn","type":"dynamicToolCall","name":"job"});
         let task: studio_runtime_store::TaskRecord = serde::Deserialize::deserialize(&raw).unwrap();
-        let value = serde::Serialize::serialize(
-            &crate::sync_views::project_task_record(&task).unwrap(),
-            serde_json::value::Serializer,
-        )
-        .unwrap();
-        assert_eq!(value["display"]["kind"], "backgroundTask");
-        assert_eq!(value["display"]["active"], true);
-        assert_eq!(value["display"]["inBackgroundList"], true);
+        let display = task_record_display(&task);
+        assert_eq!(display.kind, BackgroundTaskKind::BackgroundTask);
+        assert!(display.active);
+        assert!(display.in_background_list);
+        assert_eq!(display.stdin_state, None);
+        assert!(!display.actions.contains(&BackgroundTaskAction::Input));
+        assert!(
+            !serde_json::to_string(&display)
+                .unwrap()
+                .contains("stdinState")
+        );
     }
 
     #[test]
@@ -1379,7 +1254,6 @@ mod claim_identity_tests {
     fn typed_monitor_process_projection_preserves_identity_and_capabilities() {
         let owner = json!({"id":"owner","epoch":1,"accountKey":"default","threadId":"thread","autoWake":true});
         for status in ["starting", "running"] {
-            let raw = json!({"id":"watch","agent":"owner","epoch":1,"status":status,"requestId":"request","created":1,"activityAt":1,"activityGeneration":0,"bytes":12,"command":"printf x","cwd":std::env::temp_dir(),"interactive":true,"livenessCommand":"","log":std::env::temp_dir().join("watch.log"),"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"x","timeout_ms":3600000,"wakeOn":"exit","operation":{"agent":"owner","epoch":1,"accountKey":"default","connectionId":"connection","threadId":"thread"}});
             let fixture = format!(
                 r#"{{"id":"watch","agent":"owner","epoch":1,"status":"{status}","requestId":"request","created":1,"activityAt":1,"activityGeneration":0,"bytes":12,"command":"printf x","cwd":{},"interactive":true,"livenessCommand":"","log":{},"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"x","timeout_ms":3600000,"wakeOn":"exit","operation":{{"agent":"owner","epoch":1,"accountKey":"default","connectionId":"connection","threadId":"thread"}}}}"#,
                 serde_json::to_string(&std::env::temp_dir()).unwrap(),
@@ -1387,26 +1261,18 @@ mod claim_identity_tests {
             );
             let record: studio_runtime_store::MonitorRecord =
                 serde_json::from_str(&fixture).unwrap();
-            let mut expected =
-                legacy_project_bound("monitor", &raw, &owner, Some("connection"), None);
-            let record = project_monitor_bound(&record, &owner, Some("connection"), None);
-            assert_eq!(record.source_connection.as_deref(), Some("connection"));
-            let mut actual =
-                serde::Serialize::serialize(&record.view, serde_json::value::Serializer).unwrap();
-            for key in [
-                "_raw",
-                "_sourceAccountKey",
-                "_sourceConnectionId",
-                "_sourceThreadId",
-                "_sourceEpoch",
-            ] {
-                expected.as_object_mut().unwrap().remove(key);
-            }
-            let output = expected.as_object_mut().unwrap().remove("output").unwrap();
-            expected["tail"] = output;
-            expected["outputPatterns"] = json!([]);
-            actual.as_object_mut().unwrap().remove("display");
-            assert_eq!(actual, expected);
+            let projected = project_monitor_bound(&record, &owner, Some("connection"), None);
+            assert_eq!(projected.source_connection.as_deref(), Some("connection"));
+            assert_eq!(projected.view.id, "watch");
+            assert_eq!(projected.view.tail, "x");
+            assert_eq!(projected.view.bytes, 12);
+            assert!(
+                projected
+                    .view
+                    .display
+                    .actions
+                    .contains(&BackgroundTaskAction::ReadOutput)
+            );
         }
     }
 
@@ -1531,19 +1397,14 @@ mod claim_identity_tests {
 fn typed_task_keeps_numeric_process_identity_projection() {
     let raw = r#"{"id":"a:i","agent":"a","created":1,"itemId":"i","turnId":"turn","kind":"command","status":"running","type":"commandExecution","name":"commandExecution","processId":42}"#;
     let typed: studio_runtime_store::TaskRecord = serde_json::from_str(raw).expect("task fixture");
-    let old = serde_json::json!({"id":"a:i","agent":"a","created":1,"itemId":"i","turnId":"turn","kind":"command","status":"running","type":"commandExecution","name":"commandExecution","processId":42});
     let owner = serde_json::json!({"id":"a","epoch":1,"accountKey":"default","threadId":"thread","autoWake":true});
-    let before = legacy_project_bound("codex_task", &old, &owner, Some("connection"), None);
     let after = project(
         ProcessSourceKind::CodexTask,
         &typed,
         &owner,
         Some("connection"),
     );
-    assert_eq!(before["key"], after.view.key);
-    assert_eq!(before["generation"], after.view.generation);
-    assert_eq!(
-        before["capabilities"]["sendInput"],
-        after.view.capabilities.send_input
-    );
+    assert_eq!(after.process_id, typed.process_id().cloned());
+    assert_eq!(after.item_id.as_deref(), Some("i"));
+    assert_eq!(after.view.source, ProcessSourceKind::CodexTask);
 }

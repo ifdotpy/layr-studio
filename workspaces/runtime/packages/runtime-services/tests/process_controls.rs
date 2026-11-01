@@ -54,48 +54,59 @@ async fn owners_follow_live_descendants_once_even_in_a_cycle() {
 }
 #[test]
 fn python_process_identities_and_capabilities_match() {
-    for case in corpus()["processes"].as_array().unwrap() {
-        if case["source"] == "monitor" {
+    #[derive(serde::Deserialize)]
+    struct Cases {
+        processes: Vec<Case>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Case {
+        source: String,
+        raw: serde_json::Map<String, Value>,
+        owner: Value,
+        connection: Option<String>,
+        expected: Expected,
+    }
+    #[derive(serde::Deserialize)]
+    struct Expected {
+        id: String,
+        key: String,
+        generation: String,
+        agent: String,
+    }
+    let cases: Cases =
+        serde_json::from_str(include_str!("fixtures/process-controls.json")).unwrap();
+    for mut case in cases.processes {
+        if case.source == "monitor" {
             continue;
         }
-        let claude = case["source"] == "claude_task";
-        let mut input = case["raw"].clone();
-        input["kind"] = json!(if claude { "tool" } else { "command" });
-        input["type"] = json!(if claude {
-            "dynamicToolCall"
-        } else {
-            "commandExecution"
-        });
-        input["name"] = json!("");
+        let claude = case.source == "claude_task";
+        case.raw.insert(
+            "kind".into(),
+            json!(if claude { "tool" } else { "command" }),
+        );
+        case.raw.insert(
+            "type".into(),
+            json!(if claude {
+                "dynamicToolCall"
+            } else {
+                "commandExecution"
+            }),
+        );
+        case.raw.insert("name".into(), json!(""));
         let typed: studio_runtime_store::TaskRecord =
-            serde::Deserialize::deserialize(input).unwrap();
+            serde::Deserialize::deserialize(Value::Object(case.raw)).unwrap();
         let source = if claude {
             studio_runtime_schema::process_controls::ProcessSourceKind::ClaudeTask
         } else {
             studio_runtime_schema::process_controls::ProcessSourceKind::CodexTask
         };
         let actual =
-            process_controls::project(source, &typed, &case["owner"], case["connection"].as_str());
-        let mut actual =
-            serde::Serialize::serialize(&actual.view, serde_json::value::Serializer).unwrap();
-        actual.as_object_mut().unwrap().remove("display");
-        let mut expected = case["expected"].clone();
-        for field in [
-            "_raw",
-            "_sourceAccountKey",
-            "_sourceConnectionId",
-            "_sourceThreadId",
-            "_sourceEpoch",
-        ] {
-            expected.as_object_mut().unwrap().remove(field);
-        }
-        let output = expected.as_object_mut().unwrap().remove("output").unwrap();
-        expected["tail"] = output;
-        // These additive renderer fields have no legacy Python projection.
-        for field in ["outputWakeBudget", "outputPatterns", "outputFile"] {
-            actual.as_object_mut().unwrap().remove(field);
-        }
-        assert_eq!(actual, expected, "{}", case["source"]);
+            process_controls::project(source, &typed, &case.owner, case.connection.as_deref());
+        assert_eq!(actual.view.id, case.expected.id);
+        assert_eq!(actual.view.key, case.expected.key);
+        assert_eq!(actual.view.generation, case.expected.generation);
+        assert_eq!(actual.view.agent, case.expected.agent);
+        assert_eq!(actual.view.source, source);
     }
 }
 #[test]

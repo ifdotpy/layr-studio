@@ -16,11 +16,7 @@ const task = {
     indicator: "working",
     label: "running",
     inBackgroundList: true,
-    canStop: false,
-    canApprove: false,
-    canInput: false,
-    canResize: false,
-    canReadOutput: true,
+    actions: ["readOutput"],
   },
 } satisfies components["schemas"]["TaskEntityDto"];
 

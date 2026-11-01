@@ -192,22 +192,14 @@ const commandProcess = () =>
     tail: "Streamed command output",
     bytes: 23,
     cancelRequested: false,
-    stdinClosed: false,
-    stdinCloseRequested: false,
     outputTruncated: false,
     outputPatterns: [],
     display: backgroundDisplay({
       kindLabel: "backgroundCommand",
       title: "command",
-      canStop: true,
-      canInput: true,
+      actions: ["readOutput", "stop", "input"],
+      stdinState: "open",
     }),
-    capabilities: {
-      readOutput: true,
-      sendInput: true,
-      resize: false,
-      stop: true,
-    },
   }) satisfies ResourceData<
     Extract<ResourceRef, { kind: "processes" }>
   >["processes"][number];
@@ -261,7 +253,6 @@ it("process and task sections retain server order and their separate output", ()
   h.data.set("tasks", [
     {
       ...process,
-      stdinCloseRequested: undefined,
       kind: GeneratedApiTaskKind.command,
       tail: "Older task output",
       display: backgroundDisplay(),
@@ -334,8 +325,7 @@ it("process and task sections retain server order and their separate output", ()
         display: {
           ...process.display,
           label: BackgroundTaskLabel.waitingForExit,
-          canStop: false,
-          canInput: false,
+          actions: ["readOutput"],
         },
       },
     ],

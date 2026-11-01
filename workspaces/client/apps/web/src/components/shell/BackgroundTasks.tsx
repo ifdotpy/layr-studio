@@ -1,3 +1,4 @@
+import { BackgroundTaskAction, ProcessStdinState } from "../../generated/api";
 import { BackgroundTaskKind, BackgroundTaskLabel } from "../../generated/api";
 import {
   ProcessActionStatus as GeneratedApiProcessActionStatus,
@@ -457,7 +458,7 @@ export default function BackgroundTasks({
             .filter(activeTask)
             .filter(
               (task) =>
-                task.display.canStop &&
+                task.display.actions.includes(BackgroundTaskAction.stop) &&
                 (task.agent === leadId ||
                   (includeWorkers && owner(task.agent)?.rootId === leadId)),
             )
@@ -573,7 +574,7 @@ export default function BackgroundTasks({
             disabled={
               !processRecords.some(
                 (process) =>
-                  process.display.canStop &&
+                  process.display.actions.includes(BackgroundTaskAction.stop) &&
                   (includeWorkers || process.agent === leadId),
               ) ||
               !!pendingControl ||
@@ -734,7 +735,9 @@ export default function BackgroundTasks({
               !processLoading &&
               !processLoadError &&
               !pendingControl &&
-              !!selectedProcess?.display.canStop &&
+              !!selectedProcess?.display.actions.includes(
+                BackgroundTaskAction.stop,
+              ) &&
               (includeWorkers || selectedTask.agent === leadId)
             }
             onStop={() => {
@@ -852,7 +855,9 @@ export function TaskDetail({
   };
   const resolvedDetail = detail?.id === summary.id ? detail : null;
   const task = summary;
-  const outputSupported = task.display.canReadOutput;
+  const outputSupported = task.display.actions.includes(
+    BackgroundTaskAction.readOutput,
+  );
   const outputTail = outputSupported
     ? (fileOutput?.text ?? task.tail)
     : undefined;
@@ -950,7 +955,7 @@ export function TaskDetail({
         {task.display.kind === BackgroundTaskKind.monitor &&
           activeTask(task) && (
             <p className="task-note">
-              {task.display.canApprove
+              {task.display.actions.includes(BackgroundTaskAction.approve)
                 ? "The command waits for your approval."
                 : "The agent receives the result when this command exits."}
             </p>
@@ -1127,13 +1132,15 @@ export function TaskDetail({
           )}
         </div>
         {(task.display.kind === BackgroundTaskKind.monitor ||
-          task.display.canInput) && (
+          task.display.actions.includes(BackgroundTaskAction.input)) && (
           <ProcessInput
             task={task}
             owner={owner}
             pending={pending}
             act={act}
-            receiptOnly={!task.display.canInput}
+            receiptOnly={
+              !task.display.actions.includes(BackgroundTaskAction.input)
+            }
           />
         )}
         <dl className="task-record">
@@ -1156,18 +1163,19 @@ export function TaskDetail({
         </dl>
       </div>
       <div className="task-actions">
-        {request && task.display.canApprove && (
-          <Button
-            size="xs"
-            variant="light"
-            loading={pending}
-            onClick={() =>
-              void act("/api/answer", { id: request.id, decision: "accept" })
-            }
-          >
-            Approve command
-          </Button>
-        )}
+        {request &&
+          task.display.actions.includes(BackgroundTaskAction.approve) && (
+            <Button
+              size="xs"
+              variant="light"
+              loading={pending}
+              onClick={() =>
+                void act("/api/answer", { id: request.id, decision: "accept" })
+              }
+            >
+              Approve command
+            </Button>
+          )}
         {canStop && (
           <Button
             size="xs"
@@ -1192,10 +1200,7 @@ export function ProcessInput({
   act,
   receiptOnly = false,
 }: {
-  task: Pick<
-    DisplayBackgroundTask,
-    "id" | "display" | "stdinClosed" | "stdinCloseRequested" | "cancelRequested"
-  >;
+  task: Pick<DisplayBackgroundTask, "id" | "display">;
   owner?: Agent | undefined;
   pending: boolean;
   act: BackgroundAction;
@@ -1208,8 +1213,10 @@ export function ProcessInput({
   const [inputClosed, setStdinClosed] = useState(false);
   const [receiptState, setReceiptState] = useState("");
   const [checkingReceipt, setCheckingReceipt] = useState(false);
-  const stdinClosed = inputClosed || !!task.stdinClosed;
-  const stdinUnavailable = stdinClosed || !task.display.canInput;
+  const stdinClosed =
+    inputClosed || task.display.stdinState === ProcessStdinState.closed;
+  const stdinUnavailable =
+    stdinClosed || !task.display.actions.includes(BackgroundTaskAction.input);
   const native = task.display.kind === BackgroundTaskKind.command;
   const checkReceipt = async () => {
     if (!owner || owner.epoch == null || checkingReceipt || pending) return;
@@ -1312,7 +1319,7 @@ export function ProcessInput({
             >
               {stdinClosed
                 ? "Input closed"
-                : task.stdinCloseRequested
+                : task.display.stdinState === ProcessStdinState.closeRequested
                   ? "Closing input…"
                   : "Close input (EOF)"}
             </Button>
@@ -1342,7 +1349,9 @@ export function ProcessInput({
                   disabled={
                     pending ||
                     checkingReceipt ||
-                    !task.display.canResize ||
+                    !task.display.actions.includes(
+                      BackgroundTaskAction.resize,
+                    ) ||
                     !Number(rows) ||
                     !Number(cols)
                   }

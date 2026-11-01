@@ -21,11 +21,7 @@ export function backgroundDisplay(
     indicator: BackgroundTaskIndicator.working,
     label: BackgroundTaskLabel.running,
     inBackgroundList: true,
-    canStop: false,
-    canApprove: false,
-    canInput: false,
-    canResize: false,
-    canReadOutput: true,
+    actions: ["readOutput"],
     ...overrides,
   };
 }

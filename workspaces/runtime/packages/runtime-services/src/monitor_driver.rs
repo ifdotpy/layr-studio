@@ -321,7 +321,9 @@ pub async fn cancel_checked(
                     }
                 })?;
                 if !crate::process_controls::matches(&process, expected)
-                    || !process.view.capabilities.stop
+                    || !process.view.display.actions.contains(
+                        &studio_runtime_schema::process_controls::BackgroundTaskAction::Stop,
+                    )
                     || expected.monitor_status != Some(snapshot.record().status)
                     || snapshot.record().reattached_connection_id.as_deref()
                         != expected.reattached_connection.as_deref()

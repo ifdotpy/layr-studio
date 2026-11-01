@@ -56,11 +56,7 @@ describe("dispatch strip states", () => {
       indicator: "answer",
       label: "approval",
       inBackgroundList: true,
-      canStop: false,
-      canApprove: true,
-      canInput: false,
-      canResize: false,
-      canReadOutput: true,
+      actions: ["approve", "readOutput"],
     } as const;
     expect(backgroundTaskState({ display })).toBe("answer");
     expect(

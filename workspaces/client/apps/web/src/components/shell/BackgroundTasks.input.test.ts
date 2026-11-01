@@ -142,11 +142,8 @@ function fixture() {
       indicator: "working",
       label: "running",
       inBackgroundList: true,
-      canStop: true,
-      canApprove: false,
-      canInput: true,
-      canResize: true,
-      canReadOutput: true,
+      actions: ["stop", "input", "resize", "readOutput"],
+      stdinState: "open",
     },
   } as const;
   const owner = { id: "owner", accountKey: "target", epoch: 3 } as Agent;

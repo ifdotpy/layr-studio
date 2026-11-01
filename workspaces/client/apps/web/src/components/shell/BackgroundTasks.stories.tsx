@@ -23,11 +23,7 @@ const task: components["schemas"]["MonitorEntityDto"] = {
     indicator: BackgroundTaskIndicator.working,
     label: BackgroundTaskLabel.running,
     inBackgroundList: true,
-    canStop: false,
-    canApprove: false,
-    canInput: false,
-    canResize: false,
-    canReadOutput: true,
+    actions: ["readOutput"],
   },
 };
 const meta = {
@@ -68,7 +64,7 @@ export const Approval: Story = {
         ...task.display,
         label: BackgroundTaskLabel.approval,
         indicator: BackgroundTaskIndicator.answer,
-        canApprove: true,
+        actions: ["readOutput", "approve"],
       },
     },
   },

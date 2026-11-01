@@ -8570,19 +8570,26 @@ export interface components {
        */
       quietThresholdMs: number;
     };
+    /** @enum {string} */
+    BackgroundTaskAction:
+      | "stop"
+      | "approve"
+      | "input"
+      | "resize"
+      | "readOutput";
     /** @description The server's presentation and action decisions for a task row. */
     BackgroundTaskDisplay: {
+      actions: components["schemas"]["BackgroundTaskAction"][];
       active: boolean;
-      canApprove: boolean;
-      canInput: boolean;
-      canReadOutput: boolean;
-      canResize: boolean;
-      canStop: boolean;
       inBackgroundList: boolean;
       indicator: components["schemas"]["BackgroundTaskIndicator"];
       kind: components["schemas"]["BackgroundTaskKind"];
       kindLabel: components["schemas"]["BackgroundTaskKindLabel"];
       label: components["schemas"]["BackgroundTaskLabel"];
+      stdinState?:
+        | components["schemas"]["ProcessStdinState"]
+        | null
+        | undefined;
       title: string;
     };
     /** @enum {string} */
@@ -17335,6 +17342,8 @@ export interface components {
     ProcessStatus:
       | components["schemas"]["TaskRecordStatus"]
       | components["schemas"]["MonitorState"];
+    /** @enum {string} */
+    ProcessStdinState: "open" | "closeRequested" | "closed";
     /** ProcessTree */
     ProcessTree: {
       /** Kinds */
@@ -17355,7 +17364,6 @@ export interface components {
       /** Format: uint64 */
       bytes: number;
       cancelRequested: boolean;
-      capabilities: components["schemas"]["ProcessCapabilities"];
       command?: string | null | undefined;
       /** Format: double */
       created: number;
@@ -17385,8 +17393,6 @@ export interface components {
       processId?: components["schemas"]["ProcessId"] | null | undefined;
       source: components["schemas"]["ProcessSourceKind"];
       status: components["schemas"]["ProcessStatus"];
-      stdinClosed: boolean;
-      stdinCloseRequested: boolean;
       stdinError?: string | null | undefined;
       tail: string;
       /** Format: int64 */
@@ -38633,6 +38639,15 @@ export const AttributionOperation = {
 } as const;
 export type AttributionOperation =
   components["schemas"]["AttributionOperation"];
+export const BackgroundTaskAction = {
+  stop: "stop",
+  approve: "approve",
+  input: "input",
+  resize: "resize",
+  readOutput: "readOutput",
+} as const;
+export type BackgroundTaskAction =
+  components["schemas"]["BackgroundTaskAction"];
 export const BackgroundTaskIndicator = {
   answer: "answer",
   error: "error",
@@ -38995,6 +39010,12 @@ export const ProcessSourceKind = {
   claude_task: "claude_task",
 } as const;
 export type ProcessSourceKind = components["schemas"]["ProcessSourceKind"];
+export const ProcessStdinState = {
+  open: "open",
+  closeRequested: "closeRequested",
+  closed: "closed",
+} as const;
+export type ProcessStdinState = components["schemas"]["ProcessStdinState"];
 export const ProjectDeleteFailureCode = {
   project_not_found: "project_not_found",
   project_workspace_conflict: "project_workspace_conflict",

@@ -7,6 +7,7 @@ import {
 } from "../generated/api";
 import { TaskKind, TaskStatus } from "../generated/api";
 import type { components } from "../generated/api";
+import type { DeepReadonly } from "../deepReadonly";
 import { componentSnapshot } from "./componentTestFixtures";
 import { expectTypeOf, it, expect } from "vitest";
 import {
@@ -26,11 +27,7 @@ const display = {
   indicator: BackgroundTaskIndicator.working,
   label: BackgroundTaskLabel.running,
   inBackgroundList: true,
-  canStop: false,
-  canApprove: false,
-  canInput: false,
-  canResize: false,
-  canReadOutput: true,
+  actions: ["readOutput"],
 } satisfies components["schemas"]["BackgroundTaskDisplay"];
 
 it("uses the server's task-list membership and activity", () => {
@@ -84,16 +81,8 @@ it("preserves a server-provided process identity and presentation", () => {
     tail: "output",
     bytes: 6,
     cancelRequested: false,
-    stdinClosed: false,
-    stdinCloseRequested: false,
     outputTruncated: false,
     outputPatterns: [],
-    capabilities: {
-      readOutput: true,
-      sendInput: false,
-      resize: false,
-      stop: true,
-    },
     display: {
       ...display,
       kind: BackgroundTaskKind.backgroundTask,
@@ -110,6 +99,6 @@ it("preserves a server-provided process identity and presentation", () => {
     epoch: process.epoch,
   });
   expectTypeOf<DisplayBackgroundTask>().toEqualTypeOf<
-    components["schemas"]["BackgroundTaskView"]
+    DeepReadonly<components["schemas"]["BackgroundTaskView"]>
   >();
 });

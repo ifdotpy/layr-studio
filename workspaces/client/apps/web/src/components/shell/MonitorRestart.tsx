@@ -11,7 +11,6 @@ import type {
   DisplayBackgroundTask,
   DisplayProcessTask,
 } from "../backgroundTaskModel";
-import type { Monitor } from "../../types";
 
 type Restart = PostBody<"/api/monitor/restart">;
 export function restartPatterns(text: string): string[] {
@@ -26,9 +25,9 @@ export default function MonitorRestart({
   task: Pick<
     DisplayBackgroundTask,
     "id" | "agent" | "command" | "cancelRequested"
-  > &
-    Pick<Monitor, "outputPatterns"> &
-    Partial<Pick<DisplayProcessTask, "epoch" | "accountKey">>;
+  > & { outputPatterns?: readonly string[] | undefined } & Partial<
+      Pick<DisplayProcessTask, "epoch" | "accountKey">
+    >;
   notify: (message: string) => void;
   refresh: () => Promise<void>;
 }) {

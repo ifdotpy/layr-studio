@@ -18,7 +18,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             [crate::WORK_DETAILS_SEED_MARKER],
         )?;
     }
-    let stale_background: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection IN ('task','monitor') AND deleted=0 AND json_type(payload,'$.value.display.kindLabel') IS NULL)", [], |row| row.get(0))?;
+    let stale_background: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection IN ('task','monitor') AND deleted=0 AND json_type(payload,'$.value.display.actions') IS NULL)", [], |row| row.get(0))?;
     if stale_background {
         tx.execute(
             "DELETE FROM sync_entities WHERE collection IN ('task','monitor')",
@@ -66,7 +66,7 @@ mod tests {
         );
         tx.execute(
             "INSERT INTO sync_entities VALUES('task','a',?1,0)",
-            [r#"{"value":{"display":{"kindLabel":"command"}}}"#],
+            [r#"{"value":{"display":{"actions":[]}}}"#],
         )
         .unwrap();
         tx.execute(
