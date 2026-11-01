@@ -838,10 +838,10 @@ mod tests {
 
     #[test]
     fn team_record_keeps_request_identity_and_terminal_status() {
-        let member: TransferMember = serde_json::from_value(
-            serde_json::json!({"phase":"completed","sourceAccountKey":"source"}),
-        )
-        .unwrap();
+        let member = TransferMember::new(
+            TransferPhase::Completed,
+            "source".to_owned().try_into().unwrap(),
+        );
         let target: AccountKey = "target".to_owned().try_into().unwrap();
         let mut record = TransferRecord::new_team(
             "move".into(),

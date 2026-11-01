@@ -378,7 +378,7 @@ mod receipt_tests {
             .unwrap();
         store.transaction(|db| {
             let agent = studio_runtime_store::AgentRecord::from_value(serde_json::json!({
-                "id":"member", "rootId":"member", "epoch":1, "status":"idle", "compactions":0, "accountKey":"source", "provider":"codex", "model":"gpt-6-astra", "cwd":"/tmp"
+                "id":"member", "rootId":"member", "epoch":1, "status":"idle", "compactions":0, "accountKey":"source", "provider":"codex", "model":"gpt-6-astra", "cwd":std::env::temp_dir()
             })).unwrap();
             studio_runtime_store::AgentRepository::put(db, &agent)?;
             db.execute("INSERT INTO runtime_account_transfers(id,record) VALUES(?1,?2)", rusqlite::params!["transfer", r#"{"id":"transfer","leadId":"other","targetAccountKey":"target","status":"pending","created":1,"members":{"member":{"phase":"unknown","sourceAccountKey":"source"}}}"#])?;

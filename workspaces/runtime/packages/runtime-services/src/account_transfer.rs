@@ -3113,8 +3113,16 @@ mod provider_receipt_tests {
         let replay = current
             .written_read_replay_typed(
                 "agent",
-                &serde_json::from_value(json!({"operation":"account-transfer:transfer:agent:turns:3","account":"source",
-                    "scope":scope,"method":"thread/turns/list","params":{"threadId":"t","limit":20}})).unwrap(),
+                current
+                    .record()
+                    .members
+                    .get("agent")
+                    .unwrap()
+                    .provider_read_intents
+                    .value()
+                    .unwrap()
+                    .get("account-transfer:transfer:agent:turns:3")
+                    .unwrap(),
             )
             .expect("exact replay")
             .expect("written page replays");
