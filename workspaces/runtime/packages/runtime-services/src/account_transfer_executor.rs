@@ -1683,6 +1683,30 @@ mod destination_settings_tests {
     }
 
     #[test]
+    fn native_history_file_digest_is_stable() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let target = root.path().join("target");
+        fs::create_dir_all(source.join("sessions")).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        let history = source.join("sessions/golden.jsonl");
+        fs::write(&history, b"{\"type\":\"session_meta\",\"payload\":{\"id\":\"source-thread\"}}\n{\"type\":\"turn\"}\n").unwrap();
+        copy_native_history(
+            source.to_str().unwrap(),
+            target.to_str().unwrap(),
+            history.to_str().unwrap(),
+        )
+        .unwrap();
+        let manifest: Value =
+            serde_json::from_slice(&fs::read(target.join(".studio-account-imports.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            manifest["sessions/.studio-imports/golden.jsonl"]["sha256"],
+            "62e246317762ee0bc6d9090a820ce23f01c74a1aab542d3fb1034928e31edc4d"
+        );
+    }
+
+    #[test]
     fn native_history_copy_reuses_the_published_file_after_interruption() {
         let root = tempfile::tempdir().expect("test fixture operation succeeds");
         let source = root.path().join("source");
