@@ -280,7 +280,7 @@ where
     Ok(sender)
 }
 
-async fn accounts(
+pub(crate) async fn accounts(
     state: &HttpState,
 ) -> Result<studio_runtime_services::account_policy::AccountsSnapshot, StoreError> {
     let driver = state.account_driver.clone();
