@@ -1,6 +1,6 @@
 //! Claude session reads and durable settings controls.
 use super::{
-    extractors::{ApiJson, QueryParams},
+    extractors::{ApiJson, TypedQuery},
     manifest::{OperationStatus, RouteGroup, get, post},
 };
 use crate::{error::ApiError, router::HttpState};
@@ -36,14 +36,17 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RepairReportQuery {
+    id: studio_runtime_schema::bounded_text::BoundedText<1, { usize::MAX }>,
+}
 async fn repair_report(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<RepairReportQuery>,
 ) -> Result<Json<crate::generated::ClaudeRepairReport>, ApiError> {
     use studio_runtime_services::claude_controls::service::ControlScope;
-    let id = query
-        .nonempty_str("id")
-        .ok_or_else(|| ApiError::validation(vec![json!("query"), json!("id")]))?;
+    let id = query.id.as_str();
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let (agent, _) = load_agent(store, id.to_owned()).await?;
     require_claude_account(&state, &agent).await?;
@@ -461,3 +464,18 @@ fn session_error(
 }
 
 inventory::submit! {crate::routes::manifest::RouteModuleRegistration{name:"claude_controls",routes:Some(routes),dependencies:&[]}}
+
+#[cfg(test)]
+mod typed_query_contract_tests {
+    use super::*;
+    #[test]
+    fn repairreportquery_decodes_and_rejects_invalid() {
+        fn decode(query: &str) -> bool {
+            let uri: axum::http::Uri = format!("/?{query}").parse().unwrap();
+            axum::extract::Query::<RepairReportQuery>::try_from_uri(&uri).is_ok()
+        }
+        assert!(decode("id=x"));
+        assert!(!decode("id=&extra=x"));
+        assert!(!decode("extra=x"));
+    }
+}
