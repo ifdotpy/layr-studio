@@ -125,13 +125,7 @@ async fn prepare(
         // Ordinary writes and tombstones retain indexed sequence deltas.
         let visibility = agent.as_deref().map(|agent| SyncDocumentsRepository::entity_scope_visibility_revision(tx, &collections, agent, scope.include_team_members)).transpose()?.unwrap_or(0);
         let after = after.filter(|after| *after >= visibility);
-<<<<<<< head
-        let mut page = SyncDocumentsRepository::resume_entity_scope(tx, after, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
-||||||| base
-        let mut page = SyncDocumentsRepository::resume_entity_scope(tx, after, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS).map_err(|_| ApiError::internal())?;
-=======
-        let mut page = studio_runtime_services::work_scope::resume(tx, after, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS).map_err(|_| ApiError::internal())?;
->>>>>>> origin/main
+        let mut page = studio_runtime_services::work_scope::resume(tx, after, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
         let through = page.max_sequence;
         let snapshot = page.reset;
         let mut after = if snapshot { 0 } else { since.as_ref().map_or(0, |cursor| cursor.seq) };
@@ -143,8 +137,6 @@ async fn prepare(
         loop {
             let checkpoint = page.checkpoint;
             let final_sql_page = checkpoint == through;
-            // A stored row the current contract cannot read is skipped with a log line,
-            // so one legacy row cannot stop the whole stream.
             // A stored row the current contract cannot read is skipped with a log line,
             // so one legacy row cannot stop the whole stream.
             let documents = page.rows.iter().filter(|row| !snapshot || !row.deleted).filter_map(|row| {
@@ -169,13 +161,7 @@ async fn prepare(
             }
             if final_sql_page { break; }
             after = checkpoint;
-<<<<<<< head
-            page = SyncDocumentsRepository::continue_entity_scope(tx, &page, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
-||||||| base
-            page = SyncDocumentsRepository::continue_entity_scope(tx, &page, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS).map_err(|_| ApiError::internal())?;
-=======
-            page = studio_runtime_services::work_scope::continue_page(tx, &page, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS).map_err(|_| ApiError::internal())?;
->>>>>>> origin/main
+            page = studio_runtime_services::work_scope::continue_page(tx, &page, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
         }
         let mut file = spool.ok_or_else(data_error)?;
         file.rewind().map_err(|_| io_error())?;
