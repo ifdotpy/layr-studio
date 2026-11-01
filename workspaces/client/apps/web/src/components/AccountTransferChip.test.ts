@@ -20,7 +20,7 @@ test("shows one short line for a blocked team move and keeps the reason for the 
     id: "t-1",
     kind: "blocked",
     targetAccountKey: "target",
-    actions: ["retry", "cancel"],
+    actions: "retry_cancel",
     reason: "This profile's account changed.",
   });
   expect(markup).toContain("Account move blocked");
@@ -32,7 +32,7 @@ test("shows one short line for a blocked team move and keeps the reason for the 
 
 test("shows nothing while a move runs or after it ends", () => {
   for (const transfer of [
-    { id: "t-2", kind: "moving", targetAccountKey: "target", actions: [] },
+    { id: "t-2", kind: "moving", targetAccountKey: "target", actions: "none" },
     { id: "t-3", kind: "completed", targetAccountKey: "target" },
     undefined,
   ] as const)

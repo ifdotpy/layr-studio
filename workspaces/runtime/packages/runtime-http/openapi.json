@@ -2567,6 +2567,15 @@
         ],
         "type": "string"
       },
+      "AccountTransferActions": {
+        "enum": [
+          "none",
+          "retry",
+          "cancel",
+          "retry_cancel"
+        ],
+        "type": "string"
+      },
       "AccountTransferBlockedDto": {
         "additionalProperties": false,
         "properties": {
@@ -2843,10 +2852,7 @@
             "additionalProperties": false,
             "properties": {
               "actions": {
-                "items": {
-                  "$ref": "#/components/schemas/AccountTransferAction"
-                },
-                "type": "array"
+                "$ref": "#/components/schemas/WaitingTransferActions"
               },
               "id": {
                 "type": "string"
@@ -2877,10 +2883,7 @@
             "additionalProperties": false,
             "properties": {
               "actions": {
-                "items": {
-                  "$ref": "#/components/schemas/AccountTransferAction"
-                },
-                "type": "array"
+                "$ref": "#/components/schemas/MovingTransferActions"
               },
               "id": {
                 "type": "string"
@@ -2907,10 +2910,7 @@
             "additionalProperties": false,
             "properties": {
               "actions": {
-                "items": {
-                  "$ref": "#/components/schemas/AccountTransferAction"
-                },
-                "type": "array"
+                "$ref": "#/components/schemas/AccountTransferActions"
               },
               "id": {
                 "type": "string"
@@ -32212,6 +32212,13 @@
         ],
         "title": "MovedToolRequestResponse",
         "type": "object"
+      },
+      "MovingTransferActions": {
+        "description": "A moving transfer cannot be cancelled or retried.",
+        "enum": [
+          "none"
+        ],
+        "type": "string"
       },
       "MultiServerResource": {
         "additionalProperties": false,
@@ -61731,6 +61738,14 @@
           "native"
         ],
         "title": "VoiceTransport",
+        "type": "string"
+      },
+      "WaitingTransferActions": {
+        "description": "A waiting transfer may only be cancelled.",
+        "enum": [
+          "none",
+          "cancel"
+        ],
         "type": "string"
       },
       "WalCheckpoint": {

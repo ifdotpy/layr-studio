@@ -3339,6 +3339,8 @@ export interface components {
       | "duplicate";
     /** @enum {string} */
     AccountTransferAction: "retry" | "cancel";
+    /** @enum {string} */
+    AccountTransferActions: "none" | "retry" | "cancel" | "retry_cancel";
     /** AccountTransferBlockedDto */
     AccountTransferBlockedDto: {
       /** Id */
@@ -3448,7 +3450,7 @@ export interface components {
           kind: "none";
         }
       | {
-          actions: components["schemas"]["AccountTransferAction"][];
+          actions: components["schemas"]["WaitingTransferActions"];
           id: string;
           /** @constant */
           kind: "waiting";
@@ -3456,14 +3458,14 @@ export interface components {
           targetAccountKey: string;
         }
       | {
-          actions: components["schemas"]["AccountTransferAction"][];
+          actions: components["schemas"]["MovingTransferActions"];
           id: string;
           /** @constant */
           kind: "moving";
           targetAccountKey: string;
         }
       | {
-          actions: components["schemas"]["AccountTransferAction"][];
+          actions: components["schemas"]["AccountTransferActions"];
           id: string;
           /** @constant */
           kind: "blocked";
@@ -15324,6 +15326,11 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /**
+     * @description A moving transfer cannot be cancelled or retried.
+     * @enum {string}
+     */
+    MovingTransferActions: "none";
     /** MultiServerResource */
     MultiServerResource: {
       /**
@@ -27031,6 +27038,11 @@ export interface components {
      * @enum {string}
      */
     VoiceTransport: "native";
+    /**
+     * @description A waiting transfer may only be cancelled.
+     * @enum {string}
+     */
+    WaitingTransferActions: "none" | "cancel";
     /** WalCheckpoint */
     WalCheckpoint: {
       /** Busy */
@@ -38740,6 +38752,14 @@ export const AccountTransferAction = {
 } as const;
 export type AccountTransferAction =
   components["schemas"]["AccountTransferAction"];
+export const AccountTransferActions = {
+  none: "none",
+  retry: "retry",
+  cancel: "cancel",
+  retry_cancel: "retry_cancel",
+} as const;
+export type AccountTransferActions =
+  components["schemas"]["AccountTransferActions"];
 export const AccountTransferScope = {
   team: "team",
   subagents: "subagents",
@@ -39105,6 +39125,9 @@ export const MonitorState = {
   lost: "lost",
 } as const;
 export type MonitorState = components["schemas"]["MonitorState"];
+export const MovingTransferActions = { none: "none" } as const;
+export type MovingTransferActions =
+  components["schemas"]["MovingTransferActions"];
 export const NativeAccountState = {
   waiting: "waiting",
   updating: "updating",
@@ -39630,6 +39653,12 @@ export const VoiceSpeechState = {
 export type VoiceSpeechState = components["schemas"]["VoiceSpeechState"];
 export const VoiceTransport = { native: "native" } as const;
 export type VoiceTransport = components["schemas"]["VoiceTransport"];
+export const WaitingTransferActions = {
+  none: "none",
+  cancel: "cancel",
+} as const;
+export type WaitingTransferActions =
+  components["schemas"]["WaitingTransferActions"];
 export const WhoisStatus = {
   pending: "pending",
   verified: "verified",

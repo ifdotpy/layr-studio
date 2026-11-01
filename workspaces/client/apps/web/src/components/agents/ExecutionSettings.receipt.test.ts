@@ -308,7 +308,7 @@ test("transfer actions retry the same request and await streamed progress", asyn
     id: "saved-transfer",
     targetAccountKey: "work",
     reason: "Receipt missing",
-    actions: ["retry", "cancel"],
+    actions: "retry_cancel",
   } as const;
   const agent: Agent = { ...initial, accountTransferProgress: progress };
   const transfer = () => {
@@ -343,7 +343,7 @@ test("the transfer modal shows an action failure", () => {
       id: "transfer",
       targetAccountKey: "work",
       reason: "Receipt missing",
-      actions: ["retry"],
+      actions: "retry",
     },
     error: "Cancel response lost",
     onAction: () => {},
@@ -365,7 +365,7 @@ test("blocked transfer reason is reported", () => {
       id: "transfer",
       targetAccountKey: "work",
       reason: "Receipt missing",
-      actions: [],
+      actions: "none",
     },
   });
   expect(h.report).toHaveBeenCalledWith(

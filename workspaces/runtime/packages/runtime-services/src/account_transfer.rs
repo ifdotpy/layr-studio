@@ -254,7 +254,8 @@ pub fn progress_view(
     summary: Option<&Value>,
 ) -> Result<studio_runtime_schema::agent_progress::AccountTransferProgress, TransferError> {
     use studio_runtime_schema::agent_progress::{
-        AccountTransferAction as Action, AccountTransferProgress as Progress,
+        AccountTransferActions as Actions, AccountTransferProgress as Progress,
+        MovingTransferActions, WaitingTransferActions,
     };
     let Some(summary) = summary.filter(|value| !value.is_null()) else {
         return Ok(Progress::None);
@@ -281,13 +282,12 @@ pub fn progress_view(
             target_account_key,
         },
         TransferStatus::Pending => {
-            let mut actions = Vec::new();
-            if can_retry {
-                actions.push(Action::Retry);
-            }
-            if can_cancel {
-                actions.push(Action::Cancel);
-            }
+            let actions = match (can_retry, can_cancel) {
+                (false, false) => Actions::None,
+                (true, false) => Actions::Retry,
+                (false, true) => Actions::Cancel,
+                (true, true) => Actions::RetryCancel,
+            };
             if let Some(block) = blocked.into_iter().next() {
                 Progress::Blocked {
                     id,
@@ -299,14 +299,18 @@ pub fn progress_view(
                 Progress::Moving {
                     id,
                     target_account_key,
-                    actions,
+                    actions: MovingTransferActions::None,
                 }
             } else {
                 Progress::Waiting {
                     id,
                     target_account_key,
                     reason: waiting.unwrap_or_default(),
-                    actions,
+                    actions: if can_cancel {
+                        WaitingTransferActions::Cancel
+                    } else {
+                        WaitingTransferActions::None
+                    },
                 }
             }
         }
@@ -1608,50 +1612,53 @@ fn phase(operation: &Value, id: &str) -> Result<Phase, TransferError> {
         .map_err(|_| invalid("account transfer", "/members/phase"))
 }
 
-fn check_cancel(operation: &Value, order: &[String], agents: &BTreeMap<String, Value>) -> Result<(), TransferError> {
-                for id in order {
-                    let m = &operation["members"][id];
-                    let phase = phase(operation, id)?;
-                    // Only a native thread request moves history. Source and
-                    // catalog reads do not, so a member without one may return.
-                    let native_request =
-                        matches!(
-                            phase,
-                            Phase::Reading | Phase::Submitted | Phase::LazySubmitted | Phase::Ready
-                        ) || ["providerIntent", "transportTicket", "submittedAt", "result"]
-                            .iter()
-                            .any(|key| studio_runtime_store::truthy(m.get(*key)));
-                    if flag(m, "lazy")
-                        && !phase.terminal()
-                        && phase != Phase::Lazy
-                        && native_request
-                        && !(phase == Phase::Blocked
-                            && flag(m, "archiveInvalidated")
-                            && (!studio_runtime_store::truthy(m.get("submittedAt"))
-                                || studio_runtime_store::truthy(m.get("result"))))
-                    {
-                        return Err(TransferError::Refused(
-                            "A native history move has started. Resolve its receipt before cancelling.",
-                        ));
-                    }
-                }
-                if order.iter().any(|id| {
-                    let m = &operation["members"][id];
-                    studio_runtime_store::truthy(m.get("interruptSubmittedAt"))
-                        && m["interruptOutcome"] != "acknowledged"
-                }) {
-                    return Err(TransferError::Refused(
-                        "Retry the unresolved turn interruption before cancelling this transfer",
-                    ));
-                }
-                if order.iter().any(|id| {
-                    operation["members"][id]["interruptOutcome"] == "acknowledged"
-                        && flag(&agents[id], "inFlight")
-                }) {
-                    return Err(TransferError::Refused(
-                        "Wait for the active turn interruption to finish before cancelling this transfer",
-                    ));
-                }
+fn check_cancel(
+    operation: &Value,
+    order: &[String],
+    agents: &BTreeMap<String, Value>,
+) -> Result<(), TransferError> {
+    for id in order {
+        let m = &operation["members"][id];
+        let phase = phase(operation, id)?;
+        // Only a native thread request moves history. Source and
+        // catalog reads do not, so a member without one may return.
+        let native_request = matches!(
+            phase,
+            Phase::Reading | Phase::Submitted | Phase::LazySubmitted | Phase::Ready
+        ) || ["providerIntent", "transportTicket", "submittedAt", "result"]
+            .iter()
+            .any(|key| studio_runtime_store::truthy(m.get(*key)));
+        if flag(m, "lazy")
+            && !phase.terminal()
+            && phase != Phase::Lazy
+            && native_request
+            && !(phase == Phase::Blocked
+                && flag(m, "archiveInvalidated")
+                && (!studio_runtime_store::truthy(m.get("submittedAt"))
+                    || studio_runtime_store::truthy(m.get("result"))))
+        {
+            return Err(TransferError::Refused(
+                "A native history move has started. Resolve its receipt before cancelling.",
+            ));
+        }
+    }
+    if order.iter().any(|id| {
+        let m = &operation["members"][id];
+        studio_runtime_store::truthy(m.get("interruptSubmittedAt"))
+            && m["interruptOutcome"] != "acknowledged"
+    }) {
+        return Err(TransferError::Refused(
+            "Retry the unresolved turn interruption before cancelling this transfer",
+        ));
+    }
+    if order.iter().any(|id| {
+        operation["members"][id]["interruptOutcome"] == "acknowledged"
+            && flag(&agents[id], "inFlight")
+    }) {
+        return Err(TransferError::Refused(
+            "Wait for the active turn interruption to finish before cancelling this transfer",
+        ));
+    }
     Ok(())
 }
 
@@ -2160,12 +2167,10 @@ mod provider_receipt_tests {
         decision.stamp(2.0, None).unwrap();
         let progress = progress_view(decision.agents["agent"].get("accountTransfer")).unwrap();
         let encoded = serde_json::to_value(progress).unwrap();
-        assert!(
-            !encoded["actions"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("cancel"))
-        );
+        assert!(!matches!(
+            encoded["actions"].as_str(),
+            Some("cancel" | "retry_cancel")
+        ));
     }
 
     #[test]

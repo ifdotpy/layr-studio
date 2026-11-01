@@ -21,9 +21,26 @@ pub enum AccountEligibility {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum AccountTransferAction {
+pub enum AccountTransferActions {
+    None,
     Retry,
     Cancel,
+    RetryCancel,
+}
+
+/// A waiting transfer may only be cancelled.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WaitingTransferActions {
+    None,
+    Cancel,
+}
+
+/// A moving transfer cannot be cancelled or retried.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MovingTransferActions {
+    None,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -39,18 +56,18 @@ pub enum AccountTransferProgress {
         id: String,
         target_account_key: crate::account_key::AccountKey,
         reason: String,
-        actions: Vec<AccountTransferAction>,
+        actions: WaitingTransferActions,
     },
     Moving {
         id: String,
         target_account_key: crate::account_key::AccountKey,
-        actions: Vec<AccountTransferAction>,
+        actions: MovingTransferActions,
     },
     Blocked {
         id: String,
         target_account_key: crate::account_key::AccountKey,
         reason: String,
-        actions: Vec<AccountTransferAction>,
+        actions: AccountTransferActions,
     },
     Completed {
         id: String,
@@ -62,7 +79,7 @@ pub enum AccountTransferProgress {
     },
 }
 
-pub(crate) fn account_change_schemas() -> [(&'static str, serde_json::Value); 5] {
+pub(crate) fn account_change_schemas() -> [(&'static str, serde_json::Value); 7] {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
@@ -80,8 +97,16 @@ pub(crate) fn account_change_schemas() -> [(&'static str, serde_json::Value); 5]
             crate::account_destination::AccountDestination::json_schema(&mut generator).to_value(),
         ),
         (
-            "AccountTransferAction",
-            AccountTransferAction::json_schema(&mut generator).to_value(),
+            "AccountTransferActions",
+            AccountTransferActions::json_schema(&mut generator).to_value(),
+        ),
+        (
+            "MovingTransferActions",
+            MovingTransferActions::json_schema(&mut generator).to_value(),
+        ),
+        (
+            "WaitingTransferActions",
+            WaitingTransferActions::json_schema(&mut generator).to_value(),
         ),
         (
             "AccountTransferProgress",
@@ -305,6 +330,19 @@ mod tests {
     fn transfer_progress_rejects_invalid_account_key() {
         let json = r#"{"kind":"completed","id":"t","targetAccountKey":""}"#;
         assert!(serde_json::from_str::<AccountTransferProgress>(json).is_err());
+    }
+    #[test]
+    fn transfer_actions_reject_duplicates_and_invalid_moving_cancel() {
+        for json in [
+            r#"{"kind":"blocked","id":"t","targetAccountKey":"a","reason":"hold","actions":["cancel","cancel"]}"#,
+            r#"{"kind":"moving","id":"t","targetAccountKey":"a","actions":["cancel"]}"#,
+            r#"{"kind":"moving","id":"t","targetAccountKey":"a","actions":"cancel"}"#,
+            r#"{"kind":"waiting","id":"t","targetAccountKey":"a","reason":"hold","actions":"retry"}"#,
+        ] {
+            assert!(serde_json::from_str::<AccountTransferProgress>(json).is_err());
+        }
+        let valid = r#"{"kind":"blocked","id":"t","targetAccountKey":"a","reason":"hold","actions":"retry_cancel"}"#;
+        assert!(serde_json::from_str::<AccountTransferProgress>(valid).is_ok());
     }
     #[test]
     fn agent_progress_openapi_fragments_derive_from_serde_owners() {
