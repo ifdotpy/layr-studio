@@ -43,7 +43,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             tx,
             "questionHistory",
             &id,
-            serde_json::to_value(&approval)?,
+            &approval,
             approval.hidden.is_some(),
         )?;
     }
