@@ -445,7 +445,7 @@ impl SchedulerRepository {
                 .as_deref()
                 .is_some_and(|value| !value.is_empty())
             || agent.extra.get("capacityRetry").is_some_and(truthy)
-            || agent.extra.get("usageResume").is_some_and(truthy)
+            || agent.usage_resume_truthy()
             || agent
                 .extra
                 .get("manualRecoveryDeliveryHold")
@@ -998,7 +998,7 @@ impl SchedulerRepository {
             || !continuation_allowed(&agent)
             || agent.auto_wake != Some(true)
             || agent.in_flight == Some(true)
-            || agent.extra.get("nativeFailureHold").is_some_and(truthy)
+            || agent.native_failure_held()
             || agent.extra.get("remoteWorker").is_some_and(truthy)
             || agent.extra.get("remoteAnchor").is_some_and(truthy)
         {
@@ -1162,7 +1162,14 @@ impl SchedulerRepository {
 
         let unsupported = if single_event.is_some() {
             None
-        } else if agent.extra.get("pendingSettings").is_some_and(truthy) {
+        } else if agent
+            .pending_settings
+            .value()
+            .is_some_and(|value| match value {
+                crate::StoredTransferObject::Known(_) => true,
+                crate::StoredTransferObject::Unreadable(value) => truthy(value),
+            })
+        {
             Some("pendingSettings are not supported by the Rust turn driver; apply settings first.")
         } else {
             events
@@ -1173,10 +1180,8 @@ impl SchedulerRepository {
         if !preparation && let Some(reason) = unsupported {
             agent.status = AgentStatus::Waiting;
             agent.in_flight = Some(false);
-            agent.turn_id = None;
-            agent
-                .extra
-                .insert("nativeFailureHold".to_owned(), Value::Bool(true));
+            agent.turn_id = Default::default();
+            agent.set_native_failure_hold(true);
             agent.error = studio_runtime_schema::queue_command::Field::Value(
                 studio_runtime_schema::provider_errors::AgentError::Message(reason.to_owned()),
             );
@@ -1227,7 +1232,7 @@ impl SchedulerRepository {
         // The start gate's wait record (`startWait`) ends with the claim.
         agent.start_wait = None;
         agent.in_flight = Some(true);
-        agent.turn_id = None;
+        agent.turn_id = Default::default();
         agent.turn_epoch = Some(epoch);
         agent.start_attempt = Some(Box::new(crate::StartAttemptView {
             id: Some(attempt_id.to_owned()),

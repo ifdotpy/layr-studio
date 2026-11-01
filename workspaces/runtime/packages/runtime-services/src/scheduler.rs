@@ -1272,7 +1272,7 @@ mod child_turn_parent_tests {
                     .expect("monitor");
                     studio_runtime_store::monitor_runtime::put(tx, &monitor)?;
                     agent.status = AgentStatus::Completed;
-                    agent.turn_id = None;
+                    agent.turn_id = Default::default();
                     agent.in_flight = Some(false);
                     let mut value = agent.value();
                     crate::lifecycle_effects::ProductionRecoveryDelivery { at: 3.0 }

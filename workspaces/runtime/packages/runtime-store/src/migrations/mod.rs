@@ -58,6 +58,8 @@ mod m2026_11_01_access_invite_created;
 mod m2026_11_01_account_projection;
 mod m2026_11_01_agent_capacity;
 mod m2026_11_01_agent_naming;
+mod m2026_11_01_agent_null_parity;
+mod m2026_11_01_agent_turn_null;
 mod m2026_11_01_annotation_record;
 mod m2026_11_01_approval_secrets;
 mod m2026_11_01_chat_busy_deleted_index;
@@ -69,6 +71,7 @@ mod m2026_11_01_radio_controls;
 mod m2026_11_01_rate_limit_view;
 mod m2026_11_01_room_leads;
 mod m2026_11_01_status_turn_indexes;
+mod m2026_11_01_transfer_delegation_depth;
 mod m2026_11_01_transfer_operations;
 mod m2026_11_01_transfer_pointers;
 mod m2026_11_01_transfer_summary;
@@ -944,6 +947,26 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
+            id: "2026-11-01-agent-null-parity",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with null optional fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_agent_null_parity::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-agent-turn-null",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with null turn identifiers",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_agent_turn_null::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
             id: "2026-11-01-agent-batch-56-capacity",
             introduced: NOVEMBER_1,
             target: MigrationTarget::Canvas,
@@ -1023,6 +1046,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_01_transfer_summary::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-transfer-delegation-depth",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent and transfer worker defaults with out-of-range delegation depth",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_transfer_delegation_depth::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {

@@ -1263,7 +1263,10 @@ pub(super) async fn submitted(
                             == Some(i.attempt_id.as_str())
                         && agent.start_attempt.as_ref().and_then(|a| a.submitted) == Some(false)
                         && agent.auto_wake == Some(true)
-                        && agent.extra.get("nativeFailureHold").unwrap_or(&Value::Null) != true
+                        && !matches!(
+                            agent.native_failure_hold.value(),
+                            Some(studio_runtime_store::NativeFailureHold::Boolean(true))
+                        )
                 }
             })
         })?;
@@ -4564,7 +4567,7 @@ fn hold_before_claim(
 ) -> Result<(), WorkerError> {
     let mut agent = AgentRepository::get(tx, &AgentId::from(id))?.ok_or_else(|| invalid(id))?;
     agent.status = studio_runtime_store::AgentStatus::Waiting;
-    agent.extra.insert("nativeFailureHold".into(), json!(true));
+    agent.set_native_failure_hold(true);
     agent.auto_wake = Some(false);
     agent.in_flight = Some(false);
     agent.error = studio_runtime_schema::queue_command::Field::Value(

@@ -44157,7 +44157,10 @@
             "title": "Effort"
           },
           "fastMode": {
-            "type": "boolean"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "model": {
             "anyOf": [
@@ -64175,14 +64178,20 @@
           "daybreakEnabled": {
             "default": false,
             "title": "Daybreakenabled",
-            "type": "boolean"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "delegationDepth": {
             "default": 1,
             "maximum": 3,
             "minimum": 1,
             "title": "Delegationdepth",
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "effort": {
             "anyOf": [

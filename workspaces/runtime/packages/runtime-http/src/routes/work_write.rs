@@ -1448,7 +1448,9 @@ mod managed_work_port_tests {
                 let mut worker =
                     AgentRepository::get(tx, &"worker".into())?.expect("worker fixture exists");
                 worker.cwd = Some(cwd);
-                worker.extra.insert("yoloMode".into(), json!(true));
+                worker.yolo_mode = studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_store::StoredTransferValue::Known(true),
+                );
                 AgentRepository::put(tx, &worker)?;
                 Ok(())
             })
@@ -1618,7 +1620,9 @@ mod managed_work_port_tests {
                 let mut lead =
                     AgentRepository::get(tx, &"lead".into())?.expect("lead fixture exists");
                 lead.cwd = Some(cwd);
-                lead.extra.insert("yoloMode".into(), json!(true));
+                lead.yolo_mode = studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_store::StoredTransferValue::Known(true),
+                );
                 AgentRepository::put(tx, &lead)?;
                 Ok(())
             })

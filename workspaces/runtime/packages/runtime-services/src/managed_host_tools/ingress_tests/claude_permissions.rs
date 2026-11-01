@@ -233,3 +233,51 @@ async fn claude_child_reads_current_parent_permission_at_commit() {
         .value();
     assert_eq!(child["permissionMode"], "plan");
 }
+
+#[tokio::test]
+async fn null_and_absent_stored_permission_use_the_same_child_default() {
+    for null in [false, true] {
+        let (_dir, store, context) = fixture().await;
+        let id = context.agent.clone();
+        store.transaction_with::<_, StoreError>(move |tx| {
+            let sql = if null {
+                "UPDATE runtime_agents SET record=json_set(record,'$.permissionMode',NULL) WHERE id=?1"
+            } else {
+                "UPDATE runtime_agents SET record=json_remove(record,'$.permissionMode') WHERE id=?1"
+            };
+            tx.execute(sql, [&id])?;
+            Ok(())
+        }).await.unwrap();
+        let parent = AgentRepository::get(
+            &store.test_reader().unwrap(),
+            &AgentId::from(context.agent.as_str()),
+        )
+        .unwrap()
+        .unwrap()
+        .value();
+        assert!(parent.get("permissionMode").is_none());
+        let actor = Actor::from_record(&parent, &context.agent, context.epoch).unwrap();
+        let spawned = crate::managed_child_create::spawn_agents(
+            &store,
+            &actor,
+            &json!({"agents":[{"name":"Child", "prompt":"Task", "workspace":"shared"}]}),
+            "permission-null-parity",
+            20.0,
+            &CreationEnvironment,
+        )
+        .await
+        .unwrap();
+        let id = AgentId::from(
+            spawned.result().test_value()["agents"][0]["id"]
+                .as_str()
+                .unwrap(),
+        );
+        let child = AgentRepository::get(&store.test_reader().unwrap(), &id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            child.permission_mode,
+            Some(studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions)
+        );
+    }
+}

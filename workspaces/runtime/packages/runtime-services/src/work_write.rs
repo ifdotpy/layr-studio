@@ -950,7 +950,7 @@ fn accepted_archive_preflight(
         let canonical = archive_marker["by"] == root_id
             && archive_marker["reason"] == "Accepted task result is on main"
             && archive_marker["epoch"] == owner.epoch
-            && archive_marker.get("at") == owner_value.get("deletedAt")
+            && archive_marker.get("at") == owner_value.get("deletedAt").filter(|v| !v.is_null())
             && archive_marker["at"].as_f64().unwrap_or_default() >= intent.created
             && archive_marker["cleanupPending"] == false
             && !event_write::truthy(archive_marker.get("cleanupPending"));
@@ -2436,7 +2436,10 @@ fn continuation_work_pending(agent: &AgentRecord) -> bool {
     };
 
     let capacity = agent.extra.get("capacityRetry").unwrap_or(&Value::Null);
-    let usage = agent.extra.get("usageResume").unwrap_or(&Value::Null);
+    let Ok(usage_value) = agent.usage_resume_value() else {
+        return true;
+    };
+    let usage = usage_value.as_ref().unwrap_or(&Value::Null);
     let restart = agent.restart_recovery.as_deref();
     matches(capacity, &["scheduled", "starting", "unknown"], "turnId")
         || matches(usage, &["scheduled", "started", "unknown"], "turnId")
