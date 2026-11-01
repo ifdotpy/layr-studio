@@ -2730,11 +2730,7 @@ mod provider_receipt_tests {
 
     #[test]
     fn enrollment_reads_typed_pending_settings_and_captures_source() {
-        let mut agent: studio_runtime_store::AgentRecord = serde_json::from_value(serde_json::json!({
-            "id":"agent","rootId":"agent","provider":"codex","accountKey":"source",
-            "epoch":0,"status":"idle","compactions":0,
-            "pendingSettings":{"model":"typed","updatedAt":12.0},"pendingSettingsAccountKey":"source"
-        })).unwrap();
+        let mut agent: studio_runtime_store::AgentRecord = serde_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0,"pendingSettings":{"model":"typed","updatedAt":12.0},"pendingSettingsAccountKey":"source"}"#).unwrap();
         agent.extra.insert(
             "pendingSettings".into(),
             serde_json::json!({"model":"stale"}),
@@ -2792,11 +2788,8 @@ mod provider_receipt_tests {
             serde_json::json!({"model":"legacy"}),
         ] {
             let mut agent: studio_runtime_store::AgentRecord =
-                serde_json::from_value(serde_json::json!({
-                    "id":"agent","rootId":"agent","provider":"codex","accountKey":"source",
-                    "epoch":0,"status":"idle","compactions":0,"workerDefaults":defaults
-                }))
-                .unwrap();
+                serde_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0}"#).unwrap();
+            agent.worker_defaults = serde_json::from_value(defaults.clone()).unwrap();
             let id = "move".to_owned().try_into().unwrap();
             let target = "target".to_owned().try_into().unwrap();
             super::typed_enroll(
@@ -2823,11 +2816,7 @@ mod provider_receipt_tests {
     #[test]
     fn enrollment_reads_typed_worker_defaults_without_projecting_agent() {
         let mut agent: studio_runtime_store::AgentRecord =
-            serde_json::from_value(serde_json::json!({
-                "id":"agent","rootId":"agent","provider":"codex","accountKey":"source",
-                "epoch":0,"status":"idle","compactions":0,
-                "workerDefaults":{"model":"typed","effort":null,"fastMode":false}
-            }))
+            serde_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0,"workerDefaults":{"model":"typed","effort":null,"fastMode":false}}"#)
             .unwrap();
         // A stale extension must not replace the typed owner during enrollment.
         agent.extra.insert(
@@ -2857,11 +2846,7 @@ mod provider_receipt_tests {
     #[test]
     fn enrollment_provider_change_writes_typed_settings() {
         let mut agent: studio_runtime_store::AgentRecord =
-            serde_json::from_value(serde_json::json!({
-                "id":"agent","rootId":"agent","provider":"codex","accountKey":"source",
-                "epoch":0,"status":"idle","compactions":0,"cyberAccessProgram":"other",
-                "claudeOptions":{"configDir":"profile"}
-            }))
+            serde_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0,"cyberAccessProgram":"other","claudeOptions":{"configDir":"profile"}}"#)
             .unwrap();
         let id = "move".to_owned().try_into().unwrap();
         let target = "target".to_owned().try_into().unwrap();

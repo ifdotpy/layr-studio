@@ -3719,8 +3719,7 @@ mod tests {
             assert_eq!(record.value().get("pendingSettings"), Some(&raw));
         }
         let dto: studio_runtime_schema::agent_entity_nested::ExecutionSettingsDto =
-            serde_json::from_value(json!({"model":"m","accountKey":"target","updatedAt":1}))
-                .unwrap();
+            serde_json::from_str(r#"{"model":"m","accountKey":"target","updatedAt":1}"#).unwrap();
         let settings: crate::transfer_record::TransferSettings = dto.into();
         assert_eq!(settings.account_key.as_deref(), Some("target"));
         assert_eq!(settings.updated_at.value(), Some(&1.0));

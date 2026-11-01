@@ -283,7 +283,7 @@ impl<'de> Deserialize<'de> for ProviderReadReceipt {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TransferClaudeOptions {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -953,7 +953,7 @@ impl From<AgentTransferSummary>
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TransferWorkerDefaults {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -1071,12 +1071,7 @@ mod tests {
 
     #[test]
     fn public_summary_projects_typed_transfer() {
-        let summary: super::AgentTransferSummary = serde_json::from_value(serde_json::json!({
-            "id":"move", "targetAccountKey":"target", "status":"pending", "total":2,
-            "updated":1, "canCancel":true,
-            "blocked":[{"id":"a","provider":"codex","reason":"busy"}],
-            "leftOnSource":[{"id":"b","provider":"claude"}]
-        }))
+        let summary: super::AgentTransferSummary = serde_json::from_str(r#"{"id":"move","targetAccountKey":"target","status":"pending","total":2,"updated":1,"canCancel":true,"blocked":[{"id":"a","provider":"codex","reason":"busy"}],"leftOnSource":[{"id":"b","provider":"claude"}]}"#)
         .unwrap();
         let dto: studio_runtime_schema::agent_entity_transfer::AccountTransferSummaryDto =
             summary.into();
