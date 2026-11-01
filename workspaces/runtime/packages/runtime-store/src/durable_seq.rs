@@ -70,6 +70,8 @@ pub const DURABLE_TABLES: &[DurableTable] = &[
     DurableTable::new("runtime_work_results", "record"),
     DurableTable::new("runtime_work_decisions", "record"),
     DurableTable::new("runtime_work_releases", "record"),
+    // Execution runs: a failure refusal of a work document depends on the owner's run.
+    DurableTable::new("runtime_execution_runs", "record"),
 ];
 
 /// The next number of the shared counter. Owner of the allocation rule. The same text
@@ -241,6 +243,16 @@ pub enum DurableChanges {
         tombstones: Vec<DurableTombstone>,
         seq: i64,
     },
+}
+
+/// The highest change number of any sync table, and the durable tombstone floor.
+pub fn high_and_floor(connection: &Connection) -> StoreResult<(i64, i64)> {
+    let high: i64 = connection.query_row(&format!("SELECT {NEXT}-1"), [], |row| row.get(0))?;
+    let floor: i64 =
+        connection.query_row("SELECT floor FROM durable_floor WHERE id=1", [], |row| {
+            row.get(0)
+        })?;
+    Ok((high, floor))
 }
 
 /// Rows of `table` with `seq` above `cursor`, or a snapshot when the cursor is absent,

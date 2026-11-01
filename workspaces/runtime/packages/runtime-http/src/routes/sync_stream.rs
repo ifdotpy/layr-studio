@@ -1257,17 +1257,19 @@ async fn read_entity_changes_typed(
     store
         .ok_or_else(ApiError::internal)?
         .read_async("runtime-http/routes/sync_stream", move |connection| {
+            let (high, durable_floor) =
+                studio_runtime_store::durable_seq::high_and_floor(connection)
+                    .map_err(|_| ApiError::internal())?;
             let floor = SyncDocumentsRepository::entity_tombstone_floor(connection)
-                .map_err(|_| ApiError::internal())?;
-            let sequence = SyncDocumentsRepository::entity_sequence(connection)
                 .map_err(|_| ApiError::internal())?
-                .max(floor);
+                .max(durable_floor);
+            let sequence = high.max(floor);
             if !(0..=MAX_SAFE_REVISION).contains(&sequence) {
                 return Err(ApiError::internal());
             }
             let batch = match after {
                 Some(after) if after >= floor && after < sequence => {
-                    SyncDocumentsRepository::resume_entity_scope(
+                    studio_runtime_services::work_scope::resume(
                         connection,
                         Some(after),
                         Some(
