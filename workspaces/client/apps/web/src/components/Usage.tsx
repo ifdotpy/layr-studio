@@ -1,11 +1,8 @@
+import { LimitColor, RunwayColor } from "../generated/api";
 import { PassiveUsage } from "../hooks/BottomInsetBand";
 import { useSubscription } from "../sync/subscriptions";
 import { randomUUID } from "../uuid";
-import {
-  ProviderKind,
-  isProviderKind,
-  providerLabel,
-} from "../generated/providerKind.ts";
+import { ProviderKind, providerLabel } from "../generated/providerKind.ts";
 import { useServerApi } from "../servers/ServerServicesContext";
 import { localDateTime, localTime } from "../local-time";
 import {
@@ -14,6 +11,8 @@ import {
   type AccountLimitsSnapshot,
 } from "../usage/accountUsage";
 import { weeklyRunway } from "../usage/weeklyRunway";
+import { accountBuckets } from "../usage/accountBuckets";
+import { resetCreditEnabled } from "../usage/resetCredits";
 import {
   lazy,
   Suspense,
@@ -32,8 +31,6 @@ import {
 } from "lucide-react";
 import type { Agent, Snapshot } from "../types";
 import { errorText, type GetResult } from "../api";
-import { useServerSessionCosts } from "../servers/ServerServicesContext";
-import { useRecoveredLimit } from "./useRecoveredLimit";
 import { useLimitEligibility } from "../usage/useLimitEligibility";
 import { limitRecovery } from "../usage/limitRecovery";
 import LimitRecoveryNotice from "./LimitRecoveryNotice";
@@ -46,7 +43,6 @@ import {
   AccountTilesLayout,
   AccountRemainingBar,
   AccountTileLabel,
-  remainingLimit,
 } from "./AccountTiles";
 import { accountDisplayName } from "../accountName";
 const Analytics = lazy(() => import("./Analytics"));
@@ -58,6 +54,15 @@ export type UsageAccount = Pick<Account, "label"> & {
   provider?: Account["provider"] | undefined;
   key: string;
   signedOut?: boolean;
+  runway?:
+    | import("../generated/api").components["schemas"]["WeeklyRunway"]
+    | undefined;
+  reset?:
+    | import("../generated/api").components["schemas"]["ResetProjection"]
+    | undefined;
+  buckets?:
+    | import("../generated/api").components["schemas"]["BucketProjection"]
+    | undefined;
   limits: UsageLimitSnapshot | null;
   loading: boolean;
   reload: (force?: boolean) => void | Promise<void>;
@@ -79,105 +84,10 @@ const accountProvider = (account?: UsageAccount) => account?.provider || "";
 
 type UsageLimitSnapshot = AccountLimitsSnapshot;
 
-type LimitWindow = {
-  label: string;
-  remaining: number | null;
-  reset: number | null;
-  expired: boolean;
-};
-type LimitBucket = {
-  id: string;
-  name: string;
-  data: NonNullable<ReturnType<typeof jsonObject>>;
-  windows: LimitWindow[];
-};
-type AvailableReset = {
-  id: string;
-  title?: string;
-  description?: string;
-  expiresAt?: number;
-  resetType?: string;
-};
 const number = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
-const percentage = (value: unknown) =>
-  number(value) && value >= 0 && value <= 100 ? value : null;
 export const formatPercent = (value: number) =>
   value > 0 && value < 1 ? "<1%" : `${Math.floor(value)}%`;
-const duration = (minutes: unknown, fallback: string) => {
-  if (!number(minutes) || minutes <= 0) return fallback;
-  if (minutes % 1440 === 0) return `${minutes / 1440}d`;
-  if (minutes % 60 === 0) return `${minutes / 60}h`;
-  return `${minutes}m`;
-};
-export function readBuckets(
-  limits: UsageLimitSnapshot | null,
-  now: number,
-): LimitBucket[] {
-  const responseData = jsonObject(limits?.data);
-  const reported = jsonObject(responseData?.rateLimitsByLimitId);
-  const rateLimits = jsonObject(responseData?.rateLimits);
-  const buckets =
-    reported && Object.keys(reported).length
-      ? reported
-      : rateLimits
-        ? {
-            [typeof rateLimits.limitId === "string" && rateLimits.limitId
-              ? rateLimits.limitId
-              : "codex"]: rateLimits,
-          }
-        : {};
-  return Object.entries(buckets)
-    .flatMap(([id, value]) => {
-      const data = jsonObject(value);
-      if (!data) return [];
-      const windows = ["primary", "secondary"].flatMap((key) => {
-        const window = jsonObject(data[key]);
-        if (!window) return [];
-        const used = percentage(window.usedPercent);
-        const reset =
-          number(window.resetsAt) && window.resetsAt > 0
-            ? window.resetsAt
-            : null;
-        return [
-          {
-            label: duration(
-              window.windowDurationMins,
-              key === "primary" ? "Primary" : "Secondary",
-            ),
-            remaining: used === null ? null : 100 - used,
-            reset,
-            expired: reset !== null && reset <= now,
-          },
-        ];
-      });
-      const individualLimit = jsonObject(data.individualLimit);
-      if (individualLimit)
-        windows.push({
-          label: "Individual",
-          remaining: percentage(individualLimit.remainingPercent),
-          reset: null,
-          expired: false,
-        });
-      return {
-        id,
-        name:
-          (typeof data.limitName === "string" && data.limitName) ||
-          providerLabel(id),
-        data,
-        windows,
-      };
-    })
-    .sort((a, b) => {
-      const rank = (bucket: LimitBucket) =>
-        isProviderKind(bucket.id) || isProviderKind(bucket.data.limitId)
-          ? 0
-          : /spark/i.test(bucket.name)
-            ? 2
-            : 1;
-      return rank(a) - rank(b) || a.name.localeCompare(b.name);
-    });
-}
 const dollars = (value: unknown) =>
   number(value)
     ? new Intl.NumberFormat(undefined, {
@@ -217,7 +127,6 @@ export default function Usage({
   accounts?: UsageAccount[] | undefined;
   visible?: boolean;
 }) {
-  const { peekSessionCost, storeSessionCost } = useServerSessionCosts();
   const { subscribeStateProjection } = useServerSync();
   const { post } = useServerApi();
 
@@ -252,7 +161,6 @@ export default function Usage({
     selectedAccountKey,
     activeAccount?.accountId,
   );
-  const limitsData = jsonObject(limits?.data);
   const loadingLimits =
     !limits?.data &&
     (activeAccount?.loading ?? limitsLoading ?? !reportedLimits);
@@ -291,8 +199,8 @@ export default function Usage({
     setResetError("");
     setResetNotice("");
     try {
-      const accountId = limitsData?.accountId;
-      if (typeof accountId !== "string")
+      const accountId = activeAccount?.reset?.accountId;
+      if (!accountId)
         throw new Error("Refresh limits before using this reset credit.");
       const key = `${accountId}:${creditId}`;
       const requestId = resetAttempts.current.get(key) || randomUUID();
@@ -395,38 +303,36 @@ export default function Usage({
   const costScope = JSON.stringify([stateDir, rootId]);
   const [sessionCostState, setSessionCostState] = useState<{
     scope: string;
+    source: typeof subscribeStateProjection;
     value:
-      | ReturnType<typeof peekSessionCost>
-      | NonNullable<Snapshot["runtime"]["sessionCostsByAgent"]>[string];
-    updating: boolean;
-  }>(() => ({
-    scope: costScope,
-    value: peekSessionCost(stateDir, rootId),
-    updating: true,
-  }));
+      | NonNullable<Snapshot["runtime"]["sessionCostsByAgent"]>[string]
+      | null;
+  } | null>(null);
   const sessionCost =
-    sessionCostState.scope === costScope
+    sessionCostState?.scope === costScope &&
+    sessionCostState.source === subscribeStateProjection
       ? sessionCostState.value
-      : peekSessionCost(stateDir, rootId);
-  const sessionCostUpdating =
-    sessionCostState.scope !== costScope || sessionCostState.updating;
-  useEffect(
-    () =>
-      subscribeStateProjection(
-        (snapshot) => {
-          const value = snapshot?.runtime.sessionCostsByAgent?.[rootId];
-          if (!value) return;
-          const cached = storeSessionCost(stateDir, rootId, value);
-          setSessionCostState({
-            scope: costScope,
-            value: cached || value,
-            updating: Boolean(value.refreshing),
-          });
-        },
-        () => {},
-      ),
-    [costScope, rootId, stateDir, subscribeStateProjection],
-  );
+      : null;
+  const sessionCostUpdating = sessionCost === null || sessionCost.refreshing;
+  useEffect(() => {
+    let active = true;
+    const stop = subscribeStateProjection(
+      (snapshot) => {
+        if (!active) return;
+        const value = snapshot?.runtime.sessionCostsByAgent?.[rootId];
+        setSessionCostState({
+          scope: costScope,
+          source: subscribeStateProjection,
+          value: value?.rootId === rootId ? value : null,
+        });
+      },
+      () => {},
+    );
+    return () => {
+      active = false;
+      stop();
+    };
+  }, [costScope, rootId, subscribeStateProjection]);
   useEffect(() => {
     setCosts(null);
     const stop = subscribeStateProjection(
@@ -483,10 +389,7 @@ export default function Usage({
   const modelLimits = useLimitEligibility(agent, currentLimits);
   const selectedLimits =
     selectedAccountKey === fallbackKey ? modelLimits : limits;
-  const recovered = useRecoveredLimit(accountAgent, selectedLimits, now);
-  const selectedRecovery = recovered
-    ? null
-    : limitRecovery(accountAgent, selectedLimits, now);
+  const selectedRecovery = limitRecovery(accountAgent, selectedLimits, now);
   useEffect(() => {
     autoReloadedAccounts.current.clear();
   }, [agent.id]);
@@ -497,17 +400,9 @@ export default function Usage({
     autoReloadedAccounts.current.add(selectedAccountKey);
     void activeAccountReload.current?.(false);
   }, [limitsOpened, selectedAccountKey, fallbackKey]);
-  const accountIsLow = (item: UsageAccount) =>
-    readBuckets(accountLimits(item.limits, item.key, item.accountId), now).some(
-      (bucket) =>
-        bucket.windows.some(
-          (window) =>
-            window.remaining !== null &&
-            window.remaining <= 15 &&
-            !window.expired,
-        ),
-    );
-  const lowAccount = usageAccounts.find(accountIsLow);
+  const lowAccount = usageAccounts.find(
+    (item) => accountBuckets(item.buckets, now)?.low,
+  );
   return (
     <div
       className="usage-footer"
@@ -623,11 +518,9 @@ export default function Usage({
           aria-label="Account weekly allowance"
         >
           {usageAccounts.map((item) => {
-            const projection = weeklyRunway(
-              accountLimits(item.limits, item.key, item.accountId),
-              now,
-              item.signedOut,
-            );
+            const projection = item.signedOut
+              ? null
+              : weeklyRunway(item.runway, now);
             const current = item.key === fallbackKey;
             const provider = providerLabel(accountProvider(item));
             const label = humanAccountLabel(item);
@@ -641,18 +534,18 @@ export default function Usage({
               !item.limits?.data
                 ? [`Limits unavailable: ${item.limits.error}`]
                 : []),
-              ...projection.windows.map(
+              ...(projection?.windows ?? []).map(
                 (window) =>
                   `${window.name} weekly: ${window.remaining === null ? "remaining allowance unavailable" : `${formatPercent(window.remaining)} left`}. ${window.reset === null ? "Reset time unavailable." : window.reset <= now ? "Cached reset passed." : `Resets ${localDateTime(new Date(window.reset * 1000), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}.`}${window.days !== null && Number.isFinite(window.days) ? ` About ${window.days.toFixed(1)} days left at the current rate.` : ""}${window.resetFirst ? " Resets before this allowance runs out." : ""}`,
               ),
-              projection.days === null
+              !projection || (projection.days === null && !projection.unlimited)
                 ? "Projected days unavailable."
-                : !Number.isFinite(projection.days)
+                : projection.unlimited
                   ? "At least 7 days left at the current rate. No weekly consumption recorded."
                   : projection.windows.every((window) => window.resetFirst)
                     ? "At least 7 days left at the current rate after reset."
                     : projection.windows.length > 1
-                      ? `About ${projection.days.toFixed(1)} days left across weekly limits.`
+                      ? `About ${projection.days?.toFixed(1)} days left across weekly limits.`
                       : "",
               "Rate uses consumption in the elapsed part of the weekly window.",
             ]
@@ -686,7 +579,7 @@ export default function Usage({
                 >
                   <span
                     className="account-limits-dot"
-                    data-color={projection.color}
+                    data-color={projection?.color ?? RunwayColor.gray}
                     data-current={current || undefined}
                     aria-hidden="true"
                   />
@@ -791,16 +684,11 @@ export default function Usage({
                         <Tabs.List aria-label="Accounts with limits">
                           {usageAccounts.map((item, index) => {
                             if (accountProvider(item) !== provider) return null;
-                            const snapshot = accountLimits(
-                              item.limits,
-                              item.key,
-                              item.accountId,
+                            const bucketState = accountBuckets(
+                              item.buckets,
+                              now,
                             );
-                            const remaining = remainingLimit(
-                              readBuckets(snapshot, now).flatMap(
-                                (bucket) => bucket.windows,
-                              ),
-                            );
+                            const remaining = bucketState?.remaining ?? null;
                             return (
                               <Tabs.Tab
                                 key={item.key}
@@ -835,6 +723,9 @@ export default function Usage({
                                 )}
                                 <AccountRemainingBar
                                   remaining={remaining}
+                                  color={
+                                    bucketState?.color ?? LimitColor.paused
+                                  }
                                   label={`${humanAccountLabel(item)} remaining limit`}
                                 />
                               </Tabs.Tab>
@@ -860,9 +751,9 @@ export default function Usage({
                     activeAccount.key,
                     activeAccount.accountId,
                   );
-                  const limitsData = jsonObject(limits?.data);
                   const loadingLimits = !limits?.data && activeAccount.loading;
-                  const buckets = readBuckets(limits, now);
+                  const buckets =
+                    accountBuckets(activeAccount.buckets, now)?.buckets ?? [];
                   const recovery = isSelected
                     ? selectedRecovery
                     : limitRecovery(
@@ -872,43 +763,8 @@ export default function Usage({
                           : limits,
                         now,
                       );
-                  const resetCredits = jsonObject(
-                    limitsData?.rateLimitResetCredits,
-                  );
-                  const resetCount = number(resetCredits?.availableCount)
-                    ? resetCredits.availableCount
-                    : null;
-                  const availableResets: AvailableReset[] = Array.isArray(
-                    resetCredits?.credits,
-                  )
-                    ? resetCredits.credits.flatMap((value) => {
-                        const credit = jsonObject(value);
-                        if (
-                          !credit ||
-                          typeof credit.id !== "string" ||
-                          credit.status !== "available" ||
-                          (number(credit.expiresAt) && credit.expiresAt <= now)
-                        )
-                          return [];
-                        return [
-                          {
-                            id: credit.id,
-                            ...(typeof credit.title === "string"
-                              ? { title: credit.title }
-                              : {}),
-                            ...(typeof credit.description === "string"
-                              ? { description: credit.description }
-                              : {}),
-                            ...(number(credit.expiresAt)
-                              ? { expiresAt: credit.expiresAt }
-                              : {}),
-                            ...(typeof credit.resetType === "string"
-                              ? { resetType: credit.resetType }
-                              : {}),
-                          },
-                        ];
-                      })
-                    : [];
+                  const resetCredits = activeAccount.reset;
+                  const availableResets = resetCredits?.credits ?? [];
                   return (
                     <div
                       key={activeAccount.key}
@@ -961,8 +817,8 @@ export default function Usage({
                           >
                             <header>
                               <strong>{bucket.name}</strong>
-                              {typeof bucket.data.planType === "string" && (
-                                <span>{bucket.data.planType}</span>
+                              {bucket.planType !== null && (
+                                <span>{bucket.planType}</span>
                               )}
                             </header>
                             <div className="account-limit-windows">
@@ -975,9 +831,7 @@ export default function Usage({
                                     <span>{window.label}</span>
                                     <strong
                                       className={
-                                        window.remaining !== null &&
-                                        window.remaining <= 15 &&
-                                        !window.expired
+                                        window.warning
                                           ? "account-limits-warning"
                                           : ""
                                       }
@@ -1000,7 +854,7 @@ export default function Usage({
                                         value={window.remaining}
                                         size="xs"
                                         color={remainingLimitColor(
-                                          window.remaining,
+                                          window.color,
                                         )}
                                         aria-label={`${bucket.name} ${window.label} remaining`}
                                       />
@@ -1044,27 +898,10 @@ export default function Usage({
                                 No limit windows reported.
                               </p>
                             )}
-                            {jsonObject(bucket.data.credits) && (
+                            {bucket.creditsLabel !== null && (
                               <div className="account-limit-credits">
                                 <span>Credits</span>
-                                <strong>
-                                  {jsonObject(bucket.data.credits)
-                                    ?.unlimited === true
-                                    ? "Unlimited"
-                                    : jsonObject(bucket.data.credits)
-                                          ?.balance != null
-                                      ? String(
-                                          jsonObject(bucket.data.credits)
-                                            ?.balance,
-                                        )
-                                      : jsonObject(bucket.data.credits)
-                                            ?.hasCredits === true
-                                        ? "Available"
-                                        : jsonObject(bucket.data.credits)
-                                              ?.hasCredits === false
-                                          ? "None"
-                                          : "Unavailable"}
-                                </strong>
+                                <strong>{bucket.creditsLabel}</strong>
                               </div>
                             )}
                           </section>
@@ -1117,18 +954,14 @@ export default function Usage({
                           </div>
                         </section>
                       )}
-                      {resetCredits && (
+                      {resetCredits?.present && (
                         <section
                           className="account-reset-credits"
                           aria-label="Limit reset credits"
                         >
                           <header>
                             <strong>Limit resets</strong>
-                            <span>
-                              {resetCount === null
-                                ? "Count unavailable"
-                                : `${resetCount} available`}
-                            </span>
+                            <span>{resetCredits.countLabel}</span>
                           </header>
                           {availableResets.map((credit) => (
                             <div
@@ -1138,12 +971,12 @@ export default function Usage({
                               <div className="account-reset-credit-row">
                                 <div>
                                   <strong
-                                    title={credit.description || undefined}
+                                    title={credit.description ?? undefined}
                                   >
-                                    {credit.title || "Reset credit"}
+                                    {credit.title}
                                   </strong>
                                   <span>
-                                    {number(credit.expiresAt) ? (
+                                    {credit.expiresAt !== null ? (
                                       <>
                                         Expires {resetIn(credit.expiresAt, now)}{" "}
                                         ·{" "}
@@ -1180,8 +1013,7 @@ export default function Usage({
                                         activeAccount.key,
                                       ),
                                     ) ||
-                                    credit.resetType !== "codexRateLimits" ||
-                                    typeof limitsData?.accountId !== "string"
+                                    !resetCreditEnabled(credit, now)
                                   }
                                   onClick={() => {
                                     setConfirmReset(credit.id);
@@ -1202,7 +1034,7 @@ export default function Usage({
                                 <div
                                   className="account-reset-confirm"
                                   role="group"
-                                  aria-label={`Confirm ${credit.title || "limit reset"}`}
+                                  aria-label={credit.confirmLabel}
                                 >
                                   <p>
                                     Use this reset credit now? This spends one
@@ -1225,7 +1057,10 @@ export default function Usage({
                                       tabIndex={isSelected ? undefined : -1}
                                       size="compact-xs"
                                       loading={resetPending}
-                                      disabled={resetPending}
+                                      disabled={
+                                        resetPending ||
+                                        !resetCreditEnabled(credit, now)
+                                      }
                                       onClick={() => void applyReset(credit.id)}
                                     >
                                       Use one reset credit
@@ -1235,12 +1070,8 @@ export default function Usage({
                               )}
                             </div>
                           ))}
-                          {!availableResets.length && (
-                            <p>
-                              {resetCount === 0
-                                ? "No reset credits available."
-                                : "Reset credit details unavailable. Refresh to check."}
-                            </p>
+                          {resetCredits.emptyMessage && (
+                            <p>{resetCredits.emptyMessage}</p>
                           )}
                           {isSelected && resetError && (
                             <p className="account-limits-warning" role="alert">

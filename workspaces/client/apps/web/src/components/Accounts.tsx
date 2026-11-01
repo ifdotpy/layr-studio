@@ -64,7 +64,6 @@ import {
 import { errorText, type GetResult } from "../api";
 import type { Agent } from "../types";
 import "./accounts.css";
-import { jsonObject } from "../usage/accountUsage";
 import { remainingLimitColor } from "./accountLimitColor";
 import AccountSignIn from "./AccountSignIn";
 import AccountManagerHost from "./AccountManagerHost";
@@ -311,14 +310,8 @@ export function AccountCapacityView({
   extraDetails?: ReactNode | undefined;
   facts?: ReactNode | undefined;
 }) {
-  const { limits, buckets, remaining, error: limitsError } = view;
-  const credits = jsonObject(jsonObject(limits?.data)?.rateLimitResetCredits);
-  const availableCredits = Array.isArray(credits?.credits)
-    ? credits.credits.flatMap((value) => {
-        const credit = jsonObject(value);
-        return credit?.status === "available" ? [credit] : [];
-      })
-    : [];
+  const { limits, buckets, remaining, color, reset, error: limitsError } = view;
+  const availableCredits = reset?.credits ?? [];
   const windows = (
     <div className="account-window-grid">
       <table className="account-limits-table">
@@ -335,9 +328,7 @@ export function AccountCapacityView({
             bucket.windows.map((window, index) => (
               <tr key={`${bucket.id}-${index}`}>
                 <th scope="row">
-                  <span>
-                    {/spark/i.test(bucket.name) ? "Spark" : bucket.name}
-                  </span>
+                  <span>{bucket.shortName}</span>
                   <small>{window.label}</small>
                 </th>
                 <td>
@@ -353,7 +344,7 @@ export function AccountCapacityView({
                     >
                       <Progress.Section
                         value={window.remaining}
-                        color={remainingLimitColor(window.remaining)}
+                        color={remainingLimitColor(window.color)}
                         withAria={false}
                       />
                     </Progress.Root>
@@ -434,7 +425,7 @@ export function AccountCapacityView({
           <i
             className="account-summary-dot"
             aria-hidden="true"
-            style={{ background: remainingLimitColor(remaining) }}
+            style={{ background: remainingLimitColor(color) }}
           />
           {remaining === null
             ? view.reading
@@ -453,14 +444,12 @@ export function AccountCapacityView({
         <section className="account-detail-block">
           <h4>Resets</h4>
           <p>
-            {typeof credits?.availableCount === "number"
-              ? `${credits.availableCount} ${credits.availableCount === 1 ? "credit" : "credits"} available`
-              : "No reset credits reported."}
+            {reset?.present ? reset.countLabel : "No reset credits reported."}
           </p>
           {availableCredits.map(
-            (credit, index) =>
-              typeof credit.expiresAt === "number" && (
-                <p key={index}>
+            (credit) =>
+              credit.expiresAt !== null && (
+                <p key={credit.id}>
                   Expires{" "}
                   <time
                     dateTime={new Date(credit.expiresAt * 1000).toISOString()}

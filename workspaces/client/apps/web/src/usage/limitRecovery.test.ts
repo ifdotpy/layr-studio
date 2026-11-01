@@ -1,11 +1,10 @@
 import { ProviderKind } from "../generated/api";
 import type { AccountLimitsSnapshot } from "./accountUsage";
-import { createAccountLimitsCache } from "./accountUsage";
 import type { JsonInputOf, Agent } from "../types";
 import type { components } from "../generated/api";
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { limitRecovery, limitRecovered } from "./limitRecovery.ts";
+import { limitRecovery, modelEligibility } from "./limitRecovery.ts";
 
 const now = 1_800_000_000;
 const agent: Agent = {
@@ -50,49 +49,27 @@ const limits = (
     ...overrides,
   }) satisfies RecoveryLimits;
 
-test("recovery callers retain the generated eligibility contract", () => {
-  const invalid = () =>
-    limitRecovered(
-      agent,
-      {
-        accountKey: "work",
-        eligibility: {
-          ...decision(),
-          // @ts-expect-error A malformed decision cannot enter the recovery caller.
-          canRun: "true",
-        },
-      },
-      now,
-    );
-  assert.equal(typeof invalid, "function");
-});
-
-test("streamed eligibility retains its identity and expires at use time", () => {
-  const records = new Map<string, string>();
-  const storage = {
-    getItem: (key: string) => records.get(key) ?? null,
-    setItem: (key: string, value: string) => {
-      records.set(key, value);
-    },
-  };
-  const cache = createAccountLimitsCache(storage);
-  cache.configureLimitsCache("server");
+test("a fresh allowance does not erase the server failure episode", () => {
   const available = limits(
     {},
     { eligibility: decision({ allowed: true, canRun: true }) },
   );
-  cache.cacheAccountLimits(available);
-  const snapshot = cache.cachedAccountLimits("work");
-  assert.deepEqual(snapshot, available);
-  assert.equal(limitRecovered(agent, snapshot, now), true);
-  assert.equal(limitRecovered(agent, snapshot, now + 6), false);
-  assert.equal(
-    limitRecovered({ ...agent, model: "other" }, snapshot, now),
-    false,
-  );
+  assert.notEqual(limitRecovery(agent, available, now), null);
 });
 
-test("future and ambiguous vendor error records cannot enable limit recovery", () => {
+test("the current decision is shown only for the matching agent identity", () => {
+  const available = limits(
+    {},
+    { eligibility: decision({ allowed: true, canRun: true }) },
+  );
+  assert.equal(modelEligibility(agent, available), available.eligibility);
+  for (const key of ["agentId", "accountKey", "model", "provider"]) {
+    const changed = { ...available, eligibility: decision({ [key]: "other" }) };
+    assert.equal(modelEligibility(agent, changed), undefined);
+  }
+});
+
+test("future and ambiguous vendor errors do not invent a limit notice", () => {
   for (const codexErrorInfo of [
     "futureLimit",
     { futureLimit: { opaque: [1, null] } },
@@ -100,71 +77,9 @@ test("future and ambiguous vendor error records cannot enable limit recovery", (
   ]) {
     const error = { message: "Provider extension", codexErrorInfo };
     const original = JSON.stringify(error);
-    const current = { ...agent, error } satisfies Agent;
-    assert.equal(limitRecovered(current, limits(), now), false);
-    assert.equal(limitRecovery(current, limits(), now), null);
+    assert.equal(limitRecovery({ ...agent, error }, limits(), now), null);
     assert.equal(JSON.stringify(error), original);
   }
-});
-
-test("recovery consumes the Rust decision and validates its identity and validity", () => {
-  const available = limits(
-    { primary: { usedPercent: 100 } },
-    { eligibility: decision({ allowed: true, canRun: true }) },
-  );
-  assert.equal(limitRecovered(agent, available, now), true);
-  for (const patch of [
-    { eligibility: undefined },
-    { eligibility: decision({ canRun: false }) },
-    { eligibility: decision({ canRun: true, fresh: false }) },
-    { eligibility: decision({ canRun: true, validUntil: now - 1 }) },
-    ...["agentId", "accountKey", "model", "provider"].map((key) => ({
-      eligibility: decision({ canRun: true, [key]: "other" }),
-    })),
-    { stale: true },
-    { error: "offline" },
-    { at: now - 10 },
-    { accountKey: "other" },
-  ]) {
-    assert.equal(
-      limitRecovered(agent, { ...available, ...patch }, now),
-      false,
-      JSON.stringify(patch),
-    );
-  }
-  const sonnet: Agent = {
-    ...agent,
-    provider: ProviderKind.claude,
-    model: "sonnet",
-  };
-  const response = {
-    ...available,
-    eligibility: decision({
-      provider: "claude",
-      model: "sonnet",
-      canRun: true,
-      allowed: true,
-      overage: "allowed",
-    }),
-    data: {
-      rateLimits: { primary: { usedPercent: 100 } },
-      rateLimitsByLimitId: { "claude-opus": { primary: { usedPercent: 100 } } },
-    },
-  };
-  assert.equal(
-    limitRecovered(sonnet, response, now),
-    true,
-    "the UI does not recompute applicability or overage",
-  );
-  assert.equal(limitRecovery(sonnet, response, now), null);
-  assert.equal(
-    limitRecovered(
-      { ...sonnet, error: { codexErrorInfo: "serverOverloaded" } },
-      response,
-      now,
-    ),
-    false,
-  );
 });
 
 test("billing guidance keeps workspace roles and uses the Rust reset time", () => {

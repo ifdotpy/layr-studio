@@ -2,6 +2,7 @@ import { AccountStatus as GeneratedApiAccountStatus } from "../generated/api.ts"
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
+import { projectedLimits } from "../usage/accountLimits.fixture";
 import type { AccountLimitsSnapshot } from "../usage/accountUsage";
 import type { Account } from "./Accounts";
 import { accountLimitView, AccountTileLabel } from "./AccountTiles";
@@ -34,7 +35,15 @@ test("an account picker tile states the remaining limit next to the name", () =>
 });
 
 test("the remaining limit is known only for a signed-in account with data", () => {
-  expect(accountLimitView(account(), reading(), 200).remaining).toBe(33);
+  expect(
+    accountLimitView(
+      account(),
+      reading(),
+      200,
+      true,
+      projectedLimits("work", 100),
+    ).remaining,
+  ).toBe(33);
   expect(
     accountLimitView(
       account(GeneratedApiAccountStatus.signedOut),
@@ -62,6 +71,21 @@ test("the remaining limit is known only for a signed-in account with data", () =
       reading(),
       200,
       false,
+      projectedLimits("work", 100),
     ).remaining,
   ).toBe(33);
+});
+
+test("the projection is scoped to its observation and expires at the server deadline", () => {
+  const view = projectedLimits("work", 100);
+  expect(
+    accountLimitView(account(), reading(), 249, true, view).remaining,
+  ).toBe(33);
+  expect(
+    accountLimitView(account(), reading(), 250, true, view).remaining,
+  ).toBeNull();
+  expect(
+    accountLimitView(account(), reading({ at: 101 }), 200, true, view)
+      .remaining,
+  ).toBeNull();
 });

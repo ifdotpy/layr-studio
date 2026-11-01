@@ -2239,13 +2239,12 @@ mod persistence_tests {
                     json!({"stateDir":"fixture"}),
                     false,
                 )?;
-                SyncDocumentsRepository::put_entity(
-                    tx,
-                    "rateLimit",
-                    "other",
-                    json!({"accountKey":"other","at":1.0,"data":{"accountId":"other"}}),
-                    false,
+                let raw = serde_json::value::RawValue::from_string(
+                    json!({"accountKey":"other","at":1.0,"data":{"accountId":"other"}}).to_string(),
                 )?;
+                let view =
+                    studio_runtime_schema::usage_limits::RateLimitView::read(&raw, "other", 1.0)?;
+                SyncDocumentsRepository::put_entity(tx, "rateLimit", "other", view, false)?;
                 Ok(())
             })
             .await
@@ -2274,7 +2273,12 @@ mod persistence_tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(serde_json::from_str::<Value>(&raw).unwrap()["value"], value);
+        let entity: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(entity["value"]["observation"], value);
+        assert_eq!(
+            entity["value"]["projection"]["runway"]["next"]["color"],
+            "gray"
+        );
         assert_eq!(cache.lock().unwrap().get("default"), Some(&value));
         let restored =
             studio_runtime_store::account_state::limits_snapshots(&store.test_reader().unwrap())
@@ -2532,8 +2536,8 @@ mod limits_runtime_tests {
             )
             .unwrap();
         assert_eq!(
-            serde_json::from_str::<Value>(&raw).unwrap()["value"]["data"]["rateLimits"]["primary"]
-                ["usedPercent"],
+            serde_json::from_str::<Value>(&raw).unwrap()["value"]["observation"]["data"]["rateLimits"]
+                ["primary"]["usedPercent"],
             100.0
         );
     }
@@ -2598,8 +2602,8 @@ mod limits_runtime_tests {
             )
             .unwrap();
         assert_eq!(
-            serde_json::from_str::<Value>(&raw).unwrap()["value"]["data"]["rateLimits"]["primary"]
-                ["usedPercent"],
+            serde_json::from_str::<Value>(&raw).unwrap()["value"]["observation"]["data"]["rateLimits"]
+                ["primary"]["usedPercent"],
             100
         );
     }

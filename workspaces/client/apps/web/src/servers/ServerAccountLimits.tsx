@@ -3,7 +3,11 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { errorText } from "../api";
 import AccountStartThrottle from "../components/AccountStartThrottle";
 import AccountGroup from "../components/AccountGroup";
-import { accountLimitView } from "../components/AccountTiles";
+import {
+  accountLimitView,
+  useAccountLimitProjection,
+} from "../components/AccountTiles";
+import type { components } from "../generated/api";
 import { AccountCapacityView, type Account } from "../components/Accounts";
 import type { AccountLimitsSnapshot } from "../usage/accountUsage";
 import { useAccountLimits } from "../usage/useAccountLimits";
@@ -111,7 +115,11 @@ export type AccountSource = {
   account: Account;
   services?: ServerServices | undefined;
 };
-type Reading = AccountSource & { limits: AccountLimitsSnapshot | null };
+type ReadingValue = {
+  limits: AccountLimitsSnapshot | null;
+  projection: components["schemas"]["RateLimitView"] | null;
+};
+type Reading = AccountSource & ReadingValue;
 
 /** The reading that the account card shows. Usage limits belong to the
  * provider account, so every server reads the same limit: the card shows the
@@ -148,18 +156,19 @@ function SourceReading({
   onReading,
 }: {
   source: AccountSource;
-  onReading: (serverId: string, limits: AccountLimitsSnapshot | null) => void;
+  onReading: (serverId: string, reading: ReadingValue) => void;
 }) {
   const limits = useAccountLimits(
     source.account.id,
     source.account.accountId,
     source.account.status === AccountStatus.ready,
   );
+  const projection = useAccountLimitProjection(source.account);
   const report = useRef(onReading);
   report.current = onReading;
   useEffect(() => {
-    report.current(source.serverId, limits);
-  }, [source.serverId, limits]);
+    report.current(source.serverId, { limits, projection });
+  }, [source.serverId, limits, projection]);
   return null;
 }
 
@@ -177,9 +186,7 @@ export function AccountLimitsAcrossServers({
   extraDetails?: ReactNode;
   facts?: ReactNode;
 }) {
-  const [limits, setLimits] = useState<
-    Record<string, AccountLimitsSnapshot | null>
-  >({});
+  const [limits, setLimits] = useState<Record<string, ReadingValue>>({});
   const [now, setNow] = useState(() => Date.now() / 1000);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now() / 1000), AGE_REFRESH_MS);
@@ -190,7 +197,8 @@ export function AccountLimitsAcrossServers({
   );
   const readings: Reading[] = ready.map((source) => ({
     ...source,
-    limits: limits[source.serverId] ?? null,
+    limits: limits[source.serverId]?.limits ?? null,
+    projection: limits[source.serverId]?.projection ?? null,
   }));
   const shown = newestReading(readings);
   const account = shown?.account ?? sources[0]?.account;
@@ -210,7 +218,10 @@ export function AccountLimitsAcrossServers({
             source={source}
             onReading={(serverId, next) =>
               setLimits((old) =>
-                old[serverId] === next ? old : { ...old, [serverId]: next },
+                old[serverId]?.limits === next.limits &&
+                old[serverId]?.projection === next.projection
+                  ? old
+                  : { ...old, [serverId]: next },
               )
             }
           />
@@ -219,7 +230,13 @@ export function AccountLimitsAcrossServers({
       <AccountCapacityView
         card
         account={account}
-        view={accountLimitView(account, shown?.limits ?? null, now)}
+        view={accountLimitView(
+          account,
+          shown?.limits ?? null,
+          now,
+          true,
+          shown?.projection ?? null,
+        )}
         note={note}
         extraDetails={extraDetails}
         facts={facts}

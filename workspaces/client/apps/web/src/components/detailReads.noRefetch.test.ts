@@ -9,7 +9,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { Agent, Message } from "../types";
+import type { Agent, Message, Snapshot } from "../types";
+import { snapshotFixture } from "../snapshotFixture";
 import type { Account } from "./Accounts";
 
 const h = vi.hoisted(() => ({
@@ -18,6 +19,9 @@ const h = vi.hoisted(() => ({
   effects: [] as Array<() => void>,
   get: vi.fn(),
   post: vi.fn(),
+  subscribe: vi.fn(
+    (_callback: (snapshot: Snapshot | null) => void) => () => {},
+  ),
 }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
@@ -62,7 +66,7 @@ vi.mock("react", async (original) => ({
 vi.mock("../servers/ServerServicesContext", () => ({
   useServerApi: () => ({ get: h.get, post: h.post, saved: () => null }),
   useServerStorage: () => ({}),
-  useServerSessionCosts: () => ({ peekSessionCost: () => null }),
+  useServerSync: () => ({ subscribeStateProjection: h.subscribe }),
 }));
 vi.mock("./agents/WorkerModelPicker", () => ({
   useWorkerModels: () => ({ models: [], loading: false }),
@@ -114,6 +118,7 @@ afterEach(() => {
   h.effects = [];
   h.get.mockReset();
   h.post.mockReset();
+  h.subscribe.mockClear();
 });
 
 const agent: Agent = {
@@ -257,6 +262,64 @@ it("message info reads on open and reopen but not streamed turn metadata changes
   render(read);
   await settle();
   expect(h.get).toHaveBeenCalledTimes(2);
+});
+
+it("message info uses streamed cost and leaves missing cost unavailable", async () => {
+  h.get.mockResolvedValue({});
+  const read = () =>
+    MessageInfo({
+      message: { id: "item", role: "assistant", text: "answer" },
+      agentId: agent.id,
+      stateDir: "fixture",
+      rootId: "root",
+      onCopy: vi.fn(),
+    });
+  let view = render(read);
+  view.props.onChange(true);
+  render(read);
+  const notify = required(required(h.subscribe.mock.calls[0])[0]);
+  const cost = {
+    rootId: "root",
+    pricingState: "ready",
+    totalUSD: null,
+    estimated: true,
+    refreshing: false,
+    cacheAgeSeconds: 0,
+    pricedSamples: 0,
+    unknownModels: [],
+    breakdown: { models: {}, providers: {} },
+  } satisfies import("../generated/api").components["schemas"]["SessionCostResponse"];
+  notify(snapshotFixture([], { sessionCostsByAgent: { root: cost } }));
+  view = render(read);
+  expect(
+    find(
+      view,
+      (node) =>
+        node.type === "dt" && node.props.children === "Session estimate (USD)",
+    ),
+  ).toBeUndefined();
+  notify(
+    snapshotFixture([], {
+      sessionCostsByAgent: { root: { ...cost, totalUSD: 1 } },
+    }),
+  );
+  view = render(read);
+  expect(
+    find(
+      view,
+      (node) =>
+        node.type === "dt" && node.props.children === "Session estimate (USD)",
+    ),
+  ).toBeDefined();
+  notify(snapshotFixture());
+  view = render(read);
+  expect(
+    find(
+      view,
+      (node) =>
+        node.type === "dt" && node.props.children === "Session estimate (USD)",
+    ),
+  ).toBeUndefined();
 });
 
 it("Claude account status and key updates do not reload settings; explicit retry does", async () => {

@@ -50,40 +50,12 @@ export function modelEligibility(
   return value;
 }
 
-export function limitRecovered(
-  agent: Agent,
-  limits: AccountLimitsSnapshot | null,
-  now: number,
-): boolean {
-  const limitsAt = finite(limits?.at) ? limits.at : Number.NaN;
-  const kind = knownNativeErrorKind(agent.error);
-  if (kind !== "usageLimitExceeded" && kind !== "rateLimitExceeded")
-    return false;
-  const errorAt = finite(agent.nativeLimitErrorAt)
-    ? agent.nativeLimitErrorAt
-    : typeof agent.lastEvent === "string"
-      ? Date.parse(agent.lastEvent) / 1000
-      : Number.NaN;
-  const eligibility = modelEligibility(agent, limits);
-  return Boolean(
-    limits &&
-    freshLimits(limits, agent, now) &&
-    limitsAt <= now + 5 &&
-    (!finite(errorAt) || limitsAt > errorAt) &&
-    eligibility?.canRun &&
-    eligibility.fresh &&
-    eligibility.validUntil != null &&
-    now < eligibility.validUntil,
-  );
-}
-
 export function limitRecovery(
   agent: Agent,
   limits: AccountLimitsSnapshot | null,
   now: number,
 ): LimitRecovery | null {
   const kind = knownNativeErrorKind(agent.error);
-  if (limitRecovered(agent, limits, now)) return null;
   if (kind !== "usageLimitExceeded" && kind !== "rateLimitExceeded")
     return null;
   const eligibility = modelEligibility(agent, limits);

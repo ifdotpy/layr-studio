@@ -1,4 +1,10 @@
-import { AccountStatus as GeneratedApiAccountStatus } from "../generated/api.ts";
+import {
+  AccountStatus as GeneratedApiAccountStatus,
+  LimitColor,
+} from "../generated/api.ts";
+import type { components } from "../generated/api";
+import { useServerSync } from "../servers/ServerServicesContext";
+import { accountBuckets } from "../usage/accountBuckets";
 import { Badge, Radio, SegmentedControl, Tooltip } from "@mantine/core";
 import { Check, Sparkles } from "lucide-react";
 import { useEffect, useId, useState, type ReactNode } from "react";
@@ -9,7 +15,7 @@ import {
   type AccountLimitsSnapshot,
 } from "../usage/accountUsage";
 import { accountDisplayName, accountTooltip } from "../accountName";
-import { formatPercent, readBuckets } from "./Usage";
+import { formatPercent } from "./Usage";
 import type { Account } from "./Accounts";
 import "./account-tiles.css";
 import { remainingLimitColor } from "./accountLimitColor";
@@ -91,9 +97,11 @@ export function AccountTilesLayout({
 }
 export function AccountRemainingBar({
   remaining,
+  color,
   label = "Remaining limit",
 }: {
   remaining: number | null;
+  color: components["schemas"]["LimitColor"];
   label?: string;
 }) {
   return (
@@ -108,21 +116,11 @@ export function AccountRemainingBar({
       <span
         style={{
           width: `${remaining ?? 0}%`,
-          background: remainingLimitColor(remaining),
+          background: remainingLimitColor(color),
         }}
       />
     </span>
   );
-}
-/** The remaining share of an account's provider limit, in percent from 0 to
- * 100: the lowest unexpired window. Null when no window reports a value. */
-export function remainingLimit(
-  windows: { remaining: number | null; expired: boolean }[],
-) {
-  const values = windows
-    .filter((window) => !window.expired && window.remaining !== null)
-    .map((window) => window.remaining!);
-  return values.length ? Math.max(0, Math.min(100, ...values)) : null;
 }
 /** "33% left": the one text form of a remaining limit. */
 export const remainingText = (remaining: number) =>
@@ -131,35 +129,70 @@ export const remainingText = (remaining: number) =>
 type LimitAccount = Pick<Account, "id" | "accountId" | "status">;
 /** What one limits reading of one account shows. A provider limit belongs to
  * the provider account, so every view of an account reads it through here. */
+type AccountProjection = components["schemas"]["RateLimitView"];
+
+export function useAccountLimitProjection(account: LimitAccount) {
+  const { subscribeStateProjection } = useServerSync();
+  const scope = JSON.stringify([account.id, account.accountId]);
+  const [state, setState] = useState<{
+    scope: string;
+    source: typeof subscribeStateProjection;
+    value: AccountProjection | null;
+  } | null>(null);
+  useEffect(() => {
+    let active = true;
+    const stop = subscribeStateProjection(
+      (snapshot) => {
+        if (!active) return;
+        const entity = snapshot?.runtime.rateLimitsByAccount?.[account.id];
+        const value =
+          entity &&
+          accountLimits(entity.observation, account.id, account.accountId)
+            ? entity
+            : null;
+        setState({ scope, source: subscribeStateProjection, value });
+      },
+      () => {},
+    );
+    return () => {
+      active = false;
+      stop();
+    };
+  }, [scope, account.id, account.accountId, subscribeStateProjection]);
+  return state?.scope === scope && state.source === subscribeStateProjection
+    ? state.value
+    : null;
+}
+
 export function accountLimitView(
   account: LimitAccount,
   limits: AccountLimitsSnapshot | null,
   now = Date.now() / 1000,
   signedInOnly = true,
+  projection: AccountProjection | null = null,
 ) {
   const shown =
     !signedInOnly || account.status === GeneratedApiAccountStatus.ready;
-  const error = limits?.data ? null : limits?.error || null;
-  const buckets = readBuckets(
-    accountLimits(limits, account.id, account.accountId),
-    now,
-  );
+  const matching = accountLimits(limits, account.id, account.accountId);
+  const error = matching?.data ? null : matching?.error || null;
+  const matchingProjection =
+    matching && projection && matching.at === projection.observation.at
+      ? projection.projection
+      : null;
+  const state = accountBuckets(matchingProjection?.buckets, now);
   return {
-    limits,
-    buckets,
+    limits: matching,
+    buckets: state?.buckets ?? [],
+    reset: matchingProjection?.reset ?? null,
     error,
-    reading: !limits && shown,
-    remaining:
-      !shown || error
-        ? null
-        : remainingLimit(buckets.flatMap((bucket) => bucket.windows)),
+    reading: !matching && shown,
+    remaining: shown && !error ? (state?.remaining ?? null) : null,
+    color:
+      shown && !error ? (state?.color ?? LimitColor.paused) : LimitColor.paused,
   };
 }
 export type AccountLimitView = ReturnType<typeof accountLimitView>;
-/** The limits of one account on the server of the surrounding scope. With
- * `read` false it shows the cached reading and sends no request. A signed-out
- * account's limit shows only where `signedInOnly` is false: a picker still
- * marks an archived or signed-out account whose limit is used up. */
+/** The limits of one account on the server of the surrounding scope. */
 export function useAccountLimitView(
   account: LimitAccount,
   { read = true, signedInOnly = true } = {},
@@ -170,7 +203,14 @@ export function useAccountLimitView(
     read &&
       (!signedInOnly || account.status === GeneratedApiAccountStatus.ready),
   );
-  return accountLimitView(account, limits, Date.now() / 1000, signedInOnly);
+  const projection = useAccountLimitProjection(account);
+  return accountLimitView(
+    account,
+    limits,
+    Date.now() / 1000,
+    signedInOnly,
+    projection,
+  );
 }
 /** The remaining limit of an account as short text, for account lists. */
 export function AccountRemainingText({ account }: { account: LimitAccount }) {
@@ -219,7 +259,9 @@ function AccountTile({
   multiple?: boolean | undefined;
   readOnly?: boolean;
 }) {
-  const { remaining } = useAccountLimitView(account, { signedInOnly: false });
+  const { remaining, color } = useAccountLimitView(account, {
+    signedInOnly: false,
+  });
   if (readOnly)
     return (
       <Tooltip label={accountTooltip(account)}>
@@ -232,7 +274,9 @@ function AccountTile({
             name={setupAccountName(account)}
             remaining={remaining}
           />
-          {remaining !== null && <AccountRemainingBar remaining={remaining} />}
+          {remaining !== null && (
+            <AccountRemainingBar remaining={remaining} color={color} />
+          )}
         </div>
       </Tooltip>
     );
@@ -257,7 +301,9 @@ function AccountTile({
         >
           {multiple && selected && <Check size={13} aria-hidden="true" />}
         </AccountTileLabel>
-        {remaining !== null && <AccountRemainingBar remaining={remaining} />}
+        {remaining !== null && (
+          <AccountRemainingBar remaining={remaining} color={color} />
+        )}
       </ActionButton>
     </Tooltip>
   );

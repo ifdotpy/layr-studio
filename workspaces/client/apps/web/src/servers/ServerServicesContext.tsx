@@ -1,4 +1,3 @@
-import * as defaultSessionCosts from "../usage/sessionCostCache";
 import * as defaultUploads from "../sync/uploads";
 import { defaultServerAudio } from "../native/serverAudio";
 import * as defaultRecordings from "../dictation/storage";
@@ -119,6 +118,3 @@ export const useServerAudio = () =>
 
 export const useServerUploads = () =>
   useServerServices()?.uploads ?? defaultUploads;
-
-export const useServerSessionCosts = () =>
-  useServerServices()?.sessionCosts ?? defaultSessionCosts;

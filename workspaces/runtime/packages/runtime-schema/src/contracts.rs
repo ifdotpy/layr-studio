@@ -1224,6 +1224,34 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         openapi["components"]["schemas"][alias] =
             serde_json::json!({"$ref":format!("#/components/schemas/{owner}")});
     }
+    // The rate-limit entity wraps the original observation and its typed view.
+    let mut runway_generator = schemars::generate::SchemaSettings::draft2020_12()
+        .for_serialize()
+        .with(|settings| settings.definitions_path = "/components/schemas".into())
+        .into_generator();
+    runway_generator.subschema_for::<crate::usage_limits::AccountLimitsProjection>();
+    for (name, schema) in runway_generator.take_definitions(true) {
+        openapi["components"]["schemas"][name] = schema;
+    }
+    openapi["components"]["schemas"]["RateLimitView"] = serde_json::json!({
+        "type":"object", "additionalProperties":false,
+        "properties":{
+            "observation":{"$ref":"#/components/schemas/AccountRateLimitsDto"},
+            "projection":{"$ref":"#/components/schemas/AccountLimitsProjection"}
+        }, "required":["observation","projection"]
+    });
+    openapi["components"]["schemas"]["SyncRateLimitEntityPayload"]["properties"]["value"] =
+        serde_json::json!({"$ref":"#/components/schemas/RateLimitView"});
+    if let Some(variants) = openapi["components"]["schemas"]["SyncEntity"]["oneOf"].as_array_mut() {
+        for variant in variants {
+            if variant["properties"]["collection"]["const"] == "rateLimit"
+                && variant["properties"]["op"]["const"] == "upsert"
+            {
+                variant["properties"]["value"] =
+                    serde_json::json!({"$ref":"#/components/schemas/RateLimitView"});
+            }
+        }
+    }
     crate::records::refresh_openapi(&mut openapi)?;
     crate::multi_server_protocol::refresh_openapi(&mut openapi);
     openapi["components"]["schemas"]["BackgroundShellPolicySettings"]["properties"]["quietThresholdMs"]

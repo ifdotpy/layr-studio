@@ -65,9 +65,9 @@ type SnapshotRuntime = WorkspaceEntityDto & {
     | Record<string, components["schemas"]["QueueView"]>
     | undefined;
   rateLimitsByAccount?:
-    | Record<string, components["schemas"]["AccountRateLimitsDto"]>
+    | Record<string, components["schemas"]["RateLimitView"]>
     | undefined;
-  rateLimits?: components["schemas"]["AccountRateLimitsDto"] | null | undefined;
+  rateLimits?: components["schemas"]["RateLimitView"] | null | undefined;
   retainedWorktrees?:
     | components["schemas"]["RetainedWorktreeEntityDto"][]
     | undefined;

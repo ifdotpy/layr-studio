@@ -231,7 +231,9 @@ fn commit(
         return Ok((Some(value), false));
     }
     if content_changed {
-        SyncDocumentsRepository::put_entity(tx, "rateLimit", account, value.clone(), false)?;
+        let raw = serde_json::value::RawValue::from_string(serde_json::to_string(&value)?)?;
+        let view = studio_runtime_schema::usage_limits::RateLimitView::read(&raw, account, now)?;
+        SyncDocumentsRepository::put_entity(tx, "rateLimit", account, view, false)?;
     }
     let previous_due = earliest_due(tx, account)?;
     crate::continuation_runtime::stage_limits_changed_for_account(tx, account, &value, now)

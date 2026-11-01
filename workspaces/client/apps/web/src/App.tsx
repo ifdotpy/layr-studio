@@ -1031,7 +1031,11 @@ export default function App({ active = true }: { active?: boolean }) {
   const snapshotLimits =
     data?.runtime?.rateLimitsByAccount?.[accountKey] ||
     (accountKey === "default" ? data?.runtime?.rateLimits : null);
-  const matchingSnapshot = accountLimits(snapshotLimits, accountKey, accountId);
+  const matchingSnapshot = accountLimits(
+    snapshotLimits?.observation,
+    accountKey,
+    accountId,
+  );
   const visibleLimits =
     matchingSnapshot &&
     (!cachedLimits || (matchingSnapshot.at || 0) > (cachedLimits.at || 0))
@@ -1368,9 +1372,13 @@ export default function App({ active = true }: { active?: boolean }) {
         const snapshot =
           data?.runtime?.rateLimitsByAccount?.[key] ||
           (key === "default" ? data?.runtime?.rateLimits : null);
-        const matching = accountLimits(snapshot, key, account?.accountId);
+        const matching = accountLimits(
+          snapshot?.observation,
+          key,
+          account?.accountId,
+        );
         const limits =
-          matching && (!cached || (matching.at || 0) > (cached.at || 0))
+          matching && (!cached || (matching.at || 0) >= (cached.at || 0))
             ? matching
             : cached || null;
         return {
@@ -1381,6 +1389,10 @@ export default function App({ active = true }: { active?: boolean }) {
           plan: account?.plan,
           accountId: account?.accountId,
           signedOut: !!account?.disconnected,
+          runway: limits === matching ? snapshot?.projection.runway : undefined,
+          reset: limits === matching ? snapshot?.projection.reset : undefined,
+          buckets:
+            limits === matching ? snapshot?.projection.buckets : undefined,
           limits,
           loading: !!limitsLoading[key],
           // Reads the latest loader, so an equal account keeps its old closure.
@@ -1408,7 +1420,8 @@ export default function App({ active = true }: { active?: boolean }) {
       incoming.default = data.runtime.rateLimits;
     setLimitsByAccount((old) => {
       let next = old;
-      for (const [key, value] of Object.entries(incoming)) {
+      for (const [key, view] of Object.entries(incoming)) {
+        const value = view.observation;
         if (!value?.at || (value.accountKey || "default") !== key) continue;
         if (!old[key] || value.at > (old[key].at || 0)) {
           next = { ...next, [key]: { ...value, accountKey: key } };

@@ -1,3 +1,7 @@
+import { RunwayColor } from "../generated/api";
+import type { UsageAccount } from "../components/Usage";
+import type { components } from "../generated/api";
+import { retainUsageAccounts } from "./snapshotSelection";
 import { AgentSource, AgentStatus } from "../generated/api";
 import { describe, expect, it } from "vitest";
 import { createChatSnapshotSelector } from "./snapshotSelection";
@@ -162,4 +166,32 @@ describe("chat snapshot selection", () => {
     expect(next.token).toBe("new-token");
     expect(next.runtime.connected).toBe(false);
   });
+});
+
+it("updates a retained account when its server runway changes", () => {
+  const state: components["schemas"]["WeeklyRunwayState"] = {
+    color: RunwayColor.gray,
+    days: null,
+    unlimited: false,
+    windows: [],
+  };
+  const runway = {
+    computedAt: 100,
+    validUntil: 110,
+    current: state,
+    next: state,
+  };
+  const first: UsageAccount = {
+    key: "a",
+    label: "A",
+    limits: null,
+    loading: false,
+    reload: () => {},
+    runway,
+  };
+  const second: UsageAccount = {
+    ...first,
+    runway: { ...runway, computedAt: 101 },
+  };
+  expect(retainUsageAccounts([first], [second])[0]).toBe(second);
 });

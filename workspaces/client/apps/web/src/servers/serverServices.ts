@@ -1,5 +1,4 @@
 import { watchServerName } from "./serverNames";
-import { createSessionCostCache } from "../usage/sessionCostCache";
 import { createUploads, UPLOAD_DATABASE_NAME } from "../sync/uploads";
 import { createServerAudio } from "../native/serverAudio";
 import { createRecordingStorage } from "../dictation/storage";
@@ -62,7 +61,6 @@ export function createServerServices(server: StudioServer) {
     api.pending.observeClientSeq(sequence);
   });
   const audio = createServerAudio();
-  const sessionCosts = createSessionCostCache();
   const transcripts = createTranscriptCache();
   const tokenRates = createTokenRateCache();
   let runtime:
@@ -151,7 +149,6 @@ export function createServerServices(server: StudioServer) {
   return {
     owner: transport.owner,
     audio,
-    sessionCosts,
     chatCreations: createChatCreationStore(storage),
     recordings: createRecordingStorage(),
     localDrafts,

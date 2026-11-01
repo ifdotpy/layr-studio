@@ -3093,6 +3093,12 @@ export interface components {
        */
       account_key?: null | string | undefined;
     };
+    /** @description Server-owned account presentation; each field is derived from the same observation. */
+    AccountLimitsProjection: {
+      buckets: components["schemas"]["BucketProjection"];
+      reset: components["schemas"]["ResetProjection"];
+      runway: components["schemas"]["WeeklyRunway"];
+    };
     /** AccountLoginResponse */
     AccountLoginResponse: {
       /** Accountkey */
@@ -9369,6 +9375,37 @@ export interface components {
        */
       skillRoot?: null | string | undefined;
     };
+    BucketProjection: {
+      current: components["schemas"]["BucketState"];
+      next: components["schemas"]["BucketState"];
+      /** Format: double */
+      validUntil: number | null;
+    };
+    BucketState: {
+      buckets: components["schemas"]["BucketView"][];
+      color: components["schemas"]["LimitColor"];
+      low: boolean;
+      /** Format: double */
+      remaining: number | null;
+    };
+    BucketView: {
+      creditsLabel: string | null;
+      id: string;
+      name: string;
+      planType: string | null;
+      shortName: string;
+      windows: components["schemas"]["BucketWindowView"][];
+    };
+    BucketWindowView: {
+      color: components["schemas"]["LimitColor"];
+      expired: boolean;
+      label: string;
+      /** Format: double */
+      remaining: number | null;
+      /** Format: double */
+      reset: number | null;
+      warning: boolean;
+    };
     /** BudgetWaitRecordResponse */
     BudgetWaitRecordResponse: {
       /**
@@ -13903,6 +13940,11 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /**
+     * @description Account bucket colors and thresholds are selected by the server.
+     * @enum {string}
+     */
+    LimitColor: "paused" | "unread" | "answer" | "error";
     /** LimitResetResponse */
     LimitResetResponse: {
       /** Account Id */
@@ -18735,6 +18777,10 @@ export interface components {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
     RateLimitsDataDto: components["schemas"]["UsageLimitsData"];
+    RateLimitView: {
+      observation: components["schemas"]["AccountRateLimitsDto"];
+      projection: components["schemas"]["AccountLimitsProjection"];
+    };
     /** RateLimitWindow */
     RateLimitWindow: {
       /** Resetsat */
@@ -19465,6 +19511,27 @@ export interface components {
     RequiredAccountKeyRequest: {
       /** Account Key */
       account_key: string;
+    };
+    ResetCreditView: {
+      confirmLabel: string;
+      description: string | null;
+      enabled: boolean;
+      enabledAfter: boolean;
+      /** Format: double */
+      expiresAt: number | null;
+      id: string;
+      title: string;
+      /** Format: double */
+      validUntil: number | null;
+    };
+    ResetProjection: {
+      accountId: string | null;
+      /** Format: double */
+      availableCount: number | null;
+      countLabel: string;
+      credits: components["schemas"]["ResetCreditView"][];
+      emptyMessage: string | null;
+      present: boolean;
     };
     /** ResetRequest */
     ResetRequest: {
@@ -20793,6 +20860,8 @@ export interface components {
     RuntimeStageMetrics: {
       stages: components["schemas"]["RuntimeStageHistogram"][];
     };
+    /** @enum {string} */
+    RunwayColor: "green" | "yellow" | "red" | "gray";
     /**
      * SafetyAction
      * @enum {string}
@@ -23231,7 +23300,7 @@ export interface components {
           collection: "rateLimit";
           /** @constant */
           op: "upsert";
-          value: components["schemas"]["AccountRateLimitsDto"];
+          value: components["schemas"]["RateLimitView"];
         }
       | {
           /** @constant */
@@ -23635,7 +23704,7 @@ export interface components {
       collection: "rateLimit";
       /** Id */
       id: string;
-      value: components["schemas"]["AccountRateLimitsDto"];
+      value: components["schemas"]["RateLimitView"];
     };
     SyncRecoveryCounters: {
       gap: number;
@@ -26904,6 +26973,33 @@ export interface components {
       endpointFingerprint: string;
       /** Id */
       id: string;
+    };
+    /** @description Server-owned weekly allowance estimate, computed at `computed_at` (Unix seconds). */
+    WeeklyRunway: {
+      /** Format: double */
+      computedAt: number;
+      current: components["schemas"]["WeeklyRunwayState"];
+      next: components["schemas"]["WeeklyRunwayState"];
+      /** Format: double */
+      validUntil: number | null;
+    };
+    WeeklyRunwayState: {
+      color: components["schemas"]["RunwayColor"];
+      /** Format: double */
+      days: number | null;
+      unlimited: boolean;
+      windows: components["schemas"]["WeeklyRunwayWindow"][];
+    };
+    WeeklyRunwayWindow: {
+      /** Format: double */
+      days: number | null;
+      name: string;
+      /** Format: double */
+      remaining: number | null;
+      /** Format: double */
+      reset: number | null;
+      resetFirst: boolean;
+      unlimited: boolean;
     };
     /**
      * WhoisStatus
@@ -38714,6 +38810,13 @@ export const HttpErrorKind = {
 export type HttpErrorKind = components["schemas"]["HttpErrorKind"];
 export const InviteStatus = { open: "open", used: "used" } as const;
 export type InviteStatus = components["schemas"]["InviteStatus"];
+export const LimitColor = {
+  paused: "paused",
+  unread: "unread",
+  answer: "answer",
+  error: "error",
+} as const;
+export type LimitColor = components["schemas"]["LimitColor"];
 export const LiveUpdateState = {
   idle: "idle",
   applying: "applying",
@@ -39015,6 +39118,13 @@ export const RoomStatus = {
   revoked: "revoked",
 } as const;
 export type RoomStatus = components["schemas"]["RoomStatus"];
+export const RunwayColor = {
+  green: "green",
+  yellow: "yellow",
+  red: "red",
+  gray: "gray",
+} as const;
+export type RunwayColor = components["schemas"]["RunwayColor"];
 export const SafetyAction = {
   wait: "wait",
   retry: "retry",

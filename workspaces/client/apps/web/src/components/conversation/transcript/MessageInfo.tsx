@@ -4,7 +4,8 @@ import { ActionIcon, Popover } from "@mantine/core";
 import { Copy, Info, X } from "lucide-react";
 import { type GetOptions, type GetResult } from "../../../api";
 import { localDateTime } from "../../../local-time";
-import { useServerSessionCosts } from "../../../servers/ServerServicesContext";
+import { useServerSync } from "../../../servers/ServerServicesContext";
+import type { components } from "../../../generated/api";
 import type { Message } from "../../../types";
 import type { UsageAccount } from "../../Usage";
 import "./message-info.css";
@@ -39,7 +40,7 @@ export default function MessageInfo({
   accounts,
   onCopy,
 }: MessageInfoProps) {
-  const { peekSessionCost } = useServerSessionCosts();
+  const { subscribeStateProjection } = useServerSync();
   const { get } = useServerApi();
 
   const [open, setOpen] = useState(false);
@@ -107,7 +108,38 @@ export default function MessageInfo({
   const account = accounts?.find(
     (entry) => entry.key === (metadata?.accountKey || messageAccountKey),
   );
-  const cost = open && rootId ? peekSessionCost(stateDir, rootId) : null;
+  const costScope = JSON.stringify([stateDir, rootId]);
+  const [costState, setCostState] = useState<{
+    scope: string;
+    source: typeof subscribeStateProjection;
+    value: components["schemas"]["SessionCostResponse"];
+  } | null>(null);
+  useEffect(() => {
+    if (!open || !rootId) return;
+    let active = true;
+    const stop = subscribeStateProjection(
+      (snapshot) => {
+        const value = snapshot?.runtime.sessionCostsByAgent?.[rootId];
+        if (!active) return;
+        setCostState(
+          value?.rootId === rootId
+            ? { scope: costScope, source: subscribeStateProjection, value }
+            : null,
+        );
+      },
+      () => {},
+    );
+    return () => {
+      active = false;
+      stop();
+    };
+  }, [open, rootId, costScope, subscribeStateProjection]);
+  const cost =
+    open &&
+    costState?.scope === costScope &&
+    costState.source === subscribeStateProjection
+      ? costState.value
+      : null;
   const rows: [string, string][] = [];
   const identifiers: Array<[string, string | undefined]> = [
     ["Turn ID", message.turnId ?? undefined],

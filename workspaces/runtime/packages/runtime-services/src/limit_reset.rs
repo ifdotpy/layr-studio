@@ -272,19 +272,21 @@ fn account_id(limits: &Value) -> Option<&str> {
 }
 
 fn has_available_credit(limits: &Value, credit: &str, now: f64) -> bool {
-    limits
-        .get("data")
-        .and_then(|data| data.get("rateLimitResetCredits"))
-        .and_then(|summary| summary.get("credits"))
-        .and_then(Value::as_array)
-        .is_some_and(|credits| {
-            credits.iter().any(|row| {
-                row.get("id").and_then(Value::as_str) == Some(credit)
-                    && row.get("status").and_then(Value::as_str) == Some("available")
-                    && row.get("resetType").and_then(Value::as_str) == Some("codexRateLimits")
-                    && row.get("expiresAt").is_none_or(|expires| {
-                        expires.is_null() || expires.as_f64().is_some_and(|value| value > now)
-                    })
+    let Ok(studio_runtime_schema::json_object::JsonObject(observation)) =
+        <studio_runtime_schema::json_object::JsonObject<
+            studio_runtime_schema::usage_limits::UsageLimitsResponse,
+        > as serde::Deserialize>::deserialize(limits)
+    else {
+        return false;
+    };
+    observation
+        .data
+        .as_ref()
+        .and_then(|data| data.0.rate_limit_reset_credits.as_ref())
+        .is_some_and(|summary| {
+            summary.0.credits.iter().any(|row| {
+                row.0.id == credit
+                    && studio_runtime_schema::usage_limits::reset_credit_eligible(&row.0, now)
             })
         })
 }

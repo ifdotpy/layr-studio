@@ -4,7 +4,6 @@ import { displayError, errorDetails } from "../errorPresentation";
 import { currentCapacityRetry } from "../capacityRetry";
 import { useLimitEligibility } from "../usage/useLimitEligibility";
 import { limitRecovery } from "../usage/limitRecovery";
-import { useRecoveredLimit } from "./useRecoveredLimit";
 import CapacityRetry from "./CapacityRetry";
 import LimitRecoveryNotice from "./LimitRecoveryNotice";
 import ConnectionRecovery, {
@@ -90,8 +89,7 @@ export function NativeError({
     return () => clearInterval(timer);
   }, [limits]);
   const modelLimits = useLimitEligibility(agent, limits ?? null);
-  const recovered = useRecoveredLimit(agent, modelLimits, now);
-  const recovery = recovered ? null : limitRecovery(agent, modelLimits, now);
+  const recovery = limitRecovery(agent, modelLimits, now);
   const usageResume = agent.usageResume;
   const authResume =
     usageResume?.cause === "auth" &&
@@ -104,7 +102,6 @@ export function NativeError({
   const detailView = connectionCheck
     ? nativeErrorView(agent.error, planType)
     : error;
-  if (!blocked && !retry && recovered) return null;
   const wait = agent.contextRepairWait;
   if (
     !blocked &&
