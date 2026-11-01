@@ -81,10 +81,8 @@ pub struct WorkspaceTaskRow {
 
 impl WorkspaceTaskRow {
     /// Decode a served row without another lookup; the lookahead row stays unchecked.
-    pub fn decode(self, connection: &Connection) -> StoreResult<Value> {
-        Ok(crate::projection_value(
-            &Table::<TaskRecord>::new(connection).decode_stored(&self.id, &self.record)?,
-        ))
+    pub fn decode(self, connection: &Connection) -> StoreResult<TaskRecord> {
+        Table::<TaskRecord>::new(connection).decode_stored(&self.id, &self.record)
     }
 }
 
@@ -255,6 +253,18 @@ impl WorkspaceViewsRepository {
         Table::<AgentRecord>::new(connection).get(&AgentId::from(id))
     }
 
+    pub fn task_agent_ids(connection: &Connection, root: Option<&str>) -> StoreResult<Vec<String>> {
+        let sql = if root.is_some() {
+            "SELECT id FROM runtime_agents WHERE (deleted_at IS NULL OR deleted_at=0) AND root_id=?1"
+        } else {
+            "SELECT id FROM runtime_agents WHERE deleted_at IS NULL OR deleted_at=0"
+        };
+        let mut statement = connection.prepare_cached(sql)?;
+        Ok(statement
+            .query_map(params_from_iter(root), |row| row.get(0))?
+            .collect::<Result<_, _>>()?)
+    }
+
     /// The composite cursor remains specialized because it orders by two JSON timestamps.
     pub fn task_page(
         connection: &Connection,
@@ -298,9 +308,14 @@ impl WorkspaceViewsRepository {
             (created.to_owned(), "1=1".to_owned(), "DESC", Vec::new())
         };
         let agents_predicate = format!("json_extract(record,'$.agent') IN ({marks})");
+        let index = if cursor.is_none() {
+            " INDEXED BY runtime_task_agent_created_id"
+        } else {
+            ""
+        };
         let sql = format!(
             "SELECT id,record \
-             FROM runtime_tasks WHERE {agents_predicate} AND {condition} \
+             FROM runtime_tasks{index} WHERE {agents_predicate} AND {condition} \
              ORDER BY {sort_value} {order}, id {order} LIMIT ?"
         );
         let mut args = agent_ids
@@ -427,11 +442,35 @@ mod bulk_read_tests {
 
     fn database() -> Connection {
         let connection = Connection::open_in_memory().expect("database");
-        connection.execute_batch("CREATE TABLE runtime_tasks(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);").expect("tables");
+        connection.execute_batch("CREATE TABLE runtime_tasks(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE INDEX runtime_task_agent_created_id ON runtime_tasks(json_extract(record,'$.agent'),json_extract(record,'$.created') DESC,id DESC); CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL,root_id TEXT GENERATED ALWAYS AS (record->>'$.rootId') STORED,deleted_at GENERATED ALWAYS AS (record->>'$.deletedAt') STORED);").expect("tables");
         connection
             .execute_batch(crate::agent_volatile::agent_volatile_table_sql())
             .expect("volatile table");
         connection
+    }
+
+    #[test]
+    fn task_agent_scope_keeps_zero_deletion_and_filters_root() {
+        let connection = database();
+        for (id, root, deleted) in [
+            ("a", "one", json!(null)),
+            ("b", "one", json!(0)),
+            ("c", "one", json!(1)),
+            ("d", "two", json!(null)),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                    (
+                        id,
+                        json!({"id":id,"rootId":root,"deletedAt":deleted}).to_string(),
+                    ),
+                )
+                .unwrap();
+        }
+        let mut ids = WorkspaceViewsRepository::task_agent_ids(&connection, Some("one")).unwrap();
+        ids.sort();
+        assert_eq!(ids, ["a", "b"]);
     }
 
     #[test]
@@ -476,7 +515,7 @@ mod bulk_read_tests {
         assert_eq!(
             tasks
                 .iter()
-                .map(|task| task["id"].as_str().expect("id"))
+                .map(|task| task.id().0.as_str())
                 .collect::<Vec<_>>(),
             ["c", "b"]
         );
