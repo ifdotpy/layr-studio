@@ -43,6 +43,7 @@ mod m2026_10_31_access_invites;
 mod m2026_10_31_agent_core;
 mod m2026_10_31_agent_permissions;
 mod m2026_10_31_current_checks;
+mod m2026_10_31_drop_old_outbox_tables;
 mod m2026_10_31_native_status_error;
 mod m2026_10_31_project_record_kind;
 mod m2026_10_31_retired_start_indexes;
@@ -1602,9 +1603,12 @@ fn run_receipt_migrations(
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     m2026_10_29_request_results_v2::convert_annotations(&tx)?;
     tx.commit()?;
-    // The receipt families keep the pending transport rows in their old tables. Move them.
+    // The receipt families keep the pending transport rows in their old tables. Move them,
+    // then drop the emptied old tables. The drop runs here, after the receipt
+    // families add their columns to those tables.
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     m2026_10_30_one_outbox::apply(&tx)?;
+    m2026_10_31_drop_old_outbox_tables::apply(&tx)?;
     tx.commit()?;
     crate::schema::verify_bootstrap(db)?;
     crate::verify_observed_tables_are_rowid(db)

@@ -69,51 +69,12 @@
     ["admission", "TEXT", 0, 0, 0],
     ["receipt_state", "TEXT", 1, 0, 2]
   ],
-  "runtime_server_outbox": [
-    ["id", "TEXT", 0, 1, 0],
-    ["server", "TEXT", 1, 0, 0],
-    ["body", "TEXT", 1, 0, 0],
-    ["state", "TEXT", 1, 0, 0],
-    ["result", "TEXT", 0, 0, 0],
-    ["attempts", "INTEGER", 1, 0, 0],
-    ["next_at", "REAL", 1, 0, 0],
-    ["error", "TEXT", 0, 0, 0],
-    ["created_at", "REAL", 1, 0, 0],
-    ["completed_at", "REAL", 1, 0, 0],
-    ["fingerprint", "TEXT", 0, 0, 0],
-    ["admission", "TEXT", 0, 0, 0],
-    ["receipt_state", "TEXT", 1, 0, 2],
-    ["receipt_kind", "TEXT", 1, 0, 2]
-  ],
-  "runtime_server_fetch": [
-    ["id", "TEXT", 0, 1, 0],
-    ["server", "TEXT", 1, 0, 0],
-    ["signature", "TEXT", 1, 0, 0],
-    ["state", "TEXT", 1, 0, 0],
-    ["result", "TEXT", 0, 0, 0],
-    ["admission", "TEXT", 0, 0, 0],
-    ["receipt_state", "TEXT", 1, 0, 2]
-  ],
-  "runtime_access_outbound": [
-    ["server", "TEXT", 1, 1, 0],
-    ["request_id", "TEXT", 1, 2, 0],
-    ["hash", "TEXT", 1, 0, 0],
-    ["record", "TEXT", 1, 0, 0],
-    ["receipt_state", "TEXT", 1, 0, 2]
-  ],
   "runtime_federation_inbox": [
     ["peer_id", "TEXT", 1, 1, 0],
     ["message_id", "TEXT", 1, 2, 0],
     ["record", "TEXT", 1, 0, 0],
     ["receipt_ack", "TEXT", 1, 0, 2],
     ["receipt_kind", "TEXT", 0, 0, 2]
-  ],
-  "runtime_federation_outbox": [
-    ["id", "TEXT", 0, 1, 0],
-    ["peer_id", "TEXT", 1, 0, 0],
-    ["record", "TEXT", 1, 0, 0],
-    ["receipt_state", "TEXT", 1, 0, 2],
-    ["receipt_kind", "TEXT", 1, 0, 2]
   ],
   "runtime_events": [
     ["id", "TEXT", 0, 1, 0],
