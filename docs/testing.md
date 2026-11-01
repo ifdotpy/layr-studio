@@ -173,11 +173,11 @@ nice -n 10 just test-fast
 nice -n 10 just test-comprehensive
 ```
 
-Both gates create a private scratch directory on tmpfs under `/tmp`, export it
-as `TMPDIR` to their test processes, and remove it on exit. They require 2 GiB
-free before starting and fail if the scratch filesystem is not tmpfs. Set
-`TMPDIR` to another existing tmpfs directory to choose the parent for one run,
-for example `TMPDIR=/tmp/my-scratch nice -n 10 just test-fast`. Cargo target and
+Both gates create a private scratch directory under `${TMPDIR:-/tmp}`, export it
+as `TMPDIR` to their test processes, and remove it on exit. On Linux tmpfs they
+require 2 GiB free before starting. Set `TMPDIR` to an existing directory to
+choose the parent for one run, for example `TMPDIR=/tmp/my-scratch just test-fast`.
+A disk-backed override runs on disk and prints a notice. Cargo target and
 build outputs stay in their normal locations. The requirement covers a sampled
 peak of 1005908 KiB plus 1091244 KiB margin. The installer test fixture uses the
 same scratch; its sampled peak was 200 KiB. SQLite durability is unchanged.

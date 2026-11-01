@@ -94,14 +94,14 @@ _test-gate gate:
     trap 'chmod -R u+rwX "$scratch"; rm -rf -- "$scratch"' EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
-    if [ "$(stat -f -c %T "$scratch")" != tmpfs ]; then
-      echo "Gate scratch $scratch is not on tmpfs" >&2
-      exit 1
-    fi
-    free_kib="$(df -Pk "$scratch" | awk 'NR == 2 {print $4}')"
-    if [ "$free_kib" -lt "$required_kib" ]; then
-      echo "Gate scratch has ${free_kib} KiB free; ${required_kib} KiB required" >&2
-      exit 1
+    if [ "$(uname -s)" = Linux ] && [ "$(stat -f -c %T "$scratch")" = tmpfs ]; then
+      free_kib="$(df -Pk "$scratch" | awk 'NR == 2 {print $4}')"
+      if [ "$free_kib" -lt "$required_kib" ]; then
+        echo "Gate scratch has ${free_kib} KiB free; ${required_kib} KiB required" >&2
+        exit 1
+      fi
+    else
+      echo "Gate scratch $scratch is not memory-backed" >&2
     fi
     export TMPDIR="$scratch"
     echo "Gate scratch: $TMPDIR"
