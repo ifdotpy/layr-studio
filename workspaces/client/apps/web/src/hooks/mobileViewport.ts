@@ -507,6 +507,12 @@ export function useMobileViewport(active: boolean, compact = false) {
     window.addEventListener("resize", viewportChanged);
     window.addEventListener("orientationchange", viewportChanged);
     window.addEventListener("scroll", viewportChanged);
+    // The page can return with a new visual offset and no viewport event.
+    const returnToPage = () => {
+      if (document.visibilityState === "visible") viewportChanged();
+    };
+    document.addEventListener("visibilitychange", returnToPage);
+    window.addEventListener("pageshow", viewportChanged);
     return () => {
       cancelAnimationFrame(frame);
       cancelAnimationFrame(focusFrame);
@@ -531,6 +537,8 @@ export function useMobileViewport(active: boolean, compact = false) {
       window.removeEventListener("resize", viewportChanged);
       window.removeEventListener("orientationchange", viewportChanged);
       window.removeEventListener("scroll", viewportChanged);
+      document.removeEventListener("visibilitychange", returnToPage);
+      window.removeEventListener("pageshow", viewportChanged);
       window.removeEventListener(nativeViewportEvent, receiveNative);
       clear();
     };
