@@ -5,6 +5,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use rusqlite::OptionalExtension;
 use std::sync::Arc;
+use studio_runtime_services::commands::CommandError;
 use studio_runtime_services::coordination::{self, CoordinationError};
 
 use super::extractors::{ApiJson, TypedQuery};
@@ -128,6 +129,25 @@ pub(super) async fn send_message(
     state: HttpState,
     body: crate::generated::ManagedMessageBody,
 ) -> Result<Json<crate::generated::StudioApiWorkModelsMessageReceipt>, ApiError> {
+    send_message_with(state, body, |_| Ok::<(), CommandError>(()))
+        .await
+        .map(|(receipt, _)| receipt)
+}
+
+/// The send path with a write that commits with the message. `in_transaction` runs in the
+/// transaction that posts the message, after the post, so both commit or neither does. The
+/// federated branch does not post here and does not run it: it returns `None`.
+pub(super) async fn send_message_with<T: Send + 'static>(
+    state: HttpState,
+    body: crate::generated::ManagedMessageBody,
+    in_transaction: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T, CommandError> + Send + 'static,
+) -> Result<
+    (
+        Json<crate::generated::StudioApiWorkModelsMessageReceipt>,
+        Option<T>,
+    ),
+    ApiError,
+> {
     let store = state.store.ok_or_else(ApiError::internal)?;
     let wake = state.event_wake;
     let message_admission = state.message_admission.clone();
@@ -216,13 +236,13 @@ pub(super) async fn send_message(
             serde_json::from_str(result.get()).map_err(|_| ApiError::internal())?;
         result.id = body.id.clone();
         wake.notify_one();
-        return Ok(Json(result));
+        return Ok((Json(result), None));
     }
     let prepared = prepared.ok_or_else(ApiError::internal)?;
     let admission = message_admission.unwrap_or_else(|| Arc::from(prepared));
-    let posted = store
+    let (posted, finished) = store
         .transaction_with_error(move |transaction| {
-            coordination::post_message_with_admission(
+            let posted = coordination::post_message_with_admission(
                 transaction,
                 coordination::PostManagedMessage {
                     room: &body.room,
@@ -232,10 +252,12 @@ pub(super) async fn send_message(
                     assets: &assets,
                 },
                 admission.as_ref(),
-            )
+            )?;
+            let finished = in_transaction(transaction)?;
+            Ok::<_, CommandError>((posted, Some(finished)))
         })
         .await
-        .map_err(coordination_error)?;
+        .map_err(super::commands::command_error)?;
     let encoded = serde_json::to_vec(&posted.receipt).map_err(ApiError::json)?;
     let result =
         serde_json::from_slice::<crate::generated::StudioApiWorkModelsMessageReceipt>(&encoded)
@@ -249,7 +271,7 @@ pub(super) async fn send_message(
             .await
             .map_err(|_| ApiError::internal())?;
     }
-    Ok(Json(result))
+    Ok((Json(result), finished))
 }
 
 async fn agent_chat(
