@@ -1647,7 +1647,7 @@ async function runAccountsUi(
         agentId: claude.id,
         text: "Change the Claude task",
         kind: "user",
-        status: "pending",
+        status: "queued",
         requestedDelivery: "next_turn",
         created: Date.now() / 1000,
       },

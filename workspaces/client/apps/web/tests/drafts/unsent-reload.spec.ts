@@ -81,7 +81,12 @@ test("unsent input survives reload until each server confirmation", async ({
   await page.addInitScript(() => {
     const original = IDBDatabase.prototype.transaction;
     IDBDatabase.prototype.transaction = function (names, mode, options) {
-      const transaction = original.call(this, names, mode, options);
+      const transaction = original.call(
+        this,
+        typeof names === "string" ? names : Array.from(names),
+        mode,
+        options,
+      );
       if (this.name === "studio-unsent-input" && mode === "readwrite")
         transaction.addEventListener("complete", () =>
           window.dispatchEvent(new Event("unsent-transaction")),

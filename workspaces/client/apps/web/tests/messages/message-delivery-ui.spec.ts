@@ -435,7 +435,7 @@ test("message delivery ui", async ({ browser: _browser }) => {
       };
       const accept = async (
         sent: (typeof posts)[number],
-        status: MessageDelivery["status"] = "accepted",
+        status: MessageDelivery["status"] = "delivered",
         expectedDraft = "",
       ) => {
         await sent.route.fulfill({
@@ -482,7 +482,7 @@ test("message delivery ui", async ({ browser: _browser }) => {
       const optimisticNode = await row(firstText).elementHandle();
       const pendingBox = await row(firstText).boundingBox();
       await input.fill("Next draft typed during delivery");
-      await accept(first, "accepted", "Next draft typed during delivery");
+      await accept(first, "delivered", "Next draft typed during delivery");
       const acceptedBox = await row(firstText).boundingBox();
       assert.ok(
         Math.abs(required(pendingBox).height - required(acceptedBox).height) <=
@@ -627,7 +627,10 @@ test("message delivery ui", async ({ browser: _browser }) => {
         clientMessageId: queued.body.id,
         role: "user",
         text: queuedText,
-        pending: true,
+        deliveryStatus: {
+          source: "server" as const,
+          status: "queued" as const,
+        },
       };
       await publish(a.id, [...queueBase, queuedEcho]);
       await until(
@@ -655,7 +658,13 @@ test("message delivery ui", async ({ browser: _browser }) => {
         `${mode}: dispatch gap retains the local waiting message`,
       );
       assert.equal(await queueRow().count(), 0);
-      await publish(a.id, [...queueBase, { ...queuedEcho, pending: false }]);
+      await publish(a.id, [
+        ...queueBase,
+        {
+          ...queuedEcho,
+          deliveryStatus: { source: "server", status: "delivered" },
+        },
+      ]);
       await until(
         async () =>
           (await row(queuedText).count()) === 1 &&
@@ -752,7 +761,7 @@ test("message delivery ui", async ({ browser: _browser }) => {
         await attempt.route.fulfill({
           json: sendReply({
             id: attempt.body.id,
-            status: "accepted",
+            status: "delivered",
           } satisfies MessageDelivery),
         });
       }
@@ -773,7 +782,7 @@ test("message delivery ui", async ({ browser: _browser }) => {
       await switched.route.fulfill({
         json: sendReply({
           id: switched.body.id,
-          status: "accepted",
+          status: "delivered",
         } satisfies MessageDelivery),
       });
       await page.waitForTimeout(250);
@@ -839,7 +848,7 @@ test("message delivery ui", async ({ browser: _browser }) => {
           id: materialized.body.id,
           kind: "user",
           text: materializedText,
-          status: "pending",
+          status: "queued",
           delivery: "current_turn",
         },
       ]);
@@ -861,9 +870,8 @@ test("message delivery ui", async ({ browser: _browser }) => {
             clientMessageId: materialized.body.id,
             role: "user",
             text: materializedText,
-            deliveryStatus: "delivered",
+            deliveryStatus: { source: "server", status: "delivered" },
             materialized: true,
-            pending: false,
           },
         ],
       });
@@ -981,21 +989,21 @@ test("message delivery ui", async ({ browser: _browser }) => {
           "uncertain",
           "failed",
           "cancelled",
-        ] satisfies Message["deliveryStatus"][]
+        ] satisfies MessageDelivery["status"][]
       ).map((status) => ({
         id: `${mode}-server-${status}`,
         role: "user",
         text: `${mode} server ${status} receipt`,
-        deliveryStatus: status,
+        deliveryStatus: { source: "server" as const, status },
         deliveryError: `Fixture ${status} receipt`,
       }));
       const retained = (
-        ["accepted", "queued"] satisfies Message["deliveryStatus"][]
+        ["delivered", "queued"] satisfies MessageDelivery["status"][]
       ).map((status) => ({
         id: `${mode}-server-${status}`,
         role: "user",
         text: `${mode} server ${status} receipt`,
-        deliveryStatus: status,
+        deliveryStatus: { source: "server" as const, status },
       }));
       await publish(a.id, [...serverBase, ...removable, ...retained]);
       for (const message of removable) {

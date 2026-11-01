@@ -126,14 +126,17 @@ test("message retry http browser", async ({ page: runnerPage }) => {
     );
     await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
     const result = await page.evaluate(() => window.sendResult);
-    assert.equal(result.queued, true, "A missing response remains pending");
+    assert.equal(result.kind, "local");
+    assert.equal(
+      result.kind === "local" && result.state.kind,
+      "transport_failed",
+      "A missing response remains on the device",
+    );
     release();
     await mount();
+    await expect.poll(() => attempts.length).toBeGreaterThanOrEqual(2);
     await page.waitForFunction(
-      (id) =>
-        window.outbox.entries.some(
-          (entry) => entry.id === id && entry.status === "accepted",
-        ),
+      (id) => !window.outbox.entries.some((entry) => entry.id === id),
       id,
     );
     assert.ok(attempts.length >= 2);
@@ -177,25 +180,41 @@ test("message retry http browser", async ({ page: runnerPage }) => {
       await route.fulfill({ response });
     });
     const sendExpired = () =>
-      page.evaluate(async (body) => {
-        try {
-          await window.retrySendSend(body);
-          return "accepted";
-        } catch (error) {
-          return String(error);
-        }
-      }, expired);
-    assert.match(await sendExpired(), /expired/i);
+      page.evaluate((body) => window.retrySendSend(body), expired);
+    const firstExpired = await sendExpired();
+    assert.equal(firstExpired.kind, "local");
+    assert.equal(
+      firstExpired.kind === "local" && firstExpired.state.kind,
+      "transport_failed",
+    );
+    assert.match(
+      firstExpired.kind === "local" &&
+        firstExpired.state.kind === "transport_failed"
+        ? firstExpired.state.error
+        : "",
+      /expired/i,
+    );
     await mount();
     await page.waitForFunction(
       (id) =>
         window.outbox.entries.some(
-          (entry) => entry.id === id && entry.status === "failed",
+          (entry) =>
+            entry.id === id &&
+            entry.status.source === "device" &&
+            entry.status.state.kind === "transport_failed",
         ),
       expired.id,
     );
     await page.clock.fastForward(16_000);
-    assert.match(await sendExpired(), /expired/i);
+    const secondExpired = await sendExpired();
+    assert.equal(secondExpired.kind, "local");
+    assert.match(
+      secondExpired.kind === "local" &&
+        secondExpired.state.kind === "transport_failed"
+        ? secondExpired.state.error
+        : "",
+      /expired/i,
+    );
     assert.equal(
       expiredAttempts,
       1,

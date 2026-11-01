@@ -13,7 +13,7 @@ declare global {
   interface Window {
     unsentFixture: ReturnType<typeof unsentStore>;
     recordingFixture: ReturnType<typeof recordingStore>;
-    unsentFormFixture: typeof buffer;
+    unsentFormFixture: ReturnType<typeof unsentStore>;
   }
 }
 window.recordingFixture = recordingStore("fixture");
