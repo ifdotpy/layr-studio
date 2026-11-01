@@ -1479,7 +1479,10 @@ mod account_identity_tests {
     #[test]
     fn empty_transfer_default_inherits_automatic_account() {
         let defaults: studio_runtime_store::transfer_record::TransferWorkerDefaults =
-            serde_json::from_value(serde_json::json!({"accountKey":""})).unwrap();
+            studio_runtime_store::transfer_record::TransferWorkerDefaults {
+                account_key: studio_runtime_schema::queue_command::Field::Value(String::new()),
+                ..Default::default()
+            };
         let stored = studio_runtime_store::StoredWorkerDefaults::from(defaults);
         let studio_runtime_store::StoredWorkerDefaults::Known(defaults) = stored else {
             panic!("transfer defaults remain typed");
