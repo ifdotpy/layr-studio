@@ -14504,7 +14504,6 @@ export interface components {
     };
     /** @enum {string} */
     MessageSendStatus:
-      | "buffered"
       | "queued"
       | "sending"
       | "delivered"
@@ -38884,7 +38883,6 @@ export const MessageKind = {
 } as const;
 export type MessageKind = components["schemas"]["MessageKind"];
 export const MessageSendStatus = {
-  buffered: "buffered",
   queued: "queued",
   sending: "sending",
   delivered: "delivered",

@@ -96,10 +96,10 @@ it("keeps both texts when the server returns a concurrent master", async () => {
 });
 
 it("restores an unconfirmed edit after reload and removes it on confirmation", async () => {
-  const rows = new Map<string, string>();
+  const rows = new Map<string, ReturnType<typeof row>>();
   const buffer = {
     loadAll: async () => [...rows.entries()],
-    put: async (key: string, value: string) => {
+    put: async (key: string, value: ReturnType<typeof row>) => {
       rows.set(key, value);
     },
     delete: async (key: string) => {
@@ -122,10 +122,10 @@ it("restores an unconfirmed edit after reload and removes it on confirmation", a
 });
 
 it("removes a refused edit from the buffer", async () => {
-  const rows = new Map<string, string>();
+  const rows = new Map<string, ReturnType<typeof row>>();
   const buffer = {
     loadAll: async () => [...rows.entries()],
-    put: async (key: string, value: string) => {
+    put: async (key: string, value: ReturnType<typeof row>) => {
       rows.set(key, value);
     },
     delete: async (key: string) => {

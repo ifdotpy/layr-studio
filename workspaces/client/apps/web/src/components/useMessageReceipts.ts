@@ -5,10 +5,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import "../api";
 import "../sync/send";
-import {
-  latestMessageReceipt,
-  type MessageReceipt,
-} from "../sync/messageReceipts";
+import { type MessageReceipt } from "../sync/messageReceipts";
 
 export function useMessageReceipts(
   room: string | null,
@@ -65,11 +62,7 @@ export function useMessageReceipts(
               const next = new Map(
                 previous.scope === scope ? previous.receipts : [],
               );
-              for (const receipt of receipts)
-                next.set(
-                  receipt.id,
-                  latestMessageReceipt(next.get(receipt.id), receipt),
-                );
+              for (const receipt of receipts) next.set(receipt.id, receipt);
               // Keep confirmed receipts while retained history still has an old
               // pending record. Bound this cache to the caller's current IDs.
               const keep = new Set(requested.current);

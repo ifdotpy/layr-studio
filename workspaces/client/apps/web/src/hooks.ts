@@ -435,7 +435,7 @@ export function transcriptMessages(
   id: string | null,
 ): Message[] {
   return source.flatMap((m: TranscriptWireItem) => {
-    const { pending, ...record } = m;
+    const { pending, deliveryStatus, ...record } = m;
     return m.inputs
       ? m.inputs.map((r, i) => ({
           ...record,
@@ -446,7 +446,9 @@ export function transcriptMessages(
             r.clientMessageId ||
             r.id ||
             (i === 0 ? m.clientMessageId : undefined),
-          deliveryStatus: r.deliveryStatus,
+          deliveryStatus: r.deliveryStatus
+            ? { source: "server" as const, status: r.deliveryStatus }
+            : undefined,
           requestedDelivery: r.requestedDelivery,
           deliveryError: r.deliveryError,
           materialized: r.materialized ?? m.materialized,
@@ -477,6 +479,9 @@ export function transcriptMessages(
       : [
           {
             ...record,
+            deliveryStatus: deliveryStatus
+              ? { source: "server" as const, status: deliveryStatus }
+              : undefined,
             streamPending:
               m.role === "user" ? undefined : (pending ?? undefined),
             threadId: m.threadId ?? undefined,
@@ -879,7 +884,9 @@ export function useMessages(
               text: m.text,
               at: m.at,
               role: m.author === "user" ? "user" : "assistant",
-              deliveryStatus: m.status ?? undefined,
+              deliveryStatus: m.status
+                ? { source: "server" as const, status: m.status }
+                : undefined,
               deliveryError: m.error ?? undefined,
             })),
           );
@@ -984,7 +991,9 @@ export function useMessages(
           text: m.text,
           at: m.at,
           role: m.author === "user" ? "user" : "assistant",
-          deliveryStatus: m.status ?? undefined,
+          deliveryStatus: m.status
+            ? { source: "server" as const, status: m.status }
+            : undefined,
           deliveryError: m.error ?? undefined,
         })),
       );

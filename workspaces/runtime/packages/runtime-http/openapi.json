@@ -30130,7 +30130,6 @@
       },
       "MessageSendStatus": {
         "enum": [
-          "buffered",
           "queued",
           "sending",
           "delivered",

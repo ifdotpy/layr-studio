@@ -2,7 +2,6 @@ import { useServerStorage } from "../servers/ServerServicesContext";
 import { serverLocalStorage } from "../servers/storage";
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import type { Message } from "../types";
-import { MessageSendStatus } from "../generated/api.ts";
 
 const changed = "studio-removed-messages-changed";
 type Removed = {
@@ -120,12 +119,6 @@ export function useRemovedMessages(
         ...message,
         localDelivery: false,
         materialized: true,
-        deliveryStatus:
-          message.deliveryStatus === MessageSendStatus.buffered ||
-          message.deliveryStatus === MessageSendStatus.queued ||
-          message.deliveryStatus === MessageSendStatus.sending
-            ? MessageSendStatus.uncertain
-            : message.deliveryStatus,
       })),
     [value, revision],
   );

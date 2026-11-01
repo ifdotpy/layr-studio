@@ -31,6 +31,10 @@ vi.mock("react", async (original) => ({
     return h.cells[index];
   },
   useEffect: () => {},
+  useCallback: <T>(callback: T) => callback,
+}));
+vi.mock("../../unsent/useUnsentText", () => ({
+  useUnsentText: () => [null, vi.fn(), vi.fn(async () => {})],
 }));
 vi.mock("../../servers/ServerServicesContext", () => ({
   useServerApi: () => ({ post: h.post }),
@@ -220,9 +224,10 @@ for (const method of [
     )
       throw new Error("Expected answer form");
     form.props.onSubmit({ preventDefault() {} });
-    expect(post).toHaveBeenCalledWith({
-      answers: { q: { answers: ["Chosen"] } },
-    });
+    expect(post).toHaveBeenCalledWith(
+      { answers: { q: { answers: ["Chosen"] } } },
+      JSON.stringify({ q: "Chosen" }),
+    );
   });
 }
 
@@ -254,8 +259,8 @@ it("sends elicitation content through its generated answer variant", () => {
   )
     throw new Error("Expected answer form");
   form.props.onSubmit({ preventDefault() {} });
-  expect(post).toHaveBeenCalledWith({
-    decision: "accept",
-    content: { count: 7, flag: true },
-  });
+  expect(post).toHaveBeenCalledWith(
+    { decision: "accept", content: { count: 7, flag: true } },
+    JSON.stringify({ count: "7", flag: "true" }),
+  );
 });

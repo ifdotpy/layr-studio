@@ -1,4 +1,4 @@
-import { MessageSendStatus } from "../generated/api.ts";
+import { isMessagePending } from "../messageSendStatus";
 import { outboxRequests } from "../browserPersistence";
 import { AgentSource as GeneratedApiAgentSource } from "../generated/api.ts";
 import { DeliveryMoment } from "../generated/deliveryMoment";
@@ -15,11 +15,7 @@ import {
   saveRemovedMessage,
 } from "./removedMessages";
 
-export const isSendingMessage = (message: Message) =>
-  message.role === "user" &&
-  (message.deliveryStatus === MessageSendStatus.buffered ||
-    message.deliveryStatus === MessageSendStatus.queued ||
-    message.deliveryStatus === MessageSendStatus.sending);
+export const isSendingMessage = isMessagePending;
 
 type Queue =
   paths["/api/queue"]["get"]["responses"][200]["content"]["application/json"];
@@ -133,9 +129,7 @@ export function createSendingMessageRemoval(
       chat,
       {
         ...message,
-        deliveryStatus: cancelled
-          ? MessageSendStatus.cancelled
-          : MessageSendStatus.uncertain,
+        deliveryStatus: { source: "device", state: { kind: "removed" } },
       },
       localStorage,
     );
@@ -164,9 +158,12 @@ export function createSendingMessageRemoval(
     };
     for (const entry of outgoing) {
       if (
-        entry.status !== MessageSendStatus.buffered &&
-        entry.status !== MessageSendStatus.queued &&
-        entry.status !== MessageSendStatus.sending
+        !isSendingMessage({
+          id: entry.id,
+          role: "user",
+          text: entry.body.text,
+          deliveryStatus: entry.status,
+        })
       )
         continue;
       include({
@@ -217,7 +214,7 @@ export function createSendingMessageRemoval(
                 text: row.text,
                 assets: row.assets,
                 at: row.created,
-                deliveryStatus: row.status,
+                deliveryStatus: { source: "server", status: row.status },
               },
             });
           }

@@ -1,3 +1,4 @@
+import { serverStatus } from "../messageSendStatus";
 import { MessageSendStatus } from "../generated/api.ts";
 import {
   AgentSource as GeneratedApiAgentSource,
@@ -433,25 +434,29 @@ export default function Conversation(p: {
   const outgoing = (p.outgoing || []).filter(
     (entry) => entry.body.room === p.id,
   );
+  const removed = useRemovedMessages(p.data.stateDir, kind, p.id);
   const receiptIds = [
     ...new Set([
       ...outgoing
         .filter(
           (entry) =>
-            (entry.status === MessageSendStatus.queued ||
-              entry.status === MessageSendStatus.sending ||
-              entry.status === MessageSendStatus.uncertain) &&
+            (entry.status.source === "device" ||
+              serverStatus(entry.status) === MessageSendStatus.queued ||
+              serverStatus(entry.status) === MessageSendStatus.sending ||
+              serverStatus(entry.status) === MessageSendStatus.uncertain) &&
             (entry.receipt?.status !== MessageSendStatus.delivered ||
               entry.receipt.materialized !== true),
         )
         .map((entry) => entry.id),
-      ...history
+      ...[...history, ...removed.restored]
         .filter(
           (item) =>
             item.role === "user" &&
-            (item.deliveryStatus === MessageSendStatus.queued ||
-              item.deliveryStatus === MessageSendStatus.sending ||
-              item.deliveryStatus === MessageSendStatus.uncertain),
+            (item.deliveryStatus?.source === "device" ||
+              serverStatus(item.deliveryStatus) === MessageSendStatus.queued ||
+              serverStatus(item.deliveryStatus) === MessageSendStatus.sending ||
+              serverStatus(item.deliveryStatus) ===
+                MessageSendStatus.uncertain),
         )
         .map(
           (item) =>
@@ -478,33 +483,40 @@ export default function Conversation(p: {
       ),
     [history, p.outgoing, p.id, receipts],
   );
-  const removed = useRemovedMessages(p.data.stateDir, kind, p.id);
   const items = useMemo(
     () =>
-      [
-        ...delivery.items.map((message) => {
-          if (!isSendingMessage(message)) return message;
-          // A stale receipt must not make a restored display copy send again.
-          return (
-            removed.restored.find(
-              (copy) =>
-                message.id === copy.id ||
-                (copy.clientMessageId &&
-                  copy.clientMessageId === message.clientMessageId),
-            ) || message
-          );
-        }),
-        ...removed.restored.filter(
-          (copy) =>
-            !delivery.items.some(
-              (message) =>
-                message.id === copy.id ||
-                (copy.clientMessageId &&
-                  copy.clientMessageId === message.clientMessageId),
-            ),
-        ),
-      ].filter((message) => !removed.hidden(message)),
-    [delivery.items, removed.hidden, removed.restored],
+      receiptTranscript(
+        [
+          ...delivery.items.map((message) => {
+            if (
+              !isSendingMessage(message) ||
+              message.deliveryStatus?.source === "server"
+            )
+              return message;
+            // Keep the device removal fact until the server supplies a status.
+            return (
+              removed.restored.find(
+                (copy) =>
+                  message.id === copy.id ||
+                  (copy.clientMessageId &&
+                    copy.clientMessageId === message.clientMessageId),
+              ) || message
+            );
+          }),
+          ...removed.restored.filter(
+            (copy) =>
+              !delivery.items.some(
+                (message) =>
+                  message.id === copy.id ||
+                  (copy.clientMessageId &&
+                    copy.clientMessageId === message.clientMessageId),
+              ),
+          ),
+        ].filter((message) => !removed.hidden(message)),
+        p.id || "",
+        receipts,
+      ),
+    [delivery.items, removed.hidden, removed.restored, p.id, receipts],
   );
   const historyAgentId = p.id;
   const promptRecall = usePromptRecall(
@@ -830,6 +842,7 @@ export default function Conversation(p: {
             ...(item.assets ? { assets: item.assets } : {}),
             requestedDelivery: item.requestedDelivery,
             localDelivery: true,
+            deliveryStatus: item.deliveryStatus,
           })),
       ].filter(
         (entry) =>
@@ -1014,6 +1027,9 @@ export default function Conversation(p: {
         original = {
           ...message,
           ...fullFields,
+          deliveryStatus: fullFields.deliveryStatus
+            ? { source: "server", status: fullFields.deliveryStatus }
+            : message.deliveryStatus,
           threadId: fullFields.threadId ?? message.threadId,
           role: fullFields.role || message.role,
           text:
@@ -1214,8 +1230,8 @@ export default function Conversation(p: {
             localDelivery: true,
             deliveryStatus:
               "localDelivery" in entry && entry.localDelivery
-                ? MessageSendStatus.buffered
-                : MessageSendStatus.queued,
+                ? entry.deliveryStatus
+                : { source: "server", status: entry.status },
           })),
       ].filter((message) => !removed.hidden(message)),
     [items, queue, sending, p.id, removed.hidden],
@@ -1317,8 +1333,10 @@ export default function Conversation(p: {
       data-found={highlighted === m.id || undefined}
       className={`message ${m.role === "user" ? "user" : "assistant"} ${p.room ? "bubble " + (m.sender !== first ? "outgoing" : "incoming") : ""}`}
     >
-      {(m.deliveryStatus === MessageSendStatus.buffered ||
-        m.deliveryStatus === MessageSendStatus.sending) && (
+      {((m.deliveryStatus?.source === "device" &&
+        (m.deliveryStatus.state.kind === "stored" ||
+          m.deliveryStatus.state.kind === "in_flight")) ||
+        serverStatus(m.deliveryStatus) === MessageSendStatus.sending) && (
         <span
           className="message-delivery-status message-delivery-inline"
           role="status"
@@ -1347,8 +1365,12 @@ export default function Conversation(p: {
         </span>
       )}
       {deliveryLabel(m) &&
-        m.deliveryStatus !== MessageSendStatus.buffered &&
-        m.deliveryStatus !== MessageSendStatus.sending && (
+        !(
+          m.deliveryStatus?.source === "device" &&
+          (m.deliveryStatus.state.kind === "stored" ||
+            m.deliveryStatus.state.kind === "in_flight")
+        ) &&
+        serverStatus(m.deliveryStatus) !== MessageSendStatus.sending && (
           <div className="message-delivery-heading">
             <span
               className="message-label message-delivery-status"
@@ -1357,9 +1379,10 @@ export default function Conversation(p: {
               {deliveryLabel(m)}
             </span>
             {m.role === "user" &&
-              (m.deliveryStatus === MessageSendStatus.uncertain ||
-                m.deliveryStatus === MessageSendStatus.failed ||
-                m.deliveryStatus === MessageSendStatus.cancelled) && (
+              (serverStatus(m.deliveryStatus) === MessageSendStatus.uncertain ||
+                serverStatus(m.deliveryStatus) === MessageSendStatus.failed ||
+                serverStatus(m.deliveryStatus) ===
+                  MessageSendStatus.cancelled) && (
                 <ActionIcon
                   size="sm"
                   variant="subtle"
@@ -1406,14 +1429,16 @@ export default function Conversation(p: {
         !(
           p.offlineSendPending &&
           m.localDelivery &&
-          m.deliveryStatus === MessageSendStatus.buffered
+          m.deliveryStatus?.source === "device" &&
+          m.deliveryStatus.state.kind === "transport_failed"
         ) &&
-        (m.deliveryStatus === MessageSendStatus.failed ||
-          m.deliveryStatus === MessageSendStatus.uncertain ||
-          m.deliveryStatus === MessageSendStatus.buffered) && (
+        (serverStatus(m.deliveryStatus) === MessageSendStatus.failed ||
+          serverStatus(m.deliveryStatus) === MessageSendStatus.uncertain ||
+          (m.deliveryStatus?.source === "device" &&
+            m.deliveryStatus.state.kind === "transport_failed")) && (
           <div className="message-delivery-error">
             <p>{m.deliveryError}</p>
-            {m.deliveryStatus === MessageSendStatus.failed && (
+            {serverStatus(m.deliveryStatus) === MessageSendStatus.failed && (
               <Button
                 size="compact-xs"
                 variant="subtle"
@@ -1462,7 +1487,7 @@ export default function Conversation(p: {
           m.turnId &&
           m.turnStatus !== "uncertain" &&
           (!m.deliveryStatus ||
-            m.deliveryStatus === MessageSendStatus.delivered)
+            serverStatus(m.deliveryStatus) === MessageSendStatus.delivered)
             ? () => void editMessage(m)
             : undefined
         }

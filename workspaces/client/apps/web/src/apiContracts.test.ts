@@ -1,4 +1,3 @@
-import { MessageSendStatus } from "./generated/api.ts";
 import { DeliveryMoment } from "./generated/api";
 import { expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -248,8 +247,10 @@ const serverQueueRow: QueueItem = {
   created: 1,
   localDelivery: false,
 };
-const localDeliveryStatus: Message["deliveryStatus"] =
-  MessageSendStatus.buffered;
+const localDeliveryStatus: Message["deliveryStatus"] = {
+  source: "device",
+  state: { kind: "stored" },
+};
 const localQueueRow: LocalQueueItem = localOutboxQueueRow;
 // @ts-expect-error local queue projections do not fabricate server `status`
 const localQueueStatus: string = localQueueRow.status;

@@ -9,7 +9,7 @@ function App() {
       id: "q1",
       text: "Original message",
       created: 1,
-      status: "pending",
+      status: "queued",
       kind: "user",
     },
   ]);

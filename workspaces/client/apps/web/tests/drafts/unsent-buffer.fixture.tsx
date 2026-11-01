@@ -2,16 +2,22 @@ import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createDirectDrafts } from "../../src/sync/directDrafts.ts";
 import { useUnsentText } from "../../src/unsent/useUnsentText.ts";
-import { unsentStore } from "../../src/unsent/store.ts";
+import {
+  draftStore,
+  recordingStore,
+  unsentStore,
+} from "../../src/unsent/store.ts";
 
-const buffer = unsentStore("fixture", "draft");
+const buffer = draftStore("fixture");
 declare global {
   interface Window {
-    unsentFixture: typeof buffer;
-    unsentFormFixture: typeof buffer;
+    unsentFixture: ReturnType<typeof unsentStore>;
+    recordingFixture: ReturnType<typeof recordingStore>;
+    unsentFormFixture: ReturnType<typeof unsentStore>;
   }
 }
-window.unsentFixture = buffer;
+window.recordingFixture = recordingStore("fixture");
+window.unsentFixture = unsentStore("fixture", "form");
 window.unsentFormFixture = unsentStore("local", "form");
 const store = createDirectDrafts({
   post: async () => [],

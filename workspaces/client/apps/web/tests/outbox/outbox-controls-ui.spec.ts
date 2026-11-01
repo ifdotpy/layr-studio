@@ -157,7 +157,10 @@ for (const [device, viewport] of [
         },
         sendBody(commands[0] as never).room,
       );
-      expect(replay.first.status).toBe("uncertain");
+      expect(replay.first.kind).toBe("local");
+      expect(replay.first.kind === "local" && replay.first.state.kind).toBe(
+        "transport_failed",
+      );
       expect(replay.second?.kind).toBe("server");
       expect(replay.requests).toHaveLength(2);
       expect(replay.requests[1]).toEqual(replay.requests[0]);

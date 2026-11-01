@@ -1,51 +1,29 @@
-import { unsentStore } from "../unsent/store.ts";
+import { recordingStore } from "../unsent/store.ts";
 import { serverViewId } from "../servers/environment.ts";
 import { randomUUID } from "../uuid";
-export type Recording = {
-  id: string;
-  chatId: string;
-  created: number;
-  sampleRate: number;
-  samples: number;
-  state: "recording" | "ready";
-  transcript?: string | undefined;
-  reviewedText?: string | undefined;
-  transcriptionAttempt?: string | undefined;
-  error?: string | undefined;
-  deletedAt?: number | undefined;
-};
+import type { Recording } from "../unsent/schema.ts";
+export type { Recording } from "../unsent/schema.ts";
 export function createRecordingStorage(
   server = serverViewId ?? "local",
   buffer: Pick<
-    ReturnType<typeof unsentStore>,
-    "put" | "delete" | "loadAll"
-  > = unsentStore(server, "recording"),
+    ReturnType<typeof recordingStore>,
+    "put" | "putChunk" | "delete" | "loadAll"
+  > = recordingStore(server),
 ) {
   const records = new Map<string, Recording>();
   const chunks = new Map<string, Map<number, Int16Array>>();
   let loading: Promise<void> | undefined;
   const ready = () =>
     (loading ??= (async () => {
-      for (const [key, value] of await buffer.loadAll()) {
-        try {
-          if (key.startsWith("record:") && typeof value === "string") {
-            const row: Recording = JSON.parse(value);
-            if (typeof row.id === "string" && typeof row.chatId === "string")
-              records.set(row.id, row);
-          } else if (key.startsWith("chunk:") && value instanceof Blob) {
-            const identity: unknown = JSON.parse(key.slice(6));
-            if (
-              !Array.isArray(identity) ||
-              typeof identity[0] !== "string" ||
-              typeof identity[1] !== "number"
-            )
-              continue;
-            let parts = chunks.get(identity[0]);
-            if (!parts) chunks.set(identity[0], (parts = new Map()));
-            parts.set(identity[1], new Int16Array(await value.arrayBuffer()));
-          }
-        } catch {
-          /* Ignore damaged recording entries. */
+      for (const [, value] of await buffer.loadAll()) {
+        if (value.kind === "record") records.set(value.value.id, value.value);
+        else {
+          let parts = chunks.get(value.id);
+          if (!parts) chunks.set(value.id, (parts = new Map()));
+          parts.set(
+            value.index,
+            new Int16Array(await value.value.arrayBuffer()),
+          );
         }
       }
     })());
@@ -60,13 +38,22 @@ export function createRecordingStorage(
   }
   async function saveRecording(row: Recording) {
     await ready();
-    await buffer.put(recordKey(row.id), JSON.stringify(row));
+    await buffer.put(recordKey(row.id), { kind: "record", value: row });
     records.set(row.id, { ...row });
   }
   async function saveChunk(row: Recording, index: number, pcm: Int16Array) {
     await ready();
-    await buffer.put(chunkKey(row.id, index), new Blob([pcm.slice().buffer]));
-    await buffer.put(recordKey(row.id), JSON.stringify(row));
+    await buffer.putChunk(
+      recordKey(row.id),
+      { kind: "record", value: row },
+      chunkKey(row.id, index),
+      {
+        kind: "chunk",
+        id: row.id,
+        index,
+        value: new Blob([pcm.slice().buffer]),
+      },
+    );
     let parts = chunks.get(row.id);
     if (!parts) chunks.set(row.id, (parts = new Map()));
     parts.set(index, pcm.slice());
@@ -147,7 +134,7 @@ export function createRecordingStorage(
       (!attempt || current.transcriptionAttempt === attempt)
     ) {
       const next = { ...current, ...row };
-      await buffer.put(recordKey(row.id), JSON.stringify(next));
+      await buffer.put(recordKey(row.id), { kind: "record", value: next });
       records.set(row.id, next);
     }
   }
@@ -155,10 +142,10 @@ export function createRecordingStorage(
     await ready();
     const current = records.get(row.id);
     if (current?.chatId !== row.chatId) return false;
-    await buffer.put(
-      recordKey(row.id),
-      JSON.stringify({ ...current, transcriptionAttempt: attempt }),
-    );
+    await buffer.put(recordKey(row.id), {
+      kind: "record",
+      value: { ...current, transcriptionAttempt: attempt },
+    });
     records.set(row.id, { ...current, transcriptionAttempt: attempt });
     return true;
   }

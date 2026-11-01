@@ -132,7 +132,7 @@ export type Message = Omit<
   | "threadId"
 > & {
   assets?: Array<TranscriptAsset | LocalMessageAttachment> | null | undefined;
-  deliveryStatus?: TranscriptWireItem["deliveryStatus"];
+  deliveryStatus?: import("./sync/send").DeliveryState | undefined;
   nativeError?: DeepReadonly<JsonInput> | undefined;
   role: NonNullable<TranscriptWireItem["role"]>;
   text: NonNullable<TranscriptWireItem["text"]>;

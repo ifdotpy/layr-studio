@@ -32,16 +32,6 @@ export function checkedMessageReceipts(
   return receipts;
 }
 
-export function latestMessageReceipt(
-  previous: MessageReceipt | undefined,
-  next: MessageReceipt,
-) {
-  return previous?.status === MessageSendStatus.delivered &&
-    next.status !== MessageSendStatus.delivered
-    ? previous
-    : next;
-}
-
 export function receiptOutgoing(
   entry: OutgoingMessage,
   receipt?: MessageReceipt,
@@ -55,12 +45,11 @@ export function receiptOutgoing(
   receipt?: MessageReceipt,
 ): Omit<OutgoingMessage, "id"> {
   if (!receipt) return entry;
-  const current = latestMessageReceipt(entry.receipt, receipt);
+  const current = receipt;
   return {
     ...entry,
-    status: current.status,
+    status: { source: "server", status: current.status },
     receipt: current,
-    error: current.error || undefined,
   };
 }
 
@@ -78,16 +67,13 @@ export function receiptTranscript(
         : item.id);
     const receipt = receipts.get(id);
     if (!receipt) return item;
-    const status =
-      item.deliveryStatus === MessageSendStatus.delivered
-        ? MessageSendStatus.delivered
-        : receipt.status;
+    const status = receipt.status;
     const legacy: Message & { pending?: unknown } = item;
     const { pending: legacyPending, ...message } = legacy;
     void legacyPending;
     return {
       ...message,
-      deliveryStatus: status,
+      deliveryStatus: { source: "server" as const, status },
       deliveryError:
         status === MessageSendStatus.delivered
           ? undefined

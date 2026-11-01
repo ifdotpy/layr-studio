@@ -731,17 +731,13 @@ export default function App({ active = true }: { active?: boolean }) {
         .filter((entry) => receipts.get(entry.id)?.status !== "cancelled")
         .map((entry) => {
           const receipt = receipts.get(entry.id);
-          if (receipt?.status === "failed")
+          const status = Object.values(MessageSendStatus).find(
+            (value) => value === receipt?.status,
+          );
+          if (status)
             return {
               ...entry,
-              status: MessageSendStatus.failed,
-              error: receipt.error || undefined,
-            } satisfies OutgoingMessage;
-          if (receipt?.status === "uncertain")
-            return {
-              ...entry,
-              status: MessageSendStatus.uncertain,
-              error: receipt.error || undefined,
+              status: { source: "server", status },
             } satisfies OutgoingMessage;
           return entry;
         }),
@@ -1689,10 +1685,9 @@ export default function App({ active = true }: { active?: boolean }) {
         const entry: OutgoingMessage = {
           id: request.id,
           body: request,
-          status: MessageSendStatus.buffered,
+          status: { source: "device", state: { kind: "stored" } },
           created: Date.now(),
           attachments: options?.attachments || [],
-          displayPending: true,
         };
         setOutgoing((old) => ({ ...old, [entry.id]: entry }));
         const result = await durableSend(
@@ -1715,31 +1710,42 @@ export default function App({ active = true }: { active?: boolean }) {
             release();
           },
         );
-        setOutgoing((old) => ({
-          ...old,
-          [entry.id]: {
-            ...entry,
-            status: result.status,
-            ...(result.kind === "server" ? { receipt: result } : {}),
-            error: result.error || undefined,
-          },
-        }));
-        if (result.status === MessageSendStatus.cancelled) {
-          if (sends.current[id]?.id === entry.id) {
-            delete sends.current[id];
-          }
-          throw new ApiError(
-            "This message was cancelled. Send it again to resume.",
-            400,
-          );
+        if (result.kind === "confirmed") {
+          setOutgoing((old) => {
+            const next = { ...old };
+            delete next[entry.id];
+            return next;
+          });
+        } else if (result.kind === "removed") {
+          throw new Error("This message was removed.");
+        } else if (result.kind === "server") {
+          setOutgoing((old) => ({
+            ...old,
+            [entry.id]: {
+              ...entry,
+              status: { source: "server", status: result.status },
+              receipt: result,
+            },
+          }));
+          if (
+            result.status === MessageSendStatus.cancelled ||
+            result.status === MessageSendStatus.failed
+          )
+            throw new ApiError(
+              result.error || "The message was not sent.",
+              400,
+            );
+        } else {
+          setOutgoing((old) => ({
+            ...old,
+            [entry.id]: {
+              ...entry,
+              status: { source: "device", state: result.state },
+            },
+          }));
+          if (result.state.kind === "transport_failed")
+            throw new Error(result.state.error);
         }
-        if (result.status === MessageSendStatus.failed)
-          throw new ApiError(result.error || "The message was not sent.", 400);
-        if (result.status === MessageSendStatus.uncertain)
-          throw new Error(
-            result.error ||
-              "Delivery is uncertain. Inspect the conversation before sending again.",
-          );
         if (sends.current[id]?.id === entry.id) {
           delete sends.current[id];
         }
@@ -1791,8 +1797,16 @@ export default function App({ active = true }: { active?: boolean }) {
                 ...old,
                 [key]: {
                   ...old[key],
-                  status: rejected ? "failed" : "uncertain",
-                  error: errorText(e),
+                  status:
+                    old[key].status.source === "server"
+                      ? old[key].status
+                      : {
+                          source: "device",
+                          state: {
+                            kind: "transport_failed",
+                            error: errorText(e),
+                          },
+                        },
                 },
               }
             : old,

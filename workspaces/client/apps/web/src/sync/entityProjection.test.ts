@@ -275,7 +275,7 @@ it("projects bounded workspace summaries and receipts with deletes", () => {
     first.runtime.messageReceipts[0] !== null &&
       first.runtime.messageReceipts[0] !== undefined,
   );
-  assert.equal(first.runtime.messageReceipts[0].status, "pending");
+  assert.equal(first.runtime.messageReceipts[0].status, "queued");
 
   assert.ok(first.runtime.plans !== null && first.runtime.plans !== undefined);
   assert.ok(
