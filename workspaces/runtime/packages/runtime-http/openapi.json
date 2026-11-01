@@ -2171,6 +2171,13 @@
         "additionalProperties": false,
         "description": "Server-owned account presentation; each field is derived from the same observation.",
         "properties": {
+          "agents": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AgentLimitProjection"
+            },
+            "default": {},
+            "type": "object"
+          },
           "buckets": {
             "$ref": "#/components/schemas/BucketProjection"
           },
@@ -2184,7 +2191,8 @@
         "required": [
           "runway",
           "reset",
-          "buckets"
+          "buckets",
+          "agents"
         ],
         "type": "object"
       },
@@ -6633,6 +6641,29 @@
           "text"
         ],
         "title": "AgentInboxEntry",
+        "type": "object"
+      },
+      "AgentLimitProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "eligibility": {
+            "$ref": "#/components/schemas/UsageEligibility"
+          },
+          "recovery": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LimitRecovery"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "eligibility",
+          "recovery"
+        ],
         "type": "object"
       },
       "AgentMode": {
@@ -18643,6 +18674,47 @@
         "title": "BrowserStatus",
         "type": "object"
       },
+      "BucketCreditBalance": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "format": "double",
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          }
+        ]
+      },
+      "BucketCredits": {
+        "properties": {
+          "balance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BucketCreditBalance"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hasCredits": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "unlimited": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "BucketProjection": {
         "additionalProperties": false,
         "properties": {
@@ -21111,6 +21183,100 @@
         },
         "title": "ClaudeProfileRequest",
         "type": "object"
+      },
+      "ClaudeRateInfo": {
+        "properties": {
+          "isUsingOverage": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "overageInUse": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "overageResetsAt": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "overageStatus": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaudeRateStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rateLimitType": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaudeRateType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resetsAt": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/ClaudeRateStatus"
+          },
+          "utilization": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "ClaudeRateLimit": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/ClaudeRateInfo"
+          },
+          {
+            "$ref": "#/components/schemas/UnsupportedRateInfo"
+          }
+        ],
+        "description": "Unknown provider evidence is retained only as an unsupported decision."
+      },
+      "ClaudeRateStatus": {
+        "enum": [
+          "allowed",
+          "allowed_warning",
+          "rejected"
+        ],
+        "type": "string"
+      },
+      "ClaudeRateType": {
+        "enum": [
+          "five_hour",
+          "seven_day",
+          "seven_day_opus",
+          "seven_day_sonnet",
+          "seven_day_overage_included",
+          "overage"
+        ],
+        "type": "string"
       },
       "ClaudeRepairReport": {
         "additionalProperties": false,
@@ -26030,6 +26196,30 @@
         ],
         "type": "string"
       },
+      "EligibilityBucket": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "overageAllowed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "overageAllowed"
+        ],
+        "type": "object"
+      },
+      "EligibilityState": {
+        "enum": [
+          "stale",
+          "allowed",
+          "blocked"
+        ],
+        "type": "string"
+      },
       "EmptyTransferRecoveryRecordResponse": {
         "additionalProperties": {
           "$ref": "#/components/schemas/JsonValue"
@@ -29351,6 +29541,30 @@
           "error"
         ],
         "type": "string"
+      },
+      "LimitRecovery": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/RecoveryAction"
+          },
+          "message": {
+            "type": "string"
+          },
+          "timing": {
+            "$ref": "#/components/schemas/RecoveryTiming"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "message",
+          "action",
+          "timing"
+        ],
+        "type": "object"
       },
       "LimitResetResponse": {
         "additionalProperties": false,
@@ -34515,6 +34729,15 @@
       },
       "Origin": {
         "maxLength": 512,
+        "type": "string"
+      },
+      "Overage": {
+        "enum": [
+          "allowed",
+          "in_use",
+          "rejected",
+          "unavailable"
+        ],
         "type": "string"
       },
       "PairRequest": {
@@ -40993,11 +41216,27 @@
         "type": "string"
       },
       "RateLimitBucket": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
-        },
-        "description": "Known rate-limit fields plus provider-owned fields passed through unchanged.",
         "properties": {
+          "claudeRateLimit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaudeRateLimit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "credits": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BucketCredits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "individualLimit": {
             "anyOf": [
               {
@@ -41009,37 +41248,22 @@
             ]
           },
           "limitId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Limitid"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "limitName": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Limitname"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "planType": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Plantype"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "primary": {
             "anyOf": [
@@ -41052,15 +41276,10 @@
             ]
           },
           "rateLimitReachedType": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ratelimitreachedtype"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "secondary": {
             "anyOf": [
@@ -41073,18 +41292,12 @@
             ]
           },
           "spendControlReached": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Spendcontrolreached"
+            "type": [
+              "boolean",
+              "null"
+            ]
           }
         },
-        "title": "RateLimitBucket",
         "type": "object"
       },
       "RateLimitBucketDto": {
@@ -41094,119 +41307,91 @@
         "additionalProperties": false,
         "properties": {
           "remainingPercent": {
-            "anyOf": [
-              {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Remainingpercent"
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           }
         },
-        "title": "RateLimitIndividualLimit",
         "type": "object"
       },
       "RateLimitResetCredit": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
-        },
-        "description": "A provider reset-credit record; native service fields remain extensible.",
         "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "expiresAt": {
-            "anyOf": [
-              {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expiresat"
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "grantedAt": {
-            "anyOf": [
-              {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Grantedat"
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "id": {
-            "title": "Id",
             "type": "string"
           },
           "resetType": {
-            "title": "Resettype",
             "type": "string"
           },
           "status": {
-            "title": "Status",
             "type": "string"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "id",
-          "status",
-          "resetType"
+          "resetType",
+          "status"
         ],
-        "title": "RateLimitResetCredit",
         "type": "object"
       },
       "RateLimitResetCredits": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
-        },
-        "description": "Provider-owned reset-credit summary with the known count and credit fields.",
         "properties": {
           "availableCount": {
             "anyOf": [
               {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
+                "$ref": "#/components/schemas/StoredJsonInteger"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Availablecount"
+            ]
           },
           "credits": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/RateLimitResetCredit"
             },
-            "title": "Credits",
             "type": "array"
           }
         },
-        "title": "RateLimitResetCredits",
+        "required": [
+          "credits"
+        ],
         "type": "object"
       },
       "RateLimitView": {
         "additionalProperties": false,
+        "description": "The retained observation and its server-owned presentation travel together.",
         "properties": {
           "observation": {
-            "$ref": "#/components/schemas/AccountRateLimitsDto"
+            "$ref": "#/components/schemas/UsageLimitsResponse"
           },
           "projection": {
             "$ref": "#/components/schemas/AccountLimitsProjection"
@@ -41219,60 +41404,29 @@
         "type": "object"
       },
       "RateLimitWindow": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
-        },
         "properties": {
           "resetsAt": {
-            "anyOf": [
-              {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resetsat"
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "usedPercent": {
-            "anyOf": [
-              {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Usedpercent"
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "windowDurationMins": {
-            "anyOf": [
-              {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Windowdurationmins"
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           }
         },
-        "title": "RateLimitWindow",
         "type": "object"
       },
       "RateLimitWindowDto": {
@@ -41423,6 +41577,58 @@
           "status"
         ],
         "type": "object"
+      },
+      "RecoveryAction": {
+        "oneOf": [
+          {
+            "properties": {
+              "kind": {
+                "const": "none",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "href": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "link",
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "label",
+              "href"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "ask_owner",
+                "type": "string"
+              },
+              "request": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "request"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "RecoveryConnectionGeneration": {
         "additionalProperties": false,
@@ -41587,6 +41793,90 @@
         ],
         "title": "RecoveryStatus",
         "type": "string"
+      },
+      "RecoveryTiming": {
+        "oneOf": [
+          {
+            "properties": {
+              "kind": {
+                "const": "unknown",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "waiting",
+                "type": "string"
+              },
+              "resetAt": {
+                "format": "double",
+                "type": "number"
+              }
+            },
+            "required": [
+              "kind",
+              "resetAt"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "checking",
+                "type": "string"
+              },
+              "resetAt": {
+                "format": "double",
+                "type": "number"
+              }
+            },
+            "required": [
+              "kind",
+              "resetAt"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "confirmed",
+                "type": "string"
+              },
+              "resetAt": {
+                "format": "double",
+                "type": "number"
+              }
+            },
+            "required": [
+              "kind",
+              "resetAt"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "unconfirmed",
+                "type": "string"
+              },
+              "resetAt": {
+                "format": "double",
+                "type": "number"
+              }
+            },
+            "required": [
+              "kind",
+              "resetAt"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "RegisterAccountRequest": {
         "additionalProperties": false,
@@ -50077,6 +50367,10 @@
         ],
         "title": "StopResponse",
         "type": "object"
+      },
+      "StoredJsonInteger": {
+        "description": "A JSON Schema integer, preserving integral decimal spellings and large values.",
+        "type": "integer"
       },
       "StudioError": {
         "description": "An action always carries its real destination. Server incidents have no invented agent.",
@@ -58767,6 +59061,23 @@
         "title": "UnrevokeServer",
         "type": "object"
       },
+      "UnsupportedRateInfo": {
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/UnsupportedRateKind"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
+      "UnsupportedRateKind": {
+        "enum": [
+          "unsupported"
+        ],
+        "type": "string"
+      },
       "UsageEligibility": {
         "additionalProperties": false,
         "properties": {
@@ -58776,59 +59087,26 @@
           "agentId": {
             "type": "string"
           },
-          "allowed": {
-            "type": "boolean"
-          },
           "buckets": {
             "items": {
-              "additionalProperties": false,
-              "properties": {
-                "id": {
-                  "type": "string"
-                },
-                "overageAllowed": {
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "id",
-                "overageAllowed"
-              ],
-              "type": "object"
+              "$ref": "#/components/schemas/EligibilityBucket"
             },
             "type": "array"
-          },
-          "canRun": {
-            "type": "boolean"
-          },
-          "checkedAt": {
-            "type": "number"
-          },
-          "fresh": {
-            "type": "boolean"
           },
           "model": {
             "type": "string"
           },
           "overage": {
-            "enum": [
-              "allowed",
-              "in_use",
-              "rejected",
-              "unavailable"
-            ],
-            "type": "string"
+            "$ref": "#/components/schemas/Overage"
           },
           "provider": {
             "type": "string"
           },
-          "resetAt": {
-            "type": [
-              "number",
-              "null"
-            ]
+          "state": {
+            "$ref": "#/components/schemas/EligibilityState"
           },
           "validUntil": {
+            "format": "double",
             "type": [
               "number",
               "null"
@@ -58836,18 +59114,14 @@
           }
         },
         "required": [
-          "agentId",
           "accountKey",
+          "agentId",
+          "buckets",
           "model",
-          "provider",
-          "allowed",
-          "canRun",
-          "fresh",
-          "checkedAt",
-          "validUntil",
-          "resetAt",
           "overage",
-          "buckets"
+          "provider",
+          "state",
+          "validUntil"
         ],
         "type": "object"
       },
@@ -59007,32 +59281,28 @@
         "type": "object"
       },
       "UsageLimitsData": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
-        },
-        "description": "Known usage projection plus account-service fields passed through unchanged.",
         "properties": {
           "accountId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "claudeRateLimit": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/ClaudeRateLimit"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Accountid"
+            ]
           },
           "ordinaryUsageAllowed": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ordinaryusageallowed"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "rateLimitResetCredits": {
             "anyOf": [
@@ -59055,86 +59325,73 @@
             ]
           },
           "rateLimitsByLimitId": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/RateLimitBucket"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ratelimitsbylimitid"
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RateLimitBucket"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "signedIn": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Signedin"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "source": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "status": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Status"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
-        "title": "UsageLimitsData",
         "type": "object"
       },
       "UsageLimitsResponse": {
         "additionalProperties": false,
         "properties": {
+          "_syncEntities": {
+            "items": {
+              "$ref": "#/components/schemas/UsageLimitsSyncEntity"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "_syncEntitiesAfter": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StoredJsonInteger"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "accountKey": {
-            "title": "Accountkey",
             "type": "string"
           },
           "at": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "default": null,
-            "title": "At"
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "checkedAt": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "default": null,
-            "title": "Checkedat"
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "data": {
             "anyOf": [
@@ -59144,53 +59401,66 @@
               {
                 "type": "null"
               }
-            ],
-            "default": null
+            ]
           },
           "eligibility": {
-            "$ref": "#/components/schemas/UsageEligibility"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UsageEligibility"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "error": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Error"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "processedAt": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "default": null,
-            "title": "Processedat"
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "readAt": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "default": null,
-            "title": "Readat"
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           }
         },
         "required": [
           "accountKey"
         ],
-        "title": "UsageLimitsResponse",
+        "type": "object"
+      },
+      "UsageLimitsSyncEntity": {
+        "additionalProperties": false,
+        "properties": {
+          "_deleted": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "string"
+          },
+          "seq": {
+            "$ref": "#/components/schemas/StoredJsonInteger"
+          }
+        },
+        "required": [
+          "id",
+          "seq",
+          "payload",
+          "_deleted"
+        ],
         "type": "object"
       },
       "UsageObservation": {

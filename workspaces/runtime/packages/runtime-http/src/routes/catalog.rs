@@ -160,9 +160,15 @@ async fn limits_response(
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|_| ApiError::internal())?
             .as_secs_f64();
-        let agent = agent.into_value();
-        snapshot["eligibility"] =
-            studio_runtime_services::usage_resume::eligibility(&snapshot, &agent, now);
+        let limits = studio_runtime_services::usage_resume::LimitsObservation::from_record(
+            snapshot.clone(),
+            None,
+        )
+        .map_err(|_| ApiError::internal())?;
+        snapshot["eligibility"] = serde_json::to_value(
+            studio_runtime_services::usage_resume::eligibility(&limits, &agent, now),
+        )
+        .map_err(|_| ApiError::internal())?;
     }
     serde_json::from_value(snapshot)
         .map(Json)

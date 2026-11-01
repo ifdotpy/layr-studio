@@ -902,6 +902,15 @@ macro_rules! start_attempt_setters {
 }
 
 impl AgentRecord {
+    /// Decode the optional continuation at the persisted-agent boundary.
+    pub fn usage_continuation(
+        &self,
+    ) -> Option<studio_runtime_schema::continuation_snapshot::UsageContinuation> {
+        self.extra
+            .get("usageResume")
+            .and_then(|value| serde_json::from_value(value.clone()).ok())
+    }
+
     pub fn error_text(&self) -> Option<&str> {
         self.error.value().and_then(|error| error.as_text())
     }

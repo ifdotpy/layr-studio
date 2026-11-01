@@ -78,6 +78,40 @@ mod tests {
     use rusqlite::Connection;
 
     #[test]
+    fn later_migration_normalizes_existing_observations_without_dropping_accounts() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id)); CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE sync_generation(id INTEGER,value INTEGER); CREATE TABLE durable_rows(seq INTEGER);").unwrap();
+        db.execute("INSERT INTO sync_entities VALUES('rateLimit','a',1,'old',?1,0)", [r#"{"collection":"rateLimit","id":"a","value":{"observation":{"accountKey":"a","data":{"ordinaryUsageAllowed":null,"rateLimits":{"primary":{"usedPercent":80,"vendor":true}}}},"projection":{}}}"#]).unwrap();
+        let tx = db.transaction().unwrap();
+        super::super::m2026_11_01_normalize_limits::apply(&tx, 100.0).unwrap();
+        let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='a' AND deleted=0", [], |row| row.get(0)).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        let data = &value["value"]["observation"]["data"];
+        assert_eq!(data["rateLimits"]["primary"]["usedPercent"], 80.0);
+        assert!(data["rateLimits"]["primary"].get("vendor").is_none());
+        assert!(
+            data.get("ordinaryUsageAllowed")
+                .is_some_and(serde_json::Value::is_null)
+        );
+    }
+
+    #[test]
+    fn normalizes_unwrapped_legacy_observation_before_view_migration() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id)); CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE sync_generation(id INTEGER,value INTEGER); CREATE TABLE durable_rows(seq INTEGER);").unwrap();
+        db.execute("INSERT INTO sync_entities VALUES('rateLimit','a',1,'old',?1,0)", [r#"{"collection":"rateLimit","id":"a","value":{"accountKey":"a","data":{"rateLimits":{"primary":{"usedPercent":80}}}}}"#]).unwrap();
+        let tx = db.transaction().unwrap();
+        super::super::m2026_11_01_normalize_limits::apply(&tx, 100.0).unwrap();
+        super::apply(&tx, 100.0).unwrap();
+        let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='a' AND deleted=0", [], |row| row.get(0)).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(
+            value["value"]["observation"]["data"]["rateLimits"]["primary"]["usedPercent"],
+            80.0
+        );
+    }
+
+    #[test]
     fn catalog_migration_rolls_back_on_write_failure_and_reopens_idempotently() {
         use studio_runtime_schema::studio_errors::MigrationTarget;
         let mut db = crate::fresh_state::test_canvas();

@@ -31,6 +31,17 @@ impl<T> Field<T> {
         matches!(self, Self::Value(_))
     }
 }
+impl<T: JsonSchema> JsonSchema for Field<T> {
+    fn inline_schema() -> bool {
+        true
+    }
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        <Option<T> as JsonSchema>::schema_name()
+    }
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        <Option<T> as JsonSchema>::json_schema(generator)
+    }
+}
 impl<'de, T: Deserialize<'de>> Deserialize<'de> for Field<T> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Option::<T>::deserialize(deserializer).map(|value| match value {

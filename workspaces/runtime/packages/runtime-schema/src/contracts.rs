@@ -1261,17 +1261,10 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         .for_serialize()
         .with(|settings| settings.definitions_path = "/components/schemas".into())
         .into_generator();
-    runway_generator.subschema_for::<crate::usage_limits::AccountLimitsProjection>();
+    runway_generator.subschema_for::<crate::usage_limits::RateLimitView>();
     for (name, schema) in runway_generator.take_definitions(true) {
         openapi["components"]["schemas"][name] = schema;
     }
-    openapi["components"]["schemas"]["RateLimitView"] = serde_json::json!({
-        "type":"object", "additionalProperties":false,
-        "properties":{
-            "observation":{"$ref":"#/components/schemas/AccountRateLimitsDto"},
-            "projection":{"$ref":"#/components/schemas/AccountLimitsProjection"}
-        }, "required":["observation","projection"]
-    });
     openapi["components"]["schemas"]["SyncRateLimitEntityPayload"]["properties"]["value"] =
         serde_json::json!({"$ref":"#/components/schemas/RateLimitView"});
     if let Some(variants) = openapi["components"]["schemas"]["SyncEntity"]["oneOf"].as_array_mut() {
@@ -1687,6 +1680,23 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             text: linux_vm_swift(),
         },
     ];
+    // The workspace envelope remains a legacy input; its eligibility leaf is
+    // generated from the same Rust owner as the HTTP and SSE contracts.
+    let usage_limits_path =
+        "workspaces/runtime/packages/runtime-schema/src/schemas/workspace-usage-limits.schema.json";
+    let mut usage_limits_schema = read_json(root, usage_limits_path)?;
+    let mut eligibility_generator = schemars::generate::SchemaSettings::draft2020_12()
+        .for_serialize()
+        .with(|settings| settings.definitions_path = "/$defs".into())
+        .into_generator();
+    eligibility_generator.subschema_for::<crate::usage_limits::UsageEligibility>();
+    for (name, schema) in eligibility_generator.take_definitions(true) {
+        usage_limits_schema["$defs"][name] = schema;
+    }
+    rendered.push(Rendered {
+        path: usage_limits_path.into(),
+        text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/workspace-usage-limits.schema.json", &serde_json::to_string_pretty(&usage_limits_schema).map_err(|error| error.to_string())?)?,
+    });
     for (file, field, variants) in [
         (
             "persisted-tool-request-record",
@@ -1874,6 +1884,14 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             "RateLimitBucket",
             "RateLimitWindow",
             "RateLimitIndividualLimit",
+            "BucketCredits",
+            "BucketCreditBalance",
+            "ClaudeRateLimit",
+            "ClaudeRateInfo",
+            "ClaudeRateStatus",
+            "ClaudeRateType",
+            "UnsupportedRateInfo",
+            "UnsupportedRateKind",
             "JsonValue",
             "ClaudeSessionSettings",
             "ClaudeCustomModel",

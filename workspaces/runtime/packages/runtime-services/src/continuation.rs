@@ -698,9 +698,6 @@ impl Decision {
 pub(crate) fn text<'a>(v: &'a Value, key: &str) -> &'a str {
     v.get(key).and_then(Value::as_str).unwrap_or("")
 }
-pub(crate) fn number(v: &Value, key: &str) -> Option<f64> {
-    v.get(key).and_then(Value::as_f64)
-}
 pub(crate) fn flag(v: &Value, key: &str) -> bool {
     v.get(key) == Some(&Value::Bool(true))
 }

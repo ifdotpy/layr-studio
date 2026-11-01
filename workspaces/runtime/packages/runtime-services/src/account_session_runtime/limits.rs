@@ -225,11 +225,107 @@ fn commit(
         return Ok((Some(value), false));
     }
     let raw = serde_json::value::RawValue::from_string(serde_json::to_string(&value)?)?;
-    let view = studio_runtime_schema::usage_limits::RateLimitView::read(&raw, account, now)?;
-    SyncDocumentsRepository::put_entity(tx, "rateLimit", account, view, false)?;
     crate::continuation_runtime::stage_limits_changed_for_account(tx, account, &value, now)
         .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
+    let mut view = studio_runtime_schema::usage_limits::RateLimitView::read(&raw, account, now)?;
+    populate_agents(tx, &mut view, now)?;
+    SyncDocumentsRepository::put_entity(tx, "rateLimit", account, view, false)?;
     Ok((Some(value), true))
+}
+
+pub(crate) fn populate_agents(
+    tx: &studio_runtime_store::Transaction<'_>,
+    view: &mut studio_runtime_schema::usage_limits::RateLimitView,
+    now: f64,
+) -> Result<(), StoreError> {
+    let limits = crate::usage_resume::LimitsObservation::from_response(view.observation.clone());
+    view.projection.agents.clear();
+    for agent in studio_runtime_store::WorkspaceViewsRepository::agents(tx)? {
+        let account = if agent.account_key.is_empty() {
+            "default"
+        } else {
+            &agent.account_key
+        };
+        if account == limits.account_key() && !agent.is_deleted() {
+            view.projection.agents.insert(
+                agent.id.0.clone(),
+                crate::usage_resume::agent_limit_projection(&limits, &agent, now),
+            );
+        }
+    }
+    Ok(())
+}
+
+#[derive(serde::Deserialize)]
+struct LimitsEntity {
+    value: studio_runtime_schema::usage_limits::RateLimitView,
+}
+
+/// Recompute affected agent projections in the transaction that publishes them.
+pub(crate) fn publish_agent_change(
+    tx: &studio_runtime_store::Transaction<'_>,
+    agent_id: &str,
+    deleted: bool,
+) -> Result<(), StoreError> {
+    let agent = if deleted {
+        None
+    } else {
+        studio_runtime_store::AgentRepository::get(tx, &agent_id.into())?
+    };
+    let now = timestamp().map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
+    let rows = {
+        let mut query = tx.prepare(
+            "SELECT id,payload FROM sync_entities WHERE collection='rateLimit' AND deleted=0",
+        )?;
+        let rows = query.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    for (account, payload) in rows {
+        let LimitsEntity { mut value } = serde_json::from_str(&payload)?;
+        let matches = agent.as_ref().is_some_and(|agent| {
+            let key = if agent.account_key.is_empty() {
+                "default"
+            } else {
+                &agent.account_key
+            };
+            key == account
+        });
+        if matches {
+            let limits =
+                crate::usage_resume::LimitsObservation::from_response(value.observation.clone());
+            if let Some(agent) = &agent {
+                value.projection.agents.insert(
+                    agent_id.to_owned(),
+                    crate::usage_resume::agent_limit_projection(&limits, agent, now),
+                );
+            }
+        } else if value.projection.agents.remove(agent_id).is_none() {
+            continue;
+        }
+        SyncDocumentsRepository::put_entity(tx, "rateLimit", &account, value, false)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn seed_agents(tx: &studio_runtime_store::Transaction<'_>) -> Result<(), StoreError> {
+    let now = timestamp().map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
+    let rows = {
+        let mut query = tx.prepare(
+            "SELECT id,payload FROM sync_entities WHERE collection='rateLimit' AND deleted=0",
+        )?;
+        let rows = query.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    for (account, payload) in rows {
+        let LimitsEntity { mut value } = serde_json::from_str(&payload)?;
+        populate_agents(tx, &mut value, now)?;
+        SyncDocumentsRepository::put_entity(tx, "rateLimit", &account, value, false)?;
+    }
+    Ok(())
 }
 
 pub(super) async fn read_for_resume(

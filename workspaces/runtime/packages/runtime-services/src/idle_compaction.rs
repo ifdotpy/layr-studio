@@ -413,8 +413,16 @@ pub fn limits_allowed(limits: &Value, agent: &Value, now: f64) -> bool {
     else {
         return false;
     };
+    let Ok(limits) = crate::usage_resume::LimitsObservation::from_record(limits.clone(), None)
+    else {
+        return false;
+    };
+    let Ok(agent) = studio_runtime_store::AgentRecord::from_value(agent.clone()) else {
+        return false;
+    };
     info.is_none_or(|info| info["status"] == "allowed")
-        && crate::usage_resume::eligibility(limits, agent, now)["canRun"] == true
+        && crate::usage_resume::eligibility(&limits, &agent, now).state
+            == studio_runtime_schema::usage_limits::EligibilityState::Allowed
 }
 fn check(
     connection: &Connection,
@@ -821,14 +829,10 @@ mod tests {
 
     #[test]
     fn unsupported_rate_evidence_never_proves_resume_or_compaction() {
-        let agent =
-            json!({"id":"agent", "accountKey":"default", "provider":"claude", "model":"sonnet"});
+        let agent = json!({"id":"agent", "rootId":"agent", "epoch":1, "status":"idle", "compactions":0, "accountKey":"default", "provider":"claude", "model":"sonnet"});
         let known = json!({"status":"allowed", "rateLimitType":"five_hour", "utilization":0.2, "resetsAt":2000});
         let base = json!({"accountKey":"default", "at":1000, "data":{"rateLimits":{"limitId":"claude", "primary":{"usedPercent":20, "resetsAt":2000}}, "claudeRateLimit":known}});
-        assert_eq!(
-            crate::usage_resume::eligibility(&base, &agent, 1000.0)["canRun"],
-            true
-        );
+        assert_eq!(limits_allowed(&base, &agent, 1000.0), true);
         assert!(limits_allowed(&base, &agent, 1000.0));
         for raw in [
             json!({"type":"unsupported", "raw":{"status":"future"}}),
@@ -846,10 +850,17 @@ mod tests {
                     observation["data"]["claudeRateLimit"] = raw.clone();
                 }
                 let before = observation.clone();
-                let decision = crate::usage_resume::eligibility(&observation, &agent, 1000.0);
-                assert_eq!(decision["fresh"], false, "{raw}; bucket={bucket}");
-                assert_eq!(decision["canRun"], false);
-                assert_eq!(decision["allowed"], false);
+                let typed =
+                    crate::usage_resume::LimitsObservation::from_record(observation.clone(), None)
+                        .unwrap();
+                let typed_agent =
+                    studio_runtime_store::AgentRecord::from_value(agent.clone()).unwrap();
+                let decision = crate::usage_resume::eligibility(&typed, &typed_agent, 1000.0);
+                assert_eq!(
+                    decision.state,
+                    studio_runtime_schema::usage_limits::EligibilityState::Stale,
+                    "{raw}; bucket={bucket}"
+                );
                 assert!(!limits_allowed(&observation, &agent, 1000.0));
                 assert_eq!(observation, before);
             }

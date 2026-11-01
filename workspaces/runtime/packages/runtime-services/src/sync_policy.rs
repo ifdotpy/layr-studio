@@ -1149,6 +1149,7 @@ pub(crate) fn publish_agent_projection(
     deleted: bool,
     validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
+    crate::account_session_runtime::limits::publish_agent_change(transaction, id, deleted)?;
     for collection in ["agentSummary", "agentDetail"] {
         let projected = if deleted {
             json!({})

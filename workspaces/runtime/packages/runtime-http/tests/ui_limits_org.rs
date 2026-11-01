@@ -84,15 +84,11 @@ async fn limits_exposes_agent_policy_and_accounts_exposes_only_safe_organization
             .expect("limits body reads"),
     )
     .expect("limits response parses");
-    let expected = usage_resume::eligibility(
-        &limits,
-        &agent,
-        body["eligibility"]["checkedAt"]
-            .as_f64()
-            .expect("eligibility check time is numeric"),
-    );
-    assert_eq!(body["eligibility"], expected);
-    assert_eq!(body["eligibility"]["canRun"], true);
+    let observation = usage_resume::LimitsObservation::from_record(limits.clone(), None).unwrap();
+    let typed_agent = AgentRecord::from_value(agent.clone()).unwrap();
+    let expected = usage_resume::eligibility(&observation, &typed_agent, now);
+    assert_eq!(body["eligibility"], serde_json::to_value(expected).unwrap());
+    assert_eq!(body["eligibility"]["state"], "allowed");
     for (path, status) in [
         ("/api/limits?account_key=claude&cached=1&agent=unknown", 404),
         ("/api/limits?account_key=default&cached=1&agent=worker", 400),

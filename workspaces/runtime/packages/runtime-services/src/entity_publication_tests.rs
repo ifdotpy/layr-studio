@@ -11,6 +11,64 @@ use studio_runtime_store::{AgentRecord, AgentRepository, StoreError};
 const CHAT: &str = "published-chat";
 
 #[tokio::test]
+async fn agent_limit_failure_republishes_account_recovery() {
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64();
+    store.transaction(move |tx| {
+        let observation = json!({"accountKey":"default","at":now,"data":{"rateLimits":{"primary":{"usedPercent":100,"resetsAt":now+3600.0}}}});
+        let raw = serde_json::value::RawValue::from_string(observation.to_string())?;
+        let mut view = studio_runtime_schema::usage_limits::RateLimitView::read(&raw, "default", now)?;
+        crate::account_session_runtime::limits::populate_agents(tx, &mut view, now)?;
+        studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "rateLimit", "default", view, false)?;
+        Ok(())
+    }).await.unwrap();
+    let before: i64 = store
+        .test_read_transaction(|tx| {
+            tx.query_row(
+                "SELECT seq FROM sync_entities WHERE collection='rateLimit' AND id='default'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+        })
+        .unwrap();
+    store
+        .transaction(|tx| {
+            tx.execute(
+                "UPDATE runtime_agents SET record=json_set(record,'$.error',json(?1)) WHERE id=?2",
+                [r#"{"codexErrorInfo":"rateLimitExceeded"}"#, CHAT],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let after: i64 = store
+        .test_read_transaction(|tx| {
+            tx.query_row(
+                "SELECT seq FROM sync_entities WHERE collection='rateLimit' AND id='default'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+        })
+        .unwrap();
+    let (_, view) = client_entity(&store, "rateLimit", "default").unwrap();
+    assert!(after > before);
+    assert_eq!(
+        view["projection"]["agents"][CHAT]["recovery"]["timing"]["kind"],
+        "waiting"
+    );
+    assert_eq!(
+        view["projection"]["agents"][CHAT]["recovery"]["timing"]["resetAt"],
+        now + 3600.0
+    );
+}
+
+#[tokio::test]
 async fn unreadable_summary_keeps_agent_and_exposes_reason() {
     let (_dir, store) = store().await;
     seed_chat(

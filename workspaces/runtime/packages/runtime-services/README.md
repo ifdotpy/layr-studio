@@ -174,6 +174,13 @@ persisted public fields, including `deleted`, and omit private underscore
 fields. Login receipt fields are read from the persisted receipt value, with
 `requestId` supplied by its map key; a malformed receipt fails startup.
 
+The `rateLimit` SSE entity carries a typed, normalized observation and the
+account and agent projections owned by [`usage_limits.rs`](../runtime-schema/src/usage_limits.rs)
+and [`usage_resume.rs`](src/usage_resume.rs). The agent projection includes
+the applicable reset time and recovery guidance. Provider fields without a
+reader are dropped at ingress; the limits migration normalizes older entities
+before the view migration.
+
 Limits restoration is startup-only, matching `Runtime.restore_rate_limits`
 (`codex_runtime.py:9120-9138`). The Python route reads its in-memory cache at
 `studio_api/accounts/router.py:220-228`; it does not query SQLite per request.

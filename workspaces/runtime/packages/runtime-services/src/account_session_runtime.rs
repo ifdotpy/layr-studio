@@ -284,9 +284,8 @@ pub enum LimitsDecision {
     Read,
 }
 
-/// Schema-checked response retaining absent/null fields and provider extensions.
+/// Typed account limits accepted at the provider boundary.
 pub struct LimitsSnapshot {
-    value: Value,
     response: studio_runtime_schema::usage_limits::UsageLimitsResponse,
 }
 impl LimitsSnapshot {
@@ -309,7 +308,7 @@ impl LimitsSnapshot {
         if response.account_key != account {
             return Err(AccountSessionError::InvalidResponse("/accountKey".into()));
         }
-        Ok(Self { value, response })
+        Ok(Self { response })
     }
     fn is_fresh_for_provider(&self, now: f64) -> bool {
         if self
@@ -348,7 +347,8 @@ impl LimitsSnapshot {
         }
     }
     pub fn into_value(self) -> Value {
-        self.value
+        // This response came from JSON and contains only serializable typed fields.
+        serde_json::to_value(self.response).expect("typed limits serialize")
     }
 }
 
@@ -390,7 +390,7 @@ mod limits_freshness_tests {
     const NOW: f64 = 1_000.0;
 
     #[test]
-    fn limits_ingress_preserves_vendor_windows_and_rejects_invalid_consumed_fields() {
+    fn limits_ingress_normalizes_unread_fields_and_rejects_invalid_consumed_fields() {
         let original = json!({
             "accountKey":"default", "at":NOW,
             "data":{"source":null,"rateLimits":{"planType":"plus", "secondary":null,"primary":{
@@ -401,7 +401,8 @@ mod limits_freshness_tests {
             LimitsSnapshot::read("default", original.clone())
                 .unwrap()
                 .into_value(),
-            original
+            json!({"accountKey":"default", "at":NOW,
+                "data":{"rateLimits":{"planType":"plus", "primary":{"usedPercent":42.0}}}})
         );
         for data in [
             json!({"rateLimits":{"primary":{"usedPercent":"42"}}}),
@@ -864,7 +865,7 @@ pub struct LimitsUpdate {
     pub data: Value,
 }
 
-mod limits;
+pub(crate) mod limits;
 
 async fn persist_limits(
     store: Arc<studio_runtime_store::RuntimeStore>,
