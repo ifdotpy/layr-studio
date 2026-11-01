@@ -350,7 +350,7 @@ async fn seed_fixture_store(root: &std::path::Path, store: RuntimeStore) -> Runt
         "worktree":false,"workspaceMode":"shared","nativeEffort":null,"effort":"medium","events":0
     });
     record.as_object_mut().unwrap().extend(json!({
-        "executionSettingsAccountKey":"default","provider":"codex","yoloMode":true,
+        "executionSettingsAccountKey":"default","provider":"codex","permissionMode":"bypassPermissions",
         "prompt":"temporary","role":"orchestrator","isLead":true,"needsTitle":false,
         "parentId":null,"fastMode":false,"daybreakEnabled":false,"maxAgents":8,"tokenBudget":null,
         "turnId":null,"inFlight":false,"turnEpoch":0,"usageResumeEnabled":true,"tokensUsed":0,

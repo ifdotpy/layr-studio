@@ -4938,7 +4938,7 @@ mod actor_tests {
 
     #[tokio::test]
     async fn reviewer_archive_non_reviewer_child_result_is_not_archived() {
-        let (store, _root) = reviewer_archive_store("worker").await;
+        let (store, _root) = reviewer_archive_store("implementer").await;
 
         accepted_archive_tick(Arc::clone(&store), 10.0)
             .await
@@ -5492,7 +5492,7 @@ mod actor_tests {
         workspace_mode: &str,
     ) {
         let mut connection = database();
-        for (id, role) in [("lead", "lead"), ("worker", "reviewer")] {
+        for (id, role) in [("lead", "orchestrator"), ("worker", "reviewer")] {
             let record = json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
                 "id":id,"rootId":"lead","epoch":2,"status":"running","autoWake":true,
                 "inFlight":true,"agentMode":"multi","concurrency":8,"executionMode":execution_mode,"workspaceMode":workspace_mode,

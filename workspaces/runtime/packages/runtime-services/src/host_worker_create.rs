@@ -826,8 +826,8 @@ mod tests {
             false,
         );
         assert_eq!(
-            field(&fixture.draft, "role").and_then(Value::as_str),
-            Some("reviewer")
+            fixture.draft.role.value(),
+            Some(&studio_runtime_schema::creation_intent::AgentRole::Reviewer)
         );
         assert_eq!(
             field(&fixture.draft, "worktree").and_then(Value::as_bool),
@@ -838,14 +838,8 @@ mod tests {
             Some(studio_runtime_schema::records::WorkspaceMode::Shared)
         );
         assert_eq!(field(&fixture.draft, "workerBaseRef"), Some(&Value::Null));
-        assert_eq!(
-            field(&fixture.draft, "fastMode").and_then(Value::as_bool),
-            Some(true)
-        );
-        assert_eq!(
-            field(&fixture.draft, "daybreakEnabled").and_then(Value::as_bool),
-            Some(false)
-        );
+        assert_eq!(fixture.draft.fast_mode, Some(true));
+        assert_eq!(fixture.draft.daybreak_enabled, Some(false));
     }
 
     #[test]
@@ -1026,7 +1020,7 @@ mod tests {
         let fixture = worker_draft_fixture(value, value);
         assert_eq!(fixture.draft.name.as_deref(), Some(value));
         assert_eq!(
-            field(&fixture.draft, "prompt").and_then(Value::as_str),
+            fixture.draft.prompt.value().map(String::as_str),
             Some(value)
         );
     }
@@ -1085,10 +1079,7 @@ mod tests {
                     "model-two"
                 })
             );
-            assert_eq!(
-                field(draft, "needsTitle").and_then(Value::as_bool),
-                Some(false)
-            );
+            assert_eq!(draft.needs_title, Some(false));
         }
     }
 

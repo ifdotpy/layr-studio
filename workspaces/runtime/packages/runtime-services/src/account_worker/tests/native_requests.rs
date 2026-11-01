@@ -222,7 +222,7 @@ async fn an_approval_card_carries_the_user_decision_and_resolution_closes_anothe
     // This witness exercises Ask; Full now accepts native tool approvals live.
     let actor = state.agent.clone();
     state.bridge.store.transaction(move |tx| {
-        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.yoloMode',json('false')) WHERE id=?1", [&actor])?;
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.permissionMode','default') WHERE id=?1", [&actor])?;
         Ok(())
     }).await.unwrap();
     peer.frame(approval("claude:approval-1")).await;
@@ -377,7 +377,7 @@ async fn live_permissions_codex_next_turn_reads_the_saved_ask_policy() {
     assert_eq!(full["params"]["sandboxPolicy"]["type"], "dangerFullAccess");
     let actor = state.agent.clone();
     state.bridge.store.transaction(move |tx| {
-        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.yoloMode',json('false')) WHERE id=?1", [&actor])?;
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.permissionMode','default') WHERE id=?1", [&actor])?;
         Ok(())
     }).await.unwrap();
     finish_turn(&state, &mut peer, &full).await;
