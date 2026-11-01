@@ -241,7 +241,7 @@ it("keeps a draft, upload, recording, and send until its confirmation and restor
     chatId: "chat",
     created: 1,
     sampleRate: 16000,
-    samples: 1,
+    samples: 0,
     state: "recording" as const,
   };
   const sent = {
