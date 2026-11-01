@@ -473,6 +473,47 @@ test("Rust formatting is checked by the fast and comprehensive gates", () => {
   }
 });
 
+test("local Clippy excludes native while the hosted command includes it", () => {
+  const local = gateSteps(process.cwd(), "test-comprehensive").find(
+    (step) => step.id === "clippy",
+  )!;
+  assert.ok(local.commands![0]![1].includes("--exclude-native"));
+  const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
+  assert.match(
+    workflow,
+    /run: node workspaces\/tooling\/apps\/repository-checks\/clippy-ratchet\.ts\s*$/m,
+  );
+  const directory = mkdtempSync(
+    path.join(tmpdir(), "studio-clippy-selection-"),
+  );
+  try {
+    const capture = path.join(directory, "args");
+    writeFileSync(
+      path.join(directory, "cargo"),
+      `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.CAPTURE, JSON.stringify(process.argv.slice(2)));\n`,
+      { mode: 0o755 },
+    );
+    const args = (extra: string[]) => {
+      spawnSync(
+        process.execPath,
+        [
+          "workspaces/tooling/apps/repository-checks/clippy-ratchet.ts",
+          ...extra,
+        ],
+        { env: { ...process.env, PATH: directory, CAPTURE: capture } },
+      );
+      const result: unknown = JSON.parse(readFileSync(capture, "utf8"));
+      assert.ok(Array.isArray(result));
+      assert.ok(result.every((value) => typeof value === "string"));
+      return result;
+    };
+    assert.ok(args(["--exclude-native"]).includes("studio-native-client"));
+    assert.ok(!args([]).includes("studio-native-client"));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("compiler policy witnesses run after dependency preparation outside the JS lane", () => {
   for (const name of ["test-fast", "test-comprehensive", "test-fast-rest"]) {
     const steps = gateSteps(process.cwd(), name);

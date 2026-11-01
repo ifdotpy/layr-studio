@@ -7,24 +7,60 @@ use std::path::Path;
 #[test]
 fn templates_use_the_shared_delivery_layout_and_escape_paths() {
     let layout = service_layout().unwrap();
-    let root = Path::new("/release space/%$&<");
+    let root = Path::new("/release space/%n%Q$&<");
     let state = Path::new("/state space/%$&<");
     let unit = linux_unit(&layout, root, state).unwrap();
-    assert!(unit.contains("WorkingDirectory=/release space/%$&</current\n"));
+    assert!(unit.contains("WorkingDirectory=/release space/%%n%%Q$&</current\n"));
     assert!(unit.contains(&format!(" --port {}\n", layout.port)));
-    assert!(unit.contains("ExecStart=\"/release space/%%$$&</current/bin/studio-runtime-server\""));
+    assert!(
+        unit.contains("ExecStart=\"/release space/%%n%%Q$$&</current/bin/studio-runtime-server\"")
+    );
     assert!(unit.contains("Environment=\"CODEX_AGENTS_STATE_DIR=/state space/%%$&<\""));
     assert!(!unit.contains("python"));
     let label = macos_label(&layout, state);
     assert_ne!(label, macos_label(&layout, root));
     let plist = macos_plist(&layout, root, state, &label).unwrap();
-    assert!(plist.contains("/release space/%$&amp;&lt;/current/bin/studio-runtime-server"));
+    assert!(plist.contains("/release space/%n%Q$&amp;&lt;/current/bin/studio-runtime-server"));
     assert!(plist.contains("/state space/%$&amp;&lt;"));
     assert!(plist.contains(&format!("<string>{}</string>", layout.port)));
     assert!(!plist.contains("python"));
     assert!(!plist.contains("apps/server"));
     assert!(linux_unit(&layout, Path::new("/bad\npath"), state).is_err());
     assert!(macos_plist(&layout, root, Path::new("/bad\npath"), &label).is_err());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn systemd_verifies_rendered_unit_with_specifiers_in_path() {
+    use std::{fs, os::unix::fs::PermissionsExt, process::Command};
+    if Command::new("systemd-analyze")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        return;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let layout = service_layout().unwrap();
+    let root = temp.path().join("release space/%n%Q");
+    let binary = root
+        .join(&layout.current_relative)
+        .join(&layout.binary_relative);
+    fs::create_dir_all(binary.parent().unwrap()).unwrap();
+    fs::write(&binary, "#!/bin/sh\nexit 0\n").unwrap();
+    fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+    let unit = temp.path().join("fixture.service");
+    fs::write(&unit, linux_unit(&layout, &root, temp.path()).unwrap()).unwrap();
+    let output = Command::new("systemd-analyze")
+        .args(["--user", "verify"])
+        .arg(&unit)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

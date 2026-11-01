@@ -1071,6 +1071,7 @@ export function gateSteps(root: string, name: string): GateStep[] {
                   "node",
                   [
                     "workspaces/tooling/apps/repository-checks/clippy-ratchet.ts",
+                    "--exclude-native",
                   ],
                 ],
               ],
