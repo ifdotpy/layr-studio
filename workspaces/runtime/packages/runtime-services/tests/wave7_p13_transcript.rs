@@ -390,6 +390,7 @@ async fn transcript_cases(group: usize) {
                 fixture_sync_high - 1,
                 (durable_high - fixture_sync_high + 1).max(1),
                 case["phase"] == "prune",
+                matches!(case["phase"].as_str(), Some("update" | "prune")),
             );
             let committed = sync_snapshot(&store);
             let replay =
@@ -506,6 +507,7 @@ fn assert_pull(
     fixture_sync_high: i64,
     allocation_shift: i64,
     migrated_execution: bool,
+    changed_delivery_projection: bool,
 ) {
     let decode = |v: &Value| {
         let mut v = v.clone();
@@ -546,6 +548,14 @@ fn assert_pull(
         assert_eq!(documents.len(), 1);
         assert_eq!(documents[0]["seq"], fixture_sync_high);
         documents[0]["seq"] = json!(fixture_sync_high + allocation_shift + 1);
+    }
+    if changed_delivery_projection {
+        // The materialized input and queued receipt each change their retained
+        // projection, allocating two transcript sequence numbers.
+        expected["checkpoint"]["seq"] = json!(expected["checkpoint"]["seq"].as_i64().unwrap() + 2);
+        let documents = expected["documents"].as_array_mut().expect("documents");
+        assert_eq!(documents.len(), 1);
+        documents[0]["seq"] = json!(documents[0]["seq"].as_i64().unwrap() + 2);
     }
     assert_eq!(decode(got), expected);
 }
