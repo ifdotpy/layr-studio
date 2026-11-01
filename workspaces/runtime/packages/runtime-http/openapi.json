@@ -4673,21 +4673,6 @@
               }
             ]
           },
-          "workspaceBackend": {
-            "anyOf": [
-              {
-                "enum": [
-                  "asif",
-                  "vm"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Workspacebackend"
-          },
           "workspaceCleanupIntent": {
             "anyOf": [
               {
@@ -6185,21 +6170,6 @@
                 "type": "null"
               }
             ]
-          },
-          "workspaceBackend": {
-            "anyOf": [
-              {
-                "enum": [
-                  "asif",
-                  "vm"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Workspacebackend"
           },
           "workspaceCleanupIntent": {
             "anyOf": [
@@ -8263,22 +8233,6 @@
             "$ref": "#/components/schemas/WorkerDefaultsRecordResponse",
             "default": null
           },
-          "workspaceBackend": {
-            "anyOf": [
-              {
-                "enum": [
-                  "asif",
-                  "vm"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Workspacebackend"
-          },
           "workspaceInGit": {
             "default": null,
             "title": "Workspaceingit",
@@ -9727,22 +9681,6 @@
               }
             ],
             "default": null
-          },
-          "workspaceBackend": {
-            "anyOf": [
-              {
-                "enum": [
-                  "asif",
-                  "vm"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Workspacebackend"
           },
           "workspaceMode": {
             "anyOf": [
@@ -18152,22 +18090,6 @@
               }
             ],
             "default": null
-          },
-          "workspaceBackend": {
-            "anyOf": [
-              {
-                "enum": [
-                  "asif",
-                  "vm"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Workspacebackend"
           },
           "workspaceMode": {
             "anyOf": [

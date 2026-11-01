@@ -1210,7 +1210,6 @@ fn project_child(record: &Value, task_id: Option<&str>, worktree: bool) -> Value
             .cloned()
             .unwrap_or_else(|| json!(if worktree { "worktree" } else { "shared" })),
     );
-    output.insert("workspaceBackend".to_owned(), Value::Null);
     if let Some(value) = record
         .get("worktreeWarning")
         .filter(|value| event_write::truthy(Some(value)))

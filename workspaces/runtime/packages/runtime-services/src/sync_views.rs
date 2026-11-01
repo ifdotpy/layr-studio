@@ -985,12 +985,13 @@ mod projection_plan_tests {
 
     #[test]
     fn removed_agent_diagnostics_are_not_projected() {
-        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"checkpointError":"legacy","complaintsPresented":["c"]}"#;
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"checkpointError":"legacy","complaintsPresented":["c"],"workspaceBackend":null}"#;
         let record = serde_json::from_str(raw).unwrap();
         let projected =
             super::agent_entity_view(&record, &super::AgentViewContext::default()).unwrap();
         assert!(projected.get("checkpointError").is_none());
         assert!(projected.get("complaintsPresented").is_none());
+        assert!(projected.get("workspaceBackend").is_none());
         assert_eq!(
             studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
             "331e9f9d3338dd940d71775993842096c0457bcbcc1dfac427e79f0d7f826e20"

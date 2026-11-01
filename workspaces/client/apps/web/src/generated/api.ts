@@ -4031,8 +4031,6 @@ export interface components {
         | components["schemas"]["WorkerDefaultsDto"]
         | null
         | undefined;
-      /** Workspacebackend */
-      workspaceBackend?: ("asif" | "vm") | null | undefined;
       workspaceCleanupIntent?:
         | components["schemas"]["WorkspaceCleanupSummaryDto"]
         | null
@@ -4403,8 +4401,6 @@ export interface components {
         | components["schemas"]["WorkerDefaultsDto"]
         | null
         | undefined;
-      /** Workspacebackend */
-      workspaceBackend?: ("asif" | "vm") | null | undefined;
       workspaceCleanupIntent?:
         | components["schemas"]["WorkspaceCleanupSummaryDto"]
         | null
@@ -5680,11 +5676,6 @@ export interface components {
         | components["schemas"]["WorkerDefaultsRecordResponse"]
         | undefined;
       /**
-       * Workspacebackend
-       * @default null
-       */
-      workspaceBackend?: ("asif" | "vm") | null | undefined;
-      /**
        * Workspaceingit
        * @default null
        */
@@ -6281,11 +6272,6 @@ export interface components {
         | components["schemas"]["WorkerDefaultsDto"]
         | null
         | undefined;
-      /**
-       * Workspacebackend
-       * @default null
-       */
-      workspaceBackend?: ("asif" | "vm") | null | undefined;
       /** Workspacemode */
       workspaceMode?: components["schemas"]["WorkspaceMode"] | null | undefined;
       /**
@@ -9306,11 +9292,6 @@ export interface components {
         | components["schemas"]["WorkerDefaultsDto"]
         | null
         | undefined;
-      /**
-       * Workspacebackend
-       * @default null
-       */
-      workspaceBackend?: ("asif" | "vm") | null | undefined;
       /** Workspacemode */
       workspaceMode?: components["schemas"]["WorkspaceMode"] | null | undefined;
       /**

@@ -3105,7 +3105,7 @@ pub(crate) fn build_agent_record(
         json!({
           "tail":"","worktree":false,"workspaceMode":workspace_mode,"executionMode":"native",
           "hostProjectPath":cwd,"layrReady":false,"workspaceInGit":false,"worktreeReady":false,
-          "environment":"host","workspaceBackend":null,"workspaceModeExplicit":false,
+          "environment":"host","workspaceModeExplicit":false,
           "worktreeWarning":null,"workerBaseRef":null,"workerBaseCommit":null,
           "workerBaseBehindMain":null,"workerBaseMainRef":null
         }),

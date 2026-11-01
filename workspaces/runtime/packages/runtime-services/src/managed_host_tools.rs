@@ -934,13 +934,6 @@ fn project_child(record: &Value, task_id: Option<&str>) -> Value {
                 }
             }),
     );
-    output.insert(
-        "workspaceBackend".to_owned(),
-        record
-            .get("workspaceBackend")
-            .cloned()
-            .unwrap_or(Value::Null),
-    );
     if let Some(base_commit) = record.get("workerBaseCommit") {
         output.insert("baseRef".to_owned(), record["workerBaseRef"].clone());
         output.insert("baseCommit".to_owned(), base_commit.clone());
