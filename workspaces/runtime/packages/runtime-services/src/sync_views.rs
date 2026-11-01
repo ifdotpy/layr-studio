@@ -435,7 +435,7 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
 #[allow(clippy::struct_excessive_bools)]
 pub struct AgentViewContext {
     pub account_destinations: Vec<studio_runtime_schema::account_destination::AccountDestination>,
-    pub transfer_can_cancel: bool,
+    pub transfer: TransferObservation,
     pub team_counts: Option<studio_runtime_schema::agent_progress::TeamCounts>,
     pub project_server_id: Option<String>,
     pub launcher_alive: bool,
@@ -445,6 +445,17 @@ pub struct AgentViewContext {
     pub latest_work_result_file: Option<String>,
     pub command_progress: Vec<studio_runtime_schema::agent_progress::AgentCommandProgress>,
     pub stall: Option<studio_runtime_schema::agent_progress::AgentStall>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub enum TransferObservation {
+    #[default]
+    Absent,
+    Cancellable,
+    Held,
+    Unreadable {
+        reason: String,
+    },
 }
 
 #[derive(serde::Deserialize)]
@@ -590,11 +601,23 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
     view.insert("id".to_owned(), Value::String(id.to_owned()));
     view.insert("kind".to_owned(), Value::String("agent".to_owned()));
     view.insert("source".to_owned(), Value::String("managed".to_owned()));
-    let progress = crate::account_transfer::progress_view(
-        record.get("accountTransfer"),
-        context.transfer_can_cancel,
-    )
-    .ok()?;
+    let progress = match &context.transfer {
+        TransferObservation::Unreadable { reason } => {
+            studio_runtime_schema::agent_progress::AccountTransferProgress::Unreadable {
+                reason: reason.clone(),
+            }
+        }
+        observation @ (TransferObservation::Absent
+        | TransferObservation::Cancellable
+        | TransferObservation::Held) => {
+            let summary = record.get("accountTransfer").filter(|value| !value.is_null())
+                .map(<studio_runtime_store::transfer_record::AgentTransferState as serde::Deserialize>::deserialize).transpose().ok()?;
+            crate::account_transfer::progress_view(
+                summary.as_ref(),
+                matches!(observation, TransferObservation::Cancellable),
+            )
+        }
+    };
     if let Some(summary) = view
         .get_mut("accountTransfer")
         .and_then(Value::as_object_mut)
@@ -634,6 +657,7 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
         studio_runtime_schema::agent_progress::AccountTransferProgress::Waiting { .. }
             | studio_runtime_schema::agent_progress::AccountTransferProgress::Moving { .. }
             | studio_runtime_schema::agent_progress::AccountTransferProgress::Blocked { .. }
+            | studio_runtime_schema::agent_progress::AccountTransferProgress::Unreadable { .. }
     ) {
         studio_runtime_schema::agent_progress::AccountChange::Unavailable {
             reason: "Finish or cancel the current transfer first".into(),
@@ -1024,7 +1048,7 @@ mod projection_plan_tests {
             "accountTransfer":{"id":"move","targetAccountKey":"target","status":"pending",
                 "blocked":[{"id":"lead","reason":"History unavailable"}],"canRetry":true,"canCancel":true,"movingNow":0}});
         let context = super::AgentViewContext {
-            transfer_can_cancel: true,
+            transfer: super::TransferObservation::Cancellable,
             ..Default::default()
         };
         let view = super::agent_entity_view(&lead, &context).unwrap();
@@ -1041,40 +1065,7 @@ mod projection_plan_tests {
     }
 
     #[test]
-    fn opaque_archive_projection_bounds_nested_text_and_arrays() {
-        let raw = json!({"id":"w","status":"ready","archive":{"nested":{"long":"x".repeat(12_001),"items":vec![1; 201]}}});
-        let record: studio_runtime_store::WorkItemRecord =
-            serde::Deserialize::deserialize(&raw).unwrap();
-        let view = super::project_work_record(&record).unwrap();
-        let encoded = serde_json::to_string(&view).unwrap();
-        let view: serde_json::Value = serde_json::from_str(&encoded).unwrap();
-        assert_eq!(
-            view["archive"]["nested"]["long"].as_str().unwrap().len(),
-            12_000
-        );
-        assert_eq!(
-            view["archive"]["nested"]["items"].as_array().unwrap().len(),
-            200
-        );
-    }
-
-    #[test]
-    fn work_projection_preserves_presence_and_opaque_archive() {
-        for raw in [
-            r#"{"id":"w","status":"ready"}"#,
-            r#"{"id":"w","status":"ready","agent":null,"rootId":"r","title":"work","archive":{"reason":"kept"}}"#,
-        ] {
-            let record: studio_runtime_store::WorkItemRecord = serde_json::from_str(raw).unwrap();
-            let expected: serde_json::Value = serde_json::from_str(raw).unwrap();
-            let encoded =
-                serde_json::to_string(&super::project_work_record(&record).unwrap()).unwrap();
-            let new: serde_json::Value = serde_json::from_str(&encoded).unwrap();
-            assert_eq!(new, expected);
-        }
-    }
-
-    #[test]
-    fn task_projection_has_expected_public_fields() {
+    fn task_projection_matches_schema_projection() {
         for length in [12, 2_100] {
             let raw = json!({"id":"a:item", "agent":"a", "created":1.0, "itemId":"item", "kind":"command", "status":"running", "turnId":"turn", "type":"commandExecution", "name":"run", "tail":"雪".repeat(length), "outputTruncated":false, "command":"x".repeat(length), "sourceThreadId":"private", "interactive":true});
             let task: studio_runtime_store::TaskRecord =

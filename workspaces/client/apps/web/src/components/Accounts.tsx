@@ -551,8 +551,12 @@ export function AccountTransferChip({
 }: {
   transfer?: NonNullable<Agent["accountTransferProgress"]> | undefined;
 }) {
-  if (transfer?.kind !== "blocked") return null;
-  const label = "Account move blocked";
+  if (transfer?.kind !== "blocked" && transfer?.kind !== "unreadable")
+    return null;
+  const label =
+    transfer.kind === "unreadable"
+      ? "Account move unreadable"
+      : "Account move blocked";
   const details = transfer.reason;
   return (
     <Tooltip label={details} multiline w={320} withinPortal>

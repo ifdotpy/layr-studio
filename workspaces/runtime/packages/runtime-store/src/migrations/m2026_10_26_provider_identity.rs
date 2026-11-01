@@ -164,6 +164,15 @@ fn patches(
             agent_patches(value, "$", accounts, &mut patches, format)?
         }
         "runtime_account_transfers" => {
+            // Held operations cannot dispatch and retain their original payload.
+            if matches!(
+                serde_json::from_value::<super::m2026_11_01_transfer_operations::StoredTransferHold>(
+                    value.clone()
+                ),
+                Ok(super::m2026_11_01_transfer_operations::StoredTransferHold::Unreadable { .. })
+            ) {
+                return Ok(patches);
+            }
             let target = value
                 .get("targetAccountKey")
                 .and_then(Value::as_str)
@@ -454,6 +463,19 @@ fn analytics_needs_migration(db: &Connection) -> StoreResult<bool> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn transfer_preflight_rejects_wrong_provider_identity() {
+        let transfer = serde_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","targetProvider":"unknown","status":"pending","created":1,"members":{}});
+        assert!(
+            super::patches(
+                "runtime_account_transfers",
+                &transfer,
+                &super::Accounts::new(),
+                super::ProviderFormat::Current
+            )
+            .is_err()
+        );
+    }
     use crate::{RuntimeStore, StoreError};
     use serde_json::{Value, json};
 

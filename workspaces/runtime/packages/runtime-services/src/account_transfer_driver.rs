@@ -5,8 +5,8 @@ pub use crate::account_transfer::TransferDispatch;
 use crate::account_transfer::{
     Action, Command, Decision, EXECUTOR_REQUIRED, Snapshot, Ticket, TransferError,
 };
-use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde::Serialize;
+use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
 use studio_runtime_store::{
@@ -14,93 +14,23 @@ use studio_runtime_store::{
 };
 
 use studio_runtime_schema::queue_command::Field;
+use studio_runtime_store::transfer_record::TransferRecord;
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SavedNotice {
-    id: String,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    name: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    provider: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    reason: Field<String>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SavedMember {
-    phase: crate::account_transfer::Phase,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    source_account_key: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    source_thread_id: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    target_thread_id: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    provider: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    name: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    reason: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    error: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    waiting: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    lazy: Field<bool>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    interrupt_reason: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    interrupt_outcome: Field<SavedInterruptOutcome>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    continue_after_transfer: Field<bool>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum SavedInterruptOutcome {
-    Acknowledged,
-    Unknown,
-    Rejected,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum SavedScope {
-    Team,
-    Subagents,
-}
-
-/// The immutable response delivered for one transfer request.
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SavedTransferResponse {
-    id: String,
-    lead_id: String,
-    target_account_key: studio_runtime_schema::account_key::AccountKey,
-    status: crate::account_transfer::TransferStatus,
-    created: f64,
-    scope: SavedScope,
-    members: std::collections::BTreeMap<String, SavedMember>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    target_provider: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    updated: Field<f64>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    finish_history: Field<bool>,
-    total: usize,
-    completed: usize,
-    moved: usize,
-    native_history_pending: usize,
-    moving_now: usize,
-    can_finish_history: bool,
-    waiting_count: usize,
-    needs_attention: bool,
-    can_retry: bool,
-    interrupted: Vec<SavedNotice>,
-    left_on_source: Vec<SavedNotice>,
-    blocked: Vec<SavedNotice>,
+/// The operation named by a nonterminal, readable agent summary.
+pub(crate) fn active_summary_id(agent: &studio_runtime_store::AgentRecord) -> Option<&str> {
+    let studio_runtime_store::transfer_record::AgentTransferState::Summary(summary) =
+        agent.account_transfer.value()?
+    else {
+        return None;
+    };
+    if matches!(
+        summary.status,
+        studio_runtime_store::transfer_record::TransferStatus::Completed
+            | studio_runtime_store::transfer_record::TransferStatus::Cancelled
+    ) {
+        return None;
+    }
+    Some(summary.id.as_str())
 }
 
 pub fn load(tx: &Transaction<'_>, id: &str) -> Result<Snapshot, TransferError> {
@@ -109,15 +39,15 @@ pub fn load(tx: &Transaction<'_>, id: &str) -> Result<Snapshot, TransferError> {
             "store-bootstrap/account-transfer-schema",
         ));
     }
-    let (op, raw) = Repository::get_with_raw(tx, id)?
+    let (op, raw) = Repository::get_typed_with_raw(tx, id)?
         .ok_or(TransferError::Refused("Unknown account transfer"))?;
-    let mut ids = op["members"]
-        .as_object()
-        .map(|m| m.keys().cloned().collect::<Vec<_>>())
-        .unwrap_or_default();
-    let lead = op["leadId"]
-        .as_str()
-        .ok_or(TransferError::Refused("Invalid transfer lead"))?;
+    let mut ids = op
+        .members
+        .0
+        .iter()
+        .map(|(id, _)| id.clone())
+        .collect::<Vec<_>>();
+    let lead = op.lead_id.as_str();
     if !ids.iter().any(|id| id == lead) {
         ids.push(lead.into());
     }
@@ -126,18 +56,7 @@ pub fn load(tx: &Transaction<'_>, id: &str) -> Result<Snapshot, TransferError> {
             Repository::agent(tx, &id)?.ok_or(TransferError::Refused("Unknown transfer member"))?;
         Ok((id, raw))
     });
-    Snapshot::read_fallible(&raw, agents)
-}
-
-/// The operation id of a lead summary that still claims an active transfer.
-pub(crate) fn active_summary_id(agent: &Value) -> Option<&str> {
-    let summary = agent
-        .get("accountTransfer")
-        .filter(|value| !value.is_null())?;
-    if matches!(summary["status"].as_str(), Some("completed" | "cancelled")) {
-        return None;
-    }
-    summary["id"].as_str()
+    Snapshot::read_typed(op, raw.len(), agents)
 }
 
 /// A lead summary mirrors its transfer row. An active summary without the row
@@ -147,33 +66,30 @@ pub(crate) fn active_summary_id(agent: &Value) -> Option<&str> {
 fn drop_orphan_summary_in(
     tx: &Transaction<'_>,
     agent_id: &str,
-) -> Result<Option<Value>, TransferError> {
+) -> Result<Option<studio_runtime_store::AgentRecord>, TransferError> {
     if !Repository::available(tx)? {
         return Ok(None);
     }
-    let Some(raw) = Repository::agent(tx, agent_id)? else {
+    let Some(mut agent) = AgentRepository::get(tx, &AgentId::from(agent_id))? else {
         return Ok(None);
     };
-    let mut value: Value =
-        serde_json::from_str(&raw).map_err(studio_runtime_store::StoreError::from)?;
-    let Some(operation) = active_summary_id(&value) else {
+    let Some(operation) = active_summary_id(&agent) else {
         return Ok(None);
     };
-    if Repository::get(tx, operation)?.is_some() {
+    if Repository::get_typed_with_raw(tx, operation)?.is_some() {
         return Ok(None);
     }
-    crate::account_transfer::remove(&mut value, &["accountTransfer"])?;
-    let agent =
-        serde_json::from_value(value.clone()).map_err(studio_runtime_store::StoreError::from)?;
+    agent.account_transfer = studio_runtime_schema::queue_command::Field::Missing;
     AgentRepository::put(tx, &agent)?;
+    let value = agent.value();
     crate::agents_create::publish_agent(tx, &value)?;
-    Ok(Some(value))
+    Ok(Some(agent))
 }
 
 pub async fn drop_orphan_summary(
     store: &RuntimeStore,
     agent_id: &str,
-) -> Result<Option<Value>, TransferError> {
+) -> Result<Option<studio_runtime_store::AgentRecord>, TransferError> {
     let agent_id = agent_id.to_owned();
     store
         .transaction_with_error(move |tx| drop_orphan_summary_in(tx, &agent_id))
@@ -204,19 +120,18 @@ pub(crate) fn release_waiting_in(
     if !Repository::available(tx)? {
         return Ok(false);
     }
-    let Some(raw) = Repository::agent(tx, agent_id)? else {
+    let Some(agent) = AgentRepository::get(tx, &AgentId::from(agent_id))? else {
         return Ok(false);
     };
-    let agent: Value =
-        serde_json::from_str(&raw).map_err(studio_runtime_store::StoreError::from)?;
     let Some(operation) = agent
-        .get("accountTransferId")
-        .and_then(Value::as_str)
-        .filter(|_| !studio_runtime_store::truthy(agent.get("lazyAccountTransfer")))
+        .account_transfer_id
+        .value()
+        .map(|id| id.as_str())
+        .filter(|_| agent.lazy_account_transfer.value().is_none())
     else {
         return Ok(false);
     };
-    if Repository::get(tx, operation)?.is_none() {
+    if Repository::get_typed_with_raw(tx, operation)?.is_none() {
         return Ok(false);
     }
     let Some(decision) = load(tx, operation)?.release_waiting(agent_id)? else {
@@ -234,35 +149,24 @@ pub fn owns_reading_member(
     member_id: &str,
 ) -> Result<bool, TransferError> {
     let snapshot = load(tx, transfer_id)?;
-    let operation = snapshot.operation();
-    if operation["status"] != "pending" || operation["members"][member_id]["phase"] != "reading" {
+    use studio_runtime_store::transfer_record::{TransferPhase, TransferStatus};
+    let operation = snapshot.record();
+    if operation.status != TransferStatus::Pending
+        || operation.members.get(member_id).map(|member| member.phase)
+            != Some(TransferPhase::Reading)
+    {
         return Ok(false);
     }
-    let agent = snapshot.agent(member_id)?;
-    Ok(agent["accountTransferId"] == transfer_id
-        && agent["lazyAccountTransfer"]["id"] == transfer_id)
-}
-
-fn snapshot_agents(
-    snapshot: &Snapshot,
-) -> Result<std::collections::BTreeMap<String, Value>, TransferError> {
-    let operation = snapshot.operation();
-    let mut ids = operation["members"]
-        .as_object()
-        .map(|members| members.keys().cloned().collect::<Vec<_>>())
-        .unwrap_or_default();
-    let lead = operation["leadId"]
-        .as_str()
-        .ok_or(TransferError::Refused("Invalid transfer lead"))?;
-    if !ids.iter().any(|id| id == lead) {
-        ids.push(lead.into());
-    }
-    ids.into_iter()
-        .map(|id| {
-            let value = snapshot.agent(&id)?.clone();
-            Ok((id, value))
-        })
-        .collect()
+    let agent = snapshot.agent_record(member_id)?;
+    Ok(agent
+        .account_transfer_id
+        .value()
+        .is_some_and(|id| id.as_str() == transfer_id)
+        && agent
+            .lazy_account_transfer
+            .value()
+            .and_then(|state| state.pending())
+            .is_some_and(|lazy| lazy.id.as_str() == transfer_id))
 }
 
 /// The account worker calls this once during startup before admitting turns.
@@ -310,13 +214,26 @@ fn replay_in(
     };
     let snapshot = load(tx, &key)?;
     if snapshot.replay(id, lead, target, scope)? {
-        let saved = snapshot.operation()["requests"][id]
-            .get("savedResponse")
-            .ok_or(TransferError::Refused(
-                "The original transfer response is unavailable",
-            ))?;
-        let saved = SavedTransferResponse::deserialize(saved)
-            .map_err(|_| TransferError::Refused("The original transfer response is invalid"))?;
+        use studio_runtime_schema::queue_command::Field;
+        let response = snapshot
+            .record()
+            .requests
+            .value()
+            .and_then(|requests| requests.get(id))
+            .map(|request| &request.saved_response);
+        let saved = match response {
+            None | Some(Field::Missing) => {
+                return Err(TransferError::Refused(
+                    "The original transfer response is unavailable",
+                ));
+            }
+            Some(Field::Null) => {
+                return Err(TransferError::Refused(
+                    "The original transfer response is invalid",
+                ));
+            }
+            Some(Field::Value(saved)) => saved,
+        };
         return saved
             .serialize(serde_json::value::Serializer)
             .map(Some)
@@ -406,38 +323,47 @@ pub async fn request(
                     "This account is disabled for this chat",
                 ));
             }
-            if let Some(active) = actor.extra.get("accountTransfer").filter(|value| {
-                !matches!(value["status"].as_str(), Some("completed" | "cancelled"))
+            let summary = match actor.account_transfer.value() {
+                Some(studio_runtime_store::transfer_record::AgentTransferState::Unreadable(_)) => {
+                    return Err(TransferError::Refused(
+                        "Current transfer data is unreadable",
+                    ));
+                }
+                Some(studio_runtime_store::transfer_record::AgentTransferState::Summary(value)) => {
+                    Some(value)
+                }
+                None => None,
+            };
+            if let Some(active) = summary.filter(|value| {
+                !matches!(
+                    value.status,
+                    studio_runtime_store::transfer_record::TransferStatus::Completed
+                        | studio_runtime_store::transfer_record::TransferStatus::Cancelled
+                )
             }) {
-                if active["targetAccountKey"] != target
-                    || active
-                        .get("scope")
-                        .and_then(Value::as_str)
-                        .unwrap_or("team")
-                        != scope
-                {
+                let active_scope = match active.scope.value() {
+                    Some(studio_runtime_store::transfer_record::TransferScope::Subagents) => {
+                        "subagents"
+                    }
+                    Some(studio_runtime_store::transfer_record::TransferScope::Team) | None => {
+                        "team"
+                    }
+                };
+                if active.target_account_key.as_str() != target.as_str() || active_scope != scope {
                     return Err(TransferError::Refused(
                         "Finish or cancel the current transfer first",
                     ));
                 }
-                let active_id = active["id"]
-                    .as_str()
-                    .ok_or(TransferError::Refused("Invalid current transfer"))?;
+                let active_id = active.id.as_str();
                 let snapshot = load(tx, active_id)?;
-                let mut operation = snapshot.operation().clone();
-                let agents = snapshot_agents(&snapshot)?;
-                operation["requests"][id.as_str()] =
-                    json!({"leadId":lead,"targetAccountKey":target,"scope":scope});
-                let mut decision = Snapshot::read(
-                    &operation.to_string(),
-                    agents
-                        .iter()
-                        .map(|(id, value)| (id.clone(), value.to_string())),
-                )?
-                .decide(Command::Restart)?;
-                decision.operation = operation;
-                decision.agents = agents;
-                decision.changed = true;
+                let decision = snapshot.add_team_request(
+                    id.clone(),
+                    lead.clone(),
+                    target
+                        .clone()
+                        .try_into()
+                        .map_err(|_| TransferError::Refused("Invalid transfer target"))?,
+                )?;
                 return persist_request(tx, decision, now, Some(&id));
             }
 
@@ -446,45 +372,61 @@ pub async fn request(
                 Repository::team_agents(tx, &AgentId::from(lead.as_str()))?
                     .into_iter()
                     .filter(|agent| agent.id.0 == lead)
-                    .map(|agent| (agent.id.0.clone(), agent.into_value()))
+                    .map(|agent| (agent.id.0.clone(), agent))
                     .collect();
             if !agents.contains_key(&lead) {
                 return Err(TransferError::Refused("Unknown managed agent"));
             }
             let operation_id = id;
-            let mut requests = serde_json::Map::new();
-            requests.insert(
-                operation_id.to_owned(),
-                json!({"leadId":lead,"targetAccountKey":target,"scope":scope}),
+            let target_key = target
+                .clone()
+                .try_into()
+                .map_err(|_| TransferError::Refused("Invalid transfer target"))?;
+            let transfer_id = operation_id
+                .clone()
+                .try_into()
+                .map_err(|_| TransferError::Refused("Invalid transfer identity"))?;
+            let provider = target_provider
+                .parse()
+                .map_err(|_| TransferError::Refused("Invalid transfer provider"))?;
+            let mut members = Vec::new();
+            for (agent_id, agent) in &mut agents {
+                members.push((
+                    agent_id.clone(),
+                    crate::account_transfer::typed_enroll(
+                        agent,
+                        &transfer_id,
+                        &target_key,
+                        provider,
+                        agent_id == &lead,
+                    )?,
+                ));
+            }
+            let operation = TransferRecord::new_team(
+                operation_id.clone(),
+                lead.clone(),
+                target_key,
+                provider,
+                serde_json::Number::from_f64(now)
+                    .ok_or(TransferError::Refused("Invalid transfer time"))?,
+                studio_runtime_store::transfer_record::OrderedMembers(members),
             );
-            let mut operation = json!({"id":operation_id,"leadId":lead,"targetAccountKey":target,
-            "targetProvider":target_provider,"status":"pending","scope":scope,"created":now,
-            "members":{},"requests":Value::Object(requests)});
-            for (agent_id, value) in &mut agents {
-                operation["members"][agent_id] = crate::account_transfer::enroll(
-                    value,
-                    &operation_id,
-                    &target,
-                    &target_provider,
-                    agent_id.as_str() == lead.as_str(),
-                )?;
-            }
-            if operation["members"].as_object().is_some_and(|members| {
-                members
-                    .values()
-                    .all(|member| matches!(member["phase"].as_str(), Some("completed" | "left")))
-            }) {
-                operation["status"] = json!("completed");
-            }
-            let snapshot = Snapshot::read(
-                &operation.to_string(),
-                agents
-                    .iter()
-                    .map(|(id, value)| (id.clone(), value.to_string())),
+            let raw = serde_json::to_string(&operation)
+                .map_err(|_| TransferError::Refused("Invalid transfer"))?;
+            let snapshot = Snapshot::read_typed(
+                operation.clone(),
+                raw.len(),
+                agents.iter().map(|(id, value)| {
+                    Ok((
+                        id.clone(),
+                        serde_json::to_string(value)
+                            .map_err(|_| TransferError::Refused("Invalid transfer agent"))?,
+                    ))
+                }),
             )?;
             let mut decision = snapshot.decide(Command::Restart)?;
             decision.operation = operation;
-            decision.agents = agents;
+            decision.replace_agent_records(agents)?;
             decision.changed = true;
             persist_request(tx, decision, now, Some(&operation_id))
         })
@@ -505,8 +447,14 @@ pub async fn reserve(
         .transaction_with_error(move |tx| {
             check_durable_blockers(tx, &ticket.agent)?;
             let snapshot = load(tx, &ticket.operation)?;
-            let mut decision =
-                snapshot.provider_intent(&ticket.agent, &ticket.request, scope, &method, params)?;
+            let mut decision = typed_intent(
+                &snapshot,
+                &ticket.agent,
+                &ticket.request,
+                scope,
+                &method,
+                params,
+            )?;
             admit_mutation(&snapshot, &mut decision, &ticket.agent)?;
             persist(tx, decision, now)?;
             Ok(())
@@ -523,7 +471,11 @@ pub async fn receive(
     store
         .transaction_with_error(move |tx| {
             let snapshot = load(tx, &ticket.operation)?;
-            persist(tx, snapshot.receive(&ticket, result)?, now)?;
+            let result = result
+                .map(|value| serde_json::value::to_raw_value(&value))
+                .transpose()
+                .map_err(|_| TransferError::Refused("Invalid provider payload"))?;
+            persist(tx, snapshot.typed_receive(&ticket, result)?, now)?;
             Ok(())
         })
         .await
@@ -540,50 +492,39 @@ fn persist_request(
     request_id: Option<&str>,
 ) -> Result<Value, TransferError> {
     if !decision.changed {
-        return decision.public_view();
+        return serde_json::to_value(decision.typed_public_view())
+            .map_err(|_| TransferError::Refused("Invalid transfer response"));
     }
-    let lead = decision.operation["leadId"]
-        .as_str()
-        .ok_or(TransferError::Refused("Invalid transfer lead"))?;
-    let old = decision
-        .agents
-        .get(lead)
-        .and_then(|a| a.pointer("/accountTransfer/id"))
-        .and_then(Value::as_str);
+    let operation = &decision.operation;
+    let agents = decision.agent_records()?;
+    let old =
+        agents
+            .get(&operation.lead_id)
+            .and_then(|agent| match agent.account_transfer.value() {
+                Some(studio_runtime_store::transfer_record::AgentTransferState::Summary(
+                    summary,
+                )) => Some(summary.id.as_str()),
+                _ => None,
+            });
     let previous_created = old
-        .map(|id| Repository::get(tx, id))
+        .map(|id| Repository::get_typed_with_raw(tx, id))
         .transpose()?
         .flatten()
-        .and_then(|op| op["created"].as_f64());
+        .and_then(|(op, _)| op.created.as_f64());
     decision.stamp(now, previous_created)?;
     if let Some(request_id) = request_id {
-        let response = decision.public_view()?;
-        let saved = SavedTransferResponse::deserialize(&response)
-            .map_err(|_| TransferError::Refused("Invalid transfer response"))?;
-        decision.operation["requests"][request_id]["savedResponse"] = saved
-            .serialize(serde_json::value::Serializer)
-            .map_err(|_| TransferError::Refused("Invalid transfer response"))?;
+        let saved = decision.typed_public_view();
+        decision.operation.save_response(request_id, saved)?;
     }
     let raw = decision.encoded()?;
-    let id = decision.operation["id"]
-        .as_str()
-        .ok_or(TransferError::Refused("Invalid transfer identity"))?;
-    Repository::put(tx, id, &raw)?;
-    for (id, value) in &mut decision.agents {
-        let prior = Repository::agent(tx, id)?
-            .map(|raw| serde_json::from_str::<Value>(&raw))
-            .transpose()
-            .map_err(studio_runtime_store::StoreError::from)?;
+    let operation = &decision.operation;
+    Repository::put(tx, &operation.id, &raw)?;
+    let mut agents = decision.agent_records()?;
+    for (id, agent) in &mut agents {
+        let prior = AgentRepository::get(tx, &AgentId::from(id.as_str()))?;
         if let Some(prior) = &prior
-            && prior
-                .get("accountKey")
-                .and_then(Value::as_str)
-                .unwrap_or("default")
-                != value
-                    .get("accountKey")
-                    .and_then(Value::as_str)
-                    .unwrap_or("default")
-            && let Some(resume) = prior.get("usageResume")
+            && prior.account_key != agent.account_key
+            && let Some(resume) = prior.extra.get("usageResume")
             && matches!(
                 resume.get("status").and_then(Value::as_str),
                 Some("scheduled" | "started")
@@ -617,26 +558,21 @@ fn persist_request(
                     pointer: "/".into(),
                 },
             })?;
-            value["usageResume"] = cancelled;
+            agent.extra.insert("usageResume".into(), cancelled);
         }
-        if prior.as_ref() == Some(value) {
+        if prior.as_ref() == Some(agent) {
             continue;
         }
-        let agent = serde_json::from_value(value.clone())
-            .map_err(studio_runtime_store::StoreError::from)?;
-        AgentRepository::put(tx, &agent)?;
-        crate::agents_create::publish_agent(tx, value)?;
+        AgentRepository::put(tx, agent)?;
+        crate::agents_create::publish_agent(tx, &agent.value())?;
     }
     for followup in &decision.followups {
-        let value = decision
-            .agents
+        let agent = agents
             .get(&followup.agent)
             .ok_or(TransferError::Refused("Unknown transfer member"))?;
-        let agent = serde_json::from_value(value.clone())
-            .map_err(studio_runtime_store::StoreError::from)?;
         crate::event_write::enqueue_event(
             tx,
-            &agent,
+            agent,
             followup.id.clone(),
             "followup",
             followup.text.into(),
@@ -644,7 +580,8 @@ fn persist_request(
         )
         .map_err(|_| TransferError::Refused("Cannot enqueue transfer continuation"))?;
     }
-    decision.public_view()
+    serde_json::to_value(decision.typed_public_view())
+        .map_err(|_| TransferError::Refused("Invalid transfer response"))
 }
 
 /// Asynchronous effect port, implemented by the account worker's bounded native
@@ -740,7 +677,8 @@ pub async fn provider_intent(
     store
         .transaction_with_error(move |tx| {
             let snapshot = load(tx, &operation)?;
-            let mut decision = snapshot.provider_intent(
+            let mut decision = typed_intent(
+                &snapshot,
                 &agent,
                 &provider_operation,
                 intent.scope,
@@ -752,6 +690,26 @@ pub async fn provider_intent(
             Ok(())
         })
         .await
+}
+
+fn typed_intent(
+    snapshot: &Snapshot,
+    agent: &str,
+    operation: &str,
+    scope: Value,
+    method: &str,
+    params: Value,
+) -> Result<Decision, TransferError> {
+    snapshot.typed_provider_intent(
+        agent,
+        operation,
+        serde_json::from_value(scope)
+            .map_err(|_| TransferError::Refused("Invalid provider scope"))?,
+        serde_json::from_value(Value::String(method.into()))
+            .map_err(|_| TransferError::Refused("Invalid provider method"))?,
+        &serde_json::value::to_raw_value(&params)
+            .map_err(|_| TransferError::Refused("Invalid provider payload"))?,
+    )
 }
 
 pub(crate) struct ProviderReadIntent<'a> {
@@ -766,30 +724,31 @@ pub(crate) struct ProviderReadIntent<'a> {
 
 /// The root is created only with a new transfer obligation. Imported obligations
 /// carry their final provider token from the migration.
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ProviderAdmission {
-    pub root_request_id: String,
-    pub admitted_request: Option<studio_runtime_store::request_results::AdmittedRequest>,
-}
+pub(crate) use studio_runtime_store::transfer_record::ProviderAdmission;
 
 fn admit_mutation(
     snapshot: &Snapshot,
     decision: &mut Decision,
     agent: &str,
 ) -> Result<(), TransferError> {
-    if snapshot.operation()["members"][agent]
-        .get("providerIntent")
-        .is_none()
-    {
-        decision.operation["members"][agent]["providerAdmission"] = json!(ProviderAdmission {
+    let member = snapshot
+        .record()
+        .members
+        .get(agent)
+        .ok_or(TransferError::Refused("Unknown transfer member"))?;
+    if member.provider_intent.is_missing() {
+        use studio_runtime_schema::queue_command::Field;
+        let member = decision
+            .operation
+            .members
+            .get_mut(agent)
+            .ok_or(TransferError::Refused("Unknown transfer member"))?;
+        member.provider_admission = Field::Value(ProviderAdmission {
             root_request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
-            admitted_request: None,
+            admitted_request: Field::Null,
         });
-    } else if snapshot.operation()["members"][agent]
-        .get("providerAdmission")
-        .is_none()
-    {
+        decision.changed = true;
+    } else if member.provider_admission.is_missing() {
         return Err(TransferError::Refused(
             "The transfer provider admission is missing",
         ));
@@ -809,14 +768,28 @@ pub(crate) async fn provider_admission(
     store
         .read_async("account-transfer/provider-admission", move |tx| {
             let snapshot = load(tx, &transfer)?;
-            let member = &snapshot.operation()["members"][&agent];
-            let admission = if member["providerIntent"]["operation"] == operation {
-                &member["providerAdmission"]
+            let member = snapshot
+                .record()
+                .members
+                .get(&agent)
+                .ok_or(TransferError::Refused(
+                    "The transfer provider admission is missing",
+                ))?;
+            let admission = if member
+                .provider_intent
+                .value()
+                .is_some_and(|intent| intent.operation == operation)
+            {
+                member.provider_admission.value()
             } else {
-                &member["providerReadAdmissions"][&operation]
+                member
+                    .provider_read_admissions
+                    .value()
+                    .and_then(|admissions| admissions.get(&operation))
             };
-            serde_json::from_value(admission.clone())
-                .map_err(|_| TransferError::Refused("The transfer provider admission is missing"))
+            admission.cloned().ok_or(TransferError::Refused(
+                "The transfer provider admission is missing",
+            ))
         })
         .await
 }
@@ -825,7 +798,7 @@ pub(crate) async fn provider_read_intent(
     store: &RuntimeStore,
     intent: ProviderReadIntent<'_>,
     now: f64,
-) -> Result<Option<Value>, TransferError> {
+) -> Result<Option<studio_runtime_store::transfer_record::ProviderReadReceipt>, TransferError> {
     let transfer = intent.transfer.to_owned();
     let agent = intent.agent.to_owned();
     let operation = intent.operation.to_owned();
@@ -835,40 +808,61 @@ pub(crate) async fn provider_read_intent(
     store
         .transaction_with_error(move |tx| {
             let snapshot = load(tx, &transfer)?;
-            let next = json!({"operation":operation,"account":account,"scope":intent.scope,
-                "method":method,"params":intent.params});
-            if let Some(reply) = snapshot.written_read_replay(&agent, &next)? {
+            use studio_runtime_store::transfer_record::{
+                ProviderIntent as StoredIntent, ReceiptCertainty,
+            };
+            let next = StoredIntent {
+                operation: operation.clone(),
+                account: Field::Value(
+                    account
+                        .clone()
+                        .try_into()
+                        .map_err(|_| TransferError::Refused("Invalid provider account"))?,
+                ),
+                scope: serde_json::from_value(intent.scope.clone())
+                    .map_err(|_| TransferError::Refused("Invalid provider scope"))?,
+                method: serde_json::from_value(Value::String(method.clone()))
+                    .map_err(|_| TransferError::Refused("Invalid provider method"))?,
+                params: serde_json::value::to_raw_value(&intent.params)
+                    .map_err(|_| TransferError::Refused("Invalid provider parameters"))?,
+            };
+            if let Some(reply) = snapshot.written_read_replay_typed(&agent, &next)? {
                 return Ok(Some(inline_reply(&root, reply)?));
             }
-            let prior = snapshot.operation()["members"][agent.as_str()]["providerReadReceipts"]
-                [operation.as_str()]
-            .as_object()
-            .filter(|receipt| receipt.get("certainty") == Some(&Value::String("written".into())))
-            .cloned()
-            .map(Value::Object)
-            .map(|saved| inline_reply(&root, saved))
-            .transpose()?;
-            let mut decision = snapshot.provider_read_intent(
-                &agent,
-                &operation,
-                &account,
-                intent.scope,
-                &method,
-                intent.params,
-            )?;
+            let member = snapshot
+                .record()
+                .members
+                .get(&agent)
+                .ok_or(TransferError::Refused("Unknown transfer member"))?;
+            let prior = member
+                .provider_read_receipts
+                .value()
+                .and_then(|receipts| receipts.get(&operation))
+                .filter(|receipt| receipt.receipt.certainty == ReceiptCertainty::Written)
+                .cloned()
+                .map(|saved| inline_reply(&root, saved))
+                .transpose()?;
+            let mut decision = snapshot.typed_provider_read_intent(&agent, &next)?;
             if method == "thread/unsubscribe" {
-                if snapshot.operation()["members"][&agent]["providerReadIntents"]
-                    .get(&operation)
+                if member
+                    .provider_read_intents
+                    .value()
+                    .and_then(|intents| intents.get(&operation))
                     .is_none()
                 {
-                    decision.operation["members"][&agent]["providerReadAdmissions"][&operation] =
-                        json!(ProviderAdmission {
+                    decision.admit_provider_read(
+                        &agent,
+                        &operation,
+                        ProviderAdmission {
                             root_request_id:
                                 studio_runtime_schema::persistence::RequestIdentity::issue_root(),
-                            admitted_request: None,
-                        });
-                } else if snapshot.operation()["members"][&agent]["providerReadAdmissions"]
-                    .get(&operation)
+                            admitted_request: Field::Null,
+                        },
+                    )?;
+                } else if member
+                    .provider_read_admissions
+                    .value()
+                    .and_then(|admissions| admissions.get(&operation))
                     .is_none()
                 {
                     return Err(TransferError::Refused(
@@ -883,21 +877,31 @@ pub(crate) async fn provider_read_intent(
 }
 
 /// Put back a reply body that the record keeps as a payload blob.
-fn inline_reply(root: &std::path::Path, mut saved: Value) -> Result<Value, TransferError> {
-    let Some(reference) = saved["result"].get("valueBlob").cloned() else {
+fn inline_reply(
+    root: &std::path::Path,
+    mut saved: studio_runtime_store::transfer_record::ProviderReadReceipt,
+) -> Result<studio_runtime_store::transfer_record::ProviderReadReceipt, TransferError> {
+    let Some(result) = (match &mut saved.result {
+        Field::Value(result) => Some(result),
+        Field::Missing | Field::Null => None,
+    }) else {
         return Ok(saved);
     };
+    let (kind, reference) = match result {
+        studio_runtime_store::transfer_record::ProviderResult::Inline { .. } => return Ok(saved),
+        studio_runtime_store::transfer_record::ProviderResult::Blob { kind, value_blob } => {
+            (kind.clone(), value_blob)
+        }
+    };
     let lost = |_| TransferError::Refused("The saved provider reply is unavailable");
-    let value =
-        serde_json::from_slice(&crate::payload_blobs::load_blob(root, &reference).map_err(lost)?)
-            .map_err(|_| TransferError::Refused("The saved provider reply is unavailable"))?;
-    let result = saved["result"]
-        .as_object_mut()
-        .ok_or(TransferError::Refused(
-            "The saved provider reply is unavailable",
-        ))?;
-    result.remove("valueBlob");
-    result.insert("value".into(), value);
+    let reference = serde_json::to_value(reference).map_err(lost)?;
+    let bytes = crate::payload_blobs::load_blob(root, &reference)
+        .map_err(|_| TransferError::Refused("The saved provider reply is unavailable"))?;
+    let value = serde_json::from_slice(&bytes).map_err(lost)?;
+    *result = studio_runtime_store::transfer_record::ProviderResult::Inline {
+        kind,
+        value: Some(value),
+    };
     Ok(saved)
 }
 
@@ -1084,11 +1088,11 @@ fn check_durable_blockers(tx: &Transaction<'_>, agent: &str) -> Result<(), Trans
 /// Captured after the durable reading intent. History and destination settings
 /// are prepared outside the writer transaction from these checked records.
 pub struct TransferPreparation {
-    operation: Value,
+    operation: TransferRecord,
     agent: Value,
 }
 impl TransferPreparation {
-    pub fn operation(&self) -> &Value {
+    pub fn operation(&self) -> &TransferRecord {
         &self.operation
     }
     pub fn agent(&self) -> &Value {
@@ -1159,7 +1163,7 @@ pub async fn execute_member(
             let decision = snapshot.begin_read(&transaction_agent_id)?;
             let input = TransferPreparation {
                 operation: decision.operation.clone(),
-                agent: snapshot.agent(&transaction_agent_id)?.clone(),
+                agent: snapshot.agent_record(&transaction_agent_id)?.value(),
             };
             persist(tx, decision, now)?;
             Ok::<_, TransferError>(Ok(input))
@@ -1196,9 +1200,13 @@ pub async fn execute_member(
                 let snapshot = load(tx, &operation_id)?;
                 persist(
                     tx,
-                    snapshot.preparation_failed(
+                    snapshot.typed_preparation_failed(
                         &failed_agent,
-                        &input.operation["members"][failed_agent.as_str()]["source"],
+                        input
+                            .operation
+                            .members
+                            .get(&failed_agent)
+                            .map_or(&Field::Missing, |member| &member.source),
                     )?,
                     now,
                 )?;
@@ -1354,15 +1362,96 @@ mod request_tests {
             }],
         )
         .expect("blob");
-        let saved =
-            json!({"result":{"kind":"reply","valueBlob":{"sha256":sha256,"size":bytes.len()}}});
+        let receipt = json!({"operation":"read", "scope":{"account":"source","connection":"c","generation":1}, "certainty":"written"});
+        let saved = json!({"certainty":"written", "receipt":receipt, "result":{"kind":"reply","valueBlob":{"sha256":sha256,"size":bytes.len()}}});
+        let saved = serde_json::from_value(saved).expect("receipt");
+        let restored = inline_reply(root.path(), saved).expect("restored");
         assert_eq!(
-            inline_reply(root.path(), saved).expect("restored"),
-            json!({"result":{"kind":"reply","value":body}})
+            serde_json::to_value(restored).unwrap()["result"],
+            json!({"kind":"reply","value":body})
         );
-        let lost =
-            json!({"result":{"kind":"reply","valueBlob":{"sha256":"0".repeat(64),"size":1}}});
-        assert!(inline_reply(root.path(), lost).is_err());
+        let lost = json!({"certainty":"written", "receipt":receipt, "result":{"kind":"reply","valueBlob":{"sha256":"0".repeat(64),"size":1}}});
+        assert!(inline_reply(root.path(), serde_json::from_value(lost).unwrap()).is_err());
+    }
+
+    #[test]
+    fn account_transfer_startup_holds_unsupported_operation() {
+        let (root, store) = store_with_agents();
+        drop(store);
+        let raw = r#"{"id":"invalid","leadId":"lead","targetAccountKey":"target","targetProvider":"codex","status":"pending","created":1,"members":{},"futureField":true}"#;
+        let db = rusqlite::Connection::open(root.path().join("canvas.sqlite3")).unwrap();
+        db.execute(
+            "INSERT INTO runtime_account_transfers(id,record) VALUES('invalid',?1)",
+            [raw],
+        )
+        .unwrap();
+        db.execute(
+            "DELETE FROM sync_entity_meta WHERE key='migration_catalog'",
+            [],
+        )
+        .unwrap();
+        drop(db);
+        let store = run_async(RuntimeStore::open(Some(root.path()))).expect("store starts");
+        assert_eq!(
+            run_async(recover(&store, 10.0)).expect("recovery skips held operation"),
+            0
+        );
+        let db = store.test_reader().unwrap();
+        let (kind, original): (String, String) = db.query_row("SELECT json_extract(record,'$.kind'),json_extract(record,'$.original') FROM runtime_account_transfers WHERE id='invalid'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(kind, "unreadable");
+        assert_eq!(original, raw);
+        let marker: String = db.query_row("SELECT json_extract(record,'$.accountTransfer.kind') FROM runtime_agents WHERE id='lead'", [], |row| row.get(0)).unwrap();
+        assert_eq!(marker, "unreadable");
+        drop(db);
+        drop(store);
+        let reopened =
+            run_async(RuntimeStore::open(Some(root.path()))).expect("second store reopen");
+        assert_eq!(
+            run_async(recover(&reopened, 11.0)).expect("held operation remains skipped"),
+            0
+        );
+        for status in [Value::Null, json!("future-status")] {
+            let (root, store) = store_with_agents();
+            run_async(store.transaction(|tx| {
+                tx.execute("UPDATE runtime_agents SET record=json_set(json_remove(record,'$.accountTransfer'),'$.accountTransferId','move') WHERE id='lead'", [])?;
+                Ok(())
+            })).unwrap();
+            drop(store);
+            let db = rusqlite::Connection::open(root.path().join("canvas.sqlite3")).unwrap();
+            let raw = json!({"id":"move","leadId":"lead","targetAccountKey":"target","targetProvider":"codex","status":status,"created":1,"members":{}}).to_string();
+            db.execute(
+                "INSERT INTO runtime_account_transfers(id,record) VALUES('move',?1)",
+                [raw],
+            )
+            .unwrap();
+            db.execute(
+                "DELETE FROM sync_entity_meta WHERE key='migration_catalog'",
+                [],
+            )
+            .unwrap();
+            drop(db);
+            let store = run_async(RuntimeStore::open(Some(root.path())))
+                .expect("store opens with held operation");
+            assert_eq!(run_async(recover(&store, 12.0)).unwrap(), 0);
+            assert!(
+                request(
+                    &store,
+                    "5a300f72-4ea6-4d30-8a0e-9b2c13c42285",
+                    "lead",
+                    "target",
+                    "team",
+                    "codex",
+                    13.0
+                )
+                .is_err(),
+                "a pointer-owned unreadable operation must block a new request"
+            );
+            assert_eq!(
+                stored(&store, "lead")["accountTransfer"]["kind"],
+                "unreadable"
+            );
+            assert_eq!(stored(&store, "lead")["accountTransferId"], "move");
+        }
     }
 
     #[test]
@@ -1782,11 +1871,14 @@ mod request_tests {
         assert_eq!(lead["accountTransfer"]["waitingCount"], 0);
         assert_eq!(lead["accountTransfer"]["nativeHistoryPending"], 1);
         let member = run_async(store.transaction_with_error(move |tx| {
-            Ok::<_, TransferError>(load(tx, id)?.operation()["members"]["lead"].clone())
+            Ok::<_, TransferError>(load(tx, id)?.record().members.get("lead").unwrap().clone())
         }))
         .expect("transfer reads");
-        assert_eq!(member["phase"], "lazy");
-        assert_eq!(member["lazy"], true);
+        assert_eq!(
+            member.phase,
+            studio_runtime_store::transfer_record::TransferPhase::Lazy
+        );
+        assert_eq!(member.lazy.value(), Some(&true));
         assert!(
             !run_async(release_waiting(&store, "lead", 13.0)).expect("release reads"),
             "a released member is not released again"
@@ -1880,13 +1972,16 @@ mod request_tests {
 #[cfg(test)]
 mod provider_admission_tests {
     use super::*;
+    use serde_json::json;
 
     fn snapshot(intent: bool, admission: Option<Value>) -> Snapshot {
         let mut operation = json!({"id":"transfer","leadId":"agent","targetAccountKey":"target",
             "status":"pending","created":1.0,"scope":"team",
             "members":{"agent":{"phase":"reading","sourceAccountKey":"source","sourceThreadId":"thread"}}});
         if intent {
-            operation["members"]["agent"]["providerIntent"] = json!({"operation":"start"});
+            operation["members"]["agent"]["providerIntent"] = json!({"operation":"start",
+                "scope":{"account":"target","connection":"connection","generation":1},
+                "method":"thread/start","params":{}});
         }
         if let Some(admission) = admission {
             operation["members"]["agent"]["providerAdmission"] = admission;
@@ -1901,10 +1996,20 @@ mod provider_admission_tests {
         let first = snapshot(false, None);
         let mut decision = first.decide(Command::Restart).expect("decision");
         admit_mutation(&first, &mut decision, "agent").expect("new obligation");
-        let saved = decision.operation["members"]["agent"]["providerAdmission"].clone();
+        let saved = serde_json::to_value(
+            decision
+                .operation
+                .members
+                .get("agent")
+                .unwrap()
+                .provider_admission
+                .value()
+                .unwrap(),
+        )
+        .unwrap();
         let admission: ProviderAdmission =
             serde_json::from_value(saved.clone()).expect("admission");
-        assert!(admission.admitted_request.is_none());
+        assert!(admission.admitted_request.value().is_none());
         studio_runtime_schema::persistence::RequestIdentity::new(
             "test",
             &[],
@@ -1916,12 +2021,31 @@ mod provider_admission_tests {
         let mut decision = retry.decide(Command::Restart).expect("retry decision");
         admit_mutation(&retry, &mut decision, "agent").expect("saved identity");
         assert_eq!(
-            decision.operation["members"]["agent"]["providerAdmission"],
+            serde_json::to_value(
+                decision
+                    .operation
+                    .members
+                    .get("agent")
+                    .unwrap()
+                    .provider_admission
+                    .value()
+                    .unwrap()
+            )
+            .unwrap(),
             saved
         );
         let missing = snapshot(true, None);
         let mut decision = missing.decide(Command::Restart).expect("held decision");
         assert!(admit_mutation(&missing, &mut decision, "agent").is_err());
-        assert!(decision.operation["members"]["agent"]["providerAdmission"].is_null());
+        assert!(
+            decision
+                .operation
+                .members
+                .get("agent")
+                .unwrap()
+                .provider_admission
+                .value()
+                .is_none()
+        );
     }
 }

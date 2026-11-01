@@ -103,7 +103,11 @@ async fn compiler_dependencies_and_late_holds_are_checked_before_commit() {
                             "contextRepair" => (mutation_name,json!({"phase":"unknown"})),
                             _ => (mutation_name,json!("transfer")),
                         };
-                        row.extra.insert(key.into(),value);
+                        if key == "accountTransferId" {
+                            row.account_transfer_id = serde::Deserialize::deserialize(value).expect("typed transfer id");
+                        } else {
+                            row.extra.insert(key.into(),value);
+                        }
                         AgentRepository::put(tx,&row)?;
                     }
                 }
@@ -619,8 +623,9 @@ async fn continuation_gate_refuses_a_preexisting_admission_hold() {
                     let mut row =
                         AgentRepository::get(tx, &AgentId::from(update_agent_id.as_str()))?
                             .unwrap();
-                    row.extra
-                        .insert("accountTransferId".into(), json!("transfer"));
+                    row.account_transfer_id = studio_runtime_schema::queue_command::Field::Value(
+                        "transfer".to_owned().try_into().unwrap(),
+                    );
                     AgentRepository::put(tx, &row)
                 })
                 .await?;

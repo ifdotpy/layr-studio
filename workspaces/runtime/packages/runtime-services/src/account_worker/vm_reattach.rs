@@ -45,14 +45,11 @@ fn binding(
         account,
         Some(provider),
     )? || record.in_flight != Some(true)
-        || [
-            "executionMove",
-            "lazyAccountTransfer",
-            "accountTransferId",
-            "workspaceOperation",
-        ]
-        .iter()
-        .any(|key| fields.get(*key).is_some_and(|value| !value.is_null()))
+        || record.lazy_account_transfer.value().is_some()
+        || record.account_transfer_id.value().is_some()
+        || ["executionMove", "workspaceOperation"]
+            .iter()
+            .any(|key| fields.get(*key).is_some_and(|value| !value.is_null()))
         || ["remoteWorker", "remoteAnchor"]
             .iter()
             .any(|key| fields.get(*key) == Some(&Value::Bool(true)))

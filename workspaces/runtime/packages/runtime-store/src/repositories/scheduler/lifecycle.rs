@@ -2833,9 +2833,9 @@ pub(super) fn transport_continuation_allowed(agent: &AgentRecord) -> bool {
 
 pub(super) fn continuation_allowed(agent: &AgentRecord) -> bool {
     !agent.is_deleted()
+        && agent.account_transfer_id.value().is_none()
         && ![
             "nativeFailureHold",
-            "accountTransferId",
             "workspaceOperation",
             "contextRepairWait",
         ]
@@ -3301,6 +3301,12 @@ mod tests;
 
 #[cfg(test)]
 mod account_scope_tests {
+    #[test]
+    fn typed_transfer_pointer_blocks_continuation() {
+        let agent: crate::AgentRecord = serde_json::from_str(r#"{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"accountTransferId":"move"}"#).unwrap();
+        assert!(!super::continuation_allowed(&agent));
+    }
+
     #[test]
     fn clearing_account_hold_restores_prior_error_and_hold() {
         let mut agent: crate::AgentRecord = serde_json::from_str(

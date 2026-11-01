@@ -52,6 +52,9 @@ pub enum MovingTransferActions {
 )]
 pub enum AccountTransferProgress {
     None,
+    Unreadable {
+        reason: String,
+    },
     Waiting {
         id: String,
         target_account_key: crate::account_key::AccountKey,

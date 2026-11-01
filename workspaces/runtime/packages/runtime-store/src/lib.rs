@@ -56,6 +56,7 @@ pub mod stored_text_dictionary;
 pub mod supervisor_journal;
 pub mod terminal_output;
 pub mod text_blobs;
+pub mod transfer_record;
 pub mod vm_work_intent;
 pub mod wal_backup;
 mod write_alert;

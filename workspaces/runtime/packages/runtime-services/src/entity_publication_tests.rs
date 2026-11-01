@@ -11,6 +11,20 @@ use studio_runtime_store::{AgentRecord, AgentRepository, StoreError};
 const CHAT: &str = "published-chat";
 
 #[tokio::test]
+async fn unreadable_summary_keeps_agent_and_exposes_reason() {
+    let (_dir, store) = store().await;
+    seed_chat(
+        &store,
+        chat(json!({"accountTransfer":{"kind":"unreadable","reason":"Unknown field"}})),
+    )
+    .await;
+    let view = chat_view(&store, CHAT);
+    assert_eq!(view["id"], CHAT);
+    assert_eq!(view["accountTransferProgress"]["kind"], "unreadable");
+    assert_eq!(view["accountTransferProgress"]["reason"], "Unknown field");
+}
+
+#[tokio::test]
 async fn startup_recovers_agent_with_legacy_accounts_projection() {
     let dir = tempfile::tempdir().unwrap();
     let store = studio_runtime_store::RuntimeStore::open(Some(dir.path()))
@@ -232,6 +246,32 @@ async fn worker_status_changes_publish_lead_team_counts() {
 }
 
 #[tokio::test]
+async fn blocked_summary_without_pointer_offers_cancel() {
+    let (_dir, store) = store().await;
+    let op = json!({"id":"move","leadId":CHAT,"targetAccountKey":"target",
+        "status":"pending","created":1.0,"members":{"published-chat":{
+            "phase":"blocked","sourceAccountKey":"default","lazy":true,
+            "error":"History unavailable"}}});
+    store
+        .transaction(move |tx| {
+            studio_runtime_store::AccountTransferRepository::put(tx, "move", &op.to_string())
+        })
+        .await
+        .unwrap();
+    seed_chat(
+        &store,
+        chat(json!({"accountTransfer":{
+        "id":"move","targetAccountKey":"target","status":"pending","movingNow":0,
+        "canRetry":true,"blocked":[{"id":CHAT,"reason":"History unavailable"}]}})),
+    )
+    .await;
+    assert_eq!(
+        chat_view(&store, CHAT)["accountTransferProgress"]["actions"],
+        "retry_cancel"
+    );
+}
+
+#[tokio::test]
 async fn legacy_blocked_summary_offers_cancel_when_operation_allows_it() {
     let (_dir, store) = store().await;
     let op = json!({"id":"move","leadId":CHAT,"targetAccountKey":"target",
@@ -253,6 +293,48 @@ async fn legacy_blocked_summary_offers_cancel_when_operation_allows_it() {
     .await;
     let view = chat_view(&store, CHAT);
     assert_eq!(view["accountTransferProgress"]["actions"], "retry_cancel");
+}
+
+#[tokio::test]
+async fn unknown_transfer_field_reports_unreadable_without_hiding_lead() {
+    let (_dir, store) = store().await;
+    let operation = json!({"id":"move","leadId":CHAT,"targetAccountKey":"target",
+        "status":"pending","created":1.0,"members":{"published-chat":{
+            "phase":"waiting","sourceAccountKey":"default","lazy":false,
+            "unexpectedField":"unsupported"}}});
+    store
+        .transaction(move |tx| {
+            tx.execute(
+                "INSERT INTO runtime_account_transfers(id,record) VALUES('move',?1)",
+                [operation.to_string()],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    seed_chat(
+        &store,
+        chat(json!({"accountTransferId":"move","accountTransfer":{
+        "id":"move","targetAccountKey":"target","status":"pending","movingNow":0}})),
+    )
+    .await;
+    let view = chat_view(&store, CHAT);
+    assert_eq!(view["id"], CHAT);
+    assert_eq!(view["accountTransferProgress"]["kind"], "unreadable");
+    assert!(
+        view["accountTransferProgress"]["reason"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty())
+    );
+    store.transaction(|tx| {
+        tx.execute("UPDATE runtime_agents SET record=json_remove(record,'$.accountTransfer') WHERE id=?1", [CHAT])?;
+        Ok(())
+    }).await.unwrap();
+    assert_eq!(
+        chat_view(&store, CHAT)["accountTransferProgress"]["kind"],
+        "unreadable",
+        "a transfer pointer alone still validates the operation"
+    );
 }
 
 #[tokio::test]

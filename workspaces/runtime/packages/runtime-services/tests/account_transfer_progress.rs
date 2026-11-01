@@ -102,7 +102,9 @@ async fn unknown_transfer_operation_keeps_the_native_admission_hold() {
     store
         .transaction(|tx| {
             let mut row = AgentRepository::get(tx, &AgentId::from("lead"))?.expect("lead");
-            row.extra.insert("accountTransferId".into(), json!(OP));
+            row.account_transfer_id = studio_runtime_schema::queue_command::Field::Value(
+                OP.to_owned().try_into().unwrap(),
+            );
             AgentRepository::put(tx, &row)
         })
         .await

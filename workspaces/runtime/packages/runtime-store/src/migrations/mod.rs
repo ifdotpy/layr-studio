@@ -60,6 +60,9 @@ mod m2026_11_01_project_context;
 mod m2026_11_01_project_revisions;
 mod m2026_11_01_rate_limit_view;
 mod m2026_11_01_work_detail_policy;
+mod m2026_11_01_transfer_operations;
+mod m2026_11_01_transfer_pointers;
+mod m2026_11_01_transfer_summary;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -931,6 +934,36 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_01_account_projection::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-typed-transfer-summary",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent account transfer summaries",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_transfer_summary::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-typed-transfer-pointers",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent account transfer pointers and lazy state",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_transfer_pointers::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-typed-transfer-operations",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Account transfer operation records",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_transfer_operations::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {
