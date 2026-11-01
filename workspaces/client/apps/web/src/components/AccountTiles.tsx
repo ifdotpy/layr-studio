@@ -9,7 +9,6 @@ import { Badge, Radio, SegmentedControl, Tooltip } from "@mantine/core";
 import { Check, Sparkles } from "lucide-react";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { ActionButton } from "./ui/primitives";
-import { useAccountLimits } from "../usage/useAccountLimits";
 import {
   accountLimits,
   type AccountLimitsSnapshot,
@@ -176,9 +175,7 @@ export function accountLimitView(
   const matching = accountLimits(limits, account.id, account.accountId);
   const error = matching?.data ? null : matching?.error || null;
   const matchingProjection =
-    matching && projection && matching.at === projection.observation.at
-      ? projection.projection
-      : null;
+    matching && projection ? projection.projection : null;
   const state = accountBuckets(matchingProjection?.buckets, now);
   return {
     limits: matching,
@@ -195,15 +192,10 @@ export type AccountLimitView = ReturnType<typeof accountLimitView>;
 /** The limits of one account on the server of the surrounding scope. */
 export function useAccountLimitView(
   account: LimitAccount,
-  { read = true, signedInOnly = true } = {},
+  { signedInOnly = true } = {},
 ) {
-  const limits = useAccountLimits(
-    account.id,
-    account.accountId,
-    read &&
-      (!signedInOnly || account.status === GeneratedApiAccountStatus.ready),
-  );
   const projection = useAccountLimitProjection(account);
+  const limits = projection?.observation ?? null;
   return accountLimitView(
     account,
     limits,

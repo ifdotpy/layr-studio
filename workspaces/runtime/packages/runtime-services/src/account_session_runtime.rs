@@ -2609,7 +2609,7 @@ mod limits_runtime_tests {
     }
 
     #[tokio::test]
-    async fn timestamp_only_limits_keep_sync_sequence_and_refresh_observation() {
+    async fn timestamp_only_limits_publish_and_refresh_observation() {
         let (f, _, _) = fixture([], false).await;
         let first = update(&f, 1, 50);
         let mut repeated = first.clone();
@@ -2621,15 +2621,27 @@ mod limits_runtime_tests {
             &store.test_reader().unwrap(),
         )
         .unwrap();
-        assert!(!f.runtime.ingest_limits(repeated.clone()).await.unwrap());
+        assert!(f.runtime.ingest_limits(repeated.clone()).await.unwrap());
         let after = studio_runtime_store::SyncDocumentsRepository::entity_sequence(
             &store.test_reader().unwrap(),
         )
         .unwrap();
-        assert_eq!(
-            after, before,
-            "timestamp-only observations must not publish sync changes"
+        assert!(
+            after > before,
+            "timestamp-only observations must publish sync changes"
         );
+        let raw: String = store
+            .test_reader()
+            .unwrap()
+            .query_row(
+                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let envelope: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(envelope["value"]["observation"]["at"], repeated.observed_at);
+        assert!(envelope["value"]["projection"]["runway"]["computedAt"].is_number());
         assert_eq!(
             f.runtime.limits_snapshot("default").unwrap()["at"],
             repeated.observed_at

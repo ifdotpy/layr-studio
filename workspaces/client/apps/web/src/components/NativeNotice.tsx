@@ -2,7 +2,6 @@ import { AgentStatus as GeneratedApiAgentStatus } from "../generated/api.ts";
 import { useEffect, useState } from "react";
 import { displayError, errorDetails } from "../errorPresentation";
 import { currentCapacityRetry } from "../capacityRetry";
-import { useLimitEligibility } from "../usage/useLimitEligibility";
 import { limitRecovery } from "../usage/limitRecovery";
 import CapacityRetry from "./CapacityRetry";
 import LimitRecoveryNotice from "./LimitRecoveryNotice";
@@ -88,7 +87,7 @@ export function NativeError({
     const timer = setInterval(() => setNow(Date.now() / 1000), 1000);
     return () => clearInterval(timer);
   }, [limits]);
-  const modelLimits = useLimitEligibility(agent, limits ?? null);
+  const modelLimits = limits ?? null;
   const recovery = limitRecovery(agent, modelLimits, now);
   const usageResume = agent.usageResume;
   const authResume =

@@ -10,7 +10,6 @@ import {
 import type { components } from "../generated/api";
 import { AccountCapacityView, type Account } from "../components/Accounts";
 import type { AccountLimitsSnapshot } from "../usage/accountUsage";
-import { useAccountLimits } from "../usage/useAccountLimits";
 import { ServerServicesProvider, useServerSync } from "./ServerServicesContext";
 import type { ServerAccount } from "./navigation";
 import type { ServerServices } from "./serverServices";
@@ -158,12 +157,8 @@ function SourceReading({
   source: AccountSource;
   onReading: (serverId: string, reading: ReadingValue) => void;
 }) {
-  const limits = useAccountLimits(
-    source.account.id,
-    source.account.accountId,
-    source.account.status === AccountStatus.ready,
-  );
   const projection = useAccountLimitProjection(source.account);
+  const limits = projection?.observation ?? null;
   const report = useRef(onReading);
   report.current = onReading;
   useEffect(() => {

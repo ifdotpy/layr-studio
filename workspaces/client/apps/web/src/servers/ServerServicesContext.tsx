@@ -8,7 +8,6 @@ import { serverLocalStorage } from "./storage";
 import * as defaultFileActions from "../fileActions";
 import * as defaultFileDialogs from "../native/fileDialogs";
 import { watchResourceReads } from "../sync/subscriptions/reads";
-import * as defaultAccountLimits from "../usage/accountUsage";
 import * as defaultActivity from "./activity";
 import { useSyncedDrafts } from "../sync/drafts";
 import * as defaultOutbox from "../sync/send";
@@ -85,9 +84,6 @@ export function useServerDrafts() {
 
 export const useServerActivityScope = () =>
   useServerServices()?.activity ?? defaultActivity;
-
-export const useServerAccountLimits = () =>
-  useServerServices()?.accountLimits ?? defaultAccountLimits;
 
 export const useServerResourceReads = () =>
   useServerServices()?.watchResourceReads ?? watchResourceReads;

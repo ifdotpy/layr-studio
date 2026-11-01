@@ -87,5 +87,5 @@ test("the projection is scoped to its observation and expires at the server dead
   expect(
     accountLimitView(account(), reading({ at: 101 }), 200, true, view)
       .remaining,
-  ).toBeNull();
+  ).toBe(33);
 });

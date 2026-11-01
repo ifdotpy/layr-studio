@@ -27,17 +27,32 @@ pub(super) fn apply(tx: &Transaction<'_>, now: f64) -> StoreResult<()> {
     }
     let rows = {
         let mut query = tx.prepare(
-            "SELECT id,payload FROM sync_entities WHERE collection='rateLimit' AND deleted=0",
+            "SELECT id,typeof(payload),substr(CAST(payload AS BLOB),1,?1),length(CAST(payload AS BLOB)) FROM sync_entities WHERE collection='rateLimit' AND deleted=0",
         )?;
-        let rows = query.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
-        })?;
+        let rows = query.query_map(
+            [crate::account_state::MAX_PERSISTED_DOCUMENT_BYTES as i64 + 1],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<Vec<u8>>>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                ))
+            },
+        )?;
         rows.collect::<Result<Vec<_>, _>>()?
     };
-    for (id, payload) in rows {
+    for (id, storage_type, payload, length) in rows {
         let entity = payload
             .as_deref()
-            .and_then(|payload| serde_json::from_str::<Entity<'_>>(payload).ok());
+            .filter(|bytes| {
+                crate::account_state::persisted_document_within_bounds(bytes)
+                    && storage_type == "text"
+                    && length.is_some_and(|length| {
+                        length <= crate::account_state::MAX_PERSISTED_DOCUMENT_BYTES as i64
+                    })
+            })
+            .and_then(|bytes| serde_json::from_slice::<Entity<'_>>(bytes).ok());
         let valid = entity
             .as_ref()
             .filter(|entity| entity.collection == "rateLimit" && entity.id == id);
@@ -111,6 +126,26 @@ mod tests {
             [r#"{"collection":"rateLimit","id":"bad","value":{"accountKey":"other"}}"#],
         )
         .unwrap();
+        db.execute(
+            "INSERT INTO sync_entities VALUES('rateLimit','blob',3,'old',x'ff',0)",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO sync_entities VALUES('rateLimit','utf8',4,'old',CAST(x'ff' AS TEXT),0)",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO sync_entities VALUES('rateLimit','json',5,'old','{',0)",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO sync_entities VALUES('rateLimit','validblob',6,'old',CAST(?1 AS BLOB),0)",
+            [r#"{"collection":"rateLimit","id":"validblob","value":{"accountKey":"validblob"}}"#],
+        )
+        .unwrap();
         let tx = db.transaction().unwrap();
         super::apply(&tx, 100.0).unwrap();
         let (deleted, bad_seq): (i64, i64) = tx
@@ -120,6 +155,24 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
+        let blob_deleted: i64 = tx
+            .query_row(
+                "SELECT deleted FROM sync_entities WHERE id='blob'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(blob_deleted, 1);
+        for id in ["utf8", "json", "validblob"] {
+            let deleted: i64 = tx
+                .query_row(
+                    "SELECT deleted FROM sync_entities WHERE id=?1",
+                    [id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(deleted, 1, "{id}");
+        }
         assert_eq!(deleted, 1);
         assert!(bad_seq > 2);
         let (seq, raw): (i64, String) = tx

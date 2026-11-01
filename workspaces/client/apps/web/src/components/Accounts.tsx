@@ -269,18 +269,16 @@ function AccountNameEditor({
 
 export function AccountCapacity({
   account,
-  opened,
   card = false,
   extraDetails,
   facts,
 }: {
   account: Account;
-  opened: boolean;
   card?: boolean;
   extraDetails?: ReactNode;
   facts?: ReactNode;
 }) {
-  const view = useAccountLimitView(account, { read: opened });
+  const view = useAccountLimitView(account);
   if (account.status !== GeneratedApiAccountStatus.ready && !card) return null;
   return (
     <AccountCapacityView
@@ -1399,9 +1397,6 @@ export default function Accounts({
                             <AccountCapacity
                               card
                               account={account}
-                              opened={
-                                !account.disconnected && (managerOnly || opened)
-                              }
                               facts={
                                 <dl className="account-facts">
                                   <dt>Email</dt>

@@ -31,7 +31,6 @@ import {
 } from "lucide-react";
 import type { Agent, Snapshot } from "../types";
 import { errorText, type GetResult } from "../api";
-import { useLimitEligibility } from "../usage/useLimitEligibility";
 import { limitRecovery } from "../usage/limitRecovery";
 import LimitRecoveryNotice from "./LimitRecoveryNotice";
 import { useServerSync } from "../servers/ServerServicesContext";
@@ -386,7 +385,7 @@ export default function Usage({
     fallbackKey,
     currentAccount?.accountId,
   );
-  const modelLimits = useLimitEligibility(agent, currentLimits);
+  const modelLimits = currentLimits;
   const selectedLimits =
     selectedAccountKey === fallbackKey ? modelLimits : limits;
   const selectedRecovery = limitRecovery(accountAgent, selectedLimits, now);
