@@ -1979,6 +1979,811 @@ mod tests {
         );
     }
 
+<<<<<<< head
+||||||| base
+    struct BatchWitness;
+    impl ReceiptFamilyMigration for BatchWitness {
+        fn id(&self) -> &'static str {
+            "2026-10-28-receipts-batch-witness"
+        }
+        fn prepare(&self, _: &Transaction<'_>, _: i64) -> receipt_migration_contract::Result<()> {
+            Ok(())
+        }
+        fn move_batch(
+            &self,
+            tx: &Transaction<'_>,
+            source: &str,
+            checkpoint: &MigrationCheckpoint,
+        ) -> receipt_migration_contract::Result<MigrationCheckpoint> {
+            #[derive(serde::Deserialize, serde::Serialize)]
+            struct Reply {
+                index: i64,
+                #[serde(default, skip_serializing_if = "Option::is_none")]
+                padding: Option<String>,
+            }
+            let rows = receipt_migration_contract::read_receipt_batch(tx, source, checkpoint, "1")?;
+            let mut next = checkpoint.clone();
+            next.status = if rows.is_empty() {
+                MigrationStatus::Complete
+            } else {
+                MigrationStatus::Running
+            };
+            for row in rows {
+                if row.signature != "known" {
+                    return Err(receipt_migration_contract::unclassifiable(
+                        source,
+                        &row.id,
+                        &row.signature,
+                    ));
+                }
+                let reply: Reply = row.json(source)?;
+                receipt_migration_contract::import_result(
+                    tx,
+                    &row.id,
+                    &row.signature,
+                    &crate::request_results::ResultEnvelope {
+                        actor: None,
+                        reply,
+                        references: vec![],
+                    },
+                    next.cutover_ms,
+                )?;
+                receipt_migration_contract::delete_source(tx, source, row.rowid)?;
+                next.cursor = row.rowid;
+            }
+            Ok(next)
+        }
+        fn finish(&self, _: &Transaction<'_>) -> receipt_migration_contract::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn receipt_batch_fixture(path: &Path, count: i64) -> Connection {
+        let mut db = Connection::open(path).expect("database");
+        crate::sqlite_durability::configure_writer(&db).expect("WAL");
+        let tx = db.transaction().expect("fixture transaction");
+        receipt_migration_contract::prepare_schema(&tx).expect("targets");
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_operation_receipts(id TEXT PRIMARY KEY,signature TEXT,result TEXT)").expect("source");
+        for index in 1..=count {
+            tx.execute(
+                "INSERT INTO runtime_operation_receipts VALUES(?1,'known',?2)",
+                rusqlite::params![
+                    format!("request-{index}"),
+                    serde_json::json!({"index":index}).to_string()
+                ],
+            )
+            .expect("old row");
+        }
+        tx.commit().expect("fixture committed");
+        db
+    }
+
+    #[test]
+    fn receipt_cutover_batch_crashes_preserve_evidence_and_resume_exactly() {
+        let family = ReceiptMigration {
+            family: &BatchWitness,
+            sources: &["runtime_operation_receipts"],
+        };
+        // Prepare, four move commits (500/500/1/empty), finish: before and after each.
+        for crash in 0..12 {
+            let root = tempfile::tempdir().expect("fixture");
+            let path = root.path().join("canvas.sqlite3");
+            let mut db = receipt_batch_fixture(&path, 1001);
+            let mut boundary = 0;
+            let result = run_receipt_family(&mut db, &family, &mut |_, _, _| {
+                let at = boundary;
+                boundary += 1;
+                if at == crash {
+                    Err(StoreError::RecordContract("injected process interruption"))
+                } else {
+                    Ok(())
+                }
+            });
+            assert!(result.is_err(), "boundary {crash}");
+            let evidence:i64=db.query_row("SELECT (SELECT count(*) FROM runtime_operation_receipts)+(SELECT count(*) FROM request_results)",[],|row|row.get(0)).expect("evidence");
+            assert_eq!(
+                evidence, 1001,
+                "source deletion never outruns destination at {crash}"
+            );
+            drop(db);
+            let mut db = Connection::open(&path).expect("restart");
+            crate::sqlite_durability::configure_writer(&db).expect("WAL");
+            run_receipt_family(&mut db, &family, &mut |_, _, _| Ok(())).expect("resume");
+            let results: Vec<(String, String, String, i64)> = db
+                .prepare("SELECT id,signature,result,created FROM request_results ORDER BY id")
+                .expect("results")
+                .query_map([], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })
+                .expect("rows")
+                .collect::<rusqlite::Result<_>>()
+                .expect("read");
+            assert_eq!(results.len(), 1001);
+            assert!(results.iter().all(|row| row.3 == results[0].3));
+            let drop_migration = ReceiptMigration {
+                family: &m2026_10_28_receipts_drop_old_tables::Family,
+                sources: &[],
+            };
+            run_receipt_family(&mut db, &drop_migration, &mut |_, _, _| Ok(()))
+                .expect("drop old sources");
+            drop(db);
+            let mut db = Connection::open(&path).expect("second open");
+            run_receipt_family(&mut db, &family, &mut |_, _, _| {
+                panic!("completed family must not execute again")
+            })
+            .expect("completed");
+            let after: Vec<(String, String, String, i64)> = db
+                .prepare("SELECT id,signature,result,created FROM request_results ORDER BY id")
+                .expect("results")
+                .query_map([], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })
+                .expect("rows")
+                .collect::<rusqlite::Result<_>>()
+                .expect("read");
+            assert_eq!(after, results);
+            assert!(
+                !crate::schema::table_exists(&db, "runtime_operation_receipts").expect("schema")
+            );
+        }
+    }
+
+    #[test]
+    fn receipt_progress_reports_committed_cursor() {
+        let root = tempfile::tempdir().expect("fixture");
+        let mut db = receipt_batch_fixture(&root.path().join("canvas.sqlite3"), 1001);
+        let family = ReceiptMigration {
+            family: &BatchWitness,
+            sources: &["runtime_operation_receipts"],
+        };
+        let positions = std::sync::Mutex::new(Vec::new());
+        let result = run_receipt_family_progress(
+            &mut db,
+            &family,
+            &mut |phase, boundary, cursor| {
+                if phase == ReceiptMigrationPhase::Move
+                    && boundary == CommitBoundary::Before
+                    && cursor > 500
+                {
+                    return Err(StoreError::RecordContract("interrupt second batch"));
+                }
+                Ok(())
+            },
+            Some(&|progress| positions.lock().expect("positions").push(progress)),
+        );
+        assert!(result.is_err());
+        let positions = positions.lock().expect("positions");
+        assert_eq!(positions.len(), 2);
+        assert_eq!(positions[0].done, 0);
+        assert_eq!(positions[1].done, 500);
+        assert_eq!(positions[1].total, 1001);
+        assert_eq!(
+            positions[1].id,
+            "2026-10-28-receipts-batch-witness:runtime_operation_receipts"
+        );
+    }
+
+    #[test]
+    fn receipt_cutover_drop_crashes_are_atomic_and_never_accept_leftover_rows() {
+        for boundary in [CommitBoundary::Before, CommitBoundary::After] {
+            let root = tempfile::tempdir().expect("fixture");
+            let path = root.path().join("canvas.sqlite3");
+            let mut db = receipt_batch_fixture(&path, 0);
+            let migration = ReceiptMigration {
+                family: &m2026_10_28_receipts_drop_old_tables::Family,
+                sources: &[],
+            };
+            assert!(
+                run_receipt_family(&mut db, &migration, &mut |phase, at, _| {
+                    if phase == ReceiptMigrationPhase::Finish && at == boundary {
+                        Err(StoreError::RecordContract("drop interrupted"))
+                    } else {
+                        Ok(())
+                    }
+                })
+                .is_err()
+            );
+            assert_eq!(
+                crate::schema::table_exists(&db, "runtime_operation_receipts").expect("schema"),
+                boundary == CommitBoundary::Before
+            );
+            drop(db);
+            let mut db = Connection::open(&path).expect("restart");
+            run_receipt_family(&mut db, &migration, &mut |_, _, _| Ok(())).expect("finish drop");
+            assert!(
+                !crate::schema::table_exists(&db, "runtime_operation_receipts").expect("schema")
+            );
+        }
+        let root = tempfile::tempdir().expect("fixture");
+        let mut db = receipt_batch_fixture(&root.path().join("canvas.sqlite3"), 1);
+        let migration = ReceiptMigration {
+            family: &m2026_10_28_receipts_drop_old_tables::Family,
+            sources: &[],
+        };
+        let error = run_receipt_family(&mut db, &migration, &mut |_, _, _| Ok(()))
+            .expect_err("leftover refuses drop");
+        let error = error.to_string();
+        assert!(
+            error.contains("runtime_operation_receipts")
+                && error.contains("request-1")
+                && error.contains("known"),
+            "{error}"
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM runtime_operation_receipts",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .expect("source"),
+            1
+        );
+    }
+
+    #[test]
+    fn receipt_cutover_low_space_preserves_oversized_source_and_resumes() {
+        let root = tempfile::tempdir().expect("fixture");
+        let mut db = receipt_batch_fixture(&root.path().join("canvas.sqlite3"), 1);
+        let oversized=serde_json::json!({"index":1,"padding":"x".repeat(receipt_migration_contract::MIGRATION_BATCH_BYTES+1)}).to_string();
+        db.execute(
+            "UPDATE runtime_operation_receipts SET result=?1",
+            [&oversized],
+        )
+        .expect("oversized source");
+        let pages: i64 = db
+            .pragma_query_value(None, "page_count", |row| row.get(0))
+            .expect("pages");
+        db.pragma_update(None, "max_page_count", pages)
+            .expect("finite disk budget");
+        let family = ReceiptMigration {
+            family: &BatchWitness,
+            sources: &["runtime_operation_receipts"],
+        };
+        let error = run_receipt_family(&mut db, &family, &mut |_, _, _| Ok(()))
+            .expect_err("destination cannot fit");
+        assert!(format!("{error:?}").contains("full"), "{error:?}");
+        let source: String = db
+            .query_row("SELECT result FROM runtime_operation_receipts", [], |row| {
+                row.get(0)
+            })
+            .expect("source survives");
+        assert_eq!(source, oversized);
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM request_results", [], |row| row
+                .get::<_, i64>(0))
+                .expect("results"),
+            0
+        );
+        db.pragma_update(None, "max_page_count", pages * 4)
+            .expect("space restored");
+        run_receipt_family(&mut db, &family, &mut |_, _, _| Ok(()))
+            .expect("one oversized row resumes");
+        let result: String = db
+            .query_row("SELECT result FROM request_results", [], |row| row.get(0))
+            .expect("exact result");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&result).expect("envelope")["reply"],
+            serde_json::from_str::<serde_json::Value>(&oversized).expect("source")
+        );
+    }
+
+    #[test]
+    fn receipt_cutover_startup_error_names_unclassifiable_row_in_display() {
+        let error = failure(
+            "2026-10-28-receipts-batch-witness",
+            MigrationTarget::Canvas,
+            MigrationPhase::Apply,
+            MigrationRollbackOutcome::RolledBack,
+            receipt_error(&receipt_migration_contract::unclassifiable(
+                "source-table",
+                "source-key",
+                "source-signature",
+            )),
+        );
+        let shown = error.to_string();
+        for expected in ["source-table", "source-key", "source-signature"] {
+            assert!(
+                shown.contains(expected),
+                "operator startup error must name {expected}: {shown}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn retired_sqlite_drop_fault_rolls_back_each_target() {
+        let root = tempfile::tempdir().expect("state");
+        drop(
+            crate::RuntimeStore::open(Some(root.path()))
+                .await
+                .expect("fresh"),
+        );
+        for (file, target, setup, denied, restored) in [
+            (
+                "canvas.sqlite3",
+                MigrationTarget::Canvas,
+                "CREATE TABLE runtime_turn_item_links_v1(id TEXT); CREATE TABLE runtime_budget_usage(id TEXT); INSERT INTO runtime_turn_item_links_v1 VALUES('old'); CREATE TRIGGER runtime_turn_item_link_delete_v1 AFTER DELETE ON runtime_items BEGIN DELETE FROM runtime_turn_item_links_v1; END;",
+                "runtime_budget_usage",
+                "runtime_turn_item_links_v1",
+            ),
+            (
+                "analytics.sqlite3",
+                MigrationTarget::Analytics,
+                "CREATE TABLE analytics_cost_changes_v1(id TEXT); CREATE TABLE analytics_cost_roots_v1(id TEXT); INSERT INTO analytics_cost_changes_v1 VALUES('old');",
+                "analytics_cost_roots_v1",
+                "analytics_cost_changes_v1",
+            ),
+        ] {
+            let mut db = Connection::open(root.path().join(file)).expect("database");
+            db.execute_batch(setup).expect("old objects");
+            let marker_table = if target == MigrationTarget::Canvas {
+                "sync_entity_meta"
+            } else {
+                "analytics_meta"
+            };
+            db.execute(
+                &format!("DELETE FROM {marker_table} WHERE key='migration_catalog'"),
+                [],
+            )
+            .expect("old catalog");
+            db.authorizer(Some(move |context: AuthContext<'_>| {
+                if matches!(context.action, AuthAction::DropTable { table_name } if table_name == denied) {
+                    Authorization::Deny
+                } else {
+                    Authorization::Allow
+                }
+            })).expect("fault");
+            let source =
+                Connection::open(root.path().join("canvas.sqlite3")).expect("canvas source");
+            let error = apply_target(
+                &mut db,
+                target,
+                &Accounts::new(),
+                SourceDatabase::Canvas(&source),
+            )
+            .expect_err("drop fails");
+            assert!(matches!(
+                error,
+                StoreError::Migration {
+                    phase: MigrationPhase::Apply,
+                    rollback: MigrationRollbackOutcome::RolledBack,
+                    ..
+                }
+            ));
+            db.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+                .expect("remove fault");
+            let count: i64 = db
+                .query_row(&format!("SELECT count(*) FROM {restored}"), [], |row| {
+                    row.get(0)
+                })
+                .expect("retired rows restored");
+            assert_eq!(count, 1);
+            if target == MigrationTarget::Canvas {
+                let exists: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='runtime_turn_item_link_delete_v1')", [], |row| row.get(0)).expect("trigger restored");
+                assert!(exists);
+            }
+        }
+    }
+
+=======
+    struct BatchWitness;
+    impl ReceiptFamilyMigration for BatchWitness {
+        fn id(&self) -> &'static str {
+            "2026-10-28-receipts-batch-witness"
+        }
+        fn prepare(&self, _: &Transaction<'_>, _: i64) -> receipt_migration_contract::Result<()> {
+            Ok(())
+        }
+        fn move_batch(
+            &self,
+            tx: &Transaction<'_>,
+            source: &str,
+            checkpoint: &MigrationCheckpoint,
+        ) -> receipt_migration_contract::Result<MigrationCheckpoint> {
+            #[derive(serde::Deserialize, serde::Serialize)]
+            struct Reply {
+                index: i64,
+                #[serde(default, skip_serializing_if = "Option::is_none")]
+                padding: Option<String>,
+            }
+            let rows = receipt_migration_contract::read_receipt_batch(tx, source, checkpoint, "1")?;
+            let mut next = checkpoint.clone();
+            next.status = if rows.is_empty() {
+                MigrationStatus::Complete
+            } else {
+                MigrationStatus::Running
+            };
+            for row in rows {
+                if row.signature != "known" {
+                    return Err(receipt_migration_contract::unclassifiable(
+                        source,
+                        &row.id,
+                        &row.signature,
+                    ));
+                }
+                let reply: Reply = row.json(source)?;
+                receipt_migration_contract::import_result(
+                    tx,
+                    &row.id,
+                    &row.signature,
+                    &crate::request_results::ResultEnvelope {
+                        actor: None,
+                        reply,
+                        references: vec![],
+                    },
+                    next.cutover_ms,
+                )?;
+                receipt_migration_contract::delete_source(tx, source, row.rowid)?;
+                next.cursor = row.rowid;
+            }
+            Ok(next)
+        }
+        fn finish(&self, _: &Transaction<'_>) -> receipt_migration_contract::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn receipt_batch_fixture(path: &Path, count: i64) -> Connection {
+        let mut db = Connection::open(path).expect("database");
+        crate::sqlite_durability::configure_writer(&db).expect("WAL");
+        let tx = db.transaction().expect("fixture transaction");
+        receipt_migration_contract::prepare_schema(&tx).expect("targets");
+        tx.execute_batch("CREATE TABLE IF NOT EXISTS runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_operation_receipts(id TEXT PRIMARY KEY,signature TEXT,result TEXT)").expect("source");
+        for index in 1..=count {
+            tx.execute(
+                "INSERT INTO runtime_operation_receipts VALUES(?1,'known',?2)",
+                rusqlite::params![
+                    format!("request-{index}"),
+                    serde_json::json!({"index":index}).to_string()
+                ],
+            )
+            .expect("old row");
+        }
+        tx.commit().expect("fixture committed");
+        db
+    }
+
+    #[test]
+    fn receipt_cutover_batch_crashes_preserve_evidence_and_resume_exactly() {
+        let family = ReceiptMigration {
+            family: &BatchWitness,
+            sources: &["runtime_operation_receipts"],
+        };
+        // Prepare, four move commits (500/500/1/empty), finish: before and after each.
+        for crash in 0..12 {
+            let root = tempfile::tempdir().expect("fixture");
+            let path = root.path().join("canvas.sqlite3");
+            let mut db = receipt_batch_fixture(&path, 1001);
+            let mut boundary = 0;
+            let result = run_receipt_family(&mut db, &family, &mut |_, _, _| {
+                let at = boundary;
+                boundary += 1;
+                if at == crash {
+                    Err(StoreError::RecordContract("injected process interruption"))
+                } else {
+                    Ok(())
+                }
+            });
+            assert!(result.is_err(), "boundary {crash}");
+            let evidence:i64=db.query_row("SELECT (SELECT count(*) FROM runtime_operation_receipts)+(SELECT count(*) FROM request_results)",[],|row|row.get(0)).expect("evidence");
+            assert_eq!(
+                evidence, 1001,
+                "source deletion never outruns destination at {crash}"
+            );
+            drop(db);
+            let mut db = Connection::open(&path).expect("restart");
+            crate::sqlite_durability::configure_writer(&db).expect("WAL");
+            run_receipt_family(&mut db, &family, &mut |_, _, _| Ok(())).expect("resume");
+            let results: Vec<(String, String, String, i64)> = db
+                .prepare("SELECT id,signature,result,created FROM request_results ORDER BY id")
+                .expect("results")
+                .query_map([], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })
+                .expect("rows")
+                .collect::<rusqlite::Result<_>>()
+                .expect("read");
+            assert_eq!(results.len(), 1001);
+            assert!(results.iter().all(|row| row.3 == results[0].3));
+            let drop_migration = ReceiptMigration {
+                family: &m2026_10_28_receipts_drop_old_tables::Family,
+                sources: &[],
+            };
+            run_receipt_family(&mut db, &drop_migration, &mut |_, _, _| Ok(()))
+                .expect("drop old sources");
+            drop(db);
+            let mut db = Connection::open(&path).expect("second open");
+            run_receipt_family(&mut db, &family, &mut |_, _, _| {
+                panic!("completed family must not execute again")
+            })
+            .expect("completed");
+            let after: Vec<(String, String, String, i64)> = db
+                .prepare("SELECT id,signature,result,created FROM request_results ORDER BY id")
+                .expect("results")
+                .query_map([], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })
+                .expect("rows")
+                .collect::<rusqlite::Result<_>>()
+                .expect("read");
+            assert_eq!(after, results);
+            assert!(
+                !crate::schema::table_exists(&db, "runtime_operation_receipts").expect("schema")
+            );
+        }
+    }
+
+    #[test]
+    fn receipt_unclassifiable_row_moves_to_quarantine_and_migration_continues() {
+        let root = tempfile::tempdir().expect("fixture");
+        let mut db = receipt_batch_fixture(&root.path().join("canvas.sqlite3"), 3);
+        db.execute(
+            "UPDATE runtime_operation_receipts SET signature='old' WHERE id='request-2'",
+            [],
+        )
+        .expect("old shape");
+        let family = ReceiptMigration {
+            family: &BatchWitness,
+            sources: &["runtime_operation_receipts"],
+        };
+        run_receipt_family(&mut db, &family, &mut |_, _, _| Ok(()))
+            .expect("unclassifiable row is quarantined, not fatal");
+        let imported: Vec<String> = db
+            .prepare("SELECT id FROM request_results ORDER BY id")
+            .expect("results")
+            .query_map([], |row| row.get(0))
+            .expect("rows")
+            .collect::<rusqlite::Result<_>>()
+            .expect("read");
+        assert_eq!(imported, ["request-1", "request-3"]);
+        let quarantined: Vec<String> = db
+            .prepare("SELECT id FROM quarantine_runtime_operation_receipts ORDER BY id")
+            .expect("quarantine")
+            .query_map([], |row| row.get(0))
+            .expect("rows")
+            .collect::<rusqlite::Result<_>>()
+            .expect("read");
+        assert_eq!(quarantined, ["request-2"]);
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM runtime_operation_receipts WHERE id='request-2'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .expect("source"),
+            0
+        );
+    }
+
+    #[test]
+    fn receipt_progress_reports_committed_cursor() {
+        let root = tempfile::tempdir().expect("fixture");
+        let mut db = receipt_batch_fixture(&root.path().join("canvas.sqlite3"), 1001);
+        let family = ReceiptMigration {
+            family: &BatchWitness,
+            sources: &["runtime_operation_receipts"],
+        };
+        let positions = std::sync::Mutex::new(Vec::new());
+        let result = run_receipt_family_progress(
+            &mut db,
+            &family,
+            &mut |phase, boundary, cursor| {
+                if phase == ReceiptMigrationPhase::Move
+                    && boundary == CommitBoundary::Before
+                    && cursor > 500
+                {
+                    return Err(StoreError::RecordContract("interrupt second batch"));
+                }
+                Ok(())
+            },
+            Some(&|progress| positions.lock().expect("positions").push(progress)),
+        );
+        assert!(result.is_err());
+        let positions = positions.lock().expect("positions");
+        assert_eq!(positions.len(), 2);
+        assert_eq!(positions[0].done, 0);
+        assert_eq!(positions[1].done, 500);
+        assert_eq!(positions[1].total, 1001);
+        assert_eq!(
+            positions[1].id,
+            "2026-10-28-receipts-batch-witness:runtime_operation_receipts"
+        );
+    }
+
+    #[test]
+    fn receipt_cutover_drop_crashes_are_atomic_and_quarantine_leftover_rows() {
+        for boundary in [CommitBoundary::Before, CommitBoundary::After] {
+            let root = tempfile::tempdir().expect("fixture");
+            let path = root.path().join("canvas.sqlite3");
+            let mut db = receipt_batch_fixture(&path, 0);
+            let migration = ReceiptMigration {
+                family: &m2026_10_28_receipts_drop_old_tables::Family,
+                sources: &[],
+            };
+            assert!(
+                run_receipt_family(&mut db, &migration, &mut |phase, at, _| {
+                    if phase == ReceiptMigrationPhase::Finish && at == boundary {
+                        Err(StoreError::RecordContract("drop interrupted"))
+                    } else {
+                        Ok(())
+                    }
+                })
+                .is_err()
+            );
+            assert_eq!(
+                crate::schema::table_exists(&db, "runtime_operation_receipts").expect("schema"),
+                boundary == CommitBoundary::Before
+            );
+            drop(db);
+            let mut db = Connection::open(&path).expect("restart");
+            run_receipt_family(&mut db, &migration, &mut |_, _, _| Ok(())).expect("finish drop");
+            assert!(
+                !crate::schema::table_exists(&db, "runtime_operation_receipts").expect("schema")
+            );
+        }
+        let root = tempfile::tempdir().expect("fixture");
+        let mut db = receipt_batch_fixture(&root.path().join("canvas.sqlite3"), 1);
+        let migration = ReceiptMigration {
+            family: &m2026_10_28_receipts_drop_old_tables::Family,
+            sources: &[],
+        };
+        run_receipt_family(&mut db, &migration, &mut |_, _, _| Ok(()))
+            .expect("leftover row is quarantined before the drop");
+        assert!(!crate::schema::table_exists(&db, "runtime_operation_receipts").expect("schema"));
+        let quarantined: Vec<(String, String)> = db
+            .prepare("SELECT id,signature FROM quarantine_runtime_operation_receipts")
+            .expect("quarantine")
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .expect("rows")
+            .collect::<rusqlite::Result<_>>()
+            .expect("read");
+        assert_eq!(quarantined, [("request-1".to_owned(), "known".to_owned())]);
+    }
+
+    #[test]
+    fn receipt_cutover_low_space_preserves_oversized_source_and_resumes() {
+        let root = tempfile::tempdir().expect("fixture");
+        let mut db = receipt_batch_fixture(&root.path().join("canvas.sqlite3"), 1);
+        let oversized=serde_json::json!({"index":1,"padding":"x".repeat(receipt_migration_contract::MIGRATION_BATCH_BYTES+1)}).to_string();
+        db.execute(
+            "UPDATE runtime_operation_receipts SET result=?1",
+            [&oversized],
+        )
+        .expect("oversized source");
+        let pages: i64 = db
+            .pragma_query_value(None, "page_count", |row| row.get(0))
+            .expect("pages");
+        db.pragma_update(None, "max_page_count", pages)
+            .expect("finite disk budget");
+        let family = ReceiptMigration {
+            family: &BatchWitness,
+            sources: &["runtime_operation_receipts"],
+        };
+        let error = run_receipt_family(&mut db, &family, &mut |_, _, _| Ok(()))
+            .expect_err("destination cannot fit");
+        assert!(format!("{error:?}").contains("full"), "{error:?}");
+        let source: String = db
+            .query_row("SELECT result FROM runtime_operation_receipts", [], |row| {
+                row.get(0)
+            })
+            .expect("source survives");
+        assert_eq!(source, oversized);
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM request_results", [], |row| row
+                .get::<_, i64>(0))
+                .expect("results"),
+            0
+        );
+        db.pragma_update(None, "max_page_count", pages * 4)
+            .expect("space restored");
+        run_receipt_family(&mut db, &family, &mut |_, _, _| Ok(()))
+            .expect("one oversized row resumes");
+        let result: String = db
+            .query_row("SELECT result FROM request_results", [], |row| row.get(0))
+            .expect("exact result");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&result).expect("envelope")["reply"],
+            serde_json::from_str::<serde_json::Value>(&oversized).expect("source")
+        );
+    }
+
+    #[test]
+    fn receipt_cutover_startup_error_names_unclassifiable_row_in_display() {
+        let error = failure(
+            "2026-10-28-receipts-batch-witness",
+            MigrationTarget::Canvas,
+            MigrationPhase::Apply,
+            MigrationRollbackOutcome::RolledBack,
+            receipt_error(&receipt_migration_contract::unclassifiable(
+                "source-table",
+                "source-key",
+                "source-signature",
+            )),
+        );
+        let shown = error.to_string();
+        for expected in ["source-table", "source-key", "source-signature"] {
+            assert!(
+                shown.contains(expected),
+                "operator startup error must name {expected}: {shown}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn retired_sqlite_drop_fault_rolls_back_each_target() {
+        let root = tempfile::tempdir().expect("state");
+        drop(
+            crate::RuntimeStore::open(Some(root.path()))
+                .await
+                .expect("fresh"),
+        );
+        for (file, target, setup, denied, restored) in [
+            (
+                "canvas.sqlite3",
+                MigrationTarget::Canvas,
+                "CREATE TABLE runtime_turn_item_links_v1(id TEXT); CREATE TABLE runtime_budget_usage(id TEXT); INSERT INTO runtime_turn_item_links_v1 VALUES('old'); CREATE TRIGGER runtime_turn_item_link_delete_v1 AFTER DELETE ON runtime_items BEGIN DELETE FROM runtime_turn_item_links_v1; END;",
+                "runtime_budget_usage",
+                "runtime_turn_item_links_v1",
+            ),
+            (
+                "analytics.sqlite3",
+                MigrationTarget::Analytics,
+                "CREATE TABLE analytics_cost_changes_v1(id TEXT); CREATE TABLE analytics_cost_roots_v1(id TEXT); INSERT INTO analytics_cost_changes_v1 VALUES('old');",
+                "analytics_cost_roots_v1",
+                "analytics_cost_changes_v1",
+            ),
+        ] {
+            let mut db = Connection::open(root.path().join(file)).expect("database");
+            db.execute_batch(setup).expect("old objects");
+            let marker_table = if target == MigrationTarget::Canvas {
+                "sync_entity_meta"
+            } else {
+                "analytics_meta"
+            };
+            db.execute(
+                &format!("DELETE FROM {marker_table} WHERE key='migration_catalog'"),
+                [],
+            )
+            .expect("old catalog");
+            db.authorizer(Some(move |context: AuthContext<'_>| {
+                if matches!(context.action, AuthAction::DropTable { table_name } if table_name == denied) {
+                    Authorization::Deny
+                } else {
+                    Authorization::Allow
+                }
+            })).expect("fault");
+            let source =
+                Connection::open(root.path().join("canvas.sqlite3")).expect("canvas source");
+            let error = apply_target(
+                &mut db,
+                target,
+                &Accounts::new(),
+                SourceDatabase::Canvas(&source),
+            )
+            .expect_err("drop fails");
+            assert!(matches!(
+                error,
+                StoreError::Migration {
+                    phase: MigrationPhase::Apply,
+                    rollback: MigrationRollbackOutcome::RolledBack,
+                    ..
+                }
+            ));
+            db.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+                .expect("remove fault");
+            let count: i64 = db
+                .query_row(&format!("SELECT count(*) FROM {restored}"), [], |row| {
+                    row.get(0)
+                })
+                .expect("retired rows restored");
+            assert_eq!(count, 1);
+            if target == MigrationTarget::Canvas {
+                let exists: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='runtime_turn_item_link_delete_v1')", [], |row| row.get(0)).expect("trigger restored");
+                assert!(exists);
+            }
+        }
+    }
+
+>>>>>>> 163ad3a
     #[test]
     fn migration_catalog_has_real_unique_dates_sources_and_removal_rules() {
         let order = catalog().map(|entry| entry.id).collect::<Vec<_>>();
