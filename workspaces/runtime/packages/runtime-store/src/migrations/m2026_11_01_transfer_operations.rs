@@ -72,7 +72,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 reason,
                 original: None,
             })?;
-            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.accountTransfer',json(?2)) WHERE id=?1 AND json_valid(record) AND (?3='pending' OR json_extract(record,'$.accountTransfer.id')=?4)", params![lead, marker, status, id])?;
+            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.accountTransfer',json(?2)) WHERE id=?1 AND json_valid(record) AND (?3='pending' OR json_extract(record,'$.accountTransfer.id')=?4 OR json_extract(record,'$.accountTransferId')=?4)", params![lead, marker, status, id])?;
         }
     }
     Ok(())

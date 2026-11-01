@@ -1397,6 +1397,48 @@ mod request_tests {
             run_async(recover(&reopened, 11.0)).expect("held operation remains skipped"),
             0
         );
+        for status in [Value::Null, json!("future-status")] {
+            let (root, store) = store_with_agents();
+            run_async(store.transaction(|tx| {
+                tx.execute("UPDATE runtime_agents SET record=json_set(json_remove(record,'$.accountTransfer'),'$.accountTransferId','move') WHERE id='lead'", [])?;
+                Ok(())
+            })).unwrap();
+            drop(store);
+            let db = rusqlite::Connection::open(root.path().join("canvas.sqlite3")).unwrap();
+            let raw = json!({"id":"move","leadId":"lead","targetAccountKey":"target","targetProvider":"codex","status":status,"created":1,"members":{}}).to_string();
+            db.execute(
+                "INSERT INTO runtime_account_transfers(id,record) VALUES('move',?1)",
+                [raw],
+            )
+            .unwrap();
+            db.execute(
+                "DELETE FROM sync_entity_meta WHERE key='migration_catalog'",
+                [],
+            )
+            .unwrap();
+            drop(db);
+            let store = run_async(RuntimeStore::open(Some(root.path())))
+                .expect("store opens with held operation");
+            assert_eq!(run_async(recover(&store, 12.0)).unwrap(), 0);
+            assert!(
+                request(
+                    &store,
+                    "5a300f72-4ea6-4d30-8a0e-9b2c13c42285",
+                    "lead",
+                    "target",
+                    "team",
+                    "codex",
+                    13.0
+                )
+                .is_err(),
+                "a pointer-owned unreadable operation must block a new request"
+            );
+            assert_eq!(
+                stored(&store, "lead")["accountTransfer"]["kind"],
+                "unreadable"
+            );
+            assert_eq!(stored(&store, "lead")["accountTransferId"], "move");
+        }
     }
 
     #[test]
