@@ -42,12 +42,17 @@ fn binding(
         Some(provider),
     )? || record.in_flight != Some(true)
         || record.workspace_operation.is_some()
-        || ["executionMove", "lazyAccountTransfer", "accountTransferId"]
-            .iter()
-            .any(|key| fields.get(*key).is_some_and(|value| !value.is_null()))
-        || ["remoteWorker", "remoteAnchor"]
-            .iter()
-            .any(|key| fields.get(*key) == Some(&Value::Bool(true)))
+        || fields
+            .get("executionMove")
+            .is_some_and(|value| !value.is_null())
+        || fields
+            .get("lazyAccountTransfer")
+            .is_some_and(|value| !value.is_null())
+        || fields
+            .get("accountTransferId")
+            .is_some_and(|value| !value.is_null())
+        || fields.get("remoteWorker") == Some(&Value::Bool(true))
+        || fields.get("remoteAnchor") == Some(&Value::Bool(true))
         || record
             .execution_settings_account_key
             .value()

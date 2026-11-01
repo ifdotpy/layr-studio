@@ -2972,9 +2972,15 @@ impl Worker {
                         || row.auto_wake != Some(true)
                         || fields.get("nativeFailureHold") == Some(&json!(true))
                         || row.workspace_operation.is_some()
-                        || ["executionMove", "lazyAccountTransfer", "accountTransferId"]
-                            .iter()
-                            .any(|key| fields.get(*key).is_some_and(|value| !value.is_null()))
+                        || fields
+                            .get("executionMove")
+                            .is_some_and(|value| !value.is_null())
+                        || fields
+                            .get("lazyAccountTransfer")
+                            .is_some_and(|value| !value.is_null())
+                        || fields
+                            .get("accountTransferId")
+                            .is_some_and(|value| !value.is_null())
                         || row.cwd.as_deref() != Some(request.cwd.as_str())
                         || guest_home != request.guest_home
                         || row.thread_id.as_deref() != intent.thread_id.as_deref()

@@ -780,14 +780,10 @@ fn same_workspace_activity(current: &WorkspaceSnapshot, expected: &WorkspaceSnap
         && current.agent.deleted_at == expected.agent.deleted_at
         && current.agent.execution_mode == expected.agent.execution_mode
         && current.agent.workspace_mode == expected.agent.workspace_mode
-        && [
-            "lastCompletedTurn",
-            "workspaceOperation",
-            "workspaceReservationId",
-            "checkpointHistoryHead",
-        ]
-        .iter()
-        .all(|key| current.agent.extra.get(*key) == expected.agent.extra.get(*key))
+        && current.agent.last_completed_turn == expected.agent.last_completed_turn
+        && current.agent.workspace_operation == expected.agent.workspace_operation
+        && current.agent.workspace_reservation_id == expected.agent.workspace_reservation_id
+        && current.agent.checkpoint_history_head == expected.agent.checkpoint_history_head
         && same_parent_boundary(
             current.parent_checkpoint.as_ref(),
             expected.parent_checkpoint.as_ref(),
@@ -997,7 +993,9 @@ fn update_object(
         return Err(invalid_record(table, id));
     }
     if table == crate::agent_volatile::AGENT_TABLE {
-        crate::agent_volatile::update(transaction, id, record)?;
+        let agent =
+            AgentRecord::from_value(record.clone()).map_err(|_| invalid_record(table, id))?;
+        Table::<AgentRecord>::new(transaction).update(&agent)?;
         return Ok(());
     }
     transaction.execute(
@@ -1026,7 +1024,9 @@ fn insert_object(
         return Ok(());
     }
     if table == crate::agent_volatile::AGENT_TABLE {
-        crate::agent_volatile::put(transaction, id, record, true)?;
+        let agent =
+            AgentRecord::from_value(record.clone()).map_err(|_| invalid_record(table, id))?;
+        Table::<AgentRecord>::new(transaction).insert_new(&agent)?;
         return Ok(());
     }
     transaction.execute(
@@ -1192,6 +1192,24 @@ mod tests {
         metadata_update.agent.name = Some("renamed target agent".into());
         metadata_update.agents[1].record["name"] = json!("renamed unrelated agent");
         assert!(same_workspace_activity(&metadata_update, &snapshot));
+
+        for field in [
+            "lastCompletedTurn",
+            "workspaceOperation",
+            "workspaceReservationId",
+            "checkpointHistoryHead",
+        ] {
+            let mut changed = snapshot.clone();
+            let value = serde::Deserialize::deserialize(json!("changed")).unwrap();
+            match field {
+                "lastCompletedTurn" => changed.agent.last_completed_turn = value,
+                "workspaceOperation" => changed.agent.workspace_operation = value,
+                "workspaceReservationId" => changed.agent.workspace_reservation_id = value,
+                "checkpointHistoryHead" => changed.agent.checkpoint_history_head = value,
+                _ => unreachable!(),
+            }
+            assert!(!same_workspace_activity(&changed, &snapshot), "{field}");
+        }
 
         metadata_update.agent.epoch = 1;
         assert!(!same_workspace_activity(&metadata_update, &snapshot));

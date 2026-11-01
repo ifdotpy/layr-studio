@@ -1375,8 +1375,8 @@ pub(crate) fn notify_parent_of_failed_turn(
     let Some(agent) = AgentRepository::get(tx, &AgentId::from(agent_id))? else {
         return Ok(());
     };
-    let retrying = |key: &str| {
-        agent.extra.get(key).is_some_and(|retry| {
+    let retrying = |value: Option<&Value>| {
+        value.is_some_and(|retry| {
             retry.get("turnId") == Some(&json!(turn_id))
                 && matches!(
                     retry.get("status").and_then(Value::as_str),
@@ -1389,8 +1389,8 @@ pub(crate) fn notify_parent_of_failed_turn(
         || agent.last_completed_turn.value().map(String::as_str) != Some(turn_id)
         || agent.auto_wake != Some(true)
         || !reports_turns(&agent)
-        || retrying("capacityRetry")
-        || retrying("usageResume")
+        || retrying(agent.extra.get("capacityRetry"))
+        || retrying(agent.extra.get("usageResume"))
     {
         return Ok(());
     }
@@ -1399,10 +1399,9 @@ pub(crate) fn notify_parent_of_failed_turn(
 
 /// A live child of the current turn epoch: not deleted, archived or moving.
 fn reports_turns(agent: &AgentRecord) -> bool {
-    let flag = |key: &str| studio_runtime_store::truthy(agent.extra.get(key));
     !agent.is_deleted()
         && agent.agent_archive.is_none()
-        && !flag("executionMove")
+        && !studio_runtime_store::truthy(agent.extra.get("executionMove"))
         && agent.turn_epoch == Some(agent.epoch)
 }
 

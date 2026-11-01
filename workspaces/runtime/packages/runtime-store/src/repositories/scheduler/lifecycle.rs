@@ -582,14 +582,13 @@ impl SchedulerRepository {
                 .as_ref()
                 .is_some_and(|tools| !tools.is_empty())
             || agent.native_safety_buffering.is_some()
-            || [
-                "manualRecoveryDeliveryHold",
-                "authWait",
-                "capacityRetry",
-                "usageResume",
-            ]
-            .iter()
-            .any(|key| agent.extra.get(*key).is_some_and(truthy))
+            || agent
+                .extra
+                .get("manualRecoveryDeliveryHold")
+                .is_some_and(truthy)
+            || agent.extra.get("authWait").is_some_and(truthy)
+            || agent.extra.get("capacityRetry").is_some_and(truthy)
+            || agent.extra.get("usageResume").is_some_and(truthy)
             || agent.start_outcome_hold.is_some()
             || agent
                 .native_release
@@ -917,7 +916,6 @@ impl SchedulerRepository {
         let Some(mut agent) = load_agent(transaction, id)? else {
             return Ok(None);
         };
-        let flag = |key: &str| agent.extra.get(key).is_some_and(truthy);
         let Some(previous) = agent.start_attempt.as_ref() else {
             return Ok(None);
         };
@@ -938,9 +936,9 @@ impl SchedulerRepository {
         if !idle
             || agent.is_deleted()
             || agent.in_flight == Some(true)
-            || flag("nativeFailureHold")
-            || flag("remoteWorker")
-            || flag("remoteAnchor")
+            || agent.extra.get("nativeFailureHold").is_some_and(truthy)
+            || agent.extra.get("remoteWorker").is_some_and(truthy)
+            || agent.extra.get("remoteAnchor").is_some_and(truthy)
             || agent.auto_wake != Some(true)
             || agent.thread_id.as_deref() != Some(thread_id)
             || agent.account_key != account_key
@@ -2823,13 +2821,9 @@ pub(super) fn continuation_allowed(agent: &AgentRecord) -> bool {
             .workspace_operation
             .value()
             .is_some_and(|value| !value.is_empty())
-        && ![
-            "nativeFailureHold",
-            "accountTransferId",
-            "contextRepairWait",
-        ]
-        .iter()
-        .any(|key| agent.extra.get(*key).is_some_and(truthy))
+        && !agent.extra.get("nativeFailureHold").is_some_and(truthy)
+        && !agent.extra.get("accountTransferId").is_some_and(truthy)
+        && !agent.extra.get("contextRepairWait").is_some_and(truthy)
         && !matches!(
             agent
                 .extra

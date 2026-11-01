@@ -212,7 +212,9 @@ fn put(db: &Transaction<'_>, table: &'static str, value: &Value) -> Result<(), P
         .ok_or(ProjectsError::Invalid("record ID missing"))?;
     records::validate(table, id, value.clone())?;
     if table == studio_runtime_store::agent_volatile::AGENT_TABLE {
-        studio_runtime_store::agent_volatile::update(db, id, value)?;
+        let agent = studio_runtime_store::AgentRecord::from_value(value.clone())
+            .map_err(studio_runtime_store::StoreError::from)?;
+        studio_runtime_store::Table::<studio_runtime_store::AgentRecord>::new(db).update(&agent)?;
         return Ok(());
     }
     db.execute(

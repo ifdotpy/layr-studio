@@ -432,15 +432,14 @@ impl SchedulerRepository {
                 .disconnect_recovery
                 .as_deref()
                 .is_some_and(|value| !value.is_empty())
-            || [
-                "capacityRetry",
-                "usageResume",
-                "manualRecoveryDeliveryHold",
-                "remoteWorker",
-                "remoteAnchor",
-            ]
-            .iter()
-            .any(|key| agent.extra.get(*key).is_some_and(truthy))
+            || agent.extra.get("capacityRetry").is_some_and(truthy)
+            || agent.extra.get("usageResume").is_some_and(truthy)
+            || agent
+                .extra
+                .get("manualRecoveryDeliveryHold")
+                .is_some_and(truthy)
+            || agent.extra.get("remoteWorker").is_some_and(truthy)
+            || agent.extra.get("remoteAnchor").is_some_and(truthy)
             || agent
                 .native_release
                 .as_ref()

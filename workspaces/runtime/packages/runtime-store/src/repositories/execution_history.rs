@@ -827,7 +827,7 @@ fn merge_recovery(run: &mut ExecutionRun, agent: &AgentRecord) {
     }
     {
         let key = "connectionRecovery";
-        if let Some(marker) = agent.extra.get(key)
+        if let Some(marker) = agent.extra.get("connectionRecovery")
             && marker.get("turnId").is_none_or(|v| {
                 v.is_null()
                     || v.as_str()
