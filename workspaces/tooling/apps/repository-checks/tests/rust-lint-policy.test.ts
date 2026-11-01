@@ -385,4 +385,31 @@ test("build scripts print relative rerun-if-changed paths", () => {
       [],
       name,
     );
+  // Generated modules must not name absolute paths: a warm cache reuses them in other lines.
+  const absoluteModule =
+    /#\[path\s*=\s*"(\/|[A-Za-z]:[\\/])|include(_str|_bytes)?!\(\s*"(\/|[A-Za-z]:[\\/])/;
+  const walkOut = (directory: string): string[] =>
+    readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) return walkOut(full);
+      return entry.name.endsWith(".rs") &&
+        readFileSync(full, "utf8")
+          .split("\n")
+          .some((line) => absoluteModule.test(line))
+        ? [path.relative(builds, full)]
+        : [];
+    });
+  for (const { name } of newest.values()) {
+    const out = path.join(builds, name, "out");
+    assert.deepEqual(existsSync(out) ? walkOut(out) : [], [], name);
+  }
+  assert.ok(
+    absoluteModule.test('#[path = "/x/y.rs"] pub mod t;'),
+    "known bad module rejected",
+  );
+  assert.ok(
+    !absoluteModule.test(
+      'pub mod t { include!(concat!(env!("OUT_DIR"), "/t.rs")); }',
+    ),
+  );
 });

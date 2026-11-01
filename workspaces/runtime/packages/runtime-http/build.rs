@@ -333,8 +333,22 @@ fn main() -> Result<(), Box<dyn Error>> {
             .and_then(|stem| stem.to_str())
             .ok_or("generated module has an invalid filename")?;
         modules.push(module.to_owned());
-        module_lines.push(format!("#[path = {:?}] pub mod {module};", path));
-        fs::write(path, file.content)?;
+        // `include!` rejects inner attributes: hoist `#![x]` to `#[x]` on the module and
+        // drop the `//!` header. The path stays relative to OUT_DIR, not an absolute path.
+        let mut attributes = String::new();
+        let mut body = String::new();
+        for line in file.content.lines() {
+            if let Some(attribute) = line.strip_prefix("#![") {
+                attributes.push_str(&format!("#[{attribute} "));
+            } else if !line.starts_with("//!") {
+                body.push_str(line);
+                body.push('\n');
+            }
+        }
+        module_lines.push(format!(
+            "{attributes}pub mod {module} {{ include!(concat!(env!(\"OUT_DIR\"), \"/generated/{module}.rs\")); }}"
+        ));
+        fs::write(path, body)?;
     }
     if modules.iter().any(|module| module == "types") {
         module_lines.push("pub use types::*;".to_owned());
