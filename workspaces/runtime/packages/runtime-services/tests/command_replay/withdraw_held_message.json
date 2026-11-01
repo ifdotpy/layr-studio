@@ -1,0 +1,7 @@
+{
+  "records": {"tables": {"runtime_agents": [
+    {"id": "chat", "rootId": "chat", "parentId": null, "epoch": 4, "status": "running", "compactions": 0, "name": "Chat", "isLead": true, "autoWake": true, "inFlight": true, "turnId": "turn-2", "created": 1.0}
+  ]}},
+  "action": {"action": "stop", "target": "chat", "descendants": false},
+  "now": 1234567.5
+}

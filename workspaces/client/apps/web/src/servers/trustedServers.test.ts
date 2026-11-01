@@ -1,3 +1,4 @@
+import { AccessClientStatus } from "../generated/api";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { DiscoveredServer, DiscoverySnapshot } from "./discoveryModel";
 import type { StudioServer } from "./registry";
@@ -27,7 +28,7 @@ function peer(
     id,
     label: id,
     origin: `https://${id}.tail.ts.net`,
-    status: "paired",
+    status: AccessClientStatus.paired,
     lastSeen: null,
     paired: true,
     publicKey: `key-${id}`,

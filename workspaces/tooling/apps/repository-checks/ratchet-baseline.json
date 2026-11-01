@@ -2256,36 +2256,7 @@
       "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
     }
   ],
-  "rust-json-dispatch": [
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "1c4d758b9bd9fcfceae3212230a564e2b45f3f6e04aadf5a006afc54d0bc7250:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "2777bfa57ef26c386ab69cd571e66b5f4e7b3c34227432c5ebe91baac3579e11:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "8748a083474924d49a0d2a482645e17541d97a86458b2db14e292644549a7fe6:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "8748a083474924d49a0d2a482645e17541d97a86458b2db14e292644549a7fe6:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "983734895f5842d88b4927d904d74356a8451972a088767c0b78c9fb74751481:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "ed390076af1c67b8fe5d2f95e2ebb5f0375d0bc72b4c13dd82648bb2c289abf8:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "ed390076af1c67b8fe5d2f95e2ebb5f0375d0bc72b4c13dd82648bb2c289abf8:1"
-    }
-  ],
+  "rust-json-dispatch": [],
   "rust-json-string-roundtrip": [],
   "rust-json-value-roundtrip": [
     {

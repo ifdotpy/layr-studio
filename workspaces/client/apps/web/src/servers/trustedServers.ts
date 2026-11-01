@@ -1,3 +1,4 @@
+import { AccessClientStatus } from "../generated/api";
 import type { DiscoveredServer, DiscoverySnapshot } from "./discoveryModel";
 import { trustedServer } from "./browserCredentials";
 import { excludedServers } from "./excludedServers";
@@ -12,7 +13,7 @@ export function trustedCandidates(
   return peers.filter(
     (peer) =>
       peer.paired &&
-      peer.status !== "revoked" &&
+      peer.status !== AccessClientStatus.revoked &&
       !excluded.has(peer.id) &&
       !saved.some((row) => row.id === peer.id),
   );

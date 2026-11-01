@@ -56,8 +56,8 @@ test("direct screens keep overlapping chat drafts and sends with their owner", a
     await expect.poll(() => remote.writes.length).toBe(1);
     expect(required(remote.writes[0]).text).toBe("remote draft");
     expect(local.writes).toHaveLength(0);
-    // Drafts are kept in memory and posted to the server (f130a46d3). A failed
-    // post is the save failure the user must see.
+    // Drafts are kept in the unsent input buffer and posted to the server. A
+    // failed post is the save failure the user must see.
     await page.route("**/api/sync/drafts", (route) =>
       route.fulfill({
         status: 503,

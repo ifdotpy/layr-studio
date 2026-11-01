@@ -54,6 +54,7 @@ mod m2026_10_31_sync_project;
 mod m2026_10_31_transfer_history_pages;
 mod m2026_10_31_work_projection;
 mod m2026_10_31_work_records;
+mod m2026_11_01_access_invite_created;
 mod m2026_11_01_account_projection;
 mod m2026_11_01_agent_capacity;
 mod m2026_11_01_agent_naming;
@@ -1164,6 +1165,7 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
+<<<<<<< head
             id: "2026-11-01-outbox-cancelled",
             introduced: NOVEMBER_1,
             target: MigrationTarget::Canvas,
@@ -1171,6 +1173,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_01_outbox_cancelled::apply(c.transaction),
+||||||| base
+=======
+            id: "2026-11-01-access-invite-created",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Invitations without valid creation timestamps",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_access_invite_created::apply(c.transaction),
+>>>>>>> origin/main
     },
     &SqlMigration {
         definition: MigrationDefinition {

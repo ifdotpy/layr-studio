@@ -237,6 +237,8 @@ mod tests {
     use serde_json::{Value, json};
     use std::sync::Arc;
     use studio_runtime_schema::persistence::{REQUEST_RESULT_TTL_MS, RequestIdentity};
+    use studio_runtime_services::agent_lifecycle_runtime::LifecyclePorts;
+    use studio_runtime_services::commands::CommandError;
     use studio_runtime_services::principal::{Grant, Principal};
     use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore};
     use tower::ServiceExt;
@@ -822,6 +824,7 @@ mod tests {
             .expect("count")
     }
 
+<<<<<<< head
     /// Seed an outbox entry of `kind` for the agent `workspace` with `status`.
     async fn seed_entry(store: &RuntimeStore, kind: &'static str, status: &'static str) {
         store
@@ -962,6 +965,130 @@ mod tests {
         .await;
         assert_eq!(status, 403);
         assert_eq!(entry_row(&store).await.0, "unknown");
+||||||| base
+=======
+    /// Records the lifecycle effects that a command stages in its transaction.
+    struct StagingPorts(
+        Arc<
+            std::sync::Mutex<
+                Vec<studio_runtime_services::agent_lifecycle_runtime::LifecycleEffectKind>,
+            >,
+        >,
+    );
+
+    impl LifecyclePorts for StagingPorts {
+        fn stage(
+            &self,
+            _: &rusqlite::Transaction<'_>,
+            effect: &studio_runtime_services::agent_lifecycle_runtime::LifecycleEffect,
+        ) -> Result<(), studio_runtime_services::agent_management::ManagementError> {
+            self.0.lock().expect("staged effects").push(effect.kind());
+            Ok(())
+        }
+
+        fn committed(
+            &self,
+        ) -> studio_runtime_services::agent_lifecycle_runtime::LifecycleCommitFuture<'_> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    /// The owner withdraws message `a`, which a running turn of `workspace` holds.
+    async fn hold_a_and_withdraw_it(
+        store: &RuntimeStore,
+        staged: Arc<
+            std::sync::Mutex<
+                Vec<studio_runtime_services::agent_lifecycle_runtime::LifecycleEffectKind>,
+            >,
+        >,
+        forced_rollback: bool,
+    ) -> Result<studio_runtime_services::commands::Executed, CommandError> {
+        use studio_runtime_services::commands::execute_sync;
+        store
+            .transaction(|tx| {
+                tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.status','running','$.inFlight',json('true'),'$.turnId','turn-1') WHERE id='workspace'", [])?;
+                tx.execute("UPDATE runtime_events SET status='reserved' WHERE id='a'", [])?;
+                Ok(())
+            })
+            .await
+            .expect("hold a");
+        // The owner's command id must be a UUIDv7, as the HTTP edge requires.
+        let id = RequestIdentity::issue_root();
+        let request: studio_runtime_schema::command::CommandRequest =
+            serde_json::from_value(withdraw(&id, 1, "a")).expect("request");
+        let now = now_ms();
+        store
+            .transaction_with_error(move |tx| {
+                let ports = StagingPorts(staged);
+                let dynamic: &dyn LifecyclePorts = &ports;
+                let executed = execute_sync(
+                    tx,
+                    &Principal::Owner,
+                    &request,
+                    now,
+                    now as f64 / 1000.0,
+                    Some(dynamic),
+                )?;
+                if forced_rollback {
+                    return Err(CommandError::Invalid("forced rollback"));
+                }
+                Ok(executed)
+            })
+            .await
+    }
+
+    #[tokio::test]
+    async fn withdrawing_a_held_message_writes_the_draft_and_stages_the_stop_in_one_commit() {
+        use studio_runtime_services::agent_lifecycle_runtime::LifecycleEffectKind;
+        let (_app, store, _directory) = app_with_queue().await;
+        let staged = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let executed = hold_a_and_withdraw_it(&store, staged.clone(), false)
+            .await
+            .expect("withdraw held");
+        assert!(!executed.replayed);
+        assert_eq!(executed.reference.id, "a");
+        assert_eq!(
+            *staged.lock().expect("staged effects"),
+            vec![LifecycleEffectKind::Interrupt]
+        );
+        assert_eq!(status_of(&store, "a").await, "cancelled");
+        let draft: String = store
+            .transaction(|tx| {
+                Ok(tx.query_row(
+                    "SELECT payload FROM sync_documents WHERE scope='drafts' AND id='server:withdraw:workspace'",
+                    [],
+                    |row| row.get(0),
+                )?)
+            })
+            .await
+            .expect("server draft");
+        let draft: Value = serde_json::from_str(&draft).expect("draft JSON");
+        assert_eq!(draft["text"], "A");
+    }
+
+    #[tokio::test]
+    async fn a_held_withdraw_that_rolls_back_leaves_the_message_the_draft_and_the_turn_as_they_were()
+     {
+        let (_app, store, _directory) = app_with_queue().await;
+        let staged = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let outcome = hold_a_and_withdraw_it(&store, staged, true).await;
+        assert!(matches!(
+            outcome,
+            Err(CommandError::Invalid("forced rollback"))
+        ));
+        assert_eq!(status_of(&store, "a").await, "reserved");
+        let drafts: i64 = store
+            .transaction(|tx| {
+                Ok(tx.query_row(
+                    "SELECT count(*) FROM sync_documents WHERE scope='drafts' AND id='server:withdraw:workspace'",
+                    [],
+                    |row| row.get(0),
+                )?)
+            })
+            .await
+            .expect("draft count");
+        assert_eq!(drafts, 0);
+>>>>>>> origin/main
     }
 
     #[tokio::test]
