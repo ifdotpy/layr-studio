@@ -59,7 +59,7 @@ pub(crate) fn respond_with_app<R: Runtime>(
     // Keep generated script hashes/nonces, but grant neither IPC nor network
     // access to a server view. Its shell derives its owner from the live frame.
     let base = asset.csp_header.unwrap_or_else(|| {
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'".into()
+        "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'".into()
     });
     let mut directives: Vec<_> = base
         .split(';')
