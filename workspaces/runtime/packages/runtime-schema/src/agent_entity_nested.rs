@@ -72,6 +72,41 @@ pub enum AgentEntityDtoKind {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
+pub enum AgentEntityDtoEnvironment {
+    Host,
+    Linux,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentEntityDtoExecutionMode {
+    Vm,
+    Native,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentEntityDtoWorktreePreparation {
+    Waiting,
+    Preparing,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum AgentEntityDtoWorktree {
+    Boolean(bool),
+    String(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum AgentEntityDtoError {
+    NativeProviderError(crate::provider_errors::NativeProviderError),
+    String(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
 pub enum AgentMode {
     Multi,
     Single,
@@ -131,7 +166,49 @@ pub struct MovePointerDto {
     pub agent_id: Field<String>,
 }
 
-pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 8] {
+fn required_nullable<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    Option::<T>::deserialize(deserializer)
+}
+
+fn optional_nonnull<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkerDefaultsDto {
+    #[serde(deserialize_with = "required_nullable")]
+    pub model: Option<String>,
+    #[serde(deserialize_with = "required_nullable")]
+    pub effort: Option<String>,
+    pub fast_mode: bool,
+    #[serde(
+        default,
+        deserialize_with = "optional_nonnull",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "bool")]
+    pub daybreak_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<crate::account_key::AccountKey>")]
+    pub account_key: Field<crate::account_key::AccountKey>,
+    #[serde(
+        default,
+        deserialize_with = "optional_nonnull",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "crate::bounded_integer::BoundedInteger<1, 3>")]
+    pub delegation_depth: Option<crate::bounded_integer::BoundedInteger<1, 3>>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub cyber_access_program: Field<String>,
+}
+
+pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 9] {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
@@ -174,6 +251,46 @@ pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 8] {
     pointer["properties"]["move"]["title"] = "Move".into();
     let agent_id_type = pointer["properties"]["agentId"]["type"][0].clone();
     pointer["properties"]["agentId"] = serde_json::json!({"anyOf":[{"type":"null"},{"type":agent_id_type}],"default":null,"title":"Agentid"});
+    let mut defaults = WorkerDefaultsDto::json_schema(&mut generator).to_value();
+    defaults["title"] = "WorkerDefaultsDto".into();
+    for (name, title) in [
+        ("model", "Model"),
+        ("effort", "Effort"),
+        ("accountKey", "Accountkey"),
+        ("cyberAccessProgram", "Cyberaccessprogram"),
+    ] {
+        let property = &mut defaults["properties"][name];
+        let mut value = property.clone();
+        if let Some(types) = value["type"].as_array_mut() {
+            types.retain(|kind| kind != "null");
+            if types.len() == 1 {
+                value["type"] = types[0].clone();
+            }
+        }
+        *property = serde_json::json!({"anyOf":[{"type":"null"},value],"title":title});
+        if name == "accountKey" || name == "cyberAccessProgram" {
+            property["default"] = serde_json::Value::Null;
+        }
+    }
+    for (name, title, default) in [
+        ("fastMode", "Fastmode", None),
+        (
+            "daybreakEnabled",
+            "Daybreakenabled",
+            Some(serde_json::json!(false)),
+        ),
+        (
+            "delegationDepth",
+            "Delegationdepth",
+            Some(serde_json::json!(1)),
+        ),
+    ] {
+        let property = &mut defaults["properties"][name];
+        property["title"] = title.into();
+        if let Some(default) = default {
+            property["default"] = default;
+        }
+    }
     [
         ("AgentOverview", overview),
         ("AgentSource", source),
@@ -183,6 +300,7 @@ pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 8] {
         ("AgentNativeStatusValue", native_status),
         ("AgentEntityContextRepairWaitDto", repair),
         ("MovePointerDto", pointer),
+        ("WorkerDefaultsDto", defaults),
     ]
 }
 
@@ -205,11 +323,32 @@ mod tests {
     }
 
     #[test]
+    fn worker_defaults_reject_invalid_keys_and_missing_or_null_required_fields() {
+        let valid = json!({"model":null,"effort":null,"fastMode":false});
+        assert!(serde_json::from_value::<WorkerDefaultsDto>(valid.clone()).is_ok());
+        for invalid in [
+            json!({"effort":null,"fastMode":false}),
+            json!({"model":null,"effort":null,"fastMode":null}),
+            json!({"model":null,"effort":null,"fastMode":false,"accountKey":""}),
+            json!({"model":null,"effort":null,"fastMode":false,"daybreakEnabled":null}),
+            json!({"model":null,"effort":null,"fastMode":false,"delegationDepth":4}),
+        ] {
+            assert!(serde_json::from_value::<WorkerDefaultsDto>(invalid).is_err());
+        }
+    }
+
+    #[test]
     fn published_components_match_owners() {
         let document: serde_json::Value =
             serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
         for (name, schema) in schemas() {
-            assert_eq!(document["components"]["schemas"][name], schema, "{name}");
+            let mut published = document["components"]["schemas"][name].clone();
+            if name == "WorkerDefaultsDto" {
+                published["properties"]["accountKey"]["anyOf"][1]["minLength"] = 1.into();
+                published["properties"]["accountKey"]["anyOf"][1]["maxLength"] =
+                    crate::account_key::ACCOUNT_KEY_MAX_CHARS.into();
+            }
+            assert_eq!(published, schema, "{name}");
         }
     }
 }
