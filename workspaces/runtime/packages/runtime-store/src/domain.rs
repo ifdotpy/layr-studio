@@ -22,8 +22,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use strum::VariantNames;
 
+use crate::approvals;
 use crate::records::{AgentExecutionMode, AgentId, AgentStatus};
 use crate::{StoreError, StoreResult};
+use std::time::{SystemTime, UNIX_EPOCH};
+use studio_runtime_schema::approvals::{Timestamp, TurnId as ApprovalTurnId};
 
 pub const CHAT_TABLE: &str = "chats";
 pub const TURN_TABLE: &str = "turns";
@@ -612,6 +615,16 @@ fn finish_turn(connection: &Connection, turn: &TurnId, outcome: &str) -> StoreRe
     connection
         .prepare_cached("UPDATE turns SET state=?2,session=NULL WHERE id=?1")?
         .execute(params![turn.0, outcome])?;
+    close_turn_approvals(connection, &turn.0)
+}
+
+/// A turn ended: its open approvals close, and an answer in delivery becomes
+/// unknown (`approvals::turn_ended`).
+fn close_turn_approvals(connection: &Connection, turn: &str) -> StoreResult<()> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0.0, |elapsed| elapsed.as_secs_f64());
+    approvals::turn_ended(connection, &ApprovalTurnId(turn.to_owned()), Timestamp(now))?;
     Ok(())
 }
 
@@ -778,6 +791,14 @@ pub fn complete_turn(connection: &Connection, chat: &str, provider_turn: &str) -
              WHERE NOT EXISTS(SELECT 1 FROM turns WHERE chat=?1 AND provider_turn=?2)",
         )?
         .execute(params![chat, provider_turn, id])?;
+    let mut ids =
+        connection.prepare_cached("SELECT id FROM turns WHERE chat=?1 AND provider_turn=?2")?;
+    for turn in ids
+        .query_map([chat, provider_turn], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+    {
+        close_turn_approvals(connection, &turn)?;
+    }
     Ok(())
 }
 
@@ -1235,6 +1256,104 @@ mod tests {
             read_turns(&db, "c").unwrap()[0].state,
             TurnState::Interrupted
         );
+    }
+
+    fn open_approval(id: &str, turn: &str) -> approvals::NewApproval {
+        approvals::NewApproval {
+            id: studio_runtime_schema::approvals::ApprovalId(id.into()),
+            agent: studio_runtime_schema::approvals::AgentId("c".into()),
+            turn: Some(ApprovalTurnId(turn.into())),
+            epoch: None,
+            request: studio_runtime_schema::approvals::Request::Exec {
+                command: "ls".into(),
+                cwd: "/".into(),
+                reason: None,
+            },
+            delivery: None,
+            detail: studio_runtime_schema::approvals::Detail {
+                params: studio_runtime_schema::approvals::ProviderObject(Default::default()),
+                preview: None,
+                answer_error: None,
+                host_close_reason: None,
+            },
+            fire_at: None,
+        }
+    }
+
+    /// One chat turn with a pending and an answering approval. Returns the turn id.
+    fn turn_with_open_approvals(db: &Connection) -> String {
+        use studio_runtime_schema::approvals::{
+            Answer, ApprovalId, CommandId, Decision, Timestamp as At,
+        };
+        put(
+            db,
+            &agent(
+                "c",
+                json!({"status":"running","inFlight":true,"turnId":"p1","threadId":"th"}),
+            ),
+        );
+        let turn = read_turns(db, "c").unwrap()[0].id.0.clone();
+        approvals::create(db, open_approval("pending", &turn), At(1.0)).unwrap();
+        approvals::create(db, open_approval("answering", &turn), At(1.0)).unwrap();
+        approvals::answer(
+            db,
+            &ApprovalId("answering".into()),
+            Answer::Decision {
+                decision: Decision::Accept,
+            },
+            CommandId("cmd".into()),
+        )
+        .unwrap();
+        turn
+    }
+
+    #[test]
+    fn completing_a_turn_closes_its_pending_approvals_and_marks_answering_unknown() {
+        use studio_runtime_schema::approvals::{ApprovalId, ApprovalState, CloseReason};
+        let db = crate::fresh_state::test_canvas();
+        turn_with_open_approvals(&db);
+        complete_turn(&db, "c", "p1").unwrap();
+        let state = |id: &str| {
+            approvals::get(&db, &ApprovalId(id.into()))
+                .unwrap()
+                .unwrap()
+                .state
+        };
+        assert!(matches!(
+            state("pending"),
+            ApprovalState::Closed {
+                reason: CloseReason::TurnEnded,
+                ..
+            }
+        ));
+        assert!(matches!(state("answering"), ApprovalState::Unknown { .. }));
+    }
+
+    #[test]
+    fn an_interrupted_turn_closes_its_pending_approvals_and_marks_answering_unknown() {
+        use studio_runtime_schema::approvals::{ApprovalId, ApprovalState, CloseReason};
+        let db = crate::fresh_state::test_canvas();
+        turn_with_open_approvals(&db);
+        // A provider-less record ends the running turn as interrupted.
+        put(&db, &agent("c", json!({"threadId":"th"})));
+        assert_eq!(
+            read_turns(&db, "c").unwrap()[0].state,
+            TurnState::Interrupted
+        );
+        let state = |id: &str| {
+            approvals::get(&db, &ApprovalId(id.into()))
+                .unwrap()
+                .unwrap()
+                .state
+        };
+        assert!(matches!(
+            state("pending"),
+            ApprovalState::Closed {
+                reason: CloseReason::TurnEnded,
+                ..
+            }
+        ));
+        assert!(matches!(state("answering"), ApprovalState::Unknown { .. }));
     }
 
     #[test]
