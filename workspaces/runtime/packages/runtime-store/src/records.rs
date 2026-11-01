@@ -706,15 +706,11 @@ pub enum StoredTransferObject<T> {
     Unreadable(Value),
 }
 
-/// Complete defaults, a typed partial override, or an unreadable legacy value.
+/// Typed defaults or an unreadable legacy value.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum StoredWorkerDefaults {
     Known(
-        #[serde(deserialize_with = "deserialize_object")]
-        studio_runtime_schema::agent_entity_nested::WorkerDefaultsDto,
-    ),
-    Partial(
         #[serde(deserialize_with = "deserialize_object")]
         crate::transfer_record::TransferWorkerDefaults,
     ),
@@ -723,7 +719,7 @@ pub enum StoredWorkerDefaults {
 
 impl From<crate::transfer_record::TransferWorkerDefaults> for StoredWorkerDefaults {
     fn from(value: crate::transfer_record::TransferWorkerDefaults) -> Self {
-        Self::Partial(value)
+        Self::Known(value)
     }
 }
 
@@ -3740,7 +3736,7 @@ mod tests {
             "epoch":2, "status":"idle", "accountKey":"default", "workerDefaults":{"accountKey":"source"}}));
         assert!(matches!(
             record.worker_defaults.value(),
-            Some(super::StoredWorkerDefaults::Partial(_))
+            Some(super::StoredWorkerDefaults::Known(_))
         ));
         assert_eq!(
             record.value().get("workerDefaults"),
@@ -3764,7 +3760,7 @@ mod tests {
     fn worker_defaults_distinguish_known_and_legacy_values() {
         for (value, known) in [
             (json!({"model":"m","effort":null,"fastMode":false}), true),
-            (json!({"model":"legacy"}), false),
+            (json!({"model":"legacy"}), true),
             (
                 json!({"model":"m","effort":null,"fastMode":false,"future":42}),
                 false,

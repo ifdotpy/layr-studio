@@ -1157,10 +1157,7 @@ fn can_delegate(
         .worker_defaults
         .value()
         .and_then(|value| match value {
-            studio_runtime_store::StoredWorkerDefaults::Known(value) => {
-                value.delegation_depth.map(|depth| depth.get() as u64)
-            }
-            studio_runtime_store::StoredWorkerDefaults::Partial(value) => value
+            studio_runtime_store::StoredWorkerDefaults::Known(value) => value
                 .delegation_depth
                 .value()
                 .map(|depth| depth.get() as u64),

@@ -895,27 +895,11 @@ pub struct TransferWorkerDefaults {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub daybreak_enabled: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub account_key: Field<AccountKey>,
+    pub account_key: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub delegation_depth: Field<studio_runtime_schema::agent_entity_nested::WorkerDelegationDepth>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub cyber_access_program: Field<String>,
-}
-
-impl From<studio_runtime_schema::agent_entity_nested::WorkerDefaultsDto>
-    for TransferWorkerDefaults
-{
-    fn from(value: studio_runtime_schema::agent_entity_nested::WorkerDefaultsDto) -> Self {
-        Self {
-            model: value.model.map_or(Field::Null, Field::Value),
-            effort: value.effort.map_or(Field::Null, Field::Value),
-            fast_mode: Field::Value(value.fast_mode),
-            daybreak_enabled: value.daybreak_enabled.map_or(Field::Missing, Field::Value),
-            account_key: value.account_key,
-            delegation_depth: value.delegation_depth.map_or(Field::Missing, Field::Value),
-            cyber_access_program: value.cyber_access_program,
-        }
-    }
 }
 
 /// Stable identity of an account transfer, shared with its lazy hold.

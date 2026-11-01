@@ -1810,9 +1810,6 @@ pub fn typed_enroll(
             Field::Missing => Field::Missing,
             Field::Null => Field::Null,
             Field::Value(studio_runtime_store::StoredWorkerDefaults::Known(defaults)) => {
-                Field::Value(defaults.clone().into())
-            }
-            Field::Value(studio_runtime_store::StoredWorkerDefaults::Partial(defaults)) => {
                 Field::Value(defaults.clone())
             }
             Field::Value(studio_runtime_store::StoredWorkerDefaults::Unreadable(raw)) => {
