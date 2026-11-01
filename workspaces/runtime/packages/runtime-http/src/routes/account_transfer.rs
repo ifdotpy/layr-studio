@@ -29,13 +29,10 @@ pub(crate) fn routes() -> RouteGroup {
 }
 /// Maximum agent identity length for account transfer, in Unicode code points.
 const TRANSFER_AGENT_MAX_CHARS: usize = 200;
-/// Maximum account identity length for account transfer, in Unicode code points.
-const TRANSFER_ACCOUNT_MAX_CHARS: usize = 200;
 /// Maximum transfer request identity length, in Unicode code points.
 const TRANSFER_REQUEST_MAX_CHARS: usize = 200;
 type TransferAgent = studio_runtime_schema::bounded_text::BoundedText<1, TRANSFER_AGENT_MAX_CHARS>;
-type TransferAccount =
-    studio_runtime_schema::bounded_text::BoundedText<1, TRANSFER_ACCOUNT_MAX_CHARS>;
+type TransferAccount = studio_runtime_schema::account_key::AccountKey;
 type TransferRequestId =
     studio_runtime_schema::bounded_text::BoundedText<1, TRANSFER_REQUEST_MAX_CHARS>;
 
