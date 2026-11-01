@@ -11,18 +11,18 @@ it("closes the connection before deleting its database", async () => {
   });
   vi.stubGlobal("indexedDB", {
     open: () => {
-      const request = {
+      const request = Object.assign({} as IDBOpenDBRequest, {
         result: {
           close,
           transaction: () => {
-            const tx = {
+            const tx = Object.assign({} as IDBTransaction, {
               objectStore: () => ({ get: () => ({ result: undefined }) }),
-            } as unknown as IDBTransaction;
+            });
             queueMicrotask(() => tx.oncomplete?.(new Event("complete")));
             return tx;
           },
         },
-      } as unknown as IDBOpenDBRequest;
+      });
       queueMicrotask(() => request.onsuccess?.(new Event("success")));
       return request;
     },

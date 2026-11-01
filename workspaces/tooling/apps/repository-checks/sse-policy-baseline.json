@@ -201,6 +201,10 @@
   },
   {
     "file": "indexedDb.ts",
+    "callee": "indexedDB.deleteDatabase"
+  },
+  {
+    "file": "indexedDb.ts",
     "callee": "indexedDB.open"
   },
   {
