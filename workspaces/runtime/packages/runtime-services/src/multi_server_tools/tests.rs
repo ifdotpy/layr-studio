@@ -21,9 +21,9 @@ fn exec_environment_limit_counts_utf8_json_bytes() {
 #[test]
 fn export_request_keeps_canonical_wire_bytes() {
     let request = ExportRequest {
-        cwd: Some("/workspace".into()),
+        cwd: studio_runtime_schema::queue_command::Field::Value("/workspace".into()),
         branch: "main".into(),
-        known: vec!["abc".into(), "def".into()],
+        known: studio_runtime_schema::queue_command::Field::Value(vec!["abc".into(), "def".into()]),
     };
     let bytes = serde_json::to_vec(&request).expect("export request");
     let value: Value = serde_json::from_slice(&bytes).expect("wire payload");
@@ -246,7 +246,7 @@ impl MultiServerToolPort for ResumeFetching {
             run_git(destination, &["commit", "-q", "-m", "change local refs"]);
             assert_ne!(
                 run_git(destination, &["rev-parse", "HEAD"]),
-                self.input.as_ref().unwrap().known[0]
+                self.input.as_ref().unwrap().known.value().unwrap()[0]
             );
             self.store
                 .transaction(|tx| {
@@ -1208,9 +1208,12 @@ async fn fetching_reuses_original_export_inputs_and_missing_inputs_never_send() 
     run_git(&destination, &["add", "base.txt"]);
     run_git(&destination, &["commit", "-q", "-m", "base"]);
     let original = ExportRequest {
-        cwd: Some("/remote/original".into()),
+        cwd: studio_runtime_schema::queue_command::Field::Value("/remote/original".into()),
         branch: "worker".into(),
-        known: vec![run_git(&destination, &["rev-parse", "HEAD"])],
+        known: studio_runtime_schema::queue_command::Field::Value(vec![run_git(
+            &destination,
+            &["rev-parse", "HEAD"],
+        )]),
     };
     let mut worker = seed["worker"].clone();
     worker["remoteWorker"] = json!({"server":PEER});

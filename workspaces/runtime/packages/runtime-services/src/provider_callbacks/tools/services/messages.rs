@@ -9,7 +9,8 @@ use studio_runtime_schema::persistence::{DeliveryStatus, RecipientDelivery};
 fn message_signature(
     args: &crate::orchestration_worker::WorkerMessage,
 ) -> Result<String, CallbackError> {
-    Ok(studio_runtime_store::sha256_hex(&serde_json::to_vec(args)?))
+    let bytes = studio_runtime_schema::json_compat::python_json_serialized(args)?;
+    Ok(studio_runtime_store::sha256_hex(bytes.as_bytes()))
 }
 
 #[cfg(test)]
@@ -25,6 +26,17 @@ mod typed_message_tests {
         assert_eq!(
             super::message_signature(&first).unwrap(),
             super::message_signature(&retry).unwrap()
+        );
+    }
+
+    #[test]
+    fn message_signature_keeps_legacy_bytes() {
+        let body =
+            serde_json::from_str(r#"{"target":"parent","text":"雪","importance":"progress"}"#)
+                .unwrap();
+        assert_eq!(
+            super::message_signature(&body).unwrap(),
+            "5d0d49a2528bb748af443a88b542031e905182485fb2cb76bfbce21da95efefb"
         );
     }
 }
@@ -626,8 +638,7 @@ fn send_as_actor(
     }
     let recipients = admitted;
     let room_id = room.id.clone();
-    // Typed serialization is deterministic; retained pre-migration receipts
-    // may refuse a retry as a different signature.
+    // Preserve the original sorted, ASCII-escaped receipt identity.
     let signature = message_signature(args)?;
     let now_ms = chrono::Utc::now().timestamp_millis();
     if !broadcast

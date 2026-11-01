@@ -51,7 +51,7 @@ pub async fn peer_team_write(
         }
         TeamMutation::Delete(_) | TeamMutation::Move(_) => (None, Vec::new()),
     };
-    let signature = sha256_hex(&serde_json::to_vec(&body).map_err(StoreError::from)?);
+    let signature = peer_team_signature(&body)?;
     let key = format!("peer-team:{request_id}");
     let (prepared, path) = super::prepare_path(store.clone(), path_value, false).await?;
     store.transaction_with(move |tx| {
@@ -265,7 +265,7 @@ pub async fn reorder(
     {
         return Err(ProjectsError::Invalid("sidebar order is invalid"));
     }
-    // New typed requests use deterministic serde JSON; pre-deployment signatures can differ.
+    // Keep the existing receipt identity when request bodies are typed.
     let signature = sidebar_signature(&body)?;
     let key = format!("sidebar-order:{request_id}");
     let request_id = request_id.to_owned();
@@ -323,17 +323,39 @@ pub async fn reorder(
         .await
 }
 
+fn peer_team_signature(
+    body: &studio_runtime_schema::peer_team_ingress::TeamMutation,
+) -> Result<String, ProjectsError> {
+    operation_signature("peer-team", body)
+}
+
 fn sidebar_signature(
     body: &studio_runtime_schema::project_ingress::SidebarReorder,
 ) -> Result<String, ProjectsError> {
-    Ok(sha256_hex(
-        &serde_json::to_vec(body).map_err(StoreError::from)?,
-    ))
+    operation_signature("sidebar-order", body)
+}
+
+fn operation_signature(
+    operation: &str,
+    body: &impl serde::Serialize,
+) -> Result<String, ProjectsError> {
+    #[derive(serde::Serialize)]
+    struct SignedOperation<'a, T> {
+        operation: &'a str,
+        body: &'a T,
+    }
+    let bytes =
+        studio_runtime_schema::json_compat::python_json_compact_serialized(&SignedOperation {
+            operation,
+            body,
+        })
+        .map_err(StoreError::from)?;
+    Ok(sha256_hex(bytes.as_bytes()))
 }
 
 #[cfg(test)]
 mod sidebar_signature_tests {
-    use super::sidebar_signature;
+    use super::{peer_team_signature, sidebar_signature};
     use studio_runtime_schema::project_ingress::SidebarReorder;
 
     #[test]
@@ -348,6 +370,24 @@ mod sidebar_signature_tests {
         assert_ne!(
             sidebar_signature(&a).unwrap(),
             sidebar_signature(&changed).unwrap()
+        );
+    }
+
+    #[test]
+    fn peer_team_signature_keeps_legacy_bytes() {
+        let body = serde_json::from_str(r#"{"action":"delete","path":"/雪","expected_revision":1,"request_id":"r","team_id":"a"}"#).unwrap();
+        assert_eq!(
+            peer_team_signature(&body).unwrap(),
+            "bc5059bb0ff81794b0b058e3d29d06f81fff2ad19c7a4cca8f33e1c2b7d77c63"
+        );
+    }
+
+    #[test]
+    fn sidebar_signature_keeps_legacy_bytes() {
+        let body = serde_json::from_str(r#"{"action":"reorder","request_id":"r","expected_revision":1,"groups":{"b":["2"],"a":["1"]}}"#).unwrap();
+        assert_eq!(
+            sidebar_signature(&body).unwrap(),
+            "b253b17fedf5317dd24bcccca6f1d6eb2166326039b3f14fa442c55de2a17f14"
         );
     }
 }

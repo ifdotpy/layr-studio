@@ -146,6 +146,82 @@ pub enum OrchestrationCommand {
     DeviceTrust(Value),
 }
 
+/// Serialize only the action payload, retaining its original JSON presence.
+pub(crate) struct CommandPayload<'a>(pub &'a OrchestrationCommand);
+impl serde::Serialize for CommandPayload<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self.0 {
+            OrchestrationCommand::Event(value) => serde::Serialize::serialize(value, serializer),
+            OrchestrationCommand::Input(value) => serde::Serialize::serialize(value, serializer),
+            OrchestrationCommand::Message(value) => serde::Serialize::serialize(value, serializer),
+            OrchestrationCommand::MoveSend(value) => serde::Serialize::serialize(value, serializer),
+            OrchestrationCommand::LocationInfo(value) => {
+                serde::Serialize::serialize(value, serializer)
+            }
+            OrchestrationCommand::LocationMatches(value) => {
+                serde::Serialize::serialize(value, serializer)
+            }
+            OrchestrationCommand::Stop(value) => serde::Serialize::serialize(value, serializer),
+            OrchestrationCommand::ExecEvent(value) => {
+                serde::Serialize::serialize(value, serializer)
+            }
+            OrchestrationCommand::Projects(value) => serde::Serialize::serialize(value, serializer),
+            OrchestrationCommand::ProjectsChanged(value) => {
+                serde::Serialize::serialize(value, serializer)
+            }
+            OrchestrationCommand::Folders(value) => serde::Serialize::serialize(value, serializer),
+            OrchestrationCommand::Git(value) => serde::Serialize::serialize(value, serializer),
+            OrchestrationCommand::Export(value) => serde::Serialize::serialize(value, serializer),
+            OrchestrationCommand::Chunk(value) => serde::Serialize::serialize(value, serializer),
+            OrchestrationCommand::ExecRead(value) => serde::Serialize::serialize(value, serializer),
+            OrchestrationCommand::ExecInput(value) => {
+                serde::Serialize::serialize(value, serializer)
+            }
+            OrchestrationCommand::ExecCancel(value) => {
+                serde::Serialize::serialize(value, serializer)
+            }
+            OrchestrationCommand::Release(value) => serde::Serialize::serialize(value, serializer),
+            OrchestrationCommand::UpdateOffer(value) => {
+                serde::Serialize::serialize(value, serializer)
+            }
+            OrchestrationCommand::UpdateExport(value) => {
+                serde::Serialize::serialize(value, serializer)
+            }
+            OrchestrationCommand::UpdateChunk(value) => {
+                serde::Serialize::serialize(value, serializer)
+            }
+            OrchestrationCommand::UpdateRelease(value) => {
+                serde::Serialize::serialize(value, serializer)
+            }
+            OrchestrationCommand::BackupPut(value) => {
+                serde::Serialize::serialize(value, serializer)
+            }
+            OrchestrationCommand::Exec(value) => serde::Serialize::serialize(value, serializer),
+            OrchestrationCommand::ExecReceipt(value) => {
+                serde::Serialize::serialize(value, serializer)
+            }
+            OrchestrationCommand::BrowserCallback(value) => {
+                serde::Serialize::serialize(value, serializer)
+            }
+            OrchestrationCommand::AddLocation(value) => {
+                serde::Serialize::serialize(value, serializer)
+            }
+            OrchestrationCommand::RemoveLocation(value) => {
+                serde::Serialize::serialize(value, serializer)
+            }
+            OrchestrationCommand::MoveValidate(value) => {
+                serde::Serialize::serialize(value, serializer)
+            }
+            OrchestrationCommand::MoveBegin(value) => {
+                serde::Serialize::serialize(value, serializer)
+            }
+            OrchestrationCommand::DeviceTrust(value) => {
+                serde::Serialize::serialize(value, serializer)
+            }
+        }
+    }
+}
+
 impl OrchestrationCommand {
     pub(crate) fn actor(&self) -> Option<&str> {
         if let Self::ExecEvent(value) = self {

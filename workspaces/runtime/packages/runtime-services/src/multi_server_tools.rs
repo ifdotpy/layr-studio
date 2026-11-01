@@ -892,8 +892,9 @@ impl ServerTools {
         let invalid = |_| Step::Refused("Invalid command request".into());
         let (command, handle) = match action {
             "exec" => {
-                let request = ExecRequest::deserialize(payload).map_err(invalid)?;
+                let mut request = ExecRequest::deserialize(payload).map_err(invalid)?;
                 validate_exec(&request, server != local).map_err(Step::Refused)?;
+                request.normalize_defaults();
                 (
                     OrchestrationCommand::Exec(crate::orchestration_exec::ExecPayload::Start(
                         request,
@@ -1071,7 +1072,7 @@ impl ServerTools {
                         None=>Err(json!({"requestId":key_owned,"outcome":"unknown","detail":"The original fetch inputs are unavailable. The operation will not be sent again."})),
                     });
                 }
-                let export=ExportRequest{cwd:worker_cwd,branch:branch_for_claim,known:known_sorted};
+                let export=ExportRequest{cwd:worker_cwd.map_or(studio_runtime_schema::queue_command::Field::Null, studio_runtime_schema::queue_command::Field::Value),branch:branch_for_claim,known:studio_runtime_schema::queue_command::Field::Value(known_sorted)};
                 RemoteOutbox::put(tx,RemoteEffect::ServerFetch,&server_owned,&key_owned,&signature_for_claim,OutboxStatus::Pending,None,FetchEntry{state:ServerFetchState::Preparing,export:Some(serde_json::to_string(&export).map_err(StoreError::from)?),admission:admitted},now).map_err(StoreError::from)?;
                 Ok(Ok(FetchPayload::Preparing(export)))
             })
@@ -1664,20 +1665,27 @@ pub(crate) fn validate_exec(
             return Err("Supply command argv of 1 to 256 strings, at most 128 KiB".into());
         }
     }
-    if payload
-        .env
-        .iter()
-        .any(|(key, value)| !valid_environment_name(key) || value.contains('\0'))
-        || serde_json::to_vec(&payload.env).map_or(true, |bytes| bytes.len() > 128 * 1024)
-    {
+    if payload.env.as_ref().is_some_and(|env| {
+        env.iter()
+            .any(|(key, value)| !valid_environment_name(key) || value.contains('\0'))
+            || serde_json::to_vec(env).map_or(true, |bytes| bytes.len() > 128 * 1024)
+    }) {
         return Err(
             "Supply env additions with valid names and string values, at most 128 KiB".into(),
         );
     }
-    if !(1..=1800).contains(&payload.timeout) {
+    if !(1..=1800).contains(
+        &payload
+            .timeout
+            .unwrap_or_else(crate::orchestration_exec::default_timeout),
+    ) {
         return Err("Supply timeout seconds from 1 to 1800".into());
     }
-    if !(2..=4 * 1024 * 1024).contains(&payload.output_limit) {
+    if !(2..=4 * 1024 * 1024).contains(
+        &payload
+            .output_limit
+            .unwrap_or_else(crate::orchestration_exec::default_output_limit),
+    ) {
         return Err("Supply output_limit bytes from 2 to 4194304".into());
     }
     Ok(())

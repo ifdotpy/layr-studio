@@ -70,13 +70,14 @@ fn pages_redaction_and_request_checks_match_python() {
         let parsed =
             <crate::orchestration_exec::ExecRequest as serde::Deserialize>::deserialize(&input);
         match parsed {
-            Ok(request) => {
+            Ok(mut request) => {
                 let result = crate::multi_server_tools::validate_exec(
                     &request,
                     case["foreign"].as_bool().unwrap(),
                 );
                 match (result, case.get("value")) {
                     (Ok(()), Some(expected)) => {
+                        request.normalize_defaults();
                         let mut actual = json!(request);
                         actual.as_object_mut().unwrap().remove("actor");
                         assert_eq!(&actual, expected, "{case}");
@@ -422,8 +423,8 @@ async fn synchronous_start_wait_timeout_detaches_the_job_without_reading_output(
             &crate::orchestration_exec::ReadRequest {
                 actor: "actor".into(),
                 handle: "wait-timeout".into(),
-                stdout_offset: 0,
-                stderr_offset: 0,
+                stdout_offset: None,
+                stderr_offset: None,
             },
         )
         .await
@@ -471,8 +472,8 @@ async fn synchronous_start_lost_response_keeps_the_job_and_rejects_reexecution()
             &crate::orchestration_exec::ReadRequest {
                 actor: "actor".into(),
                 handle: "lost-response".into(),
-                stdout_offset: 0,
-                stderr_offset: 0,
+                stdout_offset: None,
+                stderr_offset: None,
             },
         )
         .await

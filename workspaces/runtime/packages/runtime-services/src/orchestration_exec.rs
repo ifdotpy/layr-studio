@@ -1,5 +1,4 @@
-//! Typed paired-server command inputs. Their serialized bytes define durable
-//! fingerprints; retries from before this format may be refused as conflicts.
+//! Typed paired-server command inputs with presence preserved for durable identities.
 use serde::{
     Deserialize, Deserializer, Serialize,
     de::{SeqAccess, Visitor},
@@ -37,10 +36,10 @@ impl<'de> Deserialize<'de> for CommandInput {
         deserializer.deserialize_any(CommandVisitor)
     }
 }
-fn default_timeout() -> u64 {
+pub(crate) fn default_timeout() -> u64 {
     120
 }
-fn default_output_limit() -> u64 {
+pub(crate) fn default_output_limit() -> u64 {
     256 * 1024
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -49,22 +48,49 @@ pub struct ExecRequest {
     pub actor: String,
     pub cwd: String,
     pub command: CommandInput,
-    #[serde(default)]
-    pub env: BTreeMap<String, String>,
-    #[serde(default = "default_timeout")]
-    pub timeout: u64,
-    #[serde(default = "default_output_limit")]
-    pub output_limit: u64,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub env: Option<BTreeMap<String, String>>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub timeout: Option<u64>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub output_limit: Option<u64>,
+}
+impl ExecRequest {
+    pub(crate) fn normalize_defaults(&mut self) {
+        self.env.get_or_insert_with(BTreeMap::new);
+        self.timeout.get_or_insert_with(default_timeout);
+        self.output_limit.get_or_insert_with(default_output_limit);
+    }
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReadRequest {
     pub actor: String,
     pub handle: String,
-    #[serde(default)]
-    pub stdout_offset: u64,
-    #[serde(default)]
-    pub stderr_offset: u64,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub stdout_offset: Option<u64>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub stderr_offset: Option<u64>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -77,14 +103,18 @@ pub struct InputRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub input: Option<String>,
-    #[serde(default)]
-    pub close_stdin: bool,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub close_stdin: Option<bool>,
 }
 
-fn deserialize_present<'de, D: Deserializer<'de>>(
+fn deserialize_present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
     deserializer: D,
-) -> Result<Option<String>, D::Error> {
-    String::deserialize(deserializer).map(Some)
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -180,18 +210,18 @@ impl<'de> Deserialize<'de> for ExecPayload {
             Field::Missing | Field::Null => return Err(D::Error::missing_field("command")),
         };
         let env = match fields.env {
-            Field::Value(v) => v,
-            Field::Missing => BTreeMap::new(),
+            Field::Value(v) => Some(v),
+            Field::Missing => None,
             Field::Null => return Err(D::Error::custom("invalid env")),
         };
         let timeout = match fields.timeout {
-            Field::Value(v) => v,
-            Field::Missing => default_timeout(),
+            Field::Value(v) => Some(v),
+            Field::Missing => None,
             Field::Null => return Err(D::Error::custom("invalid timeout")),
         };
         let output_limit = match fields.output_limit {
-            Field::Value(v) => v,
-            Field::Missing => default_output_limit(),
+            Field::Value(v) => Some(v),
+            Field::Missing => None,
             Field::Null => return Err(D::Error::custom("invalid output limit")),
         };
         Ok(Self::Start(ExecRequest {
@@ -247,7 +277,8 @@ mod tests {
             serde_json::from_str(r#"{"actor":"a","handle":"h","close_stdin":true}"#).unwrap();
         let bytes = serde_json::to_vec(&input).unwrap();
         let decoded: InputRequest = serde_json::from_slice(&bytes).unwrap();
-        assert!(decoded.close_stdin && decoded.input.is_none());
+        assert_eq!(decoded.close_stdin, Some(true));
+        assert!(decoded.input.is_none());
         assert!(
             serde_json::from_str::<InputRequest>(
                 r#"{"actor":"a","handle":"h","input":null,"close_stdin":true}"#
@@ -259,7 +290,7 @@ mod tests {
     #[test]
     fn equivalent_command_requests_have_identical_typed_signatures() {
         let left: OrchestrationRequest = serde_json::from_str(r#"{"requestId":"r","operation":[],"action":"exec","payload":{"actor":"a","cwd":"/p","command":["true"],"env":{"B":"2","A":"1"}}}"#).unwrap();
-        let right: OrchestrationRequest = serde_json::from_str(r#"{"action":"exec","operation":[],"requestId":"r","payload":{"command":["true"],"cwd":"/p","actor":"a","env":{"A":"1","B":"2"},"timeout":120,"output_limit":262144}}"#).unwrap();
+        let right: OrchestrationRequest = serde_json::from_str(r#"{"action":"exec","operation":[],"requestId":"r","payload":{"command":["true"],"cwd":"/p","actor":"a","env":{"A":"1","B":"2"}}}"#).unwrap();
         let left = serde_json::to_vec(&left).unwrap();
         let right = serde_json::to_vec(&right).unwrap();
         assert_eq!(left, right);
@@ -285,12 +316,12 @@ pub struct CompletionRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
-    pub started_at: studio_runtime_schema::queue_command::Field<f64>,
+    pub started_at: studio_runtime_schema::queue_command::Field<serde_json::Number>,
     #[serde(
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
-    pub finished_at: studio_runtime_schema::queue_command::Field<f64>,
+    pub finished_at: studio_runtime_schema::queue_command::Field<serde_json::Number>,
     #[serde(
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
@@ -305,7 +336,7 @@ pub struct CompletionRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
-    pub duration: studio_runtime_schema::queue_command::Field<f64>,
+    pub duration: studio_runtime_schema::queue_command::Field<serde_json::Number>,
     #[serde(
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
@@ -320,7 +351,7 @@ pub struct CompletionRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
-    pub output_expires_at: studio_runtime_schema::queue_command::Field<f64>,
+    pub output_expires_at: studio_runtime_schema::queue_command::Field<serde_json::Number>,
     #[serde(
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"

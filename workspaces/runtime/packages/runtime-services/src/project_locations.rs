@@ -88,6 +88,21 @@ mod receipt_tests {
     }
 
     #[test]
+    fn location_signature_keeps_legacy_unicode_bytes() {
+        let request = LocationRequest {
+            project: "/雪".into(),
+            server: "peer".into(),
+            op: LocationOp::Add {
+                path: "/新".into()
+            },
+        };
+        assert_eq!(
+            request.signature().unwrap(),
+            "82e0a5a4c8179509249c19d704209ec60975f703cdd9393fa92253fbbe08f786"
+        );
+    }
+
+    #[test]
     fn location_payload_rejects_unknown_fields_and_non_objects() {
         let request =
             r#"{"action":"add_location","path":"/remote","project":"/home","server":"peer"}"#;
@@ -559,8 +574,9 @@ fn settle_location(
         LocationError::Refused("The location request has no admitted project intent"),
     )?;
     let request_bytes =
-        serde_json::to_vec(original_request).map_err(studio_runtime_store::StoreError::from)?;
-    if request.signature() != sha256_hex(&request_bytes) {
+        studio_runtime_schema::json_compat::python_json_compact_serialized(original_request)
+            .map_err(studio_runtime_store::StoreError::from)?;
+    if request.signature() != sha256_hex(request_bytes.as_bytes()) {
         return Err(LocationError::Refused(
             "The location request has different admitted content",
         ));
@@ -845,7 +861,10 @@ impl LocationRequest {
         }
     }
     pub(crate) fn signature(&self) -> Result<String, serde_json::Error> {
-        Ok(sha256_hex(serde_json::to_string(&self.wire())?.as_bytes()))
+        Ok(sha256_hex(
+            studio_runtime_schema::json_compat::python_json_compact_serialized(&self.wire())?
+                .as_bytes(),
+        ))
     }
 }
 fn task_location_request(

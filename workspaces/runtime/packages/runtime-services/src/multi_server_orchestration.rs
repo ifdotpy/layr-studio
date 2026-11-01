@@ -557,7 +557,8 @@ impl PairedTransport for HttpsPairedTransport {
             })?;
             let request_id = envelope.request_id.clone();
             let url = format!("{}/api/servers/orchestration", origin.trim_end_matches('/'));
-            let body = serde_json::to_vec(&envelope)
+            let body = legacy_compact(&envelope)
+                .map(String::into_bytes)
                 .map_err(|_| refused(400, "invalid_request", "Invalid cross-server request"))?;
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2495,7 +2496,7 @@ fn exec_receipt_body(envelope: &Envelope, local_server: &str) -> Result<String, 
             ),
         ),
     };
-    serde_json::to_string(&compact)
+    legacy_compact(&compact)
         .map_err(|_| refused(400, "invalid_request", "Invalid cross-server request"))
 }
 
@@ -2564,7 +2565,7 @@ pub(crate) fn exec_handle_owned(
 #[serde(rename_all = "camelCase")]
 struct CompletionEventText<'a> {
     detail: &'static str,
-    duration: Option<&'a f64>,
+    duration: Option<&'a serde_json::Number>,
     error: Option<&'a String>,
     exit_code: Option<&'a i64>,
     id: &'a str,
@@ -2606,7 +2607,7 @@ fn receive_exec_event(
         return applied(&json!({"stored":false,"detail":"The lead was deleted"}));
     }
     let record = &payload.record;
-    let event_text = serde_json::to_string(&CompletionEventText {
+    let event_text = legacy_compact(&CompletionEventText {
         id: handle,
         server_id: principal,
         status: &record.status,
@@ -2770,6 +2771,20 @@ pub struct Envelope {
     body: String,
     fingerprint: String,
 }
+
+/// Preserve the pre-typing sorted UTF-8 compact JSON used on the wire and in durable identities.
+fn legacy_compact(value: &impl serde::Serialize) -> Result<String, serde_json::Error> {
+    studio_runtime_schema::json_compat::python_json_compact_serialized(value)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OutgoingFingerprint<'a> {
+    request_id: &'a str,
+    action: &'a str,
+    payload: crate::orchestration_wire::CommandPayload<'a>,
+}
+
 impl Envelope {
     pub fn from_request(
         value: &crate::orchestration_wire::OrchestrationRequest,
@@ -2784,7 +2799,7 @@ impl Envelope {
         if let Some(remaining) = value.remaining_value() {
             schema("ServerOperationRequest", &remaining)?;
         }
-        let body = serde_json::to_string(value)
+        let body = legacy_compact(value)
             .map_err(|_| refused(400, "invalid_request", "Invalid cross-server request"))?;
         if body.len() > MAX_REQUEST_BYTES {
             return Err(refused(
@@ -2815,7 +2830,15 @@ impl Envelope {
             action,
             operation: value.operation.clone(),
             command: value.command.clone(),
-            fingerprint: digest(body.as_bytes()),
+            fingerprint: digest(
+                legacy_compact(&OutgoingFingerprint {
+                    request_id: &value.request_id,
+                    action: action.as_str(),
+                    payload: crate::orchestration_wire::CommandPayload(&value.command),
+                })
+                .map_err(|_| refused(400, "invalid_request", "Invalid cross-server request"))?
+                .as_bytes(),
+            ),
             body,
         })
     }
@@ -2842,8 +2865,13 @@ impl Envelope {
     }
     fn incoming_signature(&self, principal: &str) -> Result<String, AccessError> {
         Ok(digest(
-            &serde_json::to_vec(&(principal, &self.command))
-                .map_err(|_| refused(400, "invalid_request", "Invalid cross-server request"))?,
+            legacy_compact(&(
+                principal,
+                self.action.as_str(),
+                crate::orchestration_wire::CommandPayload(&self.command),
+            ))
+            .map_err(|_| refused(400, "invalid_request", "Invalid cross-server request"))?
+            .as_bytes(),
         ))
     }
 }
@@ -3386,9 +3414,7 @@ impl OrchestrationDriver {
         let Some(probe) = exec_receipt_probe(&envelope.root, compact) else {
             return Ok(None);
         };
-        let same_compact = matches!(&envelope.command, crate::orchestration_wire::OrchestrationCommand::Exec(crate::orchestration_exec::ExecPayload::Compacted(value)) if value == compact);
-        if saved_server != server
-            || (!same_compact && body != envelope.body && fingerprint != envelope.fingerprint)
+        if saved_server != server || (body != envelope.body && fingerprint != envelope.fingerprint)
         {
             return Err(refused(
                 409,
@@ -3740,19 +3766,75 @@ impl OrchestrationDriver {
             })
             .await?;
         let mut count = 0;
-        for (server, body, state) in pending {
-            let value = serde_json::from_str::<
+        for (key, server, body, state) in pending {
+            let value = match serde_json::from_str::<
                 studio_runtime_schema::http_ingress::Object<
                     crate::orchestration_wire::OrchestrationRequest,
                 >,
             >(&body)
-            .map_err(|_| {
-                refused(
-                    503,
-                    "invalid_record",
-                    "Stored cross-server envelope is invalid",
-                )
-            })?;
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    #[derive(serde::Deserialize)]
+                    #[serde(rename_all = "camelCase")]
+                    struct StoredHeader {
+                        request_id: String,
+                        action: String,
+                    }
+                    let header = serde_json::from_str::<StoredHeader>(&body);
+                    if let Ok(header) = header
+                        && header.action.parse::<ServerOperationKind>().is_err()
+                    {
+                        let server_for_write = server.clone();
+                        let key_for_write = key.clone();
+                        let body_for_write = body.clone();
+                        let reason = format!(
+                            "Cross-server action '{}' is no longer supported",
+                            header.action
+                        );
+                        let result = self
+                            .store
+                            .transaction_with(move |tx| {
+                                let Some(entry) = crate::server_outbox::find_for(
+                                    tx,
+                                    &server_for_write,
+                                    &key_for_write,
+                                )?
+                                else {
+                                    return Ok::<_, AccessError>(());
+                                };
+                                if entry.record.body != body_for_write {
+                                    return Err(refused(
+                                        409,
+                                        "receipt_changed",
+                                        "The saved delivery changed",
+                                    ));
+                                }
+                                settle_delivery(
+                                    tx,
+                                    Direction::Outgoing,
+                                    &key_for_write,
+                                    &header.request_id,
+                                    &entry.signature,
+                                    &ExchangeOutcome::NotApplied(reason),
+                                )
+                            })
+                            .await;
+                        match result {
+                            Ok(()) => {
+                                eprintln!("retired unsupported cross-server delivery {key}");
+                                count += 1;
+                            }
+                            Err(error) => {
+                                eprintln!("failed to retire cross-server delivery {key}: {error}")
+                            }
+                        }
+                    } else {
+                        eprintln!("invalid stored cross-server delivery {key}: {error}");
+                    }
+                    continue;
+                }
+            };
             let envelope = Envelope::from_request(&value.0)?;
             // A crash after claiming leaves a row running. Stable-identity
             // peer operations can safely replay; provider commands remain
@@ -3935,6 +4017,68 @@ fn outbox_next_due_at(
 /// Normalize a paired peer's wire value once before service admission.
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn outgoing_fingerprint_keeps_legacy_canonical_bytes() {
+        let request: crate::orchestration_wire::OrchestrationRequest = serde_json::from_str(r#"{"requestId":"r","operation":["12"],"action":"chunk","payload":{"offset":12,"export":"é"}}"#).unwrap();
+        let envelope = super::Envelope::from_request(&request).unwrap();
+        assert_eq!(
+            envelope.body,
+            r#"{"action":"chunk","operation":["12"],"payload":{"export":"é","offset":12},"requestId":"r"}"#
+        );
+        assert_eq!(
+            envelope.fingerprint,
+            "ba2496138bf599fc8b5a9a0f02ed29471300845fa6f8080a1ace71bb63867302"
+        );
+    }
+
+    #[test]
+    fn incoming_signature_keeps_legacy_canonical_bytes() {
+        let request: crate::orchestration_wire::OrchestrationRequest = serde_json::from_str(r#"{"requestId":"r","operation":["12"],"action":"chunk","payload":{"offset":12,"export":"é"}}"#).unwrap();
+        let envelope = super::Envelope::from_request(&request).unwrap();
+        assert_eq!(
+            envelope.incoming_signature("peer-a").unwrap(),
+            "c66ce92f06625e45445058c8cf9cc8f08b03a374ac312d0a108dcd437786d3a2"
+        );
+    }
+
+    #[test]
+    fn incoming_signature_preserves_omitted_optional_fields() {
+        for (action, payload, expected) in [
+            (
+                "exec",
+                r#"{"actor":"a","cwd":"/p","command":["true"]}"#,
+                "ac79af099c47ad1d87b3749f2f9cda67d68e1135f712b08fde2f17a71a55bd92",
+            ),
+            (
+                "exec_read",
+                r#"{"actor":"a","handle":"h"}"#,
+                "b10f6717c5e873feadbe9737fd317ee9772b18e228647d0410471bc2d5125e32",
+            ),
+            (
+                "exec_input",
+                r#"{"actor":"a","handle":"h","input":"x"}"#,
+                "d2bd970650f6293a3197a9677111836c38957ef0c8a9b2af4fe55db674976f2e",
+            ),
+            (
+                "export",
+                r#"{"cwd":"/p","branch":"main"}"#,
+                "10b352edc16702746cabc61a1dfb0699e34e25f555885c93f34d9947e41e4a8c",
+            ),
+        ] {
+            let body = format!(
+                r#"{{"requestId":"r","operation":[],"action":"{action}","payload":{payload}}}"#
+            );
+            let request: crate::orchestration_wire::OrchestrationRequest =
+                serde_json::from_str(&body).unwrap();
+            let envelope = super::Envelope::from_request(&request).unwrap();
+            assert_eq!(
+                envelope.incoming_signature("peer").unwrap(),
+                expected,
+                "{action}"
+            );
+        }
+    }
+
     fn fixture_envelope(
         value: &serde_json::Value,
     ) -> crate::orchestration_wire::OrchestrationRequest {
@@ -3968,6 +4112,69 @@ mod tests {
                 )
             })
         }
+    }
+
+    #[tokio::test]
+    async fn retired_action_is_refused_without_blocking_next_outbox_row() {
+        assert_retired_action(super::ServerDeliveryState::Queued).await;
+    }
+
+    #[tokio::test]
+    async fn submitted_retired_action_is_refused_without_blocking_next_outbox_row() {
+        assert_retired_action(super::ServerDeliveryState::Running).await;
+    }
+
+    async fn assert_retired_action(state: super::ServerDeliveryState) {
+        let directory = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            studio_runtime_store::RuntimeStore::open(Some(directory.path()))
+                .await
+                .unwrap(),
+        );
+        store.set_local_server_id(Some("peer".into())).unwrap();
+        let old = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+        let next = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+        let old_for_write = old.clone();
+        let next_for_write = next.clone();
+        store.transaction(move |tx| {
+            let signature = "legacy-signature";
+            let body = serde_json::json!({"requestId":old_for_write,"operation":[],"action":"task","payload":{"actor":"lead"}}).to_string();
+            crate::server_outbox::insert(tx, "peer", &old_for_write, signature, state, 0.0,
+                &crate::server_outbox::ServerRequestRecord { body, admission: studio_runtime_schema::persistence::AdmittedRequest::from_persisted_fields(old_for_write.clone(), signature.into(), chrono::Utc::now().timestamp_millis()), attempts:0, error:None }, chrono::Utc::now().timestamp()).unwrap();
+            let request = crate::orchestration_wire::OrchestrationRequest { request_id: next_for_write, operation:Vec::new(), command:crate::orchestration_wire::OrchestrationCommand::Projects(serde_json::json!({})) };
+            let envelope = super::Envelope::from_request(&request).unwrap().scoped(super::Direction::Outgoing, "peer");
+            crate::server_outbox::insert(tx, "peer", &envelope.key, &envelope.fingerprint, super::ServerDeliveryState::Queued, 0.0,
+                &crate::server_outbox::ServerRequestRecord { body:envelope.body.clone(), admission:studio_runtime_schema::persistence::AdmittedRequest::from_persisted_fields(envelope.key.clone(), envelope.fingerprint.clone(), chrono::Utc::now().timestamp_millis()), attempts:0, error:None }, chrono::Utc::now().timestamp()).unwrap();
+            Ok(())
+        }).await.unwrap();
+        let effects = std::sync::Arc::new(CountEffects(std::sync::atomic::AtomicUsize::new(0)));
+        let driver = super::OrchestrationDriver::new(
+            store.clone(),
+            std::sync::Arc::new(super::HttpsPairedTransport::new(store.clone())),
+            effects.clone(),
+        );
+        driver
+            .pump_due(chrono::Utc::now().timestamp())
+            .await
+            .unwrap();
+        assert_eq!(effects.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let connection = store.test_reader().unwrap();
+        let remaining: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM runtime_outbox WHERE kind='remote_delivery'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0);
+        let result: String = connection
+            .query_row(
+                "SELECT result FROM request_results WHERE id=?1",
+                [&old],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(result.contains("not_applied"));
     }
 
     #[tokio::test]
@@ -4102,7 +4309,7 @@ mod tests {
         }
         assert_eq!(effects.0.load(std::sync::atomic::Ordering::SeqCst), 2);
         for offset in ["0", "0", "4096", "4096"] {
-            let chunk = serde_json::json!({"requestId":root,"operation":[offset],"action":"chunk","payload":{"offset":offset}});
+            let chunk = serde_json::json!({"requestId":root,"operation":[offset],"action":"chunk","payload":{"export":"bundle","offset":offset.parse::<u64>().unwrap()}});
             assert_eq!(
                 driver
                     .receive("peer-a", &fixture_envelope(&chunk), now)
@@ -4119,7 +4326,7 @@ mod tests {
             4,
             "same-offset chunk retries replay; a new offset executes once"
         );
-        let conflict = serde_json::json!({"requestId":root,"operation":["0"],"action":"chunk","payload":{"offset":"different"}});
+        let conflict = serde_json::json!({"requestId":root,"operation":["0"],"action":"chunk","payload":{"export":"other-bundle","offset":0}});
         assert_eq!(
             driver
                 .receive("peer-a", &fixture_envelope(&conflict), now)
@@ -4129,7 +4336,7 @@ mod tests {
             409
         );
         let unknown_root = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-        let unknown = serde_json::json!({"requestId":unknown_root,"operation":[],"action":"projects","payload":{"unknown":true}});
+        let unknown = serde_json::json!({"requestId":unknown_root,"operation":[],"action":"move_validate","payload":{"unknown":true}});
         for _ in 0..2 {
             assert_eq!(
                 driver

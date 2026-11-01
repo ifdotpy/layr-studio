@@ -595,6 +595,8 @@ impl ServerExec {
     ) -> Result<Value, ExecError> {
         self.prune_hourly().await;
         crate::multi_server_tools::validate_exec(payload, false).map_err(ExecError::Refused)?;
+        let mut payload = payload.clone();
+        payload.normalize_defaults();
         let actor = payload.actor.clone();
         if actor.is_empty() || actor.chars().count() > 200 {
             return refused("Supply the lead actor identity");
@@ -603,21 +605,30 @@ impl ServerExec {
         if !Path::new(&cwd).is_dir() {
             return refused("The cwd is not an existing folder on this server");
         }
-        let environment: Vec<(String, String)> = payload
+        // normalize_defaults always fills the environment before execution.
+        let environment_map = payload
             .env
+            .as_ref()
+            .expect("command defaults were populated");
+        let environment: Vec<(String, String)> = environment_map
             .iter()
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
         let argv: Vec<String> = match &payload.command {
             crate::orchestration_exec::CommandInput::Shell(command) => {
-                crate::shell_command::exec_command(command, &payload.env)
+                crate::shell_command::exec_command(command, environment_map)
                     .map_err(ExecError::Refused)?
             }
             crate::orchestration_exec::CommandInput::Argv(argv) => argv.clone(),
         };
         let started_at = now();
-        let timeout = payload.timeout;
-        let output_limit = payload.output_limit as usize;
+        let timeout = payload
+            .timeout
+            .unwrap_or_else(crate::orchestration_exec::default_timeout);
+        let output_limit = payload
+            .output_limit
+            .unwrap_or_else(crate::orchestration_exec::default_output_limit)
+            as usize;
         let record = json!({
             "handle": key, "serverId": local_server, "status": "starting",
             "startedAt": started_at, "finishedAt": null, "exitCode": null, "signal": null,
@@ -716,8 +727,8 @@ impl ServerExec {
                     &crate::orchestration_exec::ReadRequest {
                         actor,
                         handle: key.to_owned(),
-                        stdout_offset: 0,
-                        stderr_offset: 0,
+                        stdout_offset: None,
+                        stderr_offset: None,
                     },
                 )
                 .await;
@@ -763,7 +774,7 @@ impl ServerExec {
             } else {
                 p.stderr_offset
             };
-            let offset = usize::try_from(raw_offset)
+            let offset = usize::try_from(raw_offset.unwrap_or(0))
                 .map_err(|_| ExecError::Refused("Supply nonnegative output byte offsets".into()))?;
             let buffer =
                 Buffer::from_snapshot(snapshot.as_ref().and_then(|snapshot| snapshot.get(name)));
@@ -791,7 +802,10 @@ impl ServerExec {
         use crate::orchestration_exec::ControlRequest;
         let (key, actor, control, is_input) = match request {
             ControlRequest::Input(p) => {
-                let input = p.input.as_deref().or_else(|| p.close_stdin.then_some(""));
+                let input = p
+                    .input
+                    .as_deref()
+                    .or_else(|| p.close_stdin.unwrap_or(false).then_some(""));
                 let Some(input) = input.filter(|input| input.len() <= MAX_INPUT_BYTES) else {
                     return refused("Supply input text of at most 64 KiB");
                 };
@@ -800,7 +814,7 @@ impl ServerExec {
                     p.actor.as_str(),
                     Control::Input {
                         data: input.as_bytes().to_vec(),
-                        close: p.close_stdin,
+                        close: p.close_stdin.unwrap_or(false),
                     },
                     true,
                 )

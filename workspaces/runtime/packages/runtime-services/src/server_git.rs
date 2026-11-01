@@ -40,10 +40,17 @@ pub struct GitReadRequest {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ExportRequest {
-    pub cwd: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub cwd: studio_runtime_schema::queue_command::Field<String>,
     pub branch: String,
-    #[serde(default)]
-    pub known: Vec<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub known: studio_runtime_schema::queue_command::Field<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -758,7 +765,8 @@ pub(crate) fn receive(
             })
         }
         GitOperation::Export(payload) => {
-            let directory = checked_directory(payload.cwd.as_deref().unwrap_or_default())?;
+            let directory =
+                checked_directory(payload.cwd.value().map(String::as_str).unwrap_or_default())?;
             export(root, &directory, payload, key)
         }
         GitOperation::Read(payload) => {
@@ -839,10 +847,16 @@ fn export(
     if git_read(directory, &["check-ref-format", "--branch", branch])?.1 != 0 {
         return Err(refused("Invalid worker branch"));
     }
-    if payload.known.len() > 16 || payload.known.iter().any(|commit| !commit_hash(commit)) {
+    let known = match &payload.known {
+        studio_runtime_schema::queue_command::Field::Missing => &[][..],
+        studio_runtime_schema::queue_command::Field::Value(known) => known.as_slice(),
+        studio_runtime_schema::queue_command::Field::Null => {
+            return Err(refused("Supply at most 16 complete commit hashes"));
+        }
+    };
+    if known.len() > 16 || known.iter().any(|commit| !commit_hash(commit)) {
         return Err(refused("Supply at most 16 complete commit hashes"));
     }
-    let known = &payload.known;
     let mut exclusions = Vec::new();
     for commit in known {
         let object = format!("{commit}^{{commit}}");
