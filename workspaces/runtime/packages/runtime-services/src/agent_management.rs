@@ -1318,17 +1318,30 @@ fn stop(
         decision.cancel_pending.push(agent.id().to_owned());
     }
     for request in snapshot.rows("approvals") {
-        if request
+        if !request
             .get("agent")
             .and_then(Value::as_str)
             .is_some_and(|id| ids.iter().any(|a| a == id))
-            && is_pending_approval(request)
-            && request["request"]["kind"] != "monitor_start"
+            || request["request"]["kind"] == "monitor_start"
         {
-            let mut request = request.clone();
-            request["state"] = json!({"kind":"closed","reason":"session_lost","at":now});
-            decision.write("approvals", request);
+            continue;
         }
+        let mut request = request.clone();
+        if is_pending_approval(&request) {
+            let reason = if delete {
+                "chat_deleted"
+            } else {
+                "session_lost"
+            };
+            request["state"] = json!({"kind":"closed","reason":reason,"at":now});
+        } else if delete && request["state"]["kind"] == "answering" {
+            // The answer was sent but its delivery is not confirmed: unknown.
+            request["state"] =
+                json!({"kind":"unknown","answer":request["state"]["answer"],"since":now});
+        } else {
+            continue;
+        }
+        decision.write("approvals", request);
     }
     Ok(decision)
 }
@@ -1582,6 +1595,50 @@ mod lifecycle_scope_parity_tests {
                 })
             })
             .collect()
+    }
+
+    #[test]
+    fn deleting_a_chat_closes_its_pending_approvals_and_marks_answering_unknown() {
+        let records = Records {
+            tables: BTreeMap::from([
+                (
+                    "runtime_agents".to_owned(),
+                    vec![agent("lead", "lead", None, true)],
+                ),
+                (
+                    "approvals".to_owned(),
+                    vec![
+                        json!({"id":"pending","agent":"lead","state":{"kind":"pending"},"request":{"kind":"question"}}),
+                        json!({"id":"answering","agent":"lead","state":{"kind":"answering","answer":{"kind":"decision","decision":"accept"},"command":"c"},"request":{"kind":"question"}}),
+                    ],
+                ),
+            ]),
+        };
+        let snapshot = ManagementSnapshot::from_records(records).expect("snapshot");
+        let delete = decide_with_effects(
+            &snapshot,
+            &Action::Delete {
+                target: "lead".to_owned(),
+            },
+            10.0,
+        )
+        .expect("delete");
+        let state = |id: &str| {
+            delete
+                .writes
+                .iter()
+                .find(|write| write.table == "approvals" && write.record["id"] == id)
+                .map(|write| write.record["state"].clone())
+                .expect("approval write")
+        };
+        assert_eq!(
+            state("pending"),
+            json!({"kind":"closed","reason":"chat_deleted","at":10.0})
+        );
+        assert_eq!(
+            state("answering"),
+            json!({"kind":"unknown","answer":{"kind":"decision","decision":"accept"},"since":10.0})
+        );
     }
 
     #[test]
