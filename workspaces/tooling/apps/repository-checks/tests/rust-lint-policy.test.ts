@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -359,20 +360,56 @@ test("build scripts print relative rerun-if-changed paths", () => {
   walk(path.join(root, "workspaces"));
   assert.deepEqual(found, []);
   // The schema script rewrites the generator output, so also check recorded outputs of this
-  // checkout (paths inside the repository only) when a build exists.
+  // checkout (paths inside the repository only) when a build exists. A warm target cache can
+  // hold older output dirs of the same package from before a fix; only the newest is live.
   const builds = path.join(root, "target/debug/build");
+  const newest = new Map<string, { name: string; mtime: number }>();
   if (existsSync(builds))
     for (const name of readdirSync(builds)) {
       // tauri-build prints absolute paths and has no option to change that (docs/testing.md).
       if (name.startsWith("studio-native-client-")) continue;
       const output = path.join(builds, name, "output");
-      if (existsSync(output))
-        assert.deepEqual(
-          absoluteRerunPaths(readFileSync(output, "utf8")).filter((line) =>
-            line.slice("cargo:rerun-if-changed=".length).startsWith(root),
-          ),
-          [],
-          name,
-        );
+      if (!existsSync(output)) continue;
+      const mtime = statSync(output).mtimeMs;
+      const pkg = name.replace(/-[0-9a-f]+$/, "");
+      if (mtime > (newest.get(pkg)?.mtime ?? -1))
+        newest.set(pkg, { name, mtime });
     }
+  for (const { name } of newest.values())
+    assert.deepEqual(
+      absoluteRerunPaths(
+        readFileSync(path.join(builds, name, "output"), "utf8"),
+      ).filter((line) =>
+        line.slice("cargo:rerun-if-changed=".length).startsWith(root),
+      ),
+      [],
+      name,
+    );
+  // Generated modules must not name absolute paths: a warm cache reuses them in other lines.
+  const absoluteModule =
+    /#\[path\s*=\s*"(\/|[A-Za-z]:[\\/])|include(_str|_bytes)?!\(\s*"(\/|[A-Za-z]:[\\/])/;
+  const walkOut = (directory: string): string[] =>
+    readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) return walkOut(full);
+      return entry.name.endsWith(".rs") &&
+        readFileSync(full, "utf8")
+          .split("\n")
+          .some((line) => absoluteModule.test(line))
+        ? [path.relative(builds, full)]
+        : [];
+    });
+  for (const { name } of newest.values()) {
+    const out = path.join(builds, name, "out");
+    assert.deepEqual(existsSync(out) ? walkOut(out) : [], [], name);
+  }
+  assert.ok(
+    absoluteModule.test('#[path = "/x/y.rs"] pub mod t;'),
+    "known bad module rejected",
+  );
+  assert.ok(
+    !absoluteModule.test(
+      'pub mod t { include!(concat!(env!("OUT_DIR"), "/t.rs")); }',
+    ),
+  );
 });

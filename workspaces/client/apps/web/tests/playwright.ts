@@ -1197,8 +1197,7 @@ export type MonitorEntityDto =
   import("../src/generated/api.ts").components["schemas"]["MonitorEntityDto"];
 export type PeerTeamEntityDto =
   import("../src/generated/api.ts").components["schemas"]["PeerTeamEntityDto"];
-export type RequestEntityDto =
-  import("../src/generated/api.ts").components["schemas"]["RequestEntityDto"];
+export type TestApproval = import("../src/approvals.ts").Approval;
 
 export type TestAgent = AgentEntityDto;
 
@@ -1215,7 +1214,7 @@ export type TestRuntimeView = {
   projects: TestProject[];
   events: EventEntityDto[];
   peerTeams: PeerTeamEntityDto[];
-  requests: RequestEntityDto[];
+  requests: TestApproval[];
   rules: RuleEntityDto[];
   work: WorkEntityDto[];
   viewScopedAgents?: boolean;
@@ -1449,7 +1448,8 @@ export async function readTestState(
     const details = new Map<string, JsonObject>();
     for (const entry of baselines)
       for (const document of entry.entityChanges?.documents || [])
-        if (document.op === "upsert") details.set(document.id, document.value);
+        if (document.op === "upsert" && isJsonObject(document.value))
+          details.set(document.id, document.value);
     entities.set("agentDetail", details);
   }
   const agents = list("agentSummary").map((summary) => ({

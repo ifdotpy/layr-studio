@@ -179,6 +179,19 @@ pub(crate) fn install(tx: &Transaction<'_>) -> StoreResult<()> {
     Ok(())
 }
 
+/// Keep the counter above every number used so far. Owner of the floor rule: it raises the
+/// persisted part of the counter, `sync_generation.value`, to at least `NEXT - 1`.
+/// Callers must run it in the same transaction before deleting any `sync_entities` rows,
+/// because `NEXT` reads the highest `sync_entities.seq`. Without it, deleting the row that
+/// holds the highest number lets `NEXT` repeat that number.
+pub fn keep_counter(tx: &Transaction<'_>) -> StoreResult<()> {
+    tx.execute(
+        &format!("UPDATE sync_generation SET value=MAX(value,{NEXT}-1) WHERE id=1"),
+        [],
+    )?;
+    Ok(())
+}
+
 /// Give one row of an `online_backfill` table its entry, unless it has one. Rows written
 /// after the triggers exist have an entry from them, so this only reaches old rows. Safe
 /// to repeat: a row that has an entry keeps its number.
@@ -539,6 +552,32 @@ mod tests {
         // A cursor taken from the entity stream is valid here and returns only what followed.
         let (rows, _, _) = delta(&db, entity);
         assert_eq!(rows, vec!["b".to_owned()]);
+    }
+
+    #[test]
+    fn keep_counter_stops_a_deleted_max_seq_from_being_reused() {
+        let mut db = canvas();
+        db.execute_batch(
+            "INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES
+               ('agentSummary','a',5,'h','{}',0),
+               ('event','e',9,'h','{}',0);",
+        )
+        .expect("entities");
+        let tx = db.transaction().expect("transaction");
+        keep_counter(&tx).expect("keep the counter");
+        tx.execute(
+            "DELETE FROM sync_entities WHERE collection='event' AND id='e'",
+            [],
+        )
+        .expect("delete the row with the max seq");
+        tx.commit().expect("commit");
+        let fresh: i64 = db
+            .query_row(&format!("SELECT {NEXT}"), [], |r| r.get(0))
+            .expect("next");
+        assert!(
+            fresh > 9,
+            "a new number must be above the old max 9, got {fresh}"
+        );
     }
 
     #[test]
