@@ -106,6 +106,7 @@ pub use jsonschema::{
 };
 use serde_json::{Value, json};
 
+pub mod sync_entity_payload;
 pub mod sync_protocol;
 pub use sync_protocol::{SYNC_ENTITY_SCOPE, SYNC_PROTOCOL_VERSION, SYNC_PROTOCOL_VERSION_TEXT};
 mod token_rate_limits;
@@ -650,6 +651,12 @@ pub fn validate_sync_entity_payload_strict(
             .get("value")
             .and_then(Value::as_object)
             .is_some_and(serde_json::Map::is_empty));
+    }
+    if matches!(collection, "edge" | "chat" | "workRelease") {
+        return Ok(
+            serde_json::from_value::<sync_entity_payload::SyncEntityPayload>(payload.clone())
+                .is_ok(),
+        );
     }
     Ok(first_error("SyncEntityPayload", payload)?.is_none())
 }

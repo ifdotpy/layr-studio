@@ -9922,23 +9922,19 @@ export interface components {
        */
       turnId?: null | string | undefined;
     };
-    /** ChatEntityDto */
     ChatEntityDto: {
-      /** Id */
       id: string;
-      /** Kind */
-      kind?: "chat" | null | undefined;
-      /** Lastmessageat */
-      lastMessageAt?: null | number | undefined;
-      /** Members */
+      kind?: components["schemas"]["ChatKind"] | null | undefined;
+      /** Format: double */
+      lastMessageAt?: number | null | undefined;
       members?: string[] | null | undefined;
-      /** Messagecount */
+      /** Format: uint64 */
       messageCount?: number | null | undefined;
-      /** Name */
-      name?: null | string | undefined;
-      /** Tail */
-      tail?: null | string | undefined;
+      name?: string | null | undefined;
+      tail?: string | null | undefined;
     };
+    /** @enum {string} */
+    ChatKind: "chat";
     /** ChatMessage */
     ChatMessage: {
       /** Created */
@@ -12826,17 +12822,17 @@ export interface components {
        */
       kind: "drafts";
     };
-    /** EdgeEntityDto */
     EdgeEntityDto: {
-      /** Id */
       id: string;
-      /** Kind */
-      kind?: ("chat" | "spawn") | null | undefined;
-      /** Source */
-      source?: null | string | undefined;
-      /** Target */
-      target?: null | string | undefined;
+      /** @default null */
+      kind?: components["schemas"]["EdgeKind"] | null | undefined;
+      /** @default null */
+      source?: string | null | undefined;
+      /** @default null */
+      target?: string | null | undefined;
     };
+    /** @enum {string} */
+    EdgeKind: "chat" | "spawn";
     /** @enum {string} */
     ElicitationAction: "accept" | "decline" | "cancel";
     /** EmptyTransferRecoveryRecordResponse */
@@ -23169,14 +23165,12 @@ export interface components {
       id: string;
       value: components["schemas"]["AnnotationEntityDto"];
     };
-    /** SyncChatEntityPayload */
     SyncChatEntityPayload: {
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
       collection: "chat";
-      /** Id */
       id: string;
       value: components["schemas"]["ChatEntityDto"];
     };
@@ -23217,14 +23211,12 @@ export interface components {
       /** Seq */
       seq: number;
     };
-    /** SyncEdgeEntityPayload */
     SyncEdgeEntityPayload: {
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
       collection: "edge";
-      /** Id */
       id: string;
       value: components["schemas"]["EdgeEntityDto"];
     };
@@ -23924,14 +23916,12 @@ export interface components {
       id: string;
       value: components["schemas"]["WorkEntityDto"];
     };
-    /** SyncWorkReleaseEntityPayload */
     SyncWorkReleaseEntityPayload: {
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
       collection: "workRelease";
-      /** Id */
       id: string;
       value: components["schemas"]["WorkReleaseEntityDto"];
     };
@@ -27714,9 +27704,9 @@ export interface components {
       /** Tasks */
       tasks: components["schemas"]["WorkItem"][];
     };
-    /** WorkReleaseEntityDto */
     WorkReleaseEntityDto: {
       id: string;
+      /** Format: uint64 */
       index: number;
       rootId: string;
       taskId: string;
@@ -38844,6 +38834,8 @@ export const CapacityRetryStatus = {
   failed: "failed",
 } as const;
 export type CapacityRetryStatus = components["schemas"]["CapacityRetryStatus"];
+export const ChatKind = { chat: "chat" } as const;
+export type ChatKind = components["schemas"]["ChatKind"];
 export const CommandErrorCode = { receipt_expired: "receipt_expired" } as const;
 export type CommandErrorCode = components["schemas"]["CommandErrorCode"];
 export const ComplaintResponseStatus = {
@@ -38895,6 +38887,8 @@ export const DeliveryStatus = {
   uncertain: "uncertain",
 } as const;
 export type DeliveryStatus = components["schemas"]["DeliveryStatus"];
+export const EdgeKind = { chat: "chat", spawn: "spawn" } as const;
+export type EdgeKind = components["schemas"]["EdgeKind"];
 export const ElicitationAction = {
   accept: "accept",
   decline: "decline",
