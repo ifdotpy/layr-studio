@@ -27,9 +27,29 @@ pub(crate) fn routes() -> RouteGroup {
         ),
     ])
 }
+/// Maximum agent identity length for account transfer, in Unicode code points.
+const TRANSFER_AGENT_MAX_CHARS: usize = 200;
+/// Maximum account identity length for account transfer, in Unicode code points.
+const TRANSFER_ACCOUNT_MAX_CHARS: usize = 200;
+/// Maximum transfer request identity length, in Unicode code points.
+const TRANSFER_REQUEST_MAX_CHARS: usize = 200;
+type TransferAgent = studio_runtime_schema::bounded_text::BoundedText<1, TRANSFER_AGENT_MAX_CHARS>;
+type TransferAccount =
+    studio_runtime_schema::bounded_text::BoundedText<1, TRANSFER_ACCOUNT_MAX_CHARS>;
+type TransferRequestId =
+    studio_runtime_schema::bounded_text::BoundedText<1, TRANSFER_REQUEST_MAX_CHARS>;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AccountSelectionRequest {
+    id: TransferAgent,
+    account_key: TransferAccount,
+    cwd: Option<String>,
+}
+
 async fn selection(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<generated::AccountSelectionRequest>,
+    ApiJson(body): ApiJson<AccountSelectionRequest>,
 ) -> Result<Json<generated::AgentResponse>, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let driver = state.account_driver.clone();
@@ -59,9 +79,9 @@ async fn selection(
     let value = studio_runtime_services::account_selection::select(
         &store,
         &accounts,
-        &body.id,
-        &body.account_key,
-        body.cwd.as_ref().and_then(Option::as_deref),
+        body.id.as_str(),
+        body.account_key.as_str(),
+        body.cwd.as_deref(),
     )
     .await
     .map_err(error)?;
@@ -70,40 +90,73 @@ async fn selection(
     super::generated_json::<generated::AgentResponse>(value).map(Json)
 }
 #[derive(Deserialize)]
+#[serde(untagged)]
+enum Request {
+    Action(TransferActionRequest),
+    Start(TransferStartRequest),
+}
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Request {
-    request_id: String,
-    action: Option<Action>,
-    id: Option<String>,
-    account_key: Option<String>,
-    scope: Option<String>,
+struct TransferActionRequest {
+    request_id: TransferRequestId,
+    action: Action,
+    id: Option<TransferAgent>,
+    account_key: Option<TransferAccount>,
+    scope: Option<generated::TransferScope>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TransferStartRequest {
+    request_id: TransferRequestId,
+    id: Option<TransferAgent>,
+    account_key: Option<TransferAccount>,
+    #[serde(default, deserialize_with = "present_scope")]
+    scope: Option<generated::TransferScope>,
+}
+fn present_scope<'de, D: serde::Deserializer<'de>>(
+    input: D,
+) -> Result<Option<generated::TransferScope>, D::Error> {
+    generated::TransferScope::deserialize(input).map(Some)
 }
 async fn transfer(
     State(state): State<HttpState>,
     ApiJson(body): ApiJson<Request>,
 ) -> Result<Json<generated::TransferResponse>, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
-    let result = if let Some(action) = body.action {
+    let (request_id, action, id, account_key, scope) = match body {
+        Request::Action(body) => (
+            body.request_id,
+            Some(body.action),
+            body.id,
+            body.account_key,
+            body.scope,
+        ),
+        Request::Start(body) => (body.request_id, None, body.id, body.account_key, body.scope),
+    };
+    let result = if let Some(action) = action {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|_| ApiError::internal())?
             .as_secs_f64();
-        account_transfer_driver::action(&store, &body.request_id, action, now)
+        account_transfer_driver::action(&store, request_id.as_str(), action, now)
             .await
             .map_err(error)?
     } else {
-        let lead = body.id.as_deref().ok_or_else(|| {
+        let lead = id.as_ref().map(|value| value.as_str()).ok_or_else(|| {
             ApiError::validation(vec![
                 Value::String("body".into()),
                 Value::String("id".into()),
             ])
         })?;
-        let target = body.account_key.as_deref().ok_or_else(|| {
-            ApiError::validation(vec![
-                Value::String("body".into()),
-                Value::String("account_key".into()),
-            ])
-        })?;
+        let target = account_key
+            .as_ref()
+            .map(|value| value.as_str())
+            .ok_or_else(|| {
+                ApiError::validation(vec![
+                    Value::String("body".into()),
+                    Value::String("account_key".into()),
+                ])
+            })?;
         let registered = if let Some(driver) = state.account_driver.clone() {
             studio_runtime_process::blocking_pool::spawn_blocking(
                 "runtime-http/routes/account_transfer",
@@ -157,10 +210,10 @@ async fn transfer(
             .as_secs_f64();
         account_transfer_driver::request(
             &store,
-            &body.request_id,
+            request_id.as_str(),
             lead,
             target,
-            body.scope.as_deref().unwrap_or("team"),
+            scope.as_ref().map_or("team", |value| value.as_str()),
             &target_provider,
             now,
         )
@@ -190,5 +243,37 @@ inventory::submit! {
             "account-transfer/provider-history-executor", "account-transfer/destination-settings",
             "store-bootstrap/account-transfer-schema",
         ],
+    }
+}
+
+#[cfg(test)]
+mod ingress_bounds_tests {
+    use super::{AccountSelectionRequest, Request};
+
+    #[test]
+    fn transfer_body_bounds_are_enforced() {
+        assert!(
+            serde_json::from_str::<AccountSelectionRequest>(r#"{"id":"a","account_key":"b"}"#)
+                .is_ok()
+        );
+        assert!(
+            serde_json::from_str::<AccountSelectionRequest>(r#"{"id":"","account_key":"b"}"#)
+                .is_err()
+        );
+        assert!(serde_json::from_str::<Request>(r#"{"request_id":""}"#).is_err());
+        assert!(
+            serde_json::from_str::<Request>(r#"{"request_id":"a","scope":"invalid"}"#).is_err()
+        );
+        assert!(serde_json::from_str::<Request>(r#"{"request_id":"a","scope":"team"}"#).is_ok());
+        assert!(serde_json::from_str::<Request>(r#"{"request_id":"a","action":"retry"}"#).is_ok());
+        assert!(serde_json::from_str::<Request>(r#"{"request_id":"a","action":null}"#).is_err());
+        assert!(serde_json::from_str::<Request>(r#"{"request_id":"a","scope":null}"#).is_err());
+        assert!(serde_json::from_str::<Request>(r#"{"request_id":"a","unknown":1}"#).is_err());
+        assert!(
+            serde_json::from_str::<AccountSelectionRequest>(
+                r#"{"id":"a","account_key":"b","unknown":1}"#
+            )
+            .is_err()
+        );
     }
 }
