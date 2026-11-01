@@ -114,6 +114,16 @@ async fn edit_actor(state: &State, changes: Value) {
                                     serde::Deserialize::deserialize(value.clone())
                                         .expect("typed attempt")
                             }
+                            "accountTransferId" => {
+                                record.account_transfer_id =
+                                    serde::Deserialize::deserialize(value.clone())
+                                        .expect("typed transfer id");
+                            }
+                            "lazyAccountTransfer" => {
+                                record.lazy_account_transfer =
+                                    serde::Deserialize::deserialize(value.clone())
+                                        .expect("typed lazy transfer");
+                            }
                             _ => {
                                 record.extra.insert(key.clone(), value.clone());
                             }
@@ -167,7 +177,7 @@ async fn vm_existing_reattach_refuses_changed_actor_and_missing_frozen_authority
         json!({"threadId":"other-thread"}),
         json!({"turnId":"other-turn"}),
         json!({"epoch":99}),
-        json!({"lazyAccountTransfer":{"phase":"lazy"}}),
+        json!({"lazyAccountTransfer":{"id":"move","sourceAccountKey":"default"}}),
         json!({"accountTransferId":"unfinished"}),
         json!({"executionMove":{"id":"move"}}),
         json!({"deletedAt":1}),
