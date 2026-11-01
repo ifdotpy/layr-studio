@@ -92,8 +92,22 @@ async fn repair_report(
     let ControlReply::RepairReport(result) = result else {
         return Err(ApiError::internal());
     };
+    // The provider reply may carry paths or text. Only the report fields leave.
+    let Value::Object(mut reply) = result else {
+        return Err(ApiError::internal());
+    };
+    reply.retain(|name, _| {
+        matches!(
+            name.as_str(),
+            "status"
+                | "skippedRows"
+                | "invalidSequence"
+                | "scopeConfirmed"
+                | "nativeHistoryConfirmed"
+        )
+    });
     let evidence: crate::generated::ClaudeRepairReport =
-        serde::Deserialize::deserialize(result).map_err(|_| ApiError::internal())?;
+        serde::Deserialize::deserialize(Value::Object(reply)).map_err(|_| ApiError::internal())?;
     if !(0..=studio_runtime_schema::shared_values::MAX_SAFE_INTEGER)
         .contains(&evidence.skipped_rows)
     {

@@ -376,9 +376,11 @@ fn restart_recovery_refuses_completion_when_live_leader_moves_group() {
         vec![
             helper.to_string_lossy().into_owned(),
             "--exact".into(),
+            // The merged integration binary lists tests by the module path
+            // below its crate name, such as `clients::protocol_v2`.
             format!(
                 "{}::leader_moves_group_on_term_fixture",
-                module_path!().rsplit("::").next().unwrap()
+                module_path!().split_once("::").unwrap().1
             ),
             "--ignored".into(),
             "--nocapture".into(),

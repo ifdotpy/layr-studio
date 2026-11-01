@@ -816,6 +816,7 @@ async fn seed_radio_interrupt(fixture: &Fixture, snapshot: &Value) {
                         let record: Value =
                             serde_json::from_str(row["record"].as_str().unwrap()).unwrap();
                         let mut record = record;
+                        record["recordKind"] = json!("live");
                         record["id"] = json!(stored_project_root.to_string_lossy());
                         record["path"] = json!(stored_project_root.to_string_lossy());
                         record["locations"] = json!([{
@@ -3564,6 +3565,11 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
         .transaction_with(move |tx| {
             tx.execute(
                 "UPDATE runtime_agents SET record=json_set(record,'$.provider','claude','$.model','default','$.threadId',NULL,'$.accountKey','default','$.executionSettingsAccountKey','default','$.nativeEffort',NULL,'$.autoWake',json('true'),'$.isLead',json('false'),'$.status','queued') WHERE id=?1",
+                [&transaction_agent_id],
+            )?;
+            // The chat row owns auto-wake and status for the wake queries.
+            tx.execute(
+                "UPDATE chats SET status='queued',auto_wake=1 WHERE id=?1",
                 [&transaction_agent_id],
             )?;
             Ok::<_, StoreError>(())
