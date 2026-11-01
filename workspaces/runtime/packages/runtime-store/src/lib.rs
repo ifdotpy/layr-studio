@@ -120,8 +120,8 @@ pub use records::{
     PlanRecord, QueueEvent, QueueEventId, QueueEventRepository, RecordKeyMode, RecordOrder,
     RecordPredicate, RecordQueryShape, RequestRecord, RuleRecord, StartAttemptAction,
     StartAttemptView, StartIdentity, StartInterruptView, StartOutcomeHold, StoredStartOutcomeHold,
-    StoredTitleJob, Table, TaskId, TaskRecord, TaskRepository, TerminalRecord, TitleJob,
-    ToolResultRecord, TranscriptAssetId, TranscriptAssetRecord, TranscriptItemId,
+    StoredTitleJob, StoredTransferValue, Table, TaskId, TaskRecord, TaskRepository, TerminalRecord,
+    TitleJob, ToolResultRecord, TranscriptAssetId, TranscriptAssetRecord, TranscriptItemId,
     TranscriptItemRecord, UnknownAgentStatus, UsageResumeRecord, VmAuthBootstrap, VmLaunch,
     WorkItemRecord, WorkStatus, WorkspaceOperationRecord, decode_agent_record, encode_open_record,
 };

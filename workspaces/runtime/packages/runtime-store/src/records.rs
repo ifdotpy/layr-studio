@@ -587,6 +587,11 @@ pub struct AgentRecord {
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
     pub native_failure_hold: studio_runtime_schema::queue_command::Field<NativeFailureHold>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub prepare_attempt: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_mode: Option<AgentExecutionMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -654,6 +659,14 @@ pub struct AgentRecord {
 #[serde(untagged)]
 pub enum NativeFailureHold {
     Boolean(bool),
+    Unreadable(Value),
+}
+
+/// A recognized transfer value or an unchanged historical JSON value.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum StoredTransferValue<T> {
+    Known(T),
     Unreadable(Value),
 }
 
@@ -1024,6 +1037,7 @@ impl AgentRecord {
             auto_wake: None,
             usage_resume_enabled: None,
             native_failure_hold: Default::default(),
+            prepare_attempt: Default::default(),
             execution_mode: None,
             turn_epoch: None,
             account_key: crate::cost_aggregate::DEFAULT_ACCOUNT.to_owned(),
@@ -3484,6 +3498,25 @@ mod tests {
             "accountKey":"default", "nativeFailureHold":true
         }));
         assert!(!record.extra.contains_key("nativeFailureHold"));
+    }
+
+    #[test]
+    fn prepare_attempt_is_not_an_extension() {
+        let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+            "epoch":2, "status":"idle", "accountKey":"default", "prepareAttempt":"attempt"}));
+        assert!(!record.extra.contains_key("prepareAttempt"));
+    }
+
+    #[test]
+    fn prepare_attempt_preserves_unreadable_historical_value() {
+        let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+            "epoch":2, "status":"idle", "accountKey":"default", "prepareAttempt":{"old":true}}));
+        assert!(matches!(record.prepare_attempt.value(),
+            Some(super::StoredTransferValue::Unreadable(value)) if value == &json!({"old":true})));
+        assert_eq!(
+            record.value().get("prepareAttempt"),
+            Some(&json!({"old":true}))
+        );
     }
 
     #[test]
