@@ -822,7 +822,8 @@ mod tests {
             None,
         );
         parent["autoWake"] = json!(true);
-        crate::agents_create::set_capacity(&mut parent, DEFAULT_MAX_TEAM_AGENTS, false);
+        crate::agents_create::set_capacity(&mut parent, DEFAULT_MAX_TEAM_AGENTS, false)
+            .expect("valid capacity");
         database
             .execute(
                 "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",

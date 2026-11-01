@@ -1052,7 +1052,7 @@ async fn create(
         record["permissionMode"] = json!(mode);
     }
     if !draft && role == "orchestrator" {
-        super::set_capacity(&mut record, max_agents, request.max_agents.is_some());
+        super::set_capacity(&mut record, max_agents, request.max_agents.is_some())?;
     }
     if role == "orchestrator" {
         record["workerDefaults"] = worker_defaults.unwrap_or_else(|| {
@@ -1451,7 +1451,7 @@ async fn create_child(
     }
     record["provider"] = json!(provider);
     record["permissionMode"] = root_permission;
-    super::set_capacity(&mut record, root_max_agents, false);
+    super::set_capacity(&mut record, root_max_agents, false)?;
     let created = record
         .get("created")
         .and_then(Value::as_f64)
@@ -1706,8 +1706,11 @@ pub async fn configure(
                 root["concurrency"] = json!(limit);
                 root["agentModeRevision"] = json!(revision + 1);
             }
-            if root.pointer("/capacity/kind").and_then(Value::as_str) != Some("explicit") {
-                super::set_capacity(&mut root, prior_max.max(limit + TEAM_AGENT_HEADROOM), false);
+            if matches!(
+                super::agent_capacity(&root),
+                studio_runtime_store::AgentCapacity::Automatic { .. }
+            ) {
+                super::set_capacity(&mut root, prior_max.max(limit + TEAM_AGENT_HEADROOM), false)?;
             }
             mode_fields(&mut root);
             let changed = current != limit || super::capacity_max(&root) != prior_max;

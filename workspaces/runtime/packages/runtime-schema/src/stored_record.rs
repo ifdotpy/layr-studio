@@ -38,6 +38,11 @@ impl<'de> Deserialize<'de> for StoredJsonInteger {
 #[serde(transparent)]
 pub struct AgentCounter(StoredJsonInteger);
 impl AgentCounter {
+    pub fn from_i64(value: i64) -> Option<Self> {
+        (0..=crate::shared_values::MAX_SAFE_INTEGER)
+            .contains(&value)
+            .then(|| Self(StoredJsonInteger::from_i64(value)))
+    }
     pub(crate) fn default_team_limit() -> Self {
         Self(StoredJsonInteger::from_i64(
             crate::agent_limits::DEFAULT_MAX_TEAM_AGENTS,

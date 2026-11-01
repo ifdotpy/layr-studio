@@ -1087,10 +1087,7 @@ impl JsonRecord for AgentRecord {
     }
 
     fn check_write_value(&self, value: &Value) -> StoreResult<()> {
-        #[cfg(any(test, debug_assertions))]
         self.check_extra_round_trip(&serde_json::to_string(value)?)?;
-        #[cfg(not(any(test, debug_assertions)))]
-        let _ = value;
         Ok(())
     }
 
@@ -1102,7 +1099,6 @@ impl JsonRecord for AgentRecord {
 }
 
 impl AgentRecord {
-    #[cfg(any(test, debug_assertions))]
     fn check_extra_round_trip(&self, encoded: &str) -> StoreResult<()> {
         let mut deserializer = serde_json::Deserializer::from_str(encoded);
         let decoded: Self =

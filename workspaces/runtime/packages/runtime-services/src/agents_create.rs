@@ -195,18 +195,29 @@ pub fn mode_fields(record: &mut Value) {
 }
 
 pub(crate) fn capacity_max(record: &Value) -> i64 {
-    record
-        .pointer("/capacity/max")
-        .and_then(|value| {
-            serde_json::from_value::<studio_runtime_schema::AgentCounter>(value.clone()).ok()
-        })
-        .map(|value| value.as_i64())
-        .unwrap_or(studio_runtime_schema::agent_limits::DEFAULT_MAX_TEAM_AGENTS)
+    agent_capacity(record).max()
 }
 
-pub(crate) fn set_capacity(record: &mut Value, max: i64, explicit: bool) {
-    record["capacity"] =
-        json!({"kind": if explicit { "explicit" } else { "automatic" }, "max": max});
+pub(crate) fn agent_capacity(record: &Value) -> studio_runtime_store::AgentCapacity {
+    record
+        .get("capacity")
+        .and_then(|value| studio_runtime_store::AgentCapacity::deserialize(value).ok())
+        .unwrap_or_default()
+}
+
+pub(crate) fn set_capacity(record: &mut Value, max: i64, explicit: bool) -> Result<(), StoreError> {
+    let max = studio_runtime_schema::AgentCounter::from_i64(max)
+        .ok_or(StoreError::RecordContract("invalid agent capacity"))?;
+    let capacity = if explicit {
+        studio_runtime_store::AgentCapacity::Explicit { max }
+    } else {
+        studio_runtime_store::AgentCapacity::Automatic { max }
+    };
+    record
+        .as_object_mut()
+        .ok_or(StoreError::RecordContract("invalid agent record"))?
+        .insert("capacity".into(), serde_json::to_value(capacity)?);
+    Ok(())
 }
 
 /// Use the shared canonical renderer builder for every agent publication.
@@ -678,7 +689,7 @@ fn configure_limits(
             record = root_value.clone();
             if let Some(max_agents) = max_agents {
                 let explicit = record.get("isLead").and_then(Value::as_bool) == Some(true);
-                set_capacity(&mut record, max_agents, explicit);
+                set_capacity(&mut record, max_agents, explicit)?;
             }
         } else {
             record
@@ -688,7 +699,7 @@ fn configure_limits(
                     id: agent_id.clone(),
                 })?
                 .remove("concurrency");
-            set_capacity(&mut record, team_max_agents, false);
+            set_capacity(&mut record, team_max_agents, false)?;
         }
         save_agent(transaction, &record, &validate)?;
         if agent_id == id {
@@ -768,6 +779,14 @@ fn rename(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn capacity_access_uses_the_typed_kind() {
+        let record = serde_json::json!({"capacity":{"kind":"future","max":8}});
+        assert_eq!(
+            super::capacity_max(&record),
+            studio_runtime_schema::agent_limits::DEFAULT_MAX_TEAM_AGENTS
+        );
+    }
     use super::{create_agent, ensure_project, replay_agent};
     use rusqlite::Connection;
     use serde_json::{Value, json};

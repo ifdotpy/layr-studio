@@ -2812,7 +2812,7 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
         .unwrap()
         .value()
     };
-    crate::agents_create::set_capacity(&mut actor_value, 64, false);
+    crate::agents_create::set_capacity(&mut actor_value, 64, false).expect("valid capacity");
     actor_value["cwd"] = json!(project_path);
     actor_value["workspaceInGit"] = json!(true);
     actor_value["workspaceMode"] = json!("worktree");
@@ -3225,7 +3225,7 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
             )?
             .unwrap();
             let mut root_value = root.value();
-            crate::agents_create::set_capacity(&mut root_value, 1, true);
+            crate::agents_create::set_capacity(&mut root_value, 1, true).expect("valid capacity");
             root_value["executionMode"] = json!("native");
             root_value["workspaceMode"] = json!("worktree");
             root_value["cwd"] = json!(native_cwd);
@@ -3380,7 +3380,7 @@ async fn spawn_past_the_running_limit_queues_and_past_the_team_size_refuses() {
             .unwrap()
         };
         lead["concurrency"] = json!(running + 1);
-        crate::agents_create::set_capacity(&mut lead, active + 2, true);
+        crate::agents_create::set_capacity(&mut lead, active + 2, true).expect("valid capacity");
         let stored = lead.clone();
         store
             .transaction_with::<_, StoreError>(move |tx| {

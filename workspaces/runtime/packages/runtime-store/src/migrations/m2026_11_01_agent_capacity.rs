@@ -4,7 +4,7 @@ use serde_json::value::RawValue;
 use std::collections::BTreeMap;
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
-    let mut query = tx.prepare("SELECT id,record FROM runtime_agents WHERE json_valid(record) AND (json_type(record,'$.maxAgents') IS NOT NULL OR json_type(record,'$.maxAgentsExplicit') IS NOT NULL OR json_type(record,'$.capacity') IS NULL)")?;
+    let mut query = tx.prepare("SELECT id,record FROM runtime_agents WHERE json_valid(record)")?;
     let rows = query.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
@@ -14,7 +14,12 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         let mut record: BTreeMap<String, Box<RawValue>> = serde_json::from_str(&raw)?;
         let old_max = record.remove("maxAgents");
         let old_explicit = record.remove("maxAgentsExplicit");
-        if old_max.is_none() && old_explicit.is_none() && record.contains_key("capacity") {
+        if old_max.is_none()
+            && old_explicit.is_none()
+            && record.get("capacity").is_some_and(|value| {
+                serde_json::from_str::<crate::AgentCapacity>(value.get()).is_ok()
+            })
+        {
             continue;
         }
         let max = old_max.as_ref().and_then(|raw| {
@@ -58,6 +63,24 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;
+    #[test]
+    fn invalid_canonical_capacity_is_normalized() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL); INSERT INTO runtime_agents VALUES('null','{\"id\":\"null\",\"capacity\":null}'),('bad','{\"id\":\"bad\",\"capacity\":{\"kind\":\"future\",\"max\":8}}')").unwrap();
+        let tx = db.transaction().unwrap();
+        super::apply(&tx).unwrap();
+        for id in ["null", "bad"] {
+            let raw: String = tx
+                .query_row(
+                    "SELECT json_extract(record,'$.capacity') FROM runtime_agents WHERE id=?1",
+                    [id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let capacity: crate::AgentCapacity = serde_json::from_str(&raw).unwrap();
+            assert_eq!(capacity, crate::AgentCapacity::default());
+        }
+    }
     #[test]
     fn capacity_migration_normalizes_and_reseeds_once() {
         let mut db = Connection::open_in_memory().unwrap();

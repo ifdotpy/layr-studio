@@ -120,8 +120,7 @@ async fn seeded(path: &std::path::Path, state: &Value) -> studio_runtime_store::
         .expect("fresh current store");
     let seed: Seed = serde_json::from_value(state.clone()).expect("typed captured rows");
     store.transaction(move |tx| {
-        for mut row in seed.runtime_agents {
-            crate::agent_view_fixtures::normalize_legacy_agent(&mut row.record);
+        for row in seed.runtime_agents {
             let agent = studio_runtime_store::AgentRecord::from_value(row.record)?;
             assert_eq!(agent.id.0, row.id);
             studio_runtime_store::AgentRepository::put(tx, &agent)?;
@@ -281,24 +280,12 @@ fn compare(db: &rusqlite::Connection, expected: &Value, label: &str) {
     // Current execution ownership also publishes a typed active pointer. Check it
     // before comparing the unchanged Python record fields.
     let mut expected = expected.clone();
-    for row in expected
-        .get_mut("runtime_agents")
-        .and_then(Value::as_array_mut)
-        .expect("agents")
-    {
-        crate::agent_view_fixtures::normalize_legacy_agent(
-            row.get_mut("record").expect("agent record"),
-        );
-    }
     for state in [&mut actual, &mut expected] {
         for row in state
             .get_mut("runtime_agents")
             .and_then(Value::as_array_mut)
             .expect("agents")
         {
-            crate::agent_view_fixtures::materialize_agent_defaults(
-                row.get_mut("record").expect("agent record"),
-            );
             if let Some(attempt) = row
                 .pointer_mut("/record/startAttempt")
                 .and_then(Value::as_object_mut)

@@ -812,7 +812,7 @@ pub(crate) async fn spawn_agents(
             &mut record,
             crate::agents_create::capacity_max(&root_value),
             false,
-        );
+        )?;
         drafts.push(Draft {
             typed: draft,
             record,
@@ -1520,7 +1520,7 @@ pub(crate) async fn request_review(
         &mut record,
         crate::agents_create::capacity_max(&root_value),
         false,
-    );
+    )?;
     let review = ReviewDraft {
         typed: prepared,
         record,
