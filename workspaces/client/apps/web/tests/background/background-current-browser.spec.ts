@@ -1,4 +1,5 @@
 import { backgroundDisplay } from "../fixtures/background.ts";
+import { approval } from "../../src/approvalFixtures.ts";
 import { required } from "../teams/helpers.ts";
 import { execFileSync } from "node:child_process";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";
@@ -175,11 +176,14 @@ test("Background Current Browser", async ({
       runtime: {
         ...fixtureSnapshot(agents).runtime,
         requests: [
-          {
+          approval({
             id: "approve-id",
-            method: "monitor/approve",
-            params: { monitorId: "approval" },
-          },
+            request: {
+              kind: "monitor_start",
+              monitor: "approval",
+              command: "tail -f log",
+            },
+          }),
         ],
         monitors: [
           {

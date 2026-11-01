@@ -14,6 +14,8 @@ import type {
   Monitor,
   Snapshot,
 } from "../../src/types.ts";
+import { simpleRequest } from "../../src/approvalFixtures.ts";
+import type { Approval } from "../../src/approvals.ts";
 import "../../src/style.css";
 import "../../src/workspace-layout.css";
 
@@ -23,6 +25,7 @@ declare global {
     worker: (index: number) => Agent;
     command: (index: number) => BackgroundTask;
     monitor: (index: number) => Monitor;
+    input: (id: string) => Approval;
     setData: (value: PhaseSnapshot) => void;
   }
 }
@@ -54,6 +57,7 @@ window.command = (i) => ({
   status: "running",
   epoch: 2,
 });
+window.input = (id) => simpleRequest({ id, agent: "lead", epoch: 2 });
 window.monitor = (i) => ({
   created: 1,
   display: backgroundDisplay("monitor", "watch build " + i),

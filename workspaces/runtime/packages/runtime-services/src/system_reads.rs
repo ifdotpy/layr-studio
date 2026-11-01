@@ -296,19 +296,31 @@ pub fn ui_summary(
             );
         }
     }
-    for request in rows("request")
-        .iter()
-        .filter(|r| r["status"] == "pending" && !truthy(r.get("deferred")))
-    {
-        let question = request["params"]["questions"]
-            .as_array()
-            .and_then(|q| q.first())
-            .and_then(|q| q["question"].as_str())
-            .filter(|q| !q.is_empty());
-        if let Some(agent) = agents.get(request["agent"].as_str().unwrap_or_default()) {
+    for value in rows("request") {
+        use studio_runtime_schema::approvals::{Approval, ApprovalState, Request};
+        let request: Approval = serde::Deserialize::deserialize(value.clone()).map_err(|_| {
+            StoreError::InvalidStoredRecord {
+                object: "approval projection",
+                id: value["id"].as_str().unwrap_or_default().to_owned(),
+            }
+        })?;
+        if !matches!(request.state, ApprovalState::Pending)
+            || request.hidden.is_some()
+            || request.deferral.as_ref().is_some_and(|d| d.active)
+        {
+            continue;
+        }
+        let question = match &request.request {
+            Request::Question { questions } | Request::AgentQuestion { questions } => questions
+                .first()
+                .map(|q| q.question.as_str())
+                .filter(|q| !q.is_empty()),
+            _ => None,
+        };
+        if let Some(agent) = agents.get(request.agent.as_str()) {
             alert(
                 &mut alerts,
-                format!("request:{}", fallback(request, "id", "")),
+                format!("request:{}", request.id.as_str()),
                 agent,
                 if question.is_some() {
                     "Question for you"
@@ -316,7 +328,7 @@ pub fn ui_summary(
                     "Your approval is needed"
                 },
                 question.unwrap_or("Open the request to review it."),
-                request["id"].as_str(),
+                Some(request.id.as_str()),
             );
         }
     }
@@ -390,6 +402,53 @@ fn alert(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn summary_shows_pending_approval_questions_and_excludes_deferred_and_answering() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE sync_entities(collection TEXT,id TEXT,payload TEXT,deleted INTEGER)",
+        )
+        .unwrap();
+        let agent = json!({"id":"a","name":"Lead"});
+        let base = json!({"id":"q","agent":"a","turn":null,"created":1.0,"epoch":null,
+            "request":{"kind":"agent_question","questions":[{"id":"1","question":"Continue?","header":null,"options":[],"is_secret":false,"multi_select":null,"is_other":null}]},
+            "delivery":null,"detail":{"params":{},"preview":null,"answer_error":null,"host_close_reason":null},
+            "state":{"kind":"pending"},"deferral":null,"fire_at":null,"hidden":null});
+        let mut permission = base.clone();
+        permission["id"] = json!("p");
+        permission["request"] = json!({"kind":"permissions","requested":[]});
+        let mut deferred = base.clone();
+        deferred["id"] = json!("d");
+        deferred["deferral"] = json!({"active":true,"at":1.0,"by":{"kind":"owner"}});
+        let mut answering = base.clone();
+        answering["id"] = json!("x");
+        answering["state"] =
+            json!({"kind":"answering","answer":{"kind":"answers","answers":[]},"command":"cmd"});
+        for (collection, id, value) in [
+            ("agent", "a", agent),
+            ("request", "q", base),
+            ("request", "p", permission),
+            ("request", "d", deferred),
+            ("request", "x", answering),
+        ] {
+            db.execute(
+                "INSERT INTO sync_entities VALUES(?1,?2,?3,0)",
+                (collection, id, json!({"value":value}).to_string()),
+            )
+            .unwrap();
+        }
+        let tx = db.transaction().unwrap();
+        let summary = ui_summary(&tx, None).unwrap();
+        let alerts = summary["alerts"].as_array().unwrap();
+        assert_eq!(alerts.len(), 2);
+        assert!(alerts.iter().any(|a| a["body"] == "Continue?"));
+        assert!(
+            alerts
+                .iter()
+                .any(|a| a["body"] == "Open the request to review it.")
+        );
+    }
 
     #[test]
     #[cfg(unix)]
