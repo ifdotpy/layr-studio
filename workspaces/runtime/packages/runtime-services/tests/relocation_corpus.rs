@@ -210,13 +210,12 @@ fn snapshot(store: &RuntimeStore) -> Value {
                 for index in 0..count {
                     // Record key order is not a contract: startup rewrites it.
                     let cell = row.get_ref(index)?;
-                    let record = match cell {
-                        rusqlite::types::ValueRef::Text(bytes) => {
-                            serde_json::from_slice::<Value>(bytes)
-                                .ok()
-                                .filter(|value| value.is_object() || value.is_array())
-                        }
-                        _ => None,
+                    let record = if let rusqlite::types::ValueRef::Text(bytes) = cell {
+                        serde_json::from_slice::<Value>(bytes)
+                            .ok()
+                            .filter(|value| value.is_object() || value.is_array())
+                    } else {
+                        None
                     };
                     values.push(match record {
                         Some(record) => record.to_string(),
