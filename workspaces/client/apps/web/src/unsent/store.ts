@@ -6,7 +6,12 @@ import type {
   StoredSend,
   StoredUpload,
 } from "./schema.ts";
-export type { RecordingValue, StoredSend, StoredUpload } from "./schema.ts";
+export type {
+  LocalSend,
+  RecordingValue,
+  StoredSend,
+  StoredUpload,
+} from "./schema.ts";
 
 // One device buffer for input that has not yet been confirmed by its server.
 export const UNSENT_FAILURE_EVENT = "studio-unsent-input-failure";

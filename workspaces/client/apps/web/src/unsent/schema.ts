@@ -52,8 +52,15 @@ const uploadSchema = z
   })
   .refine((row) => row.size === row.bytes.size);
 export type StoredUpload = z.infer<typeof uploadSchema>;
+const localSendSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("stored") }),
+  z.strictObject({ kind: z.literal("in_flight") }),
+  z.strictObject({ kind: z.literal("transport_failed"), error: z.string() }),
+]);
+export type LocalSend = z.infer<typeof localSendSchema>;
 const sendSchema = z.strictObject({
   request: commandRequestSchema,
+  localState: localSendSchema,
   workspaceId: z.string(),
   created: z.number(),
   attachments: z.array(attachmentSchema),

@@ -146,6 +146,7 @@ it("round trips the exact generated command request", async () => {
     workspaceId: "workspace",
     created: 1,
     attachments: [],
+    localState: { kind: "stored" as const },
   };
   const id = JSON.stringify(["chat", "one"]);
   await store.put(id, value);

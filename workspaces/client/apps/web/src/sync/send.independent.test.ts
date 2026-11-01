@@ -211,7 +211,10 @@ it("removes a definitive rejection from the buffer", async () => {
   });
   expect(
     await outbox.durableSend({ id: "refused", room: "chat", text: "hello" }),
-  ).toMatchObject({ status: "failed", error: "refused" });
+  ).toMatchObject({
+    kind: "local",
+    state: { kind: "transport_failed", error: "refused" },
+  });
   expect(post).toHaveBeenCalledTimes(1);
   expect(buffer.values.size).toBe(0);
   await expect(outbox.changeOutbox("refused", "resume")).rejects.toThrow(
@@ -391,7 +394,7 @@ it("keeps a remote outcome-unknown error uncertain instead of treating it as a r
   });
   expect(
     await outbox.durableSend({ id: "pending", room: "chat", text: "hello" }),
-  ).toMatchObject({ status: "uncertain" });
+  ).toMatchObject({ kind: "local", state: { kind: "transport_failed" } });
 });
 
 it("restores an uncertain command after reload and removes it on confirmation", async () => {

@@ -3,6 +3,7 @@ import {
   reportUnsentFailure,
   sendStore,
   type StoredSend,
+  type LocalSend,
 } from "../unsent/store";
 import { serverViewId } from "../servers/environment";
 import { serverLocalStorage } from "../servers/storage";
@@ -10,7 +11,6 @@ import { serverMutationResponseIsUncertain } from "../servers/mutationIdentity";
 import { ApiError, command, errorText, getStreamSession } from "../api";
 import {
   messageReceipt,
-  type CommandRequest,
   type MessageDelivery,
   type SendMessageBody,
 } from "../commands";
@@ -19,30 +19,25 @@ import { watchResourceConnection } from "./subscriptions/events";
 import { MessageSendStatus } from "../generated/api";
 import type { MessageReceipt } from "./messageReceipts";
 
-type SendCommand = Extract<CommandRequest, { kind: "send" }>;
+export type DeliveryState =
+  | { source: "device"; state: LocalSend }
+  | { source: "server"; status: MessageSendStatus };
 type Intention = {
   body: SendMessageBody;
-  status: MessageSendStatus | "buffered";
-  attempted?: boolean;
-  error?: string | undefined;
+  status: DeliveryState;
   receipt?: MessageDelivery | undefined;
   created: number;
-  displayPending?: boolean;
   attachments?: Attachment[] | undefined;
   displayText?: string | undefined;
 };
 export type OutboxEntry = Intention & { id: string };
 export type OutgoingMessage = OutboxEntry;
-type SavedSend = Intention & { request: SendCommand; workspaceId: string };
+type SavedSend = StoredSend & { body: SendMessageBody };
 type SendResult =
   | { kind: "confirmed"; id: string }
+  | { kind: "removed"; id: string }
   | (MessageDelivery & { kind: "server" })
-  | {
-      kind: "local";
-      id: string;
-      status: Intention["status"];
-      error?: string | undefined;
-    };
+  | { kind: "local"; id: string; state: LocalSend };
 
 const statuses = new Set<string>(Object.values(MessageSendStatus));
 export function matchesMessageDelivery(value: unknown, id: string) {
@@ -80,7 +75,7 @@ export function createOutbox(options: {
             room: value.request.target,
             ...value.request.body,
           };
-          saved.set(id, { ...value, body, status: "buffered" });
+          saved.set(id, { ...value, body });
         }
       }
     })().catch((error: unknown) => {
@@ -93,7 +88,11 @@ export function createOutbox(options: {
   const publish = () => listeners.forEach((listener) => listener());
   function list(): OutboxEntry[] {
     return [...saved.values()]
-      .map((value) => ({ ...value, id: value.request.id }))
+      .map((value) => ({
+        ...value,
+        id: value.request.id,
+        status: { source: "device" as const, state: value.localState },
+      }))
       .sort((a, b) => a.created - b.created);
   }
   function read(room: string, id: string): SavedSend | undefined {
@@ -103,6 +102,7 @@ export function createOutbox(options: {
     const id = key(value.body.room, value.body.id);
     const record: StoredSend = {
       request: value.request,
+      localState: value.localState,
       workspaceId: value.workspaceId,
       created: value.created,
       attachments: value.attachments ?? [],
@@ -147,8 +147,7 @@ export function createOutbox(options: {
     return {
       kind: "local",
       id: value.body.id,
-      status: value.status,
-      error: value.error,
+      state: value.localState,
     };
   }
   function send(
@@ -174,9 +173,8 @@ export function createOutbox(options: {
       try {
         if (!read(value.body.room, id))
           return {
-            kind: "local",
+            kind: "removed",
             id,
-            status: MessageSendStatus.cancelled,
           };
         const current = options.api.getStreamSession();
         if (!current) throw new Error("The server connection is not ready.");
@@ -184,12 +182,13 @@ export function createOutbox(options: {
           throw new Error(
             "The server workspace changed. Reload before sending.",
           );
-        void write({ ...value, attempted: true });
+        const inFlight: LocalSend = { kind: "in_flight" };
+        value = { ...value, localState: inFlight };
+        void write(value);
         if (!read(value.body.room, id))
           return {
-            kind: "local",
+            kind: "removed",
             id,
-            status: MessageSendStatus.cancelled,
           };
         const response = await command.run(value.request, {
           workspaceId: value.workspaceId,
@@ -212,15 +211,9 @@ export function createOutbox(options: {
           receipt.status === MessageSendStatus.cancelled
         ) {
           refused = true;
-          const failed = {
-            ...value,
-            status: receipt.status,
-            attempted: true,
-            error: receipt.error || "The message was not sent.",
-          };
           if (read(value.body.room, id))
             void remove(value.body.room, id).catch(reportUnsentFailure);
-          return result(failed);
+          return { ...receipt, kind: "server" };
         }
         notifyPersisted();
         void remove(value.body.room, id).catch(reportUnsentFailure);
@@ -233,14 +226,11 @@ export function createOutbox(options: {
           error instanceof ApiError &&
           !serverMutationResponseIsUncertain(error.status, error.response);
         if (definitive) refused = true;
-        const failed = {
-          ...value,
-          attempted: true,
-          status: definitive
-            ? MessageSendStatus.failed
-            : MessageSendStatus.uncertain,
+        const localState: LocalSend = {
+          kind: "transport_failed",
           error: errorText(error),
         };
+        const failed: SavedSend = { ...value, localState };
         if (read(value.body.room, id)) {
           if (definitive)
             void remove(value.body.room, id).catch(reportUnsentFailure);
@@ -284,10 +274,8 @@ export function createOutbox(options: {
         body,
         request,
         workspaceId,
-        status: "buffered",
-        attempted: false,
+        localState: { kind: "stored" },
         created: Date.now(),
-        displayPending: true,
         attachments,
       };
       removed.delete(key(body.room, body.id));
@@ -314,9 +302,8 @@ export function createOutbox(options: {
     await ready();
     const entry = find(id);
     if (!entry) return false;
-    const neverAttempted = entry.attempted === false;
     await remove(entry.body.room, id);
-    return neverAttempted;
+    return false;
   }
   async function acknowledgeOutbox(ids: string[]) {
     await ready();
@@ -360,11 +347,7 @@ export function createOutbox(options: {
         try {
           for (const entry of list()) {
             const value = read(entry.body.room, entry.id);
-            if (
-              value &&
-              (value.status === "buffered" ||
-                value.status === MessageSendStatus.uncertain)
-            )
+            if (value)
               void send(value).catch((failure) => setError(errorText(failure)));
           }
         } catch (failure) {
