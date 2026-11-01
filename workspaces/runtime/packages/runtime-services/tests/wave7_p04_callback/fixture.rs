@@ -298,6 +298,32 @@ pub fn assert_writes(before: &Value, store: &RuntimeStore, expected: &Value) {
             }
         }
     }
+    // fe1e1f249 retires yoloMode from the published agent projection. These
+    // fixtures write the old record after migration, without permissionMode.
+    if let Some(rows) = expected
+        .get_mut("sync_entities")
+        .and_then(|change| change.get_mut("added"))
+        .and_then(Value::as_array_mut)
+    {
+        for row in rows {
+            let Some(row) = row.as_array_mut() else {
+                continue;
+            };
+            if row.first().and_then(Value::as_str) != Some("agent") {
+                continue;
+            }
+            let Some(fields) = row
+                .get_mut(2)
+                .and_then(|payload| payload.get_mut("value"))
+                .and_then(Value::as_object_mut)
+            else {
+                continue;
+            };
+            if let Some(mode) = fields.remove("yoloMode") {
+                assert!(mode.is_boolean(), "frozen yoloMode");
+            }
+        }
+    }
     normalize_agent_nulls(&mut expected);
     normalize_agent_nulls(&mut actual);
     crate::removed_budget_fields::strip(&mut actual);

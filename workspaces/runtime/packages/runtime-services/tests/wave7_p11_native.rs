@@ -894,6 +894,11 @@ fn review_reservation_rolls_back_and_replays_without_second_child() {
     );
     let mut expected = case["child"].clone();
     expected["nativeReview"]["actionRequestId"] = json!(action_id);
+    // fe1e1f249 adds the canonical permissionMode to newly reserved reviews.
+    expected
+        .as_object_mut()
+        .expect("child fixture")
+        .insert("permissionMode".into(), json!("default"));
     assert_eq!(child, expected);
 }
 
