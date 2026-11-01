@@ -2587,10 +2587,12 @@ mod limits_runtime_tests {
             100
         );
         assert!(wake.notified().now_or_never().is_some());
-        assert!(!f.runtime.ingest_limits(event).await.unwrap());
+        assert!(!f.runtime.ingest_limits(event.clone()).await.unwrap());
         assert!(wake.notified().now_or_never().is_none());
-        assert!(!f.runtime.ingest_limits(update(&f, 3, 100)).await.unwrap());
-        assert!(wake.notified().now_or_never().is_none());
+        let mut newer = update(&f, 3, 100);
+        newer.observed_at = event.observed_at + 1.0;
+        assert!(f.runtime.ingest_limits(newer).await.unwrap());
+        assert!(wake.notified().now_or_never().is_some());
         let store = f.runtime.store.as_ref().unwrap();
         let raw: String = store
             .test_reader()
