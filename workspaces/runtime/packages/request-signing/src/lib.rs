@@ -1,10 +1,15 @@
 //! Owner of the multi-server request signature: the canonical bytes, the header names and
 //! Ed25519 sign and verify. It does no I/O. Callers load keys and send or read requests.
 
+#[cfg(feature = "ed25519")]
 use base64::{Engine, engine::general_purpose::STANDARD};
+#[cfg(feature = "ed25519")]
 use ring::signature::{ED25519, Ed25519KeyPair, UnparsedPublicKey};
 use sha2::{Digest, Sha256};
-use studio_runtime_schema::multi_server_protocol::MULTI_SERVER_SIGNING_DOMAIN;
+
+/// Domain separator prefixed to every signed multi-server message. The protocol version
+/// (`ACCESS_PROTOCOL_VERSION` in runtime-schema) must match this name; runtime-schema tests it.
+pub const MULTI_SERVER_SIGNING_DOMAIN: &str = "studio-multi-server-v1";
 
 /// Header names of a signed multi-server request. HTTP header names are case-insensitive.
 pub mod header {
@@ -58,11 +63,13 @@ pub fn signing_bytes(input: SigningInput<'_>) -> Vec<u8> {
 }
 
 /// Sign `input` with the device key. The result is the base64 value of `header::SIGNATURE`.
+#[cfg(feature = "ed25519")]
 pub fn sign(key: &Ed25519KeyPair, input: SigningInput<'_>) -> String {
     STANDARD.encode(key.sign(&signing_bytes(input)).as_ref())
 }
 
 /// Verify the base64 `signature` of `input` with the raw 32-byte Ed25519 `public_key`.
+#[cfg(feature = "ed25519")]
 pub fn verify(
     public_key: &[u8],
     input: SigningInput<'_>,
@@ -78,12 +85,14 @@ pub fn verify(
 mod tests {
     use super::*;
 
+    #[cfg(feature = "ed25519")]
     // The RFC 8032 test seed that the runtime and client fixtures also use.
     const SEED: [u8; 32] = [
         0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c,
         0xc4, 0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae,
         0x7f, 0x60,
     ];
+    #[cfg(feature = "ed25519")]
     const PUBLIC: [u8; 32] = [
         0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7, 0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07,
         0x3a, 0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25, 0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07,
@@ -92,6 +101,7 @@ mod tests {
     // Signature of `fixed_request()` with the seed above. The runtime signer
     // (`multi_server_signed_headers`) and the client signer (`server_keys::signature`)
     // produced this exact value before the owner moved here.
+    #[cfg(feature = "ed25519")]
     pub(crate) const GOLDEN_SIGNATURE: &str =
         "PfjrkGA/IwuIryihDJjgbfNY/NicDM3N3JicKu0yQMHvEE58pUjBK502a+n1/jr/ovXn4d9nwTi1Q6p1nfX2Dg==";
 
@@ -108,6 +118,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "ed25519")]
     fn key() -> Ed25519KeyPair {
         Ed25519KeyPair::from_seed_unchecked(&SEED).expect("fixed seed loads")
     }
@@ -121,12 +132,14 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "ed25519")]
     #[test]
     fn golden_signature_is_unchanged() {
         let body = b"{\"a\":1}";
         assert_eq!(sign(&key(), fixed_request(body)), GOLDEN_SIGNATURE);
     }
 
+    #[cfg(feature = "ed25519")]
     #[test]
     fn signed_request_verifies_and_a_changed_body_is_refused() {
         let body = b"{\"a\":1}";

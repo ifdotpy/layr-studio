@@ -1,5 +1,6 @@
 import { randomUUID } from "../uuid";
 import { serveOrigin, type StudioServer } from "./registry";
+import { multiServerSigningBytes } from "../wasm/client";
 import {
   ACCESS_PROTOCOL_VERSION,
   IDENTITY_PROOF_NONCE_BYTES,
@@ -89,28 +90,6 @@ export function pairedServer(
     credentialId,
   };
 }
-export function signatureInput(
-  method: string,
-  path: string,
-  serverId: string,
-  clientId: string,
-  timestamp: string,
-  nonce: string,
-  requestId: string,
-  hash: string,
-) {
-  return [
-    MULTI_SERVER_SIGNING_DOMAIN,
-    method.toUpperCase(),
-    path,
-    serverId,
-    clientId,
-    timestamp,
-    nonce,
-    requestId,
-    hash,
-  ].join("\n");
-}
 /** Unpadded base64url of `size` random bytes. */
 export function randomNonce(size: number) {
   return btoa(
@@ -173,26 +152,20 @@ export async function signedRequest(
 ) {
   const url = new URL(request.url);
   const body = new Uint8Array(await request.clone().arrayBuffer());
-  const hash = Array.from(
-    new Uint8Array(await crypto.subtle.digest("SHA-256", body)),
-    (byte) => byte.toString(16).padStart(2, "0"),
-  ).join("");
   const timestamp = String(Math.floor(Date.now() / 1000));
   const nonce = randomNonce(24);
   const signature = await crypto.subtle.sign(
     "Ed25519",
     privateKey,
-    new TextEncoder().encode(
-      signatureInput(
-        request.method,
-        url.pathname + url.search,
-        serverId,
-        clientId,
-        timestamp,
-        nonce,
-        requestId,
-        hash,
-      ),
+    await multiServerSigningBytes(
+      request.method,
+      url.pathname + url.search,
+      serverId,
+      clientId,
+      timestamp,
+      nonce,
+      requestId,
+      body,
     ),
   );
   const headers = new Headers(request.headers);

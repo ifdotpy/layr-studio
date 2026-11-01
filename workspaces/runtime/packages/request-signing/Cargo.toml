@@ -6,10 +6,14 @@ description = "Owner of the multi-server request signature: canonical bytes, hea
 license.workspace = true
 publish.workspace = true
 
+[features]
+default = ["ed25519"]
+# Sign and verify. The browser build (client-wasm) turns it off: it only needs the bytes.
+ed25519 = ["dep:ring"]
+
 [dependencies]
-studio-runtime-schema = { path = "../runtime-schema" }
 base64 = { workspace = true }
-ring = { workspace = true }
+ring = { workspace = true, optional = true }
 sha2 = { workspace = true }
 
 [lints]

@@ -3,8 +3,8 @@
 
 /// Version of the signed multi-server access protocol.
 pub const ACCESS_PROTOCOL_VERSION: u64 = 1;
-/// Domain separator prefixed to every signed multi-server message.
-pub const MULTI_SERVER_SIGNING_DOMAIN: &str = "studio-multi-server-v1";
+/// Domain separator prefixed to every signed multi-server message. Owned by `studio-request-signing`.
+pub use studio_request_signing::MULTI_SERVER_SIGNING_DOMAIN;
 /// Size of the random nonce that a client sends to prove a route's identity, in bytes.
 pub const IDENTITY_PROOF_NONCE_BYTES: usize = 24;
 /// File name of the remote access record in the state directory.
