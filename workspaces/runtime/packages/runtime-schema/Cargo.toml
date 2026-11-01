@@ -11,11 +11,11 @@ studio-client-domain = { path = "../../../client/packages/client-domain" }
 schemars.workspace = true
 data-encoding = { workspace = true }
 jsonschema = { workspace = true }
-regex.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 strum.workspace = true
+unicode-general-category.workspace = true
 uuid = { workspace = true, features = ["v7"] }
 thiserror.workspace = true
 rusqlite = { workspace = true, optional = true }

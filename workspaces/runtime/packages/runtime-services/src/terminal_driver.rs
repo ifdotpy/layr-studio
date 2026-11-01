@@ -20,11 +20,10 @@ use thiserror::Error;
 pub const OUTPUT_LIMIT: usize = 1_048_576;
 pub const OUTPUT_CHUNK: usize = 65_536;
 pub const INPUT_LIMIT: usize = 65_536;
-pub use studio_runtime_schema::terminal_ingress::TERMINAL_TITLE_MAX_CODEPOINTS as MAX_TITLE_CHARS;
-pub use studio_runtime_schema::terminal_ingress::{
+use studio_runtime_schema::terminal_ingress::{
     TERMINAL_COLS_DEFAULT, TERMINAL_COLS_MAX, TERMINAL_COLS_MIN,
     TERMINAL_CREATE_REQUEST_ID_MAX_CODEPOINTS, TERMINAL_ROWS_DEFAULT, TERMINAL_ROWS_MAX,
-    TERMINAL_ROWS_MIN,
+    TERMINAL_ROWS_MIN, TERMINAL_TITLE_MAX_CODEPOINTS,
 };
 use studio_runtime_schema::terminal_ingress::{TerminalAction, TerminalInput};
 
@@ -1126,7 +1125,7 @@ enum InputReservation {
 }
 
 fn terminal_title(title: &str) -> Result<&str, TerminalError> {
-    if title.trim().is_empty() || title.chars().count() > MAX_TITLE_CHARS {
+    if title.trim().is_empty() || title.chars().count() > TERMINAL_TITLE_MAX_CODEPOINTS {
         Err(TerminalError::InvalidRequest)
     } else {
         Ok(title.trim())
@@ -1220,6 +1219,7 @@ mod tests {
         history_output, new_id, output, receipt_signature, terminal_title,
     };
     use serde_json::Value;
+    use studio_runtime_schema::terminal_ingress::{TerminalAction, TerminalInput};
     use studio_runtime_store::path_identity::CanonicalPath;
     use studio_runtime_store::{
         AgentId, AgentRecord, AgentRepository, AgentStatus, RuntimeStore, TerminalRecord,
@@ -1495,9 +1495,12 @@ mod tests {
         )
         .expect("receipt read");
         let requests_before = driver.session.requests.lock().expect("requests").len();
-        let too_large = serde_json::json!({"id":id,"text":"x".repeat(INPUT_LIMIT + 1),"request_id":request_id("input-limit-too-large").as_str()});
+        let too_large = serde_json::json!({"id":id,"text":"é".repeat(INPUT_LIMIT / 2 + 1),"request_id":request_id("input-limit-too-large").as_str()});
+        let input = <TerminalInput as serde::Deserialize>::deserialize(&too_large)
+            .expect("input is within the character limit");
+        assert!(before.is_none());
         assert!(matches!(
-            driver.action("input", &too_large).await,
+            driver.perform_action(&TerminalAction::Input(input)).await,
             Err(TerminalError::InvalidRequest)
         ));
         let after = TerminalsRepository::action_result(

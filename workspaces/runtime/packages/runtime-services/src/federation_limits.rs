@@ -10,7 +10,6 @@ pub const MAX_MESSAGE_CODEPOINTS: usize = 12000;
 pub const MAX_BATCH_ITEMS: usize = 50;
 /// Largest federation batch, in bytes (200 KiB).
 pub const MAX_BATCH_BYTES: usize = 204800;
-pub use studio_runtime_schema::federation_ingress::MAX_ROOM_MEMBERS;
 /// Most inbound messages one federated room accepts from a peer per minute.
 pub const MAX_ROOM_RATE: u64 = 30;
 /// Seconds a federation invitation stays valid.

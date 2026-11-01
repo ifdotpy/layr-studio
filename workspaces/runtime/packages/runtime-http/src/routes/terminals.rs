@@ -10,20 +10,18 @@ use axum::http::StatusCode;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use studio_runtime_schema::terminal_ingress::{
+    TERMINAL_COLS_DEFAULT, TERMINAL_ROWS_DEFAULT, TerminalAction, TerminalClose,
+    TerminalCreateBody, TerminalInput, TerminalRename, TerminalResize,
+};
 #[cfg(test)]
 use studio_runtime_schema::terminal_ingress::{
     TERMINAL_COLS_MAX, TERMINAL_COLS_MIN, TERMINAL_CREATE_AGENT_ID_MAX_CODEPOINTS,
     TERMINAL_CREATE_REQUEST_ID_MAX_CODEPOINTS, TERMINAL_ROWS_MAX, TERMINAL_ROWS_MIN,
 };
-use studio_runtime_schema::terminal_ingress::{
-    TerminalAction, TerminalClose, TerminalCreateBody, TerminalInput, TerminalRename,
-    TerminalResize,
-};
 #[cfg(unix)]
 use studio_runtime_services::terminal_driver::TerminalCreate;
-use studio_runtime_services::terminal_driver::{
-    self, TERMINAL_COLS_DEFAULT, TERMINAL_ROWS_DEFAULT, TerminalError,
-};
+use studio_runtime_services::terminal_driver::{self, TerminalError};
 use studio_runtime_store::path_identity::CanonicalPath;
 use studio_runtime_store::{AgentId, AgentRepository};
 

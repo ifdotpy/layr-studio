@@ -15,6 +15,7 @@ pub const ORIGIN_MAX_CODEPOINTS: usize = 512;
 pub const PUBLIC_KEY_MAX_CODEPOINTS: usize = 4096;
 pub const TAILSCALE_USER_MAX_CODEPOINTS: usize = 254;
 pub const ALIAS_MAX_CODEPOINTS: usize = 3;
+#[cfg(test)]
 const SERVER_LABEL_PATTERN: &str = r"^[^\s\p{C}](?:[^\s\p{C}]| +[^\s\p{C}])*$";
 
 type RequestId = BoundedText<1, REQUEST_ID_MAX_CODEPOINTS>;
@@ -57,6 +58,8 @@ type Expiry = BoundedInteger<0, { crate::shared_values::MAX_SAFE_INTEGER as u64 
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(transparent)]
+/// A server label has non-whitespace endpoints, optional interior ASCII spaces,
+/// and no Unicode control, format, private-use or unassigned code points.
 pub struct ServerLabel(String);
 impl ServerLabel {
     pub fn as_str(&self) -> &str {
@@ -66,9 +69,23 @@ impl ServerLabel {
 impl TryFrom<String> for ServerLabel {
     type Error = &'static str;
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        let pattern =
-            regex::Regex::new(SERVER_LABEL_PATTERN).map_err(|_| "invalid server label pattern")?;
-        if value.chars().count() <= SERVER_LABEL_MAX_CODEPOINTS && pattern.is_match(&value) {
+        use unicode_general_category::{GeneralCategory, get_general_category};
+        let permitted = |c: char| {
+            !c.is_whitespace()
+                && !matches!(
+                    get_general_category(c),
+                    GeneralCategory::Control
+                        | GeneralCategory::Format
+                        | GeneralCategory::PrivateUse
+                        | GeneralCategory::Surrogate
+                        | GeneralCategory::Unassigned
+                )
+        };
+        if value.chars().count() <= SERVER_LABEL_MAX_CODEPOINTS
+            && value.chars().next().is_some_and(permitted)
+            && value.chars().next_back().is_some_and(permitted)
+            && value.chars().all(|c| c == ' ' || permitted(c))
+        {
             Ok(Self(value))
         } else {
             Err("invalid server label")
@@ -212,6 +229,7 @@ impl PairKind {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DevicePairRequest {
+    /// Integral float spellings such as 1.0 are refused; no producer emits them.
     pub protocol: Version,
     pub invite_id: InviteId,
     pub token: Token,
@@ -226,6 +244,7 @@ pub struct DevicePairRequest {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AutoPairRequest {
+    /// Integral float spellings such as 1.0 are refused; no producer emits them.
     pub protocol: Version,
     pub server_id: ServerId,
     pub label: PairLabel,
@@ -266,6 +285,18 @@ impl ManagementRequest {
 mod tests {
     use super::ServerLabel;
     use serde_json::json;
+
+    #[test]
+    fn pairing_protocol_refuses_integral_float_spelling() {
+        let pair = r#"{"protocol":1.0,"inviteId":"i","token":"t","clientId":"c","label":"l","kind":"server","publicKey":"p","requestId":"r"}"#;
+        let auto = r#"{"protocol":1.0,"serverId":"s","label":"l","origin":"","publicKey":"p","requestId":"r"}"#;
+        assert!(serde_json::from_str::<super::DevicePairRequest>(pair).is_err());
+        assert!(serde_json::from_str::<super::AutoPairRequest>(auto).is_err());
+        assert!(
+            serde_json::from_str::<super::DevicePairRequest>(&pair.replace("1.0", "1")).is_ok()
+        );
+        assert!(serde_json::from_str::<super::AutoPairRequest>(&auto.replace("1.0", "1")).is_ok());
+    }
 
     #[test]
     fn request_limits_match_openapi() {
@@ -415,6 +446,7 @@ mod tests {
             "a\tb",
             "a\u{200d}b",
             "a\u{e000}b",
+            "a\u{378}b",
             "🙂",
             "",
             "  ",

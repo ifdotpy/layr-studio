@@ -5449,7 +5449,6 @@ version = "0.1.0"
 dependencies = [
  "data-encoding",
  "jsonschema 0.60.0",
- "regex",
  "rusqlite",
  "schemars 1.2.3",
  "serde",
@@ -5458,6 +5457,7 @@ dependencies = [
  "strum",
  "studio-client-domain",
  "thiserror 2.0.21",
+ "unicode-general-category",
  "uuid",
 ]
 
