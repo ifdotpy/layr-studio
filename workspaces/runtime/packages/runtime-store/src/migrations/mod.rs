@@ -44,6 +44,7 @@ mod m2026_10_31_agent_core;
 mod m2026_10_31_agent_permissions;
 mod m2026_10_31_current_checks;
 mod m2026_10_31_drop_old_outbox_tables;
+mod m2026_10_31_message_send_projections;
 mod m2026_10_31_native_status_error;
 mod m2026_10_31_project_record_kind;
 mod m2026_10_31_retired_start_indexes;
@@ -82,6 +83,8 @@ pub use m2026_10_30_branch_phase::apply as migrate_branch_phase;
 pub use m2026_10_30_project_teams::apply as migrate_project_teams;
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_30_radio_room::apply as migrate_radio_room;
+#[cfg(any(test, feature = "test-support"))]
+pub use m2026_10_31_message_send_projections::apply as migrate_message_send_projections;
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_31_project_record_kind::apply as migrate_project_record_kind;
 #[cfg(any(test, feature = "test-support"))]
@@ -637,6 +640,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_10_29_agent_authorizations::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-message-send-projections",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Message receipt and queue projections before the shared send status",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_message_send_projections::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {

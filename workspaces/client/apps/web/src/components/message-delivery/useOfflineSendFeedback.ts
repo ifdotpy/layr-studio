@@ -20,9 +20,15 @@ export function useOfflineSendFeedback(
   const [details, setDetails] = useState<string[]>([]);
   const currentErrors = [
     ...new Set(
-      [...errors, ...entries.map((entry) => entry.error || "")].filter(
-        connectionFailureText,
-      ),
+      [
+        ...errors,
+        ...entries.map((entry) =>
+          entry.status.source === "device" &&
+          entry.status.state.kind === "transport_failed"
+            ? entry.status.state.error
+            : "",
+        ),
+      ].filter(connectionFailureText),
     ),
   ];
   const errorKey = currentErrors.join("\n");
@@ -32,7 +38,8 @@ export function useOfflineSendFeedback(
       const next = entries
         .filter(
           (entry) =>
-            entry.status === "queued" &&
+            entry.status.source === "device" &&
+            entry.status.state.kind === "transport_failed" &&
             (disconnected || previous.includes(entry.id)),
         )
         .map((entry) => entry.id);
@@ -44,7 +51,8 @@ export function useOfflineSendFeedback(
   const pending = entries.some(
     (entry) =>
       entry.body.room === room &&
-      entry.status === "queued" &&
+      entry.status.source === "device" &&
+      entry.status.state.kind === "transport_failed" &&
       (disconnected || tracked.includes(entry.id)),
   );
   useEffect(() => {

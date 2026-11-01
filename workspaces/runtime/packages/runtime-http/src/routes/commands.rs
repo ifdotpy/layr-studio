@@ -35,7 +35,7 @@ pub(crate) fn command_error(error: CommandError) -> ApiError {
             StatusCode::FORBIDDEN,
             "This caller may not run this command",
         ),
-        CommandError::TooOld => ApiError::new(StatusCode::GONE, error.to_string()),
+        CommandError::TooOld => ApiError::receipt_expired(error.to_string()),
         CommandError::Invalid(message) => ApiError::new(StatusCode::BAD_REQUEST, message),
         CommandError::Conflict(message) => ApiError::new(StatusCode::CONFLICT, message),
         CommandError::NotFound => ApiError::new(StatusCode::NOT_FOUND, error.to_string()),

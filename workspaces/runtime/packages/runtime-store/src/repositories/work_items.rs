@@ -351,14 +351,9 @@ impl WorkItemsRepository {
             let (text, text_valid) = row
                 .get::<_, String>(2)
                 .map_or_else(|_| (String::new(), false), |value| (value, true));
-            let (mut status, status_valid) = row
+            let (status, status_valid) = row
                 .get::<_, String>(3)
                 .map_or_else(|_| (String::new(), false), |value| (value, true));
-            // Rust reserves accepted events internally before provider
-            // submission; Python keeps these visible as pending in /api/queue.
-            if status == "reserved" {
-                status = "pending".to_owned();
-            }
             let (created, created_valid) = row
                 .get::<_, f64>(4)
                 .map_or_else(|_| (f64::NAN, false), |value| (value, value.is_finite()));
@@ -622,7 +617,7 @@ mod tests {
             .expect("reserved event remains visible");
         assert_eq!(queue.len(), 1);
         assert_eq!(queue[0].id, "reserved-user");
-        assert_eq!(queue[0].status, "pending");
+        assert_eq!(queue[0].status, "reserved");
     }
 
     #[test]

@@ -36,7 +36,7 @@ pub enum CoordinationError {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ManagedMessageReply {
     pub id: String,
-    pub status: studio_runtime_schema::persistence::DeliveryStatus,
+    pub status: studio_runtime_schema::delivery::MessageSendStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(
@@ -54,8 +54,9 @@ pub struct GroupMessageReply {
     pub author: String,
     pub text: String,
     pub at: f64,
+    #[serde(serialize_with = "studio_runtime_schema::delivery::serialize_recipient_deliveries")]
     pub deliveries: BTreeMap<String, studio_runtime_schema::persistence::RecipientDelivery>,
-    pub status: studio_runtime_schema::persistence::DeliveryStatus,
+    pub status: studio_runtime_schema::delivery::MessageSendStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -63,15 +64,8 @@ pub struct GroupMessageReply {
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct FollowupMessageReply {
     pub id: String,
-    pub status: FollowupStatus,
+    pub status: studio_runtime_schema::delivery::MessageSendStatus,
     pub error: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-#[serde(untagged)]
-pub enum FollowupStatus {
-    Event(studio_runtime_schema::persistence::EventStatus),
-    Delivery(studio_runtime_schema::persistence::DeliveryStatus),
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
@@ -426,7 +420,7 @@ fn post_managed_message(
     .map_err(event_write_error)?;
     let result = ManagedMessageReply {
         id: input.id.to_owned(),
-        status: studio_runtime_schema::persistence::DeliveryStatus::Queued,
+        status: studio_runtime_schema::delivery::MessageSendStatus::Queued,
         error: None,
         waiting_for: (!blockers.is_empty()).then_some(blockers),
     };
@@ -609,8 +603,8 @@ fn send_followup_inner(
         let parse =
             || serde::de::value::StrDeserializer::<serde::de::value::Error>::new(&event.status);
         let status = <studio_runtime_schema::persistence::EventStatus as serde::Deserialize>::deserialize(parse())
-            .map(FollowupStatus::Event)
-            .or_else(|_| <studio_runtime_schema::persistence::DeliveryStatus as serde::Deserialize>::deserialize(parse()).map(FollowupStatus::Delivery))
+            .map(studio_runtime_schema::delivery::MessageSendStatus::from)
+            .or_else(|_| <studio_runtime_schema::persistence::DeliveryStatus as serde::Deserialize>::deserialize(parse()).map(studio_runtime_schema::delivery::MessageSendStatus::from))
             .map_err(|_| invalid_stored("runtime_events", id))?;
         return Ok(PostMessageResult {
             receipt: PostMessageReceipt::Followup(FollowupMessageReply {
@@ -658,7 +652,7 @@ fn send_followup_inner(
     .map_err(event_write_error)?;
     let receipt = ManagedMessageReply {
         id: id.to_owned(),
-        status: studio_runtime_schema::persistence::DeliveryStatus::Queued,
+        status: studio_runtime_schema::delivery::MessageSendStatus::Queued,
         error: None,
         waiting_for: (!blockers.is_empty()).then_some(blockers),
     };
@@ -1013,6 +1007,7 @@ pub struct ValidatedMessage {
     pub author: String,
     pub text: String,
     pub at: f64,
+    #[serde(serialize_with = "studio_runtime_schema::delivery::serialize_recipient_deliveries")]
     pub deliveries: BTreeMap<String, studio_runtime_schema::persistence::RecipientDelivery>,
 }
 
@@ -1097,7 +1092,7 @@ fn message_receipt(message: ValidatedMessage, newly_queued: bool) -> GroupMessag
         text: message.text,
         at: message.at,
         deliveries: message.deliveries,
-        status,
+        status: status.into(),
         error,
     }
 }
@@ -1742,7 +1737,7 @@ mod tests {
         let first = post(&mut connection, "Hello").expect("message writes");
         assert_eq!(
             first.status,
-            studio_runtime_schema::persistence::DeliveryStatus::Queued
+            studio_runtime_schema::delivery::MessageSendStatus::Queued
         );
         assert_eq!(
             first.deliveries["worker"].status,
@@ -1760,7 +1755,7 @@ mod tests {
         let replay = post(&mut connection, "Hello").expect("exact replay returns receipt");
         assert_eq!(
             replay.status,
-            studio_runtime_schema::persistence::DeliveryStatus::Delivered,
+            studio_runtime_schema::delivery::MessageSendStatus::Delivered,
             "retry reflects the current delivery state"
         );
         assert!(matches!(
@@ -1839,13 +1834,21 @@ mod tests {
             reply: first.clone(),
             references: Vec::new(),
         };
+        let mut legacy = serde_json::to_value(&old).unwrap();
+        for delivery in legacy["reply"]["deliveries"]
+            .as_object_mut()
+            .unwrap()
+            .values_mut()
+        {
+            delivery["status"] = json!("pending");
+        }
         connection
             .execute(
                 "INSERT INTO request_results(id,signature,result,created) VALUES(?1,?2,?3,?4)",
                 rusqlite::params![
                     id,
                     signature,
-                    serde_json::to_string(&old).unwrap(),
+                    serde_json::to_string(&legacy).unwrap(),
                     chrono::Utc::now().timestamp_millis()
                 ],
             )
@@ -2043,7 +2046,7 @@ mod tests {
         .expect("message writes");
         assert_eq!(
             receipt.status,
-            studio_runtime_schema::persistence::DeliveryStatus::Queued
+            studio_runtime_schema::delivery::MessageSendStatus::Queued
         );
         assert_eq!(
             receipt.deliveries["lead"].status,

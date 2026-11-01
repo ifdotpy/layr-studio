@@ -1,3 +1,4 @@
+import { unsentStore } from "../../unsent/store";
 import type { AnswerValues } from "./AnswerFields";
 
 // Secret answers live only in memory, owned by the same immutable storage
@@ -11,4 +12,17 @@ export function requestDraftsForStorage(storage: Storage) {
     drafts.set(storage, values);
   }
   return values;
+}
+
+/** Remove a confirmed answer or deleted question from memory and the buffer. */
+export async function removeAnswerDraft(
+  storage: Storage,
+  server: string,
+  key: string,
+  submitted?: string,
+) {
+  requestDraftsForStorage(storage).delete(key);
+  const buffer = unsentStore(server, "answer");
+  if (submitted === undefined) await buffer.delete(key);
+  else await buffer.deleteIfEqual(key, submitted);
 }

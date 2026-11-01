@@ -3392,10 +3392,6 @@
       "fingerprint": "d06ccee7f680cdc132fa8fa90fa8521626ec9d772a411d34ce3273fcc1cda6bf:0"
     },
     {
-      "file": "workspaces/client/apps/web/src/sync/subscriptions/cursors.ts",
-      "fingerprint": "7f427fa136049c853c20d9c9c56a96e65c3d94236ff2cb52203e3e4e64873123:0"
-    },
-    {
       "file": "workspaces/client/apps/web/src/sync/syncBrowserFixture.ts",
       "fingerprint": "427f2103d9127996eb11862d4feb3ebb4248c235600b96c5c11f0d1599930c68:0"
     },

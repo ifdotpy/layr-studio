@@ -39,6 +39,11 @@ it("retains a confirmed upload for the send after finishing it", async () => {
   vi.stubGlobal("BroadcastChannel", undefined);
   const uploads = createUploads({
     databaseName: "test",
+    buffer: {
+      put: async () => {},
+      delete: async () => {},
+      loadAll: async () => [],
+    },
     syncDatabase: async () => ({ workspaceId: "workspace" }),
     syncGet: async () => ({ workspaceId: "workspace" }),
     refreshSession: vi.fn(),

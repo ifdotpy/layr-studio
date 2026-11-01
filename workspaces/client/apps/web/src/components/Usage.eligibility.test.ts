@@ -20,6 +20,7 @@ vi.mock("@mantine/core", async (importOriginal) => {
   };
 });
 vi.mock("../servers/ServerServicesContext", () => ({
+  useServerServices: () => null,
   useServerApi: () => ({ get: vi.fn(), post: vi.fn(), saved: () => "" }),
   useServerSync: () => ({ subscribeStateProjection: vi.fn(() => () => {}) }),
   useServerResources: () => ({

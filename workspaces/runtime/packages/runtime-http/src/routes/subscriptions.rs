@@ -83,7 +83,7 @@ fn empty_entry() -> Result<ResourceRevisionEntry, ApiError> {
 }
 
 macro_rules! resource_handlers {
-    ($( $handler:ident => $variant:ident, $initial:ident; )+) => {
+    ($( $handler:ident => $variant:ident, $initial:ident, $policy:ident; )+) => {
         $(
             struct $handler;
             impl ResourceKindHandler for $handler {
@@ -103,6 +103,9 @@ macro_rules! resource_handlers {
             }
         )+
         static REGISTRY: &[&dyn ResourceKindHandler] = &[$(&$handler),+];
+        fn registered_cache_policy(resource: &ResourceRef) -> crate::generated::SubscriptionCachePolicy {
+            match resource { $(ResourceRef::$variant(_) => crate::generated::SubscriptionCachePolicy::$policy),+ }
+        }
     };
 }
 
@@ -406,36 +409,51 @@ pub(super) async fn attach_view_snapshots(
 // This is the only resource-kind registration list. The parity witness compares
 // its complete set against the generated OpenAPI ResourceRef discriminator.
 resource_handlers! {
-    ProcessesResourceHandler => ProcessesResource, view_initial;
-    ComplaintResourceHandler => ComplaintResource, view_initial;
-    TerminalOutputResourceHandler => TerminalOutputResource, view_initial;
-    AgentDetailResourceHandler => AgentDetailResource, entity_initial;
-    MonitorsResourceHandler => MonitorsResource, entity_initial;
-    AccountsResourceHandler => AccountsResource, passive_initial;
-    AuthProgressResourceHandler => AuthProgressResource, passive_initial;
-    CostsResourceHandler => CostsResource, entity_initial;
-    DesktopResourceHandler => DesktopResource, entity_initial;
-    DraftsResourceHandler => DraftsResource, draft_initial;
-    LimitsResourceHandler => LimitsResource, passive_initial;
-    ModelsResourceHandler => ModelsResource, passive_initial;
-    MultiServerResourceHandler => MultiServerResource, passive_initial;
-    QueueResourceHandler => QueueResource, passive_initial;
-    ReceiptsResourceHandler => ReceiptsResource, passive_initial;
-    RenameProgressResourceHandler => RenameProgressResource, passive_initial;
-    RoomResourceHandler => RoomResource, view_initial;
-    SessionCostResourceHandler => SessionCostResource, entity_initial;
-    StateResourceHandler => StateResource, entity_initial;
-    TaskResourceHandler => TaskResource, entity_initial;
-    TasksResourceHandler => TasksResource, entity_initial;
-    TerminalResourceHandler => TerminalResource, entity_initial;
-    TerminalsResourceHandler => TerminalsResource, entity_initial;
-    TranscriptResourceHandler => TranscriptResource, transcript_initial;
-    TranscriptsResourceHandler => TranscriptsResource, passive_initial;
-    VaultJobProgressResourceHandler => VaultJobProgressResource, passive_initial;
-    VaultReadinessResourceHandler => VaultReadinessResource, passive_initial;
-    VoiceResourceHandler => VoiceResource, passive_initial;
-    WorkResourceHandler => WorkResource, entity_initial;
-    WorkspaceResourceHandler => WorkspaceResource, passive_initial;
+    ProcessesResourceHandler => ProcessesResource, view_initial, NoCache;
+    ComplaintResourceHandler => ComplaintResource, view_initial, NoCache;
+    TerminalOutputResourceHandler => TerminalOutputResource, view_initial, NoCache;
+    AgentDetailResourceHandler => AgentDetailResource, entity_initial, Cache;
+    MonitorsResourceHandler => MonitorsResource, entity_initial, NoCache;
+    AccountsResourceHandler => AccountsResource, passive_initial, NoCache;
+    AuthProgressResourceHandler => AuthProgressResource, passive_initial, NoCache;
+    CostsResourceHandler => CostsResource, entity_initial, Cache;
+    DesktopResourceHandler => DesktopResource, entity_initial, Cache;
+    DraftsResourceHandler => DraftsResource, draft_initial, NoCache;
+    LimitsResourceHandler => LimitsResource, passive_initial, NoCache;
+    ModelsResourceHandler => ModelsResource, passive_initial, NoCache;
+    MultiServerResourceHandler => MultiServerResource, passive_initial, NoCache;
+    QueueResourceHandler => QueueResource, passive_initial, NoCache;
+    ReceiptsResourceHandler => ReceiptsResource, passive_initial, NoCache;
+    RenameProgressResourceHandler => RenameProgressResource, passive_initial, NoCache;
+    RoomResourceHandler => RoomResource, view_initial, NoCache;
+    SessionCostResourceHandler => SessionCostResource, entity_initial, Cache;
+    StateResourceHandler => StateResource, entity_initial, Cache;
+    TaskResourceHandler => TaskResource, entity_initial, Cache;
+    TasksResourceHandler => TasksResource, entity_initial, NoCache;
+    // A terminal detail overlaps the terminal list; only the list owns a cache.
+    TerminalResourceHandler => TerminalResource, entity_initial, NoCache;
+    TerminalsResourceHandler => TerminalsResource, entity_initial, Cache;
+    TranscriptResourceHandler => TranscriptResource, transcript_initial, Cache;
+    TranscriptsResourceHandler => TranscriptsResource, passive_initial, NoCache;
+    VaultJobProgressResourceHandler => VaultJobProgressResource, passive_initial, NoCache;
+    VaultReadinessResourceHandler => VaultReadinessResource, passive_initial, NoCache;
+    VoiceResourceHandler => VoiceResource, passive_initial, NoCache;
+    WorkResourceHandler => WorkResource, entity_initial, NoCache;
+    WorkspaceResourceHandler => WorkspaceResource, passive_initial, NoCache;
+}
+
+/// Only subscriptions whose projection rows are owned by their cursor can resume.
+pub(super) fn cache_policy(
+    resource: &ResourceRef,
+    locality: &studio_runtime_schema::sync_protocol::FrontendLocality,
+) -> crate::generated::SubscriptionCachePolicy {
+    use crate::generated::SubscriptionCachePolicy;
+    use studio_runtime_schema::sync_protocol::FrontendLocality;
+    if matches!(locality, FrontendLocality::Remote) {
+        registered_cache_policy(resource)
+    } else {
+        SubscriptionCachePolicy::NoCache
+    }
 }
 
 pub(super) fn handler(
@@ -666,6 +684,29 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn cache_policy_excludes_overlapping_terminal_detail() {
+        use crate::generated::SubscriptionCachePolicy;
+        use studio_runtime_schema::resource_ref::{EmptyResource, TerminalResource};
+        use studio_runtime_schema::sync_protocol::FrontendLocality;
+        let detail = ResourceRef::TerminalResource(TerminalResource {
+            terminal_id: "one".to_owned().try_into().expect("nonempty id"),
+        });
+        let list = ResourceRef::TerminalsResource(EmptyResource {});
+        assert_eq!(
+            cache_policy(&detail, &FrontendLocality::Remote),
+            SubscriptionCachePolicy::NoCache
+        );
+        assert_eq!(
+            cache_policy(&list, &FrontendLocality::Remote),
+            SubscriptionCachePolicy::Cache
+        );
+        assert_eq!(
+            cache_policy(&list, &FrontendLocality::Local),
+            SubscriptionCachePolicy::NoCache
+        );
+    }
 
     #[tokio::test]
     async fn stored_fingerprints_follow_edits_metadata_and_deletion() {

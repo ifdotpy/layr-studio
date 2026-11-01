@@ -200,6 +200,14 @@
     "callee": "syncGet"
   },
   {
+    "file": "indexedDb.ts",
+    "callee": "indexedDB.deleteDatabase"
+  },
+  {
+    "file": "indexedDb.ts",
+    "callee": "indexedDB.open"
+  },
+  {
     "file": "native/serverCredentials.test.ts",
     "callee": "new NativeServerCredentials().fetch"
   },

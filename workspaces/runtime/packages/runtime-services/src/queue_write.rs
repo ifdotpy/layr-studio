@@ -433,6 +433,16 @@ pub fn queue_snapshot(
             .and_then(Value::as_str)
             .unwrap_or("<event>")
             .to_owned();
+        let status = item["status"]
+            .as_str()
+            .and_then(|value| {
+                value
+                    .parse::<studio_runtime_schema::persistence::EventStatus>()
+                    .ok()
+            })
+            .map(studio_runtime_schema::delivery::MessageSendStatus::from)
+            .ok_or_else(|| invalid_stored("runtime_events", &id))?;
+        item["status"] = json!(status);
         for field in ["delivery", "requestedDelivery"] {
             let raw = item[field]
                 .as_str()
