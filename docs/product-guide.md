@@ -263,7 +263,8 @@ unavailable for Claude. Files remain native attachments or file references.
 
 Existing chats can move between Codex and Claude accounts. Selecting an account
 for a lead starts a team transfer. The chat keeps its identity and displayed
-history. Idle members rebind immediately, including worker defaults.
+history. Eligibility is checked at admission; an account lost afterwards is handled by execution.
+Idle members rebind immediately, including worker defaults.
 Their native history transfers automatically in the background after account
 selection, without sending a message or starting a model reply. The transfer keeps its
 original identity when the action is repeated or the page reloads. Active turns are
