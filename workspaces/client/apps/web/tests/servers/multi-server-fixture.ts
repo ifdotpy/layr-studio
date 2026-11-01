@@ -713,7 +713,11 @@ export async function fixture(
           ? "text/javascript"
           : filename.endsWith(".css")
             ? "text/css"
-            : "text/html",
+            : filename.endsWith(".wasm")
+              ? "application/wasm"
+              : filename.endsWith(".png")
+                ? "image/png"
+                : "text/html",
       );
       if (url.pathname === "/")
         response.setHeader(
