@@ -12,6 +12,7 @@ use studio_runtime_schema::agent_limits::{
     MAX_TEAM_AGENTS, MIN_SUBAGENT_CONCURRENCY, MIN_TEAM_AGENTS, TEAM_AGENT_HEADROOM,
 };
 use studio_runtime_schema::{
+    agent_entity_nested::AgentMode,
     creation_intent::{CreationIntent, ReviewDefaults, WorkerDefaults},
     queue_command::Field,
 };
@@ -101,13 +102,6 @@ pub struct Configuration {
     pub max_agents: Option<i64>,
     pub expected_mode_revision: Option<i64>,
     pub request_id: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-enum AgentMode {
-    Single,
-    Multi,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

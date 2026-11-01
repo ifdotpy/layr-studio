@@ -330,30 +330,7 @@ pub enum AgentSandbox {
     },
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentNaming {
-    #[default]
-    Automatic,
-    PendingTitle,
-    Manual,
-}
-
-impl AgentNaming {
-    pub fn set_needs_title(&mut self, title: Option<bool>) {
-        if *self != Self::Manual {
-            *self = if title == Some(true) {
-                Self::PendingTitle
-            } else {
-                Self::Automatic
-            };
-        }
-    }
-
-    pub fn needs_title(&self) -> Option<bool> {
-        Some(*self == Self::PendingTitle)
-    }
-}
+pub use studio_runtime_schema::agent_entity_nested::AgentNaming;
 
 pub use studio_runtime_schema::agent_limits::AgentCapacity;
 

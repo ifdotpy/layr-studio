@@ -111,6 +111,70 @@ fn main() -> Result<(), Box<dyn Error>> {
     // such as 7.0; the pull-output ingress validates them before typed decoding.
     for (name, owner) in [
         (
+            "WorkerDefaultsDto",
+            "studio_runtime_schema::agent_entity_nested::WorkerDefaultsDto",
+        ),
+        (
+            "AgentNativeStatusValue",
+            "studio_runtime_schema::agent_entity_nested::AgentNativeStatusValue",
+        ),
+        (
+            "AgentEntityContextRepairWaitDto",
+            "studio_runtime_schema::agent_entity_nested::AgentEntityContextRepairWaitDto",
+        ),
+        (
+            "MovePointerDto",
+            "studio_runtime_schema::agent_entity_nested::MovePointerDto",
+        ),
+        (
+            "AgentMode",
+            "studio_runtime_schema::agent_entity_nested::AgentMode",
+        ),
+        (
+            "AgentStatus",
+            "studio_runtime_schema::agent_entity_nested::AgentStatus",
+        ),
+        (
+            "AgentNaming",
+            "studio_runtime_schema::agent_entity_nested::AgentNaming",
+        ),
+        (
+            "AccountChange",
+            "studio_runtime_schema::agent_progress::AccountChange",
+        ),
+        (
+            "AccountDestination",
+            "studio_runtime_schema::account_destination::AccountDestination",
+        ),
+        (
+            "AccountTransferProgress",
+            "studio_runtime_schema::agent_progress::AccountTransferProgress",
+        ),
+        (
+            "NativeProviderError",
+            "studio_runtime_schema::provider_errors::NativeProviderError",
+        ),
+        (
+            "AgentOverview",
+            "studio_runtime_schema::agent_entity_nested::AgentOverview",
+        ),
+        (
+            "AgentSource",
+            "studio_runtime_schema::agent_entity_nested::AgentSource",
+        ),
+        (
+            "AgentCommandProgress",
+            "studio_runtime_schema::agent_progress::AgentCommandProgress",
+        ),
+        (
+            "AgentStall",
+            "studio_runtime_schema::agent_progress::AgentStall",
+        ),
+        (
+            "AgentEntityStartWaitDto",
+            "studio_runtime_schema::agent_progress::AgentStartWait",
+        ),
+        (
             "TeamCounts",
             "studio_runtime_schema::agent_progress::TeamCounts",
         ),
@@ -144,6 +208,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             serde_with: None,
         };
     }
+    // The start-wait union is owned by agent_progress; its generated branches
+    // are no longer referenced by the mapped component.
+    analysis
+        .schemas
+        .retain(|name, _| !name.starts_with("AgentEntityStartWaitDtoVariant"));
     analysis
         .schemas
         .get_mut("MonitorState")
