@@ -42,20 +42,30 @@ async fn startup_reprojects_legacy_room_once() {
     super::install(&store).await.unwrap();
     seed_chat(
         &store,
-        chat(json!({"id":"lead","rootId":"lead","isLead":true})),
+        chat(json!({"id":"lead","rootId":"lead","isLead":true,"created":2})),
+    )
+    .await;
+    seed_chat(
+        &store,
+        chat(json!({"id":"z","rootId":"z","isLead":true,"created":1})),
+    )
+    .await;
+    seed_chat(
+        &store,
+        chat(json!({"id":"y","rootId":"y","isLead":true,"created":2})),
     )
     .await;
     store
         .transaction(|tx| {
             tx.execute(
                 "INSERT INTO runtime_rooms(id,record) VALUES('room',?1)",
-                [json!({"id":"room","kind":"private","members":["lead"]}).to_string()],
+                [json!({"id":"room","kind":"private","members":["lead","z","y"]}).to_string()],
             )?;
             studio_runtime_store::SyncDocumentsRepository::put_entity(
                 tx,
                 "room",
                 "room",
-                json!({"id":"room","kind":"private","members":["lead"],"name":"Lead","radio":{"teamId":"team","revision":1,"status":"blocked","speaker":null,"next":[],"active":{"agentId":"lead"},"error":null}}),
+                json!({"id":"room","kind":"private","members":["lead","z","y"],"name":"Lead","radio":{"teamId":"team","revision":1,"status":"blocked","speaker":null,"next":[],"active":{"agentId":"lead"},"error":null}}),
                 false,
             )?;
             tx.execute(
@@ -79,7 +89,7 @@ async fn startup_reprojects_legacy_room_once() {
         .unwrap();
     assert_eq!(
         client_entity(&store, "room", "room").unwrap().1["leadIds"],
-        json!(["lead"])
+        json!(["z", "lead", "y"])
     );
     assert_eq!(
         client_entity(&store, "room", "room").unwrap().1["radio"]["controls"]["inputBlocked"],

@@ -303,7 +303,17 @@ fn project_room_view(
                 roots.push(root.clone());
             }
         }
-        roots.sort_unstable();
+        roots.sort_unstable_by(|a, b| {
+            let created = |id: &str| {
+                context
+                    .agents
+                    .iter()
+                    .find(|agent| agent.id.as_deref() == Some(id))
+                    .and_then(|agent| agent.created)
+                    .unwrap_or(0.0)
+            };
+            created(a).total_cmp(&created(b)).then_with(|| a.cmp(b))
+        });
         roots
     };
     Some(RoomProjection {
@@ -366,7 +376,8 @@ mod tests {
 
     #[test]
     fn room_leads_are_stable_across_publication_order() {
-        let agent = |id: &str| AgentAuthorityRow {
+        let agent = |id: &str, created: f64| AgentAuthorityRow {
+            created: Some(created),
             id: Some(id.into()),
             root_id: Some(id.into()),
             parent_id: None,
@@ -377,15 +388,21 @@ mod tests {
             shared_room_id: None,
             execution_mode: None,
         };
-        let room: RoomRecord = serde_json::from_value(json!({"id":"radio:x","kind":"private","members":["a","b"],"radio":{"teamId":"x","revision":0,"status":"idle","speaker":null,"next":[],"active":null,"error":null,"direct":false,"seen":{}}})).unwrap();
-        let first = RoomViewContext::new(vec![agent("b"), agent("a")], vec![]);
-        let second = RoomViewContext::new(vec![agent("a"), agent("b")], vec![]);
+        let room: RoomRecord = serde_json::from_value(json!({"id":"radio:x","kind":"private","members":["a","b","c"],"radio":{"teamId":"x","revision":0,"status":"idle","speaker":null,"next":[],"active":null,"error":null,"direct":false,"seen":{}}})).unwrap();
+        let first = RoomViewContext::new(
+            vec![agent("b", 1.0), agent("a", 2.0), agent("c", 2.0)],
+            vec![],
+        );
+        let second = RoomViewContext::new(
+            vec![agent("c", 2.0), agent("a", 2.0), agent("b", 1.0)],
+            vec![],
+        );
         let Field::Value(radio) = &room.radio else {
             panic!("radio")
         };
         let ordinary = project_room(&room, &first).unwrap().unwrap();
         let turn = project_radio_room(&room, &second, radio).unwrap().unwrap();
-        assert_eq!(ordinary.lead_ids, vec!["a", "b"]);
+        assert_eq!(ordinary.lead_ids, vec!["b", "a", "c"]);
         assert_eq!(ordinary.lead_ids, turn.lead_ids);
     }
 
@@ -394,6 +411,7 @@ mod tests {
         let agents = ["a", "b"]
             .into_iter()
             .map(|id| AgentAuthorityRow {
+                created: None,
                 id: Some(id.into()),
                 root_id: Some("a".into()),
                 parent_id: None,

@@ -677,6 +677,7 @@ mod room_preparation_tests {
 
     fn agent(id: &str) -> AgentAuthorityRow {
         AgentAuthorityRow {
+            created: None,
             id: Some(id.to_owned()),
             root_id: None,
             parent_id: None,

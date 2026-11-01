@@ -23,7 +23,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             }
         } else {
             let members = serde_json::to_string(&room["members"])?;
-            let mut agents = tx.prepare("SELECT CASE WHEN json_extract(record,'$.isLead')=1 THEN id ELSE root_id END FROM runtime_agents WHERE deleted_at IS NULL AND id IN (SELECT value FROM json_each(?1) WHERE type='text') ORDER BY rowid")?;
+            let mut agents = tx.prepare("SELECT CASE WHEN json_extract(member.record,'$.isLead')=1 THEN member.id ELSE member.root_id END AS root FROM runtime_agents member LEFT JOIN runtime_agents lead ON lead.id = CASE WHEN json_extract(member.record,'$.isLead')=1 THEN member.id ELSE member.root_id END WHERE member.deleted_at IS NULL AND member.id IN (SELECT value FROM json_each(?1) WHERE type='text') ORDER BY COALESCE(json_extract(lead.record,'$.created'),0), root")?;
             for root in agents.query_map([members], |row| row.get::<_, Option<String>>(0))? {
                 if let Some(root) = root?.filter(|root| !root.is_empty())
                     && !leads.contains(&root)
@@ -32,7 +32,6 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 }
             }
         }
-        leads.sort_unstable();
         room["leadIds"] = serde_json::to_value(leads)?;
         SyncDocumentsRepository::put_entity(tx, "room", &id, room, false)?;
     }
