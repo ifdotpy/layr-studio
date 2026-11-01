@@ -17,6 +17,12 @@ export const GATE_LOCK_POLL_MS = 1_000;
 // Environment variable that sets the maximum wait for the lock, in seconds. Unset: wait forever.
 export const GATE_LOCK_MAX_WAIT_ENV = "STUDIO_GATE_LOCK_MAX_WAIT_S";
 
+// Opt-in switch, "1" or unset (read by the facade only). "1" runs the Rust workspace
+// nextest step through layr-retest, which runs only tests whose executed code changed.
+export const RETEST_ENV = "STUDIO_RETEST";
+// Real layr store root, kept for layr-retest's own layr calls while tests see an empty one.
+export const RETEST_REAL_ROOT_ENV = "LAYR_GATE_REAL_ROOT";
+
 // Tests inherit host tools, but agent session settings must come from their fixtures.
 export function scrubAgentEnvironment<T extends NodeJS.ProcessEnv>(
   environment: T,

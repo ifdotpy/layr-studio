@@ -208,7 +208,19 @@ fn snapshot(store: &RuntimeStore) -> Value {
             .query_map([], |row| {
                 let mut values = Vec::new();
                 for index in 0..count {
-                    values.push(format!("{:?}", row.get_ref(index)?));
+                    // Record key order is not a contract: startup rewrites it.
+                    let cell = row.get_ref(index)?;
+                    let record = if let rusqlite::types::ValueRef::Text(bytes) = cell {
+                        serde_json::from_slice::<Value>(bytes)
+                            .ok()
+                            .filter(|value| value.is_object() || value.is_array())
+                    } else {
+                        None
+                    };
+                    values.push(match record {
+                        Some(record) => record.to_string(),
+                        None => format!("{cell:?}"),
+                    });
                 }
                 Ok(values)
             })
@@ -604,6 +616,12 @@ async fn location_commit_failpoints_reopen_and_apply_once() {
         for timing in ["BEFORE", "AFTER"] {
             let (path, store) = fixture.store(&format!("fault-{index}-{timing}")).await;
             fixture.seed(&store, case).await;
+            // Startup stores project records in canonical key order, so the
+            // rollback baseline is the state after one restart.
+            drop(store);
+            let store = RuntimeStore::open(Some(&path))
+                .await
+                .expect("restart after seeding");
             let trigger = format!(
                 "CREATE TRIGGER relocation_fault {timing} {verb} ON {table} BEGIN SELECT RAISE(ABORT,'relocation failpoint'); END"
             );

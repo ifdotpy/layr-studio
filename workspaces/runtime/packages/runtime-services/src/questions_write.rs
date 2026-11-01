@@ -669,8 +669,8 @@ fn put_request(
     record: &RequestRecord,
 ) -> Result<(), QuestionsWriteError> {
     Table::<RequestRecord>::new(transaction).put(record)?;
-    let view = crate::sync_views::project_persisted_record("request", &json!(record))
-        .ok_or_else(|| invalid_stored("runtime_requests", id))?;
+    let view = crate::request_projection::project_request_record(record)
+        .map_err(|_| invalid_stored("runtime_requests", id))?;
     SyncDocumentsRepository::put_entity(
         transaction,
         "request",

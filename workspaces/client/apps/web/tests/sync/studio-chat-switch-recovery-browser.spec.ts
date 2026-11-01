@@ -17,6 +17,7 @@ import {
   expect,
   handleEntitySyncFixtureRequest,
   protocol3SseEvent,
+  syncSessionSse,
   test,
 } from "../playwright.ts";
 
@@ -162,7 +163,7 @@ test("selected Studio chat recovers after slow cursor preparation without reload
             "Cache-Control": "no-cache",
           }),
         );
-        res.write(protocol3SseEvent("session", { sessionId }));
+        res.write(syncSessionSse(sessionId, workspaceId));
         res.write(apiSchemaHandshakeSse());
         res.write(baseline(resources));
         return;
