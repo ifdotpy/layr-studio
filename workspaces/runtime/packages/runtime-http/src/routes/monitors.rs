@@ -29,7 +29,7 @@ pub(crate) fn routes() -> RouteGroup {
 async fn log(
     State(state): State<HttpState>,
     query: QueryParams,
-    ApiHeaders(headers): ApiHeaders,
+    headers: ApiHeaders,
 ) -> Result<Response<Body>, ApiError> {
     let id = query
         .typed_value("id")
@@ -37,8 +37,7 @@ async fn log(
         .ok_or_else(ApiError::internal)?
         .to_owned();
     let range = headers
-        .get("range")
-        .and_then(Value::as_str)
+        .one("range")?
         .filter(|range| !range.is_empty())
         .map(str::to_owned);
     let store = state.store.clone().ok_or_else(ApiError::internal)?;

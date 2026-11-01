@@ -361,13 +361,16 @@ async fn sync_subscriptions(
 
 async fn sync_stream(
     query: QueryParams,
-    ApiHeaders(headers): ApiHeaders,
+    headers: ApiHeaders,
     request_headers: HeaderMap,
     Caller(principal): Caller,
     State(state): State<HttpState>,
 ) -> Response {
     let protocol = query.typed_value("protocol").and_then(Value::as_str);
-    let header_protocol = headers.get("x-codex-sync-protocol").and_then(Value::as_str);
+    let header_protocol = match headers.one("x-codex-sync-protocol") {
+        Ok(value) => value,
+        Err(error) => return error.into_response(),
+    };
     if protocol.is_some_and(|value| value != SYNC_PROTOCOL_VERSION_TEXT)
         || header_protocol.is_some_and(|value| value != SYNC_PROTOCOL_VERSION_TEXT)
         || (protocol != Some(SYNC_PROTOCOL_VERSION_TEXT)
@@ -434,7 +437,26 @@ async fn sync_stream(
             Err(error) => return error.into_response(),
         };
     let mut initial_draft_sequence = 0;
-    let reconnect = headers.contains_key("last-event-id")
+    let last_event_id = match headers.one("last-event-id") {
+        Ok(Some(value)) => match value.parse::<i64>() {
+            Ok(value)
+                if (0..=studio_runtime_schema::shared_values::MAX_SAFE_INTEGER)
+                    .contains(&value) =>
+            {
+                true
+            }
+            _ => {
+                return ApiError::validation(vec![
+                    Value::String("header".into()),
+                    Value::String("last-event-id".into()),
+                ])
+                .into_response();
+            }
+        },
+        Ok(None) => false,
+        Err(error) => return error.into_response(),
+    };
+    let reconnect = last_event_id
         || query
             .typed_value("reconnect")
             .and_then(Value::as_bool)

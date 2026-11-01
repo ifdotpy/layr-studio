@@ -7,7 +7,7 @@ use serde_json::Value;
 use studio_runtime_services::transcript::{self, TranscriptError};
 use studio_runtime_services::transcript_runtime::{self, PageRequest};
 
-use super::extractors::QueryParams;
+use super::extractors::{QueryParams, TypedQuery};
 use super::manifest::{Dependency, OperationStatus, RouteGroup, get};
 use crate::error::ApiError;
 use crate::router::HttpState;
@@ -78,39 +78,52 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
+/// Maximum length of a transcript agent ID, in Unicode code points.
+const TRANSCRIPT_AGENT_ID_MAX_CHARS: usize = 4096;
+/// Maximum length of a transcript cursor, in Unicode code points.
+const TRANSCRIPT_CURSOR_MAX_CHARS: usize = 4096;
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TranscriptPageQuery {
+    id: Option<studio_runtime_schema::bounded_text::BoundedText<0, TRANSCRIPT_AGENT_ID_MAX_CHARS>>,
+    before:
+        Option<studio_runtime_schema::bounded_text::BoundedText<0, TRANSCRIPT_CURSOR_MAX_CHARS>>,
+    around:
+        Option<studio_runtime_schema::bounded_text::BoundedText<0, TRANSCRIPT_CURSOR_MAX_CHARS>>,
+    after: Option<studio_runtime_schema::bounded_text::BoundedText<0, TRANSCRIPT_CURSOR_MAX_CHARS>>,
+    limit: Option<
+        studio_runtime_schema::bounded_integer::BoundedInteger<
+            0,
+            { studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64 },
+        >,
+    >,
+}
+
 async fn transcript_page(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<TranscriptPageQuery>,
 ) -> Result<Json<crate::generated::TranscriptPageResponse>, ApiError> {
     let request = PageRequest {
-        before: query
-            .typed_value("before")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        around: query
-            .typed_value("around")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        after: query
-            .typed_value("after")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        limit: query.typed_value("limit").and_then(Value::as_i64),
+        before: query.before.as_ref().map(|value| value.as_str().to_owned()),
+        around: query.around.as_ref().map(|value| value.as_str().to_owned()),
+        after: query.after.as_ref().map(|value| value.as_str().to_owned()),
+        limit: query.limit.map(|value| value.get()),
     };
-    read_page(state, query, request, false).await
+    let agent = query
+        .id
+        .as_ref()
+        .map_or("", |value| value.as_str())
+        .to_owned();
+    read_page(state, agent, request, false).await
 }
 
 async fn read_page(
     state: HttpState,
-    query: QueryParams,
+    agent: String,
     request: PageRequest,
     native_fallback: bool,
 ) -> Result<Json<crate::generated::TranscriptPageResponse>, ApiError> {
-    let agent = query
-        .typed_value("id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let value = match transcript_runtime::page(&store, agent, request).await {
         Err(TranscriptError::UnknownMessage) if native_fallback => Err(
@@ -255,7 +268,12 @@ async fn canvas_transcript(
     State(state): State<HttpState>,
     query: QueryParams,
 ) -> Result<Json<crate::generated::TranscriptPageResponse>, ApiError> {
-    read_page(state, query, PageRequest::default(), true).await
+    let agent = query
+        .typed_value("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    read_page(state, agent, PageRequest::default(), true).await
 }
 
 pub(crate) fn map_transcript_error(error: TranscriptError) -> ApiError {

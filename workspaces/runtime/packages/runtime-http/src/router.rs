@@ -867,11 +867,11 @@ async fn probe_echo(state: HttpState, request: Request<Body>, body_kind: u8) -> 
         Ok(query) => query,
         Err(error) => return error.into_response(),
     };
-    let headers =
-        match crate::routes::extractors::ApiHeaders::from_request_parts(&mut parts, &state).await {
-            Ok(headers) => headers,
-            Err(error) => return error.into_response(),
-        };
+    let headers = parts
+        .extensions
+        .get::<crate::validation::ValidatedRequest>()
+        .map(|validated| validated.headers.clone())
+        .unwrap_or_default();
     let request = Request::from_parts(parts, body);
     let body_value: Option<Value> = match body_kind {
         1 => match crate::routes::extractors::ApiJson::<Value>::from_request(request, &state).await
@@ -889,7 +889,7 @@ async fn probe_echo(state: HttpState, request: Request<Body>, body_kind: u8) -> 
         "query".to_owned(),
         Value::Object((*query.into_typed()).clone()),
     );
-    value.insert("headers".to_owned(), Value::Object((*headers.0).clone()));
+    value.insert("headers".to_owned(), Value::Object((*headers).clone()));
     axum::Json(Value::Object(value)).into_response()
 }
 

@@ -28,8 +28,8 @@ pub(crate) struct RawRequest {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ValidatedRequest {
-    pub raw_body: Option<Bytes>,
     pub query: Arc<Map<String, Value>>,
+    #[cfg(test)]
     pub headers: Arc<Map<String, Value>>,
 }
 
@@ -48,6 +48,7 @@ struct OperationValidator {
     body_required: bool,
     query: Option<Part>,
     headers: Option<Part>,
+    typed_query: bool,
 }
 
 #[derive(Clone, Default)]
@@ -73,6 +74,9 @@ const TYPED_BODIES: &[(&str, &str)] = &[
     ("POST", "/api/sync/drafts"),
     ("POST", "/api/work"),
 ];
+
+// Temporary migration marker; typed extractors own these query contracts.
+const TYPED_QUERIES: &[(&str, &str)] = &[("GET", "/api/transcript/page"), ("GET", "/api/messages")];
 
 #[derive(Debug, Clone)]
 pub(crate) struct CompileError {
@@ -261,10 +265,11 @@ impl Registry {
             .as_ref()
             .and_then(|part| part.schema.get("properties"))
             .and_then(Value::as_object);
-        if let Some((name, _)) = raw
-            .query
-            .iter()
-            .find(|(name, _)| !query_names.is_some_and(|names| names.contains_key(*name)))
+        if !operation.typed_query
+            && let Some((name, _)) = raw
+                .query
+                .iter()
+                .find(|(name, _)| !query_names.is_some_and(|names| names.contains_key(*name)))
         {
             return Err(LocatedError {
                 location: vec![
@@ -273,14 +278,16 @@ impl Registry {
                 ],
             });
         }
-        if let Some((name, _)) = raw.query.iter().find(|(name, values)| {
-            values.len() > 1
-                && query_names
-                    .and_then(|names| names.get(*name))
-                    .and_then(|schema| schema.get("type"))
-                    .and_then(Value::as_str)
-                    != Some("array")
-        }) {
+        if !operation.typed_query
+            && let Some((name, _)) = raw.query.iter().find(|(name, values)| {
+                values.len() > 1
+                    && query_names
+                        .and_then(|names| names.get(*name))
+                        .and_then(|schema| schema.get("type"))
+                        .and_then(Value::as_str)
+                        != Some("array")
+            })
+        {
             return Err(LocatedError {
                 location: vec![
                     Value::String("query".to_owned()),
@@ -302,7 +309,14 @@ impl Registry {
                 None => {}
             }
         }
-        let mut query = Value::Object(parameter_object(raw.query, operation.query.as_ref()));
+        let mut query = Value::Object(parameter_object(
+            if operation.typed_query {
+                BTreeMap::new()
+            } else {
+                raw.query
+            },
+            operation.query.as_ref(),
+        ));
         if let Some(part) = &operation.query {
             validate_part(part, &mut query, None)?;
         }
@@ -356,8 +370,8 @@ impl Registry {
             validate_part(part, &mut headers, None)?;
         }
         Ok(ValidatedRequest {
-            raw_body,
             query: Arc::new(query.as_object().cloned().unwrap_or_default()),
+            #[cfg(test)]
             headers: Arc::new(headers.as_object().cloned().unwrap_or_default()),
         })
     }
@@ -465,7 +479,10 @@ fn compile_operation(
     path: &str,
     operation: &Value,
 ) -> Result<OperationValidator, String> {
-    let mut output = OperationValidator::default();
+    let mut output = OperationValidator {
+        typed_query: TYPED_QUERIES.contains(&(method, path)),
+        ..OperationValidator::default()
+    };
     let operation_id = operation
         .get("operationId")
         .and_then(Value::as_str)
@@ -480,6 +497,9 @@ fn compile_operation(
     }
     if let Some(parameters) = operation.get("parameters").and_then(Value::as_array) {
         for (index, parameter) in parameters.iter().enumerate() {
+            if output.typed_query && parameter.get("in").and_then(Value::as_str) == Some("query") {
+                continue;
+            }
             if let Some(schema) = parameter.get("schema") {
                 check_safe_integer_bounds(
                     document,
@@ -504,6 +524,9 @@ fn compile_operation(
         let mut header_validator_properties = Map::new();
         let mut header_required = Vec::new();
         for (index, parameter) in parameters.iter().enumerate() {
+            if output.typed_query && parameter.get("in").and_then(Value::as_str) == Some("query") {
+                continue;
+            }
             if parameter.get("$ref").is_some() || parameter.get("content").is_some() {
                 return Err("parameter references and content are unsupported".to_owned());
             }
@@ -572,13 +595,15 @@ fn compile_operation(
         let query_schema =
             json!({"type":"object","properties":query_properties,"required":query_required});
         let query_validator_schema = json!({"type":"object","properties":query_validator_properties,"required":query_required});
-        output.query = Some(compile_part(
-            query_schema,
-            query_validator_schema,
-            "query",
-            schema_registry,
-            definitions,
-        )?);
+        if !output.typed_query {
+            output.query = Some(compile_part(
+                query_schema,
+                query_validator_schema,
+                "query",
+                schema_registry,
+                definitions,
+            )?);
+        }
         if !header_properties.is_empty() {
             let header_schema =
                 json!({"type":"object","properties":header_properties,"required":header_required});

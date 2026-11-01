@@ -8,7 +8,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use studio_runtime_services::coordination::{self, CoordinationError};
 
-use super::extractors::{ApiJson, QueryParams};
+use super::extractors::{ApiJson, QueryParams, TypedQuery};
 use super::manifest::{OperationStatus, RouteGroup, get, post};
 use crate::error::ApiError;
 use crate::router::HttpState;
@@ -30,14 +30,23 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
+/// Maximum room ID length for a message history query, in Unicode code points.
+const MESSAGE_ROOM_ID_MAX_CHARS: usize = 4096;
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MessagesQuery {
+    room: Option<studio_runtime_schema::bounded_text::BoundedText<0, MESSAGE_ROOM_ID_MAX_CHARS>>,
+}
+
 async fn messages(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<MessagesQuery>,
 ) -> Result<Json<Vec<crate::generated::MessageRecord>>, ApiError> {
     let room = query
-        .typed_value("room")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
+        .room
+        .as_ref()
+        .map_or("", |value| value.as_str())
         .to_owned();
     let store = state.store.ok_or_else(ApiError::internal)?;
     let result = store
