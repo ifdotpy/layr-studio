@@ -137,7 +137,7 @@ impl ResourceIdentity for SubscribedResource {
 
 fn cache_decisions(
     resources: &[SubscribedResource],
-    locality: &studio_runtime_schema::sync_protocol::FrontendLocality,
+    locality: studio_runtime_schema::sync_protocol::FrontendLocality,
 ) -> Vec<crate::generated::SubscriptionCacheDecision> {
     resources
         .iter()
@@ -337,7 +337,10 @@ async fn sync_subscriptions(
     for addition in request.add {
         let resource = SubscribedResource::new(addition.resource)?;
         if !resources.iter().any(|item| item.key == resource.key) {
-            if let Some(cursor) = addition.since {
+            if let Some(cursor) = addition.since
+                && super::subscriptions::cache_policy(&resource.resource, session.locality)
+                    == crate::generated::SubscriptionCachePolicy::Cache
+            {
                 since.insert(resource.key.clone(), cursor);
             }
             added.push(resource.clone());
@@ -352,7 +355,7 @@ async fn sync_subscriptions(
     {
         return Err(ApiError::validation(vec![json!("body"), json!("add")]));
     }
-    let cache_policies = cache_decisions(&added, &session.locality);
+    let cache_policies = cache_decisions(&added, session.locality);
     session
         .sender
         .try_send(SubscriptionChange {
@@ -481,11 +484,18 @@ async fn sync_stream(
             return error.into_response();
         }
     }
-    let since = match parse_since(&query, &resources) {
+    let mut since = match parse_since(&query, &resources) {
         Ok(since) => since,
         Err(error) => return error.into_response(),
     };
-    let cache_policies = cache_decisions(&resources, &locality);
+    since.retain(|key, _| {
+        resources.iter().any(|resource| {
+            resource.key == *key
+                && super::subscriptions::cache_policy(&resource.resource, locality)
+                    == crate::generated::SubscriptionCachePolicy::Cache
+        })
+    });
+    let cache_policies = cache_decisions(&resources, locality);
     let vault_readiness = match readiness_source(&state, &resources).await {
         Ok(source) => source,
         Err(error) => return error.into_response(),
@@ -629,7 +639,7 @@ async fn sync_stream(
             sessions.insert(
                 session_id.clone(),
                 SyncSession {
-                    locality: locality.clone(),
+                    locality,
                     principal: principal.clone(),
                     resources: resources.clone(),
                     generation: 0,

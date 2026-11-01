@@ -445,7 +445,7 @@ resource_handlers! {
 /// Only subscriptions whose projection rows are owned by their cursor can resume.
 pub(super) fn cache_policy(
     resource: &ResourceRef,
-    locality: &studio_runtime_schema::sync_protocol::FrontendLocality,
+    locality: studio_runtime_schema::sync_protocol::FrontendLocality,
 ) -> crate::generated::SubscriptionCachePolicy {
     use crate::generated::SubscriptionCachePolicy;
     use studio_runtime_schema::sync_protocol::FrontendLocality;
@@ -695,15 +695,15 @@ mod tests {
         });
         let list = ResourceRef::TerminalsResource(EmptyResource {});
         assert_eq!(
-            cache_policy(&detail, &FrontendLocality::Remote),
+            cache_policy(&detail, FrontendLocality::Remote),
             SubscriptionCachePolicy::NoCache
         );
         assert_eq!(
-            cache_policy(&list, &FrontendLocality::Remote),
+            cache_policy(&list, FrontendLocality::Remote),
             SubscriptionCachePolicy::Cache
         );
         assert_eq!(
-            cache_policy(&list, &FrontendLocality::Local),
+            cache_policy(&list, FrontendLocality::Local),
             SubscriptionCachePolicy::NoCache
         );
     }
