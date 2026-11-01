@@ -1270,7 +1270,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         .with(|settings| settings.definitions_path = "/components/schemas".into())
         .into_generator();
     delivery_generator.subschema_for::<crate::persistence::RecipientDelivery>();
-    delivery_generator.subschema_for::<crate::delivery::MessageRecipientDelivery<'_>>();
+    delivery_generator.subschema_for::<crate::delivery::MessageRecipientDelivery>();
     for (name, schema) in delivery_generator.take_definitions(true) {
         openapi["components"]["schemas"][name] = schema;
     }

@@ -11,6 +11,19 @@ use studio_runtime_store::{AgentRecord, AgentRepository, StoreError};
 const CHAT: &str = "published-chat";
 
 #[tokio::test]
+async fn reserved_user_input_has_same_status_in_queue_and_receipt() {
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    write(&store, "INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) VALUES(?1,?2,'user','Input','reserved',1,1)", vec!["reserved-input".into(), CHAT.into()]).await;
+    let queue = client_entity(&store, "queue", CHAT).expect("queue").1;
+    let receipt = client_entity(&store, "messageReceipt", "reserved-input")
+        .expect("receipt")
+        .1;
+    assert_eq!(receipt["status"], "sending");
+    assert_eq!(queue["items"][0]["status"], "sending");
+}
+
+#[tokio::test]
 async fn work_metadata_skips_history_and_explicit_publication_is_not_repeated() {
     use crate::sync_policy::{self, work_publication_probe};
     let (_dir, store) = store().await;

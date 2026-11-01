@@ -32,7 +32,6 @@ const pending: Message = {
   id: "lead:one",
   role: "user",
   text: "Same text",
-  pending: true,
   deliveryStatus: MessageSendStatus.queued,
   materialized: false,
 };
@@ -63,10 +62,8 @@ it("matches transcript rows by receipt identity and retains edited text and atta
   // An older server omits a reserved queue row before it materializes the input.
   assert.equal(outgoingTranscript([], [receipt]).items.length, 1);
   assert.deepEqual(
-    outgoingTranscript(
-      [{ ...pending, pending: false, materialized: false }],
-      [receipt],
-    ).observed,
+    outgoingTranscript([{ ...pending, materialized: false }], [receipt])
+      .observed,
     [],
   );
   assert.deepEqual(
@@ -74,7 +71,6 @@ it("matches transcript rows by receipt identity and retains edited text and atta
       [
         {
           ...pending,
-          pending: false,
           materialized: true,
           deliveryStatus: MessageSendStatus.delivered,
         },
@@ -309,7 +305,6 @@ it("updates a matching receipt without replacing existing transcript content", (
     role: "user",
     text: "server text",
     assets: [componentAttachment({ id: "server-asset" })],
-    pending: false,
     materialized: true,
     requestedDelivery: DeliveryMoment.next_turn,
     deliveryStatus: MessageSendStatus.delivered,
@@ -359,7 +354,6 @@ it("restores attachments and requested delivery to a local transcript row", () =
     clientMessageId: "one",
     role: "user",
     text: "Same text",
-    pending: false,
     materialized: false,
   };
   const result = outgoingTranscript(
@@ -405,7 +399,6 @@ it("shows failed and uncertain receipts until the transcript confirms their outc
       clientMessageId: "one",
       role: "user",
       text: "Same text",
-      pending: true,
     };
     const result = outgoingTranscript(
       [present],
@@ -428,7 +421,6 @@ it("shows failed and uncertain receipts until the transcript confirms their outc
 
     const materializedWithoutLabel: Message = {
       ...present,
-      pending: false,
       materialized: true,
       deliveryStatus: undefined,
     };

@@ -455,7 +455,6 @@ fn receipts(
             entry["deliveryStatus"] = json!(send_status);
             entry["requestedDelivery"] = json!(delivery);
             entry["deliveryError"] = json!(error);
-            entry["pending"] = json!(status == "pending");
             if entry.get("materialized").is_none() {
                 entry["materialized"] = json!(true);
             }

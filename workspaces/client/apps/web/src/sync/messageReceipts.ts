@@ -82,8 +82,11 @@ export function receiptTranscript(
       item.deliveryStatus === MessageSendStatus.delivered
         ? MessageSendStatus.delivered
         : receipt.status;
+    const legacy: Message & { pending?: unknown } = item;
+    const { pending: legacyPending, ...message } = legacy;
+    void legacyPending;
     return {
-      ...item,
+      ...message,
       deliveryStatus: status,
       deliveryError:
         status === MessageSendStatus.delivered

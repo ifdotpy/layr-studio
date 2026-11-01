@@ -5,6 +5,8 @@ import {
   updateLiveTranscriptPage,
 } from "./transcriptPageBounds.ts";
 import type { Message } from "./types.ts";
+import { MessageSendStatus } from "./generated/api.ts";
+import { receiptTranscript } from "./sync/messageReceipts.ts";
 
 const item = (index: number): Message => ({
   id: `m${index}`,
@@ -21,6 +23,34 @@ const merge = (first: Message[], second: Message[]) =>
   ].sort(
     (a, b) => Number(a.at ?? a.created ?? 0) - Number(b.at ?? b.created ?? 0),
   );
+
+it("treats a delivered receipt as authoritative despite a stale pending flag", () => {
+  const legacy = { pending: true };
+  const queued: Message = {
+    ...item(1),
+    ...legacy,
+    role: "user",
+    materialized: true,
+    deliveryStatus: MessageSendStatus.queued,
+  };
+  const delivered = receiptTranscript(
+    [queued],
+    "room",
+    new Map([["m1", { id: "m1", status: MessageSendStatus.delivered }]]),
+  )[0]!;
+  assert.equal("pending" in delivered, false);
+  const page = {
+    items: [item(0), delivered],
+    before: null as string | null,
+    focused: false,
+  };
+  updateLiveTranscriptPage(page, [delivered, item(2)], {
+    truncated: true,
+    nextCursor: "m1",
+  });
+  assert.equal(page.before, null);
+  assert.deepEqual(page.items, [item(0), delivered, item(2)]);
+});
 
 it("recovers the history cursor when a short cache precedes a disjoint truncated page", () => {
   const page = {
@@ -68,7 +98,7 @@ it("keeps a focused history page when the fresh range is disjoint", () => {
   assert.deepEqual(page.items, [item(1), item(2)]);
 });
 
-it.each([{ pending: true }, { materialized: false }])(
+it.each([{ streamPending: true }, { materialized: false }])(
   "does not use an optimistic row as evidence of continuity: %j",
   (optimistic) => {
     const page = {
@@ -86,7 +116,7 @@ it.each([{ pending: true }, { materialized: false }])(
   },
 );
 
-it.each([{ pending: true }, { materialized: false }])(
+it.each([{ streamPending: true }, { materialized: false }])(
   "does not use an incoming optimistic row as evidence of continuity: %j",
   (optimistic) => {
     const page = {

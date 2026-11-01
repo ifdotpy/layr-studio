@@ -123,7 +123,13 @@ export type LocalMessageAttachment = {
 };
 export type Message = Omit<
   TranscriptWireItem,
-  "assets" | "deliveryStatus" | "nativeError" | "role" | "text" | "threadId"
+  | "assets"
+  | "deliveryStatus"
+  | "nativeError"
+  | "pending"
+  | "role"
+  | "text"
+  | "threadId"
 > & {
   assets?: Array<TranscriptAsset | LocalMessageAttachment> | null | undefined;
   deliveryStatus?: TranscriptWireItem["deliveryStatus"];
@@ -137,7 +143,7 @@ export type Message = Omit<
   localDelivery?: boolean | undefined;
   model?: string | undefined;
   title?: string | undefined;
-  pending?: boolean | undefined;
+  streamPending?: boolean | undefined;
   senderName?: string | undefined;
   sender?: string | undefined;
   seq?: number | undefined;

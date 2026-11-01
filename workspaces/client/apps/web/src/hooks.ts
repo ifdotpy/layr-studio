@@ -431,10 +431,11 @@ export function transcriptMessages(
   source: TranscriptWireItem[],
   id: string | null,
 ): Message[] {
-  return source.flatMap((m: TranscriptWireItem) =>
-    m.inputs
+  return source.flatMap((m: TranscriptWireItem) => {
+    const { pending, ...record } = m;
+    return m.inputs
       ? m.inputs.map((r, i) => ({
-          ...m,
+          ...record,
           threadId: m.threadId ?? undefined,
           id: r.id ? `${id}:${r.id}` : `${m.id}:${i}`,
           sourceId: m.id,
@@ -446,7 +447,8 @@ export function transcriptMessages(
           requestedDelivery: r.requestedDelivery,
           deliveryError: r.deliveryError,
           materialized: r.materialized ?? m.materialized,
-          pending: r.pending ?? undefined,
+          streamPending:
+            r.kind === "user" ? undefined : (r.pending ?? undefined),
           assets: r.assets || (i === 0 ? m.assets : []),
           role: r.kind === "user" ? "user" : "tool",
           text: r.text,
@@ -469,8 +471,15 @@ export function transcriptMessages(
                 )[r.kind] ||
                 "Team activity",
         }))
-      : [{ ...m, threadId: m.threadId ?? undefined }],
-  );
+      : [
+          {
+            ...record,
+            streamPending:
+              m.role === "user" ? undefined : (pending ?? undefined),
+            threadId: m.threadId ?? undefined,
+          },
+        ];
+  });
 }
 
 type TranscriptPage = {

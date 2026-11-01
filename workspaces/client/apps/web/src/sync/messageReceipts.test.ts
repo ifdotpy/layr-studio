@@ -190,7 +190,6 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
     clientMessageId: "sso",
     role: "user",
     text: "sso done",
-    pending: true,
     materialized: false,
   } satisfies Message;
   const shown = receiptTranscript(
@@ -293,7 +292,6 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
   const alreadyDelivered = {
     ...pending,
     deliveryStatus: MessageSendStatus.delivered,
-    pending: false,
     deliveryError: "stale",
   } satisfies Message;
   assert.deepEqual(
@@ -305,7 +303,6 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
     {
       ...alreadyDelivered,
       deliveryStatus: "delivered",
-      pending: false,
       deliveryError: undefined,
     },
   );

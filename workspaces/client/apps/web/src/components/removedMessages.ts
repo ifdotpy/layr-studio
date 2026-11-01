@@ -118,7 +118,6 @@ export function useRemovedMessages(
     () =>
       value.restored.map((message) => ({
         ...message,
-        pending: false,
         localDelivery: false,
         materialized: true,
         deliveryStatus:

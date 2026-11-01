@@ -87,9 +87,9 @@ impl From<crate::persistence::DeliveryStatus> for MessageSendStatus {
 
 /// Public projection of a persisted recipient delivery.
 #[derive(Serialize, schemars::JsonSchema)]
-pub struct MessageRecipientDelivery<'a> {
+pub struct MessageRecipientDelivery {
     pub status: MessageSendStatus,
-    pub error: &'a Option<String>,
+    pub error: Option<String>,
 }
 
 /// Serialize recipient maps with the same public status as the enclosing send.
@@ -104,7 +104,7 @@ pub fn serialize_recipient_deliveries<S: serde::Serializer>(
             recipient,
             &MessageRecipientDelivery {
                 status: delivery.status.into(),
-                error: &delivery.error,
+                error: delivery.error.clone(),
             },
         )?;
     }
