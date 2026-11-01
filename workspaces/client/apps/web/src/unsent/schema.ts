@@ -12,6 +12,7 @@ const commandRequestSchema: z.ZodType<SendCommand> = z.strictObject({
   target: z.string(),
   body: z.strictObject({
     text: z.string(),
+    asTextFile: z.boolean().optional(),
     assets: z.array(z.string()).optional(),
     delivery: z.enum(DeliveryMomentInput).optional(),
   }),

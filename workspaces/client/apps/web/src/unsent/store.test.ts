@@ -153,7 +153,7 @@ it("round trips the exact generated command request", async () => {
       number: 1,
       kind: "send" as const,
       target: "chat",
-      body: { text: "hello", assets: ["asset"] },
+      body: { text: "hello", assets: ["asset"], asTextFile: true },
     },
     workspaceId: "workspace",
     created: 1,
