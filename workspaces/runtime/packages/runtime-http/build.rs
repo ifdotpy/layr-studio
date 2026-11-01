@@ -115,6 +115,26 @@ fn main() -> Result<(), Box<dyn Error>> {
             "studio_runtime_schema::agent_entity_nested::ExecutionSettingsDto",
         ),
         (
+            "ConnectionCheckDto",
+            "studio_runtime_schema::agent_entity_native::ConnectionCheckDto",
+        ),
+        (
+            "NativeThreadBlockDto",
+            "studio_runtime_schema::agent_entity_native::NativeThreadBlockDto",
+        ),
+        (
+            "NativeTurnErrorDto",
+            "studio_runtime_schema::agent_entity_native::NativeTurnErrorDto",
+        ),
+        (
+            "NativeSafetyRetryDto",
+            "studio_runtime_schema::agent_entity_native::NativeSafetyRetryDto",
+        ),
+        (
+            "NativeSafetyStage",
+            "studio_runtime_schema::agent_entity_native::NativeSafetyStage",
+        ),
+        (
             "WorkerDefaultsDto",
             "studio_runtime_schema::agent_entity_nested::WorkerDefaultsDto",
         ),
