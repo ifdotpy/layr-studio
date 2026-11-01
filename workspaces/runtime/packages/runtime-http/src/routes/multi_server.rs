@@ -1168,7 +1168,7 @@ mod tests {
             multi_server_access::{AccessSnapshot, Reachability},
             queue_command::Field,
         };
-        let before: AccessSnapshot = serde_json::from_str(r#"{"protocol":1,"identity":{"serverId":"local","label":"Local","origin":null,"publicKey":"key","tailscaleUser":null},"clients":[{"id":"peer","clientId":"peer","kind":"server","label":"Peer","created":1,"publicKey":"key","status":"paired","lastAccess":10,"reachability":"reachable"}],"servers":[{"id":"peer","clientId":"peer","kind":"server","label":"Peer","created":1,"publicKey":"key","status":"paired","lastSeen":10,"reachability":"reachable"}],"invites":[],"settings":{"autoPair":true}}"#).unwrap();
+        let before: AccessSnapshot = serde_json::from_str(r#"{"protocol":1,"identity":{"serverId":"local","label":"Local","origin":null,"publicKey":"key","tailscaleUser":null},"clients":[{"id":"peer","clientId":"peer","kind":"server","label":"Peer","created":1,"publicKey":"key","status":"paired","serverId":null,"origin":null,"tailscaleUser":null,"revoked":null,"lastAccess":10,"reachability":"reachable"}],"servers":[{"id":"peer","clientId":"peer","kind":"server","label":"Peer","created":1,"publicKey":"key","status":"paired","serverId":null,"origin":null,"tailscaleUser":null,"revoked":null,"lastAccess":null,"lastSeen":10,"reachability":"reachable"}],"invites":[],"settings":{"autoPair":true}}"#).unwrap();
         let mut after = before.clone();
         after.clients[0].last_access = Some(20.into());
         after.servers[0].last_seen = Field::Value(20.into());

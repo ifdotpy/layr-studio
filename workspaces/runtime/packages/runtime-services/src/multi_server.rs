@@ -872,12 +872,9 @@ mod tests {
             .await
             .unwrap();
         let snapshot = super::snapshot(&store, &identity).await.unwrap();
-        assert_eq!(
-            snapshot["invites"][0]["inviteId"],
-            invite["invitation"]["inviteId"]
-        );
-        assert!(snapshot["invites"][0]["created"].as_f64().unwrap() > 0.0);
-        assert_eq!(snapshot["invites"][0]["expires"], 1234.5);
+        assert_eq!(snapshot.invites[0].invite_id, invite.invitation.invite_id);
+        assert!(snapshot.invites[0].created.as_f64().unwrap() > 0.0);
+        assert_eq!(snapshot.invites[0].expires.as_f64(), Some(1234.5));
     }
 
     #[tokio::test]
