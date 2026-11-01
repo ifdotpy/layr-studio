@@ -240,8 +240,6 @@ struct SummaryProgress {
     can_retry: bool,
     #[serde(default)]
     moving_now: u64,
-    #[serde(default)]
-    can_cancel: bool,
 }
 
 #[derive(Deserialize)]
@@ -252,6 +250,7 @@ struct SummaryBlock {
 /// Project the legacy saved summary into the closed renderer progress contract.
 pub fn progress_view(
     summary: Option<&Value>,
+    can_cancel: bool,
 ) -> Result<studio_runtime_schema::agent_progress::AccountTransferProgress, TransferError> {
     use studio_runtime_schema::agent_progress::{
         AccountTransferActions as Actions, AccountTransferProgress as Progress,
@@ -270,7 +269,6 @@ pub fn progress_view(
         blocked,
         can_retry,
         moving_now,
-        can_cancel,
     } = summary;
     Ok(match status {
         TransferStatus::Completed => Progress::Completed {
@@ -425,6 +423,9 @@ impl Snapshot {
     }
     pub fn operation(&self) -> &Value {
         &self.operation
+    }
+    pub(crate) fn can_cancel(&self) -> bool {
+        self.pending() && check_cancel(&self.operation, &self.order, &self.agents).is_ok()
     }
     pub fn agent(&self, id: &str) -> Result<&Value, TransferError> {
         self.agents
@@ -1672,7 +1673,6 @@ impl Decision {
             return Err(TransferError::Refused("Invalid transfer timestamp"));
         }
         self.operation["updated"] = json!(now);
-        let can_cancel = check_cancel(&self.operation, &self.order, &self.agents).is_ok();
         let lead_id = self.operation["leadId"]
             .as_str()
             .ok_or_else(|| invalid("account transfer", "/leadId"))?;
@@ -1709,7 +1709,6 @@ impl Decision {
         let counts = progress(&self.operation, &self.order, false)?;
         extend(&mut summary, counts)?;
         summary["finishHistory"] = json!(true);
-        summary["canCancel"] = json!(can_cancel);
         summary["waiting"] = self
             .order
             .iter()
@@ -2156,7 +2155,11 @@ mod provider_receipt_tests {
             order: snapshot.order.clone(),
         };
         decision.stamp(2.0, None).unwrap();
-        let progress = progress_view(decision.agents["agent"].get("accountTransfer")).unwrap();
+        let progress = progress_view(
+            decision.agents["agent"].get("accountTransfer"),
+            snapshot.can_cancel(),
+        )
+        .unwrap();
         let encoded = serde_json::to_value(progress).unwrap();
         assert!(!matches!(
             encoded["actions"].as_str(),

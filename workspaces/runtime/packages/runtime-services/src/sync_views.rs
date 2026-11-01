@@ -429,6 +429,7 @@ fn unset(value: &Value) -> bool {
 #[derive(Clone, Debug, Default)]
 pub struct AgentViewContext {
     pub account_destinations: Vec<studio_runtime_schema::account_destination::AccountDestination>,
+    pub transfer_can_cancel: bool,
     pub project_server_id: Option<String>,
     pub launcher_alive: bool,
     pub empty_lead: bool,
@@ -582,7 +583,11 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
     view.insert("id".to_owned(), Value::String(id.to_owned()));
     view.insert("kind".to_owned(), Value::String("agent".to_owned()));
     view.insert("source".to_owned(), Value::String("managed".to_owned()));
-    let progress = crate::account_transfer::progress_view(record.get("accountTransfer")).ok()?;
+    let progress = crate::account_transfer::progress_view(
+        record.get("accountTransfer"),
+        context.transfer_can_cancel,
+    )
+    .ok()?;
     if let Some(summary) = view
         .get_mut("accountTransfer")
         .and_then(Value::as_object_mut)
@@ -1109,7 +1114,11 @@ mod projection_plan_tests {
         let lead = json!({"id":"lead","rootId":"lead","epoch":1,"isLead":true,"provider":"codex",
             "accountTransfer":{"id":"move","targetAccountKey":"target","status":"pending",
                 "blocked":[{"id":"lead","reason":"History unavailable"}],"canRetry":true,"canCancel":true,"movingNow":0}});
-        let view = super::agent_entity_view(&lead, &Default::default()).unwrap();
+        let context = super::AgentViewContext {
+            transfer_can_cancel: true,
+            ..Default::default()
+        };
+        let view = super::agent_entity_view(&lead, &context).unwrap();
         assert_eq!(view["accountTransferProgress"]["kind"], "blocked");
         assert_eq!(
             view["accountTransferProgress"]["actions"],

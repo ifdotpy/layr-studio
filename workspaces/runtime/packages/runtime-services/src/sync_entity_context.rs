@@ -18,6 +18,23 @@ use crate::sync_views::{AgentViewContext, RoomViewContext};
 /// kept below SQLite's host-parameter limit. Unit: rows (ids) per statement.
 const LEAD_LOOKUP_CHUNK_ROWS: usize = 500;
 
+fn transfer_can_cancel(transaction: &Transaction<'_>, record: &Value) -> bool {
+    if record.get("isLead").and_then(Value::as_bool) != Some(true) {
+        return false;
+    }
+    let Some(summary) = record.get("accountTransfer") else {
+        return false;
+    };
+    if summary.get("status").and_then(Value::as_str) != Some("pending") {
+        return false;
+    }
+    let Some(id) = summary.get("id").and_then(Value::as_str) else {
+        return false;
+    };
+    crate::account_transfer_driver::load(transaction, id)
+        .is_ok_and(|snapshot| snapshot.can_cancel())
+}
+
 fn account_destinations(
     transaction: &Transaction<'_>,
 ) -> StoreResult<Vec<studio_runtime_schema::account_destination::AccountDestination>> {
@@ -239,6 +256,7 @@ pub(crate) fn agent_view_contexts(
             id.to_owned(),
             AgentViewContext {
                 account_destinations: destinations.clone(),
+                transfer_can_cancel: transfer_can_cancel(transaction, record),
                 project_server_id: project_server_id.map(str::to_owned),
                 launcher_alive: true,
                 empty_lead,
@@ -320,6 +338,7 @@ pub(crate) fn agent_view_context(
     let attention = pending_attention(transaction, id, record)?;
     Ok(AgentViewContext {
         account_destinations: account_destinations(transaction)?,
+        transfer_can_cancel: transfer_can_cancel(transaction, record),
         command_progress: progress.commands,
         stall: progress.stall,
         project_server_id: project_server_id.map(str::to_owned),
