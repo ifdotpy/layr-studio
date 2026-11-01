@@ -1704,7 +1704,11 @@ export default function Conversation(p: {
           agent={agent}
           refresh={p.refresh}
           planType={planType}
-          limits={p.limits}
+          recovery={
+            p.limitsAccounts?.find(
+              (account) => account.key === (agent.accountKey || "default"),
+            )?.agents?.[agent.id]?.recovery
+          }
           openLimits={() => {
             setLimitsOpen(true);
             p.reloadLimits();

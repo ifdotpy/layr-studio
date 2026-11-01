@@ -146,7 +146,6 @@ test("one reading shows one remaining limit with its age and server", () => {
       view: accountLimitView(
         owner,
         limits("b", 200, 67),
-        300,
         true,
         projectedLimits("b", 200, null),
       ),

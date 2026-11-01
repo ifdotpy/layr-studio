@@ -9,9 +9,7 @@ const config = {
   },
   mutate: [
     "src/usage/tokenRate.ts",
-    "src/usage/weeklyRunway.ts",
     "src/usage/accountUsage.ts",
-    "src/usage/limitRecovery.ts",
     "src/conversation/transcriptIdentity.ts",
     "src/sync/entityProjection.ts",
     "src/sync/draftPayload.ts",

@@ -1,30 +1,26 @@
 import { useServerApi } from "../servers/ServerServicesContext";
 import { localDateTime } from "../local-time";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "@mantine/core";
-import type { LimitRecovery } from "../usage/limitRecovery";
+import type { components } from "../generated/api";
+type LimitRecovery = components["schemas"]["LimitRecovery"];
 import { copyText } from "../clipboard/clipboard";
 import { errorText, type PostResult } from "../api";
 import type { Agent } from "../types";
 
-/**
- * The one line of a usage limit: when it resets, or that Studio resumes the chat by itself,
- * or, after the reset time, that Studio checks the account.
- */
-export function limitLine(
-  resetAt: number | undefined,
-  resumes: boolean,
-  now: number,
-) {
-  if (resetAt != null && now >= resetAt)
-    return resumes
-      ? "The reset time passed. Studio is checking the account."
-      : "The reset time passed. Refresh to check the account.";
-  if (resumes)
-    return "Limit reached. Studio resumes this chat after the reset.";
-  return resetAt != null
-    ? `Limit reached. Resets at ${localDateTime(new Date(resetAt * 1000))}.`
-    : "Limit reached.";
+function limitLine(timing: LimitRecovery["timing"] | undefined) {
+  switch (timing?.kind) {
+    case "waiting":
+      return `Limit reached. Resets at ${localDateTime(new Date(timing.resetAt * 1000))}.`;
+    case "checking":
+      return "The reset time passed. Studio is checking the account.";
+    case "confirmed":
+      return "The limit has reset.";
+    case "unconfirmed":
+      return "The reset could not be confirmed. Refresh to check the account.";
+    default:
+      return "Limit reached.";
+  }
 }
 
 export default function LimitRecoveryNotice({
@@ -44,7 +40,6 @@ export default function LimitRecoveryNotice({
   onRefresh?: (() => Promise<void> | void) | undefined;
 }) {
   const { post } = useServerApi();
-  const [now, setNow] = useState(() => Date.now() / 1000);
   const [refreshing, setRefreshing] = useState(false);
 
   const [copyStatus, setCopyStatus] = useState("");
@@ -60,17 +55,6 @@ export default function LimitRecoveryNotice({
   const plannedAt = resume?.plannedAt;
   const nextCheckAt = resume?.dueAt;
   const auth = resume?.cause === "auth";
-  const resetAt =
-    recovery?.resetAt ?? recovery?.eligibility?.resetAt ?? undefined;
-  // The line changes when the reset time passes.
-  useEffect(() => {
-    if (resetAt == null || resetAt <= Date.now() / 1000) return;
-    const timer = setTimeout(
-      () => setNow(Date.now() / 1000),
-      resetAt * 1000 - Date.now() + 50,
-    );
-    return () => clearTimeout(timer);
-  }, [resetAt]);
   const canToggle =
     !!agentId &&
     !!resume?.id &&
@@ -130,7 +114,7 @@ export default function LimitRecoveryNotice({
         </>
       ) : (
         <p>
-          {limitLine(resetAt, scheduled, Math.max(now, Date.now() / 1000))}
+          {limitLine(recovery?.timing)}
           {!scheduled && onRefresh && (
             <>
               {" "}
@@ -168,7 +152,7 @@ export default function LimitRecoveryNotice({
         </Button>
       )}
       {resumeError && <p role="alert">{resumeError}</p>}
-      {recovery?.action && (
+      {recovery?.action.kind === "link" && (
         <>
           <Button
             tabIndex={tabIndex}
@@ -183,19 +167,27 @@ export default function LimitRecoveryNotice({
           <small>Use this chat's account in ChatGPT.</small>
         </>
       )}
-      {recovery?.ownerRequest && (
+      {recovery?.action.kind === "ask_owner" && (
         <>
           <Button
             tabIndex={tabIndex}
             size="compact-xs"
             onClick={async () => {
               try {
-                await copyText(recovery!.ownerRequest!);
+                await copyText(
+                  recovery.action.kind === "ask_owner"
+                    ? recovery.action.request
+                    : "",
+                );
                 setCopyStatus(
                   "Request copied. Send it to your workspace owner.",
                 );
               } catch {
-                setCopyStatus(recovery!.ownerRequest!);
+                setCopyStatus(
+                  recovery.action.kind === "ask_owner"
+                    ? recovery.action.request
+                    : "",
+                );
               }
             }}
           >
