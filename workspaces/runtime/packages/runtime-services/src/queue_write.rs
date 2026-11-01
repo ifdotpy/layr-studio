@@ -162,9 +162,7 @@ pub fn action(
             let (target_id, row) = target_row(body, rows)?;
             if recover_failed
                 && (agent
-                    .extra
-                    .get("error")
-                    .and_then(Value::as_str)
+                    .error_text()
                     .is_some_and(crate::account_auth_gate::is_hold_reason)
                     || !SchedulerRepository::proven_unsent_pending_batch(
                         transaction,
@@ -230,7 +228,7 @@ pub fn action(
     let mut agent = agent;
     if recover_failed {
         agent.status = AgentStatus::Queued;
-        agent.extra.insert("error".into(), Value::Null);
+        agent.error = studio_runtime_schema::queue_command::Field::Null;
         agent.start_attempt = None;
     }
     if updated.items != current.items || recover_failed {

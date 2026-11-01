@@ -1434,16 +1434,14 @@ fn enqueue_turn_result(
     let Some(parent) = AgentRepository::get(tx, &AgentId::from(parent_id))? else {
         return Ok(());
     };
-    let result = match agent
-        .extra
-        .get("error")
-        .filter(|error| studio_runtime_store::truthy(Some(error)))
-    {
-        Some(error) => error
-            .get("message")
-            .and_then(Value::as_str)
-            .or(error.as_str())
-            .map_or_else(|| error.to_string(), str::to_owned),
+    let result = match agent.error.value().filter(|error| {
+        matches!(
+            error,
+            studio_runtime_schema::provider_errors::AgentError::Provider(_)
+        ) || !error.display_text().is_empty()
+    }) {
+        Some(error) if !error.display_text().is_empty() => error.display_text().to_owned(),
+        Some(error) => error.diagnostic_text(),
         None => agent
             .last_answer
             .as_deref()

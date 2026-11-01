@@ -669,7 +669,7 @@ impl CompletionWriter for RestartInputCompletion {
         agent.extra.remove("nativeFailureHold");
         agent.start_outcome_hold = None;
         agent.auto_wake = Some(true);
-        agent.extra.insert("error".into(), Value::Null);
+        agent.error = studio_runtime_schema::queue_command::Field::Null;
         if let Some(marker) = agent.restart_recovery.as_deref_mut() {
             marker.stage = Some("finished".into());
             marker

@@ -33449,101 +33449,61 @@
         "type": "object"
       },
       "NativeProviderError": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
-        },
-        "description": "Known app-server fields plus pass-through provider error extensions.\n\nThe native provider owns the remaining JSON object fields; the stored\n``codex_records`` shapes likewise type these errors as ``JsonObject``.",
+        "$schema": "https://spec.openapis.org/oas/3.0/schema/2024-10-18#/definitions/Schema",
+        "description": "The provider-owned portion of an agent error that Studio displays or classifies.",
         "properties": {
           "additionalDetails": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Additionaldetails"
+            "$ref": "#/components/schemas/JsonValue"
           },
           "claudeFailure": {
             "$ref": "#/components/schemas/ClaudeFailure"
           },
           "code": {
-            "anyOf": [
-              {
-                "maximum": 9007199254740991,
-                "minimum": -9007199254740991,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Code"
+            "nullable": true,
+            "type": "string"
           },
           "codexErrorInfo": {
             "anyOf": [
               {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "object"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "additionalProperties": {
+                      "properties": {
+                        "httpStatusCode": {
+                          "format": "uint16",
+                          "maximum": 65535,
+                          "minimum": 0,
+                          "nullable": true,
+                          "type": "integer"
+                        },
+                        "turnKind": {
+                          "nullable": true,
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "type": "object"
+                  }
+                ]
               },
               {
-                "items": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
+                "enum": [
+                  null
+                ],
+                "nullable": true
               }
-            ],
-            "default": null,
-            "title": "Codexerrorinfo"
+            ]
           },
           "data": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/JsonValue"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
+            "$ref": "#/components/schemas/JsonValue"
           },
           "message": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Message"
+            "default": "",
+            "type": "string"
           }
         },
         "title": "NativeProviderError",

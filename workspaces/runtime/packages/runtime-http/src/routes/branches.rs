@@ -823,7 +823,9 @@ async fn settle_failure(
                 if unknown {
                     actor.set_status(studio_runtime_store::AgentStatus::Interrupted);
                     actor.auto_wake = Some(false);
-                    actor.extra.insert("error".into(), json!(error.clone()));
+                    actor.error = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_schema::provider_errors::AgentError::Message(error),
+                    );
                 } else {
                     actor.extra.remove("workspaceReservationId");
                     actor.extra.insert("workspaceOperation".into(), Value::Null);

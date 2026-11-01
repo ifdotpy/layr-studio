@@ -2365,9 +2365,7 @@ pub fn release_failed_work(
             "The worker was deleted".to_owned()
         } else {
             worker
-                .extra
-                .get("error")
-                .and_then(Value::as_str)
+                .error_text()
                 .unwrap_or("The worker failed")
                 .to_owned()
         };

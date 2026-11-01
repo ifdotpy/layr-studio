@@ -4981,7 +4981,7 @@ async fn vm_session_identity_refusal_holds_one_actor_and_keeps_sibling_usable() 
                     sibling_record.thread_id = None;
                     sibling_record.auto_wake = Some(true);
                     sibling_record.in_flight = Some(false);
-                    sibling_record.extra.insert("error".into(), Value::Null);
+                    sibling_record.error = studio_runtime_schema::queue_command::Field::Null;
                     sibling_record.start_attempt.take();
                     sibling_record.extra.remove("preparationWake");
                     AgentRepository::put(tx, &sibling_record)
@@ -5145,7 +5145,7 @@ async fn vm_adapter_exit_recovers_only_its_actor_and_keeps_sibling_usable() {
                     sibling_record.thread_id = None;
                     sibling_record.auto_wake = Some(true);
                     sibling_record.in_flight = Some(false);
-                    sibling_record.extra.insert("error".into(), Value::Null);
+                    sibling_record.error = studio_runtime_schema::queue_command::Field::Null;
                     sibling_record.start_attempt.take();
                     sibling_record.extra.remove("preparationWake");
                     AgentRepository::put(tx, &sibling_record)

@@ -696,7 +696,7 @@ fn agent_status_record(agent: &AgentRecord) -> Value {
         "inFlight": agent.in_flight,
         "parentId": agent.parent_id,
         "kind": "agent",
-        "error": clip_value(agent.extra.get("error")),
+        "error": clip_text(agent.error.value().map(|error| error.diagnostic_text()).unwrap_or_default()),
     });
     if agent.status == AgentStatus::Parked
         && agent
@@ -731,6 +731,10 @@ fn clip_value(value: Option<&Value>) -> Value {
                 .unwrap_or_else(|| value.to_string())
         })
         .unwrap_or_default();
+    clip_text(raw)
+}
+
+fn clip_text(raw: String) -> Value {
     let mut bytes = raw.into_bytes();
     bytes.truncate(600);
     while std::str::from_utf8(&bytes).is_err() {

@@ -390,7 +390,7 @@ fn post_managed_message(
 
     // A manual send wakes a stopped agent in the same transaction as the event.
     agent.auto_wake = Some(true);
-    agent.extra.insert("error".to_owned(), Value::Null);
+    agent.error = studio_runtime_schema::queue_command::Field::Null;
     agent.extra.remove("nativeFailureHold");
     capacity_reset(transaction, &mut agent)?;
     studio_runtime_store::AgentRepository::put(transaction, &agent)?;
@@ -622,7 +622,7 @@ fn send_followup_inner(
     }
     if sender_identity.is_some() {
         recipient.auto_wake = Some(true);
-        recipient.extra.insert("error".into(), Value::Null);
+        recipient.error = studio_runtime_schema::queue_command::Field::Null;
         recipient.extra.remove("nativeFailureHold");
         capacity_reset(transaction, &mut recipient)?;
         studio_runtime_store::AgentRepository::put(transaction, &recipient)?;
@@ -727,10 +727,7 @@ fn assert_native_thread_open(
         })
         .is_some()
         || (thread.is_some()
-            && agent
-                .extra
-                .get("error")
-                .is_some_and(is_misalignment_policy_violation))
+            && agent.error.value().is_some_and(|error| error.known_kind() == Some(studio_runtime_schema::provider_errors::KnownCodexErrorKind::MisalignmentPolicyViolation)))
         || (thread.is_some()
             && agent
                 .extra

@@ -184,7 +184,11 @@ pub async fn hold_unstarted(
                     continue;
                 }
                 agent.status = AgentStatus::Failed;
-                agent.extra.insert("error".into(), json!(reason));
+                agent.error = studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_schema::provider_errors::AgentError::Message(
+                        (reason).to_string(),
+                    ),
+                );
                 agent.start_wait = None;
                 AgentRepository::put(tx, &agent)?;
                 held.push(agent_id);
@@ -271,13 +275,12 @@ pub async fn release_held(
                 // already requeued it, or the agent moved on.
                 if agent.status != AgentStatus::Failed
                     || agent.epoch != turn.epoch
-                    || agent.extra.get("error").and_then(Value::as_str)
-                        != Some(turn.reason.as_str())
+                    || agent.error_text() != Some(turn.reason.as_str())
                 {
                     continue;
                 }
                 agent.status = AgentStatus::Queued;
-                agent.extra.insert("error".into(), Value::Null);
+                agent.error = studio_runtime_schema::queue_command::Field::Null;
                 AgentRepository::put(tx, &agent)?;
                 requeued.push((turn.agent, turn.epoch));
             }

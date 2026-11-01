@@ -503,12 +503,7 @@ impl SchedulerRepository {
         {
             return Ok(false);
         }
-        let Some(reason) = agent
-            .extra
-            .get("error")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-        else {
+        let Some(reason) = agent.error_text().filter(|value| !value.is_empty()) else {
             return Ok(false);
         };
         let original = claim_result::<HistoricalAgentSnapshot>(&saved)?.agent;
@@ -1170,9 +1165,9 @@ impl SchedulerRepository {
             agent
                 .extra
                 .insert("nativeFailureHold".to_owned(), Value::Bool(true));
-            agent
-                .extra
-                .insert("error".to_owned(), Value::String(reason.to_owned()));
+            agent.error = studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_schema::provider_errors::AgentError::Message(reason.to_owned()),
+            );
             agent.start_outcome_hold = Some(crate::StoredStartOutcomeHold::Known(
                 crate::StartOutcomeHold::Held {
                     reason: Some(reason.into()),

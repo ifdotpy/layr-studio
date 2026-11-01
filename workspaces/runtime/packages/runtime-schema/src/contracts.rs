@@ -1373,8 +1373,8 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     identity_version.remove("maximum");
     openapi["components"]["schemas"]["UsageReconciliationResponse"]["properties"]["replayConflicts"] = serde_json::json!({"type":"array","items":{"$ref":"#/components/schemas/UsageReplayConflict"}});
     openapi["components"]["schemas"]["ClaudeFailure"] = crate::claude_failure::schema();
-    openapi["components"]["schemas"]["NativeProviderError"]["properties"]["claudeFailure"] =
-        serde_json::json!({"$ref":"#/components/schemas/ClaudeFailure"});
+    openapi["components"]["schemas"]["NativeProviderError"] =
+        crate::provider_errors::native_provider_error_schema();
     check_schema_parity(&openapi, &read_json(root, ACCOUNT_TRANSFER_SCHEMA_PATH)?)?;
     for (name, fields) in [
         (

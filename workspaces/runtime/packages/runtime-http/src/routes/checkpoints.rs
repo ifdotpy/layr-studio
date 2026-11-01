@@ -738,7 +738,9 @@ async fn settle_restore_failure(
                         .insert("workspaceOperation".into(), json!("restore_recovery"));
                     agent.set_status(studio_runtime_store::AgentStatus::Interrupted);
                     agent.auto_wake = Some(false);
-                    agent.extra.insert("error".into(), json!(message));
+                    agent.error = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_schema::provider_errors::AgentError::Message(message),
+                    );
                 } else if agent
                     .extra
                     .get("workspaceReservationId")

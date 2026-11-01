@@ -51,26 +51,8 @@ export const nativeErrorHints = {
   other: "Review the error details before continuing.",
 } satisfies Record<KnownCodexErrorKind, string>;
 
-// Bound both JSON input and wrapper depth. Keep the original payload for Details.
-const MAX_ERROR_JSON_LENGTH = 65_536;
-const MAX_ERROR_DEPTH = 8;
-
-function parseError(value: unknown): unknown {
-  if (typeof value !== "string" || value.length > MAX_ERROR_JSON_LENGTH)
-    return value;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
-}
-
 export function nativeErrorKind(value: unknown): string {
-  const data = parseError(value);
-  const dataRecord = objectRecord(data);
-  const nestedData = objectRecord(dataRecord?.data);
-  const info = dataRecord?.codexErrorInfo ?? nestedData?.codexErrorInfo;
-  return rawCodexErrorKind(info) || "";
+  return rawCodexErrorKind(objectRecord(value)?.codexErrorInfo) || "";
 }
 
 export function isCyberPolicyRefusal(value: unknown): boolean {
@@ -89,78 +71,19 @@ function objectRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function biologicalPrefix(text: string) {
-  return [
-    "Invalid prompt: we've limited access to this content for safety reasons.",
-    "This content was flagged for possible biological risk.",
-  ].some((prefix) => text.startsWith(prefix));
-}
-
 type ReadableError = { message: string; biological: boolean };
 
-// Scan each character once. Only complete outer objects are parsed, so malformed
-// or deeply nested input cannot cause repeated parsing of overlapping substrings.
-function embeddedObjects(text: string): unknown[] {
-  if (text.length > MAX_ERROR_JSON_LENGTH) return [];
-  const objects: unknown[] = [];
-  let start = -1;
-  let depth = 0;
-  let quoted = false;
-  let escaped = false;
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-    if (start < 0) {
-      if (char === "{") {
-        start = i;
-        depth = 1;
-      }
-      continue;
-    }
-    if (quoted) {
-      if (escaped) escaped = false;
-      else if (char === "\\") escaped = true;
-      else if (char === '"') quoted = false;
-    } else if (char === '"') quoted = true;
-    else if (char === "{") depth++;
-    else if (char === "}" && --depth === 0) {
-      objects.push(parseError(text.slice(start, i + 1)));
-      start = -1;
-    }
-  }
-  return objects;
-}
-
-function readableError(value: unknown, depth = 0): ReadableError | undefined {
-  if (depth >= MAX_ERROR_DEPTH) return undefined;
-  if (typeof value === "string") {
-    if (!value.trim()) return undefined;
-    const parsed = parseError(value);
-    if (parsed !== value) {
-      const nested = readableError(parsed, depth + 1);
-      if (nested) return nested;
-    } else {
-      for (const object of embeddedObjects(value)) {
-        if (typeof object !== "object" || !object) continue;
-        const nested = readableError(object, depth + 1);
-        if (nested) return nested;
-      }
-    }
-    return { message: value, biological: biologicalPrefix(value) };
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    return undefined;
-  const data = objectRecord(value);
-  if (!data) return undefined;
-  const nested = readableError(data.error, depth + 1);
-  const own = nested || readableError(data.message, depth + 1);
-  if (own)
-    return {
-      message: own.message,
-      biological: own.biological || data.code === "bio_policy",
-    };
-  if (data.code === "bio_policy")
-    return { message: "Codex reported an error.", biological: true };
-  return undefined;
+function readableError(value: unknown): ReadableError | undefined {
+  if (typeof value === "string")
+    return value.trim() ? { message: value, biological: false } : undefined;
+  const record = objectRecord(value);
+  if (!record) return undefined;
+  const biological = record.code === "bio_policy";
+  if (typeof record.message === "string" && record.message.trim())
+    return { message: record.message, biological };
+  return biological
+    ? { message: "Codex reported an error.", biological }
+    : undefined;
 }
 
 export function nativeThreadError(
@@ -176,10 +99,9 @@ export function nativeThreadError(
 
 // True when an error means the disk is full (ENOSPC, SQLite SQLITE_FULL).
 export function isDiskFullError(value: unknown): boolean {
-  const data = parseError(value);
+  const data = value;
   const record = objectRecord(data);
   if (record?.codexErrorInfo === "diskFull") return true;
-  if (objectRecord(record?.data)?.diskFull === true) return true;
   const readable = readableError(data);
   return DISK_FULL_PATTERN.test(
     readable?.message ?? (typeof value === "string" ? value : ""),
@@ -195,7 +117,7 @@ export function nativeErrorView(value: unknown, planType?: string) {
       details: view.details || view.message,
     };
   if (!isDiskFullError(value)) {
-    const record = objectRecord(parseError(value));
+    const record = objectRecord(value);
     const claude = claudeFailureView(record?.claudeFailure);
     if (!claude) return view;
     return {
@@ -216,7 +138,7 @@ export function nativeErrorView(value: unknown, planType?: string) {
 }
 
 function codexErrorView(value: unknown, planType?: string) {
-  const data = parseError(value);
+  const data = value;
   const record = objectRecord(data);
   const structured = record !== null;
   const rawKind = nativeErrorKind(data);

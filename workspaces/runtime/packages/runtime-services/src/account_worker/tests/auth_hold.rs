@@ -538,7 +538,11 @@ async fn held_start_wakes_nothing_until_an_account_change() {
                     let mut row =
                         AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
                     row.status = studio_runtime_store::AgentStatus::Failed;
-                    row.extra.insert("error".into(), json!(reason));
+                    row.error = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_schema::provider_errors::AgentError::Message(
+                            (reason).to_string(),
+                        ),
+                    );
                     Ok(AgentRepository::put(tx, &row)?)
                 })
                 .await

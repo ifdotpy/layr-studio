@@ -15873,56 +15873,28 @@ export interface components {
     };
     /**
      * NativeProviderError
-     * @description Known app-server fields plus pass-through provider error extensions.
-     *
-     *     The native provider owns the remaining JSON object fields; the stored
-     *     ``codex_records`` shapes likewise type these errors as ``JsonObject``.
+     * @description The provider-owned portion of an agent error that Studio displays or classifies.
      */
     NativeProviderError: {
-      /**
-       * Additionaldetails
-       * @default null
-       */
-      additionalDetails?:
-        | {
-            [key: string]: components["schemas"]["JsonValue"] | undefined;
-          }
-        | null
-        | string
-        | undefined;
+      additionalDetails?: components["schemas"]["JsonValue"] | undefined;
       claudeFailure?: components["schemas"]["ClaudeFailure"] | undefined;
-      /**
-       * Code
-       * @default null
-       */
-      code?: number | null | string | undefined;
-      /**
-       * Codexerrorinfo
-       * @default null
-       */
+      code?: string | null | undefined;
       codexErrorInfo?:
-        | {
-            [key: string]: components["schemas"]["JsonValue"] | undefined;
-          }
-        | components["schemas"]["JsonValue"][]
+        | (
+            | string
+            | {
+                [key: string]: {
+                  /** Format: uint16 */
+                  httpStatusCode?: number | null | undefined;
+                  turnKind?: string | null | undefined;
+                };
+              }
+          )
         | null
-        | string
         | undefined;
-      /** @default null */
-      data?: components["schemas"]["JsonValue"] | null | undefined;
-      /**
-       * Message
-       * @default null
-       */
-      message?:
-        | {
-            [key: string]: components["schemas"]["JsonValue"] | undefined;
-          }
-        | null
-        | string
-        | undefined;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
+      data?: components["schemas"]["JsonValue"] | undefined;
+      /** @default  */
+      message?: string | undefined;
     };
     /**
      * NativeReleasePhase

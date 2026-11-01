@@ -4509,7 +4509,9 @@ fn hold_before_claim(
     agent.extra.insert("nativeFailureHold".into(), json!(true));
     agent.auto_wake = Some(false);
     agent.in_flight = Some(false);
-    agent.extra.insert("error".into(), json!(reason));
+    agent.error = studio_runtime_schema::queue_command::Field::Value(
+        studio_runtime_schema::provider_errors::AgentError::Message((reason).to_string()),
+    );
     agent.start_outcome_hold = Some(studio_runtime_store::StoredStartOutcomeHold::Known(
         studio_runtime_store::StartOutcomeHold::Held {
             reason: Some(reason.into()),

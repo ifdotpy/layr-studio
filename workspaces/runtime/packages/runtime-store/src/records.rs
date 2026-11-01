@@ -452,6 +452,20 @@ pub struct AgentRecord {
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
     pub last_completed_turn_status: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub error: studio_runtime_schema::queue_command::Field<
+        studio_runtime_schema::provider_errors::AgentError,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub last_completed_turn_error: studio_runtime_schema::queue_command::Field<
+        studio_runtime_schema::provider_errors::AgentError,
+    >,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree_ready: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -796,6 +810,19 @@ macro_rules! start_attempt_setters {
 }
 
 impl AgentRecord {
+    pub fn error_text(&self) -> Option<&str> {
+        self.error.value().and_then(|error| error.as_text())
+    }
+
+    pub fn set_error_receipt(&mut self, value: Value) -> Result<(), serde_json::Error> {
+        use studio_runtime_schema::queue_command::Field;
+        self.error = if value.is_null() {
+            Field::Null
+        } else {
+            Field::Value(studio_runtime_schema::provider_errors::AgentError::from_receipt(value)?)
+        };
+        Ok(())
+    }
     pub fn is_deleted(&self) -> bool {
         self.deleted_at.is_some_and(|at| at != 0.0)
     }
@@ -842,6 +869,8 @@ impl AgentRecord {
             host_project_path: Default::default(),
             execution_settings_account_key: Default::default(),
             last_completed_turn_status: Default::default(),
+            error: Default::default(),
+            last_completed_turn_error: Default::default(),
             worktree_ready: None,
             approval_policy: None,
             native_response_turn: None,
@@ -2884,6 +2913,19 @@ mod tests {
                 .unwrap()
                 .contains("\"role\":null")
         );
+    }
+
+    #[test]
+    fn agent_error_rejects_non_error_values() {
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"failed","accountKey":"default","compactions":0,"error":42}"#;
+        assert!(serde_json::from_str::<AgentRecord>(raw).is_err());
+        let last_error = raw.replace("\"error\":42", "\"lastCompletedTurnError\":42");
+        assert!(serde_json::from_str::<AgentRecord>(&last_error).is_err());
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"failed","accountKey":"default","compactions":0,"error":{"message":"failed","data":{"id":1}}}"#;
+        let decoded: AgentRecord = serde_json::from_str(raw).unwrap();
+        assert_eq!(decoded.value()["error"]["data"]["id"], 1);
+        let via_value = AgentRecord::from_value(serde_json::from_str(raw).unwrap()).unwrap();
+        assert_eq!(via_value.value()["error"]["data"]["id"], 1);
     }
 
     #[test]

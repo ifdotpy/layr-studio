@@ -629,8 +629,11 @@ async fn cancel_restores_source_fields_with_null_and_absent_values_exactly() {
         .transaction(|tx| {
             let mut row = AgentRepository::get(tx, &AgentId::from("lead"))?.expect("lead");
             row.status = AgentStatus::Failed;
-            row.extra
-                .insert("error".into(), json!("Transfer history is unavailable"));
+            row.error = studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_schema::provider_errors::AgentError::Message(
+                    "Transfer history is unavailable".into(),
+                ),
+            );
             row.extra.insert("nativeFailureHold".into(), json!(true));
             AgentRepository::put(tx, &row)
         })
