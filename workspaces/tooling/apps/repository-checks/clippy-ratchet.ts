@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { once } from "node:events";
-import { CARGO_BUILD_JOBS } from "./gate-config.ts";
+import { CARGO_BUILD_JOBS, NATIVE_PACKAGE } from "./gate-config.ts";
 import {
   checkRatchet,
   fingerprintMatches,
@@ -141,6 +141,8 @@ export async function run(shrink = false): Promise<number> {
   const args = [
     "clippy",
     "--workspace",
+    "--exclude",
+    NATIVE_PACKAGE,
     "--all-targets",
     "--locked",
     "-j",

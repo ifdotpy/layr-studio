@@ -84,6 +84,8 @@ inherits = "ci"
 # Reviewer permissions stay read-only under yolo across preparation, turns, and monitors.
 # Command replay witnesses feed recorded management commands through decide and compare the canonical outcome.
 default-filter = '''
+    (package(=studio-runtime-store) & kind(lib) & test(=path::tests::missing_state_directory_is_created)) |
+    (package(=studio-runtime-server) & test(templates_use_the_shared_delivery_layout_and_escape_paths)) |
     (package(=studio-runtime-services) & kind(lib) & test(/^account_driver::tests::vm_/)) |
     (package(=studio-runtime-server) & kind(lib) & (test(/^host_runtime::codex_vm_auth_tests::/) | test(/^host_runtime::launch_profile_tests::/))) |
     (package(=studio-runtime-services) & kind(lib) & test(/^provider_adapter::tests::checked_private_profile_launch_keeps_pin_options_and_refusal_order$/)) |
@@ -459,6 +461,8 @@ platform = 'cfg(target_os = "linux")'
 # Reviewer permissions stay read-only under yolo across preparation, turns, and monitors.
 # Command replay witnesses feed recorded management commands through decide and compare the canonical outcome.
 default-filter = '''
+    (package(=studio-runtime-store) & kind(lib) & test(=path::tests::missing_state_directory_is_created)) |
+    (package(=studio-runtime-server) & test(templates_use_the_shared_delivery_layout_and_escape_paths)) |
     (package(=studio-runtime-services) & kind(lib) & test(/^account_driver::tests::vm_/)) |
     (package(=studio-runtime-server) & kind(lib) & (test(/^host_runtime::codex_vm_auth_tests::/) | test(/^host_runtime::launch_profile_tests::/))) |
     (package(=studio-runtime-services) & kind(lib) & test(/^provider_adapter::tests::checked_private_profile_launch_keeps_pin_options_and_refusal_order$/)) |

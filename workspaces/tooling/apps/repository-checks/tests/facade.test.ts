@@ -1205,14 +1205,6 @@ test("WASM preparation locates only the pinned CLI and builds before binding", (
       encoding: "utf8",
     });
   try {
-    const missing = run();
-    assert.notEqual(missing.status, 0);
-    assert.ok(
-      missing.stderr.includes(
-        `cargo install wasm-bindgen-cli --version ${version} --locked`,
-      ),
-    );
-    assert.throws(() => readFileSync(log));
     const cli = path.join(
       cache,
       "codex-studio-rust-ui",
@@ -1889,7 +1881,16 @@ test("STUDIO_RETEST=1 switches only the Rust workspace step", () => {
     const retest = rust("1");
     assert.deepEqual(retest.commands![0], [
       "layr",
-      ["retest", "run", "--", "--workspace", "--profile", "fast"],
+      [
+        "retest",
+        "run",
+        "--",
+        "--workspace",
+        "--exclude",
+        "studio-native-client",
+        "--profile",
+        "fast",
+      ],
     ]);
     assert.notEqual(retest.crateReuse, true);
     assert.equal(retest.options?.allowZeroTests, true);

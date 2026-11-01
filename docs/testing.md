@@ -26,13 +26,13 @@ generated-contract and dependency guards, and the VM guest Python suite through 
 bounded concurrent lanes: Rust preparation and tests, type checks, web tests,
 independent tooling/provider/desktop checks, and the guest suite. Independent
 checks start immediately; artifact consumers wait only for their preparation. Cargo compilation stays in the Rust lane with four build jobs. WASM is
-generated once; the renderer is built once before the native crate embeds it.
+generated once; the renderer is built once for the web checks.
 Type checks wait for WASM; web tests wait for the workspace build's debug
 `examples/draft-server`, and the guest waits for its debug supervisor. The gate
 passes both binary paths explicitly. These checks overlap the Rust build or test run. The
 [WASM builder](../workspaces/client/apps/web/scripts/build-client-wasm.ts) requires
-the exact binding generator version pinned by the client-wasm crate; its error
-gives the installation command. Cold builds are outside the warm short-tier
+the exact binding generator version pinned by the client-wasm crate and installs
+it in the versioned cache when missing. Cold builds are outside the warm short-tier
 target. The nextest configuration also owns the failure deadline; its CI profile
 caps a stuck test above the measured busy-service witness. Test concurrency stays
 runner-derived, without global serial groups. The short tier starts no browser or model provider.
@@ -40,8 +40,9 @@ runner-derived, without global serial groups. The short tier starts no browser o
 `just test-comprehensive` runs the provider bridge, workspace Clippy, workspace
 Rust nextest with the `ci` profile, web type and unit checks, tooling tests, the
 shared desktop/helper and guest witnesses, and browser smoke. Both local tiers use
-the same full workspace, Cargo features, development/test profiles and target
-directory, including native coverage. A workspace `cargo build --tests --bins`
+the same workspace selection, Cargo features, development/test profiles and target
+directory, excluding the native client, whose coverage runs in `just test-native-ci`
+on the prepared builder. A workspace `cargo build --tests --bins`
 prepares the supervisor, contracts tool and HTTP fixture without package-only or
 release builds; one workspace nextest invocation selects the tests. Consumers get
 explicit debug binary paths. Browser smoke uses the prepared renderer and fixture,

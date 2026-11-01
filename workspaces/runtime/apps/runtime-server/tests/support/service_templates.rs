@@ -10,6 +10,7 @@ fn templates_use_the_shared_delivery_layout_and_escape_paths() {
     let root = Path::new("/release space/%$&<");
     let state = Path::new("/state space/%$&<");
     let unit = linux_unit(&layout, root, state).unwrap();
+    assert!(unit.contains("WorkingDirectory=/release space/%$&</current\n"));
     assert!(unit.contains(&format!(" --port {}\n", layout.port)));
     assert!(unit.contains("ExecStart=\"/release space/%%$$&</current/bin/studio-runtime-server\""));
     assert!(unit.contains("Environment=\"CODEX_AGENTS_STATE_DIR=/state space/%%$&<\""));

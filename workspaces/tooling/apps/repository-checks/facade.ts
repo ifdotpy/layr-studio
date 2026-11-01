@@ -22,6 +22,7 @@ import {
   CARGO_BUILD_JOBS,
   RETEST_ENV,
   RETEST_REAL_ROOT_ENV,
+  NATIVE_PACKAGE,
   scrubAgentEnvironment,
 } from "./gate-config.ts";
 import { withGateLock } from "./gate-lock.ts";
@@ -972,6 +973,8 @@ export function gateSteps(root: string, name: string): GateStep[] {
           [
             "build",
             "--workspace",
+            "--exclude",
+            NATIVE_PACKAGE,
             "--tests",
             "--bins",
             "--examples",
@@ -1018,6 +1021,8 @@ export function gateSteps(root: string, name: string): GateStep[] {
           "nextest",
           "run",
           "--workspace",
+          "--exclude",
+          NATIVE_PACKAGE,
           // Every crate must finish after a failure: saved per-crate results rely on it.
           "--no-fail-fast",
           "--profile",
