@@ -6,35 +6,78 @@
 
 use rusqlite::OptionalExtension;
 use serde_json::{Map, Value, json};
+use studio_runtime_schema::{
+    bounded_integer::BoundedInteger, bounded_text::BoundedText, http_ingress::Object,
+    queue_command::Field,
+};
 use studio_runtime_store::{AgentRecord, AgentRepository, Transaction};
 
 use crate::event_write::{self, EventWriteError};
 
-pub fn apply(tx: &Transaction<'_>, body: &Value) -> Result<Value, EventWriteError> {
-    let id = body
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or(EventWriteError::InvalidRequest("Invalid request"))?;
+/// Maximum request identity or path length, in Unicode code points.
+const ORGANIZATION_ID_MAX_CHARS: usize = 4096;
+type Text = BoundedText<0, ORGANIZATION_ID_MAX_CHARS>;
+type Revision =
+    BoundedInteger<0, { studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64 }>;
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OrganizationRequest {
+    id: Text,
+    #[serde(default)]
+    pinned: Field<bool>,
+    #[serde(default)]
+    archived: Field<bool>,
+    #[serde(default)]
+    project: Field<Text>,
+    #[serde(default)]
+    project_folder: Field<Text>,
+    #[serde(default)]
+    project_path: Field<Text>,
+    #[serde(default)]
+    expected_folder: Field<Text>,
+    #[serde(default)]
+    expected_revision: Field<Revision>,
+    #[serde(default)]
+    read_state: Field<Object<ReadStateRequest>>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReadStateRequest {
+    thread_id: Text,
+    turn_id: Text,
+    read: bool,
+    expected_revision: Revision,
+}
+
+pub fn apply(tx: &Transaction<'_>, body: &OrganizationRequest) -> Result<Value, EventWriteError> {
+    let id = body.id.as_str();
     let mut agent = event_write::checked_agent(tx, id)?;
-    if let Some(read) = body.get("read_state") {
-        return apply_read_state(tx, agent, read);
+    match &body.read_state {
+        Field::Value(Object(read)) => return apply_read_state(tx, agent, read),
+        Field::Null => {
+            return Err(EventWriteError::InvalidRequest(
+                "Supply a nonempty result identity",
+            ));
+        }
+        Field::Missing => {}
     }
-    if body.get("project_folder").is_some() {
+    if !body.project_folder.is_missing() {
         if agent.is_lead != Some(true)
-            || body.get("project_path").and_then(Value::as_str) != agent.cwd.as_deref()
+            || body.project_path.value().map(Text::as_str) != agent.cwd.as_deref()
         {
             return Err(EventWriteError::InvalidRequest(
                 "Select a chat in this project",
             ));
         }
-        let folder = body
-            .get("project_folder")
-            .ok_or(EventWriteError::InvalidRequest("Select a project folder"))?;
-        let desired = if folder.is_null() {
+        let desired = if matches!(&body.project_folder, Field::Null) {
             None
         } else {
-            let folder_id = folder
-                .as_str()
+            let folder_id = body
+                .project_folder
+                .value()
+                .map(Text::as_str)
                 .ok_or(EventWriteError::InvalidRequest("Select a project folder"))?;
             let path = agent.cwd.as_deref().unwrap_or_default();
             let project = tx
@@ -69,9 +112,10 @@ pub fn apply(tx: &Transaction<'_>, body: &Value) -> Result<Value, EventWriteErro
         };
         let current = stored_revision(agent.extra.get("projectFolderRevision"), id)?;
         let revision = body
-            .get("expected_revision")
-            .and_then(Value::as_i64)
-            .filter(|v| *v >= 0)
+            .expected_revision
+            .value()
+            .copied()
+            .map(Revision::get)
             .ok_or(EventWriteError::InvalidRequest(
                 "Supply the current chat folder revision",
             ))?;
@@ -84,7 +128,7 @@ pub fn apply(tx: &Transaction<'_>, body: &Value) -> Result<Value, EventWriteErro
             && (revision == current || current.checked_sub(1) == Some(revision));
         if !replay
             && (revision != current
-                || body.get("expected_folder").and_then(Value::as_str) != current_folder.as_deref())
+                || body.expected_folder.value().map(Text::as_str) != current_folder.as_deref())
         {
             return Err(EventWriteError::InvalidRequest(
                 "The chat folder changed. Reload it before moving",
@@ -109,9 +153,9 @@ pub fn apply(tx: &Transaction<'_>, body: &Value) -> Result<Value, EventWriteErro
             }
         }
     }
-    for field in ["pinned", "archived"] {
-        if let Some(value) = body.get(field) {
-            let enabled = value.as_bool().unwrap_or_default();
+    for (field, value) in [("pinned", &body.pinned), ("archived", &body.archived)] {
+        if !value.is_missing() {
+            let enabled = value.value().copied().unwrap_or_default();
             if field == "archived"
                 && enabled
                 && (agent.in_flight == Some(true) || active_monitor(tx, id)?)
@@ -123,8 +167,8 @@ pub fn apply(tx: &Transaction<'_>, body: &Value) -> Result<Value, EventWriteErro
             agent.extra.insert(field.into(), json!(enabled));
         }
     }
-    if let Some(project) = body.get("project") {
-        let value = project.as_str().unwrap_or_default();
+    if !body.project.is_missing() {
+        let value = body.project.value().map(Text::as_str).unwrap_or_default();
         if value.chars().count() > 100 {
             return Err(EventWriteError::InvalidRequest("Supply a project name"));
         }
@@ -148,35 +192,17 @@ fn active_monitor(tx: &Transaction<'_>, id: &str) -> Result<bool, EventWriteErro
 fn apply_read_state(
     tx: &Transaction<'_>,
     mut agent: AgentRecord,
-    read: &Value,
+    read: &ReadStateRequest,
 ) -> Result<Value, EventWriteError> {
-    let thread = read
-        .get("thread_id")
-        .and_then(Value::as_str)
-        .filter(|s| !s.trim().is_empty())
-        .ok_or(EventWriteError::InvalidRequest(
+    let thread = read.thread_id.as_str();
+    let turn = read.turn_id.as_str();
+    if thread.trim().is_empty() || turn.trim().is_empty() {
+        return Err(EventWriteError::InvalidRequest(
             "Supply a nonempty result identity",
-        ))?;
-    let turn = read
-        .get("turn_id")
-        .and_then(Value::as_str)
-        .filter(|s| !s.trim().is_empty())
-        .ok_or(EventWriteError::InvalidRequest(
-            "Supply a nonempty result identity",
-        ))?;
-    let read_value =
-        read.get("read")
-            .and_then(Value::as_bool)
-            .ok_or(EventWriteError::InvalidRequest(
-                "Supply a boolean read state",
-            ))?;
-    let revision = read
-        .get("expected_revision")
-        .and_then(Value::as_i64)
-        .filter(|v| *v >= 0)
-        .ok_or(EventWriteError::InvalidRequest(
-            "Supply the current read state revision",
-        ))?;
+        ));
+    }
+    let read_value = read.read;
+    let revision = read.expected_revision.get();
     if agent.thread_id.as_deref() != Some(thread)
         || agent.extra.get("lastCompletedTurn").and_then(Value::as_str) != Some(turn)
         || agent
@@ -249,6 +275,25 @@ mod tests {
 
     const CHAT: &str = "organized-chat";
 
+    #[test]
+    fn organization_request_is_strict_and_bounds_revision() {
+        use super::OrganizationRequest;
+        use studio_runtime_schema::http_ingress::Object;
+        assert!(
+            serde_json::from_str::<Object<OrganizationRequest>>(
+                r#"{"id":"agent","archived":true}"#
+            )
+            .is_ok()
+        );
+        for raw in [
+            r#"{"id":"agent","extra":true}"#,
+            r#"{"id":"agent","expected_revision":9007199254740992}"#,
+            r#"{"id":"agent","read_state":["thread","turn",true,0]}"#,
+        ] {
+            assert!(serde_json::from_str::<Object<OrganizationRequest>>(raw).is_err());
+        }
+    }
+
     /// The client view of the chat, as the renderer pulls it.
     fn client_view(store: &RuntimeStore) -> Value {
         let payload: String = store
@@ -263,7 +308,11 @@ mod tests {
         serde_json::from_str::<Value>(&payload).expect("entity JSON")["value"].clone()
     }
 
-    async fn organize(store: &RuntimeStore, body: Value) {
+    async fn organize(store: &RuntimeStore, body: &str) {
+        let studio_runtime_schema::http_ingress::Object(body) = serde_json::from_str::<
+            studio_runtime_schema::http_ingress::Object<super::OrganizationRequest>,
+        >(body)
+        .unwrap();
         store
             .transaction_with_error(move |tx| apply(tx, &body))
             .await
@@ -293,14 +342,18 @@ mod tests {
             .expect("the chat is seeded and published");
         assert_ne!(client_view(&store)["archived"], true);
 
-        organize(&store, json!({"id":CHAT,"archived":true,"pinned":true})).await;
+        organize(
+            &store,
+            r#"{"id":"organized-chat","archived":true,"pinned":true}"#,
+        )
+        .await;
         let view = client_view(&store);
         assert_eq!(view["archived"], true, "an archive reaches the client");
         assert_eq!(view["pinned"], true, "a pin reaches the client");
 
         organize(
             &store,
-            json!({"id":CHAT,"read_state":{"thread_id":"thread-1","turn_id":"turn-1","read":true,"expected_revision":0}}),
+            r#"{"id":"organized-chat","read_state":{"thread_id":"thread-1","turn_id":"turn-1","read":true,"expected_revision":0}}"#,
         )
         .await;
         assert_eq!(
@@ -346,7 +399,7 @@ mod tests {
         // The client sees turn-2 unread and marks it read with the revision it knows.
         organize(
             &store,
-            json!({"id":CHAT,"read_state":{"thread_id":"thread-1","turn_id":"turn-2","read":true,"expected_revision":2}}),
+            r#"{"id":"organized-chat","read_state":{"thread_id":"thread-1","turn_id":"turn-2","read":true,"expected_revision":2}}"#,
         )
         .await;
         let read = &client_view(&store)["readState"];

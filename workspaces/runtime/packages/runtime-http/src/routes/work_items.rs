@@ -233,7 +233,7 @@ pub(crate) async fn annotation(
 }
 pub(crate) async fn organization(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Value>,
+    ApiJson(body): ApiJson<studio_runtime_services::organization_effects::OrganizationRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let result = store
