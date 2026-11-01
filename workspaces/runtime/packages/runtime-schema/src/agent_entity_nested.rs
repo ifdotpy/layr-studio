@@ -302,6 +302,59 @@ fn nullable(
     Ok(())
 }
 
+fn inline_nullable_reference(
+    schema: &mut serde_json::Value,
+    definitions: &serde_json::Map<String, serde_json::Value>,
+    name: &str,
+    label: &str,
+    flatten: bool,
+) -> Result<(), String> {
+    let prop = property(schema, name)?;
+    let obj = object(prop)?;
+    let variants = obj
+        .get("anyOf")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| format!("{name} must be a nullable reference"))?;
+    if variants.len() != 2
+        || variants[1].get("type").and_then(serde_json::Value::as_str) != Some("null")
+    {
+        return Err(format!("{name} must be a nullable reference"));
+    }
+    let reference = variants[0]
+        .get("$ref")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|value| value.strip_prefix("#/components/schemas/"))
+        .ok_or_else(|| format!("{name} must reference a generated definition"))?;
+    let definition = definitions
+        .get(reference)
+        .cloned()
+        .ok_or_else(|| format!("missing generated definition {reference}"))?;
+    let variants = if flatten {
+        let definition_object = definition
+            .as_object()
+            .ok_or("union definition must be an object")?;
+        if definition_object.len() != 1 {
+            return Err("union definition has unexpected constraints".into());
+        }
+        let mut union = definition_object
+            .get("anyOf")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .ok_or("union definition must have variants")?;
+        if union.len() != 2 {
+            return Err("union definition must have two variants".into());
+        }
+        union.insert(1, serde_json::json!({"type":"null"}));
+        union
+    } else {
+        vec![definition, serde_json::json!({"type":"null"})]
+    };
+    obj.insert("anyOf".into(), variants.into());
+    obj.insert("default".into(), serde_json::Value::Null);
+    obj.insert("title".into(), label.into());
+    Ok(())
+}
+
 pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 12], String> {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
@@ -332,21 +385,20 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 12], Strin
     for (name, label) in [("at", "At"), ("message", "Message"), ("turnId", "Turnid")] {
         nullable(&mut native_status_record, name, label, true)?;
     }
-    let mut error = AgentNativeStatusError::json_schema(&mut generator).to_value();
-    let variants = object(&mut error)?
-        .get_mut("anyOf")
-        .and_then(serde_json::Value::as_array_mut)
-        .ok_or("native status error must have variants")?;
-    if variants.len() != 2 {
-        return Err("native status error must have two variants".into());
-    }
-    variants.insert(1, serde_json::json!({"type":"null"}));
-    object(&mut error)?.insert("default".into(), serde_json::Value::Null);
-    title(&mut error, "Error")?;
-    *property(&mut native_status_record, "error")? = error;
-    let phase = NativeStatusPhase::json_schema(&mut generator).to_value();
-    *property(&mut native_status_record, "phase")? =
-        serde_json::json!({"anyOf":[phase,{"type":"null"}],"default":null,"title":"Phase"});
+    inline_nullable_reference(
+        &mut native_status_record,
+        generator.definitions(),
+        "error",
+        "Error",
+        true,
+    )?;
+    inline_nullable_reference(
+        &mut native_status_record,
+        generator.definitions(),
+        "phase",
+        "Phase",
+        false,
+    )?;
     let mut repair = AgentEntityContextRepairWaitDto::json_schema(&mut generator).to_value();
     title(&mut repair, "AgentEntityContextRepairWaitDto")?;
     for (name, label) in [("scope", "Scope"), ("error", "Error")] {
@@ -484,6 +536,36 @@ mod tests {
         let status: AgentNativeStatus = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(serde_json::to_value(status).unwrap(), value);
         assert!(serde_json::from_value::<AgentNativeStatus>(json!({"phase":"unknown"})).is_err());
+    }
+
+    #[test]
+    fn native_status_schema_rejects_a_changed_error_field() {
+        #[derive(JsonSchema)]
+        struct ChangedStatus {
+            #[schemars(with = "Option<String>")]
+            error: Field<String>,
+        }
+        assert!(
+            ChangedStatus {
+                error: Field::Missing
+            }
+            .error
+            .is_missing()
+        );
+        let mut generator = schemars::generate::SchemaSettings::openapi3()
+            .for_serialize()
+            .into_generator();
+        let mut changed = ChangedStatus::json_schema(&mut generator).to_value();
+        assert!(
+            inline_nullable_reference(
+                &mut changed,
+                generator.definitions(),
+                "error",
+                "Error",
+                true
+            )
+            .is_err()
+        );
     }
 
     #[test]
