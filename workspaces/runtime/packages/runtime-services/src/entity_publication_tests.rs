@@ -378,6 +378,60 @@ async fn work_details_upgrade_seeds_before_first_stream_without_a_pull() {
 }
 
 #[tokio::test]
+async fn work_detail_refusal_is_derived_on_every_publish() {
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    let id = "refusal-derived";
+    let work = json!({"id":id,"rootId":CHAT,"title":"Inspect","status":"running","owner":CHAT,"dependencies":[],"created":1,"updated":1,"version":1,"gate":null,"results":[],"decisions":[],"releases":[],
+        "resultFailures":{"version":1,"owner":CHAT,"epoch":1,"providerAttempt":null,"count":2,"errors":[]}});
+    write(
+        &store,
+        "INSERT INTO runtime_work(id,record) VALUES(?1,?2)",
+        vec![id.into(), work.to_string()],
+    )
+    .await;
+    let derived = |store: &studio_runtime_store::RuntimeStore| {
+        store
+            .test_read_transaction(move |tx| {
+                let raw: String =
+                    tx.query_row("SELECT record FROM runtime_work WHERE id=?1", [id], |row| {
+                        row.get(0)
+                    })?;
+                let record: Value = serde_json::from_str(&raw).expect("stored work record");
+                Ok(crate::work_write::current_submission_refusal(tx, &record)
+                    .expect("derived refusal"))
+            })
+            .expect("derived refusal reads")
+    };
+    let published = |store: &studio_runtime_store::RuntimeStore| {
+        client_entity(store, "workDetail", id)
+            .expect("work detail is published")
+            .1["submissionRefusal"]
+            .clone()
+    };
+    assert_eq!(published(&store)["failedSubmits"], 2);
+    assert_eq!(published(&store), derived(&store));
+    // A new provider attempt changes the owner epoch and makes the counter stale.
+    write(&store, "UPDATE runtime_agents SET record=json_set(record,'$.epoch',json_extract(record,'$.epoch')+1) WHERE id=?1", vec![CHAT.into()]).await;
+    assert_eq!(published(&store)["failedSubmits"], 0);
+    assert_eq!(published(&store), derived(&store));
+    // A routine write must publish the same derived value, not a copy of the prior one.
+    write(
+        &store,
+        "UPDATE runtime_work SET record=json_set(record,'$.title','Routine write') WHERE id=?1",
+        vec![id.into()],
+    )
+    .await;
+    assert_eq!(
+        client_entity(&store, "workDetail", id)
+            .expect("routine detail")
+            .1["title"],
+        "Routine write"
+    );
+    assert_eq!(published(&store), derived(&store));
+}
+
+#[tokio::test]
 async fn work_detail_publishes_full_review_state_at_commit_and_retires_on_delete() {
     let (_dir, store) = store().await;
     seed_chat(

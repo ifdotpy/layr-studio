@@ -92,14 +92,10 @@ impl WorkHistoryKind {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct WorkSourceChanges {
     histories: BTreeMap<WorkHistoryKind, BTreeSet<usize>>,
-    refusal: bool,
 }
 impl WorkSourceChanges {
     pub fn histories(&self) -> &BTreeMap<WorkHistoryKind, BTreeSet<usize>> {
         &self.histories
-    }
-    pub fn refusal_changed(&self) -> bool {
-        self.refusal
     }
 }
 
@@ -135,7 +131,7 @@ pub(crate) fn register_work_change_functions(connection: &Connection) -> crate::
                 context.get::<Option<String>>(1)?,
             ) {
                 (Some(owner), None) => push(Event::WorkRefusalOwner(owner)),
-                (None, Some(task)) => push(Event::WorkRefusalTask(task)),
+                (None, Some(_)) => push(Event::WorkRefusalTask),
                 _ => return Err(rusqlite::Error::InvalidQuery),
             }
             Ok(0)
@@ -290,7 +286,7 @@ enum Event {
     Stale(Source, String),
     WorkHistory(String, WorkHistoryKind, usize),
     WorkRefusalOwner(String),
-    WorkRefusalTask(String),
+    WorkRefusalTask,
 }
 
 thread_local! {
@@ -342,7 +338,7 @@ pub(crate) fn mark_published(collection: &str, id: &str) {
 /// Journal that `collection/id` needs a full publication before commit.
 pub fn mark_stale(collection: &str, id: &str) {
     if collection == "work" {
-        push(Event::WorkRefusalTask(id.to_owned()));
+        push(Event::WorkRefusalTask);
     }
     if let Some(source) = Source::of_collection(collection) {
         push(Event::Stale(source, id.to_owned()));
@@ -504,9 +500,8 @@ pub(crate) fn pending(
             Event::WorkRefusalOwner(id) => {
                 pending.work_refusal_owners.insert(id);
             }
-            Event::WorkRefusalTask(id) => {
-                work_changes.entry(id).or_default().refusal = true;
-            }
+            // The submission refusal is derived on every work publication.
+            Event::WorkRefusalTask => {}
         }
     }
     for ((source, id), index) in changed {
