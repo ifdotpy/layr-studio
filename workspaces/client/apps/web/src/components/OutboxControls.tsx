@@ -24,7 +24,7 @@ export default function OutboxControls({
       entry.status.status === MessageSendStatus.failed
     )
   )
-    return null;
+    return <div className="outbox-controls" aria-hidden="true" />;
   const run = async (action: "resume" | "cancel") => {
     if (busy) return;
     setBusy(true);
