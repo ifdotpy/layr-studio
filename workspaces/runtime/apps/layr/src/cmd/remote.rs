@@ -253,6 +253,7 @@ pub mod git {
             .value("-m|--message")
             .flag("--squash")
             .flag("--no-verify")
+            .value("--include-base")
             .flag("--tags");
         let a = parse(&spec, args)?;
         let h = here(ctx)?;
@@ -284,6 +285,44 @@ pub mod git {
             _ => rev.clone(),
         };
         let state_id = revs::resolve(repo, line.as_ref(), &source)?;
+        // A line started on unpushed states of another line would publish that line's work too.
+        let owner = match repo.p.db.line_by_name(&source)? {
+            Some(l) => Some(repo.localize(l)?),
+            None => line.clone(),
+        };
+        if let Some(l) = &owner {
+            // `--include-base <line>[,<line>]` names each line whose work goes out on purpose.
+            let named: Vec<&str> = a.get("--include-base").map(|v| v.split(',').collect()).unwrap_or_default();
+            let mut foreign = Vec::new();
+            for s in repo.foreign_base(l, &state_id)? {
+                let from = s.line.as_deref().map(|id| repo.p.db.line_by_id(id)).transpose()?.flatten();
+                let from = from.map(|x| x.name).unwrap_or_else(|| "a deleted line".into());
+                if !named.contains(&from.as_str()) {
+                    foreign.push((s, from));
+                }
+            }
+            if !foreign.is_empty() {
+                let mut msg = format!(
+                    "error: line '{}' started on {} unpushed state(s) of other lines; this push would publish them:",
+                    l.name,
+                    foreign.len()
+                );
+                for (s, from) in foreign.iter().take(10) {
+                    msg.push_str(&format!("\n  {} (line {from}) {}", ids::short(&s.id), s.message.lines().next().unwrap_or("")));
+                }
+                if foreign.len() > 10 {
+                    msg.push_str(&format!("\n  ... and {} more", foreign.len() - 10));
+                }
+                let mut lines: Vec<&str> = foreign.iter().map(|(_, f)| f.as_str()).collect();
+                lines.sort();
+                lines.dedup();
+                msg.push_str(&format!(
+                    "\nThat work belongs to its own line and pull request. Start a new line from the remote branch ('layr line new <name> {remote}/main') and pick your states.\nOnly if you mean to publish it here: --include-base {}",
+                    lines.join(",")
+                ));
+                return Err(exit(1, msg));
+            }
+        }
         crate::secrets::check_history(ctx, repo, &state_id)?;
         let state = repo.state(&state_id)?;
         if !state.conflicts.is_empty() {

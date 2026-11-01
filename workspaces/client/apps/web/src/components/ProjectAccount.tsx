@@ -79,7 +79,7 @@ export default function ProjectAccount({
         .filter((group): group is string => !!group),
     ),
   ].sort();
-  // The account that a new chat of this project starts on with these orders.
+  // Draft-only preview: these unsaved orders are owned by the device until saved.
   const preview = newChatDefault(
     accounts.accounts,
     accounts.defaultAccountKey,

@@ -49,7 +49,7 @@ async fn transcript_cases(group: usize) {
         let orphan_replies: Vec<(String, String, String)> =
             serde_json::from_value(case.get("orphanReplies").cloned().unwrap_or(json!([])))
                 .expect("orphan reply fixtures");
-        let (fixture_sync_high, fixture_workspace_sequence) = {
+        let (fixture_sync_high, fixture_workspace_sequence, room_migration_writes) = {
             let db = rusqlite::Connection::open(state.join("canvas.sqlite3"))
                 .expect("restored snapshot reader");
             let high = db.query_row(
@@ -63,7 +63,11 @@ async fn transcript_cases(group: usize) {
                     |row| row.get::<_, i64>(0),
                 )
                 .expect("workspace sequence");
-            (high, workspace)
+            // The legacy corpus predates the room projection fields. Each missing
+            // field is published once during the initial store migration.
+            let room_writes: i64 = db.query_row("SELECT count(*) FROM sync_entities WHERE collection='room' AND deleted=0 AND json_valid(payload) AND json_type(payload,'$.value.leadIds') IS NULL", [], |row| row.get(0)).expect("count legacy room projections");
+            let radio_writes: i64 = db.query_row("SELECT count(*) FROM sync_entities WHERE collection='room' AND deleted=0 AND json_valid(payload) AND json_type(payload,'$.value.radio')='object' AND json_type(payload,'$.value.radio.controls') IS NULL", [], |row| row.get(0)).expect("count legacy radio projections");
+            (high, workspace, room_writes + radio_writes)
         };
         let mut store = Arc::new(
             RuntimeStore::open(Some(&state))
@@ -390,7 +394,9 @@ async fn transcript_cases(group: usize) {
                 fixture_sync_high - 1,
                 // A nonzero cursor observes the newly projected transcript after
                 // removing compactionsObservedOnly, which allocates one more sequence.
-                (durable_high - fixture_sync_high + 1).max(1) + i64::from(after > 0),
+                (durable_high - fixture_sync_high + 1).max(1)
+                    + i64::from(after > 0)
+                    + room_migration_writes,
                 case["phase"] == "prune",
                 matches!(case["phase"].as_str(), Some("update" | "prune")),
             );

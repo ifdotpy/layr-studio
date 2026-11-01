@@ -19585,6 +19585,32 @@
         "title": "ChatMessage",
         "type": "object"
       },
+      "ChatOperationalKind": {
+        "enum": [
+          "answer",
+          "error",
+          "working",
+          "paused",
+          "none"
+        ],
+        "type": "string"
+      },
+      "ChatOperationalStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ChatOperationalKind"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label"
+        ],
+        "type": "object"
+      },
       "ChatRead": {
         "additionalProperties": false,
         "properties": {
@@ -40981,6 +41007,41 @@
         "title": "QueueView",
         "type": "object"
       },
+      "RadioControls": {
+        "additionalProperties": false,
+        "properties": {
+          "busy": {
+            "type": "boolean"
+          },
+          "busyNotice": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "canPass": {
+            "type": "boolean"
+          },
+          "inputBlocked": {
+            "type": "boolean"
+          },
+          "speaking": {
+            "type": "boolean"
+          },
+          "stopping": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "busy",
+          "inputBlocked",
+          "canPass",
+          "stopping",
+          "speaking",
+          "busyNotice"
+        ],
+        "type": "object"
+      },
       "RadioStatus": {
         "enum": [
           "idle",
@@ -44096,7 +44157,10 @@
             "title": "Effort"
           },
           "fastMode": {
-            "type": "boolean"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "model": {
             "anyOf": [
@@ -44281,6 +44345,12 @@
                 "type": "null"
               }
             ]
+          },
+          "leadIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "localMembers": {
             "anyOf": [
@@ -44512,6 +44582,12 @@
               }
             ]
           },
+          "leadIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "localMembers": {
             "anyOf": [
               {
@@ -44722,6 +44798,9 @@
               }
             ]
           },
+          "controls": {
+            "$ref": "#/components/schemas/RadioControls"
+          },
           "direct": {
             "anyOf": [
               {
@@ -44797,7 +44876,8 @@
           "speaker",
           "next",
           "active",
-          "error"
+          "error",
+          "controls"
         ],
         "title": "RoomRadio",
         "type": "object"
@@ -64098,14 +64178,20 @@
           "daybreakEnabled": {
             "default": false,
             "title": "Daybreakenabled",
-            "type": "boolean"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "delegationDepth": {
             "default": 1,
             "maximum": 3,
             "minimum": 1,
             "title": "Delegationdepth",
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "effort": {
             "anyOf": [

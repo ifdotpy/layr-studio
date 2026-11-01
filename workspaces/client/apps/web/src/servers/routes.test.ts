@@ -1,5 +1,33 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { identityProofInput, publicKeyPem } from "./pairing";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import { readFileSync } from "node:fs";
+import { publicKeyPem } from "./pairing";
+import { identityProofMessage } from "../wasm/client";
+
+// The browser loads client_bg.wasm by URL. Node serves the same bytes from disk.
+beforeAll(async () => {
+  vi.stubGlobal(
+    "fetch",
+    async () =>
+      new Response(
+        readFileSync(
+          new URL("../wasm/generated/client_bg.wasm", import.meta.url),
+        ),
+        { headers: { "Content-Type": "application/wasm" } },
+      ),
+  );
+  // Load the module once, before any test fakes timers: the first load awaits a timer-based stream.
+  await identityProofMessage("srv", "A".repeat(32));
+});
+afterAll(() => vi.unstubAllGlobals());
 import {
   ROUTE_FAILURE_COOLDOWN_MS,
   RouteIdentityError,
@@ -52,7 +80,7 @@ function network(answers: Record<string, Answer>) {
       const signature = await crypto.subtle.sign(
         "Ed25519",
         signer,
-        new TextEncoder().encode(identityProofInput("srv", nonce)),
+        new TextEncoder().encode(await identityProofMessage("srv", nonce)),
       );
       return Response.json({
         serverId: "srv",
@@ -159,7 +187,9 @@ describe("identity proof before credentials (rule 2)", () => {
     const stale = await crypto.subtle.sign(
       "Ed25519",
       keys.privateKey,
-      new TextEncoder().encode(identityProofInput("srv", "A".repeat(32))),
+      new TextEncoder().encode(
+        await identityProofMessage("srv", "A".repeat(32)),
+      ),
     );
     net.request = async (url: RequestInfo | URL) => {
       if (String(url).startsWith(PAIRED)) throw new TypeError("network down");

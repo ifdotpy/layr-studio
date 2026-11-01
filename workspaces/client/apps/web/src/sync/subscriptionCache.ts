@@ -15,6 +15,10 @@ import { readTranscriptMeta } from "./transcriptMetadata";
 export const SUBSCRIPTION_CACHE_WRITE_MS = 5_000;
 /** Current on-device subscription record format version. */
 export const SUBSCRIPTION_CACHE_VERSION = 2;
+/** Largest total size of all subscription records on this device, in bytes (UTF-8 of the stored JSON). */
+export const SUBSCRIPTION_CACHE_MAX_BYTES = 32 * 1024 * 1024;
+/** Key of the index record: the bytes and last-use counter of each subscription record. */
+export const SUBSCRIPTION_CACHE_INDEX_KEY = "subscription-cache:index";
 type Cursor = Pick<
   components["schemas"]["SubscriptionCursor"],
   "workspaceId" | "seq"
@@ -31,9 +35,47 @@ type RecordValue = {
 };
 export type SubscriptionCacheStorage = {
   get(key: string): Promise<unknown>;
-  put(key: string, value: RecordValue): Promise<void>;
+  put(key: string, value: unknown): Promise<void>;
   delete(key: string): Promise<void>;
 };
+
+type IndexEntry = { bytes: number; use: number };
+type Index = Record<string, IndexEntry>;
+
+function byteLength(value: unknown) {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+
+function readIndex(raw: unknown): Index {
+  if (!raw || typeof raw !== "object") return {};
+  const valid = (Object.values(raw) as unknown[]).every(
+    (entry) =>
+      !!entry &&
+      typeof entry === "object" &&
+      "bytes" in entry &&
+      typeof entry.bytes === "number" &&
+      "use" in entry &&
+      typeof entry.use === "number",
+  );
+  return valid ? (raw as Index) : {};
+}
+
+function totalBytes(index: Index) {
+  return Object.values(index).reduce((sum, entry) => sum + entry.bytes, 0);
+}
+
+function nextUse(index: Index) {
+  return 1 + Math.max(0, ...Object.values(index).map((entry) => entry.use));
+}
+
+/** Least recently used key of the index, never the key `except`. */
+function leastRecentlyUsed(index: Index, except: string) {
+  let victim: [string, IndexEntry] | undefined;
+  for (const [key, entry] of Object.entries(index))
+    if (key !== except && (!victim || entry.use < victim[1].use))
+      victim = [key, entry];
+  return victim?.[0];
+}
 
 function transcriptRow(ref: ResourceRef, id: string) {
   return (
@@ -215,6 +257,7 @@ export function createSubscriptionCache(
   storage: SubscriptionCacheStorage,
   collection: LocalCollection,
   workspace: string,
+  { maxBytes = SUBSCRIPTION_CACHE_MAX_BYTES }: { maxBytes?: number } = {},
 ) {
   const key = (ref: ResourceRef) =>
     JSON.stringify([workspace, subscriptionKey(ref)]);
@@ -225,14 +268,50 @@ export function createSubscriptionCache(
   >();
   const loaded = new Map<string, Promise<Cursor | undefined>>();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  // Index changes run one at a time, so a read and a write never interleave.
+  let queue: Promise<unknown> = Promise.resolve();
+  function indexed<T>(task: () => Promise<T>): Promise<T> {
+    const run = queue.then(task);
+    queue = run.catch(() => undefined);
+    return run;
+  }
+  async function writeRecord(index: Index, id: string, value: RecordValue) {
+    const bytes = byteLength(value);
+    if (bytes > maxBytes) {
+      await storage.delete(id);
+      delete index[id];
+      return;
+    }
+    let total = totalBytes(index) - (index[id]?.bytes ?? 0) + bytes;
+    while (total > maxBytes) {
+      const victim = leastRecentlyUsed(index, id);
+      if (victim === undefined) break;
+      await storage.delete(victim);
+      total -= index[victim]?.bytes ?? 0;
+      delete index[victim];
+    }
+    await storage.put(id, value);
+    index[id] = { bytes, use: nextUse(index) };
+  }
+  const writeRecords = (values: [string, RecordValue][]) =>
+    indexed(async () => {
+      const index = readIndex(await storage.get(SUBSCRIPTION_CACHE_INDEX_KEY));
+      for (const [id, value] of values)
+        await writeRecord(index, id, value).catch(() => {});
+      await storage.put(SUBSCRIPTION_CACHE_INDEX_KEY, index);
+    });
+  const touch = (id: string, bytes: number) =>
+    indexed(async () => {
+      const index = readIndex(await storage.get(SUBSCRIPTION_CACHE_INDEX_KEY));
+      index[id] = { bytes, use: nextUse(index) };
+      await storage.put(SUBSCRIPTION_CACHE_INDEX_KEY, index);
+    });
   async function flush() {
     clearTimeout(timer);
     timer = undefined;
     const values = [...pending];
     pending.clear();
-    await Promise.all(
-      values.map(([id, value]) => storage.put(id, value).catch(() => {})),
-    );
+    await writeRecords(values).catch(() => {});
   }
   const hide = () => {
     if (document.visibilityState === "hidden") void flush();
@@ -286,6 +365,7 @@ export function createSubscriptionCache(
               loaded.get(id) === result &&
               policies.get(id) !== SubscriptionCachePolicy.noCache,
           );
+          if (applied) await touch(id, byteLength(raw)).catch(() => {});
           return applied ? value.cursor : undefined;
         } catch {
           return undefined;

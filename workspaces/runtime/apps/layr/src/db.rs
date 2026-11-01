@@ -10,6 +10,13 @@ use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
+/// Test hook: the next `with_tx` reports an error after its COMMIT succeeded (sqlite can report
+/// an error after the commit point, on a full disk).
+#[cfg(test)]
+thread_local! {
+    pub(crate) static FAIL_AFTER_COMMIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 pub struct Db {
     pub conn: Connection,
     /// The derived tables were dropped by a schema upgrade: the project rebuilds them.
@@ -45,7 +52,11 @@ CREATE TABLE IF NOT EXISTS attestations (id TEXT PRIMARY KEY, subject TEXT, kind
 CREATE INDEX IF NOT EXISTS attestations_subject ON attestations(subject, kind, ord);
 CREATE TABLE IF NOT EXISTS queue_entries (id TEXT PRIMARY KEY, rec TEXT, deleted INTEGER DEFAULT 0, ord TEXT);
 CREATE TABLE IF NOT EXISTS attestation_revocations (id TEXT, target TEXT, machine TEXT, uid INTEGER, ord TEXT, PRIMARY KEY(id,target));
+CREATE INDEX IF NOT EXISTS records_legacy_evidence ON records(op) WHERE op IN ('approve','approve.withdraw','check');
 "#;
+
+/// The records that older binaries wrote as evidence (`import_legacy_evidence`).
+const LEGACY_OPS: &str = "op IN ('approve','approve.withdraw','check')";
 
 /// Version of the derived tables. Records never change shape; a database with an older version
 /// drops its derived tables, creates them new and rebuilds them from the records.
@@ -88,28 +99,80 @@ impl Db {
         // project that `init` is creating. Without it, the other process saw the new tables
         // before the version and took the database for an old one: it dropped the derived
         // tables, and `init` failed with "no such table: states".
-        conn.execute_batch("BEGIN IMMEDIATE")?;
-        let opened = Self::prepare(&conn);
-        match &opened {
-            Ok(_) => conn.execute_batch("COMMIT")?,
-            Err(_) => {
-                let _ = conn.execute_batch("ROLLBACK");
+        // A current schema needs no write lock: one read transaction decides, so read commands
+        // do not wait for a writer.
+        let current = Self::schema_is_current(&conn)?;
+        let stale = if current {
+            false
+        } else {
+            conn.execute_batch("BEGIN IMMEDIATE")?;
+            let opened = Self::prepare(&conn);
+            match &opened {
+                Ok(_) => conn.execute_batch("COMMIT")?,
+                Err(_) => {
+                    let _ = conn.execute_batch("ROLLBACK");
+                }
             }
-        }
-        let stale = opened.map_err(|e| e.context(path.display().to_string()))?;
+            opened.map_err(|e| e.context(path.display().to_string()))?
+        };
         let db = Db { conn, stale };
-        // Older binaries can still add legacy records. Import their evidence on each open.
-        db.with_tx(|| {
-            let mut st = db.conn.prepare(
-                "SELECT raw FROM records WHERE op IN ('approve','approve.withdraw','check') ORDER BY time,machine,seq",
+        db.import_legacy_evidence()?;
+        Ok(db)
+    }
+
+    /// True when the version is current and every table and index of the schema exists.
+    fn schema_is_current(conn: &Connection) -> Result<bool> {
+        conn.execute_batch("BEGIN")?;
+        let checked = (|| -> Result<bool> {
+            let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+            if version != SCHEMA_VERSION {
+                return Ok(false);
+            }
+            let wanted: Vec<&str> = SCHEMA
+                .lines()
+                .filter_map(|l| l.split(" IF NOT EXISTS ").nth(1))
+                .filter_map(|l| l.split([' ', '(']).next())
+                .collect();
+            let have: i64 = conn.query_row(
+                &format!("SELECT COUNT(*) FROM sqlite_master WHERE name IN ({})", vec!["?"; wanted.len()].join(",")),
+                rusqlite::params_from_iter(wanted.iter()),
+                |r| r.get(0),
             )?;
+            Ok(have as usize == wanted.len())
+        })();
+        let _ = conn.execute_batch("COMMIT");
+        checked
+    }
+
+    /// Older binaries can still add legacy records. Import their evidence: only when a record
+    /// is not yet in the attestations (or a withdraw lacks a revocation of an earlier approval)
+    /// the import takes the write lock; a read command finds nothing to do and takes none.
+    fn import_legacy_evidence(&self) -> Result<()> {
+        let pending: bool = self.conn.query_row(
+            &format!(
+                "SELECT EXISTS(SELECT 1 FROM records r WHERE {LEGACY_OPS} AND (
+                   (NOT EXISTS (SELECT 1 FROM attestations a WHERE a.id=r.id)
+                     AND (json_type(r.raw, '$.r.data.state')='text' OR json_type(r.raw, '$.r.data.attestation') IS NOT NULL))
+                   OR (r.op='approve.withdraw' AND EXISTS (
+                        SELECT 1 FROM attestations w JOIN attestations ap
+                          ON ap.subject=w.subject AND ap.kind='approval' AND ap.machine=w.machine AND ap.uid=w.uid AND ap.ord<w.ord
+                        WHERE w.id=r.id AND NOT EXISTS (SELECT 1 FROM attestation_revocations v WHERE v.id=r.id AND v.target=ap.id)))))"
+            ),
+            [],
+            |r| r.get(0),
+        )?;
+        if !pending {
+            return Ok(());
+        }
+        let db = self;
+        db.with_tx(|| {
+            let mut st = db.conn.prepare(&format!("SELECT raw FROM records WHERE {LEGACY_OPS} ORDER BY time,machine,seq"))?;
             let raw = st.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
             for line in raw {
                 db.derive_attestation(&crate::oplog::parse_line(&line, None)?.record, false)?;
             }
             Ok(())
-        })?;
-        Ok(db)
+        })
     }
 
     /// Create or upgrade the schema inside the open transaction. Returns whether the derived
@@ -155,7 +218,16 @@ impl Db {
         self.conn.execute_batch("BEGIN IMMEDIATE")?;
         match f() {
             Ok(v) => {
-                self.conn.execute_batch("COMMIT")?;
+                // A failed COMMIT (a full disk) can leave the transaction open: roll it back so the
+                // next write can begin. After a COMMIT that did happen, ROLLBACK does nothing.
+                if let Err(e) = self.conn.execute_batch("COMMIT") {
+                    let _ = self.conn.execute_batch("ROLLBACK");
+                    return Err(e.into());
+                }
+                #[cfg(test)]
+                if FAIL_AFTER_COMMIT.with(|f| f.replace(false)) {
+                    anyhow::bail!("injected: COMMIT reported an error after the commit point");
+                }
                 Ok(v)
             }
             Err(e) => {
@@ -608,6 +680,14 @@ impl Db {
         Ok(v)
     }
 
+    /// The newest local states, by time, whose folders the rollback check looks at.
+    #[cfg_attr(not(all(target_os = "linux", not(feature = "overlayfs"))), allow(dead_code))]
+    pub fn newest_present_states(&self, n: usize) -> Result<Vec<String>> {
+        let mut st = self.conn.prepare("SELECT id FROM states WHERE present=1 AND deleted=0 ORDER BY time DESC LIMIT ?1")?;
+        let v = st.query_map(params![n as i64], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(v)
+    }
+
     fn line_row(r: &rusqlite::Row) -> rusqlite::Result<Line> {
         Ok(Line { id: r.get(0)?, name: r.get(1)?, owner: r.get::<_, i64>(2)? as u32, machine: r.get(3)?, head: r.get(4)? })
     }
@@ -621,6 +701,13 @@ impl Db {
                 Self::line_row,
             )
             .optional()?)
+    }
+
+    /// True when the project line `id` is deleted (its row is kept with the deleted flag).
+    pub fn line_deleted(&self, id: &str) -> Result<bool> {
+        let deleted: Option<i64> =
+            self.conn.query_row("SELECT deleted FROM lines WHERE id=?1", params![id], |r| r.get(0)).optional()?;
+        Ok(deleted == Some(1))
     }
 
     pub fn line_by_id(&self, id: &str) -> Result<Option<Line>> {
@@ -678,6 +765,18 @@ impl Db {
 
     pub fn git_commit_of(&self, state: &str) -> Result<Option<String>> {
         Ok(self.conn.query_row("SELECT gcommit FROM git_map WHERE state=?1 LIMIT 1", params![state], |r| r.get(0)).optional()?)
+    }
+
+    /// One Git commit of each state that has one.
+    pub fn git_map(&self) -> Result<std::collections::HashMap<String, String>> {
+        let mut st = self.conn.prepare("SELECT state, gcommit FROM git_map")?;
+        let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut map = std::collections::HashMap::new();
+        for row in rows {
+            let (state, commit) = row?;
+            map.entry(state).or_insert(commit);
+        }
+        Ok(map)
     }
 
     /// Every Git commit that `git_map` holds for a state, squash commits included.
@@ -975,6 +1074,19 @@ impl Db {
             Some(l) => Ok(Some(crate::oplog::parse_line(&l, None)?.record)),
             None => Ok(None),
         }
+    }
+
+    /// The head a line was created at, from its `line.create` record.
+    pub fn line_start(&self, line: &str) -> Result<Option<String>> {
+        let mut st = self.conn.prepare("SELECT raw FROM records WHERE op='line.create' AND instr(raw, ?1) > 0")?;
+        let v = st.query_map(params![line], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+        for l in v {
+            let rec = crate::oplog::parse_line(&l, None)?.record;
+            if let Some(after) = rec.lines.get(line).and_then(|c| c.after.as_ref()) {
+                return Ok(Some(after.head.clone()));
+            }
+        }
+        Ok(None)
     }
 
     /// Records newest first.
@@ -1289,6 +1401,43 @@ mod tests {
         db.derive(&other, &|_| true, machine).unwrap();
         assert_eq!(db.approvals(state).unwrap(), vec![(0, 1)]);
     }
+    #[test]
+    fn opening_a_current_database_takes_no_write_lock_and_still_imports_late_records() {
+        let dir = std::env::temp_dir().join(format!("layr-db-open-{}", crate::ids::new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("layr.sqlite");
+        let state = "01a12290-0000-7000-8000-000000000003";
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        drop(Db::open(&path).unwrap());
+        // An older binary adds a record without its attestation: the next open imports it.
+        let late = |seq: u64, op: &str| {
+            let mut r = state_record(seq, state, vec![]);
+            r.states.clear();
+            r.op = op.into();
+            r.data = serde_json::json!({"state":state,"command":"true","exit":0});
+            let raw = crate::oplog::sign_line(&r, &key).unwrap();
+            Connection::open(&path).unwrap().execute(
+                "INSERT INTO records(id, machine, seq, time, op, actor_uid, raw) VALUES(?1,?2,?3,?4,?5,?6,?7)",
+                params![r.id, r.machine, r.seq as i64, r.time, r.op, r.actor.uid as i64, raw],
+            ).unwrap();
+        };
+        late(1, "approve");
+        assert_eq!(Db::open(&path).unwrap().attestations(state, None).unwrap().len(), 1);
+        late(2, "check");
+        assert_eq!(Db::open(&path).unwrap().attestations(state, None).unwrap().len(), 2);
+        // Another process holds the write lock: opening a current database with nothing new
+        // to import does not wait for it.
+        let writer = Connection::open(&path).unwrap();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let started = std::time::Instant::now();
+        let db = Db::open(&path).unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "open waited for the writer");
+        assert_eq!(db.attestations(state, None).unwrap().len(), 2);
+        drop(db);
+        writer.execute_batch("ROLLBACK").unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn scoped_declassification_does_not_count_as_subject_approval() {
         let db = memory();

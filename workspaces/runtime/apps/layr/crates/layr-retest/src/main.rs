@@ -2,9 +2,12 @@
 //! Uses the public `layr` CLI, `cargo nextest` and the LLVM tools. No internal crate of layr.
 
 mod deps;
+mod doctor;
+mod init;
 mod parse;
 mod record;
 mod select;
+mod sweep;
 mod tools;
 
 use anyhow::{bail, Context, Result};
@@ -29,27 +32,32 @@ const RAW_COUNT_FILE: &str = "raw-count";
 /// Off by default: the call makes a state of the line, which takes 40 to 75 s in a line with a big
 /// build folder, and it holds the lock of the store.
 static SAVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Set to `0` to leave `CARGO_INCREMENTAL` as the caller has it. By default layr-retest sets it to 1 for its
+/// own cargo calls: they build into `target/retest` only, and an incremental build of a small change is faster.
+const INCREMENTAL_VAR: &str = "LAYR_RETEST_INCREMENTAL";
+/// Set to `0` to leave the debug info level as the caller has it. By default layr-retest builds with
+/// `debug = line-tables-only` (env `CARGO_PROFILE_{DEV,TEST}_DEBUG`): coverage needs no variable info.
+const LINE_TABLES_VAR: &str = "LAYR_RETEST_LINE_TABLES";
+/// Set to `0` to skip the sweep of stale build output after the build.
+const SWEEP_VAR: &str = "LAYR_RETEST_SWEEP";
 /// Number of parallel coverage exports.
 const EXPORT_WORKERS: usize = 4;
 /// Files that no record keeps: the standard library and build output. Cargo's own folders stay:
 /// they name the packages that a test used.
 const IGNORE_FILES: &str = r"(/\.rustup/|/rustc/|/target/)";
 
-fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let r = match args.first().map(String::as_str) {
+/// Entry point of `layr retest <sub> ...`: `args` are the words after `retest`. Returns the exit code.
+pub fn main(args: &[String]) -> Result<i32> {
+    match args.first().map(String::as_str) {
         Some("wrap") => wrap(&args[1..]),
         Some("run") => run(&args[1..]),
+        Some("init") => init::run(&args[1..]),
+        Some("doctor") => doctor::run(&args[1..]),
         _ => {
-            eprintln!("usage: layr-retest run [--full] [--save] [-- <nextest args>]\n       layr-retest wrap -- <test binary> <args>");
-            std::process::exit(2);
-        }
-    };
-    match r {
-        Ok(code) => std::process::exit(code),
-        Err(e) => {
-            eprintln!("layr-retest: {e:#}");
-            std::process::exit(1);
+            eprintln!(
+                "usage: layr retest run [--full] [--save] [--tool vitest|jest|pytest] [-- <nextest args>]\n       layr retest init [--yes]\n       layr retest doctor\n       layr retest wrap -- <test binary> <args>"
+            );
+            Ok(2)
         }
     }
 }
@@ -108,8 +116,9 @@ fn output(cmd: &mut Command) -> Result<Vec<u8>> {
     Ok(o.stdout)
 }
 
+/// Runs the layr CLI as a process of this executable (the `layr` that runs `layr retest`).
 fn layr(args: &[&str]) -> Result<String> {
-    Ok(String::from_utf8_lossy(&output(Command::new("layr").args(args))?).into_owned())
+    Ok(String::from_utf8_lossy(&output(Command::new(std::env::current_exe()?).args(args))?).into_owned())
 }
 
 fn state_id(rev: &str) -> Result<String> {
@@ -242,7 +251,7 @@ fn cov_export(tools: &(PathBuf, PathBuf), bin: &Path, others: &[PathBuf], data: 
 }
 
 /// Coverage of one test, from its raw profile and its test binary.
-fn export(root: &Path, bin: &Path, others: &[PathBuf], dir: &Path, tools: &(PathBuf, PathBuf), tables: &Tables) -> Result<Exported> {
+fn export(root: &Path, bin: &Path, others: &[PathBuf], libs: &[PathBuf], dir: &Path, tools: &(PathBuf, PathBuf), tables: &Tables) -> Result<Exported> {
     // The wrapper already merged the raw files. If it could not (it was killed), merge them here.
     let data = dir.join("merged.profdata");
     let n = match std::fs::read_to_string(dir.join(RAW_COUNT_FILE)) {
@@ -252,8 +261,10 @@ fn export(root: &Path, bin: &Path, others: &[PathBuf], dir: &Path, tools: &(Path
     // One profile file means that the test process was the only process with instrumented code.
     // Another file is from a child process, which may have run another bin target of the project.
     let others = if n > 1 { others } else { &[] };
+    // A dylib of the workspace runs inside the test process: it is an object of every test.
+    let objects: Vec<PathBuf> = libs.iter().chain(others).cloned().collect();
     let rel = |p: &str| relative_to(root, p);
-    let lcov = String::from_utf8_lossy(&output(&mut cov_export(tools, bin, others, &data, &["-format=lcov", "-skip-functions"]))?).into_owned();
+    let lcov = String::from_utf8_lossy(&output(&mut cov_export(tools, bin, &objects, &data, &["-format=lcov", "-skip-functions"]))?).into_owned();
     // Function ranges do not depend on the test; the profile only says which functions ran.
     let ran = parse::parse_covered(&String::from_utf8_lossy(&output(
         Command::new(&tools.0).args(["show", "--covered", "--all-functions"]).arg(&data),
@@ -261,7 +272,7 @@ fn export(root: &Path, bin: &Path, others: &[PathBuf], dir: &Path, tools: &(Path
     let cell = tables.0.lock().unwrap().entry((bin.to_path_buf(), !others.is_empty())).or_default().clone();
     let table = cell
         .get_or_init(|| {
-            let json = output(&mut cov_export(tools, bin, others, &data, &["-format=text", "-skip-expansions"]));
+            let json = output(&mut cov_export(tools, bin, &objects, &data, &["-format=text", "-skip-expansions"]));
             json.and_then(|j| parse::parse_function_table(&j, |f| rel(f).is_some())).map_err(|e| format!("{e:#}"))
         })
         .as_ref()
@@ -288,20 +299,71 @@ fn export(root: &Path, bin: &Path, others: &[PathBuf], dir: &Path, tools: &(Path
     Ok((files, packages.into_iter().collect()))
 }
 
-/// Name and source file of every bin target of the workspace.
-fn bin_targets() -> Result<Vec<(String, String)>> {
+/// Profile variables for the debug info level; none when `opt_out` is `0`.
+fn debug_vars(opt_out: Option<&str>) -> Vec<(&'static str, &'static str)> {
+    if opt_out == Some("0") {
+        return Vec::new();
+    }
+    vec![("CARGO_PROFILE_DEV_DEBUG", "line-tables-only"), ("CARGO_PROFILE_TEST_DEBUG", "line-tables-only")]
+}
+
+/// Remove the build output that the build just made did not use. `build` lists what cargo uses; it
+/// is a no-op build because the files are fresh. Any failure only skips the sweep.
+fn sweep_stale(target: &Path, mut build: Command) {
+    let t = std::time::Instant::now();
+    let Ok(out) = build.stdout(Stdio::piped()).stderr(Stdio::null()).output() else { return };
+    let listed = t.elapsed().as_secs_f32();
+    if !out.status.success() {
+        eprintln!("layr-retest: sweep skipped: cargo could not list the build output");
+        return;
+    }
+    match sweep::sweep(target, &sweep::live_files(&out.stdout)) {
+        Ok(Some(n)) => eprintln!(
+            "layr-retest: swept stale build output, freed {:.1} MB (artifact list {listed:.2}s, sweep {:.2}s)",
+            n as f64 / 1e6,
+            t.elapsed().as_secs_f32() - listed
+        ),
+        Ok(None) => eprintln!("layr-retest: sweep skipped (build lock busy or nothing listed)"),
+        Err(e) => eprintln!("layr-retest: sweep skipped: {e:#}"),
+    }
+}
+
+/// Name and source file of every target of the workspace with the crate type `kind`.
+fn kind_targets(kind: &str) -> Result<Vec<(String, String)>> {
     let meta: Value =
         serde_json::from_slice(&output(Command::new("cargo").args(["metadata", "--no-deps", "--format-version", "1"]))?)?;
     let targets = meta["packages"].as_array().into_iter().flatten().flat_map(|p| p["targets"].as_array().into_iter().flatten());
     Ok(targets
-        .filter(|t| t["kind"].as_array().is_some_and(|k| k.iter().any(|k| k == "bin")))
+        .filter(|t| t["kind"].as_array().is_some_and(|k| k.iter().any(|k| k == kind)))
         .map(|t| (t["name"].as_str().unwrap_or_default().to_string(), t["src_path"].as_str().unwrap_or_default().to_string()))
         .collect())
+}
+
+fn bin_targets() -> Result<Vec<(String, String)>> {
+    kind_targets("bin")
+}
+
+/// Build file name of the dylib target `name`.
+fn dylib_file(name: &str) -> String {
+    let ext = if cfg!(target_os = "macos") { "dylib" } else if cfg!(windows) { "dll" } else { "so" };
+    let prefix = if cfg!(windows) { "" } else { "lib" };
+    format!("{prefix}{}.{ext}", name.replace('-', "_"))
 }
 
 /// The bin targets of the workspace, built instrumented in `<target>/debug/<name>`.
 fn bin_objects(target: &Path) -> Result<Vec<PathBuf>> {
     Ok(bin_targets()?.into_iter().map(|(name, _)| target.join("debug").join(name)).filter(|p| p.is_file()).collect())
+}
+
+/// The dylib targets of the workspace, built instrumented in `<target>/debug`. A dylib holds the
+/// code of the packages that it links, so `llvm-cov` needs it as an object too.
+fn dylib_objects(target: &Path) -> Result<Vec<PathBuf>> {
+    Ok(kind_targets("dylib")?.into_iter().map(|(name, _)| target.join("debug").join(dylib_file(&name))).filter(|p| p.is_file()).collect())
+}
+
+/// RUSTFLAGS of the instrumented build. No `-C prefer-dynamic`: binaries link std like the plain build.
+fn build_flags(base: &str) -> String {
+    format!("{base} -C instrument-coverage").trim().to_string()
 }
 
 /// Path of `p` relative to the line root, if it is inside.
@@ -459,20 +521,33 @@ fn run(args: &[String]) -> Result<i32> {
     let exe = std::env::current_exe()?;
     let tools = (llvm_tool("llvm-profdata")?, llvm_tool("llvm-cov")?);
     let runner_var = format!("CARGO_TARGET_{}_RUNNER", rustc_host()?.to_uppercase().replace('-', "_"));
-    let flags = format!("{} -C instrument-coverage", std::env::var("RUSTFLAGS").unwrap_or_default());
-    let nextest = |sub: &[&str]| {
+    let flags = build_flags(&std::env::var("RUSTFLAGS").unwrap_or_default());
+    let cargo = |first: &[&str]| {
         let mut c = Command::new("cargo");
-        c.arg("nextest").args(sub).args(extra);
+        c.args(first).args(extra);
         // Cargo, build scripts and the list phase write here; the wrapper gives each test its own folder.
         c.env("LLVM_PROFILE_FILE", profdir.join("other/%p.profraw"));
         c.env(PROFDATA_VAR, &tools.0);
-        c.env("RUSTFLAGS", flags.trim()).env("CARGO_TARGET_DIR", &target).env(PROFILE_DIR_VAR, &profdir);
-        c.env(&runner_var, format!("{} wrap --", exe.display())).env("NEXTEST_EXPERIMENTAL_LIBTEST_JSON", "1");
+        c.env("RUSTFLAGS", &flags).env("CARGO_TARGET_DIR", &target).env(PROFILE_DIR_VAR, &profdir);
+        c.env(&runner_var, format!("{} retest wrap --", exe.display())).env("NEXTEST_EXPERIMENTAL_LIBTEST_JSON", "1");
+        if std::env::var(INCREMENTAL_VAR).as_deref() != Ok("0") {
+            c.env("CARGO_INCREMENTAL", "1");
+        }
+        c.envs(debug_vars(std::env::var(LINE_TABLES_VAR).ok().as_deref()));
         c
+    };
+    let nextest = |sub: &[&str]| {
+        let mut first = vec!["nextest"];
+        first.extend_from_slice(sub);
+        cargo(&first)
     };
     let list = output(nextest(&["list", "--message-format", "json"]).stderr(Stdio::inherit()))?;
     let suites = parse_list(&list)?;
     lap.mark("build and list");
+    if std::env::var(SWEEP_VAR).as_deref() != Ok("0") {
+        sweep_stale(&target, cargo(&["test", "--no-run", "--message-format", "json"]));
+        lap.mark("sweep");
+    }
 
     // A test can start a bin and stop it with SIGKILL: no profile, so the bin's code is in no record
     // and a change of it selects nothing. Run every test then (docs/retest.md, "Killed child processes").
@@ -520,6 +595,7 @@ fn run(args: &[String]) -> Result<i32> {
     // merged the raw profiles of the test already, so a test that waits for an export holds only
     // a small `merged.profdata`. The export deletes the folder of the test.
     let bins = bin_objects(&target)?;
+    let libs = dylib_objects(&target)?;
     let tables = Tables::default();
     let done: Mutex<BTreeMap<String, Result<Exported>>> = Mutex::new(BTreeMap::new());
     let mut results: BTreeMap<String, bool> = BTreeMap::new();
@@ -538,7 +614,7 @@ fn run(args: &[String]) -> Result<i32> {
                 sc.spawn(|| loop {
                     let Ok((key, bin, dir)) = rx.lock().unwrap().recv() else { break };
                     // A test that died before it wrote a profile has no coverage.
-                    let r = if dir.is_dir() { export(&root, &bin, &bins, &dir, &tools, &tables) } else { Ok(Default::default()) };
+                    let r = if dir.is_dir() { export(&root, &bin, &bins, &libs, &dir, &tools, &tables) } else { Ok(Default::default()) };
                     let _ = std::fs::remove_dir_all(&dir);
                     done.lock().unwrap().insert(key, r);
                 });
@@ -627,4 +703,36 @@ fn run(args: &[String]) -> Result<i32> {
         if contradictions > 0 { format!("; {contradictions} contradiction(s)") } else { String::new() }
     );
     Ok(code)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_flags_never_prefer_dynamic() {
+        assert_eq!(build_flags(""), "-C instrument-coverage");
+        assert_eq!(build_flags("-Dwarnings"), "-Dwarnings -C instrument-coverage");
+    }
+
+    #[test]
+    fn dylib_file_name_uses_underscores() {
+        let f = dylib_file("my-deps");
+        assert!(f.contains("my_deps") && !f.contains('-'), "{f}");
+        assert!(f.starts_with("lib") || cfg!(windows), "{f}");
+    }
+}
+
+#[cfg(test)]
+mod debug_tests {
+    use super::debug_vars;
+
+    #[test]
+    fn line_tables_for_dev_and_test_unless_opted_out() {
+        assert_eq!(debug_vars(None), debug_vars(Some("1")));
+        assert!(debug_vars(None).iter().all(|(_, v)| *v == "line-tables-only"));
+        let names: Vec<_> = debug_vars(None).iter().map(|(k, _)| *k).collect();
+        assert_eq!(names, ["CARGO_PROFILE_DEV_DEBUG", "CARGO_PROFILE_TEST_DEBUG"]);
+        assert!(debug_vars(Some("0")).is_empty());
+    }
 }

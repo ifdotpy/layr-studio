@@ -16,6 +16,7 @@ pub(crate) struct RoomProjection {
     pub(crate) id: String,
     pub(crate) kind: RoomKind,
     pub(crate) members: Vec<String>,
+    pub(crate) lead_ids: Vec<String>,
     pub(crate) name: Option<String>,
     #[serde(skip_serializing_if = "Field::is_missing")]
     last_message: Field<RoomLastMessage>,
@@ -68,6 +69,7 @@ struct RadioActive {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RadioProjection {
+    controls: studio_runtime_schema::radio_controls::RadioControls,
     team_id: String,
     revision: SafeInteger,
     status: Status,
@@ -137,6 +139,10 @@ pub(crate) fn project_radio_room(
         })
         .transpose()?;
     let radio = RadioProjection {
+        controls: studio_runtime_schema::radio_controls::RadioControls::derive(
+            state.status,
+            state.active.is_some(),
+        ),
         team_id: state.team_id.clone(),
         revision: safe(state.revision)?,
         status: state.status,
@@ -268,10 +274,53 @@ fn project_room_view(
             .map(|s| bounded(&s, ""))
             .collect()
     };
+    let lead_ids = if record.kind == RoomKind::Broadcast {
+        record
+            .root_id
+            .as_ref()
+            .filter(|root| !root.is_empty() && root.as_str() != "all")
+            .cloned()
+            .into_iter()
+            .collect()
+    } else {
+        let mut roots = Vec::new();
+        for agent in context.agents.iter().filter(|agent| {
+            agent.id.as_ref().is_some_and(|id| {
+                members
+                    .iter()
+                    .take(SYNC_ARRAY_ITEMS)
+                    .any(|member| member == id)
+            })
+        }) {
+            let root = if agent.is_lead == Some(true) {
+                agent.id.as_ref()
+            } else {
+                agent.root_id.as_ref()
+            };
+            if let Some(root) = root.filter(|root| !root.is_empty())
+                && !roots.contains(root)
+            {
+                roots.push(root.clone());
+            }
+        }
+        roots.sort_unstable_by(|a, b| {
+            let created = |id: &str| {
+                context
+                    .agents
+                    .iter()
+                    .find(|agent| agent.id.as_deref() == Some(id))
+                    .and_then(|agent| agent.created)
+                    .unwrap_or(0.0)
+            };
+            created(a).total_cmp(&created(b)).then_with(|| a.cmp(b))
+        });
+        roots
+    };
     Some(RoomProjection {
         id: bounded(&record.id, "id"),
         kind: record.kind,
         members: bounded_members(members),
+        lead_ids: bounded_members(lead_ids),
         name: name.map(|s| bounded(&s, "name")),
         last_message: match last_message {
             Some(v) => Field::Value(v),
@@ -326,10 +375,43 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn room_leads_are_stable_across_publication_order() {
+        let agent = |id: &str, created: f64| AgentAuthorityRow {
+            created: Some(created),
+            id: Some(id.into()),
+            root_id: Some(id.into()),
+            parent_id: None,
+            is_lead: Some(true),
+            deleted_at: None,
+            cwd: None,
+            name: crate::submit_gates::StoredField::Value(id.into()),
+            shared_room_id: None,
+            execution_mode: None,
+        };
+        let room: RoomRecord = serde_json::from_str(r#"{"id":"radio:x","kind":"private","members":["a","b","c"],"radio":{"teamId":"x","revision":0,"status":"idle","speaker":null,"next":[],"active":null,"error":null,"direct":false,"seen":{}}}"#).unwrap();
+        let first = RoomViewContext::new(
+            vec![agent("b", 1.0), agent("a", 2.0), agent("c", 2.0)],
+            vec![],
+        );
+        let second = RoomViewContext::new(
+            vec![agent("c", 2.0), agent("a", 2.0), agent("b", 1.0)],
+            vec![],
+        );
+        let Field::Value(radio) = &room.radio else {
+            panic!("radio")
+        };
+        let ordinary = project_room(&room, &first).unwrap().unwrap();
+        let turn = project_radio_room(&room, &second, radio).unwrap().unwrap();
+        assert_eq!(ordinary.lead_ids, vec!["b", "a", "c"]);
+        assert_eq!(ordinary.lead_ids, turn.lead_ids);
+    }
+
+    #[test]
     fn room_projection_matches_existing_view() {
         let agents = ["a", "b"]
             .into_iter()
             .map(|id| AgentAuthorityRow {
+                created: None,
                 id: Some(id.into()),
                 root_id: Some("a".into()),
                 parent_id: None,
@@ -367,7 +449,14 @@ mod tests {
         ].into_iter().zip(expected) {
             let record: RoomRecord = serde_json::from_str(raw).unwrap();
             let actual = serde_json::to_string(&project_room(&record, &context).unwrap().unwrap()).unwrap();
-            assert_eq!(actual, expected);
+            let mut value: Value = serde_json::from_str(&actual).unwrap();
+            assert_eq!(value.as_object_mut().unwrap().remove("leadIds"), Some(json!(["a"])));
+            if let Some(radio) = value.get_mut("radio") {
+                assert_eq!(radio["controls"]["busy"], record.id == "radio:y");
+                assert_eq!(radio["controls"]["inputBlocked"], false);
+                radio.as_object_mut().unwrap().remove("controls");
+            }
+            assert_eq!(value, serde_json::from_str::<Value>(expected).unwrap());
             if let Field::Value(state) = &record.radio {
                 let direct = serde_json::to_string(&
                     project_radio_room(&record, &context, state)

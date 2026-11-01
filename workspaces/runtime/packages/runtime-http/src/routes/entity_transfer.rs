@@ -125,7 +125,13 @@ async fn prepare(
         // Ordinary writes and tombstones retain indexed sequence deltas.
         let visibility = agent.as_deref().map(|agent| SyncDocumentsRepository::entity_scope_visibility_revision(tx, &collections, agent, scope.include_team_members)).transpose()?.unwrap_or(0);
         let after = after.filter(|after| *after >= visibility);
+<<<<<<< head
         let mut page = SyncDocumentsRepository::resume_entity_scope(tx, after, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
+||||||| base
+        let mut page = SyncDocumentsRepository::resume_entity_scope(tx, after, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS).map_err(|_| ApiError::internal())?;
+=======
+        let mut page = studio_runtime_services::work_scope::resume(tx, after, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS).map_err(|_| ApiError::internal())?;
+>>>>>>> origin/main
         let through = page.max_sequence;
         let snapshot = page.reset;
         let mut after = if snapshot { 0 } else { since.as_ref().map_or(0, |cursor| cursor.seq) };
@@ -163,7 +169,13 @@ async fn prepare(
             }
             if final_sql_page { break; }
             after = checkpoint;
+<<<<<<< head
             page = SyncDocumentsRepository::continue_entity_scope(tx, &page, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
+||||||| base
+            page = SyncDocumentsRepository::continue_entity_scope(tx, &page, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS).map_err(|_| ApiError::internal())?;
+=======
+            page = studio_runtime_services::work_scope::continue_page(tx, &page, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS).map_err(|_| ApiError::internal())?;
+>>>>>>> origin/main
         }
         let mut file = spool.ok_or_else(data_error)?;
         file.rewind().map_err(|_| io_error())?;
@@ -950,6 +962,179 @@ mod tests {
             "entity_transfer_fixture snapshot_records={records} pages={pages} maximum_wire_bytes={maximum_wire_bytes} delta_records={}",
             batch.documents.len()
         );
+    }
+    fn work_record(id: &str, root: &str, owner: &str, status: &str, results: usize) -> Value {
+        json!({"id":id,"rootId":root,"owner":owner,"title":id,"status":status,"created":1,"updated":1,
+            "version":1,"dependencies":[],"results":vec![json!({"id":"r","agent":"worker","text":"done","checks":"","revision":"r1","files":[],"created":1}); results],"decisions":[],"releases":[]})
+    }
+    /// Write or delete a work row the way the writer does: the child history rows follow.
+    async fn put_work(store: &studio_runtime_store::RuntimeStore, id: &str, record: Option<Value>) {
+        let id = id.to_owned();
+        store
+            .transaction(move |tx| {
+                match record {
+                    Some(record) => {
+                        tx.execute(
+                            "INSERT INTO runtime_work(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",
+                            rusqlite::params![id, record.to_string()],
+                        )?;
+                        studio_runtime_store::work_history::reconcile(tx, &id, &record)?;
+                    }
+                    None => {
+                        tx.execute("DELETE FROM runtime_work WHERE id=?1", [&id])?;
+                    }
+                }
+                Ok(())
+            })
+            .await
+            .expect("work write");
+    }
+    fn docs_of(entry: Option<ResourceRevisionEntry>) -> Vec<crate::generated::SyncEntity> {
+        entry
+            .expect("inline delta")
+            .entity_changes
+            .flatten()
+            .expect("changes")
+            .documents
+    }
+    fn find<'a>(
+        documents: &'a [crate::generated::SyncEntity],
+        collection: &str,
+        id: &str,
+    ) -> Option<&'a crate::generated::SyncEntity> {
+        documents
+            .iter()
+            .find(|document| document.collection == collection && document.id == id)
+    }
+
+    #[tokio::test]
+    async fn work_documents_stream_from_the_main_tables_with_fan_out_and_reset() {
+        let (_directory, state) = fixture().await;
+        let store = state.store.as_ref().expect("store");
+        let resource: ResourceRef =
+            serde_json::from_str(r#"{"kind":"work","agentId":"lead"}"#).expect("work resource");
+        let (_, _, first) = prepare(&state, &event(&state), resource.clone(), None)
+            .await
+            .expect("baseline");
+
+        // A new work row streams its detail and two history entries.
+        put_work(
+            store,
+            "w1",
+            Some(work_record("w1", "lead", "worker", "review", 2)),
+        )
+        .await;
+        let (entry, _, cursor) = prepare(
+            &state,
+            &event(&state),
+            resource.clone(),
+            Some(first.clone()),
+        )
+        .await
+        .expect("work change");
+        let documents = docs_of(entry);
+        let detail = find(&documents, "workDetail", "w1").expect("work detail");
+        assert_eq!(detail.op, crate::generated::SyncEntityOp::Upsert);
+        assert!(find(&documents, "workResult", "w1:1").is_some());
+
+        // A shorter history deletes the entry that no longer exists.
+        put_work(
+            store,
+            "w1",
+            Some(work_record("w1", "lead", "worker", "review", 1)),
+        )
+        .await;
+        let (entry, _, cursor) = prepare(&state, &event(&state), resource.clone(), Some(cursor))
+            .await
+            .expect("shorter history");
+        let documents = docs_of(entry);
+        assert_eq!(
+            find(&documents, "workResult", "w1:1")
+                .expect("removed entry")
+                .op,
+            crate::generated::SyncEntityOp::Delete
+        );
+
+        // A deleted work row streams a delete of its detail.
+        put_work(store, "w1", None).await;
+        let (entry, _, cursor) = prepare(&state, &event(&state), resource.clone(), Some(cursor))
+            .await
+            .expect("work delete");
+        assert_eq!(
+            find(&docs_of(entry), "workDetail", "w1")
+                .expect("deleted detail")
+                .op,
+            crate::generated::SyncEntityOp::Delete
+        );
+
+        // An execution run of the owner refreshes the detail of its work.
+        put_work(
+            store,
+            "w2",
+            Some(work_record("w2", "lead", "worker2", "review", 0)),
+        )
+        .await;
+        let (_, _, cursor) = prepare(&state, &event(&state), resource.clone(), Some(cursor))
+            .await
+            .expect("w2 change");
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO runtime_execution_runs(id,agent,account,epoch,thread,turn,created,record) VALUES('run-1','worker2','default',1,NULL,NULL,1.0,'{}')",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("execution run");
+        let (entry, _, cursor) = prepare(&state, &event(&state), resource.clone(), Some(cursor))
+            .await
+            .expect("owner execution fan-out");
+        assert!(find(&docs_of(entry), "workDetail", "w2").is_some());
+
+        // A status change of a dependency refreshes the detail of its dependent.
+        let mut dependent = work_record("w4", "lead", "worker", "review", 0);
+        dependent["dependencies"] = json!(["w3"]);
+        put_work(
+            store,
+            "w3",
+            Some(work_record("w3", "lead", "worker", "review", 0)),
+        )
+        .await;
+        put_work(store, "w4", Some(dependent)).await;
+        let (_, _, cursor) = prepare(&state, &event(&state), resource.clone(), Some(cursor))
+            .await
+            .expect("dependency rows");
+        put_work(
+            store,
+            "w3",
+            Some(work_record("w3", "lead", "worker", "accepted", 0)),
+        )
+        .await;
+        let (entry, _, cursor) = prepare(&state, &event(&state), resource.clone(), Some(cursor))
+            .await
+            .expect("dependency change");
+        assert!(find(&docs_of(entry), "workDetail", "w4").is_some());
+
+        // A cursor below the durable floor gets a snapshot, not a delta.
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "UPDATE durable_floor SET floor=(SELECT MAX(seq) FROM durable_rows) WHERE id=1",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("raise durable floor");
+        let (entry, _, _) = prepare(&state, &event(&state), resource, Some(first))
+            .await
+            .expect("reset below floor");
+        assert_eq!(
+            entry.expect("inline snapshot").reply_kind,
+            Some(crate::generated::SubscriptionReplyKind::Snapshot)
+        );
+        let _ = cursor;
     }
 }
 

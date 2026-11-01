@@ -117,13 +117,14 @@ pub use records::{
     AgentRecord, AgentRepository, AgentSandbox, AgentStatus, AnnotationRecord, ChatMessage,
     ChatMessageId, CheckpointRecord, ComplaintRecord, CredentialCopy, EventMetadataRecord,
     ExecutionRunRecord, InterruptOutcome, JsonRecord, LegacyWorkReply, MessageRepository,
-    MonitorRecord, NativeRelease, NativeReleaseScope, NativeReviewThread, PlanRecord, QueueEvent,
-    QueueEventId, QueueEventRepository, RecordKeyMode, RecordOrder, RecordPredicate,
-    RecordQueryShape, RequestRecord, RuleRecord, StartAttemptAction, StartAttemptView,
-    StartIdentity, StartInterruptView, StartOutcomeHold, StoredStartOutcomeHold, StoredTitleJob,
-    Table, TaskId, TaskRecord, TaskRepository, TerminalRecord, TitleJob, ToolResultRecord,
-    TranscriptAssetId, TranscriptAssetRecord, TranscriptItemId, TranscriptItemRecord,
-    UnknownAgentStatus, UsageResumeRecord, VmAuthBootstrap, VmLaunch, WorkItemRecord, WorkStatus,
+    MonitorRecord, NativeFailureHold, NativeRelease, NativeReleaseScope, NativeReviewThread,
+    PlanRecord, QueueEvent, QueueEventId, QueueEventRepository, RecordKeyMode, RecordOrder,
+    RecordPredicate, RecordQueryShape, RequestRecord, RuleRecord, StartAttemptAction,
+    StartAttemptView, StartIdentity, StartInterruptView, StartOutcomeHold, StoredStartOutcomeHold,
+    StoredTitleJob, StoredTransferObject, StoredTransferValue, StoredWorkerDefaults, Table, TaskId,
+    TaskRecord, TaskRepository, TerminalRecord, TitleJob, ToolResultRecord, TranscriptAssetId,
+    TranscriptAssetRecord, TranscriptItemId, TranscriptItemRecord, UnknownAgentStatus,
+    UsageResumeRecord, VmAuthBootstrap, VmLaunch, WorkItemRecord, WorkStatus,
     WorkspaceOperationRecord, decode_agent_record, encode_open_record,
 };
 pub use repositories::agent_indexed_reads::{AgentIndexedReads, reserved_turn_input};
@@ -169,7 +170,7 @@ pub use repositories::scheduler::{
 pub use repositories::startup_recovery::{self, StartupRecoveryRepository};
 pub use repositories::sync_documents::{
     ENTITY_TOMBSTONE_LIMIT, ENTITY_TOMBSTONE_PRUNE_BATCH, EntityPage, EntityRow, SyncDocument,
-    SyncDocumentsRepository,
+    SyncDocumentsRepository, WORK_COLLECTIONS,
 };
 pub use repositories::terminals::{ArchiveAppend, TerminalRow, TerminalsRepository};
 pub use repositories::transcript::{

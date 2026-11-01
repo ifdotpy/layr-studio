@@ -1,15 +1,58 @@
 {
   "writes": [
-    {"table": "runtime_agents", "record": {"id": "chat", "rootId": "chat", "parentId": null, "epoch": 4, "status": "running", "compactions": 0, "name": "Chat", "isLead": true, "autoWake": true, "inFlight": true, "turnId": "turn-2", "created": 1.0}}
+    {
+      "table": "runtime_agents",
+      "record": {
+        "id": "chat",
+        "rootId": "chat",
+        "parentId": null,
+        "epoch": 4,
+        "status": "running",
+        "compactions": 0,
+        "name": "Chat",
+        "isLead": true,
+        "autoWake": true,
+        "inFlight": true,
+        "turnId": "turn-2",
+        "created": 1.0
+      }
+    }
   ],
   "cancel_pending": [],
   "effects": [
     {
       "kind": "interrupt",
-      "before": {"id": "chat", "rootId": "chat", "parentId": null, "epoch": 4, "status": "running", "compactions": 0, "name": "Chat", "isLead": true, "autoWake": true, "inFlight": true, "turnId": "turn-2", "created": 1.0},
-      "stopped": {"id": "chat", "rootId": "chat", "parentId": null, "epoch": 4, "status": "interrupted", "compactions": 0, "name": "Chat", "isLead": true, "autoWake": true, "inFlight": true, "turnId": "turn-2", "created": 1.0, "error": "Stopped by user"},
+      "before": {
+        "id": "chat",
+        "rootId": "chat",
+        "parentId": null,
+        "epoch": 4,
+        "status": "running",
+        "compactions": 0,
+        "name": "Chat",
+        "isLead": true,
+        "autoWake": true,
+        "inFlight": true,
+        "turnId": "turn-2",
+        "created": 1.0
+      },
+      "stopped": {
+        "id": "chat",
+        "rootId": "chat",
+        "parentId": null,
+        "epoch": 4,
+        "status": "interrupted",
+        "compactions": 0,
+        "name": "Chat",
+        "isLead": true,
+        "autoWake": true,
+        "inFlight": true,
+        "turnId": "turn-2",
+        "created": 1.0,
+        "error": "Stopped by user"
+      },
       "at": 1234567.5
     }
   ],
-  "result": {"stopped": ["chat"]}
+  "result": { "stopped": ["chat"] }
 }

@@ -394,7 +394,7 @@ fn claim_refuses_every_ineligible_agent_state() {
                 Some(crate::StartAttemptAction::Compact);
         }),
         ("held", |a| {
-            a.extra.insert("nativeFailureHold".into(), json!(true));
+            a.set_native_failure_hold(true);
         }),
         ("stopped", |a| {
             a.auto_wake = Some(false);
@@ -662,7 +662,7 @@ fn definite_rejection_after_unconfirmed_requeues_once() {
     let mut idle = agent(&connection);
     idle.status = AgentStatus::Completed;
     idle.in_flight = Some(false);
-    idle.turn_id = None;
+    idle.turn_id = Default::default();
     put_agent(&connection, idle);
     assert!(
         with(&mut connection, reject),

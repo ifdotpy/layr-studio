@@ -23,6 +23,7 @@ import {
   RETEST_ENV,
   RETEST_REAL_ROOT_ENV,
   NATIVE_PACKAGE,
+  RUST_WORKSPACE_BUILD_ARGS,
   scrubAgentEnvironment,
 } from "./gate-config.ts";
 import { withGateLock } from "./gate-lock.ts";
@@ -970,16 +971,7 @@ export function gateSteps(root: string, name: string): GateStep[] {
         ...cargo(
           "workspace",
           "Rust workspace build",
-          [
-            "build",
-            "--workspace",
-            "--exclude",
-            NATIVE_PACKAGE,
-            "--tests",
-            "--bins",
-            "--examples",
-            "--locked",
-          ],
+          [...RUST_WORKSPACE_BUILD_ARGS],
           { buildOnly: true },
         ),
         requires: "renderer",
