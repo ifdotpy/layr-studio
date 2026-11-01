@@ -384,6 +384,9 @@ A server never decodes data in a form that it does not know.
   subscription: its data and its cursor in one value. It writes at most every 5 seconds
   and when the page becomes hidden, after the UI has shown the data. RxDB and Dexie are not used.
 - A lost cache write only makes the next reconnect request a larger delta.
+- The records and one index record (bytes and last use of each record) stay within
+  32 MiB. A write over the limit removes the least recently used records first. A record
+  larger than the limit is not kept.
 - Unsent input is written at once and removed when the server confirms the command.
 
 ### Routes and reconnect
