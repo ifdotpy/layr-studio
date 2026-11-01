@@ -2951,10 +2951,7 @@ impl Worker {
                     };
                     let fields = &row.extra;
                     let wait = fields.get("usageResume").unwrap_or(&Value::Null);
-                    let auth_attempt = fields
-                        .get("authResumeAttempt")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(0);
+                    let auth_attempt = row.auth_resume_attempt.unwrap_or(0);
                     if auth_attempt == 0 || wait["cause"] != "auth" || wait["status"] != "started" {
                         return Ok(None);
                     }
@@ -2976,9 +2973,10 @@ impl Worker {
                         || fields.get("nativeFailureHold") == Some(&json!(true))
                         || row.lazy_account_transfer.value().is_some()
                         || row.account_transfer_id.value().is_some()
-                        || ["executionMove", "workspaceOperation"]
+                        || ["executionMove"]
                             .iter()
                             .any(|key| fields.get(*key).is_some_and(|value| !value.is_null()))
+                        || row.workspace_operation.is_some()
                         || row.cwd.as_deref() != Some(request.cwd.as_str())
                         || guest_home != request.guest_home
                         || row.thread_id.as_deref() != intent.thread_id.as_deref()
@@ -3045,10 +3043,7 @@ impl Worker {
                         else {
                             return Ok(None);
                         };
-                        let Ok(provider) = studio_runtime_providers::ProviderKind::of_field(
-                            record.extra.get("provider"),
-                        )
-                        .map(|kind| kind.key()) else {
+                        let Some(provider) = record.provider.value().map(|kind| kind.key()) else {
                             return Ok(None);
                         };
                         if !crate::linux_vm_provider::vm_actor_matches(

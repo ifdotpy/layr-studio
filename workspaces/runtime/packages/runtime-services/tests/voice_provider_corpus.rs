@@ -422,9 +422,7 @@ async fn seeded_store() -> (tempfile::TempDir, RuntimeStore) {
                     id: id.clone(), root_id: id, epoch: 0,
                     status: studio_runtime_store::AgentStatus::Idle,
                     is_lead: Some(true),
-                    extra: [
-                        ("provider".into(), serde_json::to_value(studio_runtime_schema::ProviderKind::Codex).expect("provider")),
-                    ].into(),
+                    provider: studio_runtime_schema::queue_command::Field::Value(studio_runtime_schema::ProviderKind::Codex),
                     ..studio_runtime_store::AgentRecord::test_defaults()
                 };
                 studio_runtime_store::AgentRepository::put(connection, &record)?;

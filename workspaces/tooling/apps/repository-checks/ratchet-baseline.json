@@ -1892,10 +1892,6 @@
       "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:1"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-http/src/routes/branches.rs",
-      "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:2"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-http/src/routes/workspace_views.rs",
       "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
     },

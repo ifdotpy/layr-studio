@@ -451,8 +451,9 @@ mod tests {
             .expect("store opens");
         store.transaction(|tx| {
             for agent in agents() {
+                let agent = crate::AgentRecord::from_value(agent)?.into_value();
                 tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
-                    rusqlite::params![agent["id"].as_str(), agent.to_string()])?;
+                    rusqlite::params![agent.get("id").and_then(Value::as_str), agent.to_string()])?;
             }
             let triggers = tx.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND tbl_name='runtime_agents'")?
                 .query_map([], |row| row.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;

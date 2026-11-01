@@ -543,12 +543,14 @@ async fn python_location_and_move_corpus_through_consumers() {
             "{} move",
             case["name"]
         );
+        let mut expected_agent = case["expected"]["agent"].clone();
+        crate::agent_view_fixtures::materialize_agent_defaults(&mut expected_agent);
         assert_eq!(
             AgentRepository::get(&db, &AgentId::from(text(&case["agent"], "id")))
                 .expect("agent")
                 .expect("exists")
                 .value(),
-            case["expected"]["agent"],
+            expected_agent,
             "{} agent",
             case["name"]
         );

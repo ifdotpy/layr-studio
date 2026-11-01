@@ -734,6 +734,27 @@ pub fn check_schema_parity(openapi: &Value, account_transfer: &Value) -> Result<
         );
     }
     crate::complaints::check_schema_parity(openapi)?;
+    // AgentCapacity is owned by agent_limits; every projection and response
+    // consumes its generated OpenAPI schema.
+    if openapi.pointer("/components/schemas/AgentCapacity")
+        != Some(&agent_limits::capacity_schema())
+    {
+        return Err("AgentCapacity must match agent_limits::AgentCapacity".into());
+    }
+    for consumer in [
+        "AgentRecordResponse",
+        "AgentEntityDto",
+        "AgentDetailEntityDto",
+        "AgentResponse",
+        "BranchResponse",
+    ] {
+        let path = format!("/components/schemas/{consumer}/properties/capacity/$ref");
+        if openapi.pointer(&path).and_then(Value::as_str)
+            != Some("#/components/schemas/AgentCapacity")
+        {
+            return Err(format!("{consumer}.capacity must reference AgentCapacity"));
+        }
+    }
     let modes = serde_json::json!(crate::claude_permissions::PERMISSION_MODES);
     for path in [
         "/components/schemas/CreateAgentRequest/properties/permission_mode/enum",
@@ -1208,6 +1229,9 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     let mut openapi = read_json(root, OPENAPI_PATH)?;
     openapi["components"]["schemas"]["ResourceEntityTransferEvent"]["properties"]["data"]["maxLength"] =
         values::SYNC_STREAM_EVENT_MAX_BYTES.into();
+    *openapi
+        .pointer_mut("/components/schemas/AgentCapacity")
+        .ok_or("missing AgentCapacity schema")? = agent_limits::capacity_schema();
     crate::workspace_modes::update_openapi(&mut openapi);
     // The checked limits ingress schema also owns HTTP, SSE and bridge leaves.
     let mut limits: Value = serde_json::from_str(
@@ -1403,8 +1427,12 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     identity_version.remove("maximum");
     openapi["components"]["schemas"]["UsageReconciliationResponse"]["properties"]["replayConflicts"] = serde_json::json!({"type":"array","items":{"$ref":"#/components/schemas/UsageReplayConflict"}});
     openapi["components"]["schemas"]["ClaudeFailure"] = crate::claude_failure::schema();
-    openapi["components"]["schemas"]["NativeProviderError"]["properties"]["claudeFailure"] =
-        serde_json::json!({"$ref":"#/components/schemas/ClaudeFailure"});
+    openapi["components"]["schemas"]["NativeProviderError"] =
+        crate::provider_errors::native_provider_error_schema();
+    let provider_errors = crate::provider_errors::schemas()?;
+    for name in ["CodexErrorInfo", "NonSteerableTurnKind"] {
+        openapi["components"]["schemas"][name] = provider_errors[name].clone();
+    }
     check_schema_parity(&openapi, &read_json(root, ACCOUNT_TRANSFER_SCHEMA_PATH)?)?;
     for (name, fields) in [
         (

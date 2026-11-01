@@ -15,7 +15,7 @@ use super::retained::{RequestActor, RequestResult, RetainedSessionPort, SessionR
 use crate::recovery_history::ConnectionScope;
 use serde_json::{Value, json};
 use std::sync::Arc;
-use studio_runtime_providers::{Method, ProviderKind};
+use studio_runtime_providers::Method;
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, RuntimeStore, SchedulerRepository,
 };
@@ -439,7 +439,6 @@ async fn request(
 /// The disconnect receipt of a turn that a stop ended without a provider
 /// request, on this provider generation, and not yet ended by a worker.
 fn stopped_turn(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
-    let extra = &agent.extra;
     let receipt = agent.disconnect_recovery.as_deref()?;
     let turn = receipt.turn_id.as_deref().filter(|turn| !turn.is_empty())?;
     let thread = receipt
@@ -475,12 +474,14 @@ fn stopped_turn(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
         // A delete tombstone clears the turn id; the epoch still names the stop.
         || agent.turn_id.as_deref().is_some_and(|current| current != turn)
         || agent.thread_id.as_deref() != Some(thread)
-        || extra.get("lastCompletedTurn").and_then(Value::as_str) == Some(turn)
+        || agent.last_completed_turn.value().map(String::as_str) == Some(turn)
     {
         return None;
     }
-    let terminals = ProviderKind::of_field(extra.get("provider"))
-        .ok()
+    let terminals = agent
+        .provider
+        .value()
+        .copied()
         .and_then(studio_runtime_providers::stop_terminals_method);
     let signature = studio_runtime_store::sha256_hex(
         json!([agent.id.0, epoch, generation, thread, turn])
@@ -501,7 +502,6 @@ fn stopped_turn(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
 /// worker settled: the stop found no live connection for it. A disconnect
 /// receipt that already ended this turn owns it instead.
 fn unsettled_stop(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
-    let extra = &agent.extra;
     let attempt = agent.start_attempt.as_ref()?;
     let interrupt = attempt.interrupt.as_ref()?;
     let ticket = interrupt.request_ticket.as_deref()?;
@@ -534,12 +534,14 @@ fn unsettled_stop(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
         // A delete tombstone clears the turn id; the epoch still names the stop.
         || agent.turn_id.as_deref().is_some_and(|current| current != turn)
         || agent.thread_id.as_deref() != Some(thread)
-        || extra.get("lastCompletedTurn").and_then(Value::as_str) == Some(turn)
+        || agent.last_completed_turn.value().map(String::as_str) == Some(turn)
     {
         return None;
     }
-    let terminals = ProviderKind::of_field(extra.get("provider"))
-        .ok()
+    let terminals = agent
+        .provider
+        .value()
+        .copied()
         .and_then(studio_runtime_providers::stop_terminals_method);
     Some(StoppedTurn {
         agent: agent.id.0.clone(),
@@ -747,6 +749,15 @@ mod stop_epoch_tests {
                     "threadId":"thread","turnId":"turn","outcome":"unknown"}}
         }))
         .expect("agent")
+    }
+
+    #[test]
+    fn unsettled_stop_uses_typed_provider_and_completed_turn() {
+        let mut agent = staged(4, 4);
+        assert!(unsettled_stop(&agent, 3).unwrap().terminals.is_some());
+        agent.last_completed_turn =
+            studio_runtime_schema::queue_command::Field::Value("turn".into());
+        assert!(unsettled_stop(&agent, 3).is_none());
     }
 
     #[test]

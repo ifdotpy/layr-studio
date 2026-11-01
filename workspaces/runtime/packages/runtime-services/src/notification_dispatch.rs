@@ -4572,6 +4572,22 @@ mod tests {
         );
         assert_eq!(base_rows(&transaction), 0);
     }
+    #[tokio::test]
+    async fn encoded_biological_error_is_published_as_typed_notice() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(root.path())).await.unwrap();
+        store.transaction_with(|tx| {
+            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('agent',?1)", [json!({"compactions":0,"id":"agent","rootId":"agent","epoch":1,"status":"running","threadId":"thread","accountKey":"default","provider":"codex","turnId":"turn","inFlight":true,"autoWake":true,"activeTools":[],"events":0}).to_string()]).map_err(StoreError::from)?;
+            let raw = json!({"message":r#"{"message":"This content was flagged for possible biological risk."}"#});
+            dispatch(tx, &mut NotificationStreamBuffer::default(), 1, &json!({"method":"error","params":{"threadId":"thread","turnId":"turn","error":raw}}), 100.0)?;
+            let stored: String = tx.query_row("SELECT record FROM runtime_items WHERE json_extract(record,'$.nativeError') IS NOT NULL LIMIT 1", [], |row| row.get(0)).map_err(StoreError::from)?;
+            let item: Value = serde_json::from_str(&stored)?;
+            assert_eq!(item.pointer("/nativeError/message"), Some(&json!("This content was flagged for possible biological risk.")));
+            assert_eq!(item.pointer("/nativeError/code"), Some(&json!("bio_policy")));
+            assert_eq!(item.pointer("/nativeError/studioRawEvidence"), Some(&raw));
+            Ok::<_, super::NotificationDispatchError>(())
+        }).await.unwrap();
+    }
 }
 
 #[cfg(test)]

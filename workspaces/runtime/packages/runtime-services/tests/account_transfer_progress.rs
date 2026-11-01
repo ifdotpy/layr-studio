@@ -360,9 +360,11 @@ async fn lazy_history_receipt_is_adopted_before_ordinary_preparation_returns() {
     store
         .transaction(|tx| {
             let mut row = AgentRepository::get(tx, &AgentId::from("lead"))?.expect("lead");
-            row.extra.insert("provider".into(), json!("codex"));
+            row.provider = studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_schema::ProviderKind::Codex,
+            );
             row.model = Some("gpt-6-astra".into());
-            row.extra.insert("nativeEffort".into(), Value::Null);
+            row.native_effort = studio_runtime_schema::queue_command::Field::Null;
             AgentRepository::put(tx, &row)
         })
         .await
@@ -630,8 +632,11 @@ async fn cancel_restores_source_fields_with_null_and_absent_values_exactly() {
         .transaction(|tx| {
             let mut row = AgentRepository::get(tx, &AgentId::from("lead"))?.expect("lead");
             row.status = AgentStatus::Failed;
-            row.extra
-                .insert("error".into(), json!("Transfer history is unavailable"));
+            row.error = studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_schema::provider_errors::AgentError::Message(
+                    "Transfer history is unavailable".into(),
+                ),
+            );
             row.extra.insert("nativeFailureHold".into(), json!(true));
             AgentRepository::put(tx, &row)
         })

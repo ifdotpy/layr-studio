@@ -330,6 +330,33 @@ pub enum AgentSandbox {
     },
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentNaming {
+    #[default]
+    Automatic,
+    PendingTitle,
+    Manual,
+}
+
+impl AgentNaming {
+    pub fn set_needs_title(&mut self, title: Option<bool>) {
+        if *self != Self::Manual {
+            *self = if title == Some(true) {
+                Self::PendingTitle
+            } else {
+                Self::Automatic
+            };
+        }
+    }
+
+    pub fn needs_title(&self) -> Option<bool> {
+        Some(*self == Self::PendingTitle)
+    }
+}
+
+pub use studio_runtime_schema::agent_limits::AgentCapacity;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRecord {
@@ -373,19 +400,32 @@ pub struct AgentRecord {
     #[serde(deserialize_with = "deserialize_optional_safe_counter")]
     pub compactions: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub compactions_observed_only: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fast_mode: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daybreak_enabled: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub needs_title: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub manual_name: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_agents_explicit: Option<bool>,
+    #[serde(default)]
+    pub naming: AgentNaming,
+    #[serde(default)]
+    pub capacity: AgentCapacity,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_mode_supported: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layr_ready: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub image_workspace: studio_runtime_schema::queue_command::Field<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub archived: studio_runtime_schema::queue_command::Field<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub pinned: studio_runtime_schema::queue_command::Field<bool>,
     #[serde(
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
@@ -410,8 +450,95 @@ pub struct AgentRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
+    pub native_effort: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub project_folder: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub checkpoint_history_head: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub workspace_reservation_id: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub workspace_operation: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub excluded_account_keys: studio_runtime_schema::queue_command::Field<Vec<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
     pub role: studio_runtime_schema::queue_command::Field<
         studio_runtime_schema::creation_intent::AgentRole,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub provider: studio_runtime_schema::queue_command::Field<studio_runtime_schema::ProviderKind>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub created:
+        studio_runtime_schema::queue_command::Field<studio_runtime_schema::NonnegativeNumber>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_safe_counter"
+    )]
+    pub queue_mutation_revision: Option<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_safe_counter"
+    )]
+    pub auth_resume_attempt: Option<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub last_completed_turn: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub host_project_path: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub execution_settings_account_key: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub last_completed_turn_status: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub error: studio_runtime_schema::queue_command::Field<
+        studio_runtime_schema::provider_errors::AgentError,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub last_completed_turn_error: studio_runtime_schema::queue_command::Field<
+        studio_runtime_schema::provider_errors::AgentError,
     >,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree_ready: Option<bool>,
@@ -534,6 +661,12 @@ fn deserialize_safe_counter<'de, D: serde::Deserializer<'de>>(
     } else {
         Err(serde::de::Error::custom("counter outside safe range"))
     }
+}
+
+fn present_safe_counter<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<u64>, D::Error> {
+    deserialize_safe_counter(deserializer).map(Some)
 }
 
 pub(crate) fn deserialize_optional_safe_counter<'de, D: serde::Deserializer<'de>>(
@@ -769,6 +902,19 @@ macro_rules! start_attempt_setters {
 }
 
 impl AgentRecord {
+    pub fn error_text(&self) -> Option<&str> {
+        self.error.value().and_then(|error| error.as_text())
+    }
+
+    pub fn set_error_receipt(&mut self, value: Value) -> Result<(), serde_json::Error> {
+        use studio_runtime_schema::queue_command::Field;
+        self.error = if value.is_null() {
+            Field::Null
+        } else {
+            Field::Value(studio_runtime_schema::provider_errors::AgentError::from_receipt(value)?)
+        };
+        Ok(())
+    }
     pub fn is_deleted(&self) -> bool {
         self.deleted_at.is_some_and(|at| at != 0.0)
     }
@@ -795,18 +941,36 @@ impl AgentRecord {
             cwd: None,
             name: None,
             compactions: None,
-            compactions_observed_only: None,
             fast_mode: None,
             daybreak_enabled: None,
-            needs_title: None,
-            manual_name: None,
-            max_agents_explicit: None,
+            naming: AgentNaming::default(),
+            capacity: AgentCapacity::default(),
             agent_mode_supported: None,
+            layr_ready: None,
+            image_workspace: Default::default(),
+            archived: Default::default(),
+            pinned: Default::default(),
             prompt: Default::default(),
             profile_id: Default::default(),
             profile_instructions: Default::default(),
             effort: Default::default(),
+            native_effort: Default::default(),
+            project_folder: Default::default(),
+            checkpoint_history_head: Default::default(),
+            workspace_reservation_id: Default::default(),
+            workspace_operation: Default::default(),
+            excluded_account_keys: Default::default(),
             role: Default::default(),
+            provider: Default::default(),
+            created: Default::default(),
+            queue_mutation_revision: None,
+            auth_resume_attempt: None,
+            last_completed_turn: Default::default(),
+            host_project_path: Default::default(),
+            execution_settings_account_key: Default::default(),
+            last_completed_turn_status: Default::default(),
+            error: Default::default(),
+            last_completed_turn_error: Default::default(),
             worktree_ready: None,
             approval_policy: None,
             native_response_turn: None,
@@ -943,10 +1107,48 @@ impl JsonRecord for AgentRecord {
         encode_open_record(self, row_id)
     }
 
+    fn check_write_value(&self, value: &Value) -> StoreResult<()> {
+        self.check_extra_round_trip(&serde_json::to_string(value)?)?;
+        Ok(())
+    }
+
     fn decode_stored(connection: &Connection, row_id: &str, encoded: &str) -> StoreResult<Self> {
         let mut agent = parse_agent_record(row_id, encoded)?;
         crate::agent_volatile::merge_agent(connection, row_id, &mut agent)?;
         Ok(agent)
+    }
+}
+
+impl AgentRecord {
+    fn check_extra_round_trip(&self, encoded: &str) -> StoreResult<()> {
+        let mut deserializer = serde_json::Deserializer::from_str(encoded);
+        let decoded: Self =
+            serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
+                let key = error.path().to_string();
+                if self.extra.contains_key(&key) {
+                    invalid_agent_field(
+                        &self.id.0,
+                        &format!("/{key}"),
+                        "extra_field_collision",
+                        None,
+                    )
+                } else {
+                    crate::StoreError::from(error.into_inner())
+                }
+            })?;
+        if let Some(key) = self
+            .extra
+            .keys()
+            .find(|key| !decoded.extra.contains_key(*key))
+        {
+            return Err(invalid_agent_field(
+                &self.id.0,
+                &format!("/{key}"),
+                "extra_field_collision",
+                None,
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -1981,6 +2183,10 @@ pub trait JsonRecord: Serialize + DeserializeOwned {
 
     fn record_key(&self) -> Option<&Self::Id>;
 
+    fn check_write_value(&self, _value: &Value) -> StoreResult<()> {
+        Ok(())
+    }
+
     fn encode_stored(&self, _connection: &Connection, row_id: &str) -> StoreResult<String>
     where
         Self: Sized,
@@ -2583,6 +2789,15 @@ fn checked_value<R: JsonRecord>(record: &R, row_id: &str) -> StoreResult<Value> 
     #[cfg(test)]
     validation_counts::CHECKS.with(|count| count.set(count.get() + 1));
     let value = record.serialize(serde_json::value::Serializer)?;
+    record.check_write_value(&value)?;
+    checked_serialized_value(record, row_id, value)
+}
+
+fn checked_serialized_value<R: JsonRecord>(
+    record: &R,
+    row_id: &str,
+    value: Value,
+) -> StoreResult<Value> {
     let invalid = || crate::StoreError::InvalidStoredObject {
         table: R::TABLE,
         id: row_id.to_owned(),
@@ -2710,6 +2925,47 @@ pub(crate) fn decode_json_record<T: DeserializeOwned>(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn agent_write_rejects_extra_keys_owned_by_named_fields() {
+        for (key, value) in [
+            ("error", serde_json::json!(null)),
+            ("error", serde_json::json!(42)),
+            ("capacity", serde_json::json!(null)),
+            ("naming", serde_json::json!(null)),
+            ("id", serde_json::json!(null)),
+        ] {
+            let mut agent = super::AgentRecord::from_value(serde_json::json!({
+                "id":"agent", "rootId":"agent", "epoch":1, "status":"idle",
+                "accountKey":"default", "compactions":0
+            }))
+            .unwrap();
+            agent.extra.insert(key.into(), value);
+            assert!(
+                matches!(super::checked_value(&agent, "agent"), Err(crate::StoreError::InvalidSyncObjectField { pointer, reason, .. }) if pointer == format!("/{key}") && reason.contains("extra_field_collision")),
+                "{key}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "manual timing on a disposable copied record"]
+    fn copied_agent_extra_guard_timing() {
+        use super::JsonRecord;
+        let raw =
+            std::fs::read_to_string(std::env::var("STUDIO_AGENT_TIMING_RECORD").unwrap()).unwrap();
+        let agent: super::AgentRecord = serde_json::from_str(&raw).unwrap();
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        let encoded = agent.encode_stored(&db, &agent.id.0).unwrap();
+        let start = std::time::Instant::now();
+        for _ in 0..30 {
+            agent.check_extra_round_trip(&encoded).unwrap();
+        }
+        println!(
+            "bytes={} guard_mean_ms={:.3}",
+            encoded.len(),
+            start.elapsed().as_secs_f64() * 1000.0 / 30.0
+        );
+    }
+    #[test]
     fn agent_record_requires_materialized_account() {
         let old = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle"}"#;
         assert!(serde_json::from_str::<super::AgentRecord>(old).is_err());
@@ -2746,7 +3002,7 @@ mod tests {
         );
         assert_eq!(agent.clone().into_value(), agent.value());
 
-        let current = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"vmLaunch":{"identity":{"agentId":"agent","epoch":1,"handle":"handle","requestId":"request","launchFingerprint":"digest"},"signature":"signature","status":"submitted"},"credentialCopy":{"agentId":"agent","epoch":1,"accountKey":"account","provider":"codex","relativePath":"path","digest":"digest","requestId":"request","signature":"signature","status":"submitted"},"vmAuthBootstrap":{"agentId":"agent","epoch":1,"requestId":"request","rootRequestId":"root","admittedRequest":{"id":"token","signature":"signature","created":1},"fingerprint":"digest","state":"submitted"},"nativeRelease":{"scope":{"account":"account","connection":"connection","generation":2},"admittedRequest":{"id":"token","signature":"signature","created":1},"id":"release"}}"#;
+        let current = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{"kind":"automatic","max":64},"naming":"automatic","vmLaunch":{"identity":{"agentId":"agent","epoch":1,"handle":"handle","requestId":"request","launchFingerprint":"digest"},"signature":"signature","status":"submitted"},"credentialCopy":{"agentId":"agent","epoch":1,"accountKey":"account","provider":"codex","relativePath":"path","digest":"digest","requestId":"request","signature":"signature","status":"submitted"},"vmAuthBootstrap":{"agentId":"agent","epoch":1,"requestId":"request","rootRequestId":"root","admittedRequest":{"id":"token","signature":"signature","created":1},"fingerprint":"digest","state":"submitted"},"nativeRelease":{"scope":{"account":"account","connection":"connection","generation":2},"admittedRequest":{"id":"token","signature":"signature","created":1},"id":"release"}}"#;
         let agent: AgentRecord = serde_json::from_str(current).expect("current effect fields");
         let encoded = serde_json::to_string(&agent).expect("serialize current agent");
         assert_eq!(
@@ -2793,23 +3049,12 @@ mod tests {
     }
 
     #[test]
-    fn agent_compactions_observed_only_is_boolean() {
-        let valid = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"compactionsObservedOnly":false}"#;
-        let invalid = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"compactionsObservedOnly":"false"}"#;
-        let record: AgentRecord = serde_json::from_str(valid).unwrap();
-        assert_eq!(record.value()["compactionsObservedOnly"], false);
-        assert!(serde_json::from_str::<AgentRecord>(invalid).is_err());
-    }
-
-    #[test]
     fn agent_settings_flags_are_boolean() {
         for field in [
             "fastMode",
             "daybreakEnabled",
-            "needsTitle",
-            "manualName",
-            "maxAgentsExplicit",
             "agentModeSupported",
+            "layrReady",
         ] {
             let raw = format!(
                 r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"{field}":"false"}}"#
@@ -2826,7 +3071,21 @@ mod tests {
 
     #[test]
     fn agent_text_settings_are_strings_with_distinct_null_and_absence() {
-        for field in ["prompt", "profileId", "profileInstructions", "effort"] {
+        for field in [
+            "prompt",
+            "profileId",
+            "profileInstructions",
+            "effort",
+            "nativeEffort",
+            "projectFolder",
+            "checkpointHistoryHead",
+            "workspaceOperation",
+            "workspaceReservationId",
+            "lastCompletedTurn",
+            "hostProjectPath",
+            "lastCompletedTurnStatus",
+            "executionSettingsAccountKey",
+        ] {
             let raw = format!(
                 r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"{field}":42}}"#
             );
@@ -2853,6 +3112,138 @@ mod tests {
             serde_json::to_string(&agent)
                 .unwrap()
                 .contains("\"role\":null")
+        );
+    }
+
+    #[test]
+    fn agent_error_rejects_non_error_values() {
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"failed","accountKey":"default","compactions":0,"error":42}"#;
+        assert!(serde_json::from_str::<AgentRecord>(raw).is_err());
+        let last_error = raw.replace("\"error\":42", "\"lastCompletedTurnError\":42");
+        assert!(serde_json::from_str::<AgentRecord>(&last_error).is_err());
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"failed","accountKey":"default","compactions":0,"error":{"message":"failed","data":{"id":1}}}"#;
+        let decoded: AgentRecord = serde_json::from_str(raw).unwrap();
+        assert_eq!(decoded.value()["error"]["data"]["id"], 1);
+        let via_value = AgentRecord::from_value(serde_json::from_str(raw).unwrap()).unwrap();
+        assert_eq!(via_value.value()["error"]["data"]["id"], 1);
+    }
+
+    #[test]
+    fn agent_excluded_accounts_are_strings() {
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"excludedAccountKeys":["blocked",42]}"#;
+        assert!(serde_json::from_str::<AgentRecord>(raw).is_err());
+        let valid = raw.replace(",42", "");
+        assert!(serde_json::from_str::<AgentRecord>(&valid).is_ok());
+    }
+
+    #[test]
+    fn agent_naming_uses_canonical_states() {
+        for state in ["automatic", "pending_title", "manual"] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"naming":"{state}"}}"#
+            );
+            let agent: AgentRecord = serde_json::from_str(&raw).unwrap();
+            assert_eq!(agent.value()["naming"], state);
+        }
+    }
+
+    #[test]
+    fn agent_nullable_flags_are_boolean_or_null() {
+        for field in ["imageWorkspace", "archived", "pinned"] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"{field}":42}}"#
+            );
+            assert!(
+                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                "{field}"
+            );
+            let null = raw.replace("42", "null");
+            let agent: AgentRecord = serde_json::from_str(&null).unwrap();
+            assert_eq!(agent.value().get(field), Some(&Value::Null), "{field}");
+        }
+    }
+
+    #[test]
+    fn agent_auth_resume_attempt_is_a_nonnegative_safe_integer() {
+        for value in ["-1", "1.5", "9007199254740992", "\"1\""] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"authResumeAttempt":{value}}}"#
+            );
+            assert!(
+                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                "{value}"
+            );
+        }
+        let valid = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"authResumeAttempt":1}"#;
+        let record: AgentRecord = serde_json::from_str(valid).unwrap();
+        assert_eq!(record.auth_resume_attempt, Some(1));
+        assert!(
+            serde_json::to_string(&record)
+                .unwrap()
+                .contains("\"authResumeAttempt\":1")
+        );
+    }
+
+    #[test]
+    fn agent_capacity_max_is_a_nonnegative_safe_integer() {
+        for value in ["-1", "1.5", "9007199254740992", "\"1\""] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{{"kind":"automatic","max":{value}}}}}"#
+            );
+            assert!(
+                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                "{value}"
+            );
+        }
+        for value in ["1", "1.0"] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{{"kind":"automatic","max":{value}}}}}"#
+            );
+            let agent: AgentRecord = serde_json::from_str(&raw).unwrap();
+            assert!(
+                serde_json::to_string(&agent)
+                    .unwrap()
+                    .contains(&format!("\"max\":{value}"))
+            );
+        }
+    }
+
+    #[test]
+    fn agent_queue_revision_is_a_nonnegative_integer() {
+        for value in ["-1", "null", "1.5", "\"1\""] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"queueMutationRevision":{value}}}"#
+            );
+            assert!(
+                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn agent_created_is_nonnegative_and_preserves_null() {
+        let bad = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"created":-1}"#;
+        let null = bad.replace("-1", "null");
+        assert!(serde_json::from_str::<AgentRecord>(bad).is_err());
+        let agent: AgentRecord = serde_json::from_str(&null).unwrap();
+        assert!(
+            serde_json::to_string(&agent)
+                .unwrap()
+                .contains("\"created\":null")
+        );
+    }
+
+    #[test]
+    fn agent_provider_is_closed_and_preserves_null() {
+        let bad = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"provider":"future"}"#;
+        let null = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"provider":null}"#;
+        assert!(serde_json::from_str::<AgentRecord>(bad).is_err());
+        let agent: AgentRecord = serde_json::from_str(null).unwrap();
+        assert!(
+            serde_json::to_string(&agent)
+                .unwrap()
+                .contains("\"provider\":null")
         );
     }
 
@@ -2952,6 +3343,7 @@ mod tests {
             projected,
             json!({"compactions":0,
                 "id":"agent-1", "provider":"codex", "rootId":"root-1", "epoch":3, "status":"running", "accountKey":"default",
+                "capacity":{"kind":"automatic","max":64},"naming":"automatic",
                 "futureField":[{"nested":"retained"}]
             })
         );
@@ -2998,6 +3390,7 @@ mod tests {
         let connection = database();
         let value = json!({"compactions":0,
             "id":"agent", "rootId":"agent", "epoch":2, "status":"idle",
+            "capacity":{"kind":"automatic","max":64},"naming":"automatic",
             "inFlight":true, "autoWake":false, "executionMode":"native", "turnEpoch":2,
             "accountKey":"account", "threadId":"thread", "turnId":"turn", "future":42
         });
@@ -3028,6 +3421,7 @@ mod tests {
     fn agent_round_trip_keeps_unknown_json_fields_and_number_kinds() {
         let value = json!({"compactions":0,
             "id":"agent-1", "provider":"codex", "rootId":"agent-1", "epoch":2, "status":"idle", "accountKey":"default",
+            "capacity":{"kind":"automatic","max":64},"naming":"automatic",
             "futureObject":{"number":1.5,"flag":true}, "futureInteger":9007199254740993_i64
         });
         let record = agent(value.clone());
@@ -3048,7 +3442,7 @@ mod tests {
             json!({"startOutcomeHold":{"stage":"recovery","epoch":2,"reason":"pending"}}),
             json!({"titleJob":{"requestId":"r","agentId":"agent","rootRequestId":"root","admittedRequest":{"id":"r","signature":"s","created":1},"status":"pending","future":true}}),
         ] {
-            let mut value = json!({"compactions":0,"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default"});
+            let mut value = json!({"compactions":0,"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","capacity":{"kind":"automatic","max":64},"naming":"automatic"});
             value
                 .as_object_mut()
                 .unwrap()
@@ -3159,7 +3553,7 @@ mod tests {
 
     #[test]
     fn unknown_agent_status_and_fields_survive_carrier_rewrite() {
-        let value = json!({"compactions":0,"id":"agent-1","provider":"codex","rootId":"agent-1","epoch":4,"accountKey":"default",
+        let value = json!({"compactions":0,"id":"agent-1","provider":"codex","rootId":"agent-1","epoch":4,"accountKey":"default","capacity":{"kind":"automatic","max":64},"naming":"automatic",
             "status":"future-agent-state","future":{"enabled":true,"count":9007199254740993_i64}});
         let record = agent(value.clone());
         assert_eq!(

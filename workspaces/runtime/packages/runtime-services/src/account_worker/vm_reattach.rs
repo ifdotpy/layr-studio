@@ -31,11 +31,7 @@ fn binding(
         return Ok(None);
     };
     let fields = &record.extra;
-    let Some(provider) = fields
-        .get("provider")
-        .and_then(Value::as_str)
-        .filter(|provider| matches!(*provider, "codex" | "claude"))
-    else {
+    let Some(provider) = record.provider.value().map(|provider| provider.key()) else {
         return Ok(None);
     };
     if !crate::linux_vm_provider::vm_actor_matches(
@@ -47,15 +43,17 @@ fn binding(
     )? || record.in_flight != Some(true)
         || record.lazy_account_transfer.value().is_some()
         || record.account_transfer_id.value().is_some()
-        || ["executionMove", "workspaceOperation"]
+        || ["executionMove"]
             .iter()
             .any(|key| fields.get(*key).is_some_and(|value| !value.is_null()))
         || ["remoteWorker", "remoteAnchor"]
             .iter()
             .any(|key| fields.get(*key) == Some(&Value::Bool(true)))
-        || fields
-            .get("executionSettingsAccountKey")
-            .is_some_and(|value| !value.is_null() && value.as_str() != Some(account))
+        || record.workspace_operation.is_some()
+        || record
+            .execution_settings_account_key
+            .value()
+            .is_some_and(|value| value != account)
     {
         return Ok(None);
     }

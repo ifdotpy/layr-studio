@@ -1580,17 +1580,33 @@ mod tests {
     #[test]
     fn provider_identity_archive_export_rejects_unknown_before_writing() {
         let root = tempfile::tempdir().expect("state directory");
-        for provider in [
-            None,
-            Some(Value::Null),
-            Some(json!("future")),
-            Some(json!(7)),
+        for (provider, expected_error) in [
+            (None, None),
+            (Some(Value::Null), None),
+            (Some(json!("future")), Some("unknown variant")),
+            (Some(json!(7)), Some("invalid type")),
         ] {
             let mut agent = json!({"compactions":0,"id":"agent-a","rootId":"agent-a","epoch":2,"status":"idle","accountKey":"default"});
             if let Some(provider) = provider {
                 agent["provider"] = provider;
             }
-            let agent = studio_runtime_store::AgentRecord::from_value(agent).expect("agent");
+            let agent = match studio_runtime_store::AgentRecord::from_value(agent) {
+                Ok(agent) => {
+                    assert!(expected_error.is_none());
+                    agent
+                }
+                Err(error) => {
+                    assert!(error.is_data());
+                    assert!(
+                        error
+                            .to_string()
+                            .starts_with(expected_error.expect("expected provider error")),
+                        "{error}"
+                    );
+                    assert!(!root.path().join("portable-history").exists());
+                    continue;
+                }
+            };
             let input = super::ExportInput {
                 agent_id: "agent-a".into(),
                 account_key: "default".into(),

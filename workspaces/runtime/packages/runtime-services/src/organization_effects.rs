@@ -119,11 +119,7 @@ pub fn apply(tx: &Transaction<'_>, body: &OrganizationRequest) -> Result<Value, 
             .ok_or(EventWriteError::InvalidRequest(
                 "Supply the current chat folder revision",
             ))?;
-        let current_folder = agent
-            .extra
-            .get("projectFolder")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
+        let current_folder = agent.project_folder.value().cloned();
         let replay = current_folder == desired
             && (revision == current || current.checked_sub(1) == Some(revision));
         if !replay
@@ -146,10 +142,10 @@ pub fn apply(tx: &Transaction<'_>, body: &OrganizationRequest) -> Result<Value, 
         }
         match desired {
             Some(folder) => {
-                agent.extra.insert("projectFolder".into(), json!(folder));
+                agent.project_folder = studio_runtime_schema::queue_command::Field::Value(folder);
             }
             None => {
-                agent.extra.insert("projectFolder".into(), Value::Null);
+                agent.project_folder = studio_runtime_schema::queue_command::Field::Null;
             }
         }
     }
@@ -164,7 +160,15 @@ pub fn apply(tx: &Transaction<'_>, body: &OrganizationRequest) -> Result<Value, 
                     "Stop active work before archiving this conversation",
                 ));
             }
-            agent.extra.insert(field.into(), json!(enabled));
+            match field {
+                "archived" => {
+                    agent.archived = studio_runtime_schema::queue_command::Field::Value(enabled)
+                }
+                "pinned" => {
+                    agent.pinned = studio_runtime_schema::queue_command::Field::Value(enabled)
+                }
+                _ => unreachable!(),
+            }
         }
     }
     if !body.project.is_missing() {
@@ -204,12 +208,8 @@ fn apply_read_state(
     let read_value = read.read;
     let revision = read.expected_revision.get();
     if agent.thread_id.as_deref() != Some(thread)
-        || agent.extra.get("lastCompletedTurn").and_then(Value::as_str) != Some(turn)
-        || agent
-            .extra
-            .get("lastCompletedTurnStatus")
-            .and_then(Value::as_str)
-            != Some("completed")
+        || agent.last_completed_turn.value().map(String::as_str) != Some(turn)
+        || agent.last_completed_turn_status.value().map(String::as_str) != Some("completed")
     {
         return Err(EventWriteError::InvalidRequest(
             "The completed result changed. Reload the chat",
@@ -328,7 +328,7 @@ mod tests {
         let agent = AgentRecord::from_value(json!({"compactions":0,
             "id":CHAT,"rootId":CHAT,"epoch":1,"status":"idle","name":"Organized chat",
             "provider":"codex","model":"gpt-6","prompt":"Start","cwd":"/fixture",
-            "accountKey":"default","isLead":true,"autoWake":false,"threadId":"thread-1",
+            "accountKey":"default","isLead":true,"autoWake":false,"threadId":"thread-1","projectFolder":"folder-a",
             "lastCompletedTurn":"turn-1","lastCompletedTurnStatus":"completed"
         }))
         .expect("valid persisted agent");
@@ -341,6 +341,13 @@ mod tests {
             .await
             .expect("the chat is seeded and published");
         assert_ne!(client_view(&store)["archived"], true);
+
+        let clear_folder = r#"{"id":"organized-chat","project_path":"/fixture","project_folder":null,"expected_folder":"folder-a","expected_revision":0}"#;
+        organize(&store, clear_folder).await;
+        organize(&store, clear_folder).await;
+        let view = client_view(&store);
+        assert_eq!(view["projectFolder"], Value::Null);
+        assert_eq!(view["projectFolderRevision"], 1);
 
         organize(
             &store,

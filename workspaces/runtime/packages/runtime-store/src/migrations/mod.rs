@@ -40,6 +40,7 @@ mod m2026_10_30_unused_start_action;
 mod m2026_10_30_vm_stream_owners;
 mod m2026_10_31_access_clients;
 mod m2026_10_31_access_invites;
+mod m2026_10_31_agent_batch_55;
 mod m2026_10_31_agent_core;
 mod m2026_10_31_agent_permissions;
 mod m2026_10_31_current_checks;
@@ -54,6 +55,8 @@ mod m2026_10_31_transfer_history_pages;
 mod m2026_10_31_work_projection;
 mod m2026_10_31_work_records;
 mod m2026_11_01_account_projection;
+mod m2026_11_01_agent_capacity;
+mod m2026_11_01_agent_naming;
 mod m2026_11_01_annotation_record;
 mod m2026_11_01_approval_secrets;
 mod m2026_11_01_plan_record;
@@ -89,6 +92,15 @@ pub use m2026_10_31_message_send_projections::apply as migrate_message_send_proj
 pub use m2026_10_31_project_record_kind::apply as migrate_project_record_kind;
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_31_room_record::apply as migrate_room_record;
+
+/// Normalize historical agent fixtures inserted after the database was opened.
+#[cfg(any(test, feature = "test-support"))]
+pub fn normalize_agent_fixtures(tx: &rusqlite::Transaction<'_>) -> crate::StoreResult<()> {
+    m2026_10_31_agent_core::apply(tx)?;
+    m2026_10_31_agent_batch_55::apply(tx)?;
+    m2026_11_01_agent_capacity::apply(tx)?;
+    m2026_11_01_agent_naming::apply(tx)
+}
 
 use std::path::Path;
 
@@ -930,6 +942,36 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
+            id: "2026-10-31-agent-batch-55",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with legacy provider, timestamps and queue fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_agent_batch_55::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-agent-batch-56-capacity",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with legacy team capacity fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_agent_capacity::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-agent-batch-57-naming",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with legacy naming flags",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_agent_naming::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
             id: "2026-10-31-transfer-history-pages",
             introduced: OCTOBER_31,
             target: MigrationTarget::Canvas,
@@ -1295,6 +1337,24 @@ fn catalog_fingerprint(catalog: &[&dyn Migration], target: MigrationTarget) -> S
             .join("\0")
             .as_bytes(),
     )
+}
+
+/// Prepare a real parent-catalog marker for upgrade tests.
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_apply_catalog_before_capacity(path: &std::path::Path) -> StoreResult<()> {
+    let mut db = Connection::open(path)?;
+    crate::schema::register_python_trigger_functions(&db)?;
+    let parent: Vec<_> = CATALOG
+        .iter()
+        .copied()
+        .filter(|step| {
+            !matches!(
+                step.definition().id,
+                "2026-11-01-agent-batch-56-capacity" | "2026-11-01-agent-batch-57-naming"
+            )
+        })
+        .collect();
+    apply_target_catalog(&mut db, MigrationTarget::Canvas, &parent)
 }
 
 fn apply_target_catalog(

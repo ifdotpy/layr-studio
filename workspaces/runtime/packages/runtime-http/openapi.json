@@ -3904,6 +3904,48 @@
         "title": "AgentArchiveRecordResponse",
         "type": "object"
       },
+      "AgentCapacity": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "automatic",
+                "type": "string"
+              },
+              "max": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "kind",
+              "max"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "explicit",
+                "type": "string"
+              },
+              "max": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "kind",
+              "max"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "AgentCommandProgress": {
         "additionalProperties": false,
         "description": "A managed command currently starting or running for this agent.",
@@ -4022,6 +4064,9 @@
               }
             ],
             "title": "Cansend"
+          },
+          "capacity": {
+            "$ref": "#/components/schemas/AgentCapacity"
           },
           "commandProgress": {
             "default": [],
@@ -4313,17 +4358,6 @@
             ],
             "title": "Layrstateid"
           },
-          "manualName": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Manualname"
-          },
           "movedFrom": {
             "anyOf": [
               {
@@ -4333,6 +4367,9 @@
                 "type": "null"
               }
             ]
+          },
+          "naming": {
+            "$ref": "#/components/schemas/AgentNaming"
           },
           "nativeError": {
             "anyOf": [
@@ -4689,21 +4726,6 @@
                 "type": "null"
               }
             ]
-          },
-          "workspaceBackend": {
-            "anyOf": [
-              {
-                "enum": [
-                  "asif",
-                  "vm"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Workspacebackend"
           },
           "workspaceCleanupIntent": {
             "anyOf": [
@@ -5092,6 +5114,9 @@
               }
             ],
             "title": "Cansend"
+          },
+          "capacity": {
+            "$ref": "#/components/schemas/AgentCapacity"
           },
           "capacityRetry": {
             "anyOf": [
@@ -5543,17 +5568,6 @@
             ],
             "title": "Layrstateid"
           },
-          "manualName": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Manualname"
-          },
           "model": {
             "anyOf": [
               {
@@ -5600,6 +5614,9 @@
               }
             ],
             "title": "Name"
+          },
+          "naming": {
+            "$ref": "#/components/schemas/AgentNaming"
           },
           "nativeError": {
             "anyOf": [
@@ -6206,21 +6223,6 @@
               }
             ]
           },
-          "workspaceBackend": {
-            "anyOf": [
-              {
-                "enum": [
-                  "asif",
-                  "vm"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Workspacebackend"
-          },
           "workspaceCleanupIntent": {
             "anyOf": [
               {
@@ -6721,6 +6723,14 @@
         "title": "AgentMoveToHostResponse",
         "type": "object"
       },
+      "AgentNaming": {
+        "enum": [
+          "automatic",
+          "pending_title",
+          "manual"
+        ],
+        "type": "string"
+      },
       "AgentNativeRelease": {
         "additionalProperties": false,
         "properties": {
@@ -7111,6 +7121,9 @@
             "$ref": "#/components/schemas/ParkReceiptRecordResponse",
             "default": null
           },
+          "capacity": {
+            "$ref": "#/components/schemas/AgentCapacity"
+          },
           "capacityRetry": {
             "$ref": "#/components/schemas/CapacityRetryRecordResponse",
             "default": null
@@ -7121,18 +7134,6 @@
             "minimum": 0,
             "title": "Capacityretrycount",
             "type": "integer"
-          },
-          "checkpointError": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Checkpointerror"
           },
           "checkpointHistoryHead": {
             "default": null,
@@ -7162,25 +7163,12 @@
             "title": "Compactions",
             "type": "integer"
           },
-          "compactionsObservedOnly": {
-            "default": null,
-            "title": "Compactionsobservedonly",
-            "type": "boolean"
-          },
           "complaintMisses": {
             "default": null,
             "maximum": 9007199254740991,
             "minimum": 0,
             "title": "Complaintmisses",
             "type": "integer"
-          },
-          "complaintsPresented": {
-            "default": null,
-            "items": {
-              "type": "string"
-            },
-            "title": "Complaintspresented",
-            "type": "array"
           },
           "concurrency": {
             "default": null,
@@ -7583,23 +7571,6 @@
             "title": "Livesteerrejectedturnid",
             "type": "string"
           },
-          "manualName": {
-            "default": null,
-            "title": "Manualname",
-            "type": "boolean"
-          },
-          "maxAgents": {
-            "default": null,
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "title": "Maxagents",
-            "type": "integer"
-          },
-          "maxAgentsExplicit": {
-            "default": null,
-            "title": "Maxagentsexplicit",
-            "type": "boolean"
-          },
           "model": {
             "anyOf": [
               {
@@ -7648,6 +7619,9 @@
             "default": null,
             "title": "Name",
             "type": "string"
+          },
+          "naming": {
+            "$ref": "#/components/schemas/AgentNaming"
           },
           "nativeEffort": {
             "anyOf": [
@@ -7792,11 +7766,6 @@
           "needsAttention": {
             "default": null,
             "title": "Needsattention",
-            "type": "boolean"
-          },
-          "needsTitle": {
-            "default": null,
-            "title": "Needstitle",
             "type": "boolean"
           },
           "parentId": {
@@ -8308,22 +8277,6 @@
             "$ref": "#/components/schemas/WorkerDefaultsRecordResponse",
             "default": null
           },
-          "workspaceBackend": {
-            "anyOf": [
-              {
-                "enum": [
-                  "asif",
-                  "vm"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Workspacebackend"
-          },
           "workspaceInGit": {
             "default": null,
             "title": "Workspaceingit",
@@ -8548,6 +8501,9 @@
             ],
             "default": null,
             "title": "Cansend"
+          },
+          "capacity": {
+            "$ref": "#/components/schemas/AgentCapacity"
           },
           "capacityRetry": {
             "anyOf": [
@@ -9057,18 +9013,6 @@
             "default": null,
             "title": "Layrstateid"
           },
-          "manualName": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Manualname"
-          },
           "model": {
             "anyOf": [
               {
@@ -9119,6 +9063,9 @@
             ],
             "default": null,
             "title": "Name"
+          },
+          "naming": {
+            "$ref": "#/components/schemas/AgentNaming"
           },
           "nativeError": {
             "anyOf": [
@@ -9775,22 +9722,6 @@
               }
             ],
             "default": null
-          },
-          "workspaceBackend": {
-            "anyOf": [
-              {
-                "enum": [
-                  "asif",
-                  "vm"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Workspacebackend"
           },
           "workspaceMode": {
             "anyOf": [
@@ -17010,6 +16941,9 @@
             "default": null,
             "title": "Cansend"
           },
+          "capacity": {
+            "$ref": "#/components/schemas/AgentCapacity"
+          },
           "capacityRetry": {
             "anyOf": [
               {
@@ -17505,18 +17439,6 @@
             "default": null,
             "title": "Layrstateid"
           },
-          "manualName": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Manualname"
-          },
           "model": {
             "anyOf": [
               {
@@ -17567,6 +17489,9 @@
             ],
             "default": null,
             "title": "Name"
+          },
+          "naming": {
+            "$ref": "#/components/schemas/AgentNaming"
           },
           "nativeError": {
             "anyOf": [
@@ -18206,22 +18131,6 @@
               }
             ],
             "default": null
-          },
-          "workspaceBackend": {
-            "anyOf": [
-              {
-                "enum": [
-                  "asif",
-                  "vm"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Workspacebackend"
           },
           "workspaceMode": {
             "anyOf": [
@@ -21727,6 +21636,158 @@
             "type": "string"
           }
         ]
+      },
+      "CodexErrorInfo": {
+        "$comment": "Owner: codex-cli 0.164.0; app-server generate-json-schema --experimental. definitions/CodexErrorInfo from v2/ErrorNotification.json. Refresh with pnpm run contracts:vendor:refresh.",
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "anyOf": [
+          {
+            "enum": [
+              "contextWindowExceeded",
+              "sessionBudgetExceeded",
+              "usageLimitExceeded",
+              "rateLimitExceeded",
+              "flexUnavailable",
+              "serverOverloaded",
+              "cyberPolicy",
+              "misalignmentPolicyViolation",
+              "tooManyDenials",
+              "internalServerError",
+              "unauthorized",
+              "badRequest",
+              "threadRollbackFailed",
+              "sandboxError",
+              "other"
+            ],
+            "type": "string"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "httpConnectionFailed": {
+                "properties": {
+                  "httpStatusCode": {
+                    "format": "uint16",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "httpConnectionFailed"
+            ],
+            "title": "HttpConnectionFailedCodexErrorInfo",
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "Failed to connect to the response SSE stream.",
+            "properties": {
+              "responseStreamConnectionFailed": {
+                "properties": {
+                  "httpStatusCode": {
+                    "format": "uint16",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "responseStreamConnectionFailed"
+            ],
+            "title": "ResponseStreamConnectionFailedCodexErrorInfo",
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "The response SSE stream disconnected in the middle of a turn before completion.",
+            "properties": {
+              "responseStreamDisconnected": {
+                "properties": {
+                  "httpStatusCode": {
+                    "format": "uint16",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "responseStreamDisconnected"
+            ],
+            "title": "ResponseStreamDisconnectedCodexErrorInfo",
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "Reached the retry limit for responses.",
+            "properties": {
+              "responseTooManyFailedAttempts": {
+                "properties": {
+                  "httpStatusCode": {
+                    "format": "uint16",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "responseTooManyFailedAttempts"
+            ],
+            "title": "ResponseTooManyFailedAttemptsCodexErrorInfo",
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "Returned when `turn/start` or `turn/steer` is submitted while the current active turn cannot accept same-turn steering, for example `/review` or manual `/compact`.",
+            "properties": {
+              "activeTurnNotSteerable": {
+                "properties": {
+                  "turnKind": {
+                    "$ref": "#/components/schemas/NonSteerableTurnKind"
+                  }
+                },
+                "required": [
+                  "turnKind"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "activeTurnNotSteerable"
+            ],
+            "title": "ActiveTurnNotSteerableCodexErrorInfo",
+            "type": "object"
+          },
+          {
+            "additionalProperties": true,
+            "type": [
+              "string",
+              "object"
+            ]
+          }
+        ],
+        "description": "This translation layer make sure that we expose codex error code in camel case.\n\nWhen an upstream HTTP status is available (for example, from the Responses API or a provider), it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant.",
+        "title": "CodexErrorInfo"
       },
       "CodexLoginReceipt": {
         "additionalProperties": {
@@ -33499,101 +33560,31 @@
         "type": "object"
       },
       "NativeProviderError": {
+        "$schema": "https://spec.openapis.org/oas/3.0/schema/2024-10-18#/definitions/Schema",
         "additionalProperties": {
           "$ref": "#/components/schemas/JsonValue"
         },
-        "description": "Known app-server fields plus pass-through provider error extensions.\n\nThe native provider owns the remaining JSON object fields; the stored\n``codex_records`` shapes likewise type these errors as ``JsonObject``.",
+        "description": "The provider-owned portion of an agent error that Studio displays or classifies.",
         "properties": {
           "additionalDetails": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Additionaldetails"
+            "$ref": "#/components/schemas/JsonValue"
           },
           "claudeFailure": {
             "$ref": "#/components/schemas/ClaudeFailure"
           },
           "code": {
-            "anyOf": [
-              {
-                "maximum": 9007199254740991,
-                "minimum": -9007199254740991,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Code"
+            "nullable": true,
+            "type": "string"
           },
           "codexErrorInfo": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "object"
-              },
-              {
-                "items": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Codexerrorinfo"
+            "$ref": "#/components/schemas/CodexErrorInfo"
           },
           "data": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/JsonValue"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
+            "$ref": "#/components/schemas/JsonValue"
           },
           "message": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Message"
+            "default": "",
+            "type": "string"
           }
         },
         "title": "NativeProviderError",
@@ -34543,6 +34534,13 @@
         },
         "title": "NativeTurnErrorRecordResponse",
         "type": "object"
+      },
+      "NonSteerableTurnKind": {
+        "enum": [
+          "review",
+          "compact"
+        ],
+        "type": "string"
       },
       "OnlineMigration": {
         "additionalProperties": false,
@@ -56520,18 +56518,6 @@
             ],
             "default": null,
             "title": "Compactions"
-          },
-          "compactionsObservedOnly": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Compactionsobservedonly"
           },
           "contextUsage": {
             "anyOf": [

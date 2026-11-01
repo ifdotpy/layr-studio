@@ -221,7 +221,7 @@ impl EventWriteRepository {
             }
             if let Some(name) = name {
                 value.insert("name".to_owned(), Value::String(name.to_owned()));
-                value.insert("manualName".to_owned(), Value::Bool(true));
+                value.insert("naming".to_owned(), Value::String("manual".to_owned()));
             }
             if status == Some("queued")
                 && let Some(overview) = value.get_mut("overview").and_then(Value::as_object_mut)
@@ -500,7 +500,7 @@ mod tests {
                 "CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
                  CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
                  CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
-                 INSERT INTO sync_entities VALUES('agent','a',1,'old','{\"collection\":\"agent\",\"id\":\"a\",\"value\":{\"id\":\"a\",\"name\":\"Old\",\"manualName\":false,\"needsTitle\":true,\"role\":\"orchestrator\"}}',0);",
+                 INSERT INTO sync_entities VALUES('agent','a',1,'old','{\"collection\":\"agent\",\"id\":\"a\",\"value\":{\"id\":\"a\",\"name\":\"Old\",\"naming\":\"pending_title\",\"role\":\"orchestrator\"}}',0);",
             )
             .expect("projection fixture creates");
         let transaction = connection.transaction().expect("transaction begins");
@@ -523,17 +523,17 @@ mod tests {
         assert_eq!(sequence, 2);
         assert_eq!(
             payload,
-            r#"{"collection":"agent","id":"a","value":{"id":"a","manualName":true,"name":"New","needsTitle":true,"role":"orchestrator"}}"#
+            r#"{"collection":"agent","id":"a","value":{"id":"a","name":"New","naming":"manual","role":"orchestrator"}}"#
         );
         // SHA-256 of the payload text above.
         assert_eq!(
             hash,
-            "42b19456ff8aa96252aa2805d353078e41fad0b2f2b0d29e0e66af9cb962d2b6"
+            "479117e334e36d6086763c6fdaa607248774b31c33490bab45fee0d9d741e8b6"
         );
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&payload)
                 .expect("updated projection remains JSON")["value"],
-            json!({"id":"a","name":"New","manualName":true,"needsTitle":true,"role":"orchestrator"})
+            json!({"id":"a","name":"New","naming":"manual","role":"orchestrator"})
         );
     }
 

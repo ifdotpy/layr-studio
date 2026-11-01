@@ -1336,7 +1336,8 @@ fn notify_parent_of_settled_turn(
     let stopped = matches!(
         agent.status,
         AgentStatus::Failed | AgentStatus::Interrupted | AgentStatus::Paused
-    ) && agent.extra.get("lastCompletedTurnStatus") != Some(&json!("completed"));
+    ) && agent.last_completed_turn_status.value().map(String::as_str)
+        != Some("completed");
     let value = agent.value();
     let safety_retry = value.pointer("/nativeSafetyRetry/turnId") == Some(&json!(turn_id))
         && crate::safety_buffering::active(&value).unwrap_or(true);
@@ -1374,8 +1375,8 @@ pub(crate) fn notify_parent_of_failed_turn(
     let Some(agent) = AgentRepository::get(tx, &AgentId::from(agent_id))? else {
         return Ok(());
     };
-    let retrying = |key: &str| {
-        agent.extra.get(key).is_some_and(|retry| {
+    let retrying = |value: Option<&Value>| {
+        value.is_some_and(|retry| {
             retry.get("turnId") == Some(&json!(turn_id))
                 && matches!(
                     retry.get("status").and_then(Value::as_str),
@@ -1385,11 +1386,11 @@ pub(crate) fn notify_parent_of_failed_turn(
     };
     if agent.status != AgentStatus::Failed
         || !agent.parent_id.is_some()
-        || agent.extra.get("lastCompletedTurn") != Some(&json!(turn_id))
+        || agent.last_completed_turn.value().map(String::as_str) != Some(turn_id)
         || agent.auto_wake != Some(true)
         || !reports_turns(&agent)
-        || retrying("capacityRetry")
-        || retrying("usageResume")
+        || retrying(agent.extra.get("capacityRetry"))
+        || retrying(agent.extra.get("usageResume"))
     {
         return Ok(());
     }
@@ -1398,10 +1399,9 @@ pub(crate) fn notify_parent_of_failed_turn(
 
 /// A live child of the current turn epoch: not deleted, archived or moving.
 fn reports_turns(agent: &AgentRecord) -> bool {
-    let flag = |key: &str| studio_runtime_store::truthy(agent.extra.get(key));
     !agent.is_deleted()
         && agent.agent_archive.is_none()
-        && !flag("executionMove")
+        && !studio_runtime_store::truthy(agent.extra.get("executionMove"))
         && agent.turn_epoch == Some(agent.epoch)
 }
 
@@ -1433,16 +1433,14 @@ fn enqueue_turn_result(
     let Some(parent) = AgentRepository::get(tx, &AgentId::from(parent_id))? else {
         return Ok(());
     };
-    let result = match agent
-        .extra
-        .get("error")
-        .filter(|error| studio_runtime_store::truthy(Some(error)))
-    {
-        Some(error) => error
-            .get("message")
-            .and_then(Value::as_str)
-            .or(error.as_str())
-            .map_or_else(|| error.to_string(), str::to_owned),
+    let result = match agent.error.value().filter(|error| {
+        matches!(
+            error,
+            studio_runtime_schema::provider_errors::AgentError::Provider(_)
+        ) || !error.display_text().is_empty()
+    }) {
+        Some(error) if !error.display_text().is_empty() => error.display_text().to_owned(),
+        Some(error) => error.diagnostic_text(),
         None => agent
             .last_answer
             .as_deref()

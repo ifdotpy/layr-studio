@@ -432,15 +432,14 @@ impl SchedulerRepository {
                 .disconnect_recovery
                 .as_deref()
                 .is_some_and(|value| !value.is_empty())
-            || [
-                "capacityRetry",
-                "usageResume",
-                "manualRecoveryDeliveryHold",
-                "remoteWorker",
-                "remoteAnchor",
-            ]
-            .iter()
-            .any(|key| agent.extra.get(*key).is_some_and(truthy))
+            || agent.extra.get("capacityRetry").is_some_and(truthy)
+            || agent.extra.get("usageResume").is_some_and(truthy)
+            || agent
+                .extra
+                .get("manualRecoveryDeliveryHold")
+                .is_some_and(truthy)
+            || agent.extra.get("remoteWorker").is_some_and(truthy)
+            || agent.extra.get("remoteAnchor").is_some_and(truthy)
             || agent
                 .native_release
                 .as_ref()
@@ -503,12 +502,7 @@ impl SchedulerRepository {
         {
             return Ok(false);
         }
-        let Some(reason) = agent
-            .extra
-            .get("error")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-        else {
+        let Some(reason) = agent.error_text().filter(|value| !value.is_empty()) else {
             return Ok(false);
         };
         let original = claim_result::<HistoricalAgentSnapshot>(&saved)?.agent;
@@ -523,6 +517,14 @@ impl SchedulerRepository {
                 .value()
                 .is_some_and(|current| current.as_str() == role),
         };
+        let provider_matches = match &original.provider {
+            HistoricalField::Missing => agent.provider.is_missing(),
+            HistoricalField::Null => matches!(
+                agent.provider,
+                studio_runtime_schema::queue_command::Field::Null
+            ),
+            HistoricalField::Present(provider) => agent.provider.value() == Some(provider),
+        };
         if original.id != agent.id
             || original.root_id != agent.root_id
             || original.epoch != agent.epoch
@@ -533,8 +535,7 @@ impl SchedulerRepository {
             || original.workspace_mode != agent.workspace_mode
             || original.cwd != agent.cwd
             || original.parent_id != agent.parent_id
-            || historical_text(&original.provider, |provider| provider.key().to_owned()).as_ref()
-                != agent.extra.get("provider")
+            || !provider_matches
             || !role_matches
             || historical_text(&original.real_cwd, Clone::clone).as_ref()
                 != agent.extra.get("realCwd")
@@ -1163,9 +1164,9 @@ impl SchedulerRepository {
             agent
                 .extra
                 .insert("nativeFailureHold".to_owned(), Value::Bool(true));
-            agent
-                .extra
-                .insert("error".to_owned(), Value::String(reason.to_owned()));
+            agent.error = studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_schema::provider_errors::AgentError::Message(reason.to_owned()),
+            );
             agent.start_outcome_hold = Some(crate::StoredStartOutcomeHold::Known(
                 crate::StartOutcomeHold::Held {
                     reason: Some(reason.into()),
@@ -1545,10 +1546,9 @@ impl SchedulerRepository {
         if let Some(mut record) = load_agent(tx, agent)?
             && record.epoch == epoch
         {
-            record.extra.insert(
-                "error".into(),
-                json!(format!("Queued input could not be delivered: {reason}")),
-            );
+            record.set_error_receipt(json!(format!(
+                "Queued input could not be delivered: {reason}"
+            )))?;
             publish_agent(tx, &record)?;
             EventWriteRepository::set_agent_sync_lifecycle(
                 tx,

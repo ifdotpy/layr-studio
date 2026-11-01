@@ -2365,9 +2365,7 @@ pub fn release_failed_work(
             "The worker was deleted".to_owned()
         } else {
             worker
-                .extra
-                .get("error")
-                .and_then(Value::as_str)
+                .error_text()
                 .unwrap_or("The worker failed")
                 .to_owned()
         };
@@ -2419,7 +2417,7 @@ fn continuation_work_pending(agent: &AgentRecord) -> bool {
     let account = Value::String(agent.account_key.clone());
     let thread = agent.thread_id.as_deref();
     let epoch = agent.epoch;
-    let last_turn = agent.extra.get("lastCompletedTurn").and_then(Value::as_str);
+    let last_turn = agent.last_completed_turn.value().map(String::as_str);
 
     let matches = |record: &Value, statuses: &[&str], turn_field: &str| {
         let record_account = record.get("accountKey").unwrap_or(&default_account);

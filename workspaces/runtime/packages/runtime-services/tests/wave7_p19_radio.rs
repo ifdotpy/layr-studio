@@ -132,6 +132,20 @@ async fn corpus() -> RadioCorpus {
                         if payload["value"]["role"] == "lead" {
                             payload["value"]["role"] = json!("orchestrator");
                         }
+                        if side == "after" {
+                            let fields = payload
+                                .get_mut("value")
+                                .and_then(Value::as_object_mut)
+                                .expect("agent projection");
+                            fields.insert(
+                                "capacity".into(),
+                                json!(studio_runtime_store::AgentCapacity::default()),
+                            );
+                            fields.insert(
+                                "naming".into(),
+                                json!(studio_runtime_store::AgentNaming::default()),
+                            );
+                        }
                         row["payload"] = json!(payload.to_string());
                     }
                 }
@@ -149,7 +163,12 @@ async fn corpus() -> RadioCorpus {
                         .expect("agent object")
                         .entry("compactions")
                         .or_insert(json!(0));
-                    row["record"] = json!(record.to_string());
+                    normalize_frozen_naming(&mut record);
+                    let record = studio_runtime_store::AgentRecord::from_value(record)
+                        .expect("normalized agent fixture");
+                    row.as_object_mut()
+                        .expect("agent row")
+                        .insert("record".into(), json!(record.into_value().to_string()));
                 }
             }
             if let Some(rows) = case[side]["rules"].as_array_mut() {
@@ -175,6 +194,7 @@ async fn corpus() -> RadioCorpus {
         }
         if let Some(drafts) = case["drafts"].as_array_mut() {
             for draft in drafts {
+                normalize_frozen_naming(draft);
                 if draft["role"] == "lead" {
                     draft["role"] = json!("orchestrator");
                 }
@@ -190,6 +210,24 @@ async fn corpus() -> RadioCorpus {
             .collect(),
         cases,
         _projects: projects,
+    }
+}
+// Frozen Python drafts use the retired naming flags; current fixtures use one state.
+fn normalize_frozen_naming(value: &mut Value) {
+    let Some(fields) = value.as_object_mut() else {
+        return;
+    };
+    let manual = fields.remove("manualName");
+    let title = fields.remove("needsTitle");
+    if manual.is_some() || title.is_some() {
+        let naming = if manual == Some(json!(true)) {
+            "manual"
+        } else if title == Some(json!(true)) {
+            "pending_title"
+        } else {
+            "automatic"
+        };
+        fields.insert("naming".into(), json!(naming));
     }
 }
 /// The Python oracle ran on Linux, where its temporary project path is
@@ -369,6 +407,8 @@ async fn seed(store: &RuntimeStore, snapshot: &Value) {
                     )?;
                 }
             }
+            let legacy_naming: i64 = db.query_row("SELECT count(*) FROM runtime_agents WHERE json_type(record, '$.needsTitle') IS NOT NULL OR json_type(record, '$.manualName') IS NOT NULL", [], |row| row.get(0))?;
+            assert_eq!(legacy_naming, 0, "radio fixture agents must use canonical naming");
             db.execute("INSERT OR IGNORE INTO runtime_agent_volatile(id) SELECT id FROM runtime_agents", [])?;
             studio_runtime_store::migrations::migrate_radio_room(db)?;
             studio_runtime_store::migrations::migrate_room_record(db)?;
@@ -754,6 +794,14 @@ async fn python_written_radio_corpus_and_restart_replay() {
         if original_case["error"] == true {
             continue;
         }
+        let db = store.test_reader().expect("radio state reader");
+        let legacy_naming: i64 = db.query_row("SELECT count(*) FROM runtime_agents WHERE json_type(record, '$.needsTitle') IS NOT NULL OR json_type(record, '$.manualName') IS NOT NULL", [], |row| row.get(0)).expect("check canonical naming");
+        assert_eq!(
+            legacy_naming, 0,
+            "{} wrote legacy naming",
+            original_case["name"]
+        );
+        drop(db);
         let mut actual = state(&store, &original_case["before"]);
         if original_case["mode"] == "tick" {
             for event in actual["events"].as_array().into_iter().flatten() {

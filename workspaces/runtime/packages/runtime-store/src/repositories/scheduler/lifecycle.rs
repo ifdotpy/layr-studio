@@ -64,10 +64,7 @@ impl SchedulerRepository {
             .set_start_attempt_turn_id(Some(turn))
             .map_err(|_| invalid_agent(&identity.agent_id))?;
         agent.start_outcome_hold = None;
-        agent.extra.insert(
-            "error".into(),
-            crate::projection_value(&Option::<String>::None),
-        );
+        agent.error = studio_runtime_schema::queue_command::Field::Null;
         publish_agent(transaction, &agent)?;
         Ok(true)
     }
@@ -119,10 +116,7 @@ impl SchedulerRepository {
             agent.status = AgentStatus::Interrupted;
             agent.in_flight = Some(false);
             agent.auto_wake = Some(false);
-            agent.extra.insert(
-                "error".into(),
-                crate::projection_value(&Self::UNCLEAN_START_HOLD),
-            );
+            agent.set_error_receipt(json!(Self::UNCLEAN_START_HOLD))?;
             publish_agent(transaction, &agent)?;
             held += 1;
         }
@@ -266,11 +260,11 @@ impl SchedulerRepository {
                 .as_ref()
                 .and_then(|a| a.response_error.as_deref());
             if response_error.map_or_else(
-                || !agent.extra.contains_key("error"),
-                |response| agent.extra.get("error").and_then(Value::as_str) == Some(response),
-            ) || agent.extra.get("error") == Some(&json!(UNKNOWN_START_ERROR))
+                || agent.error.is_missing(),
+                |response| agent.error_text() == Some(response),
+            ) || agent.error_text() == Some(UNKNOWN_START_ERROR)
             {
-                agent.extra.insert("error".into(), Value::Null);
+                agent.error = studio_runtime_schema::queue_command::Field::Null;
             }
         }
         if agent
@@ -385,11 +379,11 @@ impl SchedulerRepository {
                     interrupted.push(agent.id.0);
                 }
             } else if restart_continuation_allowed(&agent) {
-                let previous_error = agent.extra.get("error").cloned().unwrap_or(Value::Null);
+                let previous_error = agent.error.value().cloned();
                 agent.status = AgentStatus::Running;
                 agent.auto_wake = Some(true);
                 agent.in_flight = Some(true);
-                agent.extra.insert("error".into(), Value::Null);
+                agent.error = studio_runtime_schema::queue_command::Field::Null;
                 agent.extra.insert("connectionRecovery".into(),json!({"source":"native_thread_read","at":at,"turnId":agent.turn_id.as_deref(),"outcome":"active","automatic":true,"previousError":previous_error}));
                 if let Some(marker) = agent.restart_recovery.as_deref_mut() {
                     marker.stage = Some("continued".into());
@@ -398,10 +392,10 @@ impl SchedulerRepository {
                 }
                 publish_agent(transaction, &agent)?;
             } else if transport_continuation_allowed(&agent) {
-                let previous_error = agent.extra.get("error").cloned().unwrap_or(Value::Null);
+                let previous_error = agent.error.value().cloned();
                 agent.auto_wake = Some(true);
                 agent.in_flight = Some(true);
-                agent.extra.insert("error".into(), Value::Null);
+                agent.error = studio_runtime_schema::queue_command::Field::Null;
                 agent.status = AgentStatus::Running;
                 agent.extra.insert(
                     "connectionRecovery".into(),
@@ -489,9 +483,9 @@ impl SchedulerRepository {
                 continue;
             }
             let last = agent
-                .extra
-                .get("lastCompletedTurn")
-                .and_then(Value::as_str)
+                .last_completed_turn
+                .value()
+                .map(String::as_str)
                 .filter(|turn| !turn.is_empty())
                 .map(str::to_owned);
             let mut changed = false;
@@ -514,11 +508,7 @@ impl SchedulerRepository {
                 marker.outcome = Some("settled".into());
                 changed = true;
             }
-            let outcome = match agent
-                .extra
-                .get("lastCompletedTurnStatus")
-                .and_then(Value::as_str)
-            {
+            let outcome = match agent.last_completed_turn_status.value().map(String::as_str) {
                 Some("completed") => Some(AgentStatus::Completed),
                 Some("failed") => Some(AgentStatus::Failed),
                 _ => None,
@@ -527,7 +517,7 @@ impl SchedulerRepository {
                 agent.status == AgentStatus::Interrupted
                     && last.is_some()
                     && matches!(
-                        agent.extra.get("error").and_then(Value::as_str),
+                        agent.error_text(),
                         Some(
                             PROVIDER_DISCONNECTED_TURN_ERROR
                                 | VM_PROVIDER_DISCONNECTED_TURN_ERROR
@@ -538,15 +528,14 @@ impl SchedulerRepository {
             }) {
                 let error = if status == AgentStatus::Failed {
                     agent.extra.insert("nativeFailureHold".into(), json!(true));
-                    agent
-                        .extra
-                        .get("lastCompletedTurnError")
-                        .cloned()
-                        .unwrap_or(Value::Null)
+                    agent.last_completed_turn_error.value().cloned()
                 } else {
-                    Value::Null
+                    None
                 };
-                agent.extra.insert("error".into(), error);
+                agent.error = error.map_or(
+                    studio_runtime_schema::queue_command::Field::Null,
+                    studio_runtime_schema::queue_command::Field::Value,
+                );
                 agent.status = status;
                 changed = true;
             }
@@ -570,10 +559,18 @@ impl SchedulerRepository {
         let Some(mut agent) = load_agent(transaction, agent_id)? else {
             return Ok(false);
         };
+        let error_matches = match &agent.error {
+            studio_runtime_schema::queue_command::Field::Missing => false,
+            studio_runtime_schema::queue_command::Field::Null => expected_error.is_null(),
+            studio_runtime_schema::queue_command::Field::Value(error) => {
+                serde::Serialize::serialize(error, serde_json::value::Serializer)
+                    .is_ok_and(|stored| stored == *expected_error)
+            }
+        };
         if agent.epoch != epoch
             || agent.status != AgentStatus::Failed
             || agent.account_key != account
-            || agent.extra.get("error") != Some(expected_error)
+            || !error_matches
             || agent.auto_wake != Some(true)
             || agent.in_flight == Some(true)
             || agent
@@ -585,14 +582,13 @@ impl SchedulerRepository {
                 .as_ref()
                 .is_some_and(|tools| !tools.is_empty())
             || agent.native_safety_buffering.is_some()
-            || [
-                "manualRecoveryDeliveryHold",
-                "authWait",
-                "capacityRetry",
-                "usageResume",
-            ]
-            .iter()
-            .any(|key| agent.extra.get(*key).is_some_and(truthy))
+            || agent
+                .extra
+                .get("manualRecoveryDeliveryHold")
+                .is_some_and(truthy)
+            || agent.extra.get("authWait").is_some_and(truthy)
+            || agent.extra.get("capacityRetry").is_some_and(truthy)
+            || agent.extra.get("usageResume").is_some_and(truthy)
             || agent.start_outcome_hold.is_some()
             || agent
                 .native_release
@@ -614,7 +610,7 @@ impl SchedulerRepository {
         if !continuation_allowed(&agent) {
             return Ok(false);
         }
-        agent.extra.insert("error".into(), Value::Null);
+        agent.error = studio_runtime_schema::queue_command::Field::Null;
         agent.native_status = None;
         agent.status = if Self::has_claimable_input(transaction, agent_id, epoch)? {
             AgentStatus::Queued
@@ -725,12 +721,9 @@ impl SchedulerRepository {
                 receipt.response_error = Some(error.to_owned());
             }
             if let Some(error) = error {
-                agent.extra.insert(
-                    "error".into(),
-                    json!(format!(
-                        "Stop requested; interrupt acknowledgement unavailable: {error}"
-                    )),
-                );
+                agent.set_error_receipt(json!(format!(
+                    "Stop requested; interrupt acknowledgement unavailable: {error}"
+                )))?;
             }
             publish_agent(tx, &agent)?;
         }
@@ -748,7 +741,9 @@ impl SchedulerRepository {
             .ok_or_else(|| invalid_agent(id))?;
         agent.status = AgentStatus::Paused;
         agent.auto_wake = Some(false);
-        agent.extra.insert("error".into(), json!(reason));
+        agent.error = studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::provider_errors::AgentError::Message((reason).to_string()),
+        );
         if let Some(mut park) = agent.extra.remove("parkReceipt") {
             park["cancelledAtEpoch"] = json!(agent.epoch);
             agent.extra.insert("cancelledPark".into(), park);
@@ -921,7 +916,6 @@ impl SchedulerRepository {
         let Some(mut agent) = load_agent(transaction, id)? else {
             return Ok(None);
         };
-        let flag = |key: &str| agent.extra.get(key).is_some_and(truthy);
         let Some(previous) = agent.start_attempt.as_ref() else {
             return Ok(None);
         };
@@ -942,9 +936,9 @@ impl SchedulerRepository {
         if !idle
             || agent.is_deleted()
             || agent.in_flight == Some(true)
-            || flag("nativeFailureHold")
-            || flag("remoteWorker")
-            || flag("remoteAnchor")
+            || agent.extra.get("nativeFailureHold").is_some_and(truthy)
+            || agent.extra.get("remoteWorker").is_some_and(truthy)
+            || agent.extra.get("remoteAnchor").is_some_and(truthy)
             || agent.auto_wake != Some(true)
             || agent.thread_id.as_deref() != Some(thread_id)
             || agent.account_key != account_key
@@ -1061,10 +1055,6 @@ impl SchedulerRepository {
         attempt.account_key = Some(account_key.into());
         attempt.connection_generation = Some(generation);
         attempt.thread_id = Some(thread_id.into());
-        agent
-            .extra
-            .entry("complaintsPresented".into())
-            .or_insert(json!([]));
         publish_agent(transaction, &agent)?;
         ExecutionHistoryRepository::save_receipt(
             transaction,
@@ -1202,7 +1192,7 @@ impl SchedulerRepository {
                 }
                 Err(error) => return Err(error),
             };
-            clear_hold(&mut agent);
+            clear_hold(&mut agent)?;
             if disconnect_agent(transaction, &mut agent, timestamp(), true, true)? {
                 recovered += 1;
             }
@@ -1403,7 +1393,9 @@ impl SchedulerRepository {
         }
         if let Some(status) = decision.visible {
             agent.status = status;
-            agent.extra.insert("error".into(), json!(message));
+            agent.error = studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_schema::provider_errors::AgentError::Message((message).to_string()),
+            );
         }
         agent.in_flight = Some(false);
         agent.start_outcome_hold = None;
@@ -1616,7 +1608,7 @@ impl SchedulerRepository {
         if current_attempt || recovering(&agent, epoch) {
             if current_attempt {
                 agent.status = AgentStatus::Running;
-                agent.extra.insert("error".into(), Value::Null);
+                agent.error = studio_runtime_schema::queue_command::Field::Null;
             }
             if agent
                 .start_outcome_hold
@@ -1633,7 +1625,7 @@ impl SchedulerRepository {
                 {
                     agent.extra.insert("nativeFailureHold".into(), json!(false));
                 }
-                agent.extra.insert("error".into(), Value::Null);
+                agent.error = studio_runtime_schema::queue_command::Field::Null;
             }
         }
         publish_agent(transaction, &agent)?;
@@ -1809,16 +1801,16 @@ impl SchedulerRepository {
             agent.start_outcome_hold = None;
         }
         crate::domain::complete_turn(transaction, agent_id, turn_id)?;
-        agent
-            .extra
-            .insert("lastCompletedTurn".into(), json!(turn_id));
-        agent
-            .extra
-            .insert("lastCompletedTurnStatus".into(), json!(outcome));
-        agent.extra.insert(
-            "lastCompletedTurnError".into(),
-            error.clone().unwrap_or(Value::Null),
-        );
+        agent.last_completed_turn =
+            studio_runtime_schema::queue_command::Field::Value(turn_id.to_owned());
+        agent.last_completed_turn_status =
+            studio_runtime_schema::queue_command::Field::Value(outcome.to_owned());
+        agent.last_completed_turn_error = match error.clone() {
+            Some(error) if !error.is_null() => studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_schema::provider_errors::AgentError::from_receipt(error)?,
+            ),
+            _ => studio_runtime_schema::queue_command::Field::Null,
+        };
         agent.turn_id = None;
         agent.activity = None;
         agent.active_tools = Some(Vec::new());
@@ -1840,9 +1832,9 @@ impl SchedulerRepository {
         }
         if current_attempt || recovering(&agent, epoch) {
             if let Some(error) = error {
-                agent.extra.insert("error".into(), error);
+                agent.set_error_receipt(error)?;
             } else {
-                agent.extra.insert("error".into(), Value::Null);
+                agent.error = studio_runtime_schema::queue_command::Field::Null;
             }
             if status == AgentStatus::Failed {
                 agent.extra.insert("nativeFailureHold".into(), json!(true));
@@ -1872,9 +1864,6 @@ impl SchedulerRepository {
         }
         if current_attempt {
             parked_after_turn(&mut agent);
-        }
-        if native_status == "completed" && current_attempt {
-            agent.extra.insert("complaintMisses".into(), json!(0));
         }
         publish_agent(transaction, &agent)?;
         crate::ExecutionHistoryRepository::terminal(
@@ -2064,7 +2053,7 @@ fn return_unapplied_input(
         params![identity.agent_id, identity.epoch, events],
     )?;
     agent.status = AgentStatus::Queued;
-    agent.extra.insert("error".into(), Value::Null);
+    agent.error = studio_runtime_schema::queue_command::Field::Null;
     agent.in_flight = Some(false);
     agent.start_attempt = None;
     agent.start_outcome_hold = None;
@@ -2136,7 +2125,7 @@ pub(super) fn apply_start_error(
         } else {
             AgentStatus::Queued
         };
-        agent.extra.insert("error".into(), Value::Null);
+        agent.error = studio_runtime_schema::queue_command::Field::Null;
         agent.start_attempt = None;
         publish_agent(tx, &agent)?;
         ExecutionHistoryRepository::save_receipt(
@@ -2153,10 +2142,7 @@ pub(super) fn apply_start_error(
     require_membership(changed, count, &identity.agent_id)?;
     if let Some(status) = decision.visible {
         agent.status = status;
-        agent.extra.insert(
-            "error".into(),
-            json!(if unknown { WAITING_START } else { message }),
-        );
+        agent.set_error_receipt(json!(if unknown { WAITING_START } else { message }))?;
         if unknown {
             agent
                 .start_attempt
@@ -2310,13 +2296,13 @@ pub(super) fn timestamp() -> f64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0.0, |d| d.as_secs_f64())
 }
-pub(super) fn clear_hold(agent: &mut AgentRecord) {
+pub(super) fn clear_hold(agent: &mut AgentRecord) -> StoreResult<()> {
     if !agent
         .start_outcome_hold
         .as_ref()
         .is_some_and(crate::StoredStartOutcomeHold::is_account_settlement)
     {
-        return;
+        return Ok(());
     }
     let Some(crate::StoredStartOutcomeHold::Known(crate::StartOutcomeHold::AccountSettlement {
         previous_native_failure_hold,
@@ -2325,7 +2311,7 @@ pub(super) fn clear_hold(agent: &mut AgentRecord) {
         ..
     })) = agent.start_outcome_hold.take()
     else {
-        return;
+        return Ok(());
     };
     if previous_native_failure_hold.present {
         agent.extra.insert(
@@ -2335,9 +2321,10 @@ pub(super) fn clear_hold(agent: &mut AgentRecord) {
     } else {
         agent.extra.remove("nativeFailureHold");
     }
-    if agent.extra.get("error").and_then(Value::as_str) == Some(reason.as_str()) {
-        agent.extra.insert("error".into(), previous_error);
+    if agent.error_text() == Some(reason.as_str()) {
+        agent.set_error_receipt(previous_error)?;
     }
+    Ok(())
 }
 /// Requeue an exact unsubmitted current attempt, or cancel a stale epoch's
 /// reservation. Returns the requeued event count when the agent was requeued.
@@ -2544,7 +2531,7 @@ pub(super) fn disconnect_agent(
         agent.extra.remove("nativeFailureHold");
         agent.start_outcome_hold = None;
         let wait_error = agent.extra["contextRepairWait"]["error"].clone();
-        agent.extra.insert("error".into(), wait_error);
+        agent.set_error_receipt(wait_error)?;
         agent.start_attempt = None;
     } else if !paused
         && agent
@@ -2552,14 +2539,11 @@ pub(super) fn disconnect_agent(
             .as_ref()
             .is_none_or(|h| !h.is_account_settlement())
     {
-        agent.extra.insert(
-            "error".into(),
-            json!(if restart {
-                BACKEND_RESTARTED_TURN_ERROR
-            } else {
-                PROVIDER_DISCONNECTED_TURN_ERROR
-            }),
-        );
+        agent.set_error_receipt(json!(if restart {
+            BACKEND_RESTARTED_TURN_ERROR
+        } else {
+            PROVIDER_DISCONNECTED_TURN_ERROR
+        }))?;
     }
     agent.in_flight = Some(false);
     crate::domain::mark_sessions_lost(transaction, &agent.id.0)?;
@@ -2705,7 +2689,7 @@ pub(super) fn settled_attempt(
     attempt: &crate::StartAttemptView,
 ) -> StoreResult<bool> {
     if let Some(turn) = bound_turn(agent, attempt).filter(|turn| !turn.is_empty())
-        && (agent.extra.get("lastCompletedTurn").and_then(Value::as_str) == Some(turn)
+        && (agent.last_completed_turn.value().map(String::as_str) == Some(turn)
             || completed_turn(connection, &agent.id.0, turn)?)
     {
         return Ok(true);
@@ -2798,7 +2782,7 @@ pub(super) fn transport_continuation_allowed(agent: &AgentRecord) -> bool {
         && agent.auto_wake != Some(true)
         && agent.turn_id.is_some()
         && matches!(
-            agent.extra.get("error").and_then(Value::as_str),
+            agent.error_text(),
             Some(
                 PROVIDER_DISCONNECTED_TURN_ERROR
                     | VM_PROVIDER_DISCONNECTED_TURN_ERROR
@@ -2833,14 +2817,13 @@ pub(super) fn transport_continuation_allowed(agent: &AgentRecord) -> bool {
 
 pub(super) fn continuation_allowed(agent: &AgentRecord) -> bool {
     !agent.is_deleted()
+        && !agent
+            .workspace_operation
+            .value()
+            .is_some_and(|value| !value.is_empty())
+        && !agent.extra.get("nativeFailureHold").is_some_and(truthy)
         && agent.account_transfer_id.value().is_none()
-        && ![
-            "nativeFailureHold",
-            "workspaceOperation",
-            "contextRepairWait",
-        ]
-        .iter()
-        .any(|key| agent.extra.get(*key).is_some_and(truthy))
+        && !agent.extra.get("contextRepairWait").is_some_and(truthy)
         && !matches!(
             agent
                 .extra
@@ -2852,8 +2835,8 @@ pub(super) fn continuation_allowed(agent: &AgentRecord) -> bool {
             block["threadId"].is_string()
                 && block.get("threadId").and_then(Value::as_str) == agent.thread_id.as_deref()
         })
-        && !agent.extra.get("error").is_some_and(|error| {
-            known_error_kind(error) == Some(KnownCodexErrorKind::MisalignmentPolicyViolation)
+        && !agent.error.value().is_some_and(|error| {
+            error.known_kind() == Some(KnownCodexErrorKind::MisalignmentPolicyViolation)
         })
 }
 pub(super) fn load_agent(db: &Connection, id: &str) -> StoreResult<Option<AgentRecord>> {
@@ -3313,11 +3296,8 @@ mod account_scope_tests {
             r#"{"id":"a","rootId":"a","epoch":1,"status":"waiting","accountKey":"default","compactions":0,"error":"paused","nativeFailureHold":true,"startOutcomeHold":{"stage":"account_settlement","cursor":12,"reason":"paused","previousError":"original","previousNativeFailureHold":{"present":true,"value":"previous"}}}"#,
         )
         .expect("stored agent");
-        super::clear_hold(&mut agent);
-        assert_eq!(
-            agent.extra.get("error"),
-            Some(&serde_json::json!("original"))
-        );
+        super::clear_hold(&mut agent).unwrap();
+        assert_eq!(agent.error_text(), Some("original"));
         assert_eq!(
             agent.extra.get("nativeFailureHold"),
             Some(&serde_json::json!("previous"))

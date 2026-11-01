@@ -188,9 +188,9 @@ impl CheckpointsRepository {
             return Ok(None);
         };
         let parent_checkpoint = agent
-            .extra
-            .get("checkpointHistoryHead")
-            .and_then(Value::as_str)
+            .checkpoint_history_head
+            .value()
+            .map(String::as_str)
             .map(|id| read_object(connection, "runtime_checkpoints", id))
             .transpose()?
             .flatten();
@@ -461,7 +461,6 @@ impl CheckpointsRepository {
             Value::String(id.to_owned()),
         );
         object.insert("workspaceOperation".to_owned(), Value::Null);
-        object.insert("checkpointError".to_owned(), Value::Null);
         object.remove("workspaceReservationId");
         update_agent(
             transaction,
@@ -471,7 +470,6 @@ impl CheckpointsRepository {
                 ("checkpointHistoryHead", json!(id)),
                 ("workspaceOperation", Value::Null),
                 ("workspaceReservationId", Value::Null),
-                ("checkpointError", Value::Null),
             ],
         )?;
         let object = operation.record.as_object_mut().ok_or_else(|| {
@@ -576,12 +574,7 @@ impl CheckpointsRepository {
                 .as_object_mut()
                 .ok_or_else(|| StoreError::SchemaMismatch("invalid stored agent".to_owned()))?;
             object.insert("workspaceOperation".to_owned(), Value::Null);
-            object.insert(
-                "checkpointError".to_owned(),
-                error.map_or(Value::Null, |message| Value::String(message.to_owned())),
-            );
             object.remove("workspaceReservationId");
-            let checkpoint_error = error.map_or(Value::Null, |message| json!(message));
             update_agent(
                 transaction,
                 agent_id,
@@ -589,7 +582,6 @@ impl CheckpointsRepository {
                 &[
                     ("workspaceOperation", Value::Null),
                     ("workspaceReservationId", Value::Null),
-                    ("checkpointError", checkpoint_error),
                 ],
             )?;
         }
@@ -704,10 +696,6 @@ impl CheckpointsRepository {
                 .ok_or_else(|| invalid_record("runtime_agents", &agent_id))?;
             object.insert("workspaceOperation".to_owned(), Value::Null);
             object.remove("workspaceReservationId");
-            object.insert(
-                "checkpointError".to_owned(),
-                json!("Server restarted before checkpoint capture finished"),
-            );
             update_agent(
                 transaction,
                 &agent_id,
@@ -715,10 +703,6 @@ impl CheckpointsRepository {
                 &[
                     ("workspaceOperation", Value::Null),
                     ("workspaceReservationId", Value::Null),
-                    (
-                        "checkpointError",
-                        json!("Server restarted before checkpoint capture finished"),
-                    ),
                 ],
             )?;
         }
@@ -730,23 +714,43 @@ impl CheckpointsRepository {
             if !matches!(kind, Some("capture" | "checkpoint")) {
                 continue;
             }
-            let Some(_operation_id) = agent
+            let Some(operation_id) = agent
                 .record
                 .get("workspaceReservationId")
                 .and_then(Value::as_str)
             else {
                 return Err(invalid_record("runtime_agents", &agent.id));
             };
+            let diagnostic_id = format!(
+                "{}:orphan:{}:{}:{}",
+                kind.unwrap_or_default(),
+                agent.id.len(),
+                agent.id,
+                operation_id
+            );
+            let diagnostic = json!({
+                "id": diagnostic_id,
+                "kind": kind,
+                "agent": agent.id,
+                "phase": "failed",
+                "updated": now,
+                "result": super::workspace_ready::CheckpointDiagnostic {
+                    checkpoint_error: "Server restarted with an orphaned checkpoint reservation",
+                    reservation_id: Some(operation_id),
+                },
+            });
+            insert_object(
+                transaction,
+                "runtime_workspace_operations",
+                &diagnostic_id,
+                &diagnostic,
+            )?;
             let object = agent
                 .record
                 .as_object_mut()
                 .ok_or_else(|| invalid_record("runtime_agents", &agent.id))?;
             object.insert("workspaceOperation".to_owned(), Value::Null);
             object.remove("workspaceReservationId");
-            object.insert(
-                "checkpointError".to_owned(),
-                json!("Server restarted before checkpoint capture finished"),
-            );
             update_agent(
                 transaction,
                 &agent.id,
@@ -754,10 +758,6 @@ impl CheckpointsRepository {
                 &[
                     ("workspaceOperation", Value::Null),
                     ("workspaceReservationId", Value::Null),
-                    (
-                        "checkpointError",
-                        json!("Server restarted before checkpoint capture finished"),
-                    ),
                 ],
             )?;
         }
@@ -804,14 +804,10 @@ fn same_workspace_activity(current: &WorkspaceSnapshot, expected: &WorkspaceSnap
         && current.agent.deleted_at == expected.agent.deleted_at
         && current.agent.execution_mode == expected.agent.execution_mode
         && current.agent.workspace_mode == expected.agent.workspace_mode
-        && [
-            "lastCompletedTurn",
-            "workspaceOperation",
-            "workspaceReservationId",
-            "checkpointHistoryHead",
-        ]
-        .iter()
-        .all(|key| current.agent.extra.get(*key) == expected.agent.extra.get(*key))
+        && current.agent.last_completed_turn == expected.agent.last_completed_turn
+        && current.agent.workspace_operation == expected.agent.workspace_operation
+        && current.agent.workspace_reservation_id == expected.agent.workspace_reservation_id
+        && current.agent.checkpoint_history_head == expected.agent.checkpoint_history_head
         && same_parent_boundary(
             current.parent_checkpoint.as_ref(),
             expected.parent_checkpoint.as_ref(),
@@ -1021,7 +1017,9 @@ fn update_object(
         return Err(invalid_record(table, id));
     }
     if table == crate::agent_volatile::AGENT_TABLE {
-        crate::agent_volatile::update(transaction, id, record)?;
+        let agent =
+            AgentRecord::from_value(record.clone()).map_err(|_| invalid_record(table, id))?;
+        Table::<AgentRecord>::new(transaction).update(&agent)?;
         return Ok(());
     }
     transaction.execute(
@@ -1050,7 +1048,9 @@ fn insert_object(
         return Ok(());
     }
     if table == crate::agent_volatile::AGENT_TABLE {
-        crate::agent_volatile::put(transaction, id, record, true)?;
+        let agent =
+            AgentRecord::from_value(record.clone()).map_err(|_| invalid_record(table, id))?;
+        Table::<AgentRecord>::new(transaction).insert_new(&agent)?;
         return Ok(());
     }
     transaction.execute(
@@ -1217,8 +1217,86 @@ mod tests {
         metadata_update.agents[1].record["name"] = json!("renamed unrelated agent");
         assert!(same_workspace_activity(&metadata_update, &snapshot));
 
+        for field in [
+            "lastCompletedTurn",
+            "workspaceOperation",
+            "workspaceReservationId",
+            "checkpointHistoryHead",
+        ] {
+            let mut changed = snapshot.clone();
+            let value = serde::Deserialize::deserialize(json!("changed")).unwrap();
+            match field {
+                "lastCompletedTurn" => changed.agent.last_completed_turn = value,
+                "workspaceOperation" => changed.agent.workspace_operation = value,
+                "workspaceReservationId" => changed.agent.workspace_reservation_id = value,
+                "checkpointHistoryHead" => changed.agent.checkpoint_history_head = value,
+                _ => unreachable!(),
+            }
+            assert!(!same_workspace_activity(&changed, &snapshot), "{field}");
+        }
+
         metadata_update.agent.epoch = 1;
         assert!(!same_workspace_activity(&metadata_update, &snapshot));
+    }
+
+    #[tokio::test]
+    async fn recovery_reports_orphan_reservations_without_overwriting_terminal_operations() {
+        for terminal in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let store = crate::RuntimeStore::open(Some(dir.path())).await.unwrap();
+            let original = json!({"id":"checkpoint:lost","kind":"checkpoint","agent":"a","phase":"completed","result":{"provider":"keep"},"error":"keep"});
+            let saved = original.clone();
+            store.transaction(move |tx| {
+                let mut agent = crate::AgentRecord::test_defaults().value();
+                agent["id"] = json!("a");
+                agent["rootId"] = json!("a");
+                agent["provider"] = json!("codex");
+                agent["workspaceOperation"] = json!("checkpoint");
+                agent["workspaceReservationId"] = json!("checkpoint:lost");
+                crate::AgentRepository::put(tx, &crate::AgentRecord::from_value(agent)?)?;
+                tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('agent','a',1,'fixture',?1,0)", [json!({"collection":"agent","id":"a","value":{"id":"a","workspaceOperation":"checkpoint","workspaceReservationId":"checkpoint:lost"}}).to_string()])?;
+                if terminal {
+                    super::insert_object(tx, "runtime_workspace_operations", "checkpoint:lost", &saved)?;
+                }
+                Ok(())
+            }).await.unwrap();
+            drop(store);
+            let store = crate::RuntimeStore::open(Some(dir.path())).await.unwrap();
+            store
+                .transaction(move |tx| {
+                    CheckpointsRepository::recover_captures(tx, 2.0)?;
+                    let agent = super::read_object(tx, "runtime_agents", "a")?
+                        .unwrap()
+                        .record;
+                    assert_eq!(agent["workspaceOperation"], json!(null));
+                    assert!(agent.get("workspaceReservationId").is_none());
+                    let operations = super::read_all(tx, "runtime_workspace_operations")?;
+                    assert_eq!(operations.len(), 1 + usize::from(terminal));
+                    let diagnostic = operations
+                        .iter()
+                        .find(|op| op.record["result"]["checkpointError"].is_string())
+                        .expect("diagnostic retained");
+                    let _: crate::WorkspaceOperationRecord =
+                        serde_json::from_value(diagnostic.record.clone())?;
+                    assert_eq!(
+                        diagnostic.record["result"]["reservationId"],
+                        "checkpoint:lost"
+                    );
+                    if terminal {
+                        assert_eq!(
+                            operations
+                                .iter()
+                                .find(|op| op.id == "checkpoint:lost")
+                                .unwrap()
+                                .record,
+                            original
+                        );
+                    }
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
     }
 
     #[test]

@@ -318,7 +318,6 @@ pub(crate) fn project(
         "inFlight",
         "contextUsage",
         "compactions",
-        "compactionsObservedOnly",
     ]
     .into_iter()
     .map(|key| {

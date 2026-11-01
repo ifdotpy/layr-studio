@@ -192,15 +192,32 @@ pub fn mode_fields(record: &mut Value) {
     if record.get("agentModeRevision").is_none() {
         record["agentModeRevision"] = json!(0);
     }
-    if record.get("maxAgentsExplicit").is_none() {
-        record["maxAgentsExplicit"] = json!(
-            record
-                .get("maxAgents")
-                .and_then(Value::as_i64)
-                .unwrap_or(64)
-                != 64
-        );
-    }
+}
+
+pub(crate) fn capacity_max(record: &Value) -> i64 {
+    agent_capacity(record).max()
+}
+
+pub(crate) fn agent_capacity(record: &Value) -> studio_runtime_store::AgentCapacity {
+    record
+        .get("capacity")
+        .and_then(|value| studio_runtime_store::AgentCapacity::deserialize(value).ok())
+        .unwrap_or_default()
+}
+
+pub(crate) fn set_capacity(record: &mut Value, max: i64, explicit: bool) -> Result<(), StoreError> {
+    let max = studio_runtime_schema::AgentCounter::from_i64(max)
+        .ok_or(StoreError::RecordContract("invalid agent capacity"))?;
+    let capacity = if explicit {
+        studio_runtime_store::AgentCapacity::Explicit { max }
+    } else {
+        studio_runtime_store::AgentCapacity::Automatic { max }
+    };
+    record
+        .as_object_mut()
+        .ok_or(StoreError::RecordContract("invalid agent record"))?
+        .insert("capacity".into(), serde_json::to_value(capacity)?);
+    Ok(())
 }
 
 /// Use the shared canonical renderer builder for every agent publication.
@@ -535,7 +552,7 @@ fn create_agent_with_identity(
             id: id.to_owned(),
         });
     }
-    let draft = record.get("needsTitle").and_then(Value::as_bool) == Some(true);
+    let draft = record["naming"] == "pending_title";
     let expected_status = if draft {
         AgentStatus::Idle
     } else {
@@ -644,8 +661,7 @@ fn configure_limits(
         return Err(SettingsError::LeadRequired);
     }
     mode_fields(&mut root_value);
-    let team_max_agents =
-        max_agents.or_else(|| root_value.get("maxAgents").and_then(Value::as_i64));
+    let team_max_agents = max_agents.unwrap_or_else(|| capacity_max(&root_value));
     let mut statement = transaction
         .prepare("SELECT id,record FROM runtime_agents")
         .map_err(StoreError::from)?;
@@ -672,10 +688,8 @@ fn configure_limits(
         if agent_id == id {
             record = root_value.clone();
             if let Some(max_agents) = max_agents {
-                record["maxAgents"] = json!(max_agents);
-                if record.get("isLead").and_then(Value::as_bool) == Some(true) {
-                    record["maxAgentsExplicit"] = json!(true);
-                }
+                let explicit = record.get("isLead").and_then(Value::as_bool) == Some(true);
+                set_capacity(&mut record, max_agents, explicit)?;
             }
         } else {
             record
@@ -685,9 +699,7 @@ fn configure_limits(
                     id: agent_id.clone(),
                 })?
                 .remove("concurrency");
-            if let Some(max_agents) = team_max_agents {
-                record["maxAgents"] = json!(max_agents);
-            }
+            set_capacity(&mut record, team_max_agents, false)?;
         }
         save_agent(transaction, &record, &validate)?;
         if agent_id == id {
@@ -699,7 +711,7 @@ fn configure_limits(
         "concurrency": root_value.get("concurrency").cloned().unwrap_or(json!(0)),
         "agentMode": if root_value.get("concurrency").and_then(Value::as_i64).unwrap_or(0) == 0 { "single" } else { "multi" },
         "agentModeRevision": root_value.get("agentModeRevision").cloned().unwrap_or(json!(0)),
-        "maxAgents": root_value.get("maxAgents").cloned().unwrap_or(Value::Null),
+        "maxAgents": capacity_max(&root_value),
     }))
 }
 
@@ -749,8 +761,7 @@ fn rename(
     };
 
     record["name"] = json!(name);
-    record["manualName"] = json!(true);
-    record["needsTitle"] = json!(false);
+    record["naming"] = json!("manual");
     save_agent(transaction, &record, &validate)?;
 
     let result = RenameReply {
@@ -768,6 +779,14 @@ fn rename(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn capacity_access_uses_the_typed_kind() {
+        let record = serde_json::json!({"capacity":{"kind":"future","max":8}});
+        assert_eq!(
+            super::capacity_max(&record),
+            studio_runtime_schema::agent_limits::DEFAULT_MAX_TEAM_AGENTS
+        );
+    }
     use super::{create_agent, ensure_project, replay_agent};
     use rusqlite::Connection;
     use serde_json::{Value, json};

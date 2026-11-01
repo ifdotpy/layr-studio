@@ -388,7 +388,9 @@ async fn transcript_cases(group: usize) {
                 &got,
                 expected,
                 fixture_sync_high - 1,
-                (durable_high - fixture_sync_high + 1).max(1),
+                // A nonzero cursor observes the newly projected transcript after
+                // removing compactionsObservedOnly, which allocates one more sequence.
+                (durable_high - fixture_sync_high + 1).max(1) + i64::from(after > 0),
                 case["phase"] == "prune",
                 matches!(case["phase"].as_str(), Some("update" | "prune")),
             );

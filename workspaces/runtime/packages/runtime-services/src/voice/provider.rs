@@ -2762,11 +2762,6 @@ mod tests {
         let store = RuntimeStore::open(Some(directory.path()))
             .await
             .expect("fresh voice store");
-        let mut extra = std::collections::BTreeMap::new();
-        extra.insert(
-            "provider".into(),
-            json!(studio_runtime_schema::ProviderKind::Codex),
-        );
         let agent = AgentRecord {
             account_key: "default".into(),
             thread_id: Some("voice-thread".into()),
@@ -2775,7 +2770,9 @@ mod tests {
             root_id: AgentId::from("voice-agent"),
             epoch: 0,
             status: AgentStatus::Idle,
-            extra,
+            provider: studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_schema::ProviderKind::Codex,
+            ),
             ..AgentRecord::test_defaults()
         };
         let old_offer = "v=0\r\nold-offer".to_owned();

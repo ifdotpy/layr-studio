@@ -1363,7 +1363,7 @@ pub(super) fn thread_snapshot(
             profile_instructions: text(record, "profileInstructions")?.unwrap_or_default(),
             role,
             is_lead: lead,
-            needs_title: flag(record, "needsTitle")?,
+            needs_title: record["naming"] == "pending_title",
             claude_options: native_claude_options(resources, record, state_root)?,
             daybreak_enabled: stored(record, "daybreakEnabled")?,
             cyber_access_program: stored(record, "cyberAccessProgram")?,
@@ -1880,8 +1880,12 @@ mod resource_tests {
                     assert!(matches!(plan, thread::Outcome::Resume(_)), "{plan:?}");
                 }
                 let saved = agent(tx, "lead")?.value();
-                assert_eq!(saved["error"], error);
-                assert_eq!(saved["lastCompletedTurnError"], error);
+                let mut expected = error.clone();
+                if let Some(fields) = expected.as_object_mut() {
+                    fields.insert("studioRawEvidence".into(), error.clone());
+                }
+                assert_eq!(saved["error"], expected);
+                assert_eq!(saved["lastCompletedTurnError"], expected);
             }
             Ok::<_, WorkerError>(())
         }).await.expect("valid structured errors preserve preparation and holds");
@@ -1899,7 +1903,9 @@ mod resource_tests {
             for error in [json!(false), json!(42), json!([])] {
                 let record = json!({"compactions":0,"accountKey":"default","id":"lead","rootId":"lead","epoch":1,"status":"queued",
                     "isLead":true,"provider":"claude","cwd":"/project","threadId":"existing-thread","error":error});
-                AgentRepository::put(tx, &AgentRecord::from_value(record.clone()).expect("agent"))?;
+                let mut persisted = record.clone();
+                persisted["error"] = Value::Null;
+                AgentRepository::put(tx, &AgentRecord::from_value(persisted).expect("agent"))?;
                 assert!(matches!(thread_snapshot(tx, &resources, &record, "connection", Path::new("/state"), None),
                     Err(WorkerError::Store(StoreError::InvalidStoredObject { table: "turn_preparation", id })) if id == "error"));
             }

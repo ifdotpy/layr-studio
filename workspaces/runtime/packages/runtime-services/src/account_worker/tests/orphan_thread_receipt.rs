@@ -45,7 +45,7 @@ async fn send_message(state: &State, id: &str, kind: &'static str) {
                 let mut agent =
                     AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?.unwrap();
                 agent.auto_wake = Some(true);
-                agent.extra.insert("error".into(), Value::Null);
+                agent.error = studio_runtime_schema::queue_command::Field::Null;
                 agent.extra.remove("nativeFailureHold");
                 AgentRepository::put(tx, &agent)?;
                 crate::event_write::enqueue_event(tx, &agent, id, kind, "continue".into(), now())

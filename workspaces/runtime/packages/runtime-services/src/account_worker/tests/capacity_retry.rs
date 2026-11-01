@@ -28,12 +28,9 @@ async fn claim_retry(state: &State) -> String {
                         AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
                     row.in_flight = Some(false);
                     row.auto_wake = Some(true);
-                    for (key, value) in [
-                        ("lastCompletedTurn", json!(PREVIOUS_TURN)),
-                        ("status", json!("completed")),
-                    ] {
-                        row.extra.insert(key.into(), value);
-                    }
+                    row.last_completed_turn =
+                        serde::Deserialize::deserialize(json!(PREVIOUS_TURN)).unwrap();
+                    row.status = studio_runtime_store::AgentStatus::Completed;
                     row.start_attempt.take();
                     AgentRepository::put(tx, &row)?;
                     let raw = ContinuationRepository::snapshot(

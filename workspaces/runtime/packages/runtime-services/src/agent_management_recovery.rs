@@ -1780,7 +1780,9 @@ mod tests {
                 .transaction(move |tx| {
                     let mut worker = AgentRepository::get(tx, &AgentId::from("worker-00000000"))?
                         .expect("worker");
-                    worker.extra.insert("provider".into(), json!(provider));
+                    worker.provider = studio_runtime_schema::queue_command::Field::Value(
+                        provider.parse().unwrap(),
+                    );
                     worker.execution_mode = Some(if mode == "vm" {
                         studio_runtime_store::AgentExecutionMode::Vm
                     } else {

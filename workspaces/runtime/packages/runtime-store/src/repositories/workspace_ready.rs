@@ -295,6 +295,14 @@ fn conflicts(
 pub const ARCHIVED_PROVISION_RELEASE: &str =
     "Worker archived; files at the provisioning destination were kept";
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct CheckpointDiagnostic<'a> {
+    pub checkpoint_error: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reservation_id: Option<&'a str>,
+}
+
 pub struct WorkspaceReadyRepository;
 impl WorkspaceReadyRepository {
     pub fn journal(connection: &rusqlite::Connection, id: &str) -> StoreResult<Option<Value>> {
@@ -464,31 +472,27 @@ impl WorkspaceReadyRepository {
             object.remove("worktreePreparation");
             object.remove("workspaceReservationId");
         }
-        match checkpoint {
-            Ok(value) => {
-                let mut value = value.clone();
-                let parent = actor.get("checkpointHistoryHead").and_then(Value::as_str);
-                let boundary = parent
-                    .map(|id| CheckpointsRepository::checkpoint(tx, id))
-                    .transpose()?
-                    .flatten()
-                    .and_then(|p| p.record["historyBoundary"].as_i64())
-                    .filter(|b| *b != 0);
-                let (delta, boundary) =
-                    CheckpointsRepository::history_delta(tx, &plan.agent, boundary)?;
-                value["historyParent"] = json!(parent);
-                value["historyDelta"] = json!(delta);
-                value["historyBoundary"] = json!(boundary);
-                value["turnId"] = actor
-                    .get("lastCompletedTurn")
-                    .cloned()
-                    .unwrap_or(Value::Null);
-                let record = CheckpointRecord::from_value(value.clone())?;
-                Table::<CheckpointRecord>::new(tx).put(&record)?;
-                actor["checkpointHistoryHead"] = value["id"].clone();
-                actor["checkpointError"] = Value::Null;
-            }
-            Err(error) => actor["checkpointError"] = json!(error),
+        if let Ok(value) = checkpoint {
+            let mut value = value.clone();
+            let parent = actor.get("checkpointHistoryHead").and_then(Value::as_str);
+            let boundary = parent
+                .map(|id| CheckpointsRepository::checkpoint(tx, id))
+                .transpose()?
+                .flatten()
+                .and_then(|p| p.record["historyBoundary"].as_i64())
+                .filter(|b| *b != 0);
+            let (delta, boundary) =
+                CheckpointsRepository::history_delta(tx, &plan.agent, boundary)?;
+            value["historyParent"] = json!(parent);
+            value["historyDelta"] = json!(delta);
+            value["historyBoundary"] = json!(boundary);
+            value["turnId"] = actor
+                .get("lastCompletedTurn")
+                .cloned()
+                .unwrap_or(Value::Null);
+            let record = CheckpointRecord::from_value(value.clone())?;
+            Table::<CheckpointRecord>::new(tx).put(&record)?;
+            actor["checkpointHistoryHead"] = value["id"].clone();
         }
         write_agent(
             tx,
@@ -502,12 +506,17 @@ impl WorkspaceReadyRepository {
                 "worktreePreparation",
                 "checkpointHistoryHead",
                 "lastCompletedTurn",
-                "checkpointError",
             ],
         )?;
         operation["phase"] = json!("completed");
         operation["updated"] = json!(now);
         operation["error"] = Value::Null;
+        if let Err(reason) = checkpoint {
+            operation["result"] = serde_json::to_value(CheckpointDiagnostic {
+                checkpoint_error: reason,
+                reservation_id: None,
+            })?;
+        }
         tx.execute(
             "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
             params![plan.id, operation.to_string()],

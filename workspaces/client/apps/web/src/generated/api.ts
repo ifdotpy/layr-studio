@@ -3838,6 +3838,17 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    AgentCapacity:
+      | {
+          /** @constant */
+          kind: "automatic";
+          max: number;
+        }
+      | {
+          /** @constant */
+          kind: "explicit";
+          max: number;
+        };
     /** @description A managed command currently starting or running for this agent. */
     AgentCommandProgress: {
       lastOutputLine: string;
@@ -3873,6 +3884,7 @@ export interface components {
       agentModeSupported?: boolean | null | undefined;
       /** Cansend */
       canSend?: boolean | null | undefined;
+      capacity?: components["schemas"]["AgentCapacity"] | undefined;
       /**
        * Commandprogress
        * @default []
@@ -3942,9 +3954,8 @@ export interface components {
       layrReady?: boolean | null | undefined;
       /** Layrstateid */
       layrStateId?: null | string | undefined;
-      /** Manualname */
-      manualName?: boolean | null | undefined;
       movedFrom?: components["schemas"]["MovePointerDto"] | null | undefined;
+      naming?: components["schemas"]["AgentNaming"] | undefined;
       /** Nativeerror */
       nativeError?: null | string | undefined;
       /** Nativelimiterrorat */
@@ -4036,8 +4047,6 @@ export interface components {
         | components["schemas"]["WorkerDefaultsDto"]
         | null
         | undefined;
-      /** Workspacebackend */
-      workspaceBackend?: ("asif" | "vm") | null | undefined;
       workspaceCleanupIntent?:
         | components["schemas"]["WorkspaceCleanupSummaryDto"]
         | null
@@ -4157,6 +4166,7 @@ export interface components {
       autoWake?: boolean | null | undefined;
       /** Cansend */
       canSend?: boolean | null | undefined;
+      capacity?: components["schemas"]["AgentCapacity"] | undefined;
       capacityRetry?:
         | components["schemas"]["AgentEntityCapacityRetryDto"]
         | null
@@ -4258,8 +4268,6 @@ export interface components {
       layrReady?: boolean | null | undefined;
       /** Layrstateid */
       layrStateId?: null | string | undefined;
-      /** Manualname */
-      manualName?: boolean | null | undefined;
       /** Model */
       model?: null | string | undefined;
       movedFrom?: components["schemas"]["MovePointerDto"] | null | undefined;
@@ -4271,6 +4279,7 @@ export interface components {
       moveImportPending?: boolean | undefined;
       /** Name */
       name?: null | string | undefined;
+      naming?: components["schemas"]["AgentNaming"] | undefined;
       /** Nativeerror */
       nativeError?: null | string | undefined;
       /** Nativelimiterrorat */
@@ -4409,8 +4418,6 @@ export interface components {
         | components["schemas"]["WorkerDefaultsDto"]
         | null
         | undefined;
-      /** Workspacebackend */
-      workspaceBackend?: ("asif" | "vm") | null | undefined;
       workspaceCleanupIntent?:
         | components["schemas"]["WorkspaceCleanupSummaryDto"]
         | null
@@ -4586,6 +4593,8 @@ export interface components {
        */
       workspaceMode: "shared";
     };
+    /** @enum {string} */
+    AgentNaming: "automatic" | "pending_title" | "manual";
     /** AgentNativeRelease */
     AgentNativeRelease: {
       /** @default null */
@@ -4824,6 +4833,7 @@ export interface components {
       cancelledPark?:
         | components["schemas"]["ParkReceiptRecordResponse"]
         | undefined;
+      capacity?: components["schemas"]["AgentCapacity"] | undefined;
       /** @default null */
       capacityRetry?:
         | components["schemas"]["CapacityRetryRecordResponse"]
@@ -4833,11 +4843,6 @@ export interface components {
        * @default null
        */
       capacityRetryCount?: number | undefined;
-      /**
-       * Checkpointerror
-       * @default null
-       */
-      checkpointError?: null | string | undefined;
       /**
        * Checkpointhistoryhead
        * @default null
@@ -4863,20 +4868,10 @@ export interface components {
        */
       compactions?: number | undefined;
       /**
-       * Compactionsobservedonly
-       * @default null
-       */
-      compactionsObservedOnly?: boolean | undefined;
-      /**
        * Complaintmisses
        * @default null
        */
       complaintMisses?: number | undefined;
-      /**
-       * Complaintspresented
-       * @default null
-       */
-      complaintsPresented?: string[] | undefined;
       /**
        * Concurrency
        * @default null
@@ -5195,21 +5190,6 @@ export interface components {
        */
       liveSteerRejectedTurnId?: string | undefined;
       /**
-       * Manualname
-       * @default null
-       */
-      manualName?: boolean | undefined;
-      /**
-       * Maxagents
-       * @default null
-       */
-      maxAgents?: number | undefined;
-      /**
-       * Maxagentsexplicit
-       * @default null
-       */
-      maxAgentsExplicit?: boolean | undefined;
-      /**
        * Model
        * @default null
        */
@@ -5239,6 +5219,7 @@ export interface components {
        * @default null
        */
       name?: string | undefined;
+      naming?: components["schemas"]["AgentNaming"] | undefined;
       /**
        * Nativeeffort
        * @default null
@@ -5350,11 +5331,6 @@ export interface components {
        * @default null
        */
       needsAttention?: boolean | undefined;
-      /**
-       * Needstitle
-       * @default null
-       */
-      needsTitle?: boolean | undefined;
       /**
        * Parentid
        * @default null
@@ -5701,11 +5677,6 @@ export interface components {
         | components["schemas"]["WorkerDefaultsRecordResponse"]
         | undefined;
       /**
-       * Workspacebackend
-       * @default null
-       */
-      workspaceBackend?: ("asif" | "vm") | null | undefined;
-      /**
        * Workspaceingit
        * @default null
        */
@@ -5810,6 +5781,7 @@ export interface components {
        * @default null
        */
       canSend?: boolean | null | undefined;
+      capacity?: components["schemas"]["AgentCapacity"] | undefined;
       /** @default null */
       capacityRetry?:
         | components["schemas"]["AgentEntityCapacityRetryDto"]
@@ -6028,11 +6000,6 @@ export interface components {
        */
       layrStateId?: null | string | undefined;
       /**
-       * Manualname
-       * @default null
-       */
-      manualName?: boolean | null | undefined;
-      /**
        * Model
        * @default null
        */
@@ -6051,6 +6018,7 @@ export interface components {
        * @default null
        */
       name?: null | string | undefined;
+      naming?: components["schemas"]["AgentNaming"] | undefined;
       /**
        * Nativeerror
        * @default null
@@ -6303,11 +6271,6 @@ export interface components {
         | components["schemas"]["WorkerDefaultsDto"]
         | null
         | undefined;
-      /**
-       * Workspacebackend
-       * @default null
-       */
-      workspaceBackend?: ("asif" | "vm") | null | undefined;
       /** Workspacemode */
       workspaceMode?: components["schemas"]["WorkspaceMode"] | null | undefined;
       /**
@@ -8853,6 +8816,7 @@ export interface components {
        * @default null
        */
       canSend?: boolean | null | undefined;
+      capacity?: components["schemas"]["AgentCapacity"] | undefined;
       /** @default null */
       capacityRetry?:
         | components["schemas"]["AgentEntityCapacityRetryDto"]
@@ -9059,11 +9023,6 @@ export interface components {
        */
       layrStateId?: null | string | undefined;
       /**
-       * Manualname
-       * @default null
-       */
-      manualName?: boolean | null | undefined;
-      /**
        * Model
        * @default null
        */
@@ -9082,6 +9041,7 @@ export interface components {
        * @default null
        */
       name?: null | string | undefined;
+      naming?: components["schemas"]["AgentNaming"] | undefined;
       /**
        * Nativeerror
        * @default null
@@ -9330,11 +9290,6 @@ export interface components {
         | components["schemas"]["WorkerDefaultsDto"]
         | null
         | undefined;
-      /**
-       * Workspacebackend
-       * @default null
-       */
-      workspaceBackend?: ("asif" | "vm") | null | undefined;
       /** Workspacemode */
       workspaceMode?: components["schemas"]["WorkspaceMode"] | null | undefined;
       /**
@@ -10889,6 +10844,65 @@ export interface components {
           | "expired"
         )
       | "legacy";
+    /**
+     * CodexErrorInfo
+     * @description This translation layer make sure that we expose codex error code in camel case.
+     *
+     *     When an upstream HTTP status is available (for example, from the Responses API or a provider), it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant.
+     */
+    CodexErrorInfo:
+      | (
+          | "contextWindowExceeded"
+          | "sessionBudgetExceeded"
+          | "usageLimitExceeded"
+          | "rateLimitExceeded"
+          | "flexUnavailable"
+          | "serverOverloaded"
+          | "cyberPolicy"
+          | "misalignmentPolicyViolation"
+          | "tooManyDenials"
+          | "internalServerError"
+          | "unauthorized"
+          | "badRequest"
+          | "threadRollbackFailed"
+          | "sandboxError"
+          | "other"
+        )
+      | {
+          httpConnectionFailed: {
+            /** Format: uint16 */
+            httpStatusCode?: number | null | undefined;
+          };
+        }
+      | {
+          responseStreamConnectionFailed: {
+            /** Format: uint16 */
+            httpStatusCode?: number | null | undefined;
+          };
+        }
+      | {
+          responseStreamDisconnected: {
+            /** Format: uint16 */
+            httpStatusCode?: number | null | undefined;
+          };
+        }
+      | {
+          responseTooManyFailedAttempts: {
+            /** Format: uint16 */
+            httpStatusCode?: number | null | undefined;
+          };
+        }
+      | {
+          activeTurnNotSteerable: {
+            turnKind: components["schemas"]["NonSteerableTurnKind"];
+          };
+        }
+      | (
+          | string
+          | {
+              [key: string]: unknown;
+            }
+        );
     /**
      * CodexLoginReceipt
      * @description Known fields; AccountStore.login_receipts() passes persisted receipts through.
@@ -15878,54 +15892,16 @@ export interface components {
     };
     /**
      * NativeProviderError
-     * @description Known app-server fields plus pass-through provider error extensions.
-     *
-     *     The native provider owns the remaining JSON object fields; the stored
-     *     ``codex_records`` shapes likewise type these errors as ``JsonObject``.
+     * @description The provider-owned portion of an agent error that Studio displays or classifies.
      */
     NativeProviderError: {
-      /**
-       * Additionaldetails
-       * @default null
-       */
-      additionalDetails?:
-        | {
-            [key: string]: components["schemas"]["JsonValue"] | undefined;
-          }
-        | null
-        | string
-        | undefined;
+      additionalDetails?: components["schemas"]["JsonValue"] | undefined;
       claudeFailure?: components["schemas"]["ClaudeFailure"] | undefined;
-      /**
-       * Code
-       * @default null
-       */
-      code?: number | null | string | undefined;
-      /**
-       * Codexerrorinfo
-       * @default null
-       */
-      codexErrorInfo?:
-        | {
-            [key: string]: components["schemas"]["JsonValue"] | undefined;
-          }
-        | components["schemas"]["JsonValue"][]
-        | null
-        | string
-        | undefined;
-      /** @default null */
-      data?: components["schemas"]["JsonValue"] | null | undefined;
-      /**
-       * Message
-       * @default null
-       */
-      message?:
-        | {
-            [key: string]: components["schemas"]["JsonValue"] | undefined;
-          }
-        | null
-        | string
-        | undefined;
+      code?: string | null | undefined;
+      codexErrorInfo?: components["schemas"]["CodexErrorInfo"] | undefined;
+      data?: components["schemas"]["JsonValue"] | undefined;
+      /** @default  */
+      message?: string | undefined;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
@@ -16471,6 +16447,8 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /** @enum {string} */
+    NonSteerableTurnKind: "review" | "compact";
     /**
      * OnlineMigration
      * @description Progress of one online migration: batch copy with a high-water mark.
@@ -24875,11 +24853,6 @@ export interface components {
        * @default null
        */
       compactions?: number | null | undefined;
-      /**
-       * Compactionsobservedonly
-       * @default null
-       */
-      compactionsObservedOnly?: boolean | null | undefined;
       /** @default null */
       contextUsage?:
         | components["schemas"]["TranscriptContextUsage"]
@@ -38714,6 +38687,12 @@ export type AccountTransferStatus =
   components["schemas"]["AccountTransferStatus"];
 export const AgentMode = { multi: "multi", single: "single" } as const;
 export type AgentMode = components["schemas"]["AgentMode"];
+export const AgentNaming = {
+  automatic: "automatic",
+  pending_title: "pending_title",
+  manual: "manual",
+} as const;
+export type AgentNaming = components["schemas"]["AgentNaming"];
 export const AgentNativeStatusValue = {
   idle: "idle",
   notLoaded: "notLoaded",
@@ -39155,6 +39134,12 @@ export const NativeSafetyStage = {
   cancelled: "cancelled",
 } as const;
 export type NativeSafetyStage = components["schemas"]["NativeSafetyStage"];
+export const NonSteerableTurnKind = {
+  review: "review",
+  compact: "compact",
+} as const;
+export type NonSteerableTurnKind =
+  components["schemas"]["NonSteerableTurnKind"];
 export const ParticipantRole = { lead: "lead", agent: "agent" } as const;
 export type ParticipantRole = components["schemas"]["ParticipantRole"];
 export const PayloadMigrationName = {

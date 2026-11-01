@@ -1020,6 +1020,85 @@ mod projection_plan_tests {
     }
 
     #[test]
+    fn removed_agent_diagnostics_are_not_projected() {
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"checkpointError":"legacy","complaintsPresented":["c"],"workspaceBackend":null}"#;
+        let record = serde_json::from_str(raw).unwrap();
+        let projected =
+            super::agent_entity_view(&record, &super::AgentViewContext::default()).unwrap();
+        assert!(projected.get("checkpointError").is_none());
+        assert!(projected.get("complaintsPresented").is_none());
+        assert!(projected.get("workspaceBackend").is_none());
+        assert_eq!(
+            studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
+            "b2ae13a4c60b1d7373b79ab982292d2d02ec8c576b257f881cb777bd35d3178d"
+        );
+    }
+
+    #[test]
+    fn removed_compaction_flag_changes_agent_projection() {
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"compactionsObservedOnly":false}"#;
+        let record = serde_json::from_str(raw).unwrap();
+        let projected =
+            super::agent_entity_view(&record, &super::AgentViewContext::default()).unwrap();
+        assert!(projected.get("compactionsObservedOnly").is_none());
+        assert_eq!(
+            studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
+            "b2ae13a4c60b1d7373b79ab982292d2d02ec8c576b257f881cb777bd35d3178d"
+        );
+    }
+
+    #[test]
+    fn agent_projection_uses_canonical_capacity() {
+        let record = serde_json::json!({"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{"kind":"explicit","max":80}});
+        let projected =
+            super::agent_entity_view(&record, &super::AgentViewContext::default()).unwrap();
+        assert_eq!(projected["capacity"], record["capacity"]);
+        assert!(projected.get("maxAgents").is_none());
+        assert!(projected.get("maxAgentsExplicit").is_none());
+    }
+
+    #[test]
+    fn canonical_naming_states_project_to_agent() {
+        for naming in ["automatic", "pending_title", "manual"] {
+            let record = serde_json::json!({"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"naming":naming});
+            let view =
+                super::agent_entity_view(&record, &super::AgentViewContext::default()).unwrap();
+            assert_eq!(view["naming"], naming);
+            assert!(view.get("manualName").is_none());
+        }
+    }
+
+    #[test]
+    fn chat_organization_flags_project_with_canonical_capacity() {
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"archived":true,"pinned":true}"#;
+        let agent: studio_runtime_store::AgentRecord = serde_json::from_str(raw).unwrap();
+        let projected =
+            super::agent_entity_view(&agent.value(), &super::AgentViewContext::default()).unwrap();
+        assert_eq!(
+            studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
+            "69870ccec982e294904c5df141fbc2d9d3f1358ccf49d5e275a02bf299f55a73"
+        );
+    }
+
+    #[test]
+    fn legacy_image_metadata_does_not_change_agent_projection_hash() {
+        let before = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"authResumeAttempt":1,"turnRecovery":{"outcome":"idle"},"lastContextRepairWait":{"status":"superseded"},"lastContextRepairCheck":{"phase":"waiting"},"completedWorkerTurns":2,"supervisorRestore":{"status":"not_restored"},"countedWorkerTurn":true,"imageWorkspaceBaseError":"old","imageWorkspaceBaseRef":"main","imageWorkspaceCreatedAt":2,"imageWorkspaceError":"old","imageWorkspaceHasGit":true,"imageWorkspaceNoticeSent":true,"imageWorkspaceNoticeText":"old","imageWorkspaceRelative":".","imageWorkspaceStartCommit":"abc","imageWorkspaceSubpath":"."}"#;
+        let after = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"authResumeAttempt":1}"#;
+        let context = super::AgentViewContext::default();
+        let project = |raw: &str| {
+            let record = serde_json::from_str(raw).unwrap();
+            serde_json::to_vec(&super::agent_entity_view(&record, &context).unwrap()).unwrap()
+        };
+        let legacy = project(before);
+        let normalized = project(after);
+        assert_eq!(legacy, normalized);
+        assert_eq!(
+            studio_runtime_store::sha256_hex(&normalized),
+            "b2ae13a4c60b1d7373b79ab982292d2d02ec8c576b257f881cb777bd35d3178d"
+        );
+    }
+
+    #[test]
     fn complaint_projection_preserves_public_fields() {
         let context = super::ComplaintViewContext::default();
         for recipient in ["user", "lead"] {
