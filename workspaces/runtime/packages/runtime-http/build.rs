@@ -224,11 +224,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             serde_with: None,
         };
     }
-    // The start-wait union is owned by agent_progress; its generated branches
-    // are no longer referenced by the mapped component.
-    analysis
-        .schemas
-        .retain(|name, _| !name.starts_with("AgentEntityStartWaitDtoVariant"));
+    // These union branches are owned by agent_progress, not generated DTOs.
+    analysis.schemas.retain(|name, _| {
+        ![
+            "AgentEntityStartWaitDtoVariant",
+            "AccountChangeVariant",
+            "AccountChangeKind",
+            "AccountTransferProgressVariant",
+            "AccountTransferProgressKind",
+        ]
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+    });
     analysis
         .schemas
         .get_mut("MonitorState")

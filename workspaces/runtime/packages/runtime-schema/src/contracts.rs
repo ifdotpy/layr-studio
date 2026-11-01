@@ -1380,7 +1380,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     openapi["components"]["schemas"]["TeamCounts"] = serde_json::json!({});
     for (name, schema) in crate::agent_progress::schemas()
         .into_iter()
-        .chain(crate::agent_entity_nested::schemas())
+        .chain(crate::agent_entity_nested::schemas()?)
         .chain(crate::agent_entity_remote::schemas())
         .chain(crate::desktop::schemas())
         .chain(crate::queue_command::schemas())

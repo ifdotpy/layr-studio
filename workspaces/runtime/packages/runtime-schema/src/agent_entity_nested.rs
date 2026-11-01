@@ -66,47 +66,6 @@ impl AgentNaming {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
-pub enum AgentEntityDtoKind {
-    Agent,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum AgentEntityDtoEnvironment {
-    Host,
-    Linux,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum AgentEntityDtoExecutionMode {
-    Vm,
-    Native,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum AgentEntityDtoWorktreePreparation {
-    Waiting,
-    Preparing,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(untagged)]
-pub enum AgentEntityDtoWorktree {
-    Boolean(bool),
-    String(String),
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(untagged)]
-pub enum AgentEntityDtoError {
-    NativeProviderError(crate::provider_errors::NativeProviderError),
-    String(String),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
 pub enum AgentMode {
     Multi,
     Single,
@@ -237,14 +196,74 @@ pub struct ExecutionSettingsDto {
     pub updated_at: Field<f64>,
 }
 
-pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 10] {
+fn object(
+    value: &mut serde_json::Value,
+) -> Result<&mut serde_json::Map<String, serde_json::Value>, String> {
+    value
+        .as_object_mut()
+        .ok_or_else(|| "agent schema must be an object".into())
+}
+
+fn property<'a>(
+    schema: &'a mut serde_json::Value,
+    name: &str,
+) -> Result<&'a mut serde_json::Value, String> {
+    object(schema)?
+        .get_mut("properties")
+        .and_then(serde_json::Value::as_object_mut)
+        .and_then(|properties| properties.get_mut(name))
+        .ok_or_else(|| format!("missing agent schema property {name}"))
+}
+
+fn title(schema: &mut serde_json::Value, name: &str) -> Result<(), String> {
+    object(schema)?.insert("title".into(), name.into());
+    Ok(())
+}
+
+// Keep the established OpenAPI nullable spelling while retaining schemars bounds.
+fn nullable(
+    schema: &mut serde_json::Value,
+    name: &str,
+    label: &str,
+    default: bool,
+) -> Result<(), String> {
+    let prop = property(schema, name)?;
+    let mut value = prop.clone();
+    let value_object = object(&mut value)?;
+    let types = value_object
+        .get("type")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| format!("{name} must have nullable type"))?;
+    if types.len() != 2 || types[1] != "null" || !types[0].is_string() {
+        return Err(format!("{name} must have one type and null"));
+    }
+    let kind = types[0].clone();
+    value_object.insert("type".into(), kind.clone());
+    if kind == "number" {
+        match value_object.remove("format") {
+            Some(serde_json::Value::String(format)) if format == "double" => {}
+            _ => return Err(format!("{name} must use the double number format")),
+        }
+    }
+    let variants = if kind == "boolean" {
+        serde_json::json!([value,{"type":"null"}])
+    } else {
+        serde_json::json!([{"type":"null"},value])
+    };
+    *prop = serde_json::json!({"anyOf":variants,"title":label});
+    if default {
+        object(prop)?.insert("default".into(), serde_json::Value::Null);
+    }
+    Ok(())
+}
+
+pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 10], String> {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
     let mut overview = AgentOverview::json_schema(&mut generator).to_value();
-    overview["title"] = "AgentOverview".into();
-    // Preserve the published OpenAPI spelling of optional nullable properties.
-    for (name, title) in [
+    title(&mut overview, "AgentOverview")?;
+    for (name, label) in [
         ("result", "Result"),
         ("resultFile", "Resultfile"),
         ("resultTruncated", "Resulttruncated"),
@@ -252,56 +271,39 @@ pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 10] {
         ("task", "Task"),
         ("taskTruncated", "Tasktruncated"),
     ] {
-        let kind = overview["properties"][name]["type"][0].clone();
-        let variants = if kind == "string" {
-            serde_json::json!([{"type":"null"},{"type":kind}])
-        } else {
-            serde_json::json!([{"type":kind},{"type":"null"}])
-        };
-        overview["properties"][name] =
-            serde_json::json!({"anyOf":variants,"default":null,"title":title});
+        nullable(&mut overview, name, label, true)?;
     }
     let mut source = AgentSource::json_schema(&mut generator).to_value();
-    source["title"] = "AgentSource".into();
+    title(&mut source, "AgentSource")?;
     let naming = AgentNaming::json_schema(&mut generator).to_value();
     let mut mode = AgentMode::json_schema(&mut generator).to_value();
-    mode["title"] = "AgentMode".into();
+    title(&mut mode, "AgentMode")?;
     let mut status = AgentStatus::json_schema(&mut generator).to_value();
-    status["title"] = "AgentStatus".into();
+    title(&mut status, "AgentStatus")?;
     let mut native_status = AgentNativeStatusValue::json_schema(&mut generator).to_value();
-    native_status["title"] = "AgentNativeStatusValue".into();
+    title(&mut native_status, "AgentNativeStatusValue")?;
     let mut repair = AgentEntityContextRepairWaitDto::json_schema(&mut generator).to_value();
-    repair["title"] = "AgentEntityContextRepairWaitDto".into();
-    repair["properties"]["scope"]["title"] = "Scope".into();
-    repair["properties"]["error"]["title"] = "Error".into();
-    let mut pointer = MovePointerDto::json_schema(&mut generator).to_value();
-    pointer["title"] = "MovePointerDto".into();
-    pointer["properties"]["server"]["title"] = "Server".into();
-    pointer["properties"]["move"]["title"] = "Move".into();
-    let agent_id_type = pointer["properties"]["agentId"]["type"][0].clone();
-    pointer["properties"]["agentId"] = serde_json::json!({"anyOf":[{"type":"null"},{"type":agent_id_type}],"default":null,"title":"Agentid"});
-    let mut defaults = WorkerDefaultsDto::json_schema(&mut generator).to_value();
-    defaults["title"] = "WorkerDefaultsDto".into();
-    for (name, title) in [
-        ("model", "Model"),
-        ("effort", "Effort"),
-        ("accountKey", "Accountkey"),
-        ("cyberAccessProgram", "Cyberaccessprogram"),
-    ] {
-        let property = &mut defaults["properties"][name];
-        let mut value = property.clone();
-        if let Some(types) = value["type"].as_array_mut() {
-            types.retain(|kind| kind != "null");
-            if types.len() == 1 {
-                value["type"] = types[0].clone();
-            }
-        }
-        *property = serde_json::json!({"anyOf":[{"type":"null"},value],"title":title});
-        if name == "accountKey" || name == "cyberAccessProgram" {
-            property["default"] = serde_json::Value::Null;
-        }
+    title(&mut repair, "AgentEntityContextRepairWaitDto")?;
+    for (name, label) in [("scope", "Scope"), ("error", "Error")] {
+        title(property(&mut repair, name)?, label)?;
     }
-    for (name, title, default) in [
+    let mut pointer = MovePointerDto::json_schema(&mut generator).to_value();
+    title(&mut pointer, "MovePointerDto")?;
+    for (name, label) in [("server", "Server"), ("move", "Move")] {
+        title(property(&mut pointer, name)?, label)?;
+    }
+    nullable(&mut pointer, "agentId", "Agentid", true)?;
+    let mut defaults = WorkerDefaultsDto::json_schema(&mut generator).to_value();
+    title(&mut defaults, "WorkerDefaultsDto")?;
+    for (name, label, default) in [
+        ("model", "Model", false),
+        ("effort", "Effort", false),
+        ("accountKey", "Accountkey", true),
+        ("cyberAccessProgram", "Cyberaccessprogram", true),
+    ] {
+        nullable(&mut defaults, name, label, default)?;
+    }
+    for (name, label, default) in [
         ("fastMode", "Fastmode", None),
         (
             "daybreakEnabled",
@@ -314,15 +316,15 @@ pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 10] {
             Some(serde_json::json!(1)),
         ),
     ] {
-        let property = &mut defaults["properties"][name];
-        property["title"] = title.into();
+        let prop = property(&mut defaults, name)?;
+        title(prop, label)?;
         if let Some(default) = default {
-            property["default"] = default;
+            object(prop)?.insert("default".into(), default);
         }
     }
     let mut settings = ExecutionSettingsDto::json_schema(&mut generator).to_value();
-    settings["title"] = "ExecutionSettingsDto".into();
-    for (name, title) in [
+    title(&mut settings, "ExecutionSettingsDto")?;
+    for (name, label) in [
         ("accountKey", "Accountkey"),
         ("cyberAccessProgram", "Cyberaccessprogram"),
         ("daybreakEnabled", "Daybreakenabled"),
@@ -332,16 +334,9 @@ pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 10] {
         ("nativeEffort", "Nativeeffort"),
         ("updatedAt", "Updatedat"),
     ] {
-        let kind = settings["properties"][name]["type"][0].clone();
-        let variants = if kind == "boolean" {
-            serde_json::json!([{"type":kind},{"type":"null"}])
-        } else {
-            serde_json::json!([{"type":"null"},{"type":kind}])
-        };
-        settings["properties"][name] =
-            serde_json::json!({"anyOf":variants,"default":null,"title":title});
+        nullable(&mut settings, name, label, true)?;
     }
-    [
+    Ok([
         ("AgentOverview", overview),
         ("AgentSource", source),
         ("AgentNaming", naming),
@@ -352,7 +347,7 @@ pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 10] {
         ("MovePointerDto", pointer),
         ("WorkerDefaultsDto", defaults),
         ("ExecutionSettingsDto", settings),
-    ]
+    ])
 }
 
 #[cfg(test)]
@@ -404,14 +399,8 @@ mod tests {
     fn published_components_match_owners() {
         let document: serde_json::Value =
             serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
-        for (name, schema) in schemas() {
-            let mut published = document["components"]["schemas"][name].clone();
-            if name == "WorkerDefaultsDto" {
-                published["properties"]["accountKey"]["anyOf"][1]["minLength"] = 1.into();
-                published["properties"]["accountKey"]["anyOf"][1]["maxLength"] =
-                    crate::account_key::ACCOUNT_KEY_MAX_CHARS.into();
-            }
-            assert_eq!(published, schema, "{name}");
+        for (name, schema) in schemas().unwrap() {
+            assert_eq!(document["components"]["schemas"][name], schema, "{name}");
         }
     }
 }
