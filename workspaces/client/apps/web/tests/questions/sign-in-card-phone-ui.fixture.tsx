@@ -66,16 +66,12 @@ const render = () =>
 // The server keeps the card pending in the waiting phase after a paste-mode approval.
 window.__waiting = () => {
   requests = requests.map((r) =>
-    r.id === "redirect"
+    r.id === "redirect" && r.request.kind === "browser_open"
       ? {
           ...r,
-          detail: {
-            ...r.detail,
-            params: {
-              ...r.detail.params,
-              phase: "waiting",
-              waiting: { expiresAt: now + 600 },
-            },
+          request: {
+            ...r.request,
+            phase: { kind: "waiting" as const, expires_at: now + 600 },
           },
         }
       : r,
