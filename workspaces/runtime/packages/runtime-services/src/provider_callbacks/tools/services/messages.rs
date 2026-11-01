@@ -6,6 +6,41 @@ use std::collections::BTreeMap;
 use studio_runtime_schema::delivery::DeliveryMoment;
 use studio_runtime_schema::persistence::{DeliveryStatus, RecipientDelivery};
 
+fn message_signature(
+    args: &crate::orchestration_worker::WorkerMessage,
+) -> Result<String, CallbackError> {
+    let bytes = studio_runtime_schema::json_compat::python_json_serialized(args)?;
+    Ok(studio_runtime_store::sha256_hex(bytes.as_bytes()))
+}
+
+#[cfg(test)]
+mod typed_message_tests {
+    #[test]
+    fn repeated_typed_messages_have_the_same_signature() {
+        let first: crate::orchestration_worker::WorkerMessage =
+            serde_json::from_str(r#"{"target":"parent","text":"hello","importance":"progress"}"#)
+                .unwrap();
+        let retry: crate::orchestration_worker::WorkerMessage =
+            serde_json::from_str(r#"{"importance":"progress","text":"hello","target":"parent"}"#)
+                .unwrap();
+        assert_eq!(
+            super::message_signature(&first).unwrap(),
+            super::message_signature(&retry).unwrap()
+        );
+    }
+
+    #[test]
+    fn message_signature_keeps_legacy_bytes() {
+        let body =
+            serde_json::from_str(r#"{"target":"parent","text":"雪","importance":"progress"}"#)
+                .unwrap();
+        assert_eq!(
+            super::message_signature(&body).unwrap(),
+            "5d0d49a2528bb748af443a88b542031e905182485fb2cb76bfbce21da95efefb"
+        );
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ChatSendReply {
@@ -346,11 +381,14 @@ pub(super) fn send(
     id: &str,
     now: f64,
 ) -> Result<Box<serde_json::value::RawValue>, CallbackError> {
+    let args =
+        <crate::orchestration_worker::WorkerMessage as serde::Deserialize>::deserialize(args)
+            .map_err(|_| CallbackError::Invalid("Invalid message arguments"))?;
     send_as_actor(
         tx,
         snapshot.actor(),
         &snapshot.context().agent,
-        args,
+        &args,
         id,
         now,
         true,
@@ -360,7 +398,7 @@ pub(super) fn send(
 pub(crate) fn send_remote_worker(
     tx: &Transaction<'_>,
     sender: &str,
-    args: &Value,
+    args: &crate::orchestration_worker::WorkerMessage,
     id: &str,
     now: f64,
 ) -> Result<Box<serde_json::value::RawValue>, CallbackError> {
@@ -379,13 +417,13 @@ fn send_as_actor(
     tx: &Transaction<'_>,
     actor: &Value,
     who: &str,
-    args: &Value,
+    args: &crate::orchestration_worker::WorkerMessage,
     id: &str,
     now: f64,
     resolve_direct: bool,
 ) -> Result<Box<serde_json::value::RawValue>, CallbackError> {
     let mut resolved_args = args.clone();
-    let prepared = if let Some(supplied) = args["target"].as_str().filter(|target| {
+    let prepared = if let Some(supplied) = Some(args.target.as_str()).filter(|target| {
         resolve_direct
             && !matches!(*target, "user" | "parent" | "lead" | "broadcast" | "all")
             && !target.starts_with("remote:")
@@ -404,7 +442,7 @@ fn send_as_actor(
             let mut authority =
                 message_authority(&agents, &projects, AuthorizationRecords::default())?;
             let target = resolve_message_target(supplied, actor, who, &agents, &mut authority)?;
-            resolved_args["target"] = json!(target);
+            resolved_args.target = target;
             Some((projects, authority))
         };
         Some((agents, authority))
@@ -412,38 +450,37 @@ fn send_as_actor(
         None
     };
     let args = &resolved_args;
-    let message = crate::event_write::python_strip(text(args, "text")?);
+    let message = crate::event_write::python_strip(&args.text);
     if !(1..=12000).contains(&message.chars().count()) {
         return Err(CallbackError::Invalid(
             "Message must have 1 to 12000 characters",
         ));
     }
-    let importance = args["importance"].as_str().unwrap_or("message");
+    let importance = args.importance.value().map_or("message", String::as_str);
     if !matches!(
         importance,
         "message" | "progress" | "question" | "blocker" | "result"
     ) {
         return Err(CallbackError::Invalid("Unknown message importance"));
     }
-    let delivery = DeliveryMoment::for_message(args)
-        .map_err(|_| CallbackError::Invalid("Invalid delivery moment"))?;
-    let progress_key = args.get("progress_key").filter(|value| !value.is_null());
-    let progress_version = args
-        .get("progress_version")
-        .filter(|value| !value.is_null());
+    let delivery = DeliveryMoment::for_message_parts(
+        args.importance.value().map(String::as_str),
+        args.delivery.value().map(String::as_str),
+    )
+    .map_err(|_| CallbackError::Invalid("Invalid delivery moment"))?;
+    let progress_key = args.progress_key.value();
+    let progress_version = args.progress_version.value();
     let versioned_progress = progress_key.is_some() || progress_version.is_some();
     if versioned_progress
         && (importance != "progress"
-            || !progress_key
-                .and_then(Value::as_str)
-                .is_some_and(|key| (1..=200).contains(&key.chars().count()))
-            || !progress_version.and_then(Value::as_u64).is_some())
+            || !progress_key.is_some_and(|key| (1..=200).contains(&key.chars().count()))
+            || progress_version.is_none())
     {
         return Err(CallbackError::Invalid(
             "Versioned progress requires a progress_key and nonnegative integer progress_version",
         ));
     }
-    let target = match text(args, "target")? {
+    let target = match args.target.as_str() {
         "lead" => text(actor, "rootId")?,
         "parent" => text(actor, "parentId")?,
         target => target,
@@ -601,7 +638,8 @@ fn send_as_actor(
     }
     let recipients = admitted;
     let room_id = room.id.clone();
-    let signature = event_write::request_signature(args);
+    // Preserve the original sorted, ASCII-escaped receipt identity.
+    let signature = message_signature(args)?;
     let now_ms = chrono::Utc::now().timestamp_millis();
     if !broadcast
         && let Some(reply) = saved_private_message(tx, id, who, &room_id, &signature, now_ms)?
@@ -676,8 +714,8 @@ fn send_as_actor(
             // Python `chat_message`: the version travels with the input, and
             // turn preparation keeps the latest version per sender, room and key.
             if let (Some(key), Some(version)) = (progress_key, progress_version) {
-                payload["progress_key"] = key.clone();
-                payload["progress_version"] = version.clone();
+                payload["progress_key"] = json!(key);
+                payload["progress_version"] = json!(version);
             }
             let event_id = format!("chat:{id}:{recipient_id}");
             studio_runtime_store::QueueWriteRepository::put_metadata(

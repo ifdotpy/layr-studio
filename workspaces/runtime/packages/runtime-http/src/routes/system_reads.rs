@@ -143,8 +143,14 @@ async fn directories(
         let result = driver
             .exchange(
                 &server,
-                "folders",
-                &serde_json::json!({"cwd":path}),
+                studio_runtime_services::orchestration_wire::OrchestrationCommand::Folders(
+                    studio_runtime_services::orchestration_worker::FoldersPayload {
+                        cwd: path.map_or(
+                            studio_runtime_schema::queue_command::Field::Null,
+                            studio_runtime_schema::queue_command::Field::Value,
+                        ),
+                    },
+                ),
                 &request_id,
                 now,
             )

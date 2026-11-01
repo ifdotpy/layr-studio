@@ -218,7 +218,7 @@ enum SignedBody {
     Auto(AutoPairRequest),
     Rename(RenameServer),
     Management(ManagementRequest),
-    Orchestration(Value),
+    Orchestration(Box<crate::orchestration_wire::OrchestrationRequest>),
     Other,
 }
 
@@ -306,9 +306,15 @@ impl SignedRequest {
                     .map_err(invalid)?
                     .0,
                 ),
-                ("POST", "/api/servers/orchestration") => {
-                    SignedBody::Orchestration(serde_json::from_slice(raw).map_err(invalid)?)
-                }
+                ("POST", "/api/servers/orchestration") => SignedBody::Orchestration(Box::new(
+                    serde_json::from_slice::<
+                        studio_runtime_schema::http_ingress::Object<
+                            crate::orchestration_wire::OrchestrationRequest,
+                        >,
+                    >(raw)
+                    .map_err(invalid)?
+                    .0,
+                )),
                 _ => {
                     if !raw.is_empty() {
                         serde_json::from_slice::<serde::de::IgnoredAny>(raw).map_err(invalid)?;
@@ -370,7 +376,7 @@ impl SignedRequest {
     pub fn request_id(&self) -> &str {
         &self.request
     }
-    pub fn orchestration_body(&self) -> Option<&Value> {
+    pub fn orchestration_body(&self) -> Option<&crate::orchestration_wire::OrchestrationRequest> {
         if let SignedBody::Orchestration(body) = &self.body {
             Some(body)
         } else {
@@ -397,7 +403,7 @@ impl SignedRequest {
             SignedBody::Auto(body) => body.request_id.as_str(),
             SignedBody::Rename(body) => body.request_id.as_str(),
             SignedBody::Management(body) => body.request_id().unwrap_or_default(),
-            SignedBody::Orchestration(body) => text(body, "requestId"),
+            SignedBody::Orchestration(body) => &body.request_id,
             SignedBody::Other => "",
         }
     }

@@ -314,7 +314,12 @@ impl PeerProjects {
         // The receiver reads the list; a lost notice is repaired by its next contact.
         if let Err(error) = self
             .driver
-            .exchange(server, CHANGED_ACTION, &json!({}), &key, now as i64)
+            .exchange(
+                server,
+                crate::orchestration_wire::OrchestrationCommand::ProjectsChanged(json!({})),
+                &key,
+                now as i64,
+            )
             .await
         {
             fail("send projects.changed", &error);
@@ -360,7 +365,12 @@ impl PeerProjects {
         let now = crate::event_write::unix_time().ok()? as i64;
         match self
             .driver
-            .exchange(server, "projects", &json!({}), &key, now)
+            .exchange(
+                server,
+                crate::orchestration_wire::OrchestrationCommand::Projects(json!({})),
+                &key,
+                now,
+            )
             .await
         {
             Ok(ExchangeOutcome::Applied(list)) => {
@@ -458,14 +468,14 @@ mod tests {
         fn exchange<'a>(
             &'a self,
             _server: &'a str,
-            envelope: &'a Value,
+            envelope: &'a crate::orchestration_wire::OrchestrationRequest,
             _timeout: std::time::Duration,
         ) -> BoxFuture<
             'a,
             Result<studio_runtime_store::multi_server_delivery::RemoteReply, AccessError>,
         > {
             Box::pin(async move {
-                let key = envelope["requestId"].clone();
+                let key = envelope.request_id.clone();
                 if *self.offline.lock().unwrap() {
                     return Err(AccessError::Refused {
                         status: 503,
@@ -477,12 +487,7 @@ mod tests {
                 struct Items<'a, T> {
                     items: &'a [T],
                 }
-                #[derive(serde::Deserialize)]
-                struct Request {
-                    action: String,
-                }
-                let request: Request = serde_json::from_str(&envelope.to_string()).unwrap();
-                let value = match request.action.as_str() {
+                let value = match envelope.command.kind().as_str() {
                     "projects" => serde_json::value::to_raw_value(&Items {
                         items: &self.items.lock().unwrap(),
                     })
@@ -498,7 +503,7 @@ mod tests {
                     _ => panic!("unexpected action"),
                 };
                 Ok(studio_runtime_store::multi_server_delivery::RemoteReply {
-                    request_id: key.as_str().unwrap().to_owned(),
+                    request_id: key,
                     outcome: studio_runtime_schema::persistence::RemoteOutcome::Applied,
                     value: Some(value),
                     error: None,
@@ -685,7 +690,11 @@ mod tests {
         let wake = Arc::new(PeerProjectsWake::default());
         let effects = RuntimeOrchestrationEffects::new(Arc::clone(&f.store))
             .with_projects_changed(Arc::clone(&wake));
-        let envelope = json!({"requestId": "r", "action": CHANGED_ACTION, "payload": {}});
+        let envelope = crate::orchestration_wire::OrchestrationRequest {
+            request_id: "r".into(),
+            operation: Vec::new(),
+            command: crate::orchestration_wire::OrchestrationCommand::ProjectsChanged(json!({})),
+        };
         assert!(effects.supports(CHANGED_ACTION));
         effects.execute(PEER, &envelope).await.unwrap();
         assert_eq!(wake.take().notified, BTreeSet::from([PEER.to_owned()]));

@@ -43,6 +43,20 @@ pub use lifecycle::{
 
 pub type RadioReply = Box<serde_json::value::RawValue>;
 
+fn radio_signature(body: &impl Serialize) -> Result<String, ProjectsError> {
+    #[derive(Serialize)]
+    struct SignedRadio<'a, T> {
+        operation: &'static str,
+        body: &'a T,
+    }
+    let bytes = studio_runtime_schema::json_compat::python_json_serialized(&SignedRadio {
+        operation: "radio",
+        body,
+    })
+    .map_err(studio_runtime_store::StoreError::from)?;
+    Ok(studio_runtime_store::sha256_hex(bytes.as_bytes()))
+}
+
 #[derive(Serialize)]
 struct FreshRadioReply {
     room: Room,
@@ -63,9 +77,7 @@ pub async fn manage(
 ) -> Result<RadioReply, ProjectsError> {
     let root = bounded_text(body.request_id(), 255)?;
     let key = format!("radio:{root}");
-    let signature = studio_runtime_store::sha256_hex(
-        &serde_json::to_vec(body).map_err(studio_runtime_store::StoreError::from)?,
-    );
+    let signature = radio_signature(body)?;
     let replay_root = root.clone();
     let replay_key = key.clone();
     let replay_signature = signature.clone();
@@ -373,9 +385,7 @@ pub async fn create_with(
 ) -> Result<RadioReply, ProjectsError> {
     let root = bounded_text(body.request_id.as_str(), 255)?;
     let key = format!("radio:{root}");
-    let signature = studio_runtime_store::sha256_hex(
-        &serde_json::to_vec(body).map_err(studio_runtime_store::StoreError::from)?,
-    );
+    let signature = radio_signature(body)?;
     let replay_root = root.clone();
     let replay_key = key.clone();
     let replay_signature = signature.clone();
@@ -522,7 +532,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn legacy_radio_receipt_signature_is_refused() {
+    async fn legacy_radio_receipt_signature_replays() {
         let dir = tempfile::tempdir().expect("legacy replay fixture");
         let store = Arc::new(
             RuntimeStore::open(Some(dir.path()))
@@ -557,7 +567,25 @@ mod tests {
             .await
             .expect("legacy replay fixture");
         let typed = serde::Deserialize::deserialize(body).expect("radio request");
-        assert!(manage(store, &typed).await.is_err());
+        assert_eq!(manage(store, &typed).await.unwrap().get(), raw);
+    }
+
+    #[test]
+    fn radio_manage_signature_keeps_legacy_bytes() {
+        let open: RadioManage = serde_json::from_str(r#"{"action":"radio","radio_action":"open","path":"/雪","team_id":"a","request_id":"r"}"#).unwrap();
+        assert_eq!(
+            radio_signature(&open).unwrap(),
+            "79861ed12b8ecafd42a69bab685830e22640972dda84e61829c92fe13c0e7466"
+        );
+    }
+
+    #[test]
+    fn radio_create_signature_keeps_legacy_bytes() {
+        let create: RadioCreate = serde_json::from_str(r#"{"action":"radio","radio_action":"create","path":"/雪","request_id":"r","name":"radio","participants":[{"account_key":"a","model":"m"},{"account_key":"b","model":"m"}]}"#).unwrap();
+        assert_eq!(
+            radio_signature(&create).unwrap(),
+            "54b0ecf63dd218e41c2527481874e4bbc21256734cba68c42d14d780e7bcdca9"
+        );
     }
 
     #[test]

@@ -19,9 +19,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 .is_some_and(|value| !value.is_null() && !value.is_string())
         {
             fields.remove("agent");
-        }
-        let normalized = serde_json::to_string(&value)?;
-        if normalized != raw {
+            let normalized = serde_json::to_string(&value)?;
             tx.execute(
                 "UPDATE runtime_work SET record=?2 WHERE id=?1",
                 (&id, normalized),
@@ -36,6 +34,23 @@ mod tests {
     use super::*;
     use rusqlite::Connection;
     use studio_runtime_schema::work_item_record::WorkItem;
+
+    #[test]
+    fn preserves_valid_record_bytes() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); INSERT INTO runtime_work VALUES('w', '{\"id\": \"w\", \"status\": \"review\"}');").unwrap();
+        let tx = db.transaction().unwrap();
+        let before: String = tx
+            .query_row("SELECT record FROM runtime_work", [], |r| r.get(0))
+            .unwrap();
+        let changes = tx.total_changes();
+        super::apply(&tx).unwrap();
+        let after: String = tx
+            .query_row("SELECT record FROM runtime_work", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(after, before);
+        assert_eq!(tx.total_changes(), changes);
+    }
 
     #[test]
     fn removes_non_string_agent_only_and_is_idempotent() {

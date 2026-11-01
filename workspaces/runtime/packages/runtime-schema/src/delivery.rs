@@ -116,15 +116,36 @@ impl DeliveryMoment {
         if let Some(delivery) = Self::metadata_delivery(metadata)? {
             return Ok(delivery);
         }
-        Ok(if kind == "agent_message" {
-            serde_json::from_str::<serde_json::Value>(text)
+        Ok(Self::event_default(kind, text))
+    }
+
+    /// Resolve a typed event's optional timing using the same legacy rules.
+    pub fn for_event_parts(
+        kind: &str,
+        text: &str,
+        delivery: Option<&str>,
+    ) -> Result<Self, InvalidDeliveryMoment> {
+        delivery
+            .map(Self::parse_legacy)
+            .unwrap_or_else(|| Ok(Self::event_default(kind, text)))
+    }
+
+    fn event_default(kind: &str, text: &str) -> Self {
+        #[derive(Deserialize)]
+        struct Importance {
+            importance: Option<String>,
+        }
+        if kind == "agent_message"
+            && serde_json::from_str::<crate::http_ingress::Object<Importance>>(text)
                 .ok()
-                .as_ref()
-                .map(Self::message_default)
-                .unwrap_or_default()
+                .and_then(|value| value.0.importance)
+                .as_deref()
+                == Some("progress")
+        {
+            Self::NextTurn
         } else {
-            Self::default()
-        })
+            Self::CurrentTurn
+        }
     }
 
     /// Resolve parsed message arguments without serializing their importance.
@@ -133,12 +154,26 @@ impl DeliveryMoment {
         Ok(Self::metadata_delivery(Some(args))?.unwrap_or_else(|| Self::message_default(args)))
     }
 
+    /// Resolve a typed message's optional timing and importance.
+    pub fn for_message_parts(
+        importance: Option<&str>,
+        delivery: Option<&str>,
+    ) -> Result<Self, InvalidDeliveryMoment> {
+        delivery
+            .map(Self::parse_legacy)
+            .unwrap_or_else(|| Ok(Self::importance_default(importance)))
+    }
+
     fn message_default(message: &serde_json::Value) -> Self {
-        if message
-            .get("importance")
-            .and_then(serde_json::Value::as_str)
-            == Some("progress")
-        {
+        Self::importance_default(
+            message
+                .get("importance")
+                .and_then(serde_json::Value::as_str),
+        )
+    }
+
+    fn importance_default(importance: Option<&str>) -> Self {
+        if importance == Some("progress") {
             Self::NextTurn
         } else {
             Self::CurrentTurn

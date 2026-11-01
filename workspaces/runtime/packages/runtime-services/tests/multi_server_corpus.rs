@@ -12,6 +12,61 @@ use studio_runtime_services::multi_server_discovery::DiscoverySnapshot;
 use studio_runtime_services::multi_server_orchestration::{AppliedReply, ExchangeOutcome};
 use studio_runtime_store::{RuntimeStore, multi_server_delivery::RemoteReply};
 
+fn typed_request(
+    value: &Value,
+) -> studio_runtime_services::orchestration_wire::OrchestrationRequest {
+    <studio_runtime_services::orchestration_wire::OrchestrationRequest as serde::Deserialize>::deserialize(value).expect("typed fixture")
+}
+
+fn input_command(text: &str) -> studio_runtime_services::orchestration_wire::OrchestrationCommand {
+    use studio_runtime_schema::queue_command::Field;
+    studio_runtime_services::orchestration_wire::OrchestrationCommand::Input(
+        studio_runtime_services::orchestration_worker::InputPayload {
+            link: "link".into(),
+            parent_epoch: 1,
+            kind: "user".into(),
+            text: text.into(),
+            delivery: Field::Missing,
+            anchor: Field::Missing,
+            worker: Field::Value("worker".into()),
+            epoch: Field::Value(1),
+            control_epoch: Field::Value(1),
+        },
+    )
+}
+
+fn input_request(
+    id: &str,
+    text: &str,
+) -> studio_runtime_services::orchestration_wire::OrchestrationRequest {
+    studio_runtime_services::orchestration_wire::OrchestrationRequest {
+        request_id: id.into(),
+        operation: Vec::new(),
+        command: input_command(text),
+    }
+}
+
+fn message_command(
+    text: &str,
+) -> studio_runtime_services::orchestration_wire::OrchestrationCommand {
+    use studio_runtime_schema::queue_command::Field;
+    use studio_runtime_services::orchestration_worker::{WorkerCall, WorkerMessage};
+    studio_runtime_services::orchestration_wire::OrchestrationCommand::Message(WorkerCall {
+        link: "link-1".into(),
+        worker: "worker-1".into(),
+        epoch: 1,
+        parent_epoch: 1,
+        args: WorkerMessage {
+            target: "parent".into(),
+            text: text.into(),
+            importance: Field::Missing,
+            progress_key: Field::Missing,
+            progress_version: Field::Missing,
+            delivery: Field::Missing,
+        },
+    })
+}
+
 fn applied(value: &Value) -> ExchangeOutcome {
     ExchangeOutcome::Applied(AppliedReply::new(
         serde_json::value::to_raw_value(value).unwrap(),
@@ -184,14 +239,14 @@ async fn peer_delivery_replays_same_identity_after_lost_receipt_and_restart_once
         fn execute<'a>(
             &'a self,
             _: &'a str,
-            _: &'a Value,
+            _: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
         ) -> futures_util::future::BoxFuture<'a, Result<ExchangeOutcome, AccessError>> {
             Box::pin(async { Ok(ExchangeOutcome::Unknown) })
         }
     }
     #[derive(Default)]
     struct Peer {
-        seen: Mutex<HashMap<String, Value>>,
+        seen: Mutex<HashMap<String, Vec<u8>>>,
         applied: Mutex<HashSet<String>>,
         calls: Mutex<HashMap<String, usize>>,
     }
@@ -199,23 +254,18 @@ async fn peer_delivery_replays_same_identity_after_lost_receipt_and_restart_once
         fn exchange<'a>(
             &'a self,
             server: &'a str,
-            envelope: &'a Value,
+            envelope: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
             _timeout: Duration,
         ) -> futures_util::future::BoxFuture<'a, Result<RemoteReply, AccessError>> {
             Box::pin(async move {
                 assert_eq!(server, "peer-server");
-                let id = envelope["requestId"]
-                    .as_str()
-                    .expect("request id")
-                    .to_owned();
+                let id = envelope.request_id.clone();
+                let bytes = serde_json::to_vec(envelope).expect("envelope bytes");
                 let mut seen = self.seen.lock().unwrap();
                 if let Some(previous) = seen.get(&id) {
-                    assert_eq!(
-                        previous, envelope,
-                        "replay keeps exact identity and content"
-                    );
+                    assert_eq!(previous, &bytes, "replay keeps exact identity and content");
                 } else {
-                    seen.insert(id.clone(), envelope.clone());
+                    seen.insert(id.clone(), bytes);
                 }
                 self.applied.lock().unwrap().insert(id.clone());
                 let mut calls = self.calls.lock().unwrap();
@@ -244,10 +294,28 @@ async fn peer_delivery_replays_same_identity_after_lost_receipt_and_restart_once
         Arc::clone(&peer) as _,
         Arc::new(Effects),
     );
-    let payload = json!({"link":"link-1","worker":"worker-1","args":{"text":"same"}});
+    let payload = studio_runtime_services::orchestration_worker::WorkerCall {
+        link: "link-1".into(),
+        worker: "worker-1".into(),
+        epoch: 1,
+        parent_epoch: 1,
+        args: studio_runtime_services::orchestration_worker::WorkerMessage {
+            target: "parent".into(),
+            text: "same".into(),
+            importance: Default::default(),
+            progress_key: Default::default(),
+            progress_version: Default::default(),
+            delivery: Default::default(),
+        },
+    };
     assert_eq!(
         driver
-            .exchange("peer-server", "message", &payload, &request_id, now)
+            .exchange(
+                "peer-server",
+                studio_runtime_services::orchestration_wire::OrchestrationCommand::Message(payload),
+                &request_id,
+                now
+            )
             .await
             .unwrap(),
         ExchangeOutcome::Unknown
@@ -317,7 +385,7 @@ async fn received_remote_event_replays_cached_receipt_after_restart_without_dupl
         fn exchange<'a>(
             &'a self,
             _server: &'a str,
-            _envelope: &'a Value,
+            _envelope: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
             _timeout: Duration,
         ) -> futures_util::future::BoxFuture<'a, Result<RemoteReply, AccessError>> {
             Box::pin(async move { Err(refused(503, "unused", "transport unused in receive test")) })
@@ -379,7 +447,7 @@ async fn received_remote_event_replays_cached_receipt_after_restart_without_dupl
     };
     let driver = make_driver(Arc::clone(&store));
     let lost_reply = driver
-        .receive("peer-server", &envelope, now)
+        .receive("peer-server", &typed_request(&envelope), now)
         .await
         .expect("event applied");
     assert!(matches!(lost_reply, ExchangeOutcome::Applied(_)));
@@ -393,7 +461,7 @@ async fn received_remote_event_replays_cached_receipt_after_restart_without_dupl
     );
     let driver = make_driver(Arc::clone(&restarted));
     let receipt = driver
-        .receive("peer-server", &envelope, now + 1)
+        .receive("peer-server", &typed_request(&envelope), now + 1)
         .await
         .expect("cached receipt replays");
     assert_eq!(receipt, lost_reply);
@@ -431,7 +499,7 @@ async fn paired_project_location_read_uses_the_fake_peer_transport() {
         fn exchange<'a>(
             &'a self,
             _server: &'a str,
-            _envelope: &'a Value,
+            _envelope: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
             _timeout: Duration,
         ) -> futures_util::future::BoxFuture<'a, Result<RemoteReply, AccessError>> {
             Box::pin(async move { Err(refused(503, "unused", "peer transport not expected")) })
@@ -442,14 +510,12 @@ async fn paired_project_location_read_uses_the_fake_peer_transport() {
         fn exchange<'a>(
             &'a self,
             server: &'a str,
-            envelope: &'a Value,
+            envelope: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
             _timeout: Duration,
         ) -> futures_util::future::BoxFuture<'a, Result<RemoteReply, AccessError>> {
             Box::pin(async move {
                 assert_eq!(server, "peer-server");
-                let key = envelope["requestId"]
-                    .as_str()
-                    .expect("stable request identity");
+                let key = envelope.request_id.as_str();
                 Ok(self
                     .0
                     .receive("local-server", envelope, chrono::Utc::now().timestamp())
@@ -505,8 +571,11 @@ async fn paired_project_location_read_uses_the_fake_peer_transport() {
     let outcome = local
         .exchange(
             "peer-server",
-            "location_info",
-            &json!({"cwd":folder.to_string_lossy()}),
+            studio_runtime_services::orchestration_wire::OrchestrationCommand::LocationInfo(
+                studio_runtime_services::orchestration_worker::LocationInfoPayload {
+                    cwd: folder.to_string_lossy().into_owned(),
+                },
+            ),
             &studio_runtime_schema::persistence::RequestIdentity::issue_root(),
             chrono::Utc::now().timestamp(),
         )
@@ -527,8 +596,13 @@ async fn paired_project_location_read_uses_the_fake_peer_transport() {
     let folders = local
         .exchange(
             "peer-server",
-            "folders",
-            &json!({"cwd":browse.to_string_lossy()}),
+            studio_runtime_services::orchestration_wire::OrchestrationCommand::Folders(
+                studio_runtime_services::orchestration_worker::FoldersPayload {
+                    cwd: studio_runtime_schema::queue_command::Field::Value(
+                        browse.to_string_lossy().into_owned(),
+                    ),
+                },
+            ),
             &studio_runtime_schema::persistence::RequestIdentity::issue_root(),
             chrono::Utc::now().timestamp(),
         )
@@ -558,7 +632,7 @@ async fn moved_worker_send_reaches_a_local_descendant_once() {
         fn exchange<'a>(
             &'a self,
             _server: &'a str,
-            _envelope: &'a Value,
+            _envelope: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
             _timeout: Duration,
         ) -> futures_util::future::BoxFuture<'a, Result<RemoteReply, AccessError>> {
             Box::pin(async move { Err(refused(503, "unused", "transport unused in receive test")) })
@@ -695,12 +769,12 @@ async fn moved_worker_send_reaches_a_local_descendant_once() {
         Arc::new(RuntimeOrchestrationEffects::new(Arc::clone(&store))),
     );
     let receipt = driver
-        .receive("peer-server", &envelope, now)
+        .receive("peer-server", &typed_request(&envelope), now)
         .await
         .expect("move-send is applied through the incoming caller");
     assert!(matches!(receipt, ExchangeOutcome::Applied(_)));
     let replay = driver
-        .receive("peer-server", &envelope, now + 1)
+        .receive("peer-server", &typed_request(&envelope), now + 1)
         .await
         .expect("stable move-send replays its saved receipt");
     assert_eq!(receipt, replay);
@@ -793,11 +867,11 @@ async fn remote_worker_call_refuses_stopped_parent_without_writes() {
     })
             .await.expect("stopped parent fixture");
     let effects = RuntimeOrchestrationEffects::new(Arc::clone(&store));
-    let request = json!({"requestId":"stopped-call","action":"message","payload":{"link":"stopped-link","worker":"stopped-worker","epoch":2,"parentEpoch":3,"args":{}}});
+    let request = json!({"requestId":"stopped-call","operation":[],"action":"message","payload":{"link":"stopped-link","worker":"stopped-worker","epoch":2,"parentEpoch":3,"args":{"target":"parent","text":"hello"}}});
     let before = rows(&store);
     assert_eq!(
         effects
-            .execute("peer-server", &request)
+            .execute("peer-server", &typed_request(&request))
             .await
             .expect_err("parent stopped")
             .status(),
@@ -915,18 +989,18 @@ async fn remote_stop_receiver_replays_exact_request_and_rejects_superseded_contr
     let lifecycle: Arc<dyn LifecyclePorts> = Arc::new(Lifecycle);
     let effects = RuntimeOrchestrationEffects::with_lifecycle_ports(store.clone(), lifecycle);
     let envelope = json!({
-        "requestId":"remote-stop-request-1",
+        "requestId":"remote-stop-request-1", "operation":[],
         "action":"stop",
         "payload":{"link":"remote-link","worker":"remote-worker","reason":"Stopped by the parent","controlEpoch":9}
     });
 
     let first = effects
-        .execute("home-server", &envelope)
+        .execute("home-server", &typed_request(&envelope))
         .await
         .expect("remote stop");
     assert_eq!(first, applied(&json!({"stopped":["remote-worker"]})));
     let replay = effects
-        .execute("home-server", &envelope)
+        .execute("home-server", &typed_request(&envelope))
         .await
         .expect("same request replay");
     assert_eq!(replay, applied(&json!({"stopped":["remote-worker"]})));
@@ -955,11 +1029,16 @@ async fn remote_stop_receiver_replays_exact_request_and_rejects_superseded_contr
         .await
         .expect("newer remote control epoch");
     let stale = json!({
-        "requestId":"remote-stop-request-2",
+        "requestId":"remote-stop-request-2", "operation":[],
         "action":"stop",
         "payload":{"link":"remote-link","worker":"remote-worker","reason":"old stop","controlEpoch":9}
     });
-    assert!(effects.execute("home-server", &stale).await.is_err());
+    assert!(
+        effects
+            .execute("home-server", &typed_request(&stale))
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]
@@ -1007,26 +1086,26 @@ async fn stopping_remote_proxy_persists_and_replays_the_same_signed_intent() {
         fn exchange<'a>(
             &'a self,
             server: &'a str,
-            envelope: &'a Value,
+            envelope: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
             _timeout: Duration,
         ) -> futures_util::future::BoxFuture<'a, Result<RemoteReply, AccessError>> {
             Box::pin(async move {
                 assert_eq!(server, "peer-server");
-                let payload = &envelope["payload"];
+                let studio_runtime_services::orchestration_wire::OrchestrationCommand::Stop(
+                    payload,
+                ) = &envelope.command
+                else {
+                    panic!("stop request")
+                };
                 let envelope = StopEnvelope {
-                    request_id: envelope["requestId"].as_str().unwrap().to_owned(),
-                    action: envelope["action"].as_str().unwrap().to_owned(),
-                    operation: envelope["operation"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .map(|v| v.as_str().unwrap().to_owned())
-                        .collect(),
+                    request_id: envelope.request_id.clone(),
+                    action: envelope.command.kind().as_str().to_owned(),
+                    operation: envelope.operation.clone(),
                     payload: StopPayload {
-                        worker: payload["worker"].as_str().unwrap().to_owned(),
-                        link: payload["link"].as_str().unwrap().to_owned(),
-                        reason: payload["reason"].as_str().unwrap().to_owned(),
-                        control_epoch: payload["controlEpoch"].as_i64().unwrap(),
+                        worker: payload.worker.clone(),
+                        link: payload.link.clone(),
+                        reason: payload.reason.value().unwrap().clone(),
+                        control_epoch: payload.control_epoch,
                     },
                 };
                 self.calls.lock().unwrap().push(envelope.clone());
@@ -1253,9 +1332,12 @@ async fn child_result_requires_link_membership_and_updates_proxy() {
     })
             .await.expect("result link and proxy");
     let effects = RuntimeOrchestrationEffects::new(Arc::clone(&store));
-    let request = |id: &str, result: &str| json!({"requestId":id,"action":"event","payload":{"link":"result-link","parentEpoch":3,"kind":"child_result","text":json!({"agent_id":"result-child","result":result}).to_string()}});
+    let request = |id: &str, result: &str| json!({"requestId":id,"operation":[],"action":"event","payload":{"link":"result-link","parentEpoch":3,"kind":"child_result","text":json!({"agent_id":"result-child","result":result}).to_string()}});
     effects
-        .execute("peer-server", &request("child-result-1", "done"))
+        .execute(
+            "peer-server",
+            &typed_request(&request("child-result-1", "done")),
+        )
         .await
         .expect("linked child result");
     let connection = store.test_reader().expect("stored result");
@@ -1268,9 +1350,9 @@ async fn child_result_requires_link_membership_and_updates_proxy() {
         Some(&json!("child-result-1"))
     );
     drop(connection);
-    let structured = json!({"requestId":"child-result-structured","action":"event","payload":{"link":"result-link","parentEpoch":3,"kind":"child_result","text":json!({"agent_id":"result-child","result":{"ok":true}}).to_string()}});
+    let structured = json!({"requestId":"child-result-structured","operation":[],"action":"event","payload":{"link":"result-link","parentEpoch":3,"kind":"child_result","text":json!({"agent_id":"result-child","result":{"ok":true}}).to_string()}});
     effects
-        .execute("peer-server", &structured)
+        .execute("peer-server", &typed_request(&structured))
         .await
         .expect("structured child result");
     let connection = store.test_reader().expect("stored structured result");
@@ -1287,7 +1369,10 @@ async fn child_result_requires_link_membership_and_updates_proxy() {
     let before = rows(&store);
     assert_eq!(
         effects
-            .execute("peer-server", &request("child-result-2", "bad"))
+            .execute(
+                "peer-server",
+                &typed_request(&request("child-result-2", "bad"))
+            )
             .await
             .expect_err("unlinked child")
             .status(),
@@ -1315,7 +1400,7 @@ async fn browser_callback_matches_python_and_replays_without_second_loopback_rel
         fn exchange<'a>(
             &'a self,
             _server: &'a str,
-            _envelope: &'a Value,
+            _envelope: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
             _timeout: Duration,
         ) -> futures_util::future::BoxFuture<'a, Result<RemoteReply, AccessError>> {
             Box::pin(async move { Err(refused(503, "unused", "transport unused in receive test")) })
@@ -1381,7 +1466,7 @@ async fn browser_callback_matches_python_and_replays_without_second_loopback_rel
         .send(())
         .expect("start callback relay after store setup");
     let first = driver
-        .receive("peer-server", &envelope, now)
+        .receive("peer-server", &typed_request(&envelope), now)
         .await
         .expect("valid callback relayed");
     let expected_result = expected["valid"].clone();
@@ -1389,7 +1474,7 @@ async fn browser_callback_matches_python_and_replays_without_second_loopback_rel
         serde_json::from_str(first.to_reply(&root_id).value.unwrap().get()).unwrap();
     assert_eq!(actual_result, expected_result);
     let replay = driver
-        .receive("peer-server", &envelope, now + 1)
+        .receive("peer-server", &typed_request(&envelope), now + 1)
         .await
         .expect("cached callback receipt");
     assert_eq!(first, replay);
@@ -1407,7 +1492,7 @@ async fn browser_callback_matches_python_and_replays_without_second_loopback_rel
     ] {
         let request = json!({"requestId":studio_runtime_schema::persistence::RequestIdentity::issue_root(),"operation":[],"action":"browser_callback","payload":payload});
         let receipt = driver
-            .receive("peer-server", &request, now + 2)
+            .receive("peer-server", &typed_request(&request), now + 2)
             .await
             .expect("definite callback refusal is returned as a receipt");
         let ExchangeOutcome::NotApplied(message) = &receipt else {
@@ -1416,7 +1501,7 @@ async fn browser_callback_matches_python_and_replays_without_second_loopback_rel
         assert!(!message.is_empty(), "{label} refusal names its cause");
         assert_eq!(
             driver
-                .receive("peer-server", &request, now + 3)
+                .receive("peer-server", &typed_request(&request), now + 3)
                 .await
                 .expect("refusal receipt is idempotently replayed"),
             receipt
@@ -1486,8 +1571,7 @@ async fn rust_remote_event_outbox_row_matches_python_queue_writer() {
                 studio_runtime_services::multi_server_orchestration::enqueue_in_transaction(
                     tx,
                     "peer-server",
-                    "event",
-                    &payload_value,
+                    studio_runtime_services::orchestration_wire::OrchestrationCommand::Event(<studio_runtime_services::orchestration_worker::EventPayload as serde::Deserialize>::deserialize(&payload_value).expect("event fixture")),
                     &request_id,
                     now,
                 )?;
@@ -1541,7 +1625,7 @@ impl studio_runtime_services::multi_server_orchestration::PairedTransport for Ex
     fn exchange<'a>(
         &'a self,
         server: &'a str,
-        envelope: &'a Value,
+        envelope: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
         _timeout: Duration,
     ) -> futures_util::future::BoxFuture<
         'a,
@@ -1549,7 +1633,7 @@ impl studio_runtime_services::multi_server_orchestration::PairedTransport for Ex
     > {
         Box::pin(async move {
             assert_eq!(server, "peer-server");
-            self.sent.lock().unwrap().push(envelope.clone());
+            self.sent.lock().unwrap().push(json!(envelope));
             self.reply.clone().ok_or_else(|| {
                 studio_runtime_services::multi_server_auth::refused(
                     503,
@@ -1574,6 +1658,35 @@ fn exec_driver(
             ),
         ),
     )
+}
+
+#[tokio::test]
+async fn compact_exec_is_rejected_before_any_incoming_claim() {
+    let (_root, store) = store().await;
+    let wire = ExecWire::new(None);
+    let driver = exec_driver(&store, wire);
+    let request = serde_json::from_str::<studio_runtime_services::orchestration_wire::OrchestrationRequest>(
+        r#"{"requestId":"compact","operation":[],"action":"exec","payload":{"actor":"lead","receiptDigest":"old"}}"#,
+    ).unwrap();
+    let error = driver
+        .receive("peer-server", &request, chrono::Utc::now().timestamp())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        studio_runtime_services::multi_server_auth::AccessError::Refused {
+            code: "invalid_request",
+            ..
+        }
+    ));
+    let count: i64 = store
+        .test_reader()
+        .unwrap()
+        .query_row("SELECT count(*) FROM runtime_server_inbox", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(count, 0);
 }
 
 #[tokio::test]
@@ -1729,7 +1842,14 @@ async fn rust_exec_attempt_writes_the_python_receipt_form_and_never_resends() {
     let lost = ExecWire::new(None);
     let driver = exec_driver(&store, Arc::clone(&lost));
     let outcome = driver
-        .exchange("peer-server", "exec", &payload, &root, now)
+        .exchange(
+            "peer-server",
+            studio_runtime_services::orchestration_wire::OrchestrationCommand::Exec(
+                <studio_runtime_services::orchestration_exec::ExecPayload as serde::Deserialize>::deserialize(&payload).unwrap(),
+            ),
+            &root,
+            now,
+        )
         .await
         .unwrap();
     assert_eq!(outcome, ExchangeOutcome::Unknown);
@@ -1755,7 +1875,14 @@ async fn rust_exec_attempt_writes_the_python_receipt_form_and_never_resends() {
     let wire = ExecWire::new(Some(applied(&receipt).to_reply(&root)));
     let driver = exec_driver(&store, Arc::clone(&wire));
     let outcome = driver
-        .exchange("peer-server", "exec", &payload, &root, now + 5)
+        .exchange(
+            "peer-server",
+            studio_runtime_services::orchestration_wire::OrchestrationCommand::Exec(
+                <studio_runtime_services::orchestration_exec::ExecPayload as serde::Deserialize>::deserialize(&payload).unwrap(),
+            ),
+            &root,
+            now + 5,
+        )
         .await
         .unwrap();
     assert_eq!(outcome, applied(&json!({"status":"exited"})));
@@ -1802,7 +1929,14 @@ async fn rust_exec_attempt_writes_the_python_receipt_form_and_never_resends() {
     );
     let changed = json!({"actor":"fixture-lead","command":["true"],"cwd":"/other","timeout":30});
     let conflict = driver
-        .exchange("peer-server", "exec", &changed, &root, now + 6)
+        .exchange(
+            "peer-server",
+            studio_runtime_services::orchestration_wire::OrchestrationCommand::Exec(
+                <studio_runtime_services::orchestration_exec::ExecPayload as serde::Deserialize>::deserialize(&changed).unwrap(),
+            ),
+            &root,
+            now + 6,
+        )
         .await
         .unwrap_err();
     assert_eq!(conflict.status(), 409);
@@ -1903,7 +2037,9 @@ async fn exec_receipt_probes_are_answered_like_the_python_receiver() {
         envelope["requestId"] = json!(key);
         envelope["operation"] = json!(["exec-receipt"]);
         let value = envelope;
-        let reply = driver.receive(&case.principal, &value, case.at).await;
+        let reply = driver
+            .receive(&case.principal, &typed_request(&value), case.at)
+            .await;
         if name == "conflict" {
             let studio_runtime_services::multi_server_orchestration::ExchangeOutcome::NotApplied(
                 message,
@@ -2036,7 +2172,7 @@ async fn exec_event_owner_checks_accept_the_receipt_form_like_python() {
         let mut expected = case.result;
         expected.request_id = key.clone();
         let outcome = driver
-            .receive(&case.principal, &envelope, now)
+            .receive(&case.principal, &typed_request(&envelope), now)
             .await
             .unwrap();
         let actual = outcome.to_reply(&key);
@@ -2508,7 +2644,7 @@ async fn unknown_peer_input_claim_is_not_reopened_as_waiting() {
         fn execute<'a>(
             &'a self,
             _: &'a str,
-            _: &'a Value,
+            _: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
         ) -> futures_util::future::BoxFuture<'a, Result<ExchangeOutcome, AccessError>> {
             Box::pin(async move {
                 self.0.fetch_add(1, Ordering::SeqCst);
@@ -2521,7 +2657,7 @@ async fn unknown_peer_input_claim_is_not_reopened_as_waiting() {
         fn exchange<'a>(
             &'a self,
             _server: &'a str,
-            _envelope: &'a Value,
+            _envelope: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
             _timeout: Duration,
         ) -> futures_util::future::BoxFuture<'a, Result<RemoteReply, AccessError>> {
             Box::pin(async move { panic!("inbound input must not call the transport") })
@@ -2543,12 +2679,7 @@ async fn unknown_peer_input_claim_is_not_reopened_as_waiting() {
         Arc::new(NoTransport),
         Arc::new(Effects(calls.clone())),
     );
-    let envelope = json!({
-        "requestId":request_id,
-        "operation":[],
-        "action":"input",
-        "payload":{"actor":"fixture"}
-    });
+    let envelope = input_request(&request_id, "fixture");
     assert_eq!(
         driver
             .receive("peer-server", &envelope, now)
@@ -2612,7 +2743,7 @@ async fn only_typed_pre_effect_waiting_reopens_peer_input() {
         fn execute<'a>(
             &'a self,
             _: &'a str,
-            _: &'a Value,
+            _: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
         ) -> futures_util::future::BoxFuture<'a, Result<ExchangeOutcome, AccessError>> {
             Box::pin(async move {
                 if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
@@ -2628,7 +2759,7 @@ async fn only_typed_pre_effect_waiting_reopens_peer_input() {
         fn exchange<'a>(
             &'a self,
             _server: &'a str,
-            _envelope: &'a Value,
+            _envelope: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
             _timeout: Duration,
         ) -> futures_util::future::BoxFuture<'a, Result<RemoteReply, AccessError>> {
             Box::pin(async move { panic!("inbound input must not call the transport") })
@@ -2644,12 +2775,7 @@ async fn only_typed_pre_effect_waiting_reopens_peer_input() {
         Arc::new(NoTransport),
         Arc::new(Effects(calls.clone())),
     );
-    let envelope = json!({
-        "requestId":request_id,
-        "operation":[],
-        "action":"input",
-        "payload":{"actor":"fixture"}
-    });
+    let envelope = input_request(&request_id, "fixture");
     assert_eq!(
         driver
             .receive("peer-server", &envelope, now)
@@ -2678,8 +2804,7 @@ async fn multi_server_corpus_witness() {
             studio_runtime_services::multi_server_orchestration::enqueue_in_transaction(
                 tx,
                 "peer-server",
-                "message",
-                &json!({"text":"fixture"}),
+                message_command("fixture"),
                 &request_id,
                 chrono::Utc::now().timestamp(),
             )?;
@@ -2730,7 +2855,7 @@ async fn orchestration_claims_survive_lost_receipts_and_reject_changed_content()
         fn execute<'a>(
             &'a self,
             _: &'a str,
-            _: &'a Value,
+            _: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
         ) -> futures_util::future::BoxFuture<'a, Result<ExchangeOutcome, AccessError>> {
             Box::pin(async move {
                 self.0.fetch_add(1, Ordering::SeqCst);
@@ -2743,10 +2868,10 @@ async fn orchestration_claims_survive_lost_receipts_and_reject_changed_content()
         fn exchange<'a>(
             &'a self,
             _: &'a str,
-            envelope: &'a Value,
+            envelope: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
             _: Duration,
         ) -> futures_util::future::BoxFuture<'a, Result<RemoteReply, AccessError>> {
-            let request_id = envelope["requestId"].as_str().expect("request id");
+            let request_id = envelope.request_id.as_str();
             Box::pin(async move {
                 self.0.fetch_add(1, Ordering::SeqCst);
                 Ok(applied(&json!({"applied":true})).to_reply(request_id))
@@ -2774,16 +2899,12 @@ async fn orchestration_claims_survive_lost_receipts_and_reject_changed_content()
                     Arc::new(Effects(calls.clone())),
                 );
                 if direction == "inbox" {
-                    driver.receive("peer-server", &json!({"requestId":request_id,"operation":[],"action":"input","payload":{"actor":"fixture"}}), now).await
+                    driver
+                        .receive("peer-server", &input_request(&request_id, "fixture"), now)
+                        .await
                 } else {
                     driver
-                        .exchange(
-                            "peer-server",
-                            "input",
-                            &json!({"actor":"fixture"}),
-                            &request_id,
-                            now,
-                        )
+                        .exchange("peer-server", input_command("fixture"), &request_id, now)
                         .await
                 }
             };
@@ -2826,16 +2947,12 @@ async fn orchestration_claims_survive_lost_receipts_and_reject_changed_content()
                 Arc::new(Effects(calls.clone())),
             );
             let changed = if direction == "inbox" {
-                driver.receive("peer-server", &json!({"requestId":request_id,"operation":[],"action":"input","payload":{"actor":"different"}}), now).await
+                driver
+                    .receive("peer-server", &input_request(&request_id, "different"), now)
+                    .await
             } else {
                 driver
-                    .exchange(
-                        "peer-server",
-                        "input",
-                        &json!({"actor":"different"}),
-                        &request_id,
-                        now,
-                    )
+                    .exchange("peer-server", input_command("different"), &request_id, now)
                     .await
             };
             assert_eq!(
@@ -2858,8 +2975,7 @@ async fn orchestration_claims_survive_lost_receipts_and_reject_changed_content()
         ("python-running", false),
         ("python-complete", true),
     ] {
-        let request =
-            json!({"requestId":id,"operation":[],"action":"input","payload":{"actor":"fixture"}});
+        let request = input_request(id, "fixture");
         let result = driver
             .receive("peer-server", &request, chrono::Utc::now().timestamp())
             .await;
@@ -3247,7 +3363,7 @@ async fn a_row_that_cannot_be_delivered_does_not_hold_back_later_rows() {
         fn execute<'a>(
             &'a self,
             _: &'a str,
-            _: &'a Value,
+            _: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
         ) -> futures_util::future::BoxFuture<'a, Result<ExchangeOutcome, AccessError>> {
             Box::pin(async { Ok(ExchangeOutcome::Unknown) })
         }
@@ -3260,11 +3376,11 @@ async fn a_row_that_cannot_be_delivered_does_not_hold_back_later_rows() {
         fn exchange<'a>(
             &'a self,
             _server: &'a str,
-            envelope: &'a Value,
+            envelope: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
             _timeout: Duration,
         ) -> futures_util::future::BoxFuture<'a, Result<RemoteReply, AccessError>> {
             Box::pin(async move {
-                let id = envelope["requestId"].as_str().unwrap().to_owned();
+                let id = envelope.request_id.clone();
                 self.delivered.lock().unwrap().push(id.clone());
                 Ok(applied(&json!({"stored":true})).to_reply(&id))
             })
@@ -3287,8 +3403,7 @@ async fn a_row_that_cannot_be_delivered_does_not_hold_back_later_rows() {
                 enqueue_in_transaction(
                     tx,
                     "peer-server",
-                    "message",
-                    &json!({"link":"link-1","worker":"worker-1","args":{"text":root}}),
+                    message_command(root),
                     root,
                     now,
                 )

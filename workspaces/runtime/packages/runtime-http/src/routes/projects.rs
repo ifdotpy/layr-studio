@@ -752,7 +752,11 @@ async fn remote_project_write(
     driver: Arc<studio_runtime_services::multi_server_orchestration::OrchestrationDriver>,
     now: i64,
 ) -> Result<LocationResult, ApiError> {
+    use studio_runtime_schema::queue_command::Field;
     use studio_runtime_services::multi_server_orchestration::ExchangeOutcome;
+    use studio_runtime_services::project_locations::{
+        LocationAction, LocationPayload, LocationWire,
+    };
     let action = body.action();
     let request_id = body
         .request_id()
@@ -830,9 +834,22 @@ async fn remote_project_write(
         );
         let op = request_id.to_owned();
         let registration = json!({"server":server,"path":path,"name":name});
-        let signature_data =
-            json!({"action":"add_location","project":id,"server":server,"path":path});
-        let payload = json!({"project":id,"name":name,"path":path,"request":signature_data});
+        let signature_data = LocationWire {
+            action: LocationAction::AddLocation,
+            project: id.clone(),
+            server: server.to_owned(),
+            path: Some(path.to_owned()),
+        };
+        let payload = LocationPayload {
+            project: id.clone(),
+            name: Field::Value(name.to_owned()),
+            path: Field::Value(path.to_owned()),
+            request: Field::Value(signature_data.clone()),
+            signature: Field::Missing,
+            result_id: Field::Missing,
+            location: Field::Missing,
+            admission: Field::Missing,
+        };
         (id, op, signature_data, payload, Some(registration))
     } else if matches!(action, "add_location" | "remove_location") {
         let project = body
@@ -852,9 +869,19 @@ async fn remote_project_write(
         } else {
             None
         };
-        let signature_data = json!({"action":action,"project":project,"server":server,"path":path});
-        let signature =
-            studio_runtime_store::sha256_hex(canonical_json(&signature_data).as_bytes());
+        let signature_data = LocationWire {
+            action: if action == "add_location" {
+                LocationAction::AddLocation
+            } else {
+                LocationAction::RemoveLocation
+            },
+            project: project.to_owned(),
+            server: server.to_owned(),
+            path: path.map(str::to_owned),
+        };
+        let signature = studio_runtime_store::sha256_hex(
+            &serde_json::to_vec(&signature_data).map_err(|_| ApiError::internal())?,
+        );
         let early_store = store.clone();
         let early_root = request_id.to_owned();
         let early_project = project.to_owned();
@@ -908,11 +935,18 @@ async fn remote_project_write(
             ));
         }
 
-        let mut payload = json!({"project":project,"name":record.name,"path":path,
-            "request":signature_data,"signature":studio_runtime_store::sha256_hex(
-                canonical_json(&signature_data).as_bytes()),
-            "location":existing});
-        payload[studio_runtime_services::project_locations::LOCATION_ADMISSION_FIELD] = admission;
+        let payload = LocationPayload {
+            project: project.to_owned(),
+            name: record.name.clone().map_or(Field::Null, Field::Value),
+            path: path.map_or(Field::Null, |value| Field::Value(value.to_owned())),
+            request: Field::Value(signature_data.clone()),
+            signature: Field::Missing,
+            result_id: Field::Missing,
+            location: existing
+                .cloned()
+                .map_or(Field::Null, |value| Field::Value(value.into())),
+            admission: Field::Value(admission),
+        };
         (project.to_owned(), operation, signature_data, payload, None)
     } else {
         return Err(ApiError::new(
@@ -920,8 +954,10 @@ async fn remote_project_write(
             "Unknown project action",
         ));
     };
-    let signature = studio_runtime_store::sha256_hex(canonical_json(&signature_data).as_bytes());
-    payload["signature"] = json!(signature);
+    let signature = studio_runtime_store::sha256_hex(
+        &serde_json::to_vec(&signature_data).map_err(|_| ApiError::internal())?,
+    );
+    payload.signature = Field::Value(signature.clone());
     let admission_store = store.clone();
     let raw_key = projects::cross_server_identity(&["project-location", "ui", request_id]);
     let root = request_id.to_owned();
@@ -977,7 +1013,7 @@ async fn remote_project_write(
         let registration_for_write = registration.clone();
         let registration_operation = operation_id.clone();
         let registration_request = request.clone();
-        let admission=store.transaction_with(move |tx| -> Result<Value, ProjectsError> {
+        let admission=store.transaction_with(move |tx| -> Result<_, ProjectsError> {
             if studio_runtime_store::ProjectsRepository::get(tx, &project_for_registration)?.is_none() {
                 let name = registration_for_write["name"].as_str().unwrap_or("Project");
                 let project = json!({"id":project_for_registration,"path":project_for_registration,"name":name,"created":now,
@@ -993,7 +1029,7 @@ async fn remote_project_write(
         })
         .await
         .map_err(projects_error)?;
-        payload[studio_runtime_services::project_locations::LOCATION_ADMISSION_FIELD] = admission;
+        payload.admission = Field::Value(admission);
     }
     let pending_project = project_id.clone();
     let pending_operation = operation_id.clone();
@@ -1009,14 +1045,14 @@ async fn remote_project_write(
         })
         .await
         .map_err(ApiError::stored)?;
-    payload["resultId"] = json!(request.id());
-    let action_for_exchange = if action == "register" {
-        "add_location".to_owned()
+    payload.result_id = Field::Value(request.id().to_owned());
+    let command = if matches!(action, "register" | "add_location") {
+        studio_runtime_services::orchestration_wire::OrchestrationCommand::AddLocation(payload)
     } else {
-        action.to_owned()
+        studio_runtime_services::orchestration_wire::OrchestrationCommand::RemoveLocation(payload)
     };
     let outcome = driver
-        .exchange(server, &action_for_exchange, &payload, &operation_id, now)
+        .exchange(server, command, &operation_id, now)
         .await
         .map_err(|error| {
             ApiError::new(
@@ -1108,14 +1144,14 @@ async fn project_locations(
 ) -> Result<Json<crate::generated::ProjectLocationQueryResponse>, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let remote_request = remote_location_request(&store, &query).await?;
-    if let Some((server, action, payload)) = remote_request {
+    if let Some((server, command)) = remote_request {
         let driver = state.orchestration_driver.ok_or_else(ApiError::internal)?;
         let request_id = studio_runtime_services::remote_transport::new_nonce()
             .map_err(|_| ApiError::internal())?;
         let now = studio_runtime_services::event_write::unix_time()
             .map_err(|_| ApiError::internal())? as i64;
         let outcome = driver
-            .exchange(&server, &action, &payload, &request_id, now)
+            .exchange(&server, command, &request_id, now)
             .await
             .map_err(|error| {
                 ApiError::new(
@@ -1183,7 +1219,13 @@ async fn project_locations(
 async fn remote_location_request(
     store: &studio_runtime_store::RuntimeStore,
     query: &LocationQuery,
-) -> Result<Option<(String, String, Value)>, ApiError> {
+) -> Result<
+    Option<(
+        String,
+        studio_runtime_services::orchestration_wire::OrchestrationCommand,
+    )>,
+    ApiError,
+> {
     let requested = query.server.as_str();
     let local = store.local_server_id().map_err(ApiError::stored)?;
     let server = if requested == "local" {
@@ -1231,7 +1273,18 @@ fn remote_location_action(
     query: &LocationQuery,
     project: &studio_runtime_schema::project_record::ProjectLive,
     server: String,
-) -> Result<(String, String, Value), ApiError> {
+) -> Result<
+    (
+        String,
+        studio_runtime_services::orchestration_wire::OrchestrationCommand,
+    ),
+    ApiError,
+> {
+    use studio_runtime_schema::queue_command::Field;
+    use studio_runtime_services::orchestration_wire::OrchestrationCommand;
+    use studio_runtime_services::orchestration_worker::{
+        LocationInfoPayload, LocationMatchesPayload,
+    };
     let action = if matches!(query.action, Some(LocationAction::Matches)) {
         let origin = project
             .locations
@@ -1248,10 +1301,11 @@ fn remote_location_action(
             .ok_or_else(|| {
                 ApiError::new(StatusCode::BAD_REQUEST, "The project has no Git origin")
             })?;
-        (
-            "location_matches".to_owned(),
-            json!({"origin":origin,"cwd":query.path.as_ref().map(|path| path.as_str())}),
-        )
+        let cwd = query
+            .path
+            .as_ref()
+            .map_or(Field::Null, |path| Field::Value(path.as_str().to_owned()));
+        OrchestrationCommand::LocationMatches(LocationMatchesPayload { origin, cwd })
     } else {
         let path = query
             .path
@@ -1271,9 +1325,11 @@ fn remote_location_action(
                     "This server has no folder for the project",
                 )
             })?;
-        ("location_info".to_owned(), json!({"cwd":path}))
+        OrchestrationCommand::LocationInfo(LocationInfoPayload {
+            cwd: path.to_owned(),
+        })
     };
-    Ok((server, action.0, action.1))
+    Ok((server, action))
 }
 
 async fn peer_teams(
@@ -1472,7 +1528,7 @@ mod local_registration_tests {
         let project = serde_json::from_str::<studio_runtime_schema::project_record::ProjectLive>(
             r#"{"id":"project","path":"project:id","peerTeams":[],"locations":[{"serverId":"server","path":"/folder","projectId":"id","gitOrigin":"origin"}]}"#,
         ).unwrap();
-        let (_, action, payload) = super::remote_location_action(
+        let (_, command) = super::remote_location_action(
             &axum::extract::Query::<super::LocationQuery>::try_from_uri(
                 &"/?project=project&server=server".parse().unwrap(),
             )
@@ -1482,9 +1538,14 @@ mod local_registration_tests {
             "server".into(),
         )
         .unwrap();
-        assert_eq!(action, "location_info");
-        assert_eq!(payload, json!({"cwd":"/folder"}));
-        let (_, action, payload) = super::remote_location_action(
+        let studio_runtime_services::orchestration_wire::OrchestrationCommand::LocationInfo(
+            payload,
+        ) = command
+        else {
+            panic!("location info")
+        };
+        assert_eq!(payload.cwd, "/folder");
+        let (_, command) = super::remote_location_action(
             &axum::extract::Query::<super::LocationQuery>::try_from_uri(
                 &"/?project=project&server=server&action=matches"
                     .parse()
@@ -1496,8 +1557,17 @@ mod local_registration_tests {
             "server".into(),
         )
         .unwrap();
-        assert_eq!(action, "location_matches");
-        assert_eq!(payload, json!({"origin":"origin","cwd":null}));
+        let studio_runtime_services::orchestration_wire::OrchestrationCommand::LocationMatches(
+            payload,
+        ) = command
+        else {
+            panic!("location matches")
+        };
+        assert_eq!(payload.origin, "origin");
+        assert!(matches!(
+            payload.cwd,
+            studio_runtime_schema::queue_command::Field::Null
+        ));
     }
 
     #[test]
@@ -1702,7 +1772,7 @@ mod local_registration_tests {
         fn exchange<'a>(
             &'a self,
             server: &'a str,
-            envelope: &'a serde_json::Value,
+            envelope: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
             _timeout: std::time::Duration,
         ) -> futures_util::future::BoxFuture<
             'a,
@@ -1711,25 +1781,30 @@ mod local_registration_tests {
             Box::pin(async move {
                 assert_eq!(server, "peer");
                 self.0.fetch_add(1, Ordering::SeqCst);
-                let payload = &envelope["payload"];
-                let path = payload["path"].as_str().expect("remote path");
-                Ok(serde_json::from_str(
-                    &json!({
-                        "requestId": envelope["requestId"],
-                        "outcome": "applied",
-                        "value": {
-                            "serverId": "peer",
-                            "path": path,
-                            "canonicalPath": path,
-                            "projectId": path,
-                            "gitOrigin": null,
-                            "homeProjectId": payload["project"],
-                            "requestId": envelope["requestId"]
-                        }
-                    })
-                    .to_string(),
-                )
-                .expect("fixture reply"))
+                let studio_runtime_services::orchestration_wire::OrchestrationCommand::AddLocation(
+                    payload,
+                ) = &envelope.command
+                else {
+                    panic!("add location")
+                };
+                let path = payload.path.value().expect("remote path");
+                let value = studio_runtime_services::project_locations::LocationValue {
+                    server_id: "peer".into(),
+                    path: Some(path.clone()),
+                    canonical_path: Some(path.clone()),
+                    project_id: Some(path.clone()),
+                    git_origin: Some(studio_runtime_services::project_locations::Nullable::Null),
+                    home_project_id: Some(payload.project.clone()),
+                    request_id: Some(envelope.request_id.clone()),
+                    removed: None,
+                };
+                Ok(studio_runtime_store::multi_server_delivery::RemoteReply {
+                    request_id: envelope.request_id.clone(),
+                    outcome: studio_runtime_schema::persistence::RemoteOutcome::Applied,
+                    value: Some(serde_json::value::to_raw_value(&value).expect("fixture reply")),
+                    error: None,
+                    waiting_for: None,
+                })
             })
         }
     }
@@ -1744,7 +1819,7 @@ mod local_registration_tests {
         fn execute<'a>(
             &'a self,
             _principal: &'a str,
-            _envelope: &'a serde_json::Value,
+            _envelope: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
         ) -> futures_util::future::BoxFuture<'a, Result<ExchangeOutcome, AccessError>> {
             Box::pin(async {
                 unreachable!("outbound project registration does not execute local effects")

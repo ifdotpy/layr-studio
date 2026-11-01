@@ -137,6 +137,9 @@ async fn corpus() -> RadioCorpus {
                             serde_json::from_str(row["payload"].as_str().expect("agent payload"))
                                 .expect("agent payload JSON");
                         payload["value"]["compactions"] = json!(0);
+                        if payload["value"]["role"] == "lead" {
+                            payload["value"]["role"] = json!("orchestrator");
+                        }
                         row["payload"] = json!(payload.to_string());
                     }
                 }
@@ -146,6 +149,9 @@ async fn corpus() -> RadioCorpus {
                     let mut record: Value =
                         serde_json::from_str(row["record"].as_str().expect("agent record"))
                             .expect("agent JSON");
+                    if record["role"] == "lead" {
+                        record["role"] = json!("orchestrator");
+                    }
                     record
                         .as_object_mut()
                         .expect("agent object")
@@ -172,6 +178,13 @@ async fn corpus() -> RadioCorpus {
                     }
                     typed.error = saved.error;
                     row["record"] = json!(serde_json::to_string(&typed).expect("valid fixture"));
+                }
+            }
+        }
+        if let Some(drafts) = case["drafts"].as_array_mut() {
+            for draft in drafts {
+                if draft["role"] == "lead" {
+                    draft["role"] = json!("orchestrator");
                 }
             }
         }

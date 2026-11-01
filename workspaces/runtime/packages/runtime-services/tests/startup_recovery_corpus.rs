@@ -328,6 +328,22 @@ async fn python_constructor_and_rust_startup_match_requests_monitors_events_and_
             "the frozen Python agent view contains its retired token count"
         );
     }
+    // Adapt the frozen Python result to the accepted permission and token migrations.
+    for agent in python["agents"].as_array_mut().unwrap() {
+        let fields = agent.as_object_mut().unwrap();
+        if fields.remove("yoloMode") == Some(json!(true)) {
+            fields.insert("permissionMode".into(), json!("bypassPermissions"));
+        }
+        fields.remove("tokenBudget");
+    }
+    for projection in python["sync_entities"].as_array_mut().unwrap() {
+        if projection["collection"] == "agent" {
+            let fields = projection["payload"]["value"].as_object_mut().unwrap();
+            if fields.remove("yoloMode") == Some(json!(true)) {
+                fields.insert("permissionMode".into(), json!("bypassPermissions"));
+            }
+        }
+    }
     crate::normalize_agent_nulls(&mut python);
     crate::normalize_agent_nulls(&mut rust);
     // Request migration canonicalizes absent and null optional connection metadata.

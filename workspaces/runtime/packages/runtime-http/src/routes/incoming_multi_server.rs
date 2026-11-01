@@ -498,11 +498,12 @@ async fn serve_inner(state: HttpState, request: Request<Body>, next: Next) -> Re
         }
     };
     if is_mutation {
-        state
-            .run_tracked_mutation(tracked_route, tracked_request_id, async move {
+        Box::pin(
+            state.run_tracked_mutation(tracked_route, tracked_request_id, async move {
                 finish(effect.await)
-            })
-            .await
+            }),
+        )
+        .await
     } else {
         finish(effect.await)
     }
