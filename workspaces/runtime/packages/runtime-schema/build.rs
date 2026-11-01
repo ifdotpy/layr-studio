@@ -4,7 +4,10 @@
 // line and mark this script dirty, so all paths here are relative to the package.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let manifest = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?);
-    let root = manifest.join("../../../..");
+    let root = manifest
+        .ancestors()
+        .nth(4)
+        .ok_or("invalid manifest directory")?;
     let relative_root = "../../../..";
     let generator = "workspaces/tooling/apps/repository-checks/generate-provider-contracts.ts";
     for file in [
@@ -42,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &mut child.stdout.take().ok_or("missing generator output")?,
         &mut inputs,
     )?;
-    let canonical_root = format!("{}/", root.canonicalize()?.display());
+    let canonical_root = format!("{}/", root.display());
     for line in inputs.lines() {
         let path = line
             .strip_prefix("cargo:rerun-if-changed=")

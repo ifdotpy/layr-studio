@@ -2,9 +2,11 @@ use axum::extract::{FromRequest, FromRequestParts};
 use axum::http::request::Parts;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+#[cfg(test)]
 use std::sync::Arc;
 
 use crate::error::ApiError;
+#[cfg(test)]
 use crate::validation::ValidatedRequest;
 
 fn serde_location(section: &str, path: &serde_path_to_error::Path) -> Vec<Value> {
@@ -174,19 +176,15 @@ where
 }
 
 /// Raw query pairs plus values validated and typed from the registered schema.
+#[cfg(test)]
 pub(crate) struct QueryParams {
     typed: Arc<serde_json::Map<String, Value>>,
 }
 
+#[cfg(test)]
 impl QueryParams {
     pub(crate) fn typed_value(&self, name: &str) -> Option<&Value> {
         self.typed.get(name)
-    }
-
-    pub(crate) fn nonempty_str(&self, name: &str) -> Option<&str> {
-        self.typed_value(name)
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
     }
 
     pub(crate) fn into_typed(self) -> Arc<serde_json::Map<String, Value>> {
@@ -194,6 +192,7 @@ impl QueryParams {
     }
 }
 
+#[cfg(test)]
 impl<S> FromRequestParts<S> for QueryParams
 where
     S: Send + Sync,
@@ -221,9 +220,11 @@ mod tests {
     use axum::{Json, Router};
     use serde::Deserialize;
     use serde_json::{Value, json};
+    #[cfg(test)]
     use std::sync::Arc;
     use tower::ServiceExt;
 
+    #[cfg(test)]
     use crate::validation::ValidatedRequest;
 
     use super::{ApiJson, QueryParams};

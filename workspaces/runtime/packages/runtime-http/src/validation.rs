@@ -28,6 +28,7 @@ pub(crate) struct RawRequest {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ValidatedRequest {
+    #[cfg(test)]
     pub query: Arc<Map<String, Value>>,
     #[cfg(test)]
     pub headers: Arc<Map<String, Value>>,
@@ -438,6 +439,7 @@ impl Registry {
             validate_part(part, &mut headers, None)?;
         }
         Ok(ValidatedRequest {
+            #[cfg(test)]
             query: Arc::new(query.as_object().cloned().unwrap_or_default()),
             #[cfg(test)]
             headers: Arc::new(headers.as_object().cloned().unwrap_or_default()),

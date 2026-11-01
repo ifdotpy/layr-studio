@@ -4,7 +4,9 @@
 use std::net::IpAddr;
 
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
 use studio_runtime_schema::multi_server_access::{
     AccessClientKind, AccessClientStatus, PersistedAccessClient,
 };

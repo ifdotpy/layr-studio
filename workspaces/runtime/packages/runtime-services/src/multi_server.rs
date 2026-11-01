@@ -361,7 +361,7 @@ pub async fn manage(
                         let mut peer = stored(tx, "runtime_access_clients", server)?
                             .ok_or_else(|| MultiServerError::Refused("server does not exist".into()))?;
                         peer.alias = Field::Value(alias_value);
-                        tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2", rusqlite::params![serde_json::to_string(&peer).map_err(|_|invalid("runtime_access_clients",&server,"record"))?, server])?;
+                        tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2", rusqlite::params![serde_json::to_string(&peer).map_err(|_|invalid("runtime_access_clients",server,"record"))?, server])?;
                     }
                     tx.execute("INSERT INTO runtime_access_alias_requests VALUES(?,?,?)", rusqlite::params![request,target,alias])?;
                     audit_write(tx,target,&actor,"alias")?;

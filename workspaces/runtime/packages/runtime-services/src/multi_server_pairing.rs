@@ -804,7 +804,7 @@ fn apply_pair(
     }
     tx.execute("INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![request.client_id(),serde_json::to_string(&client).map_err(StoreError::from)?])?;
     let _: studio_runtime_schema::multi_server_access::DevicePairReply =
-        serde_json::from_value(result.clone())
+        <studio_runtime_schema::multi_server_access::DevicePairReply as serde::Deserialize>::deserialize(&result)
             .map_err(|_| refused(503, "receipt_invalid", "The pairing receipt is invalid"))?;
     save_receipt(tx, &admitted, &result, now)?;
     if snapshot.client().is_none() {
