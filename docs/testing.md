@@ -346,6 +346,13 @@ or `cargo test -p studio-runtime-services --test integration monitor_recovery::`
 Nextest still runs each test in its own process. Library tests keep their existing
 names and `--lib` selector.
 
+For direct nextest runs on a shared host, limit compilation and test execution
+separately. For example, `cargo nextest run --build-jobs 4 --test-threads 8
+-p studio-runtime-services --lib` uses four build jobs and up to eight concurrent
+tests. Nextest's `-j` sets test threads, not build jobs; choose fewer test threads
+when other work needs the capacity. Keep explicitly serial recipes at one test
+thread.
+
 Cargo target selectors such as `--test compatibility` are routed to Cargo, for
 example `just test studio-diagnostics '' -- --test compatibility`. The server
 uses its runner's `--filter` suite selector. `just test-plan` prints the
