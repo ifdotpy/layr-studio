@@ -3287,6 +3287,7 @@ pub(super) fn seed_ack(
 ) -> Result<(), WorkerError> {
     if acknowledged > checkpoint(tx, journal_scope, generation)? {
         set_checkpoint(tx, journal_scope, generation, acknowledged)?;
+        super::retained::storage::checkpoint_covered(tx, journal_scope, generation, acknowledged)?;
     }
     Ok(())
 }
