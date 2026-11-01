@@ -1,5 +1,6 @@
 import { fixtureOrigin } from "../misc-fixture.ts";
-import type { PostBody, PostResult } from "../../src/apiTypes.ts";
+import type { PostBody } from "../../src/apiTypes.ts";
+import type { components } from "../../src/generated/api.ts";
 import { fixturePostBody } from "./fixture-server.ts";
 import { usageFixtureServer } from "./fixture-server.ts";
 import assert from "node:assert/strict";
@@ -24,14 +25,18 @@ test("Usage resume notice", async ({ context: testContext }) => {
       writes.push(body);
       await route.fulfill({
         json: {
+          id: body.resume_id,
+          accountKey: "work",
+          threadId: "thread-1",
+          turnId: "turn-1",
+          epoch: 1,
+          failedAt: dueAt - 60,
+          cause: body.id === "chat-auth" ? "auth" : "usage_limit",
           status: "cancelled",
           dueAt: null,
           reason: "Automatic resume is off for this chat.",
           updatedAt: 2,
-        } satisfies Pick<
-          NonNullable<PostResult<"/api/usage-resume">>,
-          "status" | "dueAt" | "reason" | "updatedAt"
-        >,
+        } satisfies components["schemas"]["UsageResumeResponse"],
       });
     });
     await page.goto(fixtureOrigin(server) + `?dueAt=${dueAt}`);
