@@ -308,7 +308,7 @@ export function useVisibleChatResult(
             item.role === "assistant" &&
             item.turnId === proof.turnId &&
             (!item.phase || item.phase === "final_answer") &&
-            !item.pending &&
+            !item.streamPending &&
             !item.streaming &&
             !!item.text?.trim(),
         )
@@ -326,7 +326,7 @@ export function useVisibleChatResult(
               (item) =>
                 item.turnId === proof.turnId &&
                 item.role !== "user" &&
-                !item.pending &&
+                !item.streamPending &&
                 !item.streaming,
             )
             .map((item) => item.id)
@@ -340,7 +340,7 @@ export function useVisibleChatResult(
       (item) =>
         item.turnId === proof?.turnId &&
         item.turnStatus === "completed" &&
-        !item.pending &&
+        !item.streamPending &&
         !item.streaming,
     );
   const callback = useRef(onReadResult);

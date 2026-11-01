@@ -27,7 +27,7 @@ test("bounded entities render initial and live changes with zero resource GETs",
       {
         id: "queued",
         kind: "user",
-        status: "pending",
+        status: "queued",
         created: 1,
         text,
         delivery: "next_turn",

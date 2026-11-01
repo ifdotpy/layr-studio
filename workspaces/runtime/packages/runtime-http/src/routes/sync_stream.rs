@@ -135,7 +135,21 @@ impl ResourceIdentity for SubscribedResource {
     }
 }
 
+fn cache_decisions(
+    resources: &[SubscribedResource],
+    locality: studio_runtime_schema::sync_protocol::FrontendLocality,
+) -> Vec<crate::generated::SubscriptionCacheDecision> {
+    resources
+        .iter()
+        .map(|resource| crate::generated::SubscriptionCacheDecision {
+            resource: resource.resource.clone(),
+            policy: super::subscriptions::cache_policy(&resource.resource, locality),
+        })
+        .collect()
+}
+
 struct SyncSession {
+    locality: studio_runtime_schema::sync_protocol::FrontendLocality,
     principal: studio_runtime_services::principal::Principal,
     resources: Vec<SubscribedResource>,
     generation: i64,
@@ -226,6 +240,7 @@ struct SubscriptionChange {
     added: Vec<SubscribedResource>,
     token_rates: Option<bool>,
     since: BTreeMap<String, SubscriptionCursor>,
+    cache_policies: Vec<crate::generated::SubscriptionCacheDecision>,
 }
 
 struct LiveSubscription {
@@ -337,6 +352,7 @@ async fn sync_subscriptions(
     {
         return Err(ApiError::validation(vec![json!("body"), json!("add")]));
     }
+    let cache_policies = cache_decisions(&added, session.locality);
     session
         .sender
         .try_send(SubscriptionChange {
@@ -345,6 +361,7 @@ async fn sync_subscriptions(
             added,
             token_rates: request.token_rates,
             since,
+            cache_policies: cache_policies.clone(),
         })
         .map_err(|_| {
             ApiError::new(
@@ -356,6 +373,7 @@ async fn sync_subscriptions(
     session.generation = request.r#gen;
     Ok(Json(crate::generated::SyncSubscriptionAck {
         r#gen: request.r#gen,
+        cache_policies,
     }))
 }
 
@@ -417,6 +435,7 @@ async fn sync_stream(
     Caller(principal): Caller,
     State(state): State<HttpState>,
 ) -> Response {
+    let locality = studio_runtime_services::principal::frontend_locality(&principal);
     let protocol = query.protocol.as_ref().map(|value| value.as_str());
     let header_protocol = match headers.one("x-codex-sync-protocol") {
         Ok(value) => value,
@@ -466,6 +485,7 @@ async fn sync_stream(
         Ok(since) => since,
         Err(error) => return error.into_response(),
     };
+    let cache_policies = cache_decisions(&resources, locality);
     let vault_readiness = match readiness_source(&state, &resources).await {
         Ok(source) => source,
         Err(error) => return error.into_response(),
@@ -609,6 +629,7 @@ async fn sync_stream(
             sessions.insert(
                 session_id.clone(),
                 SyncSession {
+                    locality,
                     principal: principal.clone(),
                     resources: resources.clone(),
                     generation: 0,
@@ -629,6 +650,15 @@ async fn sync_stream(
         // `routes` lists the origins this server answers on now. A client learns them.
         crate::generated::SyncSessionEvent {
             session_id,
+            locality: match locality {
+                studio_runtime_schema::sync_protocol::FrontendLocality::Local => {
+                    crate::generated::FrontendLocality::Local
+                }
+                studio_runtime_schema::sync_protocol::FrontendLocality::Remote => {
+                    crate::generated::FrontendLocality::Remote
+                }
+            },
+            cache_policies,
             routes: state.serve_origin().into_iter().collect(),
             workspace_id: state.workspace_id.clone(),
             token: matches!(
@@ -1707,6 +1737,7 @@ async fn subscription_frame(state: &mut ResourceStream, update: SubscriptionChan
         None,
         crate::generated::SyncSubscriptionAck {
             r#gen: update.generation,
+            cache_policies: update.cache_policies.clone(),
         },
     ));
     if !update.added.is_empty() {
@@ -4252,6 +4283,7 @@ mod tests {
             )
             .expect("JSON");
             assert_eq!(session["routes"], routes);
+            assert_eq!(session["locality"], "local");
         }
     }
 
@@ -4313,7 +4345,12 @@ mod tests {
         assert_eq!(initial["snapshot"], true);
         assert_eq!(initial["records"], rates["records"]);
         for (generation, interest) in [(1, false), (2, true)] {
-            let update = json!({"sessionId":session["sessionId"],"gen":generation,"add":[],"remove":[],"tokenRates":interest});
+            let add = if generation == 1 {
+                json!([{"resource":{"kind":"state"}}])
+            } else {
+                json!([])
+            };
+            let update = json!({"sessionId":session["sessionId"],"gen":generation,"add":add,"remove":[],"tokenRates":interest});
             let response = app
                 .clone()
                 .oneshot(request(
@@ -4326,8 +4363,12 @@ mod tests {
             assert_eq!(response.status(), StatusCode::OK);
             let ack = body.next().await.expect("ack").expect("bytes");
             assert!(String::from_utf8_lossy(&ack).starts_with("event: subscriptions\n"));
-            assert_eq!(document_bytes(&ack)["gen"], generation);
+            let ack = document_bytes(&ack);
+            assert_eq!(ack["gen"], generation);
             if !interest {
+                assert_eq!(ack["cachePolicies"][0]["policy"], "noCache");
+                let resource = body.next().await.expect("added resource").expect("bytes");
+                assert!(String::from_utf8_lossy(&resource).starts_with("event: resources\n"));
                 rates = floating_test_rates(2);
                 rates["records"]
                     .as_array_mut()
@@ -4445,6 +4486,7 @@ mod tests {
                     added: fixture_resources(std::slice::from_ref(&resource)),
                     token_rates: None,
                     since,
+                    cache_policies: Vec::new(),
                 },
             )
             .await
@@ -4607,6 +4649,7 @@ mod tests {
                     added: fixture_resources(std::slice::from_ref(&resource)),
                     token_rates: None,
                     since: BTreeMap::new(),
+                    cache_policies: Vec::new(),
                 },
             )
             .await
@@ -4685,6 +4728,7 @@ mod tests {
                     added: fixture_resources(std::slice::from_ref(&resource)),
                     token_rates: None,
                     since: BTreeMap::new(),
+                    cache_policies: Vec::new(),
                 },
             )
             .await
@@ -6484,6 +6528,7 @@ mod tests {
                 added: fixture_resources(std::slice::from_ref(&resource)),
                 token_rates: None,
                 since: BTreeMap::new(),
+                cache_policies: Vec::new(),
             },
         )
         .await

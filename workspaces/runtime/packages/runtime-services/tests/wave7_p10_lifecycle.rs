@@ -1199,7 +1199,13 @@ fn assert_records(store: &RuntimeStore, case: &Value) {
             !studio_runtime_services::event_write::truthy(agent.get("deletedAt"))
         }) {
             assert_eq!(
-                payload["value"]["status"], event["status"],
+                payload["value"]["status"],
+                json!(
+                    studio_runtime_schema::delivery::MessageSendStatus::from_persisted(
+                        event["status"].as_str().expect("event status")
+                    )
+                    .expect("known status")
+                ),
                 "receipt status for {}",
                 row[1]
             );

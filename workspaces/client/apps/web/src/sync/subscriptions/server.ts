@@ -29,6 +29,8 @@ export function createServerSubscriptions(options: ServerSubscriptionOptions) {
   const transport = createResourceEvents({
     api,
     tokenRates,
+    onCachePolicies: (decisions) => sync().setCachePolicies(decisions),
+    onCachePoliciesReset: () => sync().clearCachePolicies(),
     sync: {
       syncDatabase: () => sync().syncDatabase(),
       persistResourceEntityChanges: (...args) =>

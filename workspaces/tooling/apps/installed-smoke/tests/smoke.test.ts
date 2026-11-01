@@ -921,7 +921,7 @@ test("bridge provenance resolves packaged paths with spaces and requires the own
   );
 });
 
-test("steer proof rejects pending delivery and the wrong submitted identity", async () => {
+test("steer proof rejects queued delivery and the wrong submitted identity", async () => {
   const { validateSteer } = await import("../usage.ts");
   const item: Transcript = {
     id: "a:s",
@@ -950,7 +950,7 @@ test("steer proof rejects pending delivery and the wrong submitted identity", as
     () =>
       validateSteer(
         item,
-        { ...receipt, status: "pending" },
+        { ...receipt, status: "queued" },
         { id: "s", turnId: "long" },
         "long",
         1,

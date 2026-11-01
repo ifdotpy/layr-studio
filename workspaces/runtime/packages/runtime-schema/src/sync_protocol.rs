@@ -12,6 +12,17 @@ pub const SYNC_PROTOCOL_VERSION_TEXT: &str = "4";
 /// Scope name of the sync entity stream.
 pub const SYNC_ENTITY_SCOPE: &str = "state:entities:v1";
 
+/// Whether the authenticated frontend may retain a subscription cache.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, strum::VariantNames,
+)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
+pub enum FrontendLocality {
+    Local,
+    Remote,
+}
+
 /// One resource's entity selection, owned by OpenAPI resource schema extensions.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]

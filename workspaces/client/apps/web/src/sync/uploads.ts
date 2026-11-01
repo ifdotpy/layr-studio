@@ -1,3 +1,4 @@
+import { uploadStore } from "../unsent/store.ts";
 import { randomUUID } from "../uuid";
 import { serverStorageName } from "../servers/environment";
 import { syncGet, syncPost, refreshSession, type GetResult } from "../api";
@@ -23,6 +24,7 @@ export type PendingUpload = {
 export const UPLOAD_DATABASE_NAME = "codex-studio-uploads";
 export type UploadOptions = {
   databaseName: string;
+  buffer?: Pick<ReturnType<typeof uploadStore>, "put" | "delete" | "loadAll">;
   syncGet: (
     path: "/api/sync/identity",
   ) => Promise<Pick<GetResult<"/api/sync/identity">, "workspaceId">>;
@@ -84,12 +86,25 @@ export function createUploads(
 
   const rows = new Map<string, PendingUpload>();
   const contents = new Map<string, ArrayBuffer>();
+  const storedKeys = new Map<string, string>();
+  const buffer = options.buffer ?? uploadStore(databaseName);
+  let loading: Promise<void> | undefined;
+  const ready = () =>
+    (loading ??= (async () => {
+      for (const [key, value] of await buffer.loadAll()) {
+        const { bytes, ...row } = value;
+        rows.set(row.id, row);
+        contents.set(row.id, await bytes.arrayBuffer());
+        storedKeys.set(row.id, key);
+      }
+    })());
   async function queueUploads(
     stateDir: string,
     agent: string,
     files: File[],
     expectedWorkspace: string,
   ) {
+    await ready();
     if (!files.length) throw new Error("Select at least one file.");
     for (const file of files)
       if (!file.size || file.size > attachmentLimit)
@@ -121,6 +136,12 @@ export function createUploads(
         })),
       );
     for (const { bytes, ...row } of queued) {
+      const key = row.id;
+      await buffer.put(key, {
+        ...row,
+        bytes: new Blob([bytes], { type: row.mime }),
+      });
+      storedKeys.set(row.id, key);
       rows.set(row.id, row);
       contents.set(row.id, bytes);
     }
@@ -128,6 +149,7 @@ export function createUploads(
     return queued.map(({ bytes: _bytes, ...row }) => row);
   }
   async function pendingUploads(stateDir: string, expectedWorkspace?: string) {
+    await ready();
     const { workspaceId } = await syncDatabase();
     if (expectedWorkspace && workspaceId !== expectedWorkspace)
       throw new Error(
@@ -151,6 +173,10 @@ export function createUploads(
     await finishUpload(id);
   }
   async function finishUpload(id: string) {
+    await ready();
+    const stored = storedKeys.get(id);
+    if (stored) await buffer.delete(stored);
+    storedKeys.delete(id);
     rows.delete(id);
     contents.delete(id);
     uploadsChanged();
@@ -160,6 +186,7 @@ export function createUploads(
     const existing = active.get(row.id);
     if (existing) return existing;
     const promise = (async () => {
+      await ready();
       let current = rows.get(row.id);
       if (!current || uploadCancelled(row.id)) return null;
       const identity = await syncGet("/api/sync/identity");
@@ -196,12 +223,7 @@ export function createUploads(
       });
       const response = await syncPost(
         "/api/assets",
-        {
-          agent: row.agent,
-          name: row.name,
-          base64,
-          id: row.id,
-        },
+        { agent: row.agent, name: row.name, base64, id: row.id },
         { workspaceId: row.workspace, sessionToken: session.token },
       );
       const asset: Attachment = response;

@@ -244,6 +244,7 @@ test.describe("legacy schema mismatch", () => {
         stream.write(
           protocol3SseEvent("subscriptions", {
             gen: change.gen,
+            cachePolicies: [],
           } satisfies components["schemas"]["SyncSubscriptionAck"]),
         );
         if (resources.length)

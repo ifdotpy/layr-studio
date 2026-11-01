@@ -1,3 +1,4 @@
+import { MessageSendStatus } from "../generated/api.ts";
 import { afterEach, expect, it, vi } from "vitest";
 const owner = vi.hoisted(() => ({}) as Storage);
 vi.mock("../servers/ServerServicesContext", () => ({
@@ -19,7 +20,7 @@ it("hides and restores a message only in the current page", () => {
     id: "id",
     role: "user",
     text: "text",
-    deliveryStatus: "sending",
+    deliveryStatus: { source: "server", status: MessageSendStatus.sending },
   };
   const initial = useRemovedMessages("workspace", "agent", "chat");
   initial.remove(message);
@@ -29,6 +30,10 @@ it("hides and restores a message only in the current page", () => {
   const restored = useRemovedMessages("workspace", "agent", "chat");
   expect(restored.hidden(message)).toBe(false);
   expect(restored.restored).toMatchObject([
-    { id: "id", text: "text", deliveryStatus: "uncertain" },
+    {
+      id: "id",
+      text: "text",
+      deliveryStatus: { source: "server", status: "sending" },
+    },
   ]);
 });

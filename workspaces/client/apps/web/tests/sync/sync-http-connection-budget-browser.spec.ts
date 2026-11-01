@@ -186,7 +186,7 @@ test("Sync http connection budget browser", async ({
               body: message,
               requests: (previous?.requests || 0) + 1,
             });
-            json(sendReply({ id: message.id, status: "accepted" }));
+            json(sendReply({ id: message.id, status: "delivered" }));
           });
         } else json({ documents: [], items: [] });
       } else next();

@@ -1,37 +1,72 @@
+import { recordingStore } from "../unsent/store.ts";
+import { serverViewId } from "../servers/environment.ts";
 import { randomUUID } from "../uuid";
-export type Recording = {
-  id: string;
-  chatId: string;
-  created: number;
-  sampleRate: number;
-  samples: number;
-  state: "recording" | "ready";
-  transcript?: string | undefined;
-  reviewedText?: string | undefined;
-  transcriptionAttempt?: string | undefined;
-  error?: string | undefined;
-  deletedAt?: number | undefined;
-};
-export function createRecordingStorage() {
+import type { Recording } from "../unsent/schema.ts";
+export type { Recording } from "../unsent/schema.ts";
+export function createRecordingStorage(
+  server = serverViewId ?? "local",
+  buffer: Pick<
+    ReturnType<typeof recordingStore>,
+    "put" | "putChunk" | "delete" | "loadAll"
+  > = recordingStore(server),
+) {
   const records = new Map<string, Recording>();
   const chunks = new Map<string, Map<number, Int16Array>>();
+  let loading: Promise<void> | undefined;
+  const ready = () =>
+    (loading ??= (async () => {
+      for (const [, value] of await buffer.loadAll()) {
+        if (value.kind === "record") records.set(value.value.id, value.value);
+        else {
+          let parts = chunks.get(value.id);
+          if (!parts) chunks.set(value.id, (parts = new Map()));
+          parts.set(
+            value.index,
+            new Int16Array(await value.value.arrayBuffer()),
+          );
+        }
+      }
+    })());
+  const recordKey = (id: string) => `record:${id}`;
+  const chunkKey = (id: string, index: number) =>
+    `chunk:${JSON.stringify([id, index])}`;
   async function listRecordings(chatId: string) {
+    await ready();
     return [...records.values()]
       .filter((row) => row.chatId === chatId && !row.deletedAt)
       .sort((a, b) => b.created - a.created);
   }
   async function saveRecording(row: Recording) {
+    await ready();
+    await buffer.put(recordKey(row.id), { kind: "record", value: row });
     records.set(row.id, { ...row });
   }
   async function saveChunk(row: Recording, index: number, pcm: Int16Array) {
+    await ready();
+    await buffer.putChunk(
+      recordKey(row.id),
+      { kind: "record", value: row },
+      chunkKey(row.id, index),
+      {
+        kind: "chunk",
+        id: row.id,
+        index,
+        value: new Blob([pcm.slice().buffer]),
+      },
+    );
     let parts = chunks.get(row.id);
     if (!parts) chunks.set(row.id, (parts = new Map()));
     parts.set(index, pcm.slice());
     records.set(row.id, { ...row });
   }
   async function deleteRecording(id: string) {
+    await ready();
+    const parts = chunks.get(id);
     records.delete(id);
     chunks.delete(id);
+    for (const index of parts?.keys() ?? [])
+      await buffer.delete(chunkKey(id, index));
+    await buffer.delete(recordKey(id));
   }
   async function trashRecording(row: Recording) {
     await updateRecording({
@@ -49,6 +84,7 @@ export function createRecordingStorage() {
     });
   }
   async function deletedRecordings(chatId: string) {
+    await ready();
     return [...records.values()].filter(
       (row) => row.chatId === chatId && row.deletedAt,
     );
@@ -81,6 +117,7 @@ export function createRecordingStorage() {
     return new Blob([output], { type: "audio/wav" });
   }
   async function recordingAudio(row: Recording) {
+    await ready();
     const parts = [...(chunks.get(row.id) ?? new Map()).entries()]
       .sort(([a], [b]) => a - b)
       .map(([, pcm]) => pcm);
@@ -90,16 +127,25 @@ export function createRecordingStorage() {
     row: Pick<Recording, "id" | "chatId"> & Partial<Recording>,
     attempt?: string,
   ) {
+    await ready();
     const current = records.get(row.id);
     if (
       current?.chatId === row.chatId &&
       (!attempt || current.transcriptionAttempt === attempt)
-    )
-      records.set(row.id, { ...current, ...row });
+    ) {
+      const next = { ...current, ...row };
+      await buffer.put(recordKey(row.id), { kind: "record", value: next });
+      records.set(row.id, next);
+    }
   }
   async function beginTranscription(row: Recording, attempt: string) {
+    await ready();
     const current = records.get(row.id);
     if (current?.chatId !== row.chatId) return false;
+    await buffer.put(recordKey(row.id), {
+      kind: "record",
+      value: { ...current, transcriptionAttempt: attempt },
+    });
     records.set(row.id, { ...current, transcriptionAttempt: attempt });
     return true;
   }
