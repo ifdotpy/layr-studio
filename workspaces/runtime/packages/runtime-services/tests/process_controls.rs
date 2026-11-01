@@ -67,7 +67,8 @@ fn python_process_identities_and_capabilities_match() {
             "commandExecution"
         });
         input["name"] = json!("");
-        let typed: studio_runtime_store::TaskRecord = serde_json::from_value(input).unwrap();
+        let typed: studio_runtime_store::TaskRecord =
+            serde::Deserialize::deserialize(input).unwrap();
         let source = if claude {
             studio_runtime_schema::process_controls::ProcessSourceKind::ClaudeTask
         } else {
@@ -75,7 +76,8 @@ fn python_process_identities_and_capabilities_match() {
         };
         let actual =
             process_controls::project(source, &typed, &case["owner"], case["connection"].as_str());
-        let mut actual = serde_json::to_value(actual.view).unwrap();
+        let mut actual =
+            serde::Serialize::serialize(&actual.view, serde_json::value::Serializer).unwrap();
         actual.as_object_mut().unwrap().remove("display");
         let mut expected = case["expected"].clone();
         for field in [

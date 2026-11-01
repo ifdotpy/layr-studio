@@ -1352,8 +1352,11 @@ mod claim_identity_tests {
     fn task_record_projection_publishes_background_display_policy() {
         let raw = json!({"id":"a:task:1","agent":"a","created":1,"itemId":"task:1","kind":"tool","status":"running","turnId":"turn","type":"dynamicToolCall","name":"job"});
         let task: studio_runtime_store::TaskRecord = serde::Deserialize::deserialize(&raw).unwrap();
-        let value =
-            serde_json::to_value(crate::sync_views::project_task_record(&task).unwrap()).unwrap();
+        let value = serde::Serialize::serialize(
+            &crate::sync_views::project_task_record(&task).unwrap(),
+            serde_json::value::Serializer,
+        )
+        .unwrap();
         assert_eq!(value["display"]["kind"], "backgroundTask");
         assert_eq!(value["display"]["active"], true);
         assert_eq!(value["display"]["inBackgroundList"], true);
@@ -1388,7 +1391,8 @@ mod claim_identity_tests {
                 legacy_project_bound("monitor", &raw, &owner, Some("connection"), None);
             let record = project_monitor_bound(&record, &owner, Some("connection"), None);
             assert_eq!(record.source_connection.as_deref(), Some("connection"));
-            let mut actual = serde_json::to_value(&record.view).unwrap();
+            let mut actual =
+                serde::Serialize::serialize(&record.view, serde_json::value::Serializer).unwrap();
             for key in [
                 "_raw",
                 "_sourceAccountKey",

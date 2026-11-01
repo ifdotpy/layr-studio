@@ -53,6 +53,7 @@ pub enum BackgroundTaskLabel {
 }
 
 /// The server's presentation and action decisions for a task row.
+#[expect(clippy::struct_excessive_bools, reason = "independent wire fields")]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BackgroundTaskDisplay {
@@ -87,6 +88,7 @@ impl ProcessSourceKind {
     }
 }
 
+#[expect(clippy::struct_excessive_bools, reason = "independent wire fields")]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProcessCapabilities {
@@ -120,6 +122,7 @@ fn monitor_status_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema 
 }
 
 /// Complete public process view; private native proof stays on the service record.
+#[expect(clippy::struct_excessive_bools, reason = "independent wire fields")]
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProcessView {
