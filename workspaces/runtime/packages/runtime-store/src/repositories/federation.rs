@@ -32,10 +32,6 @@ const TABLES: &[TableRequirement] = &[
         name: "runtime_federation_rooms",
         columns: &["id", "record"],
     },
-    TableRequirement {
-        name: "runtime_federation_outbox",
-        columns: &["id", "peer_id", "record"],
-    },
 ];
 pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     tables: &[],
@@ -218,15 +214,23 @@ impl FederationRepository {
                 "UPDATE runtime_federation_rooms SET record=?1 WHERE id=?2",
                 params![room.to_string(), room_id],
             )?;
-            tx.execute(
-                "UPDATE runtime_rooms SET record=json_set(record,'$.status','revoked') WHERE id=?1",
-                [&room_id],
-            )?;
+            if let Some(mut local) =
+                crate::Table::<studio_runtime_schema::room_record::RoomRecord>::new(tx)
+                    .get(&room_id)?
+            {
+                local.status = Some(studio_runtime_schema::room_record::RoomStatus::Revoked);
+                crate::Table::new(tx).put(&local)?;
+            }
         }
         Ok(())
     }
 
-    pub fn room_options(tx: &Transaction<'_>, id: &str, disclosure: &Value) -> StoreResult<()> {
+    pub fn room_options(
+        tx: &Transaction<'_>,
+        id: &str,
+        disclosure: &studio_runtime_schema::federation_ingress::RoomDisclosure,
+    ) -> StoreResult<()> {
+        use studio_runtime_schema::queue_command::Field;
         let mut room = record(tx, "runtime_federation_rooms", id)?
             .ok_or_else(|| StoreError::SchemaMismatch(format!("unknown federation room {id}")))?;
         if !matches!(
@@ -237,21 +241,18 @@ impl FederationRepository {
                 "federation room {id} is unavailable"
             )));
         }
-        let values = disclosure.as_object().ok_or_else(|| {
-            StoreError::SchemaMismatch("invalid federation room disclosure settings".into())
-        })?;
-        if values
-            .keys()
-            .any(|k| !["shareNames", "shareStatus"].contains(&k.as_str()))
-            || values.values().any(|v| !v.is_boolean())
-        {
-            return Err(StoreError::SchemaMismatch(
-                "invalid federation room disclosure settings".into(),
-            ));
-        }
-        for key in ["shareNames", "shareStatus"] {
-            if let Some(value) = values.get(key) {
-                room[key] = value.clone();
+        for (key, field) in [
+            ("shareNames", &disclosure.share_names),
+            ("shareStatus", &disclosure.share_status),
+        ] {
+            match field {
+                Field::Missing => {}
+                Field::Null => {
+                    return Err(StoreError::SchemaMismatch(
+                        "invalid federation room disclosure settings".into(),
+                    ));
+                }
+                Field::Value(value) => room[key] = json!(value),
             }
         }
         room["updated"] = json!(now()?);
@@ -262,34 +263,51 @@ impl FederationRepository {
         Ok(())
     }
 
-    pub fn room_action(tx: &Transaction<'_>, body: &Value, approve: bool) -> StoreResult<()> {
-        let room_id = body
-            .get("room_id")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let peer_id = body
-            .get("peer_id")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let member_values = body
-            .get("local_members")
-            .and_then(Value::as_array)
-            .ok_or_else(|| {
-                StoreError::SchemaMismatch("invalid local federation room members".into())
-            })?;
-        if member_values.is_empty()
-            || member_values.len() > 50
-            || member_values.iter().any(|v| !v.is_string())
-        {
-            return Err(StoreError::SchemaMismatch(
-                "invalid local federation room members".into(),
-            ));
-        }
-        let members = member_values
-            .iter()
-            .map(|v| v.as_str().unwrap_or_default().to_owned())
-            .collect::<Vec<_>>();
-        let mut unique = members.clone();
+    pub fn room_action(
+        tx: &Transaction<'_>,
+        body: &studio_runtime_schema::federation_ingress::FederationRequest,
+    ) -> StoreResult<()> {
+        use studio_runtime_schema::federation_ingress::FederationRequest;
+        let (room_id, peer_id, members, share_names, share_status, approve) = match body {
+            FederationRequest::CreateRoom {
+                peer_id,
+                local_members,
+                share_names,
+                share_status,
+            } => (
+                "",
+                peer_id.as_str(),
+                local_members.as_slice(),
+                *share_names,
+                *share_status,
+                false,
+            ),
+            FederationRequest::ApproveRoom {
+                room_id,
+                local_members,
+                share_names,
+                share_status,
+            } => (
+                room_id.as_str(),
+                "",
+                local_members.as_slice(),
+                *share_names,
+                *share_status,
+                true,
+            ),
+            FederationRequest::Status {}
+            | FederationRequest::SetEnabled { .. }
+            | FederationRequest::ApprovePeer { .. }
+            | FederationRequest::RevokePeer { .. }
+            | FederationRequest::RoomOptions { .. }
+            | FederationRequest::CreateInvite { .. }
+            | FederationRequest::AcceptPeer { .. } => {
+                return Err(StoreError::SchemaMismatch(
+                    "invalid federation room action".into(),
+                ));
+            }
+        };
+        let mut unique = members.to_vec();
         unique.sort();
         unique.dedup();
         if unique.len() != members.len() {
@@ -297,14 +315,6 @@ impl FederationRepository {
                 "federation room members must be unique".into(),
             ));
         }
-        let share_names = body
-            .get("share_names")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let share_status = body
-            .get("share_status")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
         if !tx.query_row("SELECT json_extract(record,'$.enabled') FROM runtime_federation_settings WHERE id='global'",[],|r|r.get::<_,bool>(0)).optional()?.unwrap_or(false){return Err(StoreError::SchemaMismatch("federation must be enabled before room changes".into()));}
         let (id,label,public_key)=tx.query_row("SELECT json_extract(record,'$.stateId'),json_extract(record,'$.label'),json_extract(record,'$.publicKey') FROM runtime_federation_identity WHERE id='local'",[],|r|Ok((r.get::<_,Option<String>>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,Option<String>>(2)?))).optional()?.ok_or_else(||StoreError::SchemaMismatch("missing local federation identity".into()))?;
         let state_id = id.ok_or_else(|| {
@@ -410,7 +420,11 @@ impl FederationRepository {
             }
             let mut p = json!({"id":agent_id,"role":if is_lead{"lead"}else{"agent"}});
             if is_lead || share_names {
-                p["name"] = agent.get("name").cloned().unwrap_or_else(|| json!("Agent"));
+                p["name"] = agent
+                    .get("name")
+                    .filter(|v| !v.is_null())
+                    .cloned()
+                    .unwrap_or_else(|| json!("Agent"));
             }
             if share_status {
                 p["status"] = agent
@@ -438,8 +452,21 @@ impl FederationRepository {
         let room_id = room["id"].as_str().unwrap_or_default().to_owned();
         let peer_label = room["peerLabel"].as_str().unwrap_or_default();
         tx.execute("INSERT INTO runtime_federation_rooms(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![room_id,room.to_string()])?;
-        let local_room = json!({"id":room_id,"kind":"federated","members":unique,"updated":now,"name":room["name"],"federation":true,"peerId":peer_state,"peerLabel":peer_label});
-        tx.execute("INSERT INTO runtime_rooms(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![room_id,local_room.to_string()])?;
+        let mut local_room = studio_runtime_schema::room_record::RoomRecord::new(
+            room_id.clone(),
+            studio_runtime_schema::room_record::RoomKind::Federated,
+        );
+        local_room.members = Some(unique);
+        local_room.updated = serde_json::Number::from_f64(now).map_or(
+            studio_runtime_schema::queue_command::Field::Null,
+            studio_runtime_schema::queue_command::Field::Value,
+        );
+        local_room.name = room["name"].as_str().map(str::to_owned);
+        local_room.federation = Some(true);
+        local_room.peer_id = Some(peer_state.to_owned());
+        local_room.peer_label =
+            studio_runtime_schema::queue_command::Field::Value(peer_label.to_owned());
+        crate::Table::new(tx).put(&local_room)?;
         let key = if approve {
             format!("room-accept:{room_id}")
         } else {

@@ -26,6 +26,9 @@ export function retainUsageAccounts(
         old.accountId === value.accountId &&
         old.signedOut === value.signedOut &&
         old.limits === value.limits &&
+        old.runway === value.runway &&
+        old.reset === value.reset &&
+        old.buckets === value.buckets &&
         old.loading === value.loading
       );
     })
@@ -103,7 +106,7 @@ export function createChatSnapshotSelector(includeUnassignedRequests = false) {
       rooms: rooms(
         source.rooms,
         threads,
-        (room) => !!rootId && roomLeadIds(room, data.threads).includes(rootId),
+        (room) => !!rootId && roomLeadIds(room).includes(rootId),
       ),
       requests: requests(
         source.requests,

@@ -1,11 +1,12 @@
 //! Pure federation decisions. Inputs are checked stored records; no I/O or clock.
 pub use crate::federation_limits::{
     MAX_BATCH_BYTES, MAX_BATCH_ITEMS as MAX_BATCH, MAX_MESSAGE_CODEPOINTS as MAX_MESSAGE,
-    MAX_QUEUE_BYTES, MAX_QUEUE_ROWS, MAX_ROOM_MEMBERS, MAX_ROOM_RATE, PROTOCOL_VERSION as PROTOCOL,
+    MAX_QUEUE_BYTES, MAX_QUEUE_ROWS, MAX_ROOM_RATE, PROTOCOL_VERSION as PROTOCOL,
 };
 use crate::remote_transport::{RemoteTransportError, canonical_json};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use studio_runtime_schema::federation_ingress::MAX_ROOM_MEMBERS;
 use studio_runtime_store::federation_messaging::FederationTable;
 use thiserror::Error;
 
@@ -74,7 +75,7 @@ pub struct MessageSendReply {
     pub room: String,
     pub deliveries:
         std::collections::BTreeMap<String, studio_runtime_schema::persistence::RecipientDelivery>,
-    pub status: studio_runtime_schema::persistence::DeliveryStatus,
+    pub status: studio_runtime_schema::delivery::MessageSendStatus,
 }
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

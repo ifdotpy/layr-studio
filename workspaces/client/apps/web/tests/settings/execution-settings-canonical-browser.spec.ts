@@ -314,7 +314,7 @@ test("execution settings canonical browser", async ({ page }) => {
         window.canonicalRefreshRelease = null;
         window.reply = {
           ...window.agent,
-          yoloMode: true,
+          permissionMode: "bypassPermissions",
         };
       });
       const permission = page.getByRole("switch", {
@@ -419,20 +419,12 @@ test("execution settings canonical browser", async ({ page }) => {
       await move.click();
       await page.waitForFunction(() => !!window.transferRelease);
       await page.evaluate(() => {
-        const requestId = window.transfers[0]!.request_id;
         window.transferReply = {
           id: "existing-operation",
           leadId: "first",
           targetAccountKey: "second",
           scope: "subagents",
           status: "completed",
-          requests: {
-            [requestId]: {
-              leadId: "first",
-              targetAccountKey: "second",
-              scope: "subagents",
-            },
-          },
         };
         window.transferRelease!();
       });
@@ -1073,7 +1065,7 @@ test("execution settings canonical browser", async ({ page }) => {
       await page.evaluate(() => {
         window.reply = {
           ...window.agent,
-          yoloMode: true,
+          permissionMode: "bypassPermissions",
         };
         window.refreshFailure = true;
       });
@@ -1103,21 +1095,21 @@ test("execution settings canonical browser", async ({ page }) => {
       await page.evaluate(() =>
         window.setAgent!({
           ...window.agent,
-          yoloMode: true,
+          permissionMode: "bypassPermissions",
         }),
       );
       await page.waitForTimeout(50);
       await page.evaluate(() =>
         window.setAgent!({
           ...window.agent,
-          yoloMode: false,
+          permissionMode: "default",
         }),
       );
       assert.equal(await permission.isChecked(), false);
       await page.evaluate(() => {
         window.reply = {
           ...window.agent,
-          yoloMode: false,
+          permissionMode: "default",
         };
         window.refreshFailure = false;
       });

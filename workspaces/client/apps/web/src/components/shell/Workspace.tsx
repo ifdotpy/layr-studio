@@ -1,3 +1,5 @@
+import { ApiError } from "../../api";
+import { serverMutationResponseIsUncertain } from "../../servers/mutationIdentity";
 import {
   AgentSource as GeneratedApiAgentSource,
   WorkspaceMode as GeneratedApiWorkspaceMode,
@@ -1054,7 +1056,9 @@ function inventoryName(value: unknown): string | undefined {
 
 function Profiles(c: Context) {
   const state = useResource("/api/profiles", c.revision),
-    [draft, setDraft] = useFormDraft(`studio-profile-draft:${c.data.stateDir}`),
+    [draft, setDraft, clearDraft] = useFormDraft(
+      `studio-profile-draft:${c.data.stateDir}`,
+    ),
     [busy, setBusy] = useState(false),
     [remove, setRemove] = useState<
       GetResult<"/api/profiles">["profiles"][number] | null
@@ -1201,7 +1205,15 @@ function Profiles(c: Context) {
                       : "",
                 });
                 setDraft((current) => (current === draft ? null : current));
-              } catch {
+              } catch (error) {
+                if (
+                  error instanceof ApiError &&
+                  !serverMutationResponseIsUncertain(
+                    error.status,
+                    error.response,
+                  )
+                )
+                  await clearDraft(JSON.stringify(draft));
               } finally {
                 setBusy(false);
               }
@@ -1325,7 +1337,7 @@ function Rules(c: Context) {
   const state = useResource("/api/rules", c.revision, {
       query: c.selected ? { agent: c.selected.id } : {},
     }),
-    [draftValue, setDraftValue] = useFormDraft(
+    [draftValue, setDraftValue, clearDraft] = useFormDraft(
       `studio-rule-draft:${JSON.stringify([c.data.stateDir, c.selected?.id])}`,
     ),
     [busy, setBusy] = useState(false),
@@ -1484,7 +1496,15 @@ function Rules(c: Context) {
                 setDraftValue((current) =>
                   current === submittedDraft ? null : current,
                 );
-              } catch {
+              } catch (error) {
+                if (
+                  error instanceof ApiError &&
+                  !serverMutationResponseIsUncertain(
+                    error.status,
+                    error.response,
+                  )
+                )
+                  await clearDraft(JSON.stringify(submittedDraft));
               } finally {
                 setBusy(false);
               }

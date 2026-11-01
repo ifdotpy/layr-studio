@@ -156,14 +156,14 @@ async fn start_and_next_turn(provider: &'static str) {
                         Some(studio_runtime_schema::records::WorkspaceMode::Layr);
                     record.cwd = Some("/guest/line".into());
                     for (key, value) in [
-                        ("layrReady", json!(true)),
                         ("layrHome", json!(home_record)),
                         ("layrProjectId", json!("project")),
                         ("layrLine", json!("main")),
-                        ("provider", json!(provider)),
                     ] {
                         record.extra.insert(key.into(), value);
                     }
+                    record.layr_ready = Some(true);
+                    record.provider = serde::Deserialize::deserialize(json!(provider)).unwrap();
                     AgentRepository::put(tx, &record)
                 })
                 .await?;

@@ -223,10 +223,6 @@ fn blocker(tx: &Transaction<'_>, worker: &Value) -> Result<Option<&'static str>,
             "json_extract(record,'$.status') IN ('running','starting','pending','unknown')",
         ),
         (
-            "runtime_requests",
-            "json_extract(record,'$.status') IN ('pending','answering')",
-        ),
-        (
             "runtime_tool_requests",
             "json_extract(record,'$.stage') IN ('queued','running')",
         ),
@@ -235,6 +231,14 @@ fn blocker(tx: &Transaction<'_>, worker: &Value) -> Result<Option<&'static str>,
         if active {
             return Ok(Some("An active native task or request holds this session"));
         }
+    }
+    let open_approval: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM approvals WHERE agent=?1 AND state IN ('pending','answering'))",
+        [id],
+        |row| row.get(0),
+    )?;
+    if open_approval {
+        return Ok(Some("An active native task or request holds this session"));
     }
     Ok(None)
 }
@@ -1776,7 +1780,9 @@ mod tests {
                 .transaction(move |tx| {
                     let mut worker = AgentRepository::get(tx, &AgentId::from("worker-00000000"))?
                         .expect("worker");
-                    worker.extra.insert("provider".into(), json!(provider));
+                    worker.provider = studio_runtime_schema::queue_command::Field::Value(
+                        provider.parse().unwrap(),
+                    );
                     worker.execution_mode = Some(if mode == "vm" {
                         studio_runtime_store::AgentExecutionMode::Vm
                     } else {

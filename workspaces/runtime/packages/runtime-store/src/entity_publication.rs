@@ -2,7 +2,7 @@
 //!
 //! The renderer reads chats and cards only from their `sync_entities` rows, and
 //! a pull does not rebuild a complete projection. So every writer transaction
-//! publishes the `runtime_agents` and `runtime_requests` rows it changed, in the
+//! publishes the `runtime_agents` and `approvals` rows it changed, in the
 //! same transaction and before it commits, unless the transaction already
 //! published that entity after its last change. The projection itself belongs
 //! to runtime-services, which installs it with
@@ -92,14 +92,10 @@ impl WorkHistoryKind {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct WorkSourceChanges {
     histories: BTreeMap<WorkHistoryKind, BTreeSet<usize>>,
-    refusal: bool,
 }
 impl WorkSourceChanges {
     pub fn histories(&self) -> &BTreeMap<WorkHistoryKind, BTreeSet<usize>> {
         &self.histories
-    }
-    pub fn refusal_changed(&self) -> bool {
-        self.refusal
     }
 }
 
@@ -135,7 +131,7 @@ pub(crate) fn register_work_change_functions(connection: &Connection) -> crate::
                 context.get::<Option<String>>(1)?,
             ) {
                 (Some(owner), None) => push(Event::WorkRefusalOwner(owner)),
-                (None, Some(task)) => push(Event::WorkRefusalTask(task)),
+                (None, Some(_)) => push(Event::WorkRefusalTask),
                 _ => return Err(rusqlite::Error::InvalidQuery),
             }
             Ok(0)
@@ -144,8 +140,7 @@ pub(crate) fn register_work_change_functions(connection: &Connection) -> crate::
     Ok(())
 }
 
-/// Classify changes while OLD and NEW are already owned by the SQLite write.
-/// Metadata writes compare source fields but never enumerate history entries.
+/// Classify work changes while OLD and NEW are available to the source journal.
 pub(crate) fn prepare_work_change_journal(transaction: &Transaction<'_>) -> crate::StoreResult<()> {
     for kind in WorkHistoryKind::ALL {
         let field = kind.field();
@@ -233,7 +228,7 @@ impl Source {
     fn of_table(table: &str) -> Option<Self> {
         match table {
             "runtime_agents" => Some(Self::Agent),
-            "runtime_requests" => Some(Self::Request),
+            "approvals" => Some(Self::Request),
             "runtime_events" => Some(Self::Event),
             "runtime_event_meta" => Some(Self::EventMeta),
             "runtime_items" => Some(Self::Item),
@@ -264,7 +259,7 @@ impl Source {
     fn table(self) -> &'static str {
         match self {
             Self::Agent => "runtime_agents",
-            Self::Request => "runtime_requests",
+            Self::Request => "approvals",
             Self::Event => "runtime_events",
             Self::EventMeta => "runtime_event_meta",
             Self::Item => "runtime_items",
@@ -290,7 +285,8 @@ enum Event {
     Stale(Source, String),
     WorkHistory(String, WorkHistoryKind, usize),
     WorkRefusalOwner(String),
-    WorkRefusalTask(String),
+    WorkRefusalTask,
+    TeamRoot(String),
 }
 
 thread_local! {
@@ -305,6 +301,30 @@ fn push(event: Event) {
             events.push(event);
         }
     });
+}
+
+/// Capture the old team root before an indexed write can move or remove it.
+pub(crate) fn agent_team_root(connection: &Connection, id: &str) -> StoreResult<Option<String>> {
+    if !active() {
+        return Ok(None);
+    }
+    Ok(connection
+        .query_row(
+            "SELECT root_id FROM runtime_agents WHERE id=?1",
+            [id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+/// Enqueue roots only after the indexed row has actually changed.
+pub(crate) fn mark_agent_team_roots(id: &str, old_root: Option<&str>, new_root: Option<&str>) {
+    for root in old_root.into_iter().chain(new_root) {
+        if root != id {
+            push(Event::TeamRoot(root.to_owned()));
+        }
+    }
 }
 
 /// Start the journal of a writer transaction.
@@ -342,7 +362,7 @@ pub(crate) fn mark_published(collection: &str, id: &str) {
 /// Journal that `collection/id` needs a full publication before commit.
 pub fn mark_stale(collection: &str, id: &str) {
     if collection == "work" {
-        push(Event::WorkRefusalTask(id.to_owned()));
+        push(Event::WorkRefusalTask);
     }
     if let Some(source) = Source::of_collection(collection) {
         push(Event::Stale(source, id.to_owned()));
@@ -388,6 +408,27 @@ pub(crate) fn pending(
         }
     }
     for ((source, _), id) in &ids {
+        if *source == Source::Agent {
+            if let Some(id) = id {
+                let root: Option<String> = transaction
+                    .query_row(
+                        "SELECT root_id FROM runtime_agents WHERE id=?1 AND root_id<>id",
+                        [id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if let Some(root) = root {
+                    pending.agents.insert(root);
+                }
+            } else {
+                let mut statement = transaction.prepare(
+                    "SELECT id FROM runtime_agents WHERE root_id=id AND deleted_at IS NULL",
+                )?;
+                for row in statement.query_map([], |row| row.get::<_, String>(0))? {
+                    pending.agents.insert(row?);
+                }
+            }
+        }
         if matches!(
             source,
             Source::Agent | Source::Event | Source::EventMeta | Source::QueueAsset
@@ -456,11 +497,9 @@ pub(crate) fn pending(
         }
         if let Some(id) = id {
             if let Some(agent) = transaction
-                .query_row(
-                    "SELECT json_extract(record,'$.agent') FROM runtime_requests WHERE id=?1",
-                    [id],
-                    |row| row.get::<_, Option<String>>(0),
-                )
+                .query_row("SELECT agent FROM approvals WHERE id=?1", [id], |row| {
+                    row.get::<_, Option<String>>(0)
+                })
                 .optional()?
                 .flatten()
             {
@@ -506,8 +545,10 @@ pub(crate) fn pending(
             Event::WorkRefusalOwner(id) => {
                 pending.work_refusal_owners.insert(id);
             }
-            Event::WorkRefusalTask(id) => {
-                work_changes.entry(id).or_default().refusal = true;
+            // The submission refusal is derived on every work publication.
+            Event::WorkRefusalTask => {}
+            Event::TeamRoot(id) => {
+                pending.agents.insert(id);
             }
         }
     }

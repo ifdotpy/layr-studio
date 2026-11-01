@@ -8,7 +8,6 @@ import type {
   ModelEntityDto,
   PeerTeamEntityDto,
   ProjectEntityDto,
-  RequestEntityDto,
   RoomEntityDto,
   RuleEntityDto,
   SyncEntityPayload,
@@ -17,11 +16,11 @@ import type {
   WorkspaceEntityDto,
 } from "../generated/api";
 import type { components } from "../generated/api";
-import { RequestStatus } from "../generated/api";
-type AccountRateLimitsDto = components["schemas"]["AccountRateLimitsDto"];
+type RateLimitView = components["schemas"]["RateLimitView"];
 type StudioError = components["schemas"]["StudioError"];
 export type UiPreferencesDto = components["schemas"]["UiPreferencesDto"];
 import type { Snapshot } from "../types";
+import type { Approval } from "../approvals";
 
 export const UI_PREFERENCE_SCOPES = ["user", "server"] as const;
 export type UiPreferenceScope = (typeof UI_PREFERENCE_SCOPES)[number];
@@ -137,7 +136,7 @@ function emptyEntityValues(): EntityValues {
     task: new Map<string, TaskEntityDto>(),
     monitor: new Map<string, MonitorEntityDto>(),
     complaint: new Map<string, ComplaintEntityDto>(),
-    request: new Map<string, RequestEntityDto>(),
+    request: new Map<string, Approval>(),
     rule: new Map<string, RuleEntityDto>(),
     project: new Map<string, ProjectEntityDto>(),
     peerTeam: new Map<string, PeerTeamEntityDto>(),
@@ -162,7 +161,7 @@ function emptyEntityValues(): EntityValues {
     desktop: new Map<string, components["schemas"]["DesktopResponse"]>(),
     terminal: new Map<string, components["schemas"]["TerminalRecord"]>(),
     queue: new Map<string, components["schemas"]["QueueView"]>(),
-    rateLimit: new Map<string, AccountRateLimitsDto>(),
+    rateLimit: new Map<string, RateLimitView>(),
     model: new Map<string, ModelEntityDto>(),
     studioError: new Map<string, StudioError>(),
     uiPreferences: new Map<string, UiPreferencesDto>(),
@@ -174,7 +173,7 @@ function emptyEntityValues(): EntityValues {
  * Shape validation remains necessary because a mismatched server response or
  * storage corruption can still damage a row before it reaches the cache.
  */
-function parseEntityPayload(parsed: unknown): SyncEntityPayload | null {
+export function parseEntityPayload(parsed: unknown): SyncEntityPayload | null {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
     return null;
   const candidate = parsed as Record<string, unknown>;
@@ -182,6 +181,7 @@ function parseEntityPayload(parsed: unknown): SyncEntityPayload | null {
     typeof candidate.collection !== "string" ||
     !entityCollections.has(candidate.collection) ||
     typeof candidate.id !== "string" ||
+    candidate.id.length === 0 ||
     candidate.value === null ||
     typeof candidate.value !== "object" ||
     Array.isArray(candidate.value)
@@ -243,10 +243,7 @@ function projectSnapshotCollections(
   const requests =
     prior && !changed.has("request")
       ? prior.runtime.requests
-      : entityValues(values, "request").filter(
-          (request) =>
-            request.status == null || request.status === RequestStatus.pending,
-        );
+      : entityValues(values, "request");
   const rules =
     prior && !changed.has("rule")
       ? prior.runtime.rules

@@ -6,7 +6,7 @@
     "effort": "medium",
     "nativeEffort": null,
     "fastMode": false,
-    "yoloMode": true,
+    "permissionMode": "bypassPermissions",
     "profileInstructions": "",
     "role": "orchestrator",
     "daybreakEnabled": false,

@@ -114,8 +114,8 @@ async fn saved_start_effect_of_a_held_attempt_does_not_end_the_restarted_worker(
                 let mut agent =
                     AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?.unwrap();
                 agent.auto_wake = Some(true);
-                agent.extra.insert("error".into(), Value::Null);
-                agent.extra.remove("nativeFailureHold");
+                agent.error = studio_runtime_schema::queue_command::Field::Null;
+                agent.clear_native_failure_hold();
                 AgentRepository::put(tx, &agent)?;
                 Ok::<_, WorkerError>(())
             })

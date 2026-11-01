@@ -937,7 +937,6 @@ export function createApiScope(options: ApiScopeOptions) {
       "codex.terminal.",
       "codex-desktop-opened:",
       "project-last-server:",
-      "studio-recovered-limit:",
       "codex-chat-seen:",
     ].some((prefix) => key.startsWith(prefix)) ||
     key.endsWith(":tools-v3");

@@ -7,18 +7,17 @@
 //!    window, and the replay record. A repeated command returns its first reference.
 //! 2. Run the command. `execute_sync` runs `withdraw` and `stop` inside the caller's
 //!    transaction, including the reference and the watermark, so no crash can separate the
-//!    change from its record. `send` needs the message admission path, so its caller runs it
-//!    between `begin` and `finish`.
+//!    change from its record. `send` posts its message in the caller's transaction too: the
+//!    HTTP edge runs `finish` in that same transaction (`messages::send_message_with`).
 //! 3. `finish`: record the reference in `request_results` (not for a create command, whose
 //!    row is the receipt) and raise the client's watermark, in the same transaction.
 //! 4. `response`: read the referenced rows at response time. They are never stored.
 
 use crate::agent_lifecycle_runtime::LifecyclePorts;
 use crate::agent_management::Action;
-use rusqlite::{Connection, Transaction};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use studio_runtime_schema::command::{
-    COMMAND_CLIENT_ID_MAX_CHARS, COMMAND_ROW_MAX_BYTES, Command, CommandRequest, CommandResponse,
-    CommandRow, CommandStatus,
+    COMMAND_ROW_MAX_BYTES, Command, CommandRequest, CommandResponse, CommandRow, CommandStatus,
 };
 use studio_runtime_schema::persistence::{
     RequestIdentity, RequestIdentityError, RequestReferenceKind,
@@ -126,13 +125,20 @@ pub fn authorize(
 }
 
 /// A command that passed `begin` and has not run yet.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Begun {
     identity: RequestIdentity,
     signature: String,
     client: String,
     number: i64,
     records: bool,
+    legacy_send: bool,
+}
+
+impl Begun {
+    pub fn legacy_send(&self) -> bool {
+        self.legacy_send
+    }
 }
 
 #[derive(Debug)]
@@ -154,23 +160,17 @@ pub fn begin(
     // An agent or the policy runs in this process and brings a tool call id, which is not a
     // UUIDv7. The server numbers its commands.
     let trusted = matches!(principal, Principal::Agent { .. } | Principal::Policy);
-    let client = format!("{who}/{}", request.client);
-    if request.client.is_empty() || request.client.chars().count() > COMMAND_CLIENT_ID_MAX_CHARS {
-        return Err(CommandError::Invalid("Invalid command client id"));
-    }
+    let client = format!("{who}/{}", request.client.as_str());
     let number = if trusted {
         CommandWatermarks::applied(tx, &client)? + 1
     } else {
-        i64::try_from(request.number)
-            .ok()
-            .filter(|number| *number >= 1)
-            .ok_or(CommandError::Invalid("Command numbers start at 1"))?
+        request.number.get()
     };
     let identity = if trusted {
         RequestIdentity::opaque(
             "command",
             &[who.as_str()],
-            &request.id,
+            request.id.as_str(),
             &[request.command.name()],
             now_ms,
         )
@@ -178,7 +178,7 @@ pub fn begin(
         RequestIdentity::new(
             "command",
             &[who.as_str()],
-            &request.id,
+            request.id.as_str(),
             &[request.command.name()],
         )
         .map_err(RequestResultError::from)?
@@ -205,6 +205,23 @@ pub fn begin(
         });
     }
     let records = !is_create(&request.command);
+    let legacy_send =
+        !records && !trusted && identity.issued_ms() < CommandWatermarks::send_cutover(tx)?;
+    if !records
+        && !legacy_send
+        && !CommandWatermarks::reserve_send(
+            tx,
+            identity.id(),
+            &signature,
+            identity.issued_ms(),
+            now_ms,
+        )?
+    {
+        return Err(RequestResultError::Conflict {
+            id: identity.id().into(),
+        }
+        .into());
+    }
     if records
         && let Some(reference) =
             RequestResults::replay_reference(tx, identity.id(), &signature, now_ms)?
@@ -217,6 +234,7 @@ pub fn begin(
         client,
         number,
         records,
+        legacy_send,
     }))
 }
 
@@ -259,28 +277,106 @@ pub fn agent_reference(tx: &Transaction<'_>, id: &str) -> Result<RequestReferenc
     })
 }
 
-/// Step 2 for `withdraw`: delete a queued message and return its text.
-///
-/// TODO(#630): a message that already left the queue is held by a turn. The command must
-/// then interrupt that turn and return the text the same way. That needs the Turn table of
-/// the domain model; until it is on main, such a message is a conflict.
-pub fn withdraw(
+/// The facts of a withdraw, read from the rows by `read_withdraw`. `decide_withdraw` uses
+/// only these facts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WithdrawInput {
+    pub chat: String,
+    pub deleted: bool,
+    /// The chat runs on another server (a remote worker or anchor).
+    pub remote: bool,
+    /// The event with the message id, in this chat and epoch: pending (queued), or
+    /// reserved or dispatching (held by the running turn).
+    pub queued: Option<QueuedMessage>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct QueuedMessage {
+    pub id: String,
+    pub kind: String,
+    pub valid: bool,
+    pub text: String,
+    /// The message is held by the running turn, not queued.
+    pub held: bool,
+}
+
+/// What `apply_withdraw` writes: the queue status and the server draft. `interrupt` is
+/// set for a held message: its turn must stop too.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WithdrawDecision {
+    pub chat: String,
+    pub message: String,
+    pub text: String,
+    pub interrupt: bool,
+}
+
+/// Step 2 for `withdraw`, read part: gather the facts that `decide_withdraw` needs.
+pub fn read_withdraw(
     tx: &Transaction<'_>,
     chat: &str,
     message: &str,
-) -> Result<(RequestReference, String), CommandError> {
+) -> Result<WithdrawInput, CommandError> {
     let agent = AgentRepository::get(tx, &AgentId::from(chat))?.ok_or(CommandError::NotFound)?;
-    if agent.is_deleted() {
+    let queued = match QueueWriteRepository::pending_events(tx, chat, agent.epoch)?
+        .into_iter()
+        .find(|event| event.id == message)
+    {
+        Some(event) => {
+            let text: String = tx.query_row(
+                "SELECT text FROM runtime_events WHERE id=?1",
+                [message],
+                |row| row.get(0),
+            )?;
+            Some(QueuedMessage {
+                id: event.id,
+                kind: event.kind,
+                valid: event.valid,
+                text,
+                held: false,
+            })
+        }
+        None => tx
+            .query_row(
+                "SELECT kind,text FROM runtime_events WHERE id=?1 AND agent=?2 AND epoch=?3 AND status IN ('reserved','dispatching')",
+                params![message, chat, agent.epoch],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+            .map(|(kind, text)| QueuedMessage {
+                id: message.into(),
+                kind,
+                valid: true,
+                text,
+                held: true,
+            }),
+    };
+    Ok(WithdrawInput {
+        chat: chat.into(),
+        deleted: agent.is_deleted(),
+        remote: truthy(agent.extra.get("remoteWorker")) || truthy(agent.extra.get("remoteAnchor")),
+        queued,
+    })
+}
+
+/// Step 2 for `withdraw`, decide part: no I/O. The refusals keep this order: deleted,
+/// remote, not queued, invalid or not a user message. A held message is withdrawn too;
+/// its turn is interrupted (`interrupt`).
+pub fn decide_withdraw(
+    input: &WithdrawInput,
+    message: &str,
+) -> Result<WithdrawDecision, CommandError> {
+    if input.deleted {
         return Err(CommandError::Invalid("This agent was deleted"));
     }
-    if truthy(agent.extra.get("remoteWorker")) || truthy(agent.extra.get("remoteAnchor")) {
+    if input.remote {
         return Err(CommandError::Invalid(
             "Not implemented: requires cross-server/remote-events",
         ));
     }
-    let queued = QueueWriteRepository::pending_events(tx, chat, agent.epoch)?
-        .into_iter()
-        .find(|event| event.id == message)
+    let queued = input
+        .queued
+        .as_ref()
+        .filter(|queued| queued.id == message)
         .ok_or(CommandError::Conflict(
             "This message already left the queue",
         ))?;
@@ -289,13 +385,26 @@ pub fn withdraw(
             "Only a user message can be withdrawn",
         ));
     }
-    let text: String = tx.query_row(
-        "SELECT text FROM runtime_events WHERE id=?1",
-        [message],
-        |row| row.get(0),
-    )?;
-    QueueWriteRepository::update_status(tx, message, "cancelled")?;
-    Ok((message_reference(tx, message)?, text))
+    Ok(WithdrawDecision {
+        chat: input.chat.clone(),
+        message: queued.id.clone(),
+        text: queued.text.clone(),
+        interrupt: queued.held,
+    })
+}
+
+/// Step 2 for `withdraw`, apply part: write the queue status and the server draft. The
+/// status is `cancelled`, as for a steer input that its stopped turn never read. The
+/// reference is read after the status write, because the status change moves its revision.
+pub fn apply_withdraw(
+    tx: &Transaction<'_>,
+    decision: &WithdrawDecision,
+    now_ms: i64,
+) -> Result<RequestReference, CommandError> {
+    QueueWriteRepository::update_status(tx, &decision.message, "cancelled")?;
+    let reference = message_reference(tx, &decision.message)?;
+    server_draft(tx, &decision.chat, &decision.text, now_ms)?;
+    Ok(reference)
 }
 
 /// Step 4. Read the referenced rows now. `ids` are the entities that the command changed:
@@ -377,6 +486,41 @@ fn server_draft(
     Ok(())
 }
 
+/// The stop of `target` for `principal`. A stop only interrupts the running turn; it does
+/// not pause the chat or clear its queue. An agent principal names itself as the sender.
+fn stop_action(principal: &Principal, target: &str, descendants: bool) -> Action {
+    let (sender, sender_epoch) = match principal {
+        Principal::Agent { id, epoch } => (Some(id.clone()), i64::try_from(*epoch).ok()),
+        Principal::Owner
+        | Principal::Device { .. }
+        | Principal::Peer { .. }
+        | Principal::Federated { .. }
+        | Principal::Policy => (None, None),
+    };
+    Action::Stop {
+        target: target.to_owned(),
+        descendants,
+        reason: None,
+        sender,
+        sender_epoch,
+    }
+}
+
+/// Run a stop in the caller's transaction. The ports stage its provider effects.
+fn run_stop(
+    tx: &Transaction<'_>,
+    action: &Action,
+    now: f64,
+    ports: Option<&dyn LifecyclePorts>,
+) -> Result<serde_json::Value, CommandError> {
+    Ok(match ports {
+        Some(ports) => {
+            crate::agent_lifecycle_runtime::execute_in_transaction(tx, action, now, ports)?
+        }
+        None => crate::agent_management_store::execute_in_transaction(tx, action, now)?,
+    })
+}
+
 /// Steps 1 to 3 for the commands that run inside one transaction (`withdraw`, `stop`).
 /// The change, the reference and the watermark commit together. `ports` stage the provider
 /// effects of a stop; the caller wakes them after the commit.
@@ -406,35 +550,27 @@ pub fn execute_sync(
     let mut reply = serde_json::Value::Null;
     let reference = match &request.command {
         Command::Withdraw { target, body } => {
-            let (reference, text) = withdraw(tx, target, &body.message)?;
-            server_draft(tx, target, &text, now_ms)?;
+            let input = read_withdraw(tx, target.as_str(), body.message.as_str())?;
+            let decision = decide_withdraw(&input, body.message.as_str())?;
+            let reference = apply_withdraw(tx, &decision, now_ms)?;
+            if decision.interrupt {
+                run_stop(
+                    tx,
+                    &stop_action(principal, &decision.chat, false),
+                    now,
+                    ports,
+                )?;
+            }
             reference
         }
         Command::Stop { target, body } => {
-            let (sender, sender_epoch) = match principal {
-                Principal::Agent { id, epoch } => (Some(id.clone()), i64::try_from(*epoch).ok()),
-                Principal::Owner
-                | Principal::Device { .. }
-                | Principal::Peer { .. }
-                | Principal::Federated { .. }
-                | Principal::Policy => (None, None),
-            };
-            // A stop only interrupts the running turn; it does not pause the chat or
-            // clear its queue.
-            let action = Action::Stop {
-                target: target.clone(),
-                descendants: body.descendants,
-                reason: None,
-                sender,
-                sender_epoch,
-            };
-            reply = match ports {
-                Some(ports) => {
-                    crate::agent_lifecycle_runtime::execute_in_transaction(tx, &action, now, ports)?
-                }
-                None => crate::agent_management_store::execute_in_transaction(tx, &action, now)?,
-            };
-            agent_reference(tx, target)?
+            reply = run_stop(
+                tx,
+                &stop_action(principal, target.as_str(), body.descendants),
+                now,
+                ports,
+            )?;
+            agent_reference(tx, target.as_str())?
         }
         Command::Send { .. } => unreachable!("refused above"),
     };
@@ -472,25 +608,202 @@ pub fn execute_agent_send(
         crate::coordination::AgentFollowup {
             sender_id: id,
             sender_epoch: i64::try_from(*epoch).unwrap_or_default(),
-            recipient_id: target,
-            id: &request.id,
-            text: &body.text,
+            recipient_id: target.as_str(),
+            id: request.id.as_str(),
+            text: body.text.as_str(),
             delivery: body.delivery.unwrap_or_default(),
             now,
         },
         admission,
     )?;
-    let reference = finish(tx, &begun, &message_reference(tx, &request.id)?)?;
+    let reference = finish(tx, &begun, &message_reference(tx, request.id.as_str())?)?;
     Ok((reference, result))
 }
 
 /// Command identity of a tool call of `agent`: the call id is the command id.
-pub fn agent_request(agent: &str, id: &str, command: Command) -> CommandRequest {
-    CommandRequest {
-        id: id.to_owned(),
-        client: agent.to_owned(),
+pub fn agent_request(
+    agent: &str,
+    id: &str,
+    command: Command,
+) -> Result<CommandRequest, CommandError> {
+    Ok(CommandRequest {
+        id: studio_runtime_schema::command::CommandId::tool(id.to_owned()),
+        client: agent
+            .to_owned()
+            .try_into()
+            .map_err(|_| CommandError::Invalid("Invalid command client id"))?,
         // The server numbers the commands of an agent.
-        number: 1,
+        // One lies within the positive safe-integer range.
+        number: 1_i64.try_into().expect("one is a valid command number"),
         command,
+    })
+}
+
+#[cfg(test)]
+mod withdraw_decision_tests {
+    use super::{CommandError, QueuedMessage, WithdrawInput, decide_withdraw};
+
+    fn queued(id: &str, kind: &str, valid: bool) -> QueuedMessage {
+        QueuedMessage {
+            id: id.into(),
+            kind: kind.into(),
+            valid,
+            text: "draft text".into(),
+            held: false,
+        }
+    }
+
+    fn held(id: &str, kind: &str) -> QueuedMessage {
+        QueuedMessage {
+            held: true,
+            ..queued(id, kind, true)
+        }
+    }
+
+    fn input(deleted: bool, remote: bool, queued: Option<QueuedMessage>) -> WithdrawInput {
+        WithdrawInput {
+            chat: "chat-1".into(),
+            deleted,
+            remote,
+            queued,
+        }
+    }
+
+    #[test]
+    fn a_queued_user_message_is_withdrawn_with_its_text() {
+        let decision =
+            decide_withdraw(&input(false, false, Some(queued("m1", "user", true))), "m1")
+                .expect("withdraw");
+        assert_eq!(decision.chat, "chat-1");
+        assert_eq!(decision.message, "m1");
+        assert_eq!(decision.text, "draft text");
+        assert!(!decision.interrupt);
+    }
+
+    #[test]
+    fn a_message_held_by_a_running_turn_is_withdrawn_and_interrupts_it() {
+        let decision = decide_withdraw(&input(false, false, Some(held("m1", "user"))), "m1")
+            .expect("withdraw held");
+        assert_eq!(decision.chat, "chat-1");
+        assert_eq!(decision.message, "m1");
+        assert_eq!(decision.text, "draft text");
+        assert!(decision.interrupt);
+    }
+
+    #[test]
+    fn a_held_followup_is_refused_as_not_a_user_message() {
+        let error = decide_withdraw(&input(false, false, Some(held("m1", "followup"))), "m1")
+            .expect_err("held kind");
+        assert!(matches!(
+            error,
+            CommandError::Invalid("Only a user message can be withdrawn")
+        ));
+    }
+
+    #[test]
+    fn the_deleted_and_remote_checks_come_before_the_held_case() {
+        let error = decide_withdraw(&input(true, false, Some(held("m1", "user"))), "m1")
+            .expect_err("deleted");
+        assert!(matches!(
+            error,
+            CommandError::Invalid("This agent was deleted")
+        ));
+        let error = decide_withdraw(&input(false, true, Some(held("m1", "user"))), "m1")
+            .expect_err("remote");
+        assert!(
+            matches!(error, CommandError::Invalid(text) if text.starts_with("Not implemented"))
+        );
+    }
+
+    #[test]
+    fn a_deleted_chat_is_refused() {
+        let error = decide_withdraw(&input(true, false, None), "m1").expect_err("deleted");
+        assert!(matches!(
+            error,
+            CommandError::Invalid("This agent was deleted")
+        ));
+    }
+
+    #[test]
+    fn a_remote_chat_is_refused() {
+        let error = decide_withdraw(&input(false, true, Some(queued("m1", "user", true))), "m1")
+            .expect_err("remote");
+        assert!(matches!(
+            error,
+            CommandError::Invalid("Not implemented: requires cross-server/remote-events")
+        ));
+    }
+
+    #[test]
+    fn a_message_that_is_not_queued_is_a_conflict() {
+        let error = decide_withdraw(&input(false, false, None), "m1").expect_err("not queued");
+        assert!(matches!(
+            error,
+            CommandError::Conflict("This message already left the queue")
+        ));
+    }
+
+    #[test]
+    fn a_queued_event_with_another_id_is_a_conflict() {
+        let error = decide_withdraw(&input(false, false, Some(queued("m2", "user", true))), "m1")
+            .expect_err("other id");
+        assert!(matches!(
+            error,
+            CommandError::Conflict("This message already left the queue")
+        ));
+    }
+
+    #[test]
+    fn an_invalid_queued_event_is_refused() {
+        let error = decide_withdraw(
+            &input(false, false, Some(queued("m1", "user", false))),
+            "m1",
+        )
+        .expect_err("invalid");
+        assert!(matches!(
+            error,
+            CommandError::Invalid("Only a user message can be withdrawn")
+        ));
+    }
+
+    #[test]
+    fn a_queued_event_that_is_not_a_user_message_is_refused() {
+        let error = decide_withdraw(
+            &input(false, false, Some(queued("m1", "followup", true))),
+            "m1",
+        )
+        .expect_err("kind");
+        assert!(matches!(
+            error,
+            CommandError::Invalid("Only a user message can be withdrawn")
+        ));
+    }
+
+    #[test]
+    fn the_deleted_check_comes_before_the_remote_and_queue_checks() {
+        let error = decide_withdraw(&input(true, true, None), "m1").expect_err("deleted first");
+        assert!(matches!(
+            error,
+            CommandError::Invalid("This agent was deleted")
+        ));
+    }
+
+    #[test]
+    fn the_remote_check_comes_before_the_queue_checks() {
+        let error = decide_withdraw(
+            &input(false, true, Some(queued("m1", "followup", false))),
+            "m1",
+        )
+        .expect_err("remote first");
+        assert!(
+            matches!(error, CommandError::Invalid(text) if text.starts_with("Not implemented"))
+        );
+    }
+
+    #[test]
+    fn the_queue_check_comes_before_the_kind_check() {
+        let error =
+            decide_withdraw(&input(false, false, None), "m1").expect_err("not queued first");
+        assert!(matches!(error, CommandError::Conflict(_)));
     }
 }

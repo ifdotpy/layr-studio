@@ -22,14 +22,26 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use strum::VariantNames;
 
+use crate::approvals;
 use crate::records::{AgentExecutionMode, AgentId, AgentStatus};
 use crate::{StoreError, StoreResult};
+use std::time::{SystemTime, UNIX_EPOCH};
+use studio_runtime_schema::approvals::{Timestamp, TurnId as ApprovalTurnId};
 
 pub const CHAT_TABLE: &str = "chats";
 pub const TURN_TABLE: &str = "turns";
 pub const SESSION_TABLE: &str = "sessions";
 /// At most one row per chat can be in a state of [`TurnState::UNFINISHED`].
 pub const ONE_UNFINISHED_TURN_INDEX: &str = "turns_one_unfinished";
+/// Chat statuses that occupy a capacity slot (a status name each). A deleted agent
+/// keeps its status, so a slot also needs a live agent row (`deleted_at IS NULL`).
+pub const CHAT_CAPACITY_STATUSES: &str = "('starting','running','waiting','paused','approval')";
+/// Chat statuses whose turn may still be running or reserved.
+pub const CHAT_ACTIVE_STATUSES: &str = "('running','starting','approval')";
+/// Partial index of [`CHAT_CAPACITY_STATUSES`] on `chats.status`.
+pub const CAPACITY_STATUS_INDEX: &str = "chats_capacity_status";
+/// Partial index of [`CHAT_ACTIVE_STATUSES`] on `chats.status`.
+pub const ACTIVE_STATUS_INDEX: &str = "chats_active_status";
 
 /// A chat is the agent row id.
 pub type ChatId = AgentId;
@@ -118,6 +130,8 @@ pub enum SessionState {
     Starting,
     Ready,
     Lost,
+    /// The chat has another thread or none. Kept as history; thread lookups skip it.
+    Ended,
 }
 
 macro_rules! text_enum {
@@ -192,6 +206,7 @@ pub fn tables_sql() -> String {
             id TEXT PRIMARY KEY, chat TEXT NOT NULL, thread_id TEXT NOT NULL,
             account_key TEXT NOT NULL, state TEXT NOT NULL) STRICT;
          CREATE INDEX IF NOT EXISTS chats_vm ON {CHAT_TABLE}(id) WHERE execution_mode='vm';
+         CREATE INDEX IF NOT EXISTS sessions_thread ON {SESSION_TABLE}(thread_id,account_key) WHERE state<>'ended';
          CREATE INDEX IF NOT EXISTS sessions_chat ON {SESSION_TABLE}(chat);
          CREATE TABLE IF NOT EXISTS {TURN_TABLE}(
             id TEXT PRIMARY KEY, chat TEXT NOT NULL, state TEXT NOT NULL, session TEXT,
@@ -205,8 +220,10 @@ pub fn tables_sql() -> String {
             ON {TURN_TABLE}(attempt_connection_generation,chat) WHERE attempt IS NOT NULL;
          CREATE UNIQUE INDEX IF NOT EXISTS {ONE_UNFINISHED_TURN_INDEX}
             ON {TURN_TABLE}(chat) WHERE state IN ({unfinished});
-         CREATE INDEX IF NOT EXISTS turns_provider_turn ON {TURN_TABLE}(chat,provider_turn);",
+         CREATE INDEX IF NOT EXISTS turns_provider_turn ON {TURN_TABLE}(chat,provider_turn);
+         {status_indexes}",
         unfinished = in_list(&TurnState::UNFINISHED),
+        status_indexes = status_indexes_sql(),
     )
 }
 
@@ -508,12 +525,13 @@ fn project_state(connection: &Connection, id: &str, fields: &Fields) -> StoreRes
             fields.turn_epoch,
         ])?;
 
-    let session = match (&fields.thread_id, &fields.account_key) {
-        (Some(thread), Some(account)) => {
+    let session = match &fields.thread_id {
+        Some(thread) => {
+            let account = fields.account_key.as_deref().unwrap_or("default");
             let session = format!("{id}:{thread}");
             connection
                 .prepare_cached(
-                    "UPDATE sessions SET state='lost' WHERE chat=?1 AND id<>?2 AND state<>'lost'",
+                    "UPDATE sessions SET state='ended' WHERE chat=?1 AND id<>?2 AND state<>'ended'",
                 )?
                 .execute(params![id, session])?;
             connection
@@ -523,6 +541,10 @@ fn project_state(connection: &Connection, id: &str, fields: &Fields) -> StoreRes
                      WHERE account_key IS NOT excluded.account_key",
                 )?
                 .execute(params![session, id, thread, account, SessionState::Ready.column()])?;
+            // The chat is back on an earlier thread.
+            connection
+                .prepare_cached("UPDATE sessions SET state='lost' WHERE id=?1 AND state='ended'")?
+                .execute([&session])?;
             if fields.in_flight == Some(true) {
                 // A turn runs on the thread again: the provider connection is back.
                 connection
@@ -535,7 +557,14 @@ fn project_state(connection: &Connection, id: &str, fields: &Fields) -> StoreRes
             }
             Some(SessionId(session))
         }
-        _ => None,
+        None => {
+            connection
+                .prepare_cached(
+                    "UPDATE sessions SET state='ended' WHERE chat=?1 AND state<>'ended'",
+                )?
+                .execute([id])?;
+            None
+        }
     };
 
     let current = unfinished_turn(connection, id)?;
@@ -597,6 +626,20 @@ fn finish_turn(connection: &Connection, turn: &TurnId, outcome: &str) -> StoreRe
     connection
         .prepare_cached("UPDATE turns SET state=?2,session=NULL WHERE id=?1")?
         .execute(params![turn.0, outcome])?;
+    close_turn_approvals(connection, &turn.0)
+}
+
+/// A turn ended: its open approvals close, and an answer in delivery becomes
+/// unknown (`approvals::turn_ended`).
+fn close_turn_approvals(connection: &Connection, turn: &str) -> StoreResult<()> {
+    // Databases made before the approvals table has none to close.
+    if !crate::schema::table_exists(connection, approvals::TABLE)? {
+        return Ok(());
+    }
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0.0, |elapsed| elapsed.as_secs_f64());
+    approvals::turn_ended(connection, &ApprovalTurnId(turn.to_owned()), Timestamp(now))?;
     Ok(())
 }
 
@@ -649,13 +692,50 @@ pub fn unfinished_turn(connection: &Connection, chat: &str) -> StoreResult<Optio
         .transpose()
 }
 
+/// SQL: the turn row `alias` (`""` or an alias with its dot) is unfinished. The
+/// states are [`TurnState::UNFINISHED`], the same as [`ONE_UNFINISHED_TURN_INDEX`].
+pub fn unfinished_turn_sql(alias: &str) -> String {
+    format!("{alias}state IN ({})", in_list(&TurnState::UNFINISHED))
+}
+
+/// SQL: the chat `chat` (a column expression) is busy, that is, it has an
+/// unfinished turn. SQL readers use this instead of the agent `in_flight` column.
+pub fn chat_busy_sql(chat: &str) -> String {
+    format!(
+        "EXISTS(SELECT 1 FROM {TURN_TABLE} WHERE chat={chat} AND {})",
+        unfinished_turn_sql("")
+    )
+}
+
+/// The chat status indexes. [`tables_sql`] includes them; the migration that
+/// drops the agent status indexes creates them on existing state.
+pub fn status_indexes_sql() -> String {
+    format!(
+        "CREATE INDEX IF NOT EXISTS {CAPACITY_STATUS_INDEX} ON {CHAT_TABLE}(status) WHERE status IN {CHAT_CAPACITY_STATUSES};
+         CREATE INDEX IF NOT EXISTS {ACTIVE_STATUS_INDEX} ON {CHAT_TABLE}(status) WHERE status IN {CHAT_ACTIVE_STATUSES};"
+    )
+}
+
+/// SQL: the status of the chat `chat` (a column expression), read from the chat
+/// row. Agent readers use this instead of the agent `status` column.
+pub fn chat_status_sql(chat: &str) -> String {
+    format!("(SELECT status FROM {CHAT_TABLE} WHERE id={chat})")
+}
+
+/// SQL: the provider turn of the unfinished turn of the chat `chat` (a column
+/// expression), NULL when the chat has none. Agent readers use this instead of
+/// the agent `turn_id` column.
+pub fn unfinished_provider_turn_sql(chat: &str) -> String {
+    format!(
+        "(SELECT provider_turn FROM {TURN_TABLE} WHERE chat={chat} AND {} LIMIT 1)",
+        unfinished_turn_sql("")
+    )
+}
+
 /// A chat is busy exactly when it has an unfinished turn.
 pub fn chat_busy(connection: &Connection, chat: &str) -> StoreResult<bool> {
     Ok(connection
-        .prepare_cached(&format!(
-            "SELECT EXISTS(SELECT 1 FROM turns WHERE chat=?1 AND state IN ({}))",
-            in_list(&TurnState::UNFINISHED)
-        ))?
+        .prepare_cached(&format!("SELECT {}", chat_busy_sql("?1")))?
         .query_row([chat], |row| row.get(0))?)
 }
 
@@ -751,6 +831,14 @@ pub fn complete_turn(connection: &Connection, chat: &str, provider_turn: &str) -
              WHERE NOT EXISTS(SELECT 1 FROM turns WHERE chat=?1 AND provider_turn=?2)",
         )?
         .execute(params![chat, provider_turn, id])?;
+    let mut ids =
+        connection.prepare_cached("SELECT id FROM turns WHERE chat=?1 AND provider_turn=?2")?;
+    for turn in ids
+        .query_map([chat, provider_turn], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+    {
+        close_turn_approvals(connection, &turn)?;
+    }
     Ok(())
 }
 
@@ -770,7 +858,9 @@ pub fn turn_completed(
 /// A lost provider connection: every ready session of the chat is `Lost`.
 pub fn mark_sessions_lost(connection: &Connection, chat: &str) -> StoreResult<usize> {
     Ok(connection
-        .prepare_cached("UPDATE sessions SET state='lost' WHERE chat=?1 AND state<>'lost'")?
+        .prepare_cached(
+            "UPDATE sessions SET state='lost' WHERE chat=?1 AND state IN ('starting','ready')",
+        )?
         .execute([chat])?)
 }
 
@@ -827,6 +917,62 @@ mod tests {
 
     fn fail(db: &Connection, sql: &str) -> String {
         db.execute(sql, []).expect_err(sql).to_string()
+    }
+
+    #[test]
+    fn chat_busy_sql_is_true_only_for_an_unfinished_turn() {
+        let db = crate::fresh_state::test_canvas();
+        db.execute(
+            "INSERT INTO turns(id,chat,state) VALUES('t1','c','completed')",
+            [],
+        )
+        .unwrap();
+        assert!(!chat_busy(&db, "c").unwrap());
+        db.execute(
+            "INSERT INTO turns(id,chat,state) VALUES('t2','c','starting')",
+            [],
+        )
+        .unwrap();
+        assert!(chat_busy(&db, "c").unwrap());
+        let busy: bool = db
+            .query_row(&format!("SELECT {}", chat_busy_sql("?1")), ["c"], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert!(busy);
+        assert!(!chat_busy(&db, "other").unwrap());
+    }
+
+    #[test]
+    fn chat_status_and_provider_turn_follow_the_chat_and_its_unfinished_turn() {
+        let db = crate::fresh_state::test_canvas();
+        put(
+            &db,
+            &agent(
+                "c",
+                json!({"status":"running","inFlight":true,"turnId":"p1","threadId":"th"}),
+            ),
+        );
+        let read = |sql: String, chat: &str| -> Option<String> {
+            db.query_row(&format!("SELECT {sql}"), [chat], |row| row.get(0))
+                .unwrap()
+        };
+        assert_eq!(read(chat_status_sql("?1"), "c").as_deref(), Some("running"));
+        assert_eq!(
+            read(unfinished_provider_turn_sql("?1"), "c").as_deref(),
+            Some("p1")
+        );
+        assert_eq!(read(chat_status_sql("?1"), "missing"), None);
+        put(
+            &db,
+            &agent(
+                "c",
+                json!({"status":"paused","inFlight":false,"turnId":null,"threadId":"th",
+                    "lastCompletedTurn":"p1","lastCompletedTurnStatus":"completed"}),
+            ),
+        );
+        assert_eq!(read(chat_status_sql("?1"), "c").as_deref(), Some("paused"));
+        assert_eq!(read(unfinished_provider_turn_sql("?1"), "c"), None);
     }
 
     #[test]
@@ -1168,7 +1314,7 @@ mod tests {
         assert_eq!(
             states,
             [
-                ("one".into(), SessionState::Lost),
+                ("one".into(), SessionState::Ended),
                 ("two".into(), SessionState::Ready)
             ]
         );
@@ -1182,6 +1328,104 @@ mod tests {
             read_turns(&db, "c").unwrap()[0].state,
             TurnState::Interrupted
         );
+    }
+
+    fn open_approval(id: &str, turn: &str) -> approvals::NewApproval {
+        approvals::NewApproval {
+            id: studio_runtime_schema::approvals::ApprovalId(id.into()),
+            agent: studio_runtime_schema::approvals::AgentId("c".into()),
+            turn: Some(ApprovalTurnId(turn.into())),
+            epoch: None,
+            request: studio_runtime_schema::approvals::Request::Exec {
+                command: "ls".into(),
+                cwd: "/".into(),
+                reason: None,
+            },
+            delivery: None,
+            detail: studio_runtime_schema::approvals::Detail {
+                params: studio_runtime_schema::approvals::ProviderObject(Default::default()),
+                preview: None,
+                answer_error: None,
+                host_close_reason: None,
+            },
+            fire_at: None,
+        }
+    }
+
+    /// One chat turn with a pending and an answering approval. Returns the turn id.
+    fn turn_with_open_approvals(db: &Connection) -> String {
+        use studio_runtime_schema::approvals::{
+            Answer, ApprovalId, CommandId, Decision, Timestamp as At,
+        };
+        put(
+            db,
+            &agent(
+                "c",
+                json!({"status":"running","inFlight":true,"turnId":"p1","threadId":"th"}),
+            ),
+        );
+        let turn = read_turns(db, "c").unwrap()[0].id.0.clone();
+        approvals::create(db, open_approval("pending", &turn), At(1.0)).unwrap();
+        approvals::create(db, open_approval("answering", &turn), At(1.0)).unwrap();
+        approvals::answer(
+            db,
+            &ApprovalId("answering".into()),
+            Answer::Decision {
+                decision: Decision::Accept,
+            },
+            CommandId("cmd".into()),
+        )
+        .unwrap();
+        turn
+    }
+
+    #[test]
+    fn completing_a_turn_closes_its_pending_approvals_and_marks_answering_unknown() {
+        use studio_runtime_schema::approvals::{ApprovalId, ApprovalState, CloseReason};
+        let db = crate::fresh_state::test_canvas();
+        turn_with_open_approvals(&db);
+        complete_turn(&db, "c", "p1").unwrap();
+        let state = |id: &str| {
+            approvals::get(&db, &ApprovalId(id.into()))
+                .unwrap()
+                .unwrap()
+                .state
+        };
+        assert!(matches!(
+            state("pending"),
+            ApprovalState::Closed {
+                reason: CloseReason::TurnEnded,
+                ..
+            }
+        ));
+        assert!(matches!(state("answering"), ApprovalState::Unknown { .. }));
+    }
+
+    #[test]
+    fn an_interrupted_turn_closes_its_pending_approvals_and_marks_answering_unknown() {
+        use studio_runtime_schema::approvals::{ApprovalId, ApprovalState, CloseReason};
+        let db = crate::fresh_state::test_canvas();
+        turn_with_open_approvals(&db);
+        // A provider-less record ends the running turn as interrupted.
+        put(&db, &agent("c", json!({"threadId":"th"})));
+        assert_eq!(
+            read_turns(&db, "c").unwrap()[0].state,
+            TurnState::Interrupted
+        );
+        let state = |id: &str| {
+            approvals::get(&db, &ApprovalId(id.into()))
+                .unwrap()
+                .unwrap()
+                .state
+        };
+        assert!(matches!(
+            state("pending"),
+            ApprovalState::Closed {
+                reason: CloseReason::TurnEnded,
+                ..
+            }
+        ));
+        assert!(matches!(state("answering"), ApprovalState::Unknown { .. }));
     }
 
     #[test]
@@ -1352,5 +1596,185 @@ mod tests {
         assert_eq!(kept, 1);
         complete_turn(&db, "c", "p9").unwrap();
         assert!(turn_completed(&db, "c", "p9").unwrap());
+    }
+
+    /// Chat columns that come from the record: status, auto_wake, execution_mode,
+    /// usage_resume_enabled and turn_epoch.
+    type ChatFields = (
+        String,
+        Option<bool>,
+        Option<AgentExecutionMode>,
+        Option<bool>,
+        Option<i64>,
+    );
+
+    fn chat_fields(
+        status: &str,
+        auto_wake: bool,
+        mode: AgentExecutionMode,
+        usage_resume: Option<bool>,
+        turn_epoch: i64,
+    ) -> Option<ChatFields> {
+        Some((
+            status.to_owned(),
+            Some(auto_wake),
+            Some(mode),
+            usage_resume,
+            Some(turn_epoch),
+        ))
+    }
+
+    /// One agent record write, or the agent delete, and the rows that must follow it.
+    struct RowsStep {
+        command: &'static str,
+        /// `None` deletes the agent.
+        record: Option<Value>,
+        /// `None` when the agent has no chat row.
+        chat: Option<ChatFields>,
+        busy: bool,
+        /// Whether a turn is unfinished (`Starting` or `Running`).
+        unfinished: bool,
+        /// Provider turn of that unfinished turn; `None` before the provider reports one.
+        provider_turn: Option<&'static str>,
+        /// Kind of the newest turn row.
+        last_turn: Option<&'static str>,
+    }
+
+    #[test]
+    fn the_domain_rows_follow_each_agent_record_write() {
+        use AgentExecutionMode::{Native, Vm};
+        let steps = [
+            RowsStep {
+                command: "queued",
+                record: Some(agent(
+                    "c",
+                    json!({"status":"queued","autoWake":true,"executionMode":"native","turnEpoch":1}),
+                )),
+                chat: chat_fields("queued", true, Native, None, 1),
+                busy: false,
+                unfinished: false,
+                provider_turn: None,
+                last_turn: None,
+            },
+            RowsStep {
+                command: "starting",
+                record: Some(agent(
+                    "c",
+                    json!({"status":"starting","inFlight":true,"autoWake":false,"executionMode":"vm","turnEpoch":2}),
+                )),
+                chat: chat_fields("starting", false, Vm, None, 2),
+                busy: true,
+                unfinished: true,
+                provider_turn: None,
+                last_turn: Some("starting"),
+            },
+            RowsStep {
+                command: "running",
+                record: Some(agent(
+                    "c",
+                    json!({"status":"running","inFlight":true,"turnId":"p1","threadId":"th",
+                        "autoWake":true,"executionMode":"vm","usageResumeEnabled":true,"turnEpoch":2}),
+                )),
+                chat: chat_fields("running", true, Vm, Some(true), 2),
+                busy: true,
+                unfinished: true,
+                provider_turn: Some("p1"),
+                last_turn: Some("running"),
+            },
+            RowsStep {
+                command: "interrupted",
+                record: Some(agent(
+                    "c",
+                    json!({"status":"interrupted","threadId":"th","lastCompletedTurn":"p1",
+                        "lastCompletedTurnStatus":"interrupted","autoWake":false,
+                        "executionMode":"native","usageResumeEnabled":false,"turnEpoch":3}),
+                )),
+                chat: chat_fields("interrupted", false, Native, Some(false), 3),
+                busy: false,
+                unfinished: false,
+                provider_turn: None,
+                last_turn: Some("interrupted"),
+            },
+            RowsStep {
+                command: "running again",
+                record: Some(agent(
+                    "c",
+                    json!({"status":"running","inFlight":true,"turnId":"p2","threadId":"th",
+                        "autoWake":true,"executionMode":"vm","usageResumeEnabled":true,"turnEpoch":4}),
+                )),
+                chat: chat_fields("running", true, Vm, Some(true), 4),
+                busy: true,
+                unfinished: true,
+                provider_turn: Some("p2"),
+                last_turn: Some("running"),
+            },
+            RowsStep {
+                command: "completed",
+                record: Some(agent(
+                    "c",
+                    json!({"status":"completed","threadId":"th","lastCompletedTurn":"p2",
+                        "lastCompletedTurnStatus":"completed","autoWake":false,
+                        "executionMode":"native","turnEpoch":4}),
+                )),
+                chat: chat_fields("completed", false, Native, None, 4),
+                busy: false,
+                unfinished: false,
+                provider_turn: None,
+                last_turn: Some("completed"),
+            },
+            RowsStep {
+                command: "delete",
+                record: None,
+                chat: None,
+                busy: false,
+                unfinished: false,
+                provider_turn: None,
+                // The owner trigger deletes the chat and sessions; finished turns stay.
+                last_turn: Some("completed"),
+            },
+        ];
+        let db = crate::fresh_state::test_canvas();
+        for step in steps {
+            match &step.record {
+                Some(value) => put(&db, value),
+                None => {
+                    db.execute("DELETE FROM runtime_agents WHERE id='c'", [])
+                        .unwrap();
+                }
+            }
+            let command = step.command;
+            let chat = read_chat(&db, "c").unwrap().map(|chat| {
+                (
+                    chat.status.as_str().to_owned(),
+                    chat.auto_wake,
+                    chat.execution_mode,
+                    chat.usage_resume_enabled,
+                    chat.turn_epoch,
+                )
+            });
+            assert_eq!(chat, step.chat, "chats after {command}");
+            assert_eq!(
+                chat_busy(&db, "c").unwrap(),
+                step.busy,
+                "chat_busy after {command}"
+            );
+            let unfinished = unfinished_turn(&db, "c").unwrap();
+            assert_eq!(
+                unfinished.is_some(),
+                step.unfinished,
+                "unfinished turn after {command}"
+            );
+            let provider = unfinished.and_then(|turn| turn.provider_turn);
+            assert_eq!(
+                provider.as_deref(),
+                step.provider_turn,
+                "provider turn after {command}"
+            );
+            let last = read_turns(&db, "c")
+                .unwrap()
+                .last()
+                .map(|turn| turn.state.kind());
+            assert_eq!(last, step.last_turn, "newest turn after {command}");
+        }
     }
 }

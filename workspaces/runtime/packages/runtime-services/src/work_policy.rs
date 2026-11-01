@@ -39,13 +39,28 @@ pub fn work_statuses(records: &[WorkItemRecord]) -> BTreeMap<String, WorkStatus>
         .collect()
 }
 
+/// Work record fields that hold private effect state (request admissions,
+/// replies, retry bookkeeping). Client views of work omit them.
+pub const PRIVATE_WORK_FIELDS: [&str; 4] =
+    ["archiveIntent", "vmSubmit", "vmAccept", "resultFailures"];
+
 pub fn work_item_view(item: &WorkItemRecord, statuses: &BTreeMap<String, WorkStatus>) -> Value {
     let mut view = item.value();
     if let Some(fields) = view.as_object_mut() {
-        for private in ["archiveIntent", "vmSubmit", "vmAccept", "resultFailures"] {
+        for private in PRIVATE_WORK_FIELDS {
             fields.remove(private);
         }
     }
+    let (blocked, status) = dependency_policy(item, statuses);
+    view["blockedBy"] = json!(blocked);
+    view["displayStatus"] = json!(status);
+    view
+}
+
+pub fn dependency_policy(
+    item: &WorkItemRecord,
+    statuses: &BTreeMap<String, WorkStatus>,
+) -> (Vec<String>, WorkStatus) {
     let blocked = item.blocked_by(statuses);
     let status = if !blocked.is_empty()
         && matches!(item.status(), WorkStatus::Ready | WorkStatus::Running)
@@ -54,9 +69,26 @@ pub fn work_item_view(item: &WorkItemRecord, statuses: &BTreeMap<String, WorkSta
     } else {
         item.status()
     };
-    view["blockedBy"] = json!(blocked);
-    view["displayStatus"] = json!(status);
-    view
+    (blocked, status)
+}
+
+pub fn detail_policy(
+    item: &WorkItemRecord,
+    statuses: &BTreeMap<String, WorkStatus>,
+) -> studio_runtime_schema::task_gate::WorkDetailPolicy {
+    let (blocked_by, display_status) = dependency_policy(item, statuses);
+    let latest = item.results().and_then(|results| results.last());
+    let accept_available = item.status() == WorkStatus::Review
+        && latest
+            .and_then(|result| result.get("id"))
+            .and_then(Value::as_str)
+            .is_some();
+    studio_runtime_schema::task_gate::WorkDetailPolicy {
+        blocked_by,
+        display_status,
+        accept_available,
+        gate_override_required: crate::task_gate::require_pass(item, None).is_err(),
+    }
 }
 
 pub fn prepare_queue(events: Vec<StoredQueueEvent>) -> Result<PreparedQueue, WorkPolicyError> {

@@ -26,13 +26,13 @@ generated-contract and dependency guards, and the VM guest Python suite through 
 bounded concurrent lanes: Rust preparation and tests, type checks, web tests,
 independent tooling/provider/desktop checks, and the guest suite. Independent
 checks start immediately; artifact consumers wait only for their preparation. Cargo compilation stays in the Rust lane with four build jobs. WASM is
-generated once; the renderer is built once before the native crate embeds it.
+generated once; the renderer is built once for the web checks.
 Type checks wait for WASM; web tests wait for the workspace build's debug
 `examples/draft-server`, and the guest waits for its debug supervisor. The gate
 passes both binary paths explicitly. These checks overlap the Rust build or test run. The
 [WASM builder](../workspaces/client/apps/web/scripts/build-client-wasm.ts) requires
-the exact binding generator version pinned by the client-wasm crate; its error
-gives the installation command. Cold builds are outside the warm short-tier
+the exact binding generator version pinned by the client-wasm crate and installs
+it in the versioned cache when missing. Cold builds are outside the warm short-tier
 target. The nextest configuration also owns the failure deadline; its CI profile
 caps a stuck test above the measured busy-service witness. Test concurrency stays
 runner-derived, without global serial groups. The short tier starts no browser or model provider.
@@ -40,8 +40,9 @@ runner-derived, without global serial groups. The short tier starts no browser o
 `just test-comprehensive` runs the provider bridge, workspace Clippy, workspace
 Rust nextest with the `ci` profile, web type and unit checks, tooling tests, the
 shared desktop/helper and guest witnesses, and browser smoke. Both local tiers use
-the same full workspace, Cargo features, development/test profiles and target
-directory, including native coverage. A workspace `cargo build --tests --bins`
+the same workspace selection, Cargo features, development/test profiles and target
+directory, excluding the native client, whose coverage runs in `just test-native-ci`
+on the prepared builder. A workspace `cargo build --tests --bins`
 prepares the supervisor, contracts tool and HTTP fixture without package-only or
 release builds; one workspace nextest invocation selects the tests. Consumers get
 explicit debug binary paths. Browser smoke uses the prepared renderer and fixture,
@@ -147,13 +148,11 @@ layr git clone git@github.com:ifdotpy/codex-studio.git studio
 
 Start a line with a warm build:
 
-1. In a built line, run `layr save --caches`.
-2. Find the new automatic state: `layr log --auto -n 1`.
-3. Start the line from that state ID: `layr line new <name> <state-id>`.
-4. Enter it: `cd ../<name>`.
+1. In the main line folder, run `layr git fetch origin`.
+2. Run `layr line new <name> origin/main`.
+3. Enter it: `cd ../<name>`.
 
-Use the state ID, not the line name. On an unprotected line, `save --caches`
-puts the caches on an automatic state.
+After a build in main, run `layr save --caches` once. New lines then start warm.
 `target/` (about 11 GB) is regenerable. Starting the line copies it as an APFS
 clone in 5 to 15 seconds. Cargo rebuilds only what changed.
 
@@ -166,12 +165,49 @@ Two traps in a line started from an automatic state:
   cache. Run `cargo clean -p <crate>` for a crate whose tests start its own
   binary, before you trust its results.
 
+### Build and test speed rules
+
+Every agent and developer follows these rules:
+
+1. Start each task in a new line from `origin/main`: `layr line new <name> origin/main`.
+   Never use a git clone or a copied folder. The line gets `target/` and `node_modules`
+   from the cache overlays, so a build after a small change compiles only the changed crates.
+2. Do not set `CARGO_TARGET_DIR`, do not use `sccache`, and do not run `cargo clean`.
+   Each one throws the warm cache away or bypasses it. The exception is
+   `cargo clean -p <crate>` in the trap list above.
+3. Run the full gates through the gate wrapper when one exists. On the owner's machine,
+   that is `~/Projects/studio-ops/layr-test-fast.sh` or `layr-test-comprehensive.sh`. The
+   wrapper takes the machine gate lock, sets the build jobs, and saves the results to the
+   shared results line. Never start a gate directly while another gate runs.
+4. After a failed gate, fix the cause and run the gate again. A passing step runs again
+   only when its inputs changed. On an unchanged tree, only the failed steps run again.
+5. Build scripts print `cargo:rerun-if-changed` paths relative to their package. Include
+   generated files through `env!("OUT_DIR")`. An absolute path makes every new line rebuild.
+   The test "build scripts print relative rerun-if-changed paths" in
+   `rust-lint-policy.test.ts` rejects absolute paths in build script output and in
+   `include!`, `include_str!`, `include_bytes!`, and `#[path]`. `layr retest doctor`
+   reports the same check. `tauri-build` is the known exception (see "Build script paths").
+6. `layr retest run` runs only the Rust tests whose executed code changed. It is opt-in
+   with `STUDIO_RETEST=1` (see "Retest" below). It is not the default. It builds a second
+   copy of the tests with coverage, and the measured runs below were slower than the
+   default path.
+7. The sweep config lives in the root `Cargo.toml` under `[workspace.metadata.layr-retest]`, and its `sweep` list must name the same command as the gate (checked by `layr-sweep-parity.test.ts`).
+
 ### Run the gates
 
 ```sh
 nice -n 10 just test-fast
 nice -n 10 just test-comprehensive
 ```
+
+Both gates create a private scratch directory under `${TMPDIR:-/tmp}`, export it
+as `TMPDIR` to their test processes, and remove it on exit. On Linux tmpfs they
+require 2 GiB free before starting. Set `TMPDIR` to an existing directory to
+choose the parent for one run, for example `TMPDIR=/tmp/my-scratch just test-fast`.
+A disk-backed override runs on disk and prints a notice. Cargo target and
+build outputs stay in their normal locations. The requirement covers a sampled
+peak of 1005908 KiB plus 1091244 KiB margin. The installer test fixture uses the
+same scratch; its sampled peak was 200 KiB. SQLite durability is unchanged.
 
 Use `nice -n 10`, not `taskpolicy -b`. Background priority made the WASM build
 miss its 30-minute limit. On macOS, `just test-fast` takes 12.3 min cold, about
@@ -210,6 +246,78 @@ For the daily full run and before an install:
 ```sh
 STUDIO_TEST_REUSE=0 just test-comprehensive
 ```
+
+### Retest: run only the Rust tests a change can reach (opt-in, experiment)
+
+`STUDIO_RETEST=1 just test-fast` (or any gate that has the Rust nextest step)
+runs that step as `layr retest run -- <same nextest args>`. Default behavior is
+unchanged. The per-crate result cache does not apply to that step when the
+switch is on.
+
+- `layr-retest` builds the tests with LLVM coverage in `target/retest`, records the
+  lines each test executed, and later runs only the tests whose executed code
+  changed. A test with no record, or one that failed, always runs.
+- Needs `layr` (with `layr retest`) on `PATH` and the `llvm-tools` rustup component.
+  Run it in a layr line. Records are in `.layr-retest/` (a cache path in
+  `.layrattributes`, ignored by Git), so a new line takes them.
+- The step passes with zero selected tests. Its counts come from the line
+  `layr-retest: ran N, passed P, failed F, skipped S; ...`.
+- With the switch on, the step sets no `STUDIO_SUPERVISOR_BINARY`. The tests start the
+  `codex-process-supervisor` next to their own binary (owner:
+  `workspaces/runtime/packages/runtime-process/tests/support/supervisor_binary.rs`), which is
+  the build with coverage in `target/retest/debug`. So a change in supervisor code selects the
+  tests that spawn it. The step drops `--no-fail-fast`: layr retest always sets it.
+  Owner of the environment: `retestEnvironment` in
+  `workspaces/tooling/apps/repository-checks/facade.ts`.
+- Owner of the switch name: `RETEST_ENV` in
+  `workspaces/tooling/apps/repository-checks/gate-config.ts`.
+- Safety: no Studio Rust test reads `LAYR_ROOT` from the gate or starts `layr` from
+  `PATH`. The tests that mention `LAYR_ROOT` build an environment for a guest or
+  use fake scripts. Still, with the switch on, the facade gives the step an empty
+  temporary `LAYR_ROOT`. A shim first on `PATH` runs the real `layr` with the real
+  store only for calls that layr-retest itself makes (no
+  `LAYR_RETEST_PROFILE_DIR` is set for those), and a test never gets it.
+
+Measured on one warm line (Apple silicon, load 20 to 60, 4 build jobs, 4 test
+threads), crate `studio-runtime-process` (146 tests, `ci` profile):
+
+| Run                                              | Selected | layr-retest before PR #50 | layr-retest d730ca3 (new) |
+| ------------------------------------------------ | -------- | ------------------------- | ------------------------- |
+| Current path (`cargo nextest run`)               | 146      | 14.7 s                    | same, no layr-retest      |
+| Retest, first run (full, builds `target/retest`) | 146      | 533 s                     | 321 s                     |
+| Retest, no change                                | 0        | 121 s                     | 66 s                      |
+| Retest, one line added inside `spawn_process`    | 10       | 242 s                     | 109 s                     |
+| Current path, same change                        | 146      | 33 s (18 s of tests)      | 23 s                      |
+
+The old-binary column was measured 2026-10-28 16:22 to 16:58, before the 18:27
+replacement. The new column used layr main d730ca3 (2x faster coverage export).
+
+Limits:
+
+- The current path is faster for every case measured. Studio's tests are quick
+  (146 tests in 12 s), so coverage export and the instrumented build cost more than
+  the tests they skip. Even "no change" costs 66 s with the new binary.
+- The workspace is too large for a first run today: for `studio-runtime-http`
+  alone (465 tests) the first run did not finish inside the 30 minute gate
+  command limit, and the whole workspace (4582 tests, `ci` profile) did not
+  either. Coverage export is the cost, plus about 28 GB of temporary raw profiles.
+- Disk: `target/retest` is about 19 to 41 GB. Delete it when you stop.
+- Files a test reads (fixtures, `include_str!`) and toolchain changes are seen only
+  by `layr retest run --full`. A saved pass is for speed, not evidence.
+- Doc tests are not run by `layr-retest`; the separate doctest steps stay as they are.
+
+### Build script paths
+
+Cargo stores `cargo:rerun-if-changed=` paths as printed. An absolute path differs in every
+line, so cargo marks the script dirty in a new line and rebuilds every crate after it (10
+crates, about 130 s, in a warm `target/` clone). Build scripts here print paths relative to
+their package. `rust-lint-policy.test.ts` rejects absolute paths in `build.rs` sources and
+in recorded outputs.
+
+Known limit: `tauri-build` prints absolute paths for `tauri.conf.json`, `capabilities` and
+the frontend files, and has no option to change that. In a new line it reruns the
+`studio-native-client` build script and recompiles that one crate. No crate depends on it,
+so the cost is one crate, not a chain.
 
 ### Disk
 
@@ -286,6 +394,35 @@ that every behavior file is registered exactly once. Select a module with
 or `cargo test -p studio-runtime-services --test integration monitor_recovery::`.
 Nextest still runs each test in its own process. Library tests keep their existing
 names and `--lib` selector.
+
+For direct nextest runs on a shared host, limit compilation and test execution
+separately. For example, `cargo nextest run --build-jobs 4 --test-threads 8
+-p studio-runtime-services --lib` uses four build jobs and up to eight concurrent
+tests. Nextest's `-j` sets test threads, not build jobs; choose fewer test threads
+when other work needs the capacity. Keep explicitly serial recipes at one test
+thread.
+
+On a shared Linux host with a memory-backed `/tmp`, direct and focused runs can
+use a private tmpfs scratch directory to avoid disk sync costs. Check available
+memory and tmpfs space first; other work shares that capacity. This example
+requires at least 2 GiB free before starting and removes its own fixtures:
+
+```sh
+(
+  scratch="$(mktemp -d /tmp/studio-tests.XXXXXX)"
+  trap 'chmod -R u+rwX "$scratch"; rm -r -- "$scratch"' EXIT
+  test "$(stat -f -c %T "$scratch")" = tmpfs || exit 1
+  df -h "$scratch"
+  test "$(df -Pk "$scratch" | awk 'NR == 2 {print $4}')" -ge 2097152 || exit 1
+  TMPDIR="$scratch" cargo nextest run --build-jobs 4 --test-threads 8 \
+    -p studio-runtime-services --lib
+  # For a focused repository command instead:
+  # TMPDIR="$scratch" just test studio-runtime-services <case>
+)
+```
+
+Watch free space during long runs and stop if other work needs it. This opt-in
+applies to direct and focused commands; the full gates use tmpfs by default.
 
 Cargo target selectors such as `--test compatibility` are routed to Cargo, for
 example `just test studio-diagnostics '' -- --test compatibility`. The server

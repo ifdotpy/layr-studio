@@ -59,6 +59,7 @@ function readToolLimitNotice(
   const candidates = [
     record.error,
     record.result,
+    result?.error,
     item.nativeError,
     ...textEntries(record.contentItems),
     ...textEntries(result?.contentItems),

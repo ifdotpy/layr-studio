@@ -1,3 +1,6 @@
+import type { DeepReadonly } from "../../deepReadonly";
+import { BackgroundTaskAction, ProcessStdinState } from "../../generated/api";
+import { BackgroundTaskKind, BackgroundTaskLabel } from "../../generated/api";
 import {
   ProcessActionStatus as GeneratedApiProcessActionStatus,
   NativeCommandAction as GeneratedApiNativeCommandAction,
@@ -49,32 +52,23 @@ import {
   type PostInput,
   type PostResult,
 } from "../../api";
-import type { paths } from "../../generated/api";
+import type { components, paths } from "../../generated/api";
 import "./background-controls.css";
 import MonitorRestart from "./MonitorRestart";
-import {
-  CHAT_INDICATOR_URGENCY,
-  type ChatIndicatorKind,
-} from "../chat-status/chatStatusModel";
+import type { ChatIndicatorKind } from "../chat-status/chatStatusModel";
 import type {
   Agent,
   BackgroundTask,
-  JsonInput,
-  Monitor,
-  Request,
   Snapshot,
   WorkspaceTask,
 } from "../../types";
+import type { Approval } from "../../approvals";
 import { copyText } from "../../clipboard/clipboard";
 import {
   activeTask,
-  displayProcess,
   processIdentity,
-  projectTaskForRenderer,
   type DisplayBackgroundTask,
-  type DisplayLegacyTask,
   type DisplayProcessTask,
-  type RendererTaskKind,
 } from "../backgroundTaskModel";
 
 type BackgroundAction = <Path extends ApiPostPath>(
@@ -83,17 +77,10 @@ type BackgroundAction = <Path extends ApiPostPath>(
 ) => Promise<boolean>;
 type TaskDetailResponse =
   paths["/api/task"]["get"]["responses"][200]["content"]["application/json"];
-type MonitorTask = Monitor;
-type PendingRequest = Request;
+type PendingRequest = Approval;
 type ProcessResponseTarget = NonNullable<
   paths["/api/processes"]["get"]["responses"][200]["content"]["application/json"]["responseTarget"]
 >;
-export const backgroundProcessGroups = [
-  ["command", "Commands"],
-  ["monitor", "Monitors"],
-  ["tool", "Other tools"],
-  ["backgroundTask", "Background tasks"],
-] as const satisfies ReadonlyArray<readonly [RendererTaskKind, string]>;
 export const responseStopIdentity = (target: ProcessResponseTarget) => ({
   responseTarget: target,
 });
@@ -122,18 +109,8 @@ export const responseOwnerIdentityKey = (
       : null,
   );
 
-export function monitorTask(monitor: MonitorTask) {
-  return projectTaskForRenderer(monitor, "monitor");
-}
-
-function isJsonObject(
-  value: JsonInput | null | undefined,
-): value is Record<string, JsonInput> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-export { activeTask, backgroundTasks } from "../backgroundTaskModel";
-const labels: Record<string, string> = {
+export { activeTask } from "../backgroundTaskModel";
+const labels: Record<components["schemas"]["BackgroundTaskLabel"], string> = {
   running: "Running",
   starting: "Starting",
   pending: "Pending",
@@ -144,24 +121,20 @@ const labels: Record<string, string> = {
   cancelled: "Cancelled",
   interrupted: "Interrupted",
   lost: "Outcome unknown",
+  waitingForExit: "Waiting for exit",
+  unknown: "Unknown",
 };
-const names: Record<string, string> = {
-  commandExecution: "Command",
-  webSearch: "Web search",
-  mcpToolCall: "Connected tool",
-  dynamicToolCall: "Tool call",
-  contextCompaction: "Context compaction",
-  fileChange: "File changes",
+const kindLabels: Record<
+  components["schemas"]["BackgroundTaskKindLabel"],
+  string
+> = {
+  monitor: "Monitor",
+  command: "Command",
+  backgroundCommand: "Background command",
+  tool: "Tool",
 };
-const taskName = (
-  task: Pick<DisplayBackgroundTask, "command" | "name"> &
-    Pick<WorkspaceTask, "query">,
-) =>
-  task.command ||
-  ("query" in task ? task.query : undefined) ||
-  names[task.name || ""] ||
-  task.name?.replaceAll("_", " ") ||
-  "Tool call";
+const taskName = (task: Pick<DisplayBackgroundTask, "display">) =>
+  task.display.title;
 const duration = (seconds: number) =>
   seconds < 60
     ? `${Math.floor(seconds)}s`
@@ -169,7 +142,7 @@ const duration = (seconds: number) =>
       ? `${Math.floor(seconds / 60)}m ${Math.floor(seconds % 60)}s`
       : `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
 const elapsed = (
-  task: Pick<DisplayBackgroundTask, "status" | "created"> &
+  task: Pick<DisplayBackgroundTask, "display" | "created"> &
     Pick<WorkspaceTask, "durationMs" | "finished">,
   now: number,
 ) => {
@@ -178,50 +151,25 @@ const elapsed = (
   return duration(Math.max(0, (task.finished || now) - task.created));
 };
 export function backgroundTaskState(
-  task: Pick<DisplayBackgroundTask, "status">,
+  task: Pick<DisplayBackgroundTask, "display">,
 ): ChatIndicatorKind {
-  if (task.status === "approval") return "answer";
-  if (["failed", "lost"].includes(task.status)) return "error";
-  if (activeTask(task)) return "working";
-  if (task.status === "completed") return "unread";
-  return "paused";
+  return task.display.indicator;
 }
 function TaskStatus({
   task,
 }: {
-  task: Pick<DisplayBackgroundTask, "status" | "cancelRequested">;
+  task: Pick<DisplayBackgroundTask, "display">;
 }) {
-  return (
-    <span className="task-status">
-      {activeTask(task) && task.cancelRequested
-        ? "Waiting for exit"
-        : labels[task.status] || task.status}
-    </span>
-  );
+  return <span className="task-status">{labels[task.display.label]}</span>;
 }
-const iconFor = (task: Pick<DisplayBackgroundTask, "kind">) =>
-  task.kind === "monitor"
+const iconFor = (task: Pick<DisplayBackgroundTask, "display">) =>
+  task.display.kind === BackgroundTaskKind.monitor
     ? Activity
-    : task.kind === "command"
+    : task.display.kind === BackgroundTaskKind.command
       ? Terminal
       : Wrench;
-const taskKindLabel = (
-  task: Pick<DisplayBackgroundTask, "kind"> & Pick<WorkspaceTask, "turnId">,
-  owner?: Agent,
-) => {
-  if (task.kind === "monitor") return "Monitor";
-  if (task.kind !== "command") return "Tool";
-  const outsideTurn = Boolean(
-    "turnId" in task &&
-    task.turnId &&
-    owner &&
-    (owner.inFlight === false ||
-      (owner.inFlight === true &&
-        owner.turnId &&
-        owner.turnId !== task.turnId)),
-  );
-  return outsideTurn ? "Background command" : "Command";
-};
+const taskKindLabel = (task: Pick<DisplayBackgroundTask, "display">) =>
+  kindLabels[task.display.kindLabel];
 export default function BackgroundTasks({
   opened,
   close,
@@ -246,9 +194,6 @@ export default function BackgroundTasks({
   const { get, post } = useServerApi();
   const services = useServerServices();
   const outbox = sessionOutboxRequests();
-  const taskRecords = useSubscription(
-    opened && leadId ? { kind: "tasks", agentId: leadId } : null,
-  );
   const controlSuffix = `${services?.owner.id || "local"}:${leadId}`;
   const controlStorageKey = outbox.key("processControl", controlSuffix);
   const controlScope = useRef(controlStorageKey);
@@ -259,13 +204,17 @@ export default function BackgroundTasks({
       scope?: string | undefined;
       id: string;
       requested?: boolean | undefined;
+      source?: "process" | "task" | undefined;
     } | null>(null),
     [mobileDetail, setMobileDetail] = useState(false),
     [now, setNow] = useState(Date.now() / 1000);
   const processes = useSubscription(
     opened && leadId ? { kind: "processes", agentId: leadId } : null,
   );
-  const processRecords = processes.data?.processes ?? [];
+  const activities = processes.data?.activities ?? [];
+  const processRecords = activities.flatMap((entry) =>
+    entry.source === "process" ? [entry.value] : [],
+  );
   const processLoadError = processes.error ? errorText(processes.error) : "";
   const processLoading = processes.status === "loading";
   const [controlPending, setControlPending] = useState(false);
@@ -278,17 +227,7 @@ export default function BackgroundTasks({
   const agents = data.threads,
     owner = (id: string) => agents.find((a) => a.id === id),
     scopeOwner = owner(leadId || ""),
-    streamedTarget = processes.data?.responseTarget,
-    responseTarget =
-      scopeOwner?.inFlight &&
-      streamedTarget &&
-      streamedTarget.agent === scopeOwner.id &&
-      streamedTarget.epoch === scopeOwner.epoch &&
-      streamedTarget.threadId === scopeOwner.threadId &&
-      streamedTarget.turnId === scopeOwner.turnId &&
-      streamedTarget.accountKey === (scopeOwner.accountKey || "default")
-        ? streamedTarget
-        : null;
+    responseTarget = processes.data?.responseTarget;
   useEffect(() => {
     if (!opened) return;
     const timer = setInterval(() => setNow(Date.now() / 1000), 1000);
@@ -308,38 +247,16 @@ export default function BackgroundTasks({
       setPendingControl(null);
     }
   }, [leadId, controlStorageKey]);
-  const processIds = new Set(processRecords.map((process) => process.id));
-  const processTasks = processRecords.map(displayProcess);
-  const tasks = [
-    ...processTasks,
-    // The task stream also carries tools and commands without a process handle.
-    // Process records own the output and controls for overlapping task ids.
-    ...(taskRecords.data ?? [])
-      .map((task) => projectTaskForRenderer(task))
-      .filter(
-        (task): task is DisplayLegacyTask =>
-          task != null && !processIds.has(task.id),
-      ),
-  ].filter(activeTask);
-  const scoped = tasks.filter(
-    (t) =>
-      !!leadId &&
-      (t.agent === leadId || owner(t.agent)?.rootId === leadId) &&
-      (kind === "all" || t.kind === kind),
+  const processTasks = processRecords;
+  const active = activities.length;
+  const matchesSearch = (task: DisplayBackgroundTask) =>
+    `${task.display.title} ${owner(task.agent)?.name} ${task.cwd ?? ""} ${labels[task.display.label]}`
+      .toLowerCase()
+      .includes(query.toLowerCase());
+  const filtered = activities.filter(
+    ({ value }) =>
+      (kind === "all" || value.display.kind === kind) && matchesSearch(value),
   );
-  const active = scoped.length;
-  const filtered = scoped
-    .filter((t) =>
-      `${taskName(t)} ${owner(t.agent)?.name} ${t.cwd || ""} ${labels[t.status] || t.status}`
-        .toLowerCase()
-        .includes(query.toLowerCase()),
-    )
-    .sort(
-      (a, b) =>
-        CHAT_INDICATOR_URGENCY.indexOf(backgroundTaskState(a)) -
-          CHAT_INDICATOR_URGENCY.indexOf(backgroundTaskState(b)) ||
-        b.created - a.created,
-    );
   const pendingFocus =
     opened &&
     initialFocus?.leadId === leadId &&
@@ -347,17 +264,18 @@ export default function BackgroundTasks({
       ? initialFocus
       : undefined;
   const explicitId =
-    pendingFocus?.id ||
-    (selection?.scope === leadId && selection?.requested
+    pendingFocus?.id ??
+    (selection && selection.scope === leadId && selection.requested
       ? selection.id
       : undefined);
-  const selectedTask = explicitId
-    ? scoped.find((task) => task.id === explicitId)
-    : (selection && selection.scope === leadId
-        ? scoped.find((task) => task.id === selection.id)
-        : undefined) || filtered[0];
+  const selectedEntry = explicitId
+    ? activities.find((entry) => entry.value.id === explicitId)
+    : selection && selection.scope === leadId
+      ? activities.find((entry) => entry.value.id === selection.id)
+      : filtered[0];
+  const selectedTask = selectedEntry?.value;
   const selectedProcess =
-    selectedTask && "key" in selectedTask ? selectedTask : undefined;
+    selectedEntry?.source === "process" ? selectedEntry.value : undefined;
   const submitControl = async (body: PostBody<"/api/processes/action">) => {
     setControlPending(true);
     try {
@@ -467,24 +385,31 @@ export default function BackgroundTasks({
           >;
         },
   ) => {
-    if (
-      !leadId ||
-      !scopeOwner ||
-      scopeOwner.epoch == null ||
-      controlPending ||
-      processLoading ||
-      processLoadError
-    )
-      return;
+    if (!leadId || controlPending || processLoading || processLoadError) return;
     if (pendingControl) {
       notify("Check the earlier stop result before starting another stop.");
       return;
     }
+    const identity =
+      control.action === "stop_response"
+        ? responseTarget
+        : scopeOwner?.epoch == null
+          ? null
+          : {
+              agent: leadId,
+              accountKey: scopeOwner.accountKey || "default",
+              epoch: scopeOwner.epoch,
+            };
+    if (!identity) {
+      if (control.action === "stop_response")
+        notify("Refresh the process list before stopping this response.");
+      return;
+    }
     const scope = {
       requestId: randomUUID(),
-      agent: leadId,
-      accountKey: scopeOwner.accountKey || "default",
-      epoch: scopeOwner.epoch,
+      agent: identity.agent,
+      accountKey: identity.accountKey,
+      epoch: identity.epoch,
     };
     let body: PostBody<"/api/processes/action">;
     switch (control.action) {
@@ -514,10 +439,9 @@ export default function BackgroundTasks({
           ...scope,
           action: control.action,
           processes: processTasks
-            .filter(activeTask)
             .filter(
               (task) =>
-                task.capabilities.stop &&
+                task.display.actions.includes(BackgroundTaskAction.stop) &&
                 (task.agent === leadId ||
                   (includeWorkers && owner(task.agent)?.rootId === leadId)),
             )
@@ -535,16 +459,20 @@ export default function BackgroundTasks({
     void submitControl(body);
   };
   const selectedId = selectedTask?.id;
+  const selectedSource = selectedEntry?.source;
   useEffect(() => {
     if (explicitId && !selectedId) return;
     setSelection((previous) =>
       selectedId
-        ? previous && previous.scope === leadId && previous.id === selectedId
+        ? previous &&
+          previous.scope === leadId &&
+          previous.id === selectedId &&
+          previous.source === selectedSource
           ? previous
-          : { scope: leadId, id: selectedId }
+          : { scope: leadId, id: selectedId, source: selectedSource }
         : null,
     );
-  }, [leadId, selectedId, selection, explicitId]);
+  }, [leadId, selectedId, selectedSource, selection, explicitId]);
   useEffect(() => {
     setMobileDetail(false);
   }, [leadId]);
@@ -631,7 +559,7 @@ export default function BackgroundTasks({
             disabled={
               !processRecords.some(
                 (process) =>
-                  process.capabilities.stop &&
+                  process.display.actions.includes(BackgroundTaskAction.stop) &&
                   (includeWorkers || process.agent === leadId),
               ) ||
               !!pendingControl ||
@@ -660,12 +588,6 @@ export default function BackgroundTasks({
         </p>
       )}
       {processLoading && <p role="status">Loading processes…</p>}
-      {taskRecords.error && (
-        <p role="alert" className="task-error">
-          Task list unavailable: {errorText(taskRecords.error)}
-        </p>
-      )}
-      {taskRecords.status === "loading" && <p role="status">Loading tasks…</p>}
       {controlResult?.response && (
         <p
           role={
@@ -721,39 +643,21 @@ export default function BackgroundTasks({
             />
           </div>
           <div className="tasks-rows">
-            {backgroundProcessGroups.map(([groupKind, label]) => {
-              const groupTasks = filtered.filter(
-                (task) => task.kind === groupKind,
-              );
-              return groupTasks.length ? (
-                <section key={groupKind} aria-label={label}>
-                  <Text
-                    component="h3"
-                    size="xs"
-                    c="dimmed"
-                    fw={600}
-                    px="sm"
-                    py="xs"
-                    m={0}
-                  >
-                    {label}
-                  </Text>
-                  {groupTasks.map((task) => (
-                    <BackgroundTaskStrip
-                      key={task.id}
-                      task={task}
-                      owner={owner(task.agent)}
-                      now={now}
-                      selected={selectedTask?.id === task.id}
-                      select={() => {
-                        setSelection({ scope: leadId, id: task.id });
-                        setMobileDetail(true);
-                      }}
-                    />
-                  ))}
-                </section>
-              ) : null;
-            })}
+            {filtered.map(({ source, value: task }) => (
+              <BackgroundTaskStrip
+                key={`${source}:${task.id}`}
+                task={task}
+                owner={owner(task.agent)}
+                now={now}
+                selected={
+                  selection?.source === source && selectedTask?.id === task.id
+                }
+                select={() => {
+                  setSelection({ scope: leadId, id: task.id, source });
+                  setMobileDetail(true);
+                }}
+              />
+            ))}
             {!filtered.length && (
               <div className="tasks-empty">
                 <Check size={24} />
@@ -772,7 +676,7 @@ export default function BackgroundTasks({
         {selectedTask ? (
           <TaskDetail
             key={selectedTask.id}
-            task={selectedTask}
+            activity={selectedEntry!}
             owner={owner(selectedTask.agent)}
             now={now}
             requests={data.runtime.requests}
@@ -787,7 +691,9 @@ export default function BackgroundTasks({
               !processLoading &&
               !processLoadError &&
               !pendingControl &&
-              !!selectedProcess?.capabilities.stop &&
+              !!selectedProcess?.display.actions.includes(
+                BackgroundTaskAction.stop,
+              ) &&
               (includeWorkers || selectedTask.agent === leadId)
             }
             onStop={() => {
@@ -842,7 +748,7 @@ export function BackgroundTaskStrip({
       onClick={select}
     >
       <div className="task-row-heading">
-        <span className="task-row-kind">{taskKindLabel(task, owner)}</span>
+        <span className="task-row-kind">{taskKindLabel(task)}</span>
         <span className="task-age">{elapsed(task, now)}</span>
       </div>
       <strong
@@ -860,7 +766,7 @@ export function BackgroundTaskStrip({
 }
 
 export function TaskDetail({
-  task: summary,
+  activity,
   owner,
   now,
   requests,
@@ -872,7 +778,7 @@ export function TaskDetail({
   onStop,
   controlPending,
 }: {
-  task: DisplayBackgroundTask;
+  activity: DeepReadonly<components["schemas"]["BackgroundTaskView"]>;
   owner?: Agent | undefined;
   now: number;
   requests: PendingRequest[];
@@ -885,6 +791,8 @@ export function TaskDetail({
   controlPending: boolean;
 }) {
   const { get, post } = useServerApi();
+  const summary = activity.value;
+  const process = activity.source === "process" ? activity.value : undefined;
 
   const [fileOutput, setFileOutput] = useState<{
     text: string;
@@ -904,16 +812,14 @@ export function TaskDetail({
     }
   };
   const resolvedDetail = detail?.id === summary.id ? detail : null;
-  const task = { ...resolvedDetail, ...summary };
-  const monitor = task.kind === "monitor" && "tail" in task ? task : null;
-  const outputSupported =
-    !("capabilities" in summary) || summary.capabilities.readOutput !== false;
+  const task = summary;
+  const outputSupported = task.display.actions.includes(
+    BackgroundTaskAction.readOutput,
+  );
   const outputTail = outputSupported
-    ? (fileOutput?.text ??
-      resolvedDetail?.tail ??
-      ("tail" in task ? task.tail : undefined))
+    ? (fileOutput?.text ?? task.tail)
     : undefined;
-  const outputError = task.error ?? resolvedDetail?.error ?? monitor?.error;
+  const outputError = task.error;
   const [pending, setPending] = useState(false),
     [follow, setFollow] = useState(true),
     [copied, setCopied] = useState(false);
@@ -946,10 +852,7 @@ export function TaskDetail({
     }
   };
   const request = requests.find(
-    (r) =>
-      r.method === "monitor/approve" &&
-      isJsonObject(r.params) &&
-      r.params.monitorId === task.id,
+    (r) => r.request.kind === "monitor_start" && r.request.monitor === task.id,
   );
   const Icon = iconFor(task),
     age = elapsed(task, now);
@@ -970,7 +873,7 @@ export function TaskDetail({
         </Button>
         <span>
           <Icon size={15} />
-          {taskKindLabel(task, owner)}
+          {taskKindLabel(task)}
         </span>
         <TaskStatus task={task} />
       </div>
@@ -998,41 +901,45 @@ export function TaskDetail({
               Exit {task.exitCode}
             </span>
           )}
-          {task.timeout_ms != null && (
-            <span>Timeout {duration(task.timeout_ms / 1000)}</span>
+          {process?.timeout_ms != null && (
+            <span>Timeout {duration(process?.timeout_ms / 1000)}</span>
           )}
           {task.processId && <span>Process {task.processId}</span>}
         </div>
         {task.cwd && <p className="task-cwd">{task.cwd}</p>}
-        {task.kind === "monitor" && activeTask(task) && (
-          <p className="task-note">
-            {task.status === "approval"
-              ? "The command waits for your approval."
-              : "The agent receives the result when this command exits."}
-          </p>
-        )}
-        {task.kind === "monitor" &&
-          "outputWakeBudget" in task &&
-          task.outputWakeBudget && (
+        {task.display.kind === BackgroundTaskKind.monitor &&
+          activeTask(task) && (
+            <p className="task-note">
+              {task.display.actions.includes(BackgroundTaskAction.approve)
+                ? "The command waits for your approval."
+                : "The agent receives the result when this command exits."}
+            </p>
+          )}
+        {process?.display.kind === BackgroundTaskKind.monitor &&
+          process.outputWakeBudget && (
             <div className="task-wake-budget" role="status">
               <Text size="sm">
-                {task.outputWakeBudget.totalSuppressedMatches} matches
+                {process.outputWakeBudget.totalSuppressedMatches} matches
                 suppressed
               </Text>
-              {task.outputWakeBudget.paused && (
+              {process.outputWakeBudget.paused && (
                 <>
                   <Text fw={600} size="sm">
                     Output wakes paused
                   </Text>
                   <Text size="sm">
-                    {task.status === "running"
+                    {task.display.label === BackgroundTaskLabel.running
                       ? "The command is still running. Its exit will still wake the agent."
                       : "The command exit will still wake the agent."}
                   </Text>
                 </>
               )}
               {activeTask(task) && (
-                <MonitorRestart task={task} notify={notify} refresh={refresh} />
+                <MonitorRestart
+                  task={process}
+                  notify={notify}
+                  refresh={refresh}
+                />
               )}
             </div>
           )}
@@ -1073,15 +980,16 @@ export function TaskDetail({
             )}
           </div>
         )}
-        {task.kind !== "monitor" && !resolvedDetail && (
-          <Button
-            size="compact-xs"
-            variant="subtle"
-            onClick={() => void loadDetail()}
-          >
-            Read tool input
-          </Button>
-        )}
+        {task.display.kind !== BackgroundTaskKind.monitor &&
+          !resolvedDetail && (
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              onClick={() => void loadDetail()}
+            >
+              Read tool input
+            </Button>
+          )}
         {resolvedDetail?.arguments && (
           <details className="task-input">
             <summary>Tool input</summary>
@@ -1098,9 +1006,9 @@ export function TaskDetail({
             <ErrorDescription value={outputError} />
           </p>
         )}
-        {task.stdinError && (
+        {process?.stdinError && (
           <p role="alert" className="task-error">
-            <ErrorDescription value={task.stdinError} />
+            <ErrorDescription value={process?.stdinError} />
           </p>
         )}
         <div className="task-terminal">
@@ -1173,27 +1081,24 @@ export function TaskDetail({
                     : "No output recorded.")}
           </pre>
           {(task.outputTruncated ||
-            (task.bytes || 0) >
+            (process?.bytes || 0) >
               new TextEncoder().encode(outputTail || "").length) && (
             <p className="task-output-limit">
               Latest output shown
-              {task.log ? ". The saved log is available below." : "."}
+              {process?.log ? ". The saved log is available below." : "."}
             </p>
           )}
         </div>
-        {(task.kind === "monitor" ||
-          (task.status === "running" &&
-            "capabilities" in task &&
-            task.capabilities.sendInput)) && (
+        {(task.display.kind === BackgroundTaskKind.monitor ||
+          task.display.actions.includes(BackgroundTaskAction.input)) && (
           <ProcessInput
             task={task}
             owner={owner}
             pending={pending}
             act={act}
             receiptOnly={
-              task.status !== "running" ||
-              !("capabilities" in task) ||
-              !task.capabilities.sendInput
+              !task.display.actions.includes(BackgroundTaskAction.input) &&
+              !task.display.actions.includes(BackgroundTaskAction.resize)
             }
           />
         )}
@@ -1208,37 +1113,38 @@ export function TaskDetail({
               <dd>{localDateTime(new Date(task.finished * 1000))}</dd>
             </div>
           )}
-          {task.log && (
+          {process?.log && (
             <div>
               <dt>Saved log</dt>
-              <dd>{task.log}</dd>
+              <dd>{process?.log}</dd>
             </div>
           )}
         </dl>
       </div>
       <div className="task-actions">
-        {request && task.status === "approval" && (
-          <Button
-            size="xs"
-            variant="light"
-            loading={pending}
-            onClick={() =>
-              void act("/api/answer", { id: request.id, decision: "accept" })
-            }
-          >
-            Approve command
-          </Button>
-        )}
-        {canStop && activeTask(task) && (
+        {request &&
+          task.display.actions.includes(BackgroundTaskAction.approve) && (
+            <Button
+              size="xs"
+              variant="light"
+              loading={pending}
+              onClick={() =>
+                void act("/api/answer", { id: request.id, decision: "accept" })
+              }
+            >
+              Approve command
+            </Button>
+          )}
+        {canStop && (
           <Button
             size="xs"
             color="red"
             leftSection={<Square size={12} />}
             loading={controlPending}
-            disabled={!!task.cancelRequested || controlPending}
+            disabled={controlPending}
             onClick={onStop}
           >
-            {task.cancelRequested ? "Stop requested" : "Stop selected process"}
+            Stop selected process
           </Button>
         )}
       </div>
@@ -1253,10 +1159,7 @@ export function ProcessInput({
   act,
   receiptOnly = false,
 }: {
-  task: Pick<
-    DisplayBackgroundTask,
-    "id" | "kind" | "stdinClosed" | "stdinCloseRequested" | "cancelRequested"
-  >;
+  task: Pick<DisplayBackgroundTask, "id" | "display">;
   owner?: Agent | undefined;
   pending: boolean;
   act: BackgroundAction;
@@ -1269,10 +1172,11 @@ export function ProcessInput({
   const [inputClosed, setStdinClosed] = useState(false);
   const [receiptState, setReceiptState] = useState("");
   const [checkingReceipt, setCheckingReceipt] = useState(false);
-  const stdinClosed = inputClosed || !!task.stdinClosed;
+  const stdinClosed =
+    inputClosed || task.display.stdinState === ProcessStdinState.closed;
   const stdinUnavailable =
-    stdinClosed || !!task.stdinCloseRequested || !!task.cancelRequested;
-  const native = task.kind === "command";
+    stdinClosed || !task.display.actions.includes(BackgroundTaskAction.input);
+  const native = task.display.kind === BackgroundTaskKind.command;
   const checkReceipt = async () => {
     if (!owner || owner.epoch == null || checkingReceipt || pending) return;
     setCheckingReceipt(true);
@@ -1374,7 +1278,7 @@ export function ProcessInput({
             >
               {stdinClosed
                 ? "Input closed"
-                : task.stdinCloseRequested
+                : task.display.stdinState === ProcessStdinState.closeRequested
                   ? "Closing input…"
                   : "Close input (EOF)"}
             </Button>
@@ -1404,7 +1308,9 @@ export function ProcessInput({
                   disabled={
                     pending ||
                     checkingReceipt ||
-                    !!task.cancelRequested ||
+                    !task.display.actions.includes(
+                      BackgroundTaskAction.resize,
+                    ) ||
                     !Number(rows) ||
                     !Number(cols)
                   }
@@ -1433,7 +1339,7 @@ export function ProcessInput({
 }
 
 async function downloadLog(
-  task: Pick<DisplayBackgroundTask, "id" | "kind" | "outputTruncated"> &
+  task: Pick<DisplayBackgroundTask, "id" | "display" | "outputTruncated"> &
     Pick<BackgroundTask, "tail">,
   detail: TaskDetailResponse | null,
   notify: (s: string) => void,
@@ -1441,7 +1347,7 @@ async function downloadLog(
 ) {
   try {
     let blob: Blob, name: string;
-    if (task.kind === "monitor") {
+    if (task.display.kind === BackgroundTaskKind.monitor) {
       const result = await apiDownload("/api/monitor/log", { id: task.id });
       blob = result.blob;
       name = result.name;

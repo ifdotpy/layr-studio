@@ -196,6 +196,10 @@ fn shared_values_ts() -> String {
                 values::MAX_MANAGED_MESSAGE_CODEPOINTS.to_string(),
             ),
             (
+                "MAX_DRAFT_TEXT_CODEPOINTS",
+                studio_client_domain::drafts::MAX_DRAFT_TEXT_CODEPOINTS.to_string(),
+            ),
+            (
                 "USER_ATTACHMENT_LIMIT_LABEL",
                 json_string(values::USER_ATTACHMENT_LIMIT_LABEL),
             ),
@@ -631,6 +635,7 @@ pub fn check_schema_parity(openapi: &Value, account_transfer: &Value) -> Result<
     crate::project_record::check_schema_parity()?;
     crate::continuation_snapshot::check_capacity_schema_parity()?;
     crate::request_record::check_schema_parity()?;
+    crate::room_record::check_schema_parity()?;
     crate::workspace_operation::check_schema_parity()?;
     crate::task_record::check_schema_parity()?;
     crate::transcript_record::check_schema_parity()?;
@@ -729,10 +734,34 @@ pub fn check_schema_parity(openapi: &Value, account_transfer: &Value) -> Result<
         );
     }
     crate::complaints::check_schema_parity(openapi)?;
+    // AgentCapacity is owned by agent_limits; every projection and response
+    // consumes its generated OpenAPI schema.
+    if openapi.pointer("/components/schemas/AgentCapacity")
+        != Some(&agent_limits::capacity_schema())
+    {
+        return Err("AgentCapacity must match agent_limits::AgentCapacity".into());
+    }
+    for consumer in [
+        "AgentRecordResponse",
+        "AgentEntityDto",
+        "AgentDetailEntityDto",
+        "AgentResponse",
+        "BranchResponse",
+    ] {
+        let path = format!("/components/schemas/{consumer}/properties/capacity/$ref");
+        if openapi.pointer(&path).and_then(Value::as_str)
+            != Some("#/components/schemas/AgentCapacity")
+        {
+            return Err(format!("{consumer}.capacity must reference AgentCapacity"));
+        }
+    }
     let modes = serde_json::json!(crate::claude_permissions::PERMISSION_MODES);
     for path in [
         "/components/schemas/CreateAgentRequest/properties/permission_mode/enum",
-        "/components/schemas/AgentEntityDto/properties/claudeOptions/anyOf/0/properties/permissionMode/enum",
+        "/components/schemas/AgentEntityDto/properties/permissionMode/anyOf/0/enum",
+        "/components/schemas/AgentDetailEntityDto/properties/permissionMode/anyOf/0/enum",
+        "/components/schemas/AgentResponse/properties/permissionMode/anyOf/0/enum",
+        "/components/schemas/AgentRecordResponse/properties/permissionMode/anyOf/0/enum",
         "/components/schemas/ClaudeSettings/properties/permissionMode/enum",
         "/components/schemas/ClaudeSessionSettings/properties/permissionMode/anyOf/0/enum",
     ] {
@@ -747,6 +776,7 @@ pub fn check_schema_parity(openapi: &Value, account_transfer: &Value) -> Result<
     crate::agent_progress::check_schema_parity(openapi)?;
     crate::studio_errors::check_schema_parity(openapi)?;
     crate::queue_command::check_schema_parity(openapi)?;
+    crate::approvals::check_schema_parity(openapi)?;
     crate::question_answers::check_schema_parity(openapi)?;
     crate::claude_controls::check_schema_parity(openapi)?;
     crate::process_controls::check_schema_parity(openapi)?;
@@ -919,8 +949,9 @@ fn check_delivery_parity(openapi: &Value) -> Result<(), String> {
             let Some(property) = schema.pointer(&format!("/properties/{field}")) else {
                 continue;
             };
-            // Terminal input delivery is an unrelated status contract.
-            if name == "TerminalInputResult" {
+            // Terminal input delivery is an unrelated status contract. An approval's
+            // delivery names the provider connection that gets the answer.
+            if name == "TerminalInputResult" || name == "Approval" {
                 continue;
             }
             let reference = if matches!(name.as_str(), "ManagedMessageBody" | "CommandSendBody") {
@@ -1196,6 +1227,11 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     check_backend_kind_parity(root)?;
     check_provider_sql_parity(root)?;
     let mut openapi = read_json(root, OPENAPI_PATH)?;
+    openapi["components"]["schemas"]["ResourceEntityTransferEvent"]["properties"]["data"]["maxLength"] =
+        values::SYNC_STREAM_EVENT_MAX_BYTES.into();
+    *openapi
+        .pointer_mut("/components/schemas/AgentCapacity")
+        .ok_or("missing AgentCapacity schema")? = agent_limits::capacity_schema();
     crate::workspace_modes::update_openapi(&mut openapi);
     // The checked limits ingress schema also owns HTTP, SSE and bridge leaves.
     let mut limits: Value = serde_json::from_str(
@@ -1220,7 +1256,39 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         openapi["components"]["schemas"][alias] =
             serde_json::json!({"$ref":format!("#/components/schemas/{owner}")});
     }
+    // The rate-limit entity wraps the original observation and its typed view.
+    let mut runway_generator = schemars::generate::SchemaSettings::draft2020_12()
+        .for_serialize()
+        .with(|settings| settings.definitions_path = "/components/schemas".into())
+        .into_generator();
+    runway_generator.subschema_for::<crate::usage_limits::AccountLimitsProjection>();
+    for (name, schema) in runway_generator.take_definitions(true) {
+        openapi["components"]["schemas"][name] = schema;
+    }
+    openapi["components"]["schemas"]["RateLimitView"] = serde_json::json!({
+        "type":"object", "additionalProperties":false,
+        "properties":{
+            "observation":{"$ref":"#/components/schemas/AccountRateLimitsDto"},
+            "projection":{"$ref":"#/components/schemas/AccountLimitsProjection"}
+        }, "required":["observation","projection"]
+    });
+    openapi["components"]["schemas"]["SyncRateLimitEntityPayload"]["properties"]["value"] =
+        serde_json::json!({"$ref":"#/components/schemas/RateLimitView"});
+    if let Some(variants) = openapi["components"]["schemas"]["SyncEntity"]["oneOf"].as_array_mut() {
+        for variant in variants {
+            if variant["properties"]["collection"]["const"] == "rateLimit"
+                && variant["properties"]["op"]["const"] == "upsert"
+            {
+                variant["properties"]["value"] =
+                    serde_json::json!({"$ref":"#/components/schemas/RateLimitView"});
+            }
+        }
+    }
+    for (name, schema) in crate::sync_entity_payload::schemas()? {
+        openapi["components"]["schemas"][name] = schema;
+    }
     crate::records::refresh_openapi(&mut openapi)?;
+    crate::multi_server_access::refresh_openapi(&mut openapi);
     crate::multi_server_protocol::refresh_openapi(&mut openapi);
     openapi["components"]["schemas"]["BackgroundShellPolicySettings"]["properties"]["quietThresholdMs"]
         ["not"] = serde_json::json!({"minimum":1,"maximum":crate::shell_policy::QUIET_MIN_MS - 1});
@@ -1238,8 +1306,37 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         .with(|settings| settings.definitions_path = "/components/schemas".into())
         .into_generator();
     delivery_generator.subschema_for::<crate::persistence::RecipientDelivery>();
+    delivery_generator.subschema_for::<crate::delivery::MessageRecipientDelivery>();
     for (name, schema) in delivery_generator.take_definitions(true) {
         openapi["components"]["schemas"][name] = schema;
+    }
+    openapi["components"]["schemas"]["FrontendLocality"] = serde_json::json!({
+        "type": "string", "enum": <crate::sync_protocol::FrontendLocality as strum::VariantNames>::VARIANTS
+    });
+    openapi["components"]["schemas"]["CommandErrorCode"] = serde_json::json!({
+        "type": "string", "enum": <crate::command::CommandErrorCode as strum::VariantNames>::VARIANTS
+    });
+    openapi["components"]["schemas"]["MessageSendStatus"] = serde_json::json!({
+        "type": "string", "enum": <crate::delivery::MessageSendStatus as strum::VariantNames>::VARIANTS
+    });
+    for name in [
+        "MessageReceiptEntityDto",
+        "studio_api__work__models__MessageReceipt",
+    ] {
+        openapi["components"]["schemas"][name]["properties"]["status"] =
+            serde_json::json!({"$ref":"#/components/schemas/MessageSendStatus"});
+    }
+    openapi["components"]["schemas"]["QueueItem"]["properties"]["status"] =
+        serde_json::json!({"$ref":"#/components/schemas/MessageSendStatus"});
+    openapi["components"]["schemas"]["MessageRecord"]["properties"]["status"] = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/MessageSendStatus"},{"type":"null"}]});
+    for schema in openapi["components"]["schemas"]
+        .as_object_mut()
+        .ok_or("missing schemas")?
+        .values_mut()
+    {
+        if let Some(status) = schema.pointer_mut("/properties/deliveryStatus") {
+            *status = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/MessageSendStatus"},{"type":"null"}]});
+        }
     }
     for path in [
         "/components/schemas/ChatMessage/properties/deliveries/additionalProperties",
@@ -1249,11 +1346,38 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         *openapi
             .pointer_mut(path)
             .ok_or_else(|| format!("missing recipient delivery map {path}"))? =
-            serde_json::json!({"$ref":"#/components/schemas/RecipientDelivery"});
+            serde_json::json!({"$ref":"#/components/schemas/MessageRecipientDelivery"});
     }
     openapi["components"]["schemas"]["AdmittedRequest"] = admitted_request_schema();
+    openapi["components"]["schemas"]["CommandSendBody"]["properties"]["text"]["maxLength"] =
+        studio_client_domain::drafts::MAX_DRAFT_TEXT_CODEPOINTS.into();
+    openapi["components"]["schemas"]["CommandSendBody"]["properties"]["asTextFile"] =
+        serde_json::json!({"type":"boolean","default":false});
     openapi["components"]["schemas"]["ServerOperationRequest"]["properties"]["action"] = serde_json::json!({"type":"string","enum":crate::persistence::ServerOperationKind::VARIANTS});
     crate::task_command::apply_api_contract(&mut openapi);
+    crate::task_gate::apply_api_contract(&mut openapi);
+    for (name, schema) in crate::agent_progress::account_change_schemas() {
+        openapi["components"]["schemas"][name] = schema;
+    }
+    for name in [
+        "AgentResponse",
+        "AgentEntityDto",
+        "AgentSummaryEntityDto",
+        "AgentDetailEntityDto",
+    ] {
+        openapi["components"]["schemas"][name]["properties"]["accountChange"] =
+            serde_json::json!({"$ref":"#/components/schemas/AccountChange"});
+        openapi["components"]["schemas"][name]["properties"]["accountTransferProgress"] =
+            serde_json::json!({"$ref":"#/components/schemas/AccountTransferProgress"});
+        openapi["components"]["schemas"][name]["properties"]["accountDestinations"] = serde_json::json!({"type":"array","items":{"$ref":"#/components/schemas/AccountDestination"}});
+    }
+    openapi["components"]["schemas"]["AgentEntityDto"]["properties"]["accountTransfer"] = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/AccountTransferSummaryDto"},{"type":"null"}]});
+    openapi["components"]["schemas"]["Account"]["properties"]["eligibility"] =
+        serde_json::json!({"$ref":"#/components/schemas/AccountEligibility"});
+    for name in ["RoomEntityDto", "RoomDetailDto"] {
+        openapi["components"]["schemas"][name]["properties"]["leadIds"] =
+            serde_json::json!({"type":"array","items":{"type":"string"}});
+    }
     for (name, schema) in crate::studio_errors::schemas()? {
         openapi["components"]["schemas"][name] = schema;
     }
@@ -1261,8 +1385,14 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     openapi["components"]["schemas"]["ComplaintBody"]["properties"]["status"] =
         crate::complaints::status_property();
     openapi["components"]["schemas"]["StartWaitReason"] = serde_json::Value::Null;
+    openapi["components"]["schemas"]["TeamCounts"] = serde_json::json!({});
     for (name, schema) in crate::agent_progress::schemas()
         .into_iter()
+        .chain(crate::agent_entity_nested::schemas()?)
+        .chain(crate::agent_entity_nested_extra::schemas()?)
+        .chain(crate::agent_entity_transfer::schemas()?)
+        .chain(crate::agent_entity_remote::schemas()?)
+        .chain(crate::agent_entity_native::schemas()?)
         .chain(crate::desktop::schemas())
         .chain(crate::queue_command::schemas())
         .chain(crate::claude_controls::schemas())
@@ -1271,7 +1401,23 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             .pointer_mut(&format!("/components/schemas/{name}"))
             .ok_or_else(|| format!("OpenAPI is missing Rust-owned {name}"))? = schema;
     }
+    for (name, schema) in crate::chat_operational_status::schemas() {
+        openapi["components"]["schemas"][name] = schema;
+    }
+    openapi["components"]["schemas"]["RadioControls"] = crate::radio_controls::schema();
+    openapi["components"]["schemas"]["RoomRadio"]["properties"]["controls"] =
+        serde_json::json!({"$ref":"#/components/schemas/RadioControls"});
+    let required = openapi["components"]["schemas"]["RoomRadio"]["required"]
+        .as_array_mut()
+        .ok_or("RoomRadio required fields missing")?;
+    if !required.iter().any(|value| value == "controls") {
+        required.push(serde_json::json!("controls"));
+    }
     for (name, schema) in crate::process_controls::schemas() {
+        openapi["components"]["schemas"][name] = schema;
+    }
+    crate::process_controls::apply_background_views(&mut openapi);
+    for (name, schema) in crate::approvals::schemas() {
         openapi["components"]["schemas"][name] = schema;
     }
     openapi["components"]["schemas"]["AnswerBody"]["properties"]["decision"] =
@@ -1306,8 +1452,12 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     identity_version.remove("maximum");
     openapi["components"]["schemas"]["UsageReconciliationResponse"]["properties"]["replayConflicts"] = serde_json::json!({"type":"array","items":{"$ref":"#/components/schemas/UsageReplayConflict"}});
     openapi["components"]["schemas"]["ClaudeFailure"] = crate::claude_failure::schema();
-    openapi["components"]["schemas"]["NativeProviderError"]["properties"]["claudeFailure"] =
-        serde_json::json!({"$ref":"#/components/schemas/ClaudeFailure"});
+    openapi["components"]["schemas"]["NativeProviderError"] =
+        crate::provider_errors::native_provider_error_schema();
+    let provider_errors = crate::provider_errors::schemas()?;
+    for name in ["CodexErrorInfo", "NonSteerableTurnKind"] {
+        openapi["components"]["schemas"][name] = provider_errors[name].clone();
+    }
     check_schema_parity(&openapi, &read_json(root, ACCOUNT_TRANSFER_SCHEMA_PATH)?)?;
     for (name, fields) in [
         (
@@ -1403,6 +1553,10 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-annotation-record.schema.json", &serde_json::to_string_pretty(&crate::annotation_record::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
+            path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-access-invite.schema.json".into(),
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-access-invite.schema.json", &serde_json::to_string_pretty(&crate::multi_server_protocol::invite_schema()).map_err(|error| error.to_string())?)?,
+        },
+        Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-terminal-record.schema.json".into(),
             text: run_node(
                 root,
@@ -1422,6 +1576,10 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-request-record.schema.json".into(),
             text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-request-record.schema.json", &serde_json::to_string_pretty(&crate::request_record::schema()).map_err(|error| error.to_string())?)?,
+        },
+        Rendered {
+            path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-room-record.schema.json".into(),
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-room-record.schema.json", &serde_json::to_string_pretty(&crate::room_record::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: web("persistence.ts"),
@@ -1811,6 +1969,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             .into_generator();
         generator.subschema_for::<crate::supervisor_contract::HealthResult>();
         generator.subschema_for::<crate::persistence::RecipientDelivery>();
+        generator.subschema_for::<crate::approvals::Approval>();
         generator.subschema_for::<crate::provider_diagnostics::StdinTimingDiagnostic>();
         generator.subschema_for::<crate::provider_diagnostics::ReplyTimingDiagnostic>();
         generator.subschema_for::<studio_client_domain::protocol::Request>();
@@ -2231,7 +2390,10 @@ process.stdout.write(JSON.stringify(JSON.parse(input).map(([method, params]) => 
             read_json(&root, ACCOUNT_TRANSFER_SCHEMA_PATH).expect("account transfer schema");
         for path in [
             "/components/schemas/CreateAgentRequest/properties/permission_mode/enum",
-            "/components/schemas/AgentEntityDto/properties/claudeOptions/anyOf/0/properties/permissionMode/enum",
+            "/components/schemas/AgentEntityDto/properties/permissionMode/anyOf/0/enum",
+            "/components/schemas/AgentDetailEntityDto/properties/permissionMode/anyOf/0/enum",
+            "/components/schemas/AgentResponse/properties/permissionMode/anyOf/0/enum",
+            "/components/schemas/AgentRecordResponse/properties/permissionMode/anyOf/0/enum",
             "/components/schemas/ClaudeSettings/properties/permissionMode/enum",
             "/components/schemas/ClaudeSessionSettings/properties/permissionMode/anyOf/0/enum",
         ] {

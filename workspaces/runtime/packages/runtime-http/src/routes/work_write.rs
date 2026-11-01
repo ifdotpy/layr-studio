@@ -6,6 +6,7 @@ use super::work_items;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::{Extension, Json};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use studio_runtime_services::work_write::{
     self, AcceptWork, SubmitWork, WorkWrite, WorkWriteError,
@@ -48,12 +49,29 @@ pub(crate) fn routes() -> RouteGroup {
     )])
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct WorkRequest<
+    const DESCRIPTION_MAX: usize = {
+        studio_runtime_schema::task_command::MAX_HTTP_DESCRIPTION_CODEPOINTS
+    },
+    const CANCEL_MAX: usize = {
+        studio_runtime_schema::task_command::MAX_HTTP_CANCEL_REASON_CODEPOINTS
+    },
+> {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    #[serde(flatten)]
+    command: studio_runtime_schema::task_command::TaskCommand<DESCRIPTION_MAX, CANCEL_MAX>,
+}
+
 pub(crate) async fn work_action(
     State(state): State<HttpState>,
     runtime: Option<Extension<Arc<MonitorRuntime>>>,
-    ApiJson(body): ApiJson<Value>,
+    ApiJson(body): ApiJson<WorkRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    perform(state, runtime.map(|Extension(runtime)| runtime), body, None)
+    perform_typed(state, runtime.map(|Extension(runtime)| runtime), body, None)
         .await
         .map(Json)
 }
@@ -84,13 +102,16 @@ impl studio_runtime_services::provider_callbacks::WorkActionPort for ManagedWork
     > {
         use studio_runtime_services::provider_callbacks::WorkActionOutcome;
         Box::pin(async move {
-            let mut body = args.clone();
-            let Some(object) = body.as_object_mut() else {
-                return WorkActionOutcome::Refused("Invalid task arguments".to_owned());
+            let command = match studio_runtime_schema::task_command::TaskCommand::parse_tool(args) {
+                Ok(command) => command,
+                Err(message) => return WorkActionOutcome::Refused(message),
             };
-            object.insert("agent".to_owned(), Value::String(actor_id.to_owned()));
-            object.insert("id".to_owned(), Value::String(request_id.to_owned()));
-            match perform(
+            let body = WorkRequest {
+                agent: Some(actor_id.to_owned()),
+                id: Some(request_id.to_owned()),
+                command,
+            };
+            match perform_typed(
                 self.state.clone(),
                 self.runtime.clone(),
                 body,
@@ -120,41 +141,35 @@ impl studio_runtime_services::provider_callbacks::WorkActionPort for ManagedWork
     }
 }
 
-pub(crate) async fn perform(
+async fn perform_typed<const DESCRIPTION_MAX: usize, const CANCEL_MAX: usize>(
     state: HttpState,
     runtime: Option<Arc<MonitorRuntime>>,
-    body: Value,
+    body: WorkRequest<DESCRIPTION_MAX, CANCEL_MAX>,
     actor_id: Option<String>,
 ) -> Result<Value, ApiError> {
     let agent = body
-        .get("agent")
-        .and_then(Value::as_str)
+        .agent
+        .as_deref()
         .unwrap_or(&state.workspace_id)
         .to_owned();
-    let action = body.get("action").and_then(Value::as_str).unwrap_or("list");
-    if action == "list" {
+    use studio_runtime_schema::task_command::TaskCommand;
+    if matches!(body.command, TaskCommand::List { .. }) {
         return work_items::work_for_agent(state, agent).await;
     }
     #[cfg(not(unix))]
-    if action == "submit" {
+    if matches!(body.command, TaskCommand::Submit { .. }) {
         return Err(ApiError::new(
             StatusCode::NOT_IMPLEMENTED,
             "Not implemented: requires workspace-state/submission-files",
         ));
     }
     let request_id = body
-        .get("id")
-        .and_then(Value::as_str)
+        .id
+        .as_deref()
         .filter(|id| !id.is_empty())
         .map(str::to_owned);
     let signature = work_items::work_request_signature(&agent, actor_id.as_deref(), &body)?;
-    use studio_runtime_schema::task_command::TaskCommand;
-    let command = if actor_id.is_some() {
-        TaskCommand::parse_tool(&body)
-    } else {
-        TaskCommand::parse(&body)
-    }
-    .map_err(|message| ApiError::new(StatusCode::BAD_REQUEST, message))?;
+    let command = body.command;
     if let studio_runtime_schema::task_command::TaskCommand::SetDefaultGate { gate } = command {
         let store = state.store.clone().ok_or_else(ApiError::internal)?;
         return store
@@ -170,10 +185,11 @@ pub(crate) async fn perform(
             .await
             .map_err(|error| write_error(WorkWriteError::Event(error)));
     }
+    let is_accept = matches!(command, TaskCommand::Accept { .. });
     let mut command =
         work_write::task_command(command, agent.clone(), state.state_dir.clone().into())
             .map_err(|error| write_error(WorkWriteError::Event(error)))?;
-    if action == "accept" {
+    if is_accept {
         let store = state.store.clone().ok_or_else(ApiError::internal)?;
         let receipt = work_write::read_work_receipt(
             &store,
@@ -243,6 +259,18 @@ pub(crate) async fn perform(
         state, runtime, agent, actor_id, request_id, signature, command,
     )
     .await
+}
+
+#[cfg(test)]
+async fn perform(
+    state: HttpState,
+    runtime: Option<Arc<MonitorRuntime>>,
+    body: Value,
+    actor_id: Option<String>,
+) -> Result<Value, ApiError> {
+    let body: WorkRequest = serde_json::from_value(body)
+        .map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "Invalid task arguments"))?;
+    perform_typed(state, runtime, body, actor_id).await
 }
 
 #[cfg(unix)]
@@ -637,6 +665,38 @@ mod tests {
     use studio_runtime_schema::task_command::Version;
 
     #[test]
+    fn typed_work_signature_is_stable() {
+        let first: super::WorkRequest =
+            serde_json::from_str(r#"{"action":"claim","task_id":"task","version":1.0}"#)
+                .expect("first");
+        let second: super::WorkRequest =
+            serde_json::from_str(r#"{"version":1,"task_id":"task","action":"claim"}"#)
+                .expect("retry");
+        let first = super::work_items::work_request_signature("agent", None, &first)
+            .expect("first signature");
+        let second = super::work_items::work_request_signature("agent", None, &second)
+            .expect("retry signature");
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn typed_work_requires_nullable_gate_and_rejects_unknown_fields() {
+        assert!(
+            serde_json::from_str::<super::WorkRequest>(r#"{"action":"set_default_gate"}"#).is_err()
+        );
+        assert!(
+            serde_json::from_str::<super::WorkRequest>(
+                r#"{"action":"set_default_gate","gate":null}"#
+            )
+            .is_ok()
+        );
+        assert!(
+            serde_json::from_str::<super::WorkRequest>(r#"{"action":"list","extra":true}"#)
+                .is_err()
+        );
+    }
+
+    #[test]
     fn integral_decimal_version_keeps_its_stale_value() {
         assert_eq!(
             serde_json::from_value::<Version>(json!(0.0))
@@ -767,7 +827,7 @@ mod managed_work_port_tests {
     }
 
     #[tokio::test]
-    async fn task_command_preupgrade_receipt_replays_nullable_unused_fields() {
+    async fn task_command_preupgrade_signature_mismatch_refuses_retry() {
         let (state, store, _directory) = state().await;
         let created = super::perform(
             state.clone(),
@@ -779,12 +839,11 @@ mod managed_work_port_tests {
         .expect("seed task");
         for (index, actor) in [None, Some("lead")].into_iter().enumerate() {
             let request = format!("legacy-create-{index}");
-            // A successful pre-upgrade create retained these unused nullable
-            // fields in its HTTP body and therefore in its receipt signature.
-            let original = json!({"action":"create","agent":"lead","id":request,"title":"Task",
-                "checks":null,"task_id":null,"reason":null,"revision":null,"files":null,"result":null});
-            let signature = super::work_items::work_request_signature("lead", actor, &original)
-                .expect("original hash");
+            let original = json!({"action":"create","agent":"lead","id":request,"title":"Task"});
+            let legacy = json!({"agent":"lead","actor":actor,"body":original});
+            let signature = studio_runtime_store::sha256_hex(
+                studio_runtime_services::event_write::python_json(&legacy).as_bytes(),
+            );
             let saved_signature = signature.clone();
             let saved_result = json!({"actor":actor,"reply":created,"references":[]}).to_string();
             let saved_request = request.clone();
@@ -793,18 +852,20 @@ mod managed_work_port_tests {
                     rusqlite::params![saved_request,saved_signature,saved_result])?;
                 Ok(())
             }).await.expect("pre-upgrade successful receipt");
-            let replayed = if actor.is_some() {
-                written(
+            if actor.is_some() {
+                assert!(matches!(
                     managed_work_port(state.clone(), None)
                         .act("lead", &original, &request)
                         .await,
-                )
+                    WorkActionOutcome::Refused(_)
+                ));
             } else {
-                super::perform(state.clone(), None, original.clone(), None)
-                    .await
-                    .expect("original HTTP body replays")
-            };
-            assert_eq!(replayed, created);
+                assert!(
+                    super::perform(state.clone(), None, original.clone(), None)
+                        .await
+                        .is_err()
+                );
+            }
             let query_request = request.clone();
             let (actual_signature, actual_result, task_count) = store
                 .read_async("legacy-replay-test", move |db| {
@@ -825,14 +886,6 @@ mod managed_work_port_tests {
                 created
             );
             assert_eq!(task_count, 1, "replay creates no additional task");
-            let mut changed = original;
-            changed.as_object_mut().expect("body").remove("checks");
-            assert!(
-                super::perform(state.clone(), None, changed, actor.map(str::to_owned))
-                    .await
-                    .is_err(),
-                "dropping a null field cannot rewrite the original hash"
-            );
         }
     }
 
@@ -855,10 +908,12 @@ mod managed_work_port_tests {
         );
         let mut changed = update;
         changed["version"] = json!(1);
-        assert!(
-            matches!(port.act("lead", &changed, &request_id("typed-update")).await,
-            WorkActionOutcome::Refused(message) if message.contains("different content")),
-            "decimal spelling remains part of the original receipt signature"
+        assert_eq!(
+            written(
+                port.act("lead", &changed, &request_id("typed-update"))
+                    .await
+            ),
+            updated
         );
         let cleared = written(
             port.act(
@@ -1393,7 +1448,9 @@ mod managed_work_port_tests {
                 let mut worker =
                     AgentRepository::get(tx, &"worker".into())?.expect("worker fixture exists");
                 worker.cwd = Some(cwd);
-                worker.extra.insert("yoloMode".into(), json!(true));
+                worker.yolo_mode = studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_store::StoredTransferValue::Known(true),
+                );
                 AgentRepository::put(tx, &worker)?;
                 Ok(())
             })
@@ -1563,7 +1620,9 @@ mod managed_work_port_tests {
                 let mut lead =
                     AgentRepository::get(tx, &"lead".into())?.expect("lead fixture exists");
                 lead.cwd = Some(cwd);
-                lead.extra.insert("yoloMode".into(), json!(true));
+                lead.yolo_mode = studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_store::StoredTransferValue::Known(true),
+                );
                 AgentRepository::put(tx, &lead)?;
                 Ok(())
             })

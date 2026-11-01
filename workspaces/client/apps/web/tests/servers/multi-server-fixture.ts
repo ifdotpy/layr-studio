@@ -74,6 +74,11 @@ export async function fixture(
     ? {}
     : accountRowsOrOptions || {};
   const workspaceId = options.workspaceId || fixtureWorkspaceId(label);
+  const processListing = {
+    processes: [],
+    activities: [],
+    responseTarget: null,
+  } satisfies components["schemas"]["ProcessListing"];
   const accountRows = Array.isArray(accountRowsOrOptions)
     ? accountRowsOrOptions
     : options.accounts || null;
@@ -128,6 +133,17 @@ export async function fixture(
   let autoPair = true;
   let staleSettingsReceipts = false;
   const pairs: string[] = [];
+  // The same snapshot the HTTP route returns and the stream attaches (sync_stream.rs).
+  const accessSnapshot = () => ({
+    protocol: 1 as const,
+    identity: invitation,
+    clients: accessClients,
+    settings: { aliases, autoPair },
+    servers: discoveredPeers.map(
+      ({ invitation: _invitation, ...peer }) => peer,
+    ),
+    invites: [],
+  });
   const streams = new Set<ServerResponse>();
   const subscriptions = new Map<ServerResponse, ResourceRef[]>();
   const nonces = new Set<string | undefined>();
@@ -327,8 +343,10 @@ export async function fixture(
     }
     if (
       handleEntitySyncFixtureRequest(request, response, {
+        discoverySnapshot: accessSnapshot,
         snapshot,
         workspaceId,
+        processSnapshot: () => processListing,
         subscriptionUpdate: bodyFor("/api/sync/subscriptions"),
         progress: (resource) =>
           resource.kind === "auth-progress"
@@ -485,9 +503,7 @@ export async function fixture(
         }
       }
       json({
-        protocol: 1,
-        identity: invitation,
-        clients: accessClients,
+        ...accessSnapshot(),
         // An exact retry can return an earlier snapshot. GET stays current.
         settings: {
           aliases,
@@ -496,10 +512,6 @@ export async function fixture(
               ? !autoPair
               : autoPair,
         },
-        servers: discoveredPeers.map(
-          ({ invitation: _invitation, ...peer }) => peer,
-        ),
-        invites: [],
       });
       return;
     }
@@ -509,6 +521,10 @@ export async function fixture(
     }
     if (url.pathname === "/api/state") {
       json(snapshot);
+      return;
+    }
+    if (url.pathname === "/api/processes") {
+      json(processListing);
       return;
     }
     if (url.pathname === "/api/accounts") {
@@ -697,12 +713,16 @@ export async function fixture(
           ? "text/javascript"
           : filename.endsWith(".css")
             ? "text/css"
-            : "text/html",
+            : filename.endsWith(".wasm")
+              ? "application/wasm"
+              : filename.endsWith(".png")
+                ? "image/png"
+                : "text/html",
       );
       if (url.pathname === "/")
         response.setHeader(
           "Content-Security-Policy",
-          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* https://api.openai.com https://*.ts.net:*; img-src 'self' data: blob: https: http:; media-src 'self' blob: data:; frame-src 'self' blob: http://*.localhost:*; frame-ancestors " +
+          "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* https://api.openai.com https://*.ts.net:*; img-src 'self' data: blob: https: http:; media-src 'self' blob: data:; frame-src 'self' blob: http://*.localhost:*; frame-ancestors " +
             (url.searchParams.has("studio-server")
               ? "'self' http://127.0.0.1:* http://localhost:*"
               : "'none'") +

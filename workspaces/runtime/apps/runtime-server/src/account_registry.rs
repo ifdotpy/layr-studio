@@ -105,19 +105,17 @@ mod registry_hints {
                             | ObservedTable::RequestResults
                             | ObservedTable::Monitors
                             | ObservedTable::Rules
-                            | ObservedTable::ServerOutbox
                             | ObservedTable::ServerLinks
                             | ObservedTable::FederationSettings
                             | ObservedTable::FederationIdentity
                             | ObservedTable::FederationPeers
                             | ObservedTable::FederationInvites
                             | ObservedTable::FederationRooms
-                            | ObservedTable::FederationOutbox
                             | ObservedTable::RuntimeOutbox
                             | ObservedTable::ErrorIncidents
                             | ObservedTable::AccountTransfers
                             | ObservedTable::OrchestrationSettings
-                            | ObservedTable::RuntimeRequests
+                            | ObservedTable::Approvals
                             | ObservedTable::RuntimeToolRequests
                             | ObservedTable::AccountState
                             | ObservedTable::AnalyticsProjection
@@ -1352,12 +1350,19 @@ impl AccountRegistry {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs_f64();
-            let handled = studio_runtime_services::work_write::accepted_archive_tick(
+            // Archive upkeep must never block account starts; a failure is logged and retried.
+            let handled = match studio_runtime_services::work_write::accepted_archive_tick(
                 Arc::clone(&self.store),
                 archive_now,
             )
             .await
-            .map_err(|_| WorkerError::TaskFailed)?;
+            {
+                Ok(handled) => handled,
+                Err(error) => {
+                    eprintln!("accepted archive tick failed: {error}");
+                    0
+                }
+            };
             self.accepted_archive_batch_full =
                 handled >= studio_runtime_services::work_write::ACCEPTED_ARCHIVE_PAGE_SIZE;
         }
@@ -1414,6 +1419,15 @@ impl AccountRegistry {
                 }
                 AccountPageDispatch::Exhausted | AccountPageDispatch::Full => return Ok(()),
                 AccountPageDispatch::StartFailed(error) => {
+                    let delay = self
+                        .worker_retry_delay
+                        .get(&account)
+                        .copied()
+                        .unwrap_or(RETRY_DELAY);
+                    self.worker_retry_at
+                        .insert(account.clone(), tokio::time::Instant::now() + delay);
+                    self.worker_retry_delay
+                        .insert(account, next_retry_delay(delay));
                     failure.get_or_insert(error);
                     return Ok(());
                 }
@@ -2132,10 +2146,9 @@ mod bounded_reconcile_tests {
                         turn_epoch: None,
                         thread_id: None,
                         turn_id: None,
-                        extra: BTreeMap::from([(
-                            "provider".to_owned(),
-                            serde_json::json!(studio_runtime_schema::ProviderKind::Codex),
-                        )]),
+                        provider: studio_runtime_schema::queue_command::Field::Value(
+                            studio_runtime_schema::ProviderKind::Codex,
+                        ),
                         ..AgentRecord::test_defaults()
                     },
                 )?;
@@ -2314,9 +2327,7 @@ mod bounded_reconcile_tests {
                         usage_resume_enabled: None,
                         in_flight: Some(false),
                         execution_mode: None, turn_epoch: None, thread_id: None, turn_id: None,
-                        extra: BTreeMap::from([
-                            ("provider".to_owned(), serde_json::json!(studio_runtime_schema::ProviderKind::Codex)),
-                        ]),
+                        provider: studio_runtime_schema::queue_command::Field::Value(studio_runtime_schema::ProviderKind::Codex),
                         ..AgentRecord::test_defaults()
                     },
                 )?;
@@ -2355,10 +2366,6 @@ mod bounded_reconcile_tests {
                     ("lead", None, AgentStatus::Queued),
                     ("worker", Some("lead"), AgentStatus::Running),
                 ] {
-                    let extra = BTreeMap::from([(
-                        "provider".to_owned(),
-                        serde_json::json!(studio_runtime_schema::ProviderKind::Codex),
-                    )]);
                     AgentRepository::put(
                         transaction,
                         &AgentRecord {
@@ -2383,7 +2390,9 @@ mod bounded_reconcile_tests {
                             turn_epoch: None,
                             thread_id: None,
                             turn_id: None,
-                            extra,
+                            provider: studio_runtime_schema::queue_command::Field::Value(
+                                studio_runtime_schema::ProviderKind::Codex,
+                            ),
                             ..AgentRecord::test_defaults()
                         },
                     )?;

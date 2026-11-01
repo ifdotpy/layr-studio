@@ -1,3 +1,4 @@
+import { AccessClientStatus, Reachability } from "../generated/api";
 import type { ConnectionHealth } from "../sync/connectionState";
 import { randomUUID } from "../uuid";
 import { restoreSidebarFocus } from "../components/sidebar/SidebarFrame";
@@ -439,7 +440,14 @@ function MultiServerShell({
   );
   useEffect(() => {
     for (const [id, instance] of serviceInstances.current) {
-      if (services.get(id) !== instance) instance.close();
+      const next = services.get(id);
+      // A replacement may open the old cache before this cleanup effect runs.
+      if (next !== instance)
+        instance.close(
+          !next ||
+            next.owner.origin !== instance.owner.origin ||
+            next.owner.credentialId !== instance.owner.credentialId,
+        );
     }
     serviceInstances.current = services;
   }, [services]);
@@ -847,8 +855,8 @@ function MultiServerShell({
                   (discovery.snapshot?.servers || [])
                     .filter(
                       (peer) =>
-                        peer.status === "unreachable" ||
-                        peer.reachability === "unreachable",
+                        peer.status === AccessClientStatus.unreachable ||
+                        peer.reachability === Reachability.unreachable,
                     )
                     .map((peer) => [peer.id, "offline"]),
                 ),

@@ -1,3 +1,4 @@
+import { backgroundDisplay } from "../fixtures/background.ts";
 import { cacheFixture, readCacheFixture } from "../cacheFixture.ts";
 import {
   readTestState,
@@ -169,6 +170,7 @@ test("Terminal dock transport", async () => {
     cwd: "/workspace/release",
   };
   const command: BackgroundTask = {
+    display: backgroundDisplay("command", "npm run dev"),
     id: "native-command",
     agent: "lead",
     kind: "command",
@@ -179,6 +181,7 @@ test("Terminal dock transport", async () => {
     tail: "Listening on localhost:3000",
   };
   const monitorFields = {
+    display: backgroundDisplay("monitor", "await deployment"),
     id: "agent-monitor",
     agent: "lead",
     command: "await deployment",

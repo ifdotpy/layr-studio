@@ -18,12 +18,6 @@ pub(crate) mod validation_counts {
     }
 }
 
-fn present_start_wait<'de, D: serde::Deserializer<'de>>(
-    d: D,
-) -> Result<Option<studio_runtime_schema::agent_progress::AgentStartWait>, D::Error> {
-    studio_runtime_schema::agent_progress::AgentStartWait::deserialize(d).map(Some)
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentDraft {
@@ -32,18 +26,6 @@ pub struct AgentDraft {
     pub assets: Vec<studio_runtime_schema::transcript_asset::TranscriptAssetView>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
-}
-
-fn present_agent_draft<'de, D: serde::Deserializer<'de>>(
-    d: D,
-) -> Result<Option<Box<AgentDraft>>, D::Error> {
-    AgentDraft::deserialize(d).map(Box::new).map(Some)
-}
-
-fn present_creation_intent<'de, D: serde::Deserializer<'de>>(
-    d: D,
-) -> Result<Option<studio_runtime_schema::creation_intent::CreationIntent>, D::Error> {
-    studio_runtime_schema::creation_intent::CreationIntent::deserialize(d).map(Some)
 }
 
 macro_rules! string_id {
@@ -207,6 +189,36 @@ pub struct AgentActivity {
     pub turn_id: Option<String>,
 }
 
+impl TryFrom<&AgentActivity> for studio_runtime_schema::agent_entity_nested::AgentActivity {
+    type Error = &'static str;
+
+    fn try_from(value: &AgentActivity) -> Result<Self, Self::Error> {
+        use studio_runtime_schema::{agent_entity_nested::ActiveToolDto, queue_command::Field};
+
+        let tools = value
+            .tools
+            .as_ref()
+            .map(|tools| {
+                tools
+                    .iter()
+                    .map(|tool| {
+                        Ok(ActiveToolDto {
+                            id: tool.id.clone().ok_or("active tool is missing id")?,
+                            kind: tool.kind.clone().ok_or("active tool is missing type")?,
+                            name: tool.name.clone().ok_or("active tool is missing name")?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, Self::Error>>()
+            })
+            .transpose()?;
+        Ok(Self {
+            at: value.at.map_or(Field::Missing, Field::Value),
+            phase: value.phase.clone().map_or(Field::Missing, Field::Value),
+            tools: tools.map_or(Field::Missing, Field::Value),
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentContextUsage {
@@ -280,13 +292,7 @@ pub struct NativeSafetyBuffering {
     pub turn_id: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum NativeStatusPhase {
-    Safety,
-    Retrying,
-    Auth,
-}
+pub use studio_runtime_schema::agent_entity_nested::NativeStatusPhase;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -330,15 +336,15 @@ pub enum AgentSandbox {
     },
 }
 
+pub use studio_runtime_schema::agent_entity_nested::AgentNaming;
+
+pub use studio_runtime_schema::agent_limits::AgentCapacity;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRecord {
     pub id: AgentId,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "present_agent_draft"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub draft: Option<Box<AgentDraft>>,
     pub root_id: AgentId,
     #[serde(deserialize_with = "deserialize_agent_epoch")]
@@ -370,8 +376,149 @@ pub struct AgentRecord {
     pub cwd: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    #[serde(deserialize_with = "deserialize_optional_safe_counter")]
+    #[serde(default, deserialize_with = "deserialize_optional_safe_counter")]
     pub compactions: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fast_mode: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daybreak_enabled: Option<bool>,
+    #[serde(default)]
+    pub naming: AgentNaming,
+    #[serde(default)]
+    pub capacity: AgentCapacity,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mode_supported: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layr_ready: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub image_workspace: studio_runtime_schema::queue_command::Field<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub archived: studio_runtime_schema::queue_command::Field<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub pinned: studio_runtime_schema::queue_command::Field<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub prompt: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub profile_id: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub profile_instructions: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub effort: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub native_effort: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub project_folder: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub checkpoint_history_head: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub workspace_reservation_id: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub workspace_operation: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub excluded_account_keys: studio_runtime_schema::queue_command::Field<Vec<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub role: studio_runtime_schema::queue_command::Field<
+        studio_runtime_schema::creation_intent::AgentRole,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub provider: studio_runtime_schema::queue_command::Field<studio_runtime_schema::ProviderKind>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub created:
+        studio_runtime_schema::queue_command::Field<studio_runtime_schema::NonnegativeNumber>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_safe_counter"
+    )]
+    pub queue_mutation_revision: Option<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_safe_counter"
+    )]
+    pub auth_resume_attempt: Option<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub last_completed_turn: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub host_project_path: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub execution_settings_account_key: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub last_completed_turn_status: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub error: studio_runtime_schema::queue_command::Field<
+        studio_runtime_schema::provider_errors::AgentError,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub last_completed_turn_error: studio_runtime_schema::queue_command::Field<
+        studio_runtime_schema::provider_errors::AgentError,
+    >,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree_ready: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -380,11 +527,7 @@ pub struct AgentRecord {
     pub native_response_turn: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parked_event: Option<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "present_start_wait"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_wait: Option<studio_runtime_schema::agent_progress::AgentStartWait>,
     #[serde(
         default,
@@ -414,6 +557,89 @@ pub struct AgentRecord {
     pub auto_wake: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage_resume_enabled: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub environment: studio_runtime_schema::queue_command::Field<
+        StoredTransferValue<studio_runtime_schema::project_ingress::WorkerEnvironment>,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub usage_resume: studio_runtime_schema::queue_command::Field<
+        StoredTransferObject<Box<studio_runtime_schema::continuation_snapshot::UsageContinuation>>,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub native_failure_hold: studio_runtime_schema::queue_command::Field<NativeFailureHold>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub prepare_attempt: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub worker_defaults: studio_runtime_schema::queue_command::Field<StoredWorkerDefaults>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub pending_settings: studio_runtime_schema::queue_command::Field<
+        StoredTransferObject<Box<crate::transfer_record::TransferSettings>>,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub pending_settings_account_key: studio_runtime_schema::queue_command::Field<
+        StoredTransferValue<studio_runtime_schema::account_key::AccountKey>,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub updated_at: studio_runtime_schema::queue_command::Field<StoredTransferValue<f64>>,
+
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub portable_history: studio_runtime_schema::queue_command::Field<
+        StoredTransferObject<crate::transfer_record::PortableHistory>,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub account_history: studio_runtime_schema::queue_command::Field<
+        StoredTransferValue<
+            Vec<StoredTransferObject<crate::transfer_record::TransferAccountHistoryEntry>>,
+        >,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub cyber_access_program:
+        studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub yolo_mode: studio_runtime_schema::queue_command::Field<StoredTransferValue<bool>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub claude_options: studio_runtime_schema::queue_command::Field<
+        StoredTransferObject<crate::transfer_record::TransferClaudeOptions>,
+    >,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_mode: Option<AgentExecutionMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -445,14 +671,131 @@ pub struct AgentRecord {
     pub vm_auth_bootstrap: Option<VmAuthBootstrap>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_release: Option<NativeRelease>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creation_intent: Option<studio_runtime_schema::creation_intent::CreationIntent>,
     #[serde(
         default,
-        deserialize_with = "present_creation_intent",
-        skip_serializing_if = "Option::is_none"
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
-    pub creation_intent: Option<studio_runtime_schema::creation_intent::CreationIntent>,
+    pub account_transfer:
+        studio_runtime_schema::queue_command::Field<crate::transfer_record::AgentTransferState>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub account_transfer_id:
+        studio_runtime_schema::queue_command::Field<crate::transfer_record::TransferId>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub lazy_account_transfer:
+        studio_runtime_schema::queue_command::Field<crate::transfer_record::LazyTransferState>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
+}
+
+/// Historical non-boolean holds retain their original JSON and truthiness.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum NativeFailureHold {
+    Boolean(bool),
+    Unreadable(Value),
+}
+
+/// Normalize transfer values on decode while retaining historical JSON on disk.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum StoredTransferValue<T> {
+    Known(T),
+    Unreadable(Value),
+}
+
+pub(crate) fn deserialize_object<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let value = Value::deserialize(deserializer)?;
+    if !value.is_object() {
+        return Err(serde::de::Error::custom("expected an object"));
+    }
+    serde::Deserialize::deserialize(value).map_err(serde::de::Error::custom)
+}
+
+/// An object-shaped typed value or its unchanged legacy representation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged, bound(deserialize = "T: serde::de::DeserializeOwned"))]
+pub enum StoredTransferObject<T> {
+    Known(#[serde(deserialize_with = "deserialize_object")] T),
+    Unreadable(Value),
+}
+
+/// Typed defaults or an unreadable legacy value.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum StoredWorkerDefaults {
+    Known(
+        #[serde(deserialize_with = "deserialize_object")]
+        crate::transfer_record::TransferWorkerDefaults,
+    ),
+    Unreadable(Value),
+}
+
+impl From<crate::transfer_record::TransferWorkerDefaults> for StoredWorkerDefaults {
+    fn from(value: crate::transfer_record::TransferWorkerDefaults) -> Self {
+        Self::Known(value)
+    }
+}
+
+impl AgentRecord {
+    pub fn set_usage_resume(&mut self, value: Value) {
+        use studio_runtime_schema::queue_command::Field;
+        if value.is_null() {
+            self.usage_resume = Field::Null;
+        } else {
+            let known = value
+                .is_object()
+                .then(|| serde::Deserialize::deserialize(value.clone()))
+                .transpose();
+            self.usage_resume = Field::Value(match known {
+                Ok(Some(known)) => StoredTransferObject::Known(known),
+                _ => StoredTransferObject::Unreadable(value),
+            });
+        }
+    }
+
+    pub fn usage_resume_value(&self) -> Result<Option<Value>, serde_json::Error> {
+        self.usage_resume
+            .value()
+            .map(|value| serde::Serialize::serialize(value, serde_json::value::Serializer))
+            .transpose()
+    }
+
+    pub fn usage_resume_truthy(&self) -> bool {
+        match self.usage_resume.value() {
+            Some(StoredTransferObject::Known(_)) => true,
+            Some(StoredTransferObject::Unreadable(value)) => crate::truthy(Some(value)),
+            None => false,
+        }
+    }
+
+    pub fn set_native_failure_hold(&mut self, value: bool) {
+        self.native_failure_hold =
+            studio_runtime_schema::queue_command::Field::Value(NativeFailureHold::Boolean(value));
+    }
+
+    pub fn clear_native_failure_hold(&mut self) {
+        self.native_failure_hold = studio_runtime_schema::queue_command::Field::Missing;
+    }
+
+    pub fn native_failure_held(&self) -> bool {
+        match self.native_failure_hold.value() {
+            Some(NativeFailureHold::Boolean(value)) => *value,
+            Some(NativeFailureHold::Unreadable(value)) => crate::truthy(Some(value)),
+            None => false,
+        }
+    }
 }
 
 fn deserialize_agent_epoch<'de, D: serde::Deserializer<'de>>(
@@ -710,6 +1053,19 @@ macro_rules! start_attempt_setters {
 }
 
 impl AgentRecord {
+    pub fn error_text(&self) -> Option<&str> {
+        self.error.value().and_then(|error| error.as_text())
+    }
+
+    pub fn set_error_receipt(&mut self, value: Value) -> Result<(), serde_json::Error> {
+        use studio_runtime_schema::queue_command::Field;
+        self.error = if value.is_null() {
+            Field::Null
+        } else {
+            Field::Value(studio_runtime_schema::provider_errors::AgentError::from_receipt(value)?)
+        };
+        Ok(())
+    }
     pub fn is_deleted(&self) -> bool {
         self.deleted_at.is_some_and(|at| at != 0.0)
     }
@@ -736,6 +1092,36 @@ impl AgentRecord {
             cwd: None,
             name: None,
             compactions: None,
+            fast_mode: None,
+            daybreak_enabled: None,
+            naming: AgentNaming::default(),
+            capacity: AgentCapacity::default(),
+            agent_mode_supported: None,
+            layr_ready: None,
+            image_workspace: Default::default(),
+            archived: Default::default(),
+            pinned: Default::default(),
+            prompt: Default::default(),
+            profile_id: Default::default(),
+            profile_instructions: Default::default(),
+            effort: Default::default(),
+            native_effort: Default::default(),
+            project_folder: Default::default(),
+            checkpoint_history_head: Default::default(),
+            workspace_reservation_id: Default::default(),
+            workspace_operation: Default::default(),
+            excluded_account_keys: Default::default(),
+            role: Default::default(),
+            provider: Default::default(),
+            created: Default::default(),
+            queue_mutation_revision: None,
+            auth_resume_attempt: None,
+            last_completed_turn: Default::default(),
+            host_project_path: Default::default(),
+            execution_settings_account_key: Default::default(),
+            last_completed_turn_status: Default::default(),
+            error: Default::default(),
+            last_completed_turn_error: Default::default(),
             worktree_ready: None,
             approval_policy: None,
             native_response_turn: None,
@@ -753,11 +1139,24 @@ impl AgentRecord {
             in_flight: None,
             auto_wake: None,
             usage_resume_enabled: None,
+            environment: Default::default(),
+            usage_resume: Default::default(),
+            native_failure_hold: Default::default(),
+            prepare_attempt: Default::default(),
+            worker_defaults: Default::default(),
+            pending_settings: Default::default(),
+            pending_settings_account_key: Default::default(),
+            updated_at: Default::default(),
+            portable_history: Default::default(),
+            account_history: Default::default(),
+            cyber_access_program: Default::default(),
+            yolo_mode: Default::default(),
+            claude_options: Default::default(),
             execution_mode: None,
             turn_epoch: None,
             account_key: crate::cost_aggregate::DEFAULT_ACCOUNT.to_owned(),
             thread_id: None,
-            turn_id: None,
+            turn_id: Default::default(),
             title_job: None,
             start_attempt: None,
             disconnect_recovery: None,
@@ -770,6 +1169,9 @@ impl AgentRecord {
             vm_auth_bootstrap: None,
             native_release: None,
             creation_intent: None,
+            account_transfer: studio_runtime_schema::queue_command::Field::Missing,
+            account_transfer_id: studio_runtime_schema::queue_command::Field::Missing,
+            lazy_account_transfer: studio_runtime_schema::queue_command::Field::Missing,
             extra: BTreeMap::new(),
         }
     }
@@ -869,10 +1271,48 @@ impl JsonRecord for AgentRecord {
         encode_open_record(self, row_id)
     }
 
+    fn check_write_value(&self, value: &Value) -> StoreResult<()> {
+        self.check_extra_round_trip(&serde_json::to_string(value)?)?;
+        Ok(())
+    }
+
     fn decode_stored(connection: &Connection, row_id: &str, encoded: &str) -> StoreResult<Self> {
         let mut agent = parse_agent_record(row_id, encoded)?;
         crate::agent_volatile::merge_agent(connection, row_id, &mut agent)?;
         Ok(agent)
+    }
+}
+
+impl AgentRecord {
+    fn check_extra_round_trip(&self, encoded: &str) -> StoreResult<()> {
+        let mut deserializer = serde_json::Deserializer::from_str(encoded);
+        let decoded: Self =
+            serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
+                let key = error.path().to_string();
+                if self.extra.contains_key(&key) {
+                    invalid_agent_field(
+                        &self.id.0,
+                        &format!("/{key}"),
+                        "extra_field_collision",
+                        None,
+                    )
+                } else {
+                    crate::StoreError::from(error.into_inner())
+                }
+            })?;
+        if let Some(key) = self
+            .extra
+            .keys()
+            .find(|key| !decoded.extra.contains_key(*key))
+        {
+            return Err(invalid_agent_field(
+                &self.id.0,
+                &format!("/{key}"),
+                "extra_field_collision",
+                None,
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -983,10 +1423,11 @@ mod plan_typed_tests {
             json!({"id":"a"}),
             json!({"id":"a","rootId":"r","text":"","version":1.5,"updated":null}),
             json!({"id":"a","rootId":"r","text":"","version":1,"updated":null,"native":[]}),
+            json!({"id":"a","rootId":"r","text":"","version":1,"updated":null,"future":[1]}),
         ] {
             assert!(PlanRecord::deserialize(invalid).is_err());
         }
-        let value = json!({"id":"different-from-row","rootId":"r","text":"x","version":1.0,"updated":null,"native":null,"future":[1]});
+        let value = json!({"id":"different-from-row","rootId":"r","text":"x","version":1.0,"updated":null,"native":{"plan":[{"future":[1]}]}});
         let record = PlanRecord::deserialize(value.clone()).unwrap();
         assert_eq!(record.into_value(), value);
     }
@@ -996,7 +1437,7 @@ mod plan_typed_tests {
         let db = rusqlite::Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE runtime_plans(id TEXT PRIMARY KEY,record TEXT NOT NULL)")
             .unwrap();
-        let value = json!({"id":"payload-id","rootId":"root","text":"x","version":1.0,"updated":null,"future":true});
+        let value = json!({"id":"payload-id","rootId":"root","text":"x","version":1.0,"updated":null,"steps":[{"future":true}]});
         let record = PlanRecord::from_value(value.clone()).unwrap();
         let key = AgentId::from("row-id");
         Table::<PlanRecord>::new(&db).put_at(&key, &record).unwrap();
@@ -1045,7 +1486,7 @@ mod annotation_typed_tests {
         }
         for value in [
             json!({"id":"a"}),
-            json!({"id":"a","line":1.0,"created":null,"extra":[1]}),
+            json!({"id":"a","line":1.0,"created":null}),
         ] {
             let record = AnnotationRecord::deserialize(value.clone()).unwrap();
             assert_eq!(record.into_value(), value);
@@ -1067,13 +1508,13 @@ mod annotation_typed_tests {
     }
 
     #[test]
-    fn annotation_store_preserves_identity_extensions_and_rejects_duplicate() {
+    fn annotation_store_preserves_identity_and_rejects_duplicate() {
         let db = rusqlite::Connection::open_in_memory().unwrap();
         db.execute_batch(
             "CREATE TABLE runtime_annotations(id TEXT PRIMARY KEY,record TEXT NOT NULL)",
         )
         .unwrap();
-        let value = json!({"id":"a","line":-1.0,"created":null,"future":{"x":1}});
+        let value = json!({"id":"a","line":-1.0,"created":null,"rootId":"r"});
         let record = AnnotationRecord::from_value(value.clone()).unwrap();
         Table::<AnnotationRecord>::new(&db).put(&record).unwrap();
         assert_eq!(
@@ -1164,7 +1605,16 @@ impl JsonRecord for RequestRecord {
     fn encode_stored(&self, _connection: &Connection, row_id: &str) -> StoreResult<String> {
         if self.id != row_id
             || !self.created_at.is_finite()
-            || !self.params.get().trim_start().starts_with('{')
+            || serde_json::from_str::<studio_runtime_schema::request_projection::RequestParams>(
+                self.params.get(),
+            )
+            .is_err()
+            || self.preview.as_ref().is_some_and(|value| {
+                serde_json::from_str::<studio_runtime_schema::request_projection::RequestPreview>(
+                    value.get(),
+                )
+                .is_err()
+            })
         {
             return Err(crate::StoreError::InvalidStoredObject {
                 table: Self::TABLE,
@@ -1210,6 +1660,25 @@ mod request_typed_tests {
             super::validation_counts::CHECKS.with(|count| count.get()),
             0,
             "typed default must not build a generic JSON value"
+        );
+    }
+
+    #[test]
+    fn request_write_rejects_malformed_known_provider_fields() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE runtime_requests(id TEXT PRIMARY KEY, record TEXT NOT NULL)",
+        )
+        .unwrap();
+        let mut record: RequestRecord = serde_json::from_str(r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{}}"#).unwrap();
+        record.params =
+            serde_json::value::RawValue::from_string(r#"{"command":42}"#.into()).unwrap();
+        assert!(Table::new(&db).put(&record).is_err());
+        assert!(
+            Table::<RequestRecord>::new(&db)
+                .get(&"r".into())
+                .unwrap()
+                .is_none()
         );
     }
 
@@ -1708,6 +2177,10 @@ impl JsonRecord for EventMetadataRecord {
 }
 
 impl WorkItemRecord {
+    /// The record as stored JSON, for the history rows that follow its arrays.
+    pub(crate) fn history_value(&self) -> Value {
+        self.0.value()
+    }
     pub fn from_value(value: Value) -> Result<Self, serde_json::Error> {
         Self::deserialize(value)
     }
@@ -1777,6 +2250,21 @@ impl WorkItemRecord {
     }
     pub fn owner(&self) -> Option<&str> {
         self.0.owner()
+    }
+    pub fn agent_field(&self) -> &studio_runtime_schema::queue_command::Field<String> {
+        self.0.agent_field()
+    }
+    pub fn archive_field(
+        &self,
+    ) -> &studio_runtime_schema::queue_command::Field<studio_runtime_schema::raw_json::RawJson>
+    {
+        self.0.archive_field()
+    }
+    pub fn root_id_field(&self) -> &studio_runtime_schema::queue_command::Field<String> {
+        self.0.root_id_field()
+    }
+    pub fn title_field(&self) -> &studio_runtime_schema::queue_command::Field<String> {
+        self.0.title_field()
     }
     pub fn root_id(&self) -> Option<&str> {
         self.0.root_id()
@@ -1862,6 +2350,10 @@ pub trait JsonRecord: Serialize + DeserializeOwned {
     const TYPED_SHAPE: bool = false;
 
     fn record_key(&self) -> Option<&Self::Id>;
+
+    fn check_write_value(&self, _value: &Value) -> StoreResult<()> {
+        Ok(())
+    }
 
     fn encode_stored(&self, _connection: &Connection, row_id: &str) -> StoreResult<String>
     where
@@ -2239,10 +2731,22 @@ impl<'connection, R: JsonRecord> Table<'connection, R> {
     }
 
     pub fn delete(&self, id: &R::Id) -> StoreResult<bool> {
+        let old_root = if R::TABLE == AgentRecord::TABLE {
+            crate::entity_publication::agent_team_root(self.connection, id.as_ref())?
+        } else {
+            None
+        };
         let changed = self.connection.execute(
             &format!("DELETE FROM {} WHERE id=?1", quoted_table::<R>()),
             [id.as_ref()],
         )?;
+        if changed == 1 && R::TABLE == AgentRecord::TABLE {
+            crate::entity_publication::mark_agent_team_roots(
+                id.as_ref(),
+                old_root.as_deref(),
+                None,
+            );
+        }
         Ok(changed == 1)
     }
 }
@@ -2453,6 +2957,15 @@ fn checked_value<R: JsonRecord>(record: &R, row_id: &str) -> StoreResult<Value> 
     #[cfg(test)]
     validation_counts::CHECKS.with(|count| count.set(count.get() + 1));
     let value = record.serialize(serde_json::value::Serializer)?;
+    record.check_write_value(&value)?;
+    checked_serialized_value(record, row_id, value)
+}
+
+fn checked_serialized_value<R: JsonRecord>(
+    record: &R,
+    row_id: &str,
+    value: Value,
+) -> StoreResult<Value> {
     let invalid = || crate::StoreError::InvalidStoredObject {
         table: R::TABLE,
         id: row_id.to_owned(),
@@ -2580,6 +3093,47 @@ pub(crate) fn decode_json_record<T: DeserializeOwned>(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn agent_write_rejects_extra_keys_owned_by_named_fields() {
+        for (key, value) in [
+            ("error", serde_json::json!(null)),
+            ("error", serde_json::json!(42)),
+            ("capacity", serde_json::json!(null)),
+            ("naming", serde_json::json!(null)),
+            ("id", serde_json::json!(null)),
+        ] {
+            let mut agent = super::AgentRecord::from_value(serde_json::json!({
+                "id":"agent", "rootId":"agent", "epoch":1, "status":"idle",
+                "accountKey":"default", "compactions":0
+            }))
+            .unwrap();
+            agent.extra.insert(key.into(), value);
+            assert!(
+                matches!(super::checked_value(&agent, "agent"), Err(crate::StoreError::InvalidSyncObjectField { pointer, reason, .. }) if pointer == format!("/{key}") && reason.contains("extra_field_collision")),
+                "{key}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "manual timing on a disposable copied record"]
+    fn copied_agent_extra_guard_timing() {
+        use super::JsonRecord;
+        let raw =
+            std::fs::read_to_string(std::env::var("STUDIO_AGENT_TIMING_RECORD").unwrap()).unwrap();
+        let agent: super::AgentRecord = serde_json::from_str(&raw).unwrap();
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        let encoded = agent.encode_stored(&db, &agent.id.0).unwrap();
+        let start = std::time::Instant::now();
+        for _ in 0..30 {
+            agent.check_extra_round_trip(&encoded).unwrap();
+        }
+        println!(
+            "bytes={} guard_mean_ms={:.3}",
+            encoded.len(),
+            start.elapsed().as_secs_f64() * 1000.0 / 30.0
+        );
+    }
+    #[test]
     fn agent_record_requires_materialized_account() {
         let old = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle"}"#;
         assert!(serde_json::from_str::<super::AgentRecord>(old).is_err());
@@ -2616,7 +3170,7 @@ mod tests {
         );
         assert_eq!(agent.clone().into_value(), agent.value());
 
-        let current = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"vmLaunch":{"identity":{"agentId":"agent","epoch":1,"handle":"handle","requestId":"request","launchFingerprint":"digest"},"signature":"signature","status":"submitted"},"credentialCopy":{"agentId":"agent","epoch":1,"accountKey":"account","provider":"codex","relativePath":"path","digest":"digest","requestId":"request","signature":"signature","status":"submitted"},"vmAuthBootstrap":{"agentId":"agent","epoch":1,"requestId":"request","rootRequestId":"root","admittedRequest":{"id":"token","signature":"signature","created":1},"fingerprint":"digest","state":"submitted"},"nativeRelease":{"scope":{"account":"account","connection":"connection","generation":2},"admittedRequest":{"id":"token","signature":"signature","created":1},"id":"release"}}"#;
+        let current = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{"kind":"automatic","max":64},"naming":"automatic","vmLaunch":{"identity":{"agentId":"agent","epoch":1,"handle":"handle","requestId":"request","launchFingerprint":"digest"},"signature":"signature","status":"submitted"},"credentialCopy":{"agentId":"agent","epoch":1,"accountKey":"account","provider":"codex","relativePath":"path","digest":"digest","requestId":"request","signature":"signature","status":"submitted"},"vmAuthBootstrap":{"agentId":"agent","epoch":1,"requestId":"request","rootRequestId":"root","admittedRequest":{"id":"token","signature":"signature","created":1},"fingerprint":"digest","state":"submitted"},"nativeRelease":{"scope":{"account":"account","connection":"connection","generation":2},"admittedRequest":{"id":"token","signature":"signature","created":1},"id":"release"}}"#;
         let agent: AgentRecord = serde_json::from_str(current).expect("current effect fields");
         let encoded = serde_json::to_string(&agent).expect("serialize current agent");
         assert_eq!(
@@ -2650,8 +3204,23 @@ mod tests {
         assert!(serde_json::from_str::<AgentRecord>(raw).is_err());
         let null_mode = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"creationIntent":{"permission_mode":null}}"#;
         assert!(serde_json::from_str::<AgentRecord>(null_mode).is_err());
-        let null_intent = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"creationIntent":null}"#;
-        assert!(serde_json::from_str::<AgentRecord>(null_intent).is_err());
+        let null_intent = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"creationIntent":null,"draft":null,"queueMutationRevision":null,"authResumeAttempt":null,"startWait":null}"#;
+        let absent = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0}"#;
+        assert_eq!(
+            serde_json::from_str::<AgentRecord>(null_intent).unwrap(),
+            serde_json::from_str::<AgentRecord>(absent).unwrap()
+        );
+    }
+
+    #[test]
+    fn agent_compactions_null_and_absence_are_equivalent() {
+        let absent =
+            r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default"}"#;
+        let null = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":null}"#;
+        let absent: AgentRecord = serde_json::from_str(absent).unwrap();
+        let null: AgentRecord = serde_json::from_str(null).unwrap();
+        assert_eq!(absent, null);
+        assert!(null.value().get("compactions").unwrap().is_null());
     }
 
     #[test]
@@ -2660,6 +3229,213 @@ mod tests {
         let unknown = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"permissionMode":"unknown"}"#;
         assert!(serde_json::from_str::<AgentRecord>(valid).is_ok());
         assert!(serde_json::from_str::<AgentRecord>(unknown).is_err());
+    }
+
+    #[test]
+    fn agent_settings_flags_are_boolean() {
+        for field in [
+            "fastMode",
+            "daybreakEnabled",
+            "agentModeSupported",
+            "layrReady",
+        ] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"{field}":"false"}}"#
+            );
+            assert!(
+                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                "{field}"
+            );
+            let valid = raw.replace("\"false\"", "false");
+            let record: AgentRecord = serde_json::from_str(&valid).unwrap();
+            assert_eq!(record.value()[field], false, "{field}");
+        }
+    }
+
+    #[test]
+    fn agent_text_settings_are_strings_with_distinct_null_and_absence() {
+        for field in [
+            "prompt",
+            "profileId",
+            "profileInstructions",
+            "effort",
+            "nativeEffort",
+            "projectFolder",
+            "checkpointHistoryHead",
+            "workspaceOperation",
+            "workspaceReservationId",
+            "lastCompletedTurn",
+            "hostProjectPath",
+            "lastCompletedTurnStatus",
+            "executionSettingsAccountKey",
+        ] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"{field}":42}}"#
+            );
+            assert!(
+                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                "{field}"
+            );
+            let null = raw.replace("42", "null");
+            let record: AgentRecord = serde_json::from_str(&null).unwrap();
+            assert_eq!(record.value().get(field), Some(&Value::Null), "{field}");
+            let missing = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0}"#;
+            let record: AgentRecord = serde_json::from_str(missing).unwrap();
+            assert!(record.value().get(field).is_none(), "{field}");
+        }
+    }
+
+    #[test]
+    fn agent_role_is_closed_and_preserves_null() {
+        let bad = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"role":"future"}"#;
+        let null = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"role":null}"#;
+        assert!(serde_json::from_str::<AgentRecord>(bad).is_err());
+        let agent: AgentRecord = serde_json::from_str(null).unwrap();
+        assert!(
+            serde_json::to_string(&agent)
+                .unwrap()
+                .contains("\"role\":null")
+        );
+    }
+
+    #[test]
+    fn agent_error_preserves_non_error_values() {
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"failed","accountKey":"default","compactions":0,"error":42}"#;
+        let decoded: AgentRecord = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            decoded.value()["error"],
+            serde_json::json!({"message":"","studioRawEvidence":42})
+        );
+        let last_error = raw.replace("\"error\":42", "\"lastCompletedTurnError\":42");
+        let decoded: AgentRecord = serde_json::from_str(&last_error).unwrap();
+        assert_eq!(
+            decoded.value()["lastCompletedTurnError"],
+            serde_json::json!({"message":"","studioRawEvidence":42})
+        );
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"failed","accountKey":"default","compactions":0,"error":{"message":"failed","data":{"id":1}}}"#;
+        let decoded: AgentRecord = serde_json::from_str(raw).unwrap();
+        assert_eq!(decoded.value()["error"]["data"]["id"], 1);
+        let via_value = AgentRecord::from_value(serde_json::from_str(raw).unwrap()).unwrap();
+        assert_eq!(via_value.value()["error"]["data"]["id"], 1);
+    }
+
+    #[test]
+    fn agent_excluded_accounts_are_strings() {
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"excludedAccountKeys":["blocked",42]}"#;
+        assert!(serde_json::from_str::<AgentRecord>(raw).is_err());
+        let valid = raw.replace(",42", "");
+        assert!(serde_json::from_str::<AgentRecord>(&valid).is_ok());
+    }
+
+    #[test]
+    fn agent_naming_uses_canonical_states() {
+        for state in ["automatic", "pending_title", "manual"] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"naming":"{state}"}}"#
+            );
+            let agent: AgentRecord = serde_json::from_str(&raw).unwrap();
+            assert_eq!(agent.value()["naming"], state);
+        }
+    }
+
+    #[test]
+    fn agent_nullable_flags_are_boolean_or_null() {
+        for field in ["imageWorkspace", "archived", "pinned"] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"{field}":42}}"#
+            );
+            assert!(
+                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                "{field}"
+            );
+            let null = raw.replace("42", "null");
+            let agent: AgentRecord = serde_json::from_str(&null).unwrap();
+            assert_eq!(agent.value().get(field), Some(&Value::Null), "{field}");
+        }
+    }
+
+    #[test]
+    fn agent_auth_resume_attempt_is_a_nonnegative_safe_integer() {
+        for value in ["-1", "1.5", "9007199254740992", "\"1\""] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"authResumeAttempt":{value}}}"#
+            );
+            assert!(
+                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                "{value}"
+            );
+        }
+        let valid = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"authResumeAttempt":1}"#;
+        let record: AgentRecord = serde_json::from_str(valid).unwrap();
+        assert_eq!(record.auth_resume_attempt, Some(1));
+        assert!(
+            serde_json::to_string(&record)
+                .unwrap()
+                .contains("\"authResumeAttempt\":1")
+        );
+    }
+
+    #[test]
+    fn agent_capacity_max_is_a_nonnegative_safe_integer() {
+        for value in ["-1", "1.5", "9007199254740992", "\"1\""] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{{"kind":"automatic","max":{value}}}}}"#
+            );
+            assert!(
+                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                "{value}"
+            );
+        }
+        for value in ["1", "1.0"] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{{"kind":"automatic","max":{value}}}}}"#
+            );
+            let agent: AgentRecord = serde_json::from_str(&raw).unwrap();
+            assert!(
+                serde_json::to_string(&agent)
+                    .unwrap()
+                    .contains(&format!("\"max\":{value}"))
+            );
+        }
+    }
+
+    #[test]
+    fn agent_queue_revision_is_a_nonnegative_integer() {
+        for value in ["-1", "1.5", "\"1\""] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"queueMutationRevision":{value}}}"#
+            );
+            assert!(
+                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn agent_created_is_nonnegative_and_preserves_null() {
+        let bad = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"created":-1}"#;
+        let null = bad.replace("-1", "null");
+        assert!(serde_json::from_str::<AgentRecord>(bad).is_err());
+        let agent: AgentRecord = serde_json::from_str(&null).unwrap();
+        assert!(
+            serde_json::to_string(&agent)
+                .unwrap()
+                .contains("\"created\":null")
+        );
+    }
+
+    #[test]
+    fn agent_provider_is_closed_and_preserves_null() {
+        let bad = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"provider":"future"}"#;
+        let null = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"provider":null}"#;
+        assert!(serde_json::from_str::<AgentRecord>(bad).is_err());
+        let agent: AgentRecord = serde_json::from_str(null).unwrap();
+        assert!(
+            serde_json::to_string(&agent)
+                .unwrap()
+                .contains("\"provider\":null")
+        );
     }
 
     #[test]
@@ -2758,6 +3534,7 @@ mod tests {
             projected,
             json!({"compactions":0,
                 "id":"agent-1", "provider":"codex", "rootId":"root-1", "epoch":3, "status":"running", "accountKey":"default",
+                "capacity":{"kind":"automatic","max":64},"naming":"automatic",
                 "futureField":[{"nested":"retained"}]
             })
         );
@@ -2804,6 +3581,7 @@ mod tests {
         let connection = database();
         let value = json!({"compactions":0,
             "id":"agent", "rootId":"agent", "epoch":2, "status":"idle",
+            "capacity":{"kind":"automatic","max":64},"naming":"automatic",
             "inFlight":true, "autoWake":false, "executionMode":"native", "turnEpoch":2,
             "accountKey":"account", "threadId":"thread", "turnId":"turn", "future":42
         });
@@ -2831,9 +3609,425 @@ mod tests {
     }
 
     #[test]
+    fn agent_round_trip_preserves_null_and_missing_turn_id() {
+        let base = json!({"compactions":0,
+            "id":"agent", "rootId":"agent", "epoch":2, "status":"idle",
+            "accountKey":"default", "capacity":{"kind":"automatic","max":64},
+            "naming":"automatic"
+        });
+        for turn in [None, Some(Value::Null), Some(json!("turn"))] {
+            let mut value = base.clone();
+            if let Some(turn) = turn {
+                value["turnId"] = turn;
+            }
+            if value.get("turnId").is_some_and(Value::is_null) {
+                value.as_object_mut().unwrap().remove("turnId");
+                let mut null = value.clone();
+                null["turnId"] = Value::Null;
+                assert_eq!(agent(null).into_value(), value);
+            } else {
+                assert_eq!(agent(value.clone()).into_value(), value);
+            }
+        }
+    }
+
+    #[test]
+    fn native_failure_hold_is_not_an_extension() {
+        let record = agent(json!({"compactions":0,
+            "id":"agent", "rootId":"agent", "epoch":2, "status":"idle",
+            "accountKey":"default", "nativeFailureHold":true
+        }));
+        assert!(!record.extra.contains_key("nativeFailureHold"));
+    }
+
+    #[test]
+    fn prepare_attempt_is_not_an_extension() {
+        let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+            "epoch":2, "status":"idle", "accountKey":"default", "prepareAttempt":"attempt"}));
+        assert!(!record.extra.contains_key("prepareAttempt"));
+    }
+
+    #[test]
+    fn yolo_mode_is_not_an_extension() {
+        let record = agent(json!({"compactions":0,"id":"agent","rootId":"agent",
+            "epoch":2,"status":"idle","accountKey":"default","yoloMode":true}));
+        assert!(!record.extra.contains_key("yoloMode"));
+        assert!(matches!(
+            record.yolo_mode.value(),
+            Some(super::StoredTransferValue::Known(true))
+        ));
+        let legacy = agent(json!({"compactions":0,"id":"agent","rootId":"agent",
+            "epoch":2,"status":"idle","accountKey":"default","yoloMode":"legacy"}));
+        assert!(matches!(
+            legacy.yolo_mode.value(),
+            Some(super::StoredTransferValue::Unreadable(_))
+        ));
+        assert_eq!(legacy.value().get("yoloMode"), Some(&json!("legacy")));
+    }
+
+    #[test]
+    fn updated_at_is_not_an_extension() {
+        let record = agent(
+            json!({"compactions":0,"id":"agent","rootId":"agent","epoch":2,"status":"idle","accountKey":"default","updatedAt":1.0}),
+        );
+        assert!(!record.extra.contains_key("updatedAt"));
+        assert!(
+            matches!(record.updated_at, studio_runtime_schema::queue_command::Field::Value(super::StoredTransferValue::Known(value)) if value == 1.0)
+        );
+        let integer = agent(
+            json!({"compactions":0,"id":"agent","rootId":"agent","epoch":2,"status":"idle","accountKey":"default","updatedAt":1}),
+        );
+        assert!(
+            matches!(integer.updated_at, studio_runtime_schema::queue_command::Field::Value(super::StoredTransferValue::Known(value)) if value == 1.0)
+        );
+    }
+
+    #[test]
+    fn pending_settings_are_not_extensions() {
+        let record = agent(json!({"compactions":0,"id":"agent","rootId":"agent",
+            "epoch":2,"status":"idle","accountKey":"default",
+            "pendingSettings":{"model":"m"},"pendingSettingsAccountKey":"default"}));
+        assert!(!record.extra.contains_key("pendingSettings"));
+        assert!(!record.extra.contains_key("pendingSettingsAccountKey"));
+        assert!(matches!(
+            &record.pending_settings,
+            studio_runtime_schema::queue_command::Field::Value(super::StoredTransferObject::Known(settings))
+                if settings.model.value().map(String::as_str) == Some("m") && settings.account_key.is_none()
+        ));
+        assert!(
+            matches!(record.pending_settings_account_key, studio_runtime_schema::queue_command::Field::Value(super::StoredTransferValue::Known(ref key)) if key.as_str() == "default")
+        );
+        let null_key = agent(
+            json!({"compactions":0,"id":"agent","rootId":"agent","epoch":2,"status":"idle","accountKey":"default","pendingSettings":{"accountKey":null}}),
+        );
+        assert!(
+            matches!(null_key.pending_settings, studio_runtime_schema::queue_command::Field::Value(super::StoredTransferObject::Known(ref settings)) if settings.account_key.is_none())
+        );
+        let missing = agent(
+            json!({"compactions":0,"id":"agent","rootId":"agent","epoch":2,"status":"idle","accountKey":"default"}),
+        );
+        assert!(matches!(
+            missing.pending_settings,
+            studio_runtime_schema::queue_command::Field::Missing
+        ));
+        let null = agent(
+            json!({"compactions":0,"id":"agent","rootId":"agent","epoch":2,"status":"idle","accountKey":"default","pendingSettings":null}),
+        );
+        assert!(matches!(
+            null.pending_settings,
+            studio_runtime_schema::queue_command::Field::Null
+        ));
+        for raw in [json!([1, 2]), json!({"unknown":42})] {
+            let record = agent(json!({"compactions":0,"id":"agent","rootId":"agent",
+                "epoch":2,"status":"idle","accountKey":"default","pendingSettings":raw}));
+            assert!(matches!(
+                record.pending_settings.value(),
+                Some(super::StoredTransferObject::Unreadable(_))
+            ));
+            assert_eq!(record.value().get("pendingSettings"), Some(&raw));
+        }
+        let dto: studio_runtime_schema::agent_entity_nested::ExecutionSettingsDto =
+            serde_json::from_str(r#"{"model":"m","accountKey":"target","updatedAt":1}"#).unwrap();
+        let settings: crate::transfer_record::TransferSettings = dto.into();
+        assert_eq!(settings.account_key.as_deref(), Some("target"));
+        assert_eq!(settings.updated_at.value(), Some(&1.0));
+    }
+
+    #[test]
+    fn usage_resume_is_not_an_extension() {
+        let record = agent(json!({"compactions":0,"id":"agent","rootId":"agent",
+            "epoch":2,"status":"idle","accountKey":"default","usageResume":{
+                "id":"resume","accountKey":"default","threadId":"thread","turnId":"turn",
+                "epoch":2,"failedAt":1,"status":"scheduled"}}));
+        assert!(!record.extra.contains_key("usageResume"));
+        assert!(matches!(
+            record.usage_resume.value(),
+            Some(super::StoredTransferObject::Known(_))
+        ));
+        assert!(record.usage_resume_truthy());
+        for value in [json!({"future":true}), json!([1]), json!(false)] {
+            let mut legacy = agent(json!({"compactions":0,"id":"agent","rootId":"agent",
+                "epoch":2,"status":"idle","accountKey":"default"}));
+            legacy.set_usage_resume(value.clone());
+            assert!(matches!(
+                legacy.usage_resume.value(),
+                Some(super::StoredTransferObject::Unreadable(_))
+            ));
+            assert_eq!(legacy.usage_resume_value().unwrap(), Some(value.clone()));
+            assert_eq!(legacy.usage_resume_truthy(), crate::truthy(Some(&value)));
+        }
+    }
+
+    #[test]
+    fn portable_history_is_not_an_extension() {
+        let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+            "epoch":2, "status":"idle", "accountKey":"default", "portableHistory":{
+                "version":1,"path":"archive","sha256":"hash","bytes":1,"counts":{},
+                "source":{"agentId":"agent","accountKey":"default","epoch":2,"threadId":"thread"},
+                "transferId":"transfer"}}));
+        assert!(!record.extra.contains_key("portableHistory"));
+        assert!(matches!(
+            record.portable_history.value(),
+            Some(super::StoredTransferObject::Known(_))
+        ));
+        let legacy = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+            "epoch":2, "status":"idle", "accountKey":"default", "portableHistory":{"legacy":42}}));
+        assert!(matches!(
+            legacy.portable_history.value(),
+            Some(super::StoredTransferObject::Unreadable(_))
+        ));
+        assert_eq!(
+            legacy.value().get("portableHistory"),
+            Some(&json!({"legacy":42}))
+        );
+    }
+
+    #[test]
+    fn portable_history_source_preserves_missing_and_null() {
+        for source in [
+            json!({"agentId":"agent","accountKey":"default"}),
+            json!({"agentId":"agent","accountKey":"default","epoch":null,"threadId":null}),
+        ] {
+            let history = json!({"version":1,"path":"archive","sha256":"hash","bytes":1,
+                "counts":{},"source":source,"transferId":"transfer"});
+            let record = agent(json!({"compactions":0,"id":"agent","rootId":"agent",
+                "epoch":2,"status":"idle","accountKey":"default","portableHistory":history}));
+            assert_eq!(record.value().get("portableHistory"), Some(&history));
+        }
+    }
+
+    #[test]
+    fn transfer_objects_preserve_positional_arrays() {
+        for (key, value) in [
+            ("claudeOptions", json!([null, null, "profile", null, null])),
+            ("claudeOptions", json!({"customModels":[["model","label"]]})),
+            (
+                "portableHistory",
+                json!([
+                    1,
+                    "archive",
+                    "hash",
+                    1,
+                    {},
+                    ["agent", "default", null, null],
+                    "transfer"
+                ]),
+            ),
+            (
+                "portableHistory",
+                json!({"version":1,"path":"archive","sha256":"hash","bytes":1,
+                "counts":{},"source":["agent","default",null,null],"transferId":"transfer"}),
+            ),
+        ] {
+            let mut input = json!({"compactions":0,"id":"agent","rootId":"agent",
+                "epoch":2,"status":"idle","accountKey":"default"});
+            input
+                .as_object_mut()
+                .unwrap()
+                .insert(key.into(), value.clone());
+            let record = agent(input);
+            assert_eq!(record.value().get(key), Some(&value));
+        }
+    }
+
+    #[test]
+    fn account_history_is_not_an_extension() {
+        let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+        "epoch":2, "status":"idle", "accountKey":"default", "accountHistory":[{
+            "accountKey":"source","threadId":"thread","provider":"codex","at":1.0
+        }]}));
+        assert!(!record.extra.contains_key("accountHistory"));
+        assert!(matches!(
+            record.account_history.value(),
+            Some(super::StoredTransferValue::Known(_))
+        ));
+        let legacy = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+            "epoch":2, "status":"idle", "accountKey":"default", "accountHistory":[{"future":true}]}));
+        assert!(
+            matches!(legacy.account_history.value(), Some(super::StoredTransferValue::Known(entries))
+            if matches!(entries.as_slice(), [super::StoredTransferObject::Unreadable(_)]))
+        );
+        assert_eq!(
+            legacy.value().get("accountHistory"),
+            Some(&json!([{"future":true}]))
+        );
+        let connection = database();
+        let table = Table::<AgentRecord>::new(&connection);
+        table.put(&legacy).unwrap();
+        let restored = table.get(&AgentId::from("agent")).unwrap().unwrap();
+        assert_eq!(
+            restored.value().get("accountHistory"),
+            Some(&json!([{"future":true}]))
+        );
+    }
+
+    #[test]
+    fn enrollment_settings_are_not_extensions() {
+        let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+            "epoch":2, "status":"idle", "accountKey":"default", "cyberAccessProgram":"standard",
+            "claudeOptions":{"configDir":"profile"}}));
+        for key in ["cyberAccessProgram", "claudeOptions"] {
+            assert!(
+                !record.extra.contains_key(key),
+                "{key} remains an extension"
+            );
+        }
+        assert!(
+            matches!(record.cyber_access_program.value(), Some(super::StoredTransferValue::Known(value)) if value == "standard")
+        );
+        assert!(matches!(
+            record.claude_options.value(),
+            Some(super::StoredTransferObject::Known(_))
+        ));
+        let legacy = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+            "epoch":2, "status":"idle", "accountKey":"default", "cyberAccessProgram":42,
+            "claudeOptions":{"future":true}}));
+        assert!(matches!(
+            legacy.cyber_access_program.value(),
+            Some(super::StoredTransferValue::Unreadable(_))
+        ));
+        assert!(matches!(
+            legacy.claude_options.value(),
+            Some(super::StoredTransferObject::Unreadable(_))
+        ));
+        assert_eq!(
+            legacy.value().get("claudeOptions"),
+            Some(&json!({"future":true}))
+        );
+    }
+
+    #[test]
+    fn worker_defaults_are_not_an_extension() {
+        let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+            "epoch":2, "status":"idle", "accountKey":"default",
+            "workerDefaults":{"model":"m","effort":null,"fastMode":false}}));
+        assert!(!record.extra.contains_key("workerDefaults"));
+    }
+
+    #[test]
+    fn partial_worker_defaults_are_typed() {
+        let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+            "epoch":2, "status":"idle", "accountKey":"default", "workerDefaults":{"accountKey":"source"}}));
+        assert!(matches!(
+            record.worker_defaults.value(),
+            Some(super::StoredWorkerDefaults::Known(_))
+        ));
+        assert_eq!(
+            record.value().get("workerDefaults"),
+            Some(&json!({"accountKey":"source"}))
+        );
+    }
+
+    #[test]
+    fn transfer_defaults_enforce_shared_delegation_depth() {
+        for depth in [0, 4] {
+            assert!(
+                <crate::transfer_record::TransferWorkerDefaults as serde::Deserialize>::deserialize(
+                    json!({"delegationDepth":depth})
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn worker_defaults_distinguish_known_and_legacy_values() {
+        for (value, known) in [
+            (json!({"model":"m","effort":null,"fastMode":false}), true),
+            (json!({"model":"legacy"}), true),
+            (
+                json!({"model":"m","effort":null,"fastMode":false,"future":42}),
+                false,
+            ),
+            (json!(false), false),
+        ] {
+            let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+                "epoch":2, "status":"idle", "accountKey":"default", "workerDefaults":value}));
+            assert_eq!(
+                matches!(
+                    record.worker_defaults.value(),
+                    Some(super::StoredWorkerDefaults::Known(_))
+                ),
+                known
+            );
+            assert_eq!(record.value().get("workerDefaults"), Some(&value));
+            if let Some(super::StoredWorkerDefaults::Known(defaults)) =
+                record.worker_defaults.value()
+            {
+                let transfer: crate::transfer_record::TransferWorkerDefaults = defaults.clone();
+                assert_eq!(
+                    serde::Serialize::serialize(&(transfer), serde_json::value::Serializer)
+                        .unwrap(),
+                    value
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn prepare_attempt_preserves_unreadable_historical_value() {
+        let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+            "epoch":2, "status":"idle", "accountKey":"default", "prepareAttempt":{"old":true}}));
+        assert!(matches!(record.prepare_attempt.value(),
+            Some(super::StoredTransferValue::Unreadable(value)) if value == &json!({"old":true})));
+        assert_eq!(
+            record.value().get("prepareAttempt"),
+            Some(&json!({"old":true}))
+        );
+    }
+
+    #[test]
+    fn native_failure_hold_preserves_legacy_values_and_truthiness() {
+        for value in [
+            json!(true),
+            json!(false),
+            json!(0),
+            json!(2),
+            json!(""),
+            json!("hold"),
+            json!([]),
+            json!([1]),
+            json!({}),
+            json!({"reason":"pending"}),
+        ] {
+            let input = json!({"compactions":0, "id":"agent", "rootId":"agent",
+                "epoch":2, "status":"idle", "accountKey":"default", "naming":"automatic",
+                "capacity":{"kind":"automatic","max":64},
+                "nativeFailureHold":value});
+            let record = agent(input.clone());
+            assert_eq!(record.native_failure_held(), crate::truthy(Some(&value)));
+            assert_eq!(record.value(), input);
+            match (&value, record.native_failure_hold.value()) {
+                (Value::Bool(expected), Some(super::NativeFailureHold::Boolean(actual))) => {
+                    assert_eq!(expected, actual)
+                }
+                (_, Some(super::NativeFailureHold::Unreadable(actual))) => {
+                    assert_eq!(&value, actual)
+                }
+                _ => panic!("unexpected native failure hold variant"),
+            }
+        }
+        for value in [None, Some(Value::Null)] {
+            let mut input = json!({"compactions":0, "id":"agent", "rootId":"agent",
+                "epoch":2, "status":"idle", "accountKey":"default", "naming":"automatic",
+                "capacity":{"kind":"automatic","max":64}});
+            if let Some(value) = value {
+                input
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("nativeFailureHold".into(), value);
+            }
+            let record = agent(input.clone());
+            assert!(!record.native_failure_held());
+            assert_eq!(record.value(), input);
+        }
+    }
+
+    #[test]
     fn agent_round_trip_keeps_unknown_json_fields_and_number_kinds() {
         let value = json!({"compactions":0,
             "id":"agent-1", "provider":"codex", "rootId":"agent-1", "epoch":2, "status":"idle", "accountKey":"default",
+            "capacity":{"kind":"automatic","max":64},"naming":"automatic",
             "futureObject":{"number":1.5,"flag":true}, "futureInteger":9007199254740993_i64
         });
         let record = agent(value.clone());
@@ -2854,7 +4048,7 @@ mod tests {
             json!({"startOutcomeHold":{"stage":"recovery","epoch":2,"reason":"pending"}}),
             json!({"titleJob":{"requestId":"r","agentId":"agent","rootRequestId":"root","admittedRequest":{"id":"r","signature":"s","created":1},"status":"pending","future":true}}),
         ] {
-            let mut value = json!({"compactions":0,"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default"});
+            let mut value = json!({"compactions":0,"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","capacity":{"kind":"automatic","max":64},"naming":"automatic"});
             value
                 .as_object_mut()
                 .unwrap()
@@ -2868,7 +4062,7 @@ mod tests {
     fn stored_review_boundary_work_diagnostic_uses_physical_row_id() {
         let connection = Connection::open_in_memory().expect("fixture database");
         connection
-            .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL)")
+            .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL)")
             .expect("work table");
         connection
             .execute(
@@ -2965,7 +4159,7 @@ mod tests {
 
     #[test]
     fn unknown_agent_status_and_fields_survive_carrier_rewrite() {
-        let value = json!({"compactions":0,"id":"agent-1","provider":"codex","rootId":"agent-1","epoch":4,"accountKey":"default",
+        let value = json!({"compactions":0,"id":"agent-1","provider":"codex","rootId":"agent-1","epoch":4,"accountKey":"default","capacity":{"kind":"automatic","max":64},"naming":"automatic",
             "status":"future-agent-state","future":{"enabled":true,"count":9007199254740993_i64}});
         let record = agent(value.clone());
         assert_eq!(
@@ -3287,7 +4481,8 @@ mod agent_projection_tests {
 
     #[test]
     fn stored_agent_rejects_legacy_start_wait_shapes() {
-        for wait in [r#"{"reason":"slot","epoch":1,"runningTurns":null}"#, "null"] {
+        {
+            let wait = r#"{"reason":"slot","epoch":1,"runningTurns":null}"#;
             let raw = format!(
                 r#"{{"id":"a","rootId":"a","epoch":1,"status":"queued","accountKey":"default","compactions":0,"startWait":{wait}}}"#
             );
@@ -3443,10 +4638,15 @@ mod agent_projection_tests {
     }
 
     #[test]
-    fn stored_agent_requires_explicit_compactions_but_accepts_unknown() {
+    fn stored_agent_accepts_absent_and_unknown_compactions() {
         let missing = r#"{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default"}"#;
         let unknown = r#"{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":null}"#;
-        assert!(serde_json::from_str::<AgentRecord>(missing).is_err());
+        assert_eq!(
+            serde_json::from_str::<AgentRecord>(missing)
+                .unwrap()
+                .compactions,
+            None
+        );
         assert_eq!(
             serde_json::from_str::<AgentRecord>(unknown)
                 .unwrap()
@@ -3576,5 +4776,32 @@ mod agent_projection_tests {
             ));
             assert!(!error.to_string().contains("secret-value"));
         }
+    }
+}
+
+#[cfg(test)]
+mod activity_projection_tests {
+    use super::{AgentActiveTool, AgentActivity};
+    use studio_runtime_schema::agent_entity_nested::AgentActivity as WireActivity;
+
+    #[test]
+    fn activity_projection_requires_tool_identity_and_omits_storage_only_fields() {
+        let mut activity = AgentActivity {
+            phase: Some("running".into()),
+            dismissed: Some(true),
+            tools: Some(vec![AgentActiveTool {
+                id: Some("id".into()),
+                name: Some("tool".into()),
+                kind: Some("call".into()),
+            }]),
+            ..AgentActivity::default()
+        };
+        let projected = WireActivity::try_from(&activity).unwrap();
+        assert_eq!(
+            serde::Serialize::serialize(&(projected), serde_json::value::Serializer).unwrap(),
+            serde_json::json!({"phase":"running","tools":[{"id":"id","name":"tool","type":"call"}]})
+        );
+        activity.tools.as_mut().unwrap()[0].id = None;
+        assert!(WireActivity::try_from(&activity).is_err());
     }
 }

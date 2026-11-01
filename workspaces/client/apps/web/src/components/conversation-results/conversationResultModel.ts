@@ -57,7 +57,7 @@ export function conversationResults(messages: Message[]): ConversationResult[] {
     results.push(result);
   };
   for (const message of messages) {
-    if (message.pending || message.streaming) continue;
+    if (message.streamPending || message.streaming) continue;
     let serial = 0;
     const base = (label: string) => ({
       id: `${message.id}:result:${serial++}`,

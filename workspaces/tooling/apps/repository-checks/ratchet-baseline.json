@@ -1,62 +1,6 @@
 {
   "from_value": [
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_selection.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "b24048192a2b133a5339ef598571064dbe2548dc9fdbcdd2ee5df81891b7fed8:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:2"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:3"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:4"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:5"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:2"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:3"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:4"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_executor.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/account_worker/callback.rs",
       "fingerprint": "ee40c0b3955a00b1c72314f8bfd405afb2ecae120f0e813e627e6b94304b9cea:0"
     },
@@ -285,10 +229,6 @@
       "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:2"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/managed_status_watch.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/monitor_policy.rs",
       "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
     },
@@ -309,20 +249,8 @@
       "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/project_locations.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/provider_callbacks/cards.rs",
       "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/provider_callbacks/cards.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/provider_callbacks/cards.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:2"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/provider_callbacks/model.rs",
@@ -961,6 +889,38 @@
       "fingerprint": "b83fbdc5af2110fa1e99b9b255ed438f594b833a1df72af2a05e0e84cdbdd9cb:0"
     },
     {
+      "file": "workspaces/runtime/packages/runtime-store/src/migrations/m2026_10_30_approvals.rs",
+      "fingerprint": "3d8360ab0f3b45d9db5138c709d5ee0d85795b677ad89cc0be416ca61bd0dccd:0"
+    },
+    {
+      "file": "workspaces/runtime/packages/runtime-store/src/migrations/m2026_10_30_approvals.rs",
+      "fingerprint": "eef1a49005de15dc8b62b240413d697ea6cf01f9333938bfd5f4ca039432fc70:0"
+    },
+    {
+      "file": "workspaces/runtime/packages/runtime-store/src/migrations/m2026_10_30_approvals.rs",
+      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
+    },
+    {
+      "file": "workspaces/runtime/packages/runtime-store/src/migrations/m2026_10_30_approvals.rs",
+      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:1"
+    },
+    {
+      "file": "workspaces/runtime/packages/runtime-store/src/migrations/m2026_10_30_approvals.rs",
+      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:2"
+    },
+    {
+      "file": "workspaces/runtime/packages/runtime-store/src/migrations/m2026_10_30_approvals.rs",
+      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:3"
+    },
+    {
+      "file": "workspaces/runtime/packages/runtime-store/src/migrations/m2026_10_30_approvals.rs",
+      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:4"
+    },
+    {
+      "file": "workspaces/runtime/packages/runtime-store/src/migrations/m2026_10_30_approvals.rs",
+      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:5"
+    },
+    {
       "file": "workspaces/runtime/packages/runtime-store/src/repositories/agent_management.rs",
       "fingerprint": "01ae30bd1740c78b00f58e55ca38e4d5da5cf83f7ba9803c66ff7715f71d4f88:0"
     },
@@ -1090,10 +1050,6 @@
     {
       "file": "workspaces/runtime/apps/runtime-server/src/peer_link.rs",
       "fingerprint": "1597ef76e1f7800da7e0b498334ebf0b27f53e8cbaa7fc8f54c77640f9d7093e:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-http/src/bounded_entities.rs",
-      "fingerprint": "855d91779dc5c231c360eb45c9ea353e2af201462997d9e8adab4f9be8a844f2:0"
     },
     {
       "file": "workspaces/runtime/packages/runtime-http/src/error.rs",
@@ -1286,22 +1242,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
       "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:2"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:3"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:4"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/account_worker/preparation/snapshot.rs",
@@ -1620,14 +1560,6 @@
       "fingerprint": "bebc5b5d9e74e0b7262b1bfd0803cf63ba428eff598d50325a10e53e03121aba:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/remote_transport.rs",
-      "fingerprint": "d1b01ce3f1c0ac3036e6c1e5f12d850e88b3ac3784ce2c8399121ae7b56e4dcd:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/remote_transport.rs",
-      "fingerprint": "d1b01ce3f1c0ac3036e6c1e5f12d850e88b3ac3784ce2c8399121ae7b56e4dcd:1"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/rules_tick.rs",
       "fingerprint": "1bf43ebf53cbd5041f98720824215c3b0604d3c75c2efcd2e2f610eb7a17cdc3:0"
     },
@@ -1732,10 +1664,6 @@
       "fingerprint": "a0034e3d4920302af287ecb4ce6b83c0da7fe07e0374b62d0b457ae625856a49:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/workspace_views.rs",
-      "fingerprint": "ba0e4493df2553a721c1de1d70d2669deb2f37257a1aa0fc0cd6ff79c4ff892a:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/tests/account_transfer_driver.rs",
       "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
     },
@@ -1794,10 +1722,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-services/tests/vm_macsync_round.rs",
       "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/tests/wave7_p14_resources.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/tests/workspace_ready/effects.rs",
@@ -1950,10 +1874,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-http/src/routes/branches.rs",
       "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-http/src/routes/branches.rs",
-      "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:2"
     },
     {
       "file": "workspaces/runtime/packages/runtime-http/src/routes/workspace_views.rs",
@@ -2168,10 +2088,6 @@
       "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/resource_notify.rs",
-      "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/server_exec.rs",
       "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
     },
@@ -2328,36 +2244,7 @@
       "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
     }
   ],
-  "rust-json-dispatch": [
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "1c4d758b9bd9fcfceae3212230a564e2b45f3f6e04aadf5a006afc54d0bc7250:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "2777bfa57ef26c386ab69cd571e66b5f4e7b3c34227432c5ebe91baac3579e11:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "8748a083474924d49a0d2a482645e17541d97a86458b2db14e292644549a7fe6:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "8748a083474924d49a0d2a482645e17541d97a86458b2db14e292644549a7fe6:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "983734895f5842d88b4927d904d74356a8451972a088767c0b78c9fb74751481:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "ed390076af1c67b8fe5d2f95e2ebb5f0375d0bc72b4c13dd82648bb2c289abf8:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "ed390076af1c67b8fe5d2f95e2ebb5f0375d0bc72b4c13dd82648bb2c289abf8:1"
-    }
-  ],
+  "rust-json-dispatch": [],
   "rust-json-string-roundtrip": [],
   "rust-json-value-roundtrip": [
     {
@@ -2474,10 +2361,6 @@
     },
     {
       "file": "workspaces/runtime/packages/runtime-http/src/routes/sync_stream.rs",
-      "fingerprint": "479484212283c62fdddc769e49600f159df70def4234b22917ca36fdae3df58a:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-http/src/routes/sync_stream.rs",
       "fingerprint": "8ec747c1b9d78087ebd5915e8d76a343fa4bb3e688948615060ac9e49977c7e3:0"
     },
     {
@@ -2495,10 +2378,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-process/src/tests.rs",
       "fingerprint": "c561134022751e5032b017f28ce8ce13cf637826a234d7119c8baab02fb0a488:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-schema/src/command.rs",
-      "fingerprint": "2bd70344c5c99098351126ec4b5ce6b94e385d52a20fc8e9f3627ad0ae7ec87d:0"
     },
     {
       "file": "workspaces/runtime/packages/runtime-schema/src/complaints.rs",
@@ -2665,10 +2544,6 @@
       "fingerprint": "5dac839a508a4f83f7d210dcf218af488d0774c847c2ed31c35508b144159cc8:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/sync_views.rs",
-      "fingerprint": "e8a70eff58fdafdd2899f6c830f5aee7ec31d22734aa5e88f369fad59a4eabc3:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/thread_prepare.rs",
       "fingerprint": "677b7a0a4e7bcf68d460ccd4512ab3b4304f0311ab9ad243c54484069a131eb6:0"
     },
@@ -2684,32 +2559,8 @@
   "switch-default": [],
   "to_value": [
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:2"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:3"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_executor.rs",
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_executor.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:1"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/account_worker/preparation/pipeline.rs",
@@ -2844,10 +2695,6 @@
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:1"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/lifecycle_effects.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/liveness.rs",
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
     },
@@ -2928,8 +2775,12 @@
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/project_locations.rs",
+      "file": "workspaces/runtime/packages/runtime-services/src/provider_callbacks/legacy_view.rs",
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
+    },
+    {
+      "file": "workspaces/runtime/packages/runtime-services/src/provider_callbacks/legacy_view.rs",
+      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:1"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/provider_callbacks/tools/runtime_dispatch.rs",
@@ -2970,18 +2821,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-services/src/studio_errors.rs",
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:3"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/sync_views.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/sync_views.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/sync_views.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:2"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/terminal_driver.rs",
@@ -3056,12 +2895,24 @@
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
     },
     {
+      "file": "workspaces/runtime/packages/runtime-services/tests/agent_management_corpus.rs",
+      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:1"
+    },
+    {
+      "file": "workspaces/runtime/packages/runtime-services/tests/agent_management_store.rs",
+      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
+    },
+    {
       "file": "workspaces/runtime/packages/runtime-services/tests/claude_controls_actor.rs",
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/tests/claude_controls_actor.rs",
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:1"
+    },
+    {
+      "file": "workspaces/runtime/packages/runtime-services/tests/monitor_wake_guarantees.rs",
+      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/tests/portable_history_python_parity.rs",
@@ -3116,7 +2967,27 @@
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:2"
     },
     {
+      "file": "workspaces/runtime/packages/runtime-services/tests/voice_provider_corpus.rs",
+      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
+    },
+    {
+      "file": "workspaces/runtime/packages/runtime-services/tests/voice_provider_corpus.rs",
+      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:1"
+    },
+    {
+      "file": "workspaces/runtime/packages/runtime-services/tests/voice_provider_corpus.rs",
+      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:2"
+    },
+    {
+      "file": "workspaces/runtime/packages/runtime-services/tests/voice_provider_corpus.rs",
+      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:3"
+    },
+    {
       "file": "workspaces/runtime/packages/runtime-services/tests/wave7_p03_message_ingress.rs",
+      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
+    },
+    {
+      "file": "workspaces/runtime/packages/runtime-services/tests/wave7_p10_lifecycle.rs",
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
     },
     {
@@ -3133,6 +3004,10 @@
     },
     {
       "file": "workspaces/runtime/packages/runtime-store/src/lib.rs",
+      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
+    },
+    {
+      "file": "workspaces/runtime/packages/runtime-store/src/migrations/m2026_10_30_approvals.rs",
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
     },
     {
@@ -3172,10 +3047,6 @@
       "fingerprint": "a4fc2c6fe5816e16795ca4090209d675f02e5346505e127aabe49153c12acfe6:0"
     },
     {
-      "file": "workspaces/client/apps/web/src/chatScope.test.ts",
-      "fingerprint": "83d82ab31733123b72cc0cdf363641970882e31a4062affc7563656c2ff8e4a4:0"
-    },
-    {
       "file": "workspaces/client/apps/web/src/components/AccountStartThrottle.test.ts",
       "fingerprint": "52267d508df7d569aba04cdc59896349d716a9af4da62368ba0d7cb3493e1205:0"
     },
@@ -3197,15 +3068,11 @@
     },
     {
       "file": "workspaces/client/apps/web/src/components/liveRequestConsumers.test.ts",
-      "fingerprint": "d0e937cfbdae4bc3877719bf6d9ee51eb08473f396ec691ca0e8dd345c0d5a19:0"
+      "fingerprint": "b2d5d6ac5d417be601dd86316f5bf594275166679713d51ea82c74b9448b3725:0"
     },
     {
       "file": "workspaces/client/apps/web/src/components/readState.noRefetch.test.ts",
       "fingerprint": "ad3857efd77e2c68df3e2e3769523323078df4a2bce162303af80e15b7756a79:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/components/shell/WorkerPermissions.test.ts",
-      "fingerprint": "c2f64c59a6bd90c6ed8bbaeed42b85975e9eda3f4b036864029a4ecfb03cd1a0:0"
     },
     {
       "file": "workspaces/client/apps/web/src/components/sidebar/services.test.ts",
@@ -3230,10 +3097,6 @@
     {
       "file": "workspaces/client/apps/web/src/hooks/mobileViewport.test.ts",
       "fingerprint": "69d1dc386914d5abc5b5a3e330ea6d60632d17d778b851eec08d3c91801727ee:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/hooks/snapshotDeleteReadback.test.ts",
-      "fingerprint": "b3f2d33979f6f5b2081292f8d0bef7246b2633c338a69b974665f355239c2c01:0"
     },
     {
       "file": "workspaces/client/apps/web/src/native/audioFrames.test.ts",
@@ -3440,10 +3303,6 @@
     {
       "file": "workspaces/client/apps/web/src/components/ConversationWarnings.stories.tsx",
       "fingerprint": "925bba0caf98ff346b265f0abd0811b92656c45c6afb71110f8c86c3033f9cbb:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/components/Sidebar.stories.tsx",
-      "fingerprint": "24bc5d4e643f262bda7b6beab88091674db9bdfa2d366082fe9079b294cf862f:0"
     }
   ],
   "ts-json-parse-cast": [
@@ -3494,10 +3353,6 @@
     {
       "file": "workspaces/client/apps/web/src/sync/resourceEvents.ts",
       "fingerprint": "d06ccee7f680cdc132fa8fa90fa8521626ec9d772a411d34ce3273fcc1cda6bf:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/sync/subscriptions/cursors.ts",
-      "fingerprint": "7f427fa136049c853c20d9c9c56a96e65c3d94236ff2cb52203e3e4e64873123:0"
     },
     {
       "file": "workspaces/client/apps/web/src/sync/syncBrowserFixture.ts",

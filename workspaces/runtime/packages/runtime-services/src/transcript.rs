@@ -725,7 +725,7 @@ fn search_item_in(
         .optional()
         .map_err(|_| TranscriptError::Store)?
     {
-        let room_record = studio_runtime_store::system_reads::get(connection, "runtime_rooms", &room)?
+        let room_record = studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(connection).get(&room)?
             .ok_or(TranscriptError::ChatUnavailable)?;
         if room_view(connection, directory, &room_record)?.is_none() {
             return Err(TranscriptError::ChatUnavailable);
@@ -805,14 +805,21 @@ fn search_item_in(
 fn room_view(
     connection: &Connection,
     directory: &crate::sync_entity_context::RoomDirectory,
-    room: &Value,
-) -> Result<Option<Value>, TranscriptError> {
-    if room["kind"] == "federated" && !connection.query_row(
+    room: &studio_runtime_schema::room_record::RoomRecord,
+) -> Result<Option<crate::room_projection::RoomProjection>, TranscriptError> {
+    if room.kind == studio_runtime_schema::room_record::RoomKind::Federated && !connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM runtime_federation_rooms WHERE id=?1 AND json_extract(record,'$.status')='approved' AND json_extract(record,'$.localApproved')=1 AND json_extract(record,'$.remoteApproved')=1)",
-        [room["id"].as_str()], |r| r.get::<_, bool>(0),
+        [&room.id], |r| r.get::<_, bool>(0),
     )? { return Ok(None); }
-    let context = directory.for_room(connection, room, false)?;
-    Ok(crate::sync_views::room_entity_view(room, &context))
+    let context = directory.for_room_identity(
+        connection,
+        &room.id,
+        room.kind == studio_runtime_schema::room_record::RoomKind::Federated,
+        false,
+    )?;
+    crate::room_projection::project_room(room, &context)
+        .map_err(StoreError::from)
+        .map_err(Into::into)
 }
 
 pub async fn search_work(
@@ -944,42 +951,44 @@ pub(crate) fn search_work_in_transaction(
         }
     }
     let mut readable = std::collections::BTreeSet::new();
-    for room in studio_runtime_store::system_reads::all(connection, "runtime_rooms")? {
+    for room in studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(
+        connection,
+    )
+    .list()?
+    {
         let Some(view) = room_view(connection, directory, &room)? else {
             continue;
         };
         if let Some(caller) = agent_filter {
-            let members = view["members"].as_array().cloned().unwrap_or_default();
+            let members = &view.members;
             if !members.iter().any(|id| id == caller) {
                 continue;
             }
-            if room["kind"] != "federated" {
-                if caller_root.is_none() || room["rootId"] == "all" {
+            if room.kind != studio_runtime_schema::room_record::RoomKind::Federated {
+                if caller_root.is_none() || room.root_id.as_ref().map(String::as_str) == Some("all")
+                {
                     continue;
                 }
-                let foreign = members
-                    .iter()
-                    .any(|id| !allowed.contains(id.as_str().unwrap_or_default()));
-                let direct = room["radio"]["direct"] == true
+                let foreign = members.iter().any(|id| !allowed.contains(id.as_str()));
+                let direct = view.direct_radio()
                     && members.iter().all(|id| {
                         directory.agents().iter().any(|a| {
-                            a.id.as_deref() == id.as_str()
-                                && a.shared_room_id.as_deref() == room["id"].as_str()
-                                && a.cwd.as_deref() == room["projectPath"].as_str()
+                            a.id.as_deref() == Some(id.as_str())
+                                && a.shared_room_id.as_deref() == Some(room.id.as_str())
+                                && a.cwd.as_deref()
+                                    == room.project_path.as_ref().map(String::as_str)
                         })
                     });
                 if foreign
-                    && !(room["kind"] == "private"
+                    && !(room.kind == studio_runtime_schema::room_record::RoomKind::Private
                         && members.len() == 2
-                        && (view.get("peerTeamId").is_some() || direct))
+                        && (view.peer_team_id.is_some() || direct))
                 {
                     continue;
                 }
             }
         }
-        if let Some(id) = room["id"].as_str() {
-            readable.insert(id.to_owned());
-        }
+        readable.insert(room.id);
     }
     let mut messages=connection.prepare("SELECT id,room,sender,text FROM runtime_chat_messages WHERE instr(lower(text),lower(?1))>0 ORDER BY seq DESC LIMIT 1000")?;
     for row in messages.query_map([query], |r| {
@@ -1418,9 +1427,9 @@ mod tests {
         );
         store
             .transaction(move |transaction| {
-                if !retired {
+                if retired {
                     transaction.execute(
-                        "DELETE FROM sync_entity_meta WHERE key='transcript_copies'",
+                        "INSERT OR REPLACE INTO sync_entity_meta(key,value) VALUES('transcript_copies','retired')",
                         [],
                     )?;
                 }

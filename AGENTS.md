@@ -23,6 +23,9 @@ a package for installation also needs `just test-comprehensive` on its exact com
 Keep test load low: run focused tests, use `cargo -j 4`, and run at most one full
 `just test-fast` or workspace nextest at a time per agent.
 The full gates take a machine-wide lock (`/tmp/studio-gate.lock`), so a second one waits.
+Before the first build or test in a task, read "Build and test speed rules" in docs/testing.md.
+Those rules cover starting a layr line, build variables to keep unset, and running the gates.
+Follow them in every task.
 
 Read README.md and the relevant source before editing. Use the engineering-protocol
 skill for substantive work when it is available. Match checks to the changed scope.

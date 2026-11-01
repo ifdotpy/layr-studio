@@ -105,6 +105,10 @@ async fn edit_actor(state: &State, changes: Value) {
                         match key.as_str() {
                             "epoch" => record.epoch = value.as_i64().unwrap(),
                             "accountKey" => record.account_key = value.as_str().unwrap().to_owned(),
+                            "provider" => {
+                                record.provider =
+                                    serde::Deserialize::deserialize(value.clone()).unwrap()
+                            }
                             "threadId" => record.thread_id = value.as_str().map(str::to_owned),
                             "turnId" => record.turn_id = value.as_str().map(str::to_owned),
                             "cwd" => record.cwd = value.as_str().map(str::to_owned),
@@ -113,6 +117,16 @@ async fn edit_actor(state: &State, changes: Value) {
                                 record.start_attempt =
                                     serde::Deserialize::deserialize(value.clone())
                                         .expect("typed attempt")
+                            }
+                            "accountTransferId" => {
+                                record.account_transfer_id =
+                                    serde::Deserialize::deserialize(value.clone())
+                                        .expect("typed transfer id");
+                            }
+                            "lazyAccountTransfer" => {
+                                record.lazy_account_transfer =
+                                    serde::Deserialize::deserialize(value.clone())
+                                        .expect("typed lazy transfer");
                             }
                             _ => {
                                 record.extra.insert(key.clone(), value.clone());
@@ -167,7 +181,7 @@ async fn vm_existing_reattach_refuses_changed_actor_and_missing_frozen_authority
         json!({"threadId":"other-thread"}),
         json!({"turnId":"other-turn"}),
         json!({"epoch":99}),
-        json!({"lazyAccountTransfer":{"phase":"lazy"}}),
+        json!({"lazyAccountTransfer":{"id":"move","sourceAccountKey":"default"}}),
         json!({"accountTransferId":"unfinished"}),
         json!({"executionMove":{"id":"move"}}),
         json!({"deletedAt":1}),
@@ -433,6 +447,11 @@ async fn vm_existing_auth_recovery_copy_failure_keeps_exact_input_reserved() {
     auth_recovery_turn(true).await;
 }
 
+#[tokio::test]
+async fn vm_auth_recovery_reads_typed_continuation_and_hold() {
+    auth_recovery_turn(false).await;
+}
+
 async fn auth_recovery_turn(refuse: bool) {
     let (state, guest) = existing_actor(false).await;
     let resolver = Arc::new(AuthRecoveryCredentials {
@@ -527,6 +546,23 @@ async fn auth_recovery_turn(refuse: bool) {
         .await
         .unwrap();
     let resumed = state.record().await;
+    let actor = state.agent.clone();
+    state
+        .bridge
+        .store
+        .read_async("test/typed-auth-recovery", move |db| {
+            let row = AgentRepository::get(db, &AgentId::from(actor.as_str()))?.unwrap();
+            assert!(!row.extra.contains_key("usageResume"));
+            assert!(!row.extra.contains_key("nativeFailureHold"));
+            assert_eq!(
+                row.usage_resume_value().unwrap().unwrap()["status"],
+                "started"
+            );
+            assert!(!row.native_failure_held());
+            Ok::<_, WorkerError>(())
+        })
+        .await
+        .unwrap();
     assert_eq!(resumed["usageResume"]["cause"], "auth");
     assert_eq!(resumed["usageResume"]["status"], "started");
     assert_eq!(resumed["authResumeAttempt"], 1);
@@ -831,11 +867,9 @@ record.thread_id = Some("fake-thread-0".to_string());
 record.turn_id = Some("vm-turn".to_string());
 record.workspace_mode = Some(studio_runtime_schema::records::WorkspaceMode::Layr);
 record.cwd = Some("/home/studio/project".into());
-for (key, value) in [
-                ("layrReady",json!(true)),
-                ("provider",json!("claude")),("executionSettingsAccountKey",json!("default")),
-
-            ] { record.extra.insert(key.into(), value); }
+record.layr_ready = Some(true);
+record.provider = serde::Deserialize::deserialize(json!("claude")).unwrap();
+record.execution_settings_account_key = serde::Deserialize::deserialize(json!("default")).unwrap();
             record.start_attempt = Some(Box::new(studio_runtime_store::StartAttemptView { id: Some("existing-vm-attempt".into()), epoch: Some(epoch), account_key: Some("default".into()), submitted: Some(true), events: Some(vec!["annotation:input".into()]), thread_id: Some("fake-thread-0".into()), turn_id: Some("vm-turn".into()), connection_generation: Some(1), connection_id: Some("previous-backend".into()), request_ticket: Some("original-native-start".into()), ..Default::default() }));
             AgentRepository::put(tx,&record)?;
             studio_runtime_store::ExecutionHistoryRepository::record(tx,&record)?;
@@ -892,7 +926,7 @@ async fn vm_existing_reattach_restores_the_journal_without_launch_or_input_repla
                     .read_async("vm_reattach_plan", |connection| {
                         let mut plan = connection.prepare(&format!(
                             "EXPLAIN QUERY PLAN {}",
-                            super::super::vm_reattach::STARTUP_CANDIDATES
+                            super::super::vm_reattach::startup_candidates_sql()
                         ))?;
                         let rows = plan.query_map(
                             rusqlite::params![
@@ -905,7 +939,10 @@ async fn vm_existing_reattach_restores_the_journal_without_launch_or_input_repla
                         let details = rows.collect::<Result<Vec<_>, _>>()?.join(" ");
                         assert!(
                             details.contains("SEARCH runtime_agents")
-                                && details.contains("account_key=?"),
+                                && details.contains("account_key=?")
+                                && details.contains(
+                                    studio_runtime_store::domain::ONE_UNFINISHED_TURN_INDEX
+                                ),
                             "{details}"
                         );
                         Ok::<_, StoreError>(())

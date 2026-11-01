@@ -16,6 +16,7 @@ import {
   expect,
   protocol3SseEvent,
   readApiSchemaHash,
+  syncSessionSse,
   test,
 } from "../../tests/playwright.ts";
 import { SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS } from "../generated/sharedValues.ts";
@@ -92,9 +93,7 @@ test("a transcript window streams without pulls and older history uses one bound
             else if (url.pathname === "/api/sync/stream") {
               response.setHeader("Content-Type", "text/event-stream");
               response.setHeader("Cache-Control", "no-cache");
-              response.write(
-                protocol3SseEvent("session", { sessionId: "window-session" }),
-              );
+              response.write(syncSessionSse("window-session", workspaceId));
               response.write(apiSchemaHandshakeSse());
               baseline(
                 response,
@@ -112,6 +111,7 @@ test("a transcript window streams without pulls and older history uses one bound
                 stream.write(
                   protocol3SseEvent("subscriptions", {
                     gen: update.gen,
+                    cachePolicies: [],
                   } satisfies components["schemas"]["SyncSubscriptionAck"]),
                 );
                 baseline(
@@ -121,6 +121,7 @@ test("a transcript window streams without pulls and older history uses one bound
               }
               json({
                 gen: update.gen,
+                cachePolicies: [],
               } satisfies components["schemas"]["SyncSubscriptionAck"]);
             } else if (url.pathname === "/api/sync/pull") {
               pulls.push(url.searchParams.get("scope"));

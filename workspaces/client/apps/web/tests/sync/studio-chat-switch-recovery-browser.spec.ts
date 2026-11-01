@@ -17,6 +17,7 @@ import {
   expect,
   handleEntitySyncFixtureRequest,
   protocol3SseEvent,
+  syncSessionSse,
   test,
 } from "../playwright.ts";
 
@@ -162,7 +163,7 @@ test("selected Studio chat recovers after slow cursor preparation without reload
             "Cache-Control": "no-cache",
           }),
         );
-        res.write(protocol3SseEvent("session", { sessionId }));
+        res.write(syncSessionSse(sessionId, workspaceId));
         res.write(apiSchemaHandshakeSse());
         res.write(baseline(resources));
         return;
@@ -182,10 +183,15 @@ test("selected Studio chat recovers after slow cursor preparation without reload
             res.end();
             return;
           }
-          stream.write(protocol3SseEvent("subscriptions", { gen: update.gen }));
+          stream.write(
+            protocol3SseEvent("subscriptions", {
+              gen: update.gen,
+              cachePolicies: [],
+            } satisfies import("../../src/generated/api.ts").components["schemas"]["SyncSubscriptionAck"]),
+          );
           if (update.add.length)
             stream.write(baseline(update.add.map((entry) => entry.resource)));
-          json({ gen: update.gen });
+          json({ gen: update.gen, cachePolicies: [] });
         });
         return;
       }

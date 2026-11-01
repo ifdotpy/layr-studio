@@ -141,6 +141,14 @@ describe("server sidebar projection", () => {
         members: ["lead", "worker"],
         projectPath: "/work",
         radio: {
+          controls: {
+            busy: false,
+            inputBlocked: false,
+            canPass: false,
+            stopping: false,
+            speaking: false,
+            busyNotice: null,
+          },
           direct: true,
           teamId: "team",
           revision: 2,
@@ -265,9 +273,7 @@ describe("server sidebar projection", () => {
     expect(projected.sidebarOrder).toBeUndefined();
     // Preference records come from streamed memory; only the saved order reads storage.
     expect(getItem.mock.calls.map(([key]) => key).sort()).toEqual(
-      [
-        `codex-sidebar-order:${data.stateDir}`,
-      ].sort(),
+      [`codex-sidebar-order:${data.stateDir}`].sort(),
     );
     expect(setItem).not.toHaveBeenCalled();
   });

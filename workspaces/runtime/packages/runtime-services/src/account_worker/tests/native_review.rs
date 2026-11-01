@@ -29,7 +29,7 @@ async fn queue_review_child(state: &State) {
                 row.in_flight = Some(false);
 row.auto_wake = Some(true);
 row.thread_id = None;
-row.turn_id = None;
+row.turn_id = Default::default();
 for (key, value) in [
 
 
@@ -48,6 +48,10 @@ for (key, value) in [
                             "status":"pending","response":{}}),
                     ),
                 ] { match key {
+                    "status" => row.status = serde::Deserialize::deserialize(value).unwrap(),
+                    "role" => row.role = serde::Deserialize::deserialize(value).unwrap(),
+                    "nativeEffort" => row.native_effort = serde::Deserialize::deserialize(value).unwrap(),
+                    "yoloMode" => row.yolo_mode = serde::Deserialize::deserialize(value).unwrap(),
                     "startAttempt" => row.start_attempt = Some(serde::Deserialize::deserialize(value).unwrap()),
                     "disconnectRecovery" => row.disconnect_recovery = Some(Box::new(serde::Deserialize::deserialize(value).unwrap())),
                     _ => { row.extra.insert(key.into(), value); }
@@ -226,6 +230,8 @@ for (key, value) in [
                             "status":"started","response":{}}),
                     ),
                 ] { match key {
+                    "status" => row.status = serde::Deserialize::deserialize(value).unwrap(),
+                    "error" => row.error = serde::Deserialize::deserialize(value).unwrap(),
                     "startAttempt" => row.start_attempt = Some(serde::Deserialize::deserialize(value).unwrap()),
                     "disconnectRecovery" => row.disconnect_recovery = Some(Box::new(serde::Deserialize::deserialize(value).unwrap())),
                     _ => { row.extra.insert(key.into(), value); }

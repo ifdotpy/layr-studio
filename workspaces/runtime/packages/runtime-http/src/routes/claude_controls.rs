@@ -1,6 +1,6 @@
 //! Claude session reads and durable settings controls.
 use super::{
-    extractors::{ApiJson, QueryParams},
+    extractors::{ApiJson, TypedQuery},
     manifest::{OperationStatus, RouteGroup, get, post},
 };
 use crate::{error::ApiError, router::HttpState};
@@ -8,6 +8,7 @@ use axum::{Json, extract::State, http::StatusCode};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_providers::ProviderKind;
+use studio_runtime_schema::claude_controls::{ClaudeControlCommand, ClaudeSessionRead};
 use studio_runtime_services::claude_controls::{
     ControlError,
     service::{
@@ -35,14 +36,17 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RepairReportQuery {
+    id: studio_runtime_schema::bounded_text::BoundedText<1, { usize::MAX }>,
+}
 async fn repair_report(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<RepairReportQuery>,
 ) -> Result<Json<crate::generated::ClaudeRepairReport>, ApiError> {
     use studio_runtime_services::claude_controls::service::ControlScope;
-    let id = query
-        .nonempty_str("id")
-        .ok_or_else(|| ApiError::validation(vec![json!("query"), json!("id")]))?;
+    let id = query.id.as_str();
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let (agent, _) = load_agent(store, id.to_owned()).await?;
     require_claude_account(&state, &agent).await?;
@@ -56,10 +60,10 @@ async fn repair_report(
         return super::generated_json(json!({"status":"none","skippedRows":0,"invalidSequence":false,"scopeConfirmed":null,"nativeHistoryConfirmed":null})).map(Json);
     };
     let account = agent
-        .extra
-        .get("lazyAccountTransfer")
-        .and_then(|transfer| transfer.get("sourceAccountKey"))
-        .and_then(Value::as_str)
+        .lazy_account_transfer
+        .value()
+        .and_then(|transfer| transfer.pending())
+        .map(|transfer| transfer.source_account_key.as_str())
         .unwrap_or(&agent.account_key);
     let session = state
         .account_session
@@ -91,8 +95,22 @@ async fn repair_report(
     let ControlReply::RepairReport(result) = result else {
         return Err(ApiError::internal());
     };
+    // The provider reply may carry paths or text. Only the report fields leave.
+    let Value::Object(mut reply) = result else {
+        return Err(ApiError::internal());
+    };
+    reply.retain(|name, _| {
+        matches!(
+            name.as_str(),
+            "status"
+                | "skippedRows"
+                | "invalidSequence"
+                | "scopeConfirmed"
+                | "nativeHistoryConfirmed"
+        )
+    });
     let evidence: crate::generated::ClaudeRepairReport =
-        serde::Deserialize::deserialize(result).map_err(|_| ApiError::internal())?;
+        serde::Deserialize::deserialize(Value::Object(reply)).map_err(|_| ApiError::internal())?;
     if !(0..=studio_runtime_schema::shared_values::MAX_SAFE_INTEGER)
         .contains(&evidence.skipped_rows)
     {
@@ -101,32 +119,126 @@ async fn repair_report(
     Ok(Json(evidence))
 }
 
+fn nonempty_text<'de, D: serde::Deserializer<'de>, const MAX: usize>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    let value = <studio_runtime_schema::bounded_text::BoundedText<1, MAX> as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(value.as_str().to_owned())
+}
+fn command_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    nonempty_text::<D, { usize::MAX }>(d)
+}
+fn backup_agent_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    nonempty_text::<D, { studio_runtime_schema::http_bounded_ingress::BACKUP_AGENT_ID_MAX_CHARS }>(
+        d,
+    )
+}
+fn backup_request_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    nonempty_text::<D, { studio_runtime_schema::http_bounded_ingress::BACKUP_REQUEST_ID_MAX_CHARS }>(
+        d,
+    )
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SessionCommand {
+    #[serde(rename = "action")]
+    _action: crate::generated::ClaudeSessionCommandRequestAction,
+    id: String,
+    command: String,
+    #[serde(deserialize_with = "command_id")]
+    request_id: String,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BackupsRequest {
+    #[serde(deserialize_with = "backup_agent_id")]
+    id: String,
+    release: bool,
+    #[serde(deserialize_with = "backup_request_id")]
+    request_id: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum SessionRequest {
+    Settings(ClaudeControlCommand),
+    Command(SessionCommand),
+    Read(ClaudeSessionRead),
+}
+
+#[cfg(test)]
+mod session_request_tests {
+    use super::SessionRequest;
+
+    #[test]
+    fn session_request_rejects_extra_fields_and_unbounded_stop_identity() {
+        assert!(
+            serde_json::from_str::<SessionRequest>(
+                r#"{"id":"agent","action":"command","command":"/help","request_id":"id"}"#
+            )
+            .is_ok()
+        );
+        assert!(
+            serde_json::from_str::<SessionRequest>(
+                r#"{"id":"agent","action":"command","command":"/help","request_id":""}"#
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<super::BackupsRequest>(
+                r#"{"id":"a","release":true,"request_id":"r"}"#
+            )
+            .is_ok()
+        );
+        assert!(
+            serde_json::from_str::<super::BackupsRequest>(
+                r#"{"id":"a","release":true,"request_id":"r","extra":1}"#
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<super::BackupsRequest>(
+                r#"{"id":"a","release":true,"request_id":""}"#
+            )
+            .is_err()
+        );
+        for body in [
+            r#"{"id":"agent","action":"state","extra":true}"#.to_owned(),
+            r#"{"id":"agent","action":"command","command":"/help","request_id":"id","extra":true}"#
+                .to_owned(),
+            format!(
+                r#"{{"id":"agent","action":"stop_task","task_id":"{}","request_id":"id"}}"#,
+                "x".repeat(1025)
+            ),
+        ] {
+            assert!(
+                serde_json::from_str::<SessionRequest>(&body).is_err(),
+                "{body}"
+            );
+        }
+    }
+}
+
 async fn session(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<crate::generated::ClaudeSessionApiClaudeSessionPostRequest>,
+    ApiJson(body): ApiJson<SessionRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    use crate::generated::{
-        ClaudeSessionApiClaudeSessionPostRequest as SessionRequest, ClaudeSessionStateRequestAction,
-    };
     let id = match &body {
-        SessionRequest::ClaudeSessionSettingsRequest(request) => request.id(),
-        SessionRequest::ClaudeSessionCommandRequest(request) => &request.id,
-        SessionRequest::ClaudeSessionStateRequest(request) => &request.id,
-        SessionRequest::ClaudeSessionStopTaskRequest(request) => &request.id,
+        SessionRequest::Settings(request) => request.id(),
+        SessionRequest::Command(request) => &request.id,
+        SessionRequest::Read(request) => request.id(),
     };
     if id.is_empty() {
         return Err(ApiError::validation(vec![json!("body"), json!("id")]));
     }
     let id = id.to_owned();
-    let is_state = matches!(&body, SessionRequest::ClaudeSessionStateRequest(request) if request.action == ClaudeSessionStateRequestAction::State);
+    let is_state = matches!(&body, SessionRequest::Read(ClaudeSessionRead::State { .. }));
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let (agent, operation) = load_agent(store.clone(), id).await?;
     require_claude_account(&state, &agent).await?;
     let snapshot_operation = match &body {
-        SessionRequest::ClaudeSessionCommandRequest(_) => None,
-        SessionRequest::ClaudeSessionSettingsRequest(_)
-        | SessionRequest::ClaudeSessionStateRequest(_)
-        | SessionRequest::ClaudeSessionStopTaskRequest(_) => operation.clone(),
+        SessionRequest::Command(_) => None,
+        SessionRequest::Settings(_) | SessionRequest::Read(_) => operation.clone(),
     };
     let snapshot = studio_runtime_services::claude_controls::ControlSnapshot::from_stored(
         agent.value(),
@@ -135,18 +247,22 @@ async fn session(
     .map_err(control_error)?;
     let account = if is_state {
         agent
-            .extra
-            .get("lazyAccountTransfer")
-            .and_then(|lazy| lazy.get("sourceAccountKey"))
-            .and_then(Value::as_str)
+            .lazy_account_transfer
+            .value()
+            .and_then(|lazy| lazy.pending())
+            .map(|lazy| lazy.source_account_key.as_str())
             .unwrap_or(&agent.account_key)
     } else {
         &agent.account_key
     };
     let no_thread = agent.thread_id.as_deref().is_none_or(str::is_empty);
     let local_only = (is_state && state_thread(&agent).is_none())
-        || (matches!(&body, SessionRequest::ClaudeSessionSettingsRequest(_)) && no_thread);
-    if matches!(&body, SessionRequest::ClaudeSessionStopTaskRequest(_)) && no_thread {
+        || (matches!(&body, SessionRequest::Settings(_)) && no_thread);
+    if matches!(
+        &body,
+        SessionRequest::Read(ClaudeSessionRead::StopTask { .. })
+    ) && no_thread
+    {
         return Err(control_error(ControlError::Request));
     }
     // Native commands use the message service and need no provider control session.
@@ -171,14 +287,12 @@ async fn session(
         ))
     };
     let result = match body {
-        SessionRequest::ClaudeSessionCommandRequest(request) => {
+        SessionRequest::Command(request) => {
             return command(state, request).await;
         }
-        SessionRequest::ClaudeSessionSettingsRequest(request) => controls()?.execute(request).await,
-        request @ (SessionRequest::ClaudeSessionStateRequest(_)
-        | SessionRequest::ClaudeSessionStopTaskRequest(_)) => {
-            let body = serde_json::to_value(request).map_err(|_| ApiError::internal())?;
-            controls()?.read_or_stop_snapshot(&snapshot, &body).await
+        SessionRequest::Settings(request) => controls()?.execute(request).await,
+        SessionRequest::Read(request) => {
+            controls()?.read_or_stop_snapshot(&snapshot, &request).await
         }
     };
     state.event_wake.notify_one();
@@ -188,7 +302,7 @@ async fn session(
 
 async fn file_backups(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<crate::generated::ClaudeFileBackupsRequest>,
+    ApiJson(body): ApiJson<BackupsRequest>,
 ) -> Result<Json<crate::generated::ClaudeFileBackupsResponse>, ApiError> {
     tokio::spawn(async move {
         use studio_runtime_services::claude_controls::service::ControlScope;
@@ -289,14 +403,12 @@ async fn require_claude_account(
 }
 
 fn state_thread(agent: &studio_runtime_store::AgentRecord) -> Option<&str> {
-    let transfer = agent
-        .extra
-        .get("lazyAccountTransfer")
-        .filter(|transfer| transfer.as_object().is_some_and(|value| !value.is_empty()));
+    let transfer = agent.lazy_account_transfer.value();
     if let Some(transfer) = transfer {
         transfer
-            .get("sourceThreadId")
-            .and_then(Value::as_str)
+            .pending()
+            .and_then(|transfer| transfer.source_thread_id.value())
+            .map(String::as_str)
             .filter(|thread| !thread.is_empty())
     } else {
         agent
@@ -354,10 +466,7 @@ async fn load_agent(
     loaded.ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Unknown managed agent"))
 }
 
-async fn command(
-    state: HttpState,
-    body: crate::generated::ClaudeSessionCommandRequest,
-) -> Result<Json<Value>, ApiError> {
+async fn command(state: HttpState, body: SessionCommand) -> Result<Json<Value>, ApiError> {
     let command = studio_runtime_services::claude_controls::service::native_command(&body.command)
         .map_err(|_| {
             ApiError::new(
@@ -365,17 +474,13 @@ async fn command(
                 "Supply one explicit Claude command",
             )
         })?;
-    if body.request_id.is_empty() {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "Supply a command request identity",
-        ));
-    }
-    let text: String = command.into();
-    let wire = json!({"id": body.request_id, "room": body.id, "text": text});
-    let mut message: crate::generated::ManagedMessageBody =
-        serde_json::from_value(wire).map_err(|_| ApiError::internal())?;
-    message.delivery = Some(studio_runtime_schema::DeliveryMoment::CurrentTurn);
+    let message = crate::generated::ManagedMessageBody {
+        id: body.request_id,
+        room: body.id,
+        text: command.into(),
+        assets: None,
+        delivery: Some(studio_runtime_schema::DeliveryMoment::CurrentTurn),
+    };
     let receipt = super::messages::send_message(state, message).await?;
     serde_json::to_value(receipt.0)
         .map(Json)
@@ -431,3 +536,18 @@ fn session_error(
 }
 
 inventory::submit! {crate::routes::manifest::RouteModuleRegistration{name:"claude_controls",routes:Some(routes),dependencies:&[]}}
+
+#[cfg(test)]
+mod typed_query_contract_tests {
+    use super::*;
+    #[test]
+    fn repairreportquery_decodes_and_rejects_invalid() {
+        fn decode(query: &str) -> bool {
+            let uri: axum::http::Uri = format!("/?{query}").parse().unwrap();
+            axum::extract::Query::<RepairReportQuery>::try_from_uri(&uri).is_ok()
+        }
+        assert!(decode("id=x"));
+        assert!(!decode("id=&extra=x"));
+        assert!(!decode("extra=x"));
+    }
+}

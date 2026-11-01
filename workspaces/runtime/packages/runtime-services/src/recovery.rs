@@ -578,6 +578,31 @@ pub fn completion_permission(
         && ["epoch", "accountKey", "threadId", "turnId"]
             .iter()
             .all(|k| previous.get(*k).unwrap_or(&Value::Null) == a.get(*k).unwrap_or(&Value::Null))
-        && a.get("turnEpoch").unwrap_or(&a["epoch"]) == &a["epoch"]
+        && snapshot.turn_epoch_matches()
         && !unresolved_receipts
+}
+
+#[cfg(test)]
+mod null_parity_review_tests {
+    use super::*;
+    #[test]
+    fn completion_accepts_matching_integral_float_turn_epoch() {
+        let agent = json!({"id":"a","rootId":"a","epoch":1,"accountKey":"default","status":"running","threadId":"t","turnId":"u","turnEpoch":1.0,"disconnectRecovery":{"epoch":1,"accountKey":"default","threadId":"t","turnId":"u","autoWake":true}});
+        let snapshot = RecoverySnapshot::from_record(agent).unwrap();
+        assert!(completion_permission(
+            &snapshot,
+            &json!({"status":"completed"}),
+            false
+        ));
+    }
+    #[test]
+    fn completion_rejects_mismatched_integral_float_turn_epoch() {
+        let agent = json!({"id":"a","rootId":"a","epoch":1,"accountKey":"default","status":"running","threadId":"t","turnId":"u","turnEpoch":2.0,"disconnectRecovery":{"epoch":1,"accountKey":"default","threadId":"t","turnId":"u","autoWake":true}});
+        let snapshot = RecoverySnapshot::from_record(agent).unwrap();
+        assert!(!completion_permission(
+            &snapshot,
+            &json!({"status":"completed"}),
+            false
+        ));
+    }
 }

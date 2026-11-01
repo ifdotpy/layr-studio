@@ -18,32 +18,32 @@ const render = (
 test("shows one short line for a blocked team move and keeps the reason for the tooltip", () => {
   const markup = render({
     id: "t-1",
-    status: "pending",
-    total: 2,
-    completed: 1,
-    nativeHistoryPending: 1,
-    blocked: [
-      {
-        id: "lead",
-        name: "Codex Studio Attar",
-        reason: "This profile's account changed.",
-      },
-    ],
+    kind: "blocked",
+    targetAccountKey: "target",
+    actions: "retry_cancel",
+    reason: "This profile's account changed.",
   });
   expect(markup).toContain("Account move blocked");
   expect(markup).toContain("data-blocked");
-  expect(markup).toContain(
-    "Codex Studio Attar: This profile&#x27;s account changed.",
-  );
+  expect(markup).toContain("This profile&#x27;s account changed.");
   // The long text of the old status block is not in the composer row.
   expect(markup).not.toContain("History transfer in progress");
 });
 
 test("shows nothing while a move runs or after it ends", () => {
   for (const transfer of [
-    { id: "t-2", status: "pending", total: 3, completed: 1 },
-    { id: "t-3", status: "completed", total: 3, completed: 3 },
+    { id: "t-2", kind: "moving", targetAccountKey: "target", actions: "none" },
+    { id: "t-3", kind: "completed", targetAccountKey: "target" },
     undefined,
   ] as const)
     expect(render(transfer)).not.toContain("account-transfer-chip");
+});
+
+test("shows an unreadable transfer and its reason", () => {
+  const markup = render({
+    kind: "unreadable",
+    reason: "Unknown transfer field",
+  });
+  expect(markup).toContain("Account move unreadable");
+  expect(markup).toContain("Unknown transfer field");
 });

@@ -1,36 +1,59 @@
 {
   "$defs": {
-    "JsonValue": {}
+    "InviteStatus": {
+      "enum": ["open", "used"],
+      "type": "string"
+    }
   },
-  "additionalProperties": {
-    "$ref": "#/$defs/JsonValue"
-  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A stored invitation. Legacy rows that do not decode are discarded.",
   "properties": {
-    "expires": {
+    "created": {
+      "description": "Creation time as Unix seconds; fractional seconds are permitted.",
       "minimum": 0,
-      "title": "Expires",
+      "type": ["number", "null"]
+    },
+    "expires": {
+      "description": "Expiry as Unix seconds; fractional seconds are permitted.",
+      "minimum": 0,
       "type": "number"
+    },
+    "grant": {
+      "type": ["string", "null"]
     },
     "inviteId": {
       "maxLength": 128,
       "minLength": 1,
-      "title": "Inviteid",
       "type": "string"
     },
+    "label": {
+      "type": ["string", "null"]
+    },
+    "origin": {
+      "type": ["string", "null"]
+    },
+    "protocol": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": ["integer", "null"]
+    },
+    "publicKey": {
+      "type": ["string", "null"]
+    },
+    "serverId": {
+      "type": ["string", "null"]
+    },
     "status": {
-      "enum": ["open", "used"],
-      "title": "Status",
-      "type": "string"
+      "$ref": "#/$defs/InviteStatus"
     },
     "tailscaleUser": {
       "maxLength": 254,
       "minLength": 1,
-      "title": "Tailscaleuser",
       "type": "string"
     },
     "tokenHash": {
       "pattern": "^[0-9a-f]{64}$",
-      "title": "Tokenhash",
       "type": "string"
     }
   },

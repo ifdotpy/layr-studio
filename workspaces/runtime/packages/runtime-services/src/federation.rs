@@ -5,6 +5,7 @@ use ring::rand::{SecureRandom, SystemRandom};
 use rusqlite::OptionalExtension;
 use serde_json::{Value, json};
 use std::sync::Arc;
+use studio_runtime_schema::federation_ingress::{FederationInvitation, FederationRequest};
 use studio_runtime_store::{FederationRepository, RuntimeStore, StoreError};
 use thiserror::Error;
 
@@ -30,7 +31,7 @@ pub async fn snapshot(store: &RuntimeStore) -> Result<Value, FederationError> {
 
 pub async fn manage_with_origin(
     store: Arc<RuntimeStore>,
-    body: &Value,
+    body: &FederationRequest,
     public_origin: Option<&str>,
 ) -> Result<Value, FederationError> {
     manage_with_origin_and_whoami(store, body, public_origin, None).await
@@ -38,48 +39,63 @@ pub async fn manage_with_origin(
 
 pub async fn manage_with_origin_and_whoami(
     store: Arc<RuntimeStore>,
-    body: &Value,
+    body: &FederationRequest,
     public_origin: Option<&str>,
     whoami: Option<&Value>,
 ) -> Result<Value, FederationError> {
-    if body.get("action").and_then(Value::as_str) == Some("create_invite") {
-        return create_invitation(store, body, public_origin, whoami).await;
-    }
-    if body.get("action").and_then(Value::as_str) == Some("accept_peer") {
-        return accept_peer(store, body, public_origin).await;
+    match body {
+        FederationRequest::CreateInvite {
+            label,
+            expected_user,
+            ..
+        } => {
+            return create_invitation(
+                store,
+                label.as_ref().map(|v| v.as_str()),
+                expected_user.as_ref().map(|v| v.as_str()),
+                public_origin,
+                whoami,
+            )
+            .await;
+        }
+        FederationRequest::AcceptPeer { invitation } => {
+            return accept_peer(store, invitation, public_origin).await;
+        }
+        FederationRequest::Status {}
+        | FederationRequest::SetEnabled { .. }
+        | FederationRequest::ApprovePeer { .. }
+        | FederationRequest::RevokePeer { .. }
+        | FederationRequest::RoomOptions { .. }
+        | FederationRequest::CreateRoom { .. }
+        | FederationRequest::ApproveRoom { .. } => {}
     }
     let body = body.clone();
     store
         .transaction_with(move |tx| {
-            let action = body
-                .get("action")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            match action {
-                "set_enabled" => FederationRepository::set_enabled(
-                    tx,
-                    body["enabled"].as_bool().unwrap_or(false),
-                )?,
-                "approve_peer" => FederationRepository::approve_peer(
-                    tx,
-                    body["state_id"].as_str().unwrap_or_default(),
-                    body["accept_missing_whois"].as_bool().unwrap_or(false),
-                )?,
-                "revoke_peer" => FederationRepository::revoke_peer(
-                    tx,
-                    body["state_id"].as_str().unwrap_or_default(),
-                )?,
-                "room_options" => FederationRepository::room_options(
-                    tx,
-                    body["room_id"].as_str().unwrap_or_default(),
-                    &body["disclosure"],
-                )?,
-                "create_room" => FederationRepository::room_action(tx, &body, false)?,
-                "approve_room" => FederationRepository::room_action(tx, &body, true)?,
-                _ => {
-                    return Err(FederationError::Refused(format!(
-                        "unsupported local federation action: {action}"
-                    )));
+            match &body {
+                FederationRequest::SetEnabled { enabled } => {
+                    FederationRepository::set_enabled(tx, *enabled)?
+                }
+                FederationRequest::ApprovePeer {
+                    state_id,
+                    accept_missing_whois,
+                } => FederationRepository::approve_peer(tx, state_id, *accept_missing_whois)?,
+                FederationRequest::RevokePeer { state_id } => {
+                    FederationRepository::revoke_peer(tx, state_id)?
+                }
+                FederationRequest::RoomOptions {
+                    room_id,
+                    disclosure,
+                } => FederationRepository::room_options(tx, room_id, disclosure)?,
+                FederationRequest::CreateRoom { .. } | FederationRequest::ApproveRoom { .. } => {
+                    FederationRepository::room_action(tx, &body)?
+                }
+                FederationRequest::Status {}
+                | FederationRequest::CreateInvite { .. }
+                | FederationRequest::AcceptPeer { .. } => {
+                    return Err(FederationError::Refused(
+                        "unsupported local federation action".to_owned(),
+                    ));
                 }
             }
             FederationRepository::snapshot(tx).map_err(FederationError::from)
@@ -105,7 +121,8 @@ pub async fn manage_with_origin_and_whoami(
 
 async fn create_invitation(
     store: Arc<RuntimeStore>,
-    body: &Value,
+    label: Option<&str>,
+    expected_user: Option<&str>,
     public_origin: Option<&str>,
     whoami: Option<&Value>,
 ) -> Result<Value, FederationError> {
@@ -128,24 +145,10 @@ async fn create_invitation(
         ));
     }
 
-    let label = body
-        .get("label")
-        .and_then(Value::as_str)
-        .unwrap_or("Studio server")
-        .trim();
+    let label = label.unwrap_or("Studio server").trim();
     if label.is_empty() || label.chars().count() > 80 {
         return Err(FederationError::Refused(
             "Server label must be 1 to 80 characters".to_owned(),
-        ));
-    }
-    let expected_user = body.get("expected_user").and_then(Value::as_str);
-    if body
-        .get("expected_user")
-        .is_some_and(|value| !value.is_null())
-        && expected_user.is_none_or(|value| value.chars().count() > 254)
-    {
-        return Err(FederationError::Refused(
-            "Invalid expected Tailscale user".to_owned(),
         ));
     }
     let now = unix_time()?;
@@ -229,29 +232,21 @@ async fn create_invitation(
 
 async fn accept_peer(
     store: Arc<RuntimeStore>,
-    body: &Value,
+    invitation: &FederationInvitation,
     public_origin: Option<&str>,
 ) -> Result<Value, FederationError> {
-    let invitation = body
-        .get("invitation")
-        .filter(|value| value.is_object())
-        .ok_or_else(|| FederationError::Refused("Invalid federation invitation".to_owned()))?;
-    let protocol = invitation["protocol"].as_i64();
-    let invite_id = invitation["inviteId"].as_str().unwrap_or_default();
-    let token = invitation["token"].as_str().unwrap_or_default();
-    let state_id = invitation["stateId"].as_str().unwrap_or_default();
-    let label = invitation["label"].as_str().unwrap_or_default();
-    let public_key = invitation["publicKey"].as_str().unwrap_or_default();
-    let expires = invitation["expires"].as_i64().unwrap_or_default();
-    let origin = crate::remote_transport::validate_federation_origin(
-        invitation["origin"].as_str().unwrap_or_default(),
-    )
-    .map_err(|_| {
-        FederationError::Refused("Federation invitation has an invalid server URL".to_owned())
-    })?;
+    let invite_id = invitation.invite_id.as_str();
+    let token = invitation.token.as_str();
+    let state_id = invitation.state_id.as_str();
+    let label = invitation.label.as_str();
+    let public_key = invitation.public_key.as_str();
+    let expires = invitation.expires.get();
+    let origin =
+        crate::remote_transport::validate_federation_origin(&invitation.origin).map_err(|_| {
+            FederationError::Refused("Federation invitation has an invalid server URL".to_owned())
+        })?;
     let now = unix_time()?;
-    if protocol != Some(crate::federation_limits::PROTOCOL_VERSION)
-        || invite_id.is_empty()
+    if invite_id.is_empty()
         || token.is_empty()
         || token.len() > 128
         || state_id.is_empty()
@@ -299,7 +294,7 @@ async fn accept_peer(
     let record = json!({
         "stateId": state_id,
         "label": label.trim(),
-        "leadName": invitation.get("leadName").cloned().unwrap_or(Value::Null),
+        "leadName": invitation.lead_name,
         "origin": origin,
         "publicKey": public_key,
         "inviteId": invite_id,
@@ -310,7 +305,7 @@ async fn accept_peer(
         "localApproved": true,
         "remoteApproved": false,
         "whoisStatus": "pending",
-        "whoisUser": invitation.get("tailscaleUser").cloned().unwrap_or(Value::Null),
+        "whoisUser": invitation.tailscale_user,
         "created": now,
         "updated": now,
         "protocol": crate::federation_limits::PROTOCOL_VERSION,
@@ -421,7 +416,7 @@ mod tests {
         );
         manage_with_origin_and_whoami(
             std::sync::Arc::clone(&store),
-            &json!({"action":"set_enabled","enabled":true}),
+            &serde_json::from_str(r#"{"action":"set_enabled","enabled":true}"#).unwrap(),
             None,
             None,
         )
@@ -430,7 +425,7 @@ mod tests {
         let whoami = json!({"status":"verified","user":"owner@example.test","node":"node-1"});
         let result = manage_with_origin_and_whoami(
             std::sync::Arc::clone(&store),
-            &json!({"action":"create_invite","label":"Test server"}),
+            &serde_json::from_str(r#"{"action":"create_invite","label":"Test server"}"#).unwrap(),
             Some("https://studio.example.ts.net"),
             Some(&whoami),
         )

@@ -14,6 +14,7 @@ mod m2026_10_29_model_choices;
 mod m2026_10_29_request_results_v2;
 mod m2026_10_30_agent_compactions;
 mod m2026_10_30_agent_volatile;
+mod m2026_10_30_approvals;
 mod m2026_10_30_branch_phase;
 mod m2026_10_30_capture_errors;
 mod m2026_10_30_command_path;
@@ -25,6 +26,7 @@ pub(crate) mod m2026_10_30_monitor_queue;
 pub(crate) mod m2026_10_30_monitor_status;
 mod m2026_10_30_one_nonce_table;
 mod m2026_10_30_one_outbox;
+mod m2026_10_30_outbox_reopen;
 mod m2026_10_30_project_teams;
 mod m2026_10_30_radio_room;
 mod m2026_10_30_request_record;
@@ -36,12 +38,44 @@ mod m2026_10_30_text_blobs;
 mod m2026_10_30_unused_agent_columns;
 mod m2026_10_30_unused_start_action;
 mod m2026_10_30_vm_stream_owners;
+mod m2026_10_31_access_clients;
+mod m2026_10_31_access_invites;
+mod m2026_10_31_agent_batch_55;
+mod m2026_10_31_agent_core;
+mod m2026_10_31_agent_permissions;
 mod m2026_10_31_current_checks;
+mod m2026_10_31_drop_old_outbox_tables;
+mod m2026_10_31_message_send_projections;
 mod m2026_10_31_native_status_error;
 mod m2026_10_31_project_record_kind;
 mod m2026_10_31_retired_start_indexes;
+mod m2026_10_31_room_record;
+mod m2026_10_31_sync_project;
 mod m2026_10_31_transfer_history_pages;
+mod m2026_10_31_work_projection;
 mod m2026_10_31_work_records;
+mod m2026_11_01_access_invite_created;
+mod m2026_11_01_account_projection;
+mod m2026_11_01_agent_capacity;
+mod m2026_11_01_agent_naming;
+mod m2026_11_01_agent_null_parity;
+mod m2026_11_01_agent_turn_null;
+mod m2026_11_01_annotation_record;
+mod m2026_11_01_approval_secrets;
+mod m2026_11_01_chat_busy_deleted_index;
+mod m2026_11_01_chat_busy_indexes;
+mod m2026_11_01_plan_record;
+mod m2026_11_01_project_context;
+mod m2026_11_01_project_revisions;
+mod m2026_11_01_radio_controls;
+mod m2026_11_01_rate_limit_view;
+mod m2026_11_01_room_leads;
+mod m2026_11_01_status_turn_indexes;
+mod m2026_11_01_transfer_delegation_depth;
+mod m2026_11_01_transfer_operations;
+mod m2026_11_01_transfer_pointers;
+mod m2026_11_01_transfer_summary;
+mod m2026_11_01_work_detail_policy;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -54,13 +88,28 @@ pub(crate) use m2026_10_26_provider_identity::{
     ANALYTICS_PROVIDER_FORMAT_KEY, PROVIDER_IDENTITY_FORMAT,
 };
 #[cfg(any(test, feature = "test-support"))]
+pub(crate) use m2026_10_30_approvals::approval_from_record;
+#[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_30_branch_phase::apply as migrate_branch_phase;
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_30_project_teams::apply as migrate_project_teams;
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_30_radio_room::apply as migrate_radio_room;
 #[cfg(any(test, feature = "test-support"))]
+pub use m2026_10_31_message_send_projections::apply as migrate_message_send_projections;
+#[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_31_project_record_kind::apply as migrate_project_record_kind;
+#[cfg(any(test, feature = "test-support"))]
+pub use m2026_10_31_room_record::apply as migrate_room_record;
+
+/// Normalize historical agent fixtures inserted after the database was opened.
+#[cfg(any(test, feature = "test-support"))]
+pub fn normalize_agent_fixtures(tx: &rusqlite::Transaction<'_>) -> crate::StoreResult<()> {
+    m2026_10_31_agent_core::apply(tx)?;
+    m2026_10_31_agent_batch_55::apply(tx)?;
+    m2026_11_01_agent_capacity::apply(tx)?;
+    m2026_11_01_agent_naming::apply(tx)
+}
 
 use std::path::Path;
 
@@ -109,6 +158,11 @@ const OCTOBER_31: MigrationDate = MigrationDate {
     year: 2026,
     month: 10,
     day: 31,
+};
+const NOVEMBER_1: MigrationDate = MigrationDate {
+    year: 2026,
+    month: 11,
+    day: 1,
 };
 const OCTOBER_30: MigrationDate = MigrationDate {
     year: 2026,
@@ -207,9 +261,178 @@ impl Migration for RegistryMigration {
     }
 }
 
+fn apply_projection_records(tx: &Transaction<'_>) -> StoreResult<()> {
+    m2026_11_01_project_revisions::apply(tx)?;
+    m2026_11_01_project_context::apply(tx)?;
+    m2026_11_01_annotation_record::apply(tx)?;
+    m2026_11_01_plan_record::apply(tx)?;
+    m2026_10_31_work_projection::apply(tx)
+}
+
+#[cfg(test)]
+mod projection_copy_tests {
+    use super::*;
+    use serde::Deserialize;
+    use studio_runtime_schema::json_object::JsonObject;
+    use studio_runtime_schema::project_projection::{ProjectReadiness, ProjectSync, ProjectVault};
+
+    #[test]
+    #[ignore = "manual verification on a disposable reflink copy"]
+    fn verify_projection_migrations_on_copy() {
+        let path = std::env::var_os("STUDIO_PROJECTION_MIGRATION_COPY").unwrap();
+        let mut db = Connection::open(path).unwrap();
+        crate::schema::register_python_trigger_functions(&db).unwrap();
+        let tx = db.transaction().unwrap();
+        let needed = [
+            "2026-11-01-projection-records",
+            "2026-10-31-work-records",
+            "2026-10-30-project-teams",
+            "2026-10-31-sync-project-duplicates",
+            "2026-10-31-project-record-kind",
+            "2026-10-31-project-record-kind-repair",
+        ];
+        for _ in 0..2 {
+            for migration in CATALOG
+                .iter()
+                .filter(|step| needed.contains(&step.definition().id))
+            {
+                migration
+                    .apply(&Context::Sql(SqlContext { transaction: &tx }))
+                    .unwrap();
+            }
+        }
+        for table in [
+            "runtime_projects",
+            "runtime_work",
+            "runtime_plans",
+            "runtime_annotations",
+        ] {
+            if !crate::schema::table_exists(&tx, table).unwrap() {
+                println!("{table}: table absent; rows=0, refused=0");
+                continue;
+            }
+            let mut statement = tx
+                .prepare(&format!("SELECT id,record FROM {table}"))
+                .unwrap();
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .unwrap();
+            let (mut count, mut refused) = (0, 0);
+            for row in rows {
+                let (id, raw) = row.unwrap();
+                count += 1;
+                let valid = match table {
+                    "runtime_projects" => match serde_json::from_str::<
+                        studio_runtime_schema::project_record::ProjectRecord,
+                    >(&raw)
+                    {
+                        Ok(studio_runtime_schema::project_record::ProjectRecord::Live(record)) => {
+                            record.id == id
+                        }
+                        Ok(studio_runtime_schema::project_record::ProjectRecord::Removal(
+                            record,
+                        )) => record.id == id,
+                        Err(_) => false,
+                    },
+                    "runtime_work" => serde_json::from_str::<
+                        studio_runtime_schema::work_item_record::WorkItem,
+                    >(&raw)
+                    .is_ok_and(|record| record.id().as_ref() == id),
+                    "runtime_plans" => {
+                        serde_json::from_str::<studio_runtime_schema::plan_record::PlanRecord>(&raw)
+                            .is_ok_and(|record| record.id() == id)
+                    }
+                    "runtime_annotations" => serde_json::from_str::<
+                        studio_runtime_schema::annotation_record::AnnotationRecord,
+                    >(&raw)
+                    .is_ok_and(|record| record.id() == &id),
+                    _ => unreachable!(),
+                };
+                refused += usize::from(!valid);
+            }
+            println!("{table}: rows={count}, refused={refused}");
+            assert_eq!(refused, 0);
+        }
+        if crate::schema::table_exists(&tx, "sync_entities").unwrap() {
+            let mut stmt = tx.prepare("SELECT payload FROM sync_entities WHERE collection='project' AND deleted=0 AND payload IS NOT NULL").unwrap();
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0)).unwrap();
+            let (mut count, mut refused) = (0, 0);
+            for row in rows {
+                let payload: serde_json::Value = serde_json::from_str(&row.unwrap()).unwrap();
+                let value = &payload["value"];
+                count += 1;
+                for (name, valid) in [
+                    (
+                        "layrReadiness",
+                        value.get("layrReadiness").is_none_or(|v| {
+                            v.is_null() || JsonObject::<ProjectReadiness>::deserialize(v).is_ok()
+                        }),
+                    ),
+                    (
+                        "layrSync",
+                        value.get("layrSync").is_none_or(|v| {
+                            v.is_null() || JsonObject::<ProjectSync>::deserialize(v).is_ok()
+                        }),
+                    ),
+                    (
+                        "vault",
+                        value.get("vault").is_none_or(|v| {
+                            v.is_null() || JsonObject::<ProjectVault>::deserialize(v).is_ok()
+                        }),
+                    ),
+                ] {
+                    if !valid {
+                        eprintln!("invalid project context: {name}");
+                        refused += 1;
+                    }
+                }
+            }
+            println!("project contexts: rows={count}, refused={refused}");
+            assert_eq!(refused, 0);
+        }
+        tx.commit().unwrap();
+    }
+}
+
 // Explicit dependency order: provider leaves precede strict generated columns;
 // columns precede indexes; volatile data moves before its new triggers exist.
 static CATALOG: &[&dyn Migration] = &[
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-rate-limit-view",
+            introduced: MigrationDate {
+                year: 2026,
+                month: 11,
+                day: 1,
+            },
+            target: MigrationTarget::Canvas,
+            supported_source: "Rate-limit entities containing provider observations",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?
+                .as_secs_f64();
+            m2026_11_01_rate_limit_view::apply(c.transaction, now)
+        },
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-projection-records",
+            introduced: MigrationDate {
+                year: 2026,
+                month: 11,
+                day: 1,
+            },
+            target: MigrationTarget::Canvas,
+            supported_source: "Legacy projection records and cached project contexts",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| apply_projection_records(c.transaction),
+    },
     &SqlMigration {
         definition: MigrationDefinition {
             id: "2026-10-31-work-records",
@@ -441,6 +664,16 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
+            id: "2026-10-31-message-send-projections",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Message receipt and queue projections before the shared send status",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_message_send_projections::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
             id: "2026-10-30-agent-volatile-complete",
             introduced: MigrationDate {
                 year: 2026,
@@ -599,21 +832,7 @@ static CATALOG: &[&dyn Migration] = &[
             supported_source: "Transcript copies in sync_entities and items without a change number entry",
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
-        apply: |c| {
-            crate::durable_seq::install(c.transaction)?;
-            // Old items are numbered by the online backfill (transcript_seq_backfill),
-            // which also runs the copy check and ends the copies. Without items there is
-            // nothing to number, so the check runs here. The old rows stay either way.
-            let items: bool = c.transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM runtime_items)",
-                [],
-                |row| row.get(0),
-            )?;
-            if !items {
-                crate::durable_seq::retire_transcript_copies(c.transaction)?;
-            }
-            Ok(())
-        },
+        apply: |c| crate::durable_seq::install(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {
@@ -678,6 +897,16 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
+            id: "2026-10-31-sync-project-duplicates",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Project records with duplicate fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_sync_project::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
             id: "2026-10-31-native-status-error",
             introduced: OCTOBER_31,
             target: MigrationTarget::Canvas,
@@ -688,6 +917,76 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
+            id: "2026-10-31-agent-permissions",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with legacy permission fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_agent_permissions::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-agent-core",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with retired core fields or malformed typed fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_agent_core::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-agent-batch-55",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with legacy provider, timestamps and queue fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_agent_batch_55::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-agent-null-parity",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with null optional fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_agent_null_parity::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-agent-turn-null",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with null turn identifiers",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_agent_turn_null::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-agent-batch-56-capacity",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with legacy team capacity fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_agent_capacity::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-agent-batch-57-naming",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with legacy naming flags",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_agent_naming::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
             id: "2026-10-31-transfer-history-pages",
             introduced: OCTOBER_31,
             target: MigrationTarget::Canvas,
@@ -695,6 +994,88 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_10_31_transfer_history_pages::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-account-eligibility-projection",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Derived account snapshots without eligibility",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_account_projection::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-room-lead-projection",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Room entities before lead roots were projected",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| {
+            apply_once(
+                c.transaction,
+                "2026-11-01-room-lead-projection",
+                m2026_11_01_room_leads::apply,
+            )
+        },
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-radio-controls-projection",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Radio room entities before server controls were projected",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| {
+            apply_once(
+                c.transaction,
+                "2026-11-01-radio-controls-projection",
+                m2026_11_01_radio_controls::apply,
+            )
+        },
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-typed-transfer-summary",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent account transfer summaries",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_transfer_summary::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-transfer-delegation-depth",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent and transfer worker defaults with out-of-range delegation depth",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_transfer_delegation_depth::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-typed-transfer-pointers",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent account transfer pointers and lazy state",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_transfer_pointers::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-typed-transfer-operations",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Account transfer operation records",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_transfer_operations::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {
@@ -715,6 +1096,26 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_10_30_domain_model::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-approvals",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Approvals and provider questions in runtime_requests with string states",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_30_approvals::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-outbox-card-reopen",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Callback outbox rows that keep the whole unanswered card",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_30_outbox_reopen::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {
@@ -745,6 +1146,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_10_31_project_record_kind::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-room-record",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Open room records with legacy fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_room_record::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {
@@ -808,6 +1219,117 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_10_31_current_checks::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-work-detail-policy",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Work details without server policy",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_work_detail_policy::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-access-invite-created",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Invitations without valid creation timestamps",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_access_invite_created::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-access-invites",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Stores with open invitation records",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_access_invites::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-access-clients",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Stores with paired or discovered access identities",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_access_clients::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-approval-secret-redaction",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Approvals migrated from legacy secret question answers",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_approval_secrets::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-send-admissions",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Databases without durable send admission fingerprints",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| {
+            let now = c.transaction.query_row(
+                "SELECT CAST((julianday('now')-2440587.5)*86400000 AS INTEGER)",
+                [],
+                |row| row.get(0),
+            )?;
+            crate::repositories::command_watermarks::CommandWatermarks::install_send_admissions(
+                c.transaction,
+                now,
+            )?;
+            Ok(())
+        },
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-chat-busy-indexes",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent wake and active indexes that read the in_flight column",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_chat_busy_indexes::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-chat-busy-deleted-index",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Deleted agent index that reads the in_flight column",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_chat_busy_deleted_index::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-status-turn-indexes",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent capacity and active indexes that read the status column",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_status_turn_indexes::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-work-history-rows",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Work records whose results, decisions and releases exist only inside the record",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| crate::work_history::migrate(c.transaction),
     },
 ];
 
@@ -911,6 +1433,37 @@ fn apply_target(db: &mut Connection, target: MigrationTarget) -> StoreResult<()>
     apply_target_catalog(db, target, CATALOG)
 }
 
+/// Hash of the ids of the SQL steps that the catalog marker covers.
+fn catalog_fingerprint(catalog: &[&dyn Migration], target: MigrationTarget) -> String {
+    crate::sha256_hex(
+        catalog
+            .iter()
+            .filter(|step| step.definition().target == target && step.receipt_family().is_none())
+            .map(|step| step.definition().id)
+            .collect::<Vec<_>>()
+            .join("\0")
+            .as_bytes(),
+    )
+}
+
+/// Prepare a real parent-catalog marker for upgrade tests.
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_apply_catalog_before_capacity(path: &std::path::Path) -> StoreResult<()> {
+    let mut db = Connection::open(path)?;
+    crate::schema::register_python_trigger_functions(&db)?;
+    let parent: Vec<_> = CATALOG
+        .iter()
+        .copied()
+        .filter(|step| {
+            !matches!(
+                step.definition().id,
+                "2026-11-01-agent-batch-56-capacity" | "2026-11-01-agent-batch-57-naming"
+            )
+        })
+        .collect();
+    apply_target_catalog(&mut db, MigrationTarget::Canvas, &parent)
+}
+
 fn apply_target_catalog(
     db: &mut Connection,
     target: MigrationTarget,
@@ -921,15 +1474,7 @@ fn apply_target_catalog(
         MigrationTarget::Analytics => Some("analytics_meta"),
         MigrationTarget::Supervisor | MigrationTarget::AccountRegistry => None,
     };
-    let fingerprint = crate::sha256_hex(
-        catalog
-            .iter()
-            .filter(|step| step.definition().target == target && step.receipt_family().is_none())
-            .map(|step| step.definition().id)
-            .collect::<Vec<_>>()
-            .join("\0")
-            .as_bytes(),
-    );
+    let fingerprint = catalog_fingerprint(catalog, target);
     if let Some(table) = marker_table
         && crate::schema::table_exists(db, table)?
         && db
@@ -1062,6 +1607,36 @@ fn apply_target_catalog(
             error.into(),
         )),
     }
+}
+
+fn apply_once(
+    tx: &Transaction<'_>,
+    id: &str,
+    apply: fn(&Transaction<'_>) -> StoreResult<()>,
+) -> StoreResult<()> {
+    let previous: Option<(i64, String)> = tx
+        .query_row(
+            "SELECT complete,status FROM runtime_payload_migrations WHERE name=?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let status = studio_runtime_schema::persistence::MigrationStatus::Complete.as_str();
+    if let Some((complete, saved_status)) = previous {
+        return if complete == 1 && saved_status == status {
+            Ok(())
+        } else {
+            Err(StoreError::RecordContract(
+                "invalid room projection migration checkpoint",
+            ))
+        };
+    }
+    apply(tx)?;
+    tx.execute(
+        "INSERT INTO runtime_payload_migrations(name,cursor,complete,status) VALUES(?1,0,1,?2)",
+        rusqlite::params![id, status],
+    )?;
+    Ok(())
 }
 
 fn catalog_marker(db: &Connection, fingerprint: &str) -> rusqlite::Result<String> {
@@ -1308,9 +1883,19 @@ fn run_receipt_migrations(
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     m2026_10_29_request_results_v2::convert_annotations(&tx)?;
     tx.commit()?;
-    // The receipt families keep the pending transport rows in their old tables. Move them.
+    // The receipt families keep the pending transport rows in their old tables. Move them,
+    // then drop the emptied old tables. The drop runs here, after the receipt
+    // families add their columns to those tables.
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     m2026_10_30_one_outbox::apply(&tx)?;
+    m2026_10_31_drop_old_outbox_tables::apply(&tx)?;
+    // The drop changes the schema version after `apply_target` stored the catalog
+    // marker. Store the marker again, or the next open repeats the whole catalog.
+    let fingerprint = catalog_fingerprint(CATALOG, MigrationTarget::Canvas);
+    tx.execute(
+        "UPDATE sync_entity_meta SET value=?1 WHERE key='migration_catalog'",
+        [catalog_marker(&tx, &fingerprint)?],
+    )?;
     tx.commit()?;
     crate::schema::verify_bootstrap(db)?;
     crate::verify_observed_tables_are_rowid(db)
@@ -1379,6 +1964,28 @@ mod tests {
             crate::RuntimeStore::open(Some(root.path()))
                 .await
                 .expect("reopen"),
+        );
+    }
+
+    #[tokio::test]
+    async fn first_open_leaves_a_marker_that_matches_the_final_schema() {
+        let root = tempfile::tempdir().expect("state");
+        let store = crate::RuntimeStore::open(Some(root.path()))
+            .await
+            .expect("first open");
+        let db = store.test_reader().expect("reader");
+        let stored: String = db
+            .query_row(
+                "SELECT value FROM sync_entity_meta WHERE key='migration_catalog'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("catalog marker");
+        let fingerprint = catalog_fingerprint(CATALOG, MigrationTarget::Canvas);
+        assert_eq!(
+            stored,
+            catalog_marker(&db, &fingerprint).expect("current marker"),
+            "a later schema change must not leave the marker stale"
         );
     }
 

@@ -2,7 +2,9 @@
 
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use serde::de::DeserializeOwned;
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
 use std::collections::HashMap;
 use studio_runtime_store::CachedSql;
 use studio_runtime_store::{StoreResult, system_reads as records};
@@ -10,11 +12,87 @@ use studio_runtime_store::{StoreResult, system_reads as records};
 use crate::event_write::truthy;
 use crate::submit_gates::{AgentAuthorityRow, Deletion, ProjectAuthorityRow};
 use crate::sync_policy::table_exists;
-use crate::sync_views::{AgentViewContext, RoomViewContext};
+use crate::sync_views::{AgentViewContext, RoomViewContext, TransferObservation};
 
 /// Lead ids bound into one `IN (...)` lookup while building agent contexts,
 /// kept below SQLite's host-parameter limit. Unit: rows (ids) per statement.
 const LEAD_LOOKUP_CHUNK_ROWS: usize = 500;
+
+fn transfer_observation(transaction: &Transaction<'_>, record: &Value) -> TransferObservation {
+    if record.get("isLead").and_then(Value::as_bool) != Some(true) {
+        return TransferObservation::Absent;
+    }
+    if let Some(summary) = record.get("accountTransfer")
+        && summary.get("kind").and_then(Value::as_str) == Some("unreadable")
+    {
+        return TransferObservation::Unreadable {
+            reason: summary
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("Transfer data is unreadable")
+                .to_owned(),
+        };
+    }
+    let id = record
+        .get("accountTransferId")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            let summary = record.get("accountTransfer")?;
+            (summary.get("status").and_then(Value::as_str) == Some("pending"))
+                .then(|| summary.get("id").and_then(Value::as_str))
+                .flatten()
+        });
+    let Some(id) = id else {
+        return TransferObservation::Absent;
+    };
+    match crate::account_transfer_driver::load(transaction, id) {
+        Ok(snapshot) if snapshot.can_cancel() => TransferObservation::Cancellable,
+        Ok(_) => TransferObservation::Held,
+        Err(_) => TransferObservation::Unreadable {
+            reason: "Transfer data is unreadable".into(),
+        },
+    }
+}
+
+fn account_destinations(
+    transaction: &Transaction<'_>,
+) -> StoreResult<Vec<studio_runtime_schema::account_destination::AccountDestination>> {
+    #[derive(serde::Deserialize)]
+    struct Entity {
+        value: Accounts,
+    }
+    #[derive(serde::Deserialize)]
+    struct Accounts {
+        accounts: Vec<Account>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Account {
+        id: studio_runtime_schema::account_key::AccountKey,
+        eligibility: studio_runtime_schema::agent_progress::AccountEligibility,
+    }
+    if !table_exists(transaction, "sync_entities")? {
+        return Ok(Vec::new());
+    }
+    let raw: Option<String> = transaction.query_row(
+        "SELECT payload FROM sync_entities WHERE collection='accounts' AND id='current' AND deleted=0",
+        [], |row| row.get(0),
+    ).optional()?;
+    let Some(raw) = raw else {
+        return Ok(Vec::new());
+    };
+    let entity: Entity = serde_json::from_str(&raw)?;
+    Ok(entity
+        .value
+        .accounts
+        .into_iter()
+        .map(
+            |row| studio_runtime_schema::account_destination::AccountDestination {
+                account_key: row.id,
+                eligibility: row.eligibility,
+            },
+        )
+        .collect())
+}
 
 /// Work performed by one bulk projection-context pass, exposed for deterministic tests.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -32,6 +110,7 @@ pub(crate) fn agent_view_contexts(
     work_records: &[studio_runtime_store::WorkItemRecord],
     project_server_id: Option<&str>,
 ) -> StoreResult<(HashMap<String, AgentViewContext>, AgentContextWork)> {
+    let destinations = account_destinations(transaction)?;
     let lead_ids = agents
         .iter()
         .filter_map(|(id, record)| {
@@ -195,6 +274,9 @@ pub(crate) fn agent_view_contexts(
         contexts.insert(
             id.to_owned(),
             AgentViewContext {
+                account_destinations: destinations.clone(),
+                transfer: transfer_observation(transaction, record),
+                team_counts: team_counts(transaction, id, record)?,
                 project_server_id: project_server_id.map(str::to_owned),
                 launcher_alive: true,
                 empty_lead,
@@ -275,6 +357,9 @@ pub(crate) fn agent_view_context(
     let progress = crate::agent_progress::derive(transaction, record, &assigned)?;
     let attention = pending_attention(transaction, id, record)?;
     Ok(AgentViewContext {
+        account_destinations: account_destinations(transaction)?,
+        transfer: transfer_observation(transaction, record),
+        team_counts: team_counts(transaction, id, record)?,
         command_progress: progress.commands,
         stall: progress.stall,
         project_server_id: project_server_id.map(str::to_owned),
@@ -284,6 +369,38 @@ pub(crate) fn agent_view_context(
         has_approval: attention.1,
         latest_work_result_file: latest.map(|(_, path)| path),
     })
+}
+
+pub(crate) const TEAM_COUNT_INPUTS_SQL: &str = "SELECT status,json_extract(record,'$.autoWake') FROM runtime_agents INDEXED BY runtime_agent_live_root_v2 WHERE root_id=?1 AND deleted_at IS NULL AND id<>?1 AND COALESCE(json_extract(record,'$.isLead'),0)=0";
+
+fn team_counts(
+    transaction: &Transaction<'_>,
+    id: &str,
+    record: &Value,
+) -> StoreResult<Option<studio_runtime_schema::agent_progress::TeamCounts>> {
+    if !truthy(record.get("isLead")) {
+        return Ok(None);
+    }
+    let mut total = 0;
+    let mut working = 0;
+    let mut statement = transaction.prepare_cached(TEAM_COUNT_INPUTS_SQL)?;
+    let rows = statement.query_map([id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<bool>>(1)?.unwrap_or(false),
+        ))
+    })?;
+    for row in rows {
+        let (status, auto_wake) = row?;
+        total += 1;
+        if crate::turn_prepare::WorkerStatus::from_agent_status(&status).working(auto_wake) {
+            working += 1;
+        }
+    }
+    Ok(Some(studio_runtime_schema::agent_progress::TeamCounts {
+        working,
+        total,
+    }))
 }
 
 fn exists_for_agent(
@@ -476,26 +593,41 @@ impl RoomDirectory {
     pub(crate) fn projects(&self) -> &[ProjectAuthorityRow] {
         &self.projects
     }
-    pub(crate) fn for_room(
+    pub(crate) fn for_room_identity(
         &self,
         tx: &Connection,
-        room: &Value,
+        id: &str,
+        federated: bool,
         last: bool,
     ) -> Result<RoomViewContext, studio_runtime_store::StoreError> {
-        let id = room["id"].as_str().unwrap_or_default();
         let last_message = if last && records::exists(tx, "runtime_chat_messages")? {
             let row=tx.query_row_cached("SELECT id,seq,text,created,sender,deliveries FROM runtime_chat_messages WHERE room=?1 ORDER BY seq DESC LIMIT 1",[id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,String>(2)?,r.get::<_,f64>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?))).optional()?;
-            row.map(|(key,seq,text,created,sender,deliveries)|{
-                let deliveries:std::collections::BTreeMap<String,studio_runtime_schema::persistence::RecipientDelivery>=serde_json::from_str(&deliveries).map_err(|_|records::invalid("runtime_chat_messages",&key))?;
-                records::validate("runtime_chat_messages",&key,json!({"id":key,"seq":seq,"room":id,"text":text,"created":created,"sender":sender,"deliveries":deliveries}))?;
-                Ok::<Value,studio_runtime_store::StoreError>(json!({"seq":seq,"text":text.chars().take(180).collect::<String>(),"created":created,"sender":sender}))
-            }).transpose()?
+            row.map(|(key, seq, text, created, sender, deliveries)| {
+                let _deliveries: std::collections::BTreeMap<
+                    String,
+                    studio_runtime_schema::persistence::RecipientDelivery,
+                > = serde_json::from_str(&deliveries)
+                    .map_err(|_| records::invalid("runtime_chat_messages", &key))?;
+                let seq = studio_runtime_schema::room_record::ChatSequence::from_i64(seq)
+                    .ok_or_else(|| records::invalid("runtime_chat_messages", &key))?;
+                let created = serde_json::Number::from_f64(created)
+                    .ok_or_else(|| records::invalid("runtime_chat_messages", &key))?;
+                Ok::<_, studio_runtime_store::StoreError>(
+                    studio_runtime_schema::room_record::RoomLastMessage {
+                        seq,
+                        text: text.chars().take(180).collect(),
+                        created,
+                        sender,
+                    },
+                )
+            })
+            .transpose()?
         } else {
             None
         };
         Ok(RoomViewContext {
             last_message,
-            federation: if room["kind"] == "federated" {
+            federation: if federated {
                 records::get(tx, "runtime_federation_rooms", id)?
                     .map(|row| {
                         // The authoritative table schema was checked by get;
@@ -523,7 +655,7 @@ fn pending_attention(
     id: &str,
     record: &Value,
 ) -> StoreResult<(bool, bool)> {
-    if !table_exists(transaction, "runtime_requests")? {
+    if !table_exists(transaction, "approvals")? {
         return Ok((false, false));
     }
     let epoch = record
@@ -531,8 +663,8 @@ fn pending_attention(
         .and_then(Value::as_i64)
         .unwrap_or_default();
     transaction.query_row_cached(
-        "SELECT EXISTS(SELECT 1 FROM runtime_requests WHERE json_valid(record) AND json_extract(record,'$.agent')=?1 AND (json_extract(record,'$.epoch') IS NULL OR json_extract(record,'$.epoch')=?2) AND COALESCE(json_extract(record,'$.status'),'pending')='pending' AND COALESCE(json_extract(record,'$.deferred'),0)=0 AND json_extract(record,'$.method') IN ('item/tool/requestUserInput','mcpServer/elicitation/request')), \
-                EXISTS(SELECT 1 FROM runtime_requests WHERE json_valid(record) AND json_extract(record,'$.agent')=?1 AND (json_extract(record,'$.epoch') IS NULL OR json_extract(record,'$.epoch')=?2) AND COALESCE(json_extract(record,'$.status'),'pending')='pending' AND COALESCE(json_extract(record,'$.deferred'),0)=0 AND COALESCE(json_extract(record,'$.method'),'') NOT IN ('item/tool/requestUserInput','mcpServer/elicitation/request'))",
+        "SELECT EXISTS(SELECT 1 FROM approvals WHERE agent=?1 AND (epoch IS NULL OR epoch=?2) AND state='pending' AND COALESCE(deferral_active,0)=0 AND kind IN ('question','elicitation')), \
+                EXISTS(SELECT 1 FROM approvals WHERE agent=?1 AND (epoch IS NULL OR epoch=?2) AND state='pending' AND COALESCE(deferral_active,0)=0 AND kind NOT IN ('question','elicitation'))",
         rusqlite::params![id, epoch], |row| Ok((row.get(0)?, row.get(1)?)),
     ).map_err(Into::into)
 }
@@ -545,6 +677,7 @@ mod room_preparation_tests {
 
     fn agent(id: &str) -> AgentAuthorityRow {
         AgentAuthorityRow {
+            created: None,
             id: Some(id.to_owned()),
             root_id: None,
             parent_id: None,
@@ -694,12 +827,11 @@ mod room_preparation_tests {
         )
         .expect("directory resolves");
         let connection = Connection::open_in_memory().expect("database");
-        let room = json!({"id":"room"});
         let first = directory
-            .for_room(&connection, &room, false)
+            .for_room_identity(&connection, "room", false, false)
             .expect("first room context");
         let second = directory
-            .for_room(&connection, &room, false)
+            .for_room_identity(&connection, "room", false, false)
             .expect("second room context");
 
         assert!(Arc::ptr_eq(&first.agents, &second.agents));
@@ -719,7 +851,7 @@ mod room_preparation_tests {
             .execute_batch(&studio_runtime_store::agent_columns::fixture_sql(
                 "CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL);
                  CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0);
-                 CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL);
+                 CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
                  CREATE TABLE runtime_events(agent TEXT NOT NULL);
                  CREATE TABLE runtime_items(agent TEXT NOT NULL);
                  CREATE INDEX runtime_item_agent ON runtime_items(agent);",

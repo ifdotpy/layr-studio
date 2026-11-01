@@ -307,7 +307,7 @@ pub(super) fn prepare_parent_workspace(
                 .ok_or(studio_runtime_services::provider_callbacks::ManagedCreationEnvironmentError::Invalid(
                     "The parent layr line is not ready",
                 ))?;
-        if actor.extra.get("layrReady").and_then(Value::as_bool) != Some(true) {
+        if actor.layr_ready != Some(true) {
             return Err(studio_runtime_services::provider_callbacks::ManagedCreationEnvironmentError::Invalid(
                     "The parent layr line is not ready",
                 ));
@@ -545,7 +545,7 @@ impl studio_runtime_services::monitor_runtime::WorkspaceAdmission for VmManagedW
             || actor.epoch != self.epoch
             || actor.cwd.as_deref() != Some(self.cwd.as_str())
             || actor.execution_mode != Some(studio_runtime_store::AgentExecutionMode::Vm)
-            || extra.get("layrReady").and_then(Value::as_bool) != Some(true)
+            || actor.layr_ready != Some(true)
             || extra.get("layrProjectId").and_then(Value::as_str) != Some(self.project_id.as_str())
             || extra.get("layrLine").and_then(Value::as_str) != Some(self.line.as_str())
         {
@@ -1913,8 +1913,7 @@ mod title_http_tests {
             "cwd":"/fixture",
             "accountKey":"default",
             "isLead":false,
-            "needsTitle":true,
-            "manualName":false,
+            "naming":"pending_title",
             "autoWake":false
         }))
         .expect("valid persisted agent");
@@ -2019,8 +2018,7 @@ mod title_http_tests {
                     .expect("title agent exists");
                 let record: Value = serde_json::from_str(&record).expect("agent JSON");
                 if record["name"] == "Generated through HTTP"
-                    && record["needsTitle"] == false
-                    && record["manualName"] == true
+                    && record.get("naming").and_then(Value::as_str) == Some("manual")
                 {
                     break;
                 }
@@ -2375,10 +2373,30 @@ async fn rename(
                 .await;
                 // Receipt-only commits deliberately do not wake entity readers.
                 // Publish this exact selector after every finisher exit, including failure.
-                if let Err(error) = notifications.publish_once(&serde_json::json!({
-                    "requestId":format!("rename-result:{request_id}"),
-                    "resources":[{"kind":"rename-progress", "agentId":agent_id, "requestId":request_id}]
-                })) {
+                let result = (|| {
+                    use studio_runtime_schema::{
+                        resource_notification::ResourceNotifyRequest,
+                        resource_ref::{RenameResource, ResourceRef},
+                    };
+                    use studio_runtime_services::resource_notify::ResourceNotifyError;
+                    let resource = RenameResource {
+                        agent_id: agent_id
+                            .clone()
+                            .try_into()
+                            .map_err(|_| ResourceNotifyError::Invalid)?,
+                        request_id: request_id
+                            .clone()
+                            .try_into()
+                            .map_err(|_| ResourceNotifyError::Invalid)?,
+                    };
+                    let request = ResourceNotifyRequest::new(
+                        format!("rename-result:{request_id}"),
+                        vec![ResourceRef::RenameProgressResource(resource)],
+                    )
+                    .map_err(|_| ResourceNotifyError::Invalid)?;
+                    notifications.publish_once(&request)
+                })();
+                if let Err(error) = result {
                     eprintln!("Could not publish rename completion: {error}");
                 }
                 notifications.publish_progress(

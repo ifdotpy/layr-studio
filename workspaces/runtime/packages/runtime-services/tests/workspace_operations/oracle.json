@@ -1746,8 +1746,7 @@
         "autoWake": true,
         "worktreeReady": true,
         "inFlight": false,
-        "workspaceOperation": null,
-        "checkpointError": "Server restarted before checkpoint capture finished"
+        "workspaceOperation": null
       }
     }
   },
@@ -1816,8 +1815,7 @@
         "autoWake": true,
         "worktreeReady": true,
         "inFlight": false,
-        "workspaceOperation": null,
-        "checkpointError": "Server restarted before checkpoint capture finished"
+        "workspaceOperation": null
       }
     }
   },
@@ -1886,8 +1884,7 @@
         "autoWake": true,
         "worktreeReady": true,
         "inFlight": false,
-        "workspaceOperation": null,
-        "checkpointError": "Server restarted before checkpoint capture finished"
+        "workspaceOperation": null
       }
     }
   },
@@ -1956,8 +1953,7 @@
         "autoWake": true,
         "worktreeReady": true,
         "inFlight": false,
-        "workspaceOperation": null,
-        "checkpointError": "Server restarted before checkpoint capture finished"
+        "workspaceOperation": null
       }
     }
   },

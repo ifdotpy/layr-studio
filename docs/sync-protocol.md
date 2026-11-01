@@ -16,10 +16,27 @@ lagging revision announced by the stream, or a link too slow for SSE. Startup
 fetch chains, focus probes, periodic refresh, and automatic mark-read are
 forbidden.
 
-Local storage and IndexedDB may contain only device keys, credentials and
-pairing secrets, the monitor input journal, and outbox request identities. No
-other data may be persisted there. Existing implementation descriptions below
-are migration targets where they conflict with this rule.
+Local storage and IndexedDB may contain device keys, credentials and pairing
+secrets, the monitor input journal, outbox request identities, unsent user input (drafts,
+reply and answer text, form and queue edits, pending uploads, and unsent
+recordings) until the server confirms it, and the remote frontend's subscription
+cache. Secret answer fields remain in memory only. The cache is never used to decide whether to send or retry a command.
+
+A remote frontend stores one IndexedDB record per cacheable subscription, with
+its data and cursor together. It writes at most once per five seconds and when
+the page becomes hidden. The server decides locality and cacheability; local
+frontends and subscriptions without provable row ownership start with snapshots
+after a reload. All subscriptions may resume from an in-memory cursor after a
+stream reconnect. A corrupt or unknown record is discarded and recovered with a snapshot. A browser
+on the server machine that pairs as a remote device is treated as remote.
+
+Drafts, uploads, recordings, and unconfirmed sends share one IndexedDB input
+buffer. Input is written immediately and removed on server confirmation. Old
+RxDB unsent messages are intentionally not migrated.
+
+Message send receipts and queue projections use the Rust-owned `MessageSendStatus`
+contract generated into the web API. An uncertain result keeps its request identity. An expired receipt retains the
+message on the device and cannot be retried with that identity.
 
 ## Routes and reconnect
 
@@ -74,6 +91,8 @@ is the draft sequence read with its rows, so later stream batches continue from
 that point. The snapshot is bounded by the shared [draft row and stream byte
 limits](../workspaces/runtime/packages/runtime-schema/src/shared_values.rs); its
 `complete` flag is false when either limit truncates it.
+Legacy drafts above the current text limit are refused visibly while other drafts remain available.
+Pre-upgrade command retries retain pre-upgrade semantics, including cross-owner identity behavior, and never convert text to a file.
 
 Large entity baselines and deltas use typed `entity-transfer` frames on the same
 connection. Each page is a canonical `EntityChangeBatch` within the shared
@@ -136,9 +155,11 @@ changes with the wire contract. Draft and outbox storage keep their workspace id
 The old RxDB migration is removed. A browser that did not open Studio after the
 migration was introduced cannot recover unresolved sends left in that old store.
 
-The browser saves each pending message command and workspace identity before its
-POST. A reconnect or explicit retry reuses the exact command; a failed or damaged
-entry can be discarded without blocking other messages. The retired
+The browser keeps each pending message command and workspace identity in memory
+and writes them to the unsent input buffer while dispatching the POST. A reconnect
+or explicit retry reuses the exact command; confirmation or definitive refusal
+removes the buffered command.
+A damaged entry can be discarded without blocking other messages. The retired
 `studio-thin-cache` database is deleted on startup. Its unsent messages and drafts
 are not migrated.
 

@@ -78,9 +78,8 @@ async fn change_settings(state: &State, instructions: &str, input: &str) {
                 .transaction_with(move |tx| {
                     let mut agent = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
                         .expect("test agent exists");
-                    agent
-                        .extra
-                        .insert("profileInstructions".into(), json!(instructions));
+                    agent.profile_instructions =
+                        studio_runtime_schema::queue_command::Field::Value(instructions);
                     AgentRepository::put(tx, &agent)
                 })
                 .await?;

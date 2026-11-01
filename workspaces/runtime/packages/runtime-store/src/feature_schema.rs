@@ -71,10 +71,6 @@ const FEATURE_SCHEMA: &str = r#"
           id TEXT PRIMARY KEY, record TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS runtime_federation_rooms (
           id TEXT PRIMARY KEY, record TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS runtime_federation_outbox (
-          id TEXT PRIMARY KEY, peer_id TEXT NOT NULL, record TEXT NOT NULL);
-        CREATE INDEX IF NOT EXISTS runtime_federation_outbox_peer
-          ON runtime_federation_outbox(peer_id);
         CREATE TABLE IF NOT EXISTS runtime_federation_inbox (
           peer_id TEXT NOT NULL, message_id TEXT NOT NULL, record TEXT NOT NULL,
           PRIMARY KEY(peer_id,message_id));
@@ -132,12 +128,6 @@ const FEATURE_SCHEMA: &str = r#"
             CREATE TABLE IF NOT EXISTS runtime_access_nonces (
           client TEXT NOT NULL, nonce TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY(client,nonce));
             CREATE INDEX IF NOT EXISTS runtime_access_nonce_age ON runtime_access_nonces(created);
-            CREATE TABLE IF NOT EXISTS runtime_access_outbound (
-          server TEXT NOT NULL, request_id TEXT NOT NULL, hash TEXT NOT NULL,
-          record TEXT NOT NULL, PRIMARY KEY(server,request_id));
-            CREATE INDEX IF NOT EXISTS runtime_access_outbound_age
-          ON runtime_access_outbound(json_extract(record,'$.completed'))
-          WHERE json_extract(record,'$.outcome')='complete';
             CREATE TABLE IF NOT EXISTS runtime_access_audit (
           seq INTEGER PRIMARY KEY AUTOINCREMENT, client TEXT NOT NULL, actor TEXT NOT NULL,
           action TEXT NOT NULL, created REAL NOT NULL);
@@ -152,7 +142,7 @@ const FEATURE_SCHEMA: &str = r#"
             CREATE TABLE IF NOT EXISTS runtime_model_status (agent TEXT, revision TEXT, at REAL, record TEXT, PRIMARY KEY(agent,revision));
             CREATE TABLE IF NOT EXISTS runtime_native_notices (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS runtime_agent_sweep_busy_v2 ON runtime_agents(account_key) WHERE provider='codex' AND (context_repair_phase IN ('preparing','submitted','unknown','ready') OR COALESCE(native_tool_refresh_id,'')!='');
-            CREATE INDEX IF NOT EXISTS runtime_agent_callback_context_v3 ON runtime_agents(account_key,thread_id,turn_id) WHERE status='running';
+            CREATE INDEX IF NOT EXISTS runtime_agent_callback_context_v3 ON runtime_agents(account_key,turn_id) WHERE status='running';
             CREATE INDEX IF NOT EXISTS runtime_agent_sweep_cleanup_v2 ON runtime_agents(source_cleanup_account_key,source_cleanup_thread_id) WHERE source_cleanup_phase IN ('planned','submitted');
             CREATE INDEX IF NOT EXISTS runtime_agent_unsettled_legacy ON runtime_agents(id) WHERE legacy_unsettled=1;
             CREATE INDEX IF NOT EXISTS runtime_idle_compaction_deadline ON runtime_agents(idle_episode_type,idle_episode_fire_at,id,idle_episode_id) WHERE idle_episode_type='object';
@@ -165,12 +155,6 @@ const FEATURE_SCHEMA: &str = r#"
             CREATE TABLE IF NOT EXISTS runtime_limit_reset_requests (id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_agent_moves(id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_usage_resumes(id TEXT PRIMARY KEY, agent TEXT NOT NULL, record TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_server_outbox (
-                    id TEXT PRIMARY KEY, server TEXT NOT NULL, body TEXT NOT NULL,
-                    state TEXT NOT NULL, result TEXT, attempts INTEGER NOT NULL DEFAULT 0,
-                    next_at REAL NOT NULL DEFAULT 0, error TEXT, created_at REAL NOT NULL DEFAULT 0, completed_at REAL NOT NULL DEFAULT 0, fingerprint TEXT);
-            CREATE INDEX IF NOT EXISTS runtime_server_outbox_due
-                    ON runtime_server_outbox(state,next_at);
             CREATE TABLE IF NOT EXISTS runtime_server_inbox (
                     id TEXT PRIMARY KEY, signature TEXT NOT NULL, state TEXT NOT NULL,
                     result TEXT, created_at REAL NOT NULL DEFAULT 0, completed_at REAL NOT NULL DEFAULT 0, principal TEXT, actor TEXT);
@@ -179,9 +163,6 @@ const FEATURE_SCHEMA: &str = r#"
             CREATE INDEX IF NOT EXISTS runtime_server_links_home_parent
                     ON runtime_server_links(json_extract(record,'$.parent'))
                     WHERE json_extract(record,'$.side')='home';
-            CREATE TABLE IF NOT EXISTS runtime_server_fetch (
-                    id TEXT PRIMARY KEY, server TEXT NOT NULL, signature TEXT NOT NULL,
-                    state TEXT NOT NULL, result TEXT);
             CREATE TABLE IF NOT EXISTS runtime_server_retired (
                     id TEXT NOT NULL, direction TEXT NOT NULL, signature TEXT NOT NULL,
                     server TEXT, actor TEXT, PRIMARY KEY(id,direction));

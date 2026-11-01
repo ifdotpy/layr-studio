@@ -205,7 +205,6 @@ impl RecoveryStore {
                                     updated["restartRecovery"]["reconciledAt"] = json!(current.at);
                                 }
                                 updated["status"] = json!("queued");
-                                updated["turnRecovery"] = json!({"at":current.at,"turnId":null,"outcome":"input_absent","source":"replaced_native_child","attemptId":attempt["id"]});
                             }
                             updated["inFlight"] = json!(false);
                             updated["error"] = Value::Null;
@@ -246,7 +245,6 @@ impl RecoveryStore {
                             RecoveryReceipt::Applied(json!({"status":"held","at":current.at}))
                         }
                         StartAbsenceDecision::Waiting => {
-                            updated["startRecoveryCheck"] = json!({"at":current.at,"attemptId":attempt["id"],"state":"waiting","reason":"start-outcome-unconfirmed","completeHistory":complete_history,"idleTwice":idle_twice,"quiet":current.quiet,"journalDrained":current.journal_drained});
                             RecoveryReceipt::Unknown(json!({"status":"unconfirmed"}))
                         }
                     }
@@ -340,7 +338,6 @@ impl RecoveryStore {
                     if let Some(object) = updated.as_object_mut() {
                         object.remove("steerRejectedTurnId");
                     }
-                    updated["turnRecovery"] = json!({"at":at,"turnId":null,"latestTurnId":latest.as_ref().map(|t|&t["id"]),"outcome":"idle","source":"native_thread_read"});
                     RecoveryReceipt::Applied(json!({"status":"reconciled","turnId":null,"outcome":"idle"}))
                 }
                 RecoveryAction::RecordCheck {
@@ -505,11 +502,8 @@ impl CompletionWriter for LifecycleCompletionWriter {
                 rows.push(event_id);
             }
             let pending_request: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM runtime_requests \
-                 WHERE json_extract(record,'$.agent')=?1 \
-                 AND json_extract(record,'$.status')='pending' \
-                 AND (json_extract(record,'$.turnId') IS NULL \
-                      OR json_extract(record,'$.turnId')=?2))",
+                "SELECT EXISTS(SELECT 1 FROM approvals \
+                 WHERE agent=?1 AND state='pending' AND (turn IS NULL OR turn=?2))",
                 rusqlite::params![id, a["turnId"].as_str().ok_or(RecoveryError::CommitFailed)?],
                 |row| row.get(0),
             )?;
@@ -520,14 +514,9 @@ impl CompletionWriter for LifecycleCompletionWriter {
                 return Ok(RecoveryEffectResult::plain(RecoveryOutcome::Unconfirmed));
             }
             let mut updated = a.clone();
-            let mut wait = updated
+            updated
                 .get("contextRepairWait")
-                .cloned()
                 .ok_or(RecoveryError::CommitFailed)?;
-            wait["status"] = json!("superseded");
-            wait["reason"] = json!("The exact native turn was confirmed");
-            wait["finishedAt"] = json!(self.at);
-            updated["lastContextRepairWait"] = wait;
             let Some(fields) = updated.as_object_mut() else {
                 return Err(RecoveryError::CommitFailed);
             };
@@ -538,8 +527,8 @@ impl CompletionWriter for LifecycleCompletionWriter {
             updated["error"] = Value::Null;
             let mut connection = updated
                 .get("connectionRecovery")
+                .filter(|value| value.is_object())
                 .cloned()
-                .filter(Value::is_object)
                 .unwrap_or(json!({}));
             connection["at"] = json!(self.at);
             connection["turnId"] = turn["id"].clone();
@@ -776,9 +765,7 @@ impl CompletionWriter for LifecycleCompletionWriter {
                     )?;
                 }
                 tx.execute("UPDATE runtime_items SET record=json_set(record,'$.turnStatus',?1) WHERE agent=?2 AND json_extract(record,'$.turnId')=?3",rusqlite::params![text(turn,"status")?,id,turn_id])?;
-                if *mode == CompletionMode::ObservedTurn {
-                    updated["turnRecovery"] = json!({"at":self.at,"turnId":turn_id,"outcome":turn["status"],"source":"native_thread_read"});
-                } else {
+                if *mode != CompletionMode::ObservedTurn {
                     updated["connectionRecovery"] = json!({"at":self.at,"turnId":turn_id,"outcome":turn["status"],"source":"native_thread_read","previousError":a["error"]});
                     if *mode == CompletionMode::QueuedActiveWait {
                         updated["connectionRecovery"]["queuedInputPreserved"] = json!(true);

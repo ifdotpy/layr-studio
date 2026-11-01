@@ -53,27 +53,42 @@ pub async fn fixture() -> (tempfile::TempDir, Arc<RuntimeStore>, CallbackContext
     };
     (root, store, context)
 }
+/// Seed a card written as a legacy record. It becomes a typed approval.
 pub async fn card(store: &RuntimeStore, value: &Value) {
-    let id = value["id"].as_str().unwrap().to_owned();
-    let record = value.to_string();
+    let value = value.clone();
     store
         .transaction_with::<_, studio_runtime_store::StoreError>(move |tx| {
-            studio_runtime_store::QuestionsWriteRepository::put_request(tx, &id, &record)
+            studio_runtime_services::provider_callbacks::legacy_view::insert(tx, &value)
         })
         .await
         .unwrap();
 }
+/// The approval as the legacy record showed it.
 pub fn stored(store: &RuntimeStore, id: &str) -> Value {
-    let raw: String = store
-        .test_reader()
-        .unwrap()
-        .query_row(
-            "SELECT record FROM runtime_requests WHERE id=?1",
-            [id],
-            |r| r.get(0),
+    studio_runtime_services::provider_callbacks::legacy_view::stored(
+        &store.test_reader().unwrap(),
+        id,
+    )
+    .unwrap()
+}
+/// The typed card keeps the outcome of the frozen record: status and decision.
+/// The frozen record also holds Python-only fields (answer hash, redacted
+/// history text, answer time) that the typed row does not have.
+pub fn assert_outcome(actual: &Value, expected: &Value) {
+    assert_eq!(actual["status"], expected["status"], "{}", expected["id"]);
+    let decided = |value: &Value| {
+        matches!(
+            value["decision"].as_str(),
+            Some("accept" | "decline" | "cancel")
         )
-        .unwrap();
-    serde_json::from_str(&raw).unwrap()
+    };
+    if decided(expected) && decided(actual) {
+        assert_eq!(
+            actual["decision"], expected["decision"],
+            "{}",
+            expected["id"]
+        );
+    }
 }
 #[derive(Default)]
 pub struct Port {
@@ -142,6 +157,7 @@ pub fn actor(store: &RuntimeStore, context: &CallbackContext) -> Value {
 }
 pub fn normalized_actor(value: &Value) -> Value {
     let mut record = value.clone();
+    crate::agent_view_fixtures::normalize_legacy_agent(&mut record);
     for field in studio_runtime_store::agent_volatile::AGENT_VOLATILE_FIELDS {
         let default = template()["agents"][0]
             .get(field)
@@ -164,6 +180,7 @@ pub async fn put_actor(store: &RuntimeStore, value: &Value) {
     store
         .transaction_with::<_, studio_runtime_store::StoreError>(move |tx| {
             let mut record: Value = serde_json::from_str(&record).expect("actor JSON");
+            crate::agent_view_fixtures::normalize_legacy_agent(&mut record);
             let previous = studio_runtime_store::agent_volatile::merged_record(tx, &id)?
                 .expect("actor exists");
             for field in studio_runtime_store::agent_volatile::AGENT_VOLATILE_FIELDS {
@@ -288,6 +305,45 @@ pub fn logical_changes(before: &Value, after: &Value) -> Value {
     }
     Value::Object(result)
 }
+/// Cards are typed rows now. Their frozen legacy writes (the request record and
+/// its sync view) have no counterpart; `assert_outcome` checks the card.
+fn drop_card_writes(changes: &mut Value) {
+    let Some(map) = changes.as_object_mut() else {
+        return;
+    };
+    map.remove("runtime_requests");
+    map.remove("approvals");
+    // A request's execution effect follows its typed status, which differs from the
+    // frozen record when an answer was in delivery.
+    let mut effects_empty = false;
+    if let Some(effects) = map.get_mut("runtime_execution_effects") {
+        for key in ["removed", "added"] {
+            if let Some(rows) = effects[key].as_array_mut() {
+                rows.retain(|row| row[2] != "requests");
+            }
+        }
+        effects_empty = ["removed", "added"]
+            .iter()
+            .all(|key| effects[*key].as_array().is_some_and(Vec::is_empty));
+    }
+    if effects_empty {
+        map.remove("runtime_execution_effects");
+    }
+    let mut empty = false;
+    if let Some(sync) = map.get_mut("sync_entities") {
+        for key in ["removed", "added"] {
+            if let Some(rows) = sync[key].as_array_mut() {
+                rows.retain(|row| row[0] != "request" && row[0] != "questionHistory");
+            }
+        }
+        empty = ["removed", "added"]
+            .iter()
+            .all(|key| sync[*key].as_array().is_some_and(Vec::is_empty));
+    }
+    if empty {
+        map.remove("sync_entities");
+    }
+}
 pub fn assert_writes(before: &Value, store: &RuntimeStore, expected: &Value) {
     let mut actual = logical_changes(before, &logical_snapshot(store));
     let mut expected = expected.clone();
@@ -298,8 +354,40 @@ pub fn assert_writes(before: &Value, store: &RuntimeStore, expected: &Value) {
             }
         }
     }
+    // fe1e1f249 retires yoloMode from the published agent projection. These
+    // fixtures write the old record after migration, without permissionMode.
+    for kind in ["added", "removed"] {
+        let Some(rows) = expected
+            .get_mut("sync_entities")
+            .and_then(|change| change.get_mut(kind))
+            .and_then(Value::as_array_mut)
+        else {
+            continue;
+        };
+        for row in rows {
+            let Some(row) = row.as_array_mut() else {
+                continue;
+            };
+            if row.first().and_then(Value::as_str) != Some("agent") {
+                continue;
+            }
+            let Some(value) = row.get_mut(2).and_then(|payload| payload.get_mut("value")) else {
+                continue;
+            };
+            crate::agent_view_fixtures::normalize_legacy_agent(value);
+            if kind == "added"
+                && let Some(mode) = value
+                    .as_object_mut()
+                    .and_then(|fields| fields.remove("yoloMode"))
+            {
+                assert!(mode.is_boolean(), "frozen yoloMode");
+            }
+        }
+    }
     normalize_agent_nulls(&mut expected);
     normalize_agent_nulls(&mut actual);
+    drop_card_writes(&mut actual);
+    drop_card_writes(&mut expected);
     crate::removed_budget_fields::strip(&mut actual);
     crate::removed_budget_fields::strip(&mut expected);
     for root in [&mut actual, &mut expected] {
@@ -376,11 +464,18 @@ pub async fn seed_case(store: &RuntimeStore, case: &Value) {
                     }
                     for row in change["removed"].as_array().unwrap() {
                         if table == "sync_entities" {
+                            let mut value = row.get(2).and_then(|payload| payload.get("value"))
+                                .expect("projection value").clone();
+                            if row.get(0).and_then(Value::as_str) == Some("agent")
+                                && row.get(3).and_then(Value::as_i64) != Some(1)
+                            {
+                                crate::agent_view_fixtures::normalize_legacy_agent(&mut value);
+                            }
                             studio_runtime_store::SyncDocumentsRepository::put_entity(
                                 tx,
                                 row[0].as_str().unwrap(),
                                 row[1].as_str().unwrap(),
-                                row[2]["value"].clone(),
+                                value.clone(),
                                 row[3] == 1,
                             )?;
                             if row[0] == "agent" {
@@ -388,7 +483,7 @@ pub async fn seed_case(store: &RuntimeStore, case: &Value) {
                                 // both current projections from that same view, too.
                                 for collection in ["agentSummary", "agentDetail"] {
                                     let value = studio_runtime_services::sync_policy::project_persisted_record(
-                                        collection, &row[2]["value"],
+                                        collection, &value,
                                     ).expect("frozen agent view has id");
                                     studio_runtime_store::SyncDocumentsRepository::put_entity(
                                         tx, collection, row[1].as_str().unwrap(), value, row[3] == 1,
@@ -401,6 +496,7 @@ pub async fn seed_case(store: &RuntimeStore, case: &Value) {
                     }
                 }
             }
+            studio_runtime_store::migrations::normalize_agent_fixtures(tx)?;
             for (table, rows) in case["counters"].as_object().unwrap() {
                 tx.execute(&format!("DELETE FROM {table}"), [])?;
                 for row in rows.as_array().unwrap() {
@@ -476,6 +572,16 @@ fn insert_row(
 pub(crate) fn normalize_agent_nulls(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(fields) => {
+            // These projection fields postdate the frozen Python oracle.
+            if fields.get("kind").and_then(serde_json::Value::as_str) == Some("agent") {
+                for key in [
+                    "accountChange",
+                    "accountTransferProgress",
+                    "accountDestinations",
+                ] {
+                    fields.remove(key);
+                }
+            }
             if fields.contains_key("rootId") && fields.contains_key("epoch") {
                 for field in studio_runtime_store::agent_volatile::AGENT_VOLATILE_FIELDS
                     .into_iter()

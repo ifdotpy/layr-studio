@@ -9,6 +9,25 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static UNSETTLED: AtomicBool = AtomicBool::new(false);
+
+/// A copy of `src` could not settle: writers changed it in every round, so its files come from
+/// different moments. The copy stays; `repo.save` marks the state as taken while processes ran.
+pub fn mark_unsettled(src: &Path) {
+    if !UNSETTLED.swap(true, Ordering::Relaxed) {
+        eprintln!(
+            "layr: {} kept changing while it was copied; the state is kept and marked as taken while processes ran",
+            src.display()
+        );
+    }
+}
+
+/// Whether a copy has not settled since the last call; clears the mark.
+pub fn take_unsettled() -> bool {
+    UNSETTLED.swap(false, Ordering::Relaxed)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum FType {
@@ -85,7 +104,7 @@ pub fn safe_join(root: &Path, rel: &str) -> Result<PathBuf> {
 }
 
 /// A tree to read: a folder, or on APFS a thin state over its base (`thin::Layered`).
-pub trait Src {
+pub trait Src: Sync {
     /// The path to read `rel` from; it may not exist. Fails for a path through a link.
     fn at(&self, rel: &str) -> Result<PathBuf>;
     /// The folder, when the tree is one complete folder.
@@ -138,9 +157,7 @@ pub fn case_clash(path: &Path) -> Option<String> {
     {
         let name = path.file_name()?;
         let m = fs::symlink_metadata(path).ok()?;
-        if crate::sys::case_sensitive_dev(m.dev(), path) {
-            return None;
-        }
+        let sensitive = crate::sys::case_sensitive_dev(m.dev(), path);
         // A file with several links: the folder listing names the entries reliably.
         if !m.is_dir() && m.nlink() > 1 {
             let mut other = None;
@@ -149,7 +166,7 @@ pub fn case_clash(path: &Path) -> Option<String> {
                 if n == name {
                     return None;
                 }
-                if case_key(&n.to_string_lossy()) == case_key(&name.to_string_lossy()) {
+                if name_key(sensitive, &n.to_string_lossy()) == name_key(sensitive, &name.to_string_lossy()) {
                     other = Some(n.to_string_lossy().into_owned());
                 }
             }
@@ -179,9 +196,7 @@ pub fn refuse_case_clash(root: &Path, rel: &str) -> Result<()> {
 
 #[cfg(target_os = "macos")]
 fn refuse_case_clash_apfs(root: &Path, rel: &str) -> Result<()> {
-    if fs::symlink_metadata(root).map(|m| crate::sys::case_sensitive_dev(m.dev(), root)).unwrap_or(true) {
-        return Ok(());
-    }
+    let sensitive = fs::symlink_metadata(root).map(|m| crate::sys::case_sensitive_dev(m.dev(), root)).unwrap_or(true);
     let mut path = root.to_path_buf();
     let mut done = String::new();
     for part in rel.split('/').filter(|c| !c.is_empty()) {
@@ -200,7 +215,8 @@ fn refuse_case_clash_apfs(root: &Path, rel: &str) -> Result<()> {
             }
             let parent = done.rsplit_once('/').map(|(p, _)| format!("{p}/")).unwrap_or_default();
             bail!(
-                "{done} and {parent}{stored} differ only in case, and the volume of this store does not tell them apart.\nRename one of them, or use a store on a case-sensitive APFS volume."
+                "{done} and {parent}{stored} {}",
+                clash_reason(sensitive)
             );
         }
         if fs::symlink_metadata(&path).is_err() {
@@ -230,6 +246,28 @@ pub fn case_key(name: &str) -> String {
         c => c,
     };
     name.nfd().flat_map(char::to_lowercase).map(fold).nfd().collect()
+}
+
+/// The form of a name that the volume compares. APFS ignores the Unicode normal form also on a
+/// case-sensitive volume: `cafe\u{301}` and `caf\u{e9}` are one entry there.
+#[cfg(target_os = "macos")]
+pub fn name_key(case_sensitive: bool, name: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    if case_sensitive {
+        name.nfd().collect()
+    } else {
+        case_key(name)
+    }
+}
+
+/// The end of a clash message: what the volume ignores and what to do.
+#[cfg(target_os = "macos")]
+fn clash_reason(case_sensitive: bool) -> &'static str {
+    if case_sensitive {
+        "differ only in Unicode normalization, and the volume of this store does not tell them apart.\nRename one of them."
+    } else {
+        "differ only in case, and the volume of this store does not tell them apart.\nRename one of them, or use a store on a case-sensitive APFS volume."
+    }
 }
 
 /// True when the entry `rel` below `root` holds no files: it leaves (`leaves(rel)`), or it is a
@@ -277,11 +315,22 @@ pub fn replace_entries(src: &Path, dst: &Path, gone: &[&str], write: &[&str], ow
     Ok(())
 }
 
+/// `replace_entries` into a working folder: written files get the current time.
+pub fn replace_work_entries(src: &Path, dst: &Path, gone: &[&str], write: &[&str], own: Option<(u32, u32)>) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    refuse_remaining_clashes(dst, gone, write)?;
+    for g in gone {
+        remove_entry(dst, g)?;
+    }
+    for w in write {
+        copy_work_entry(src, w, dst, w, own)?;
+    }
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 fn refuse_remaining_clashes(dst: &Path, gone: &[&str], write: &[&str]) -> Result<()> {
-    if fs::symlink_metadata(dst).map(|m| crate::sys::case_sensitive_dev(m.dev(), dst)).unwrap_or(true) {
-        return Ok(());
-    }
+    let sensitive = fs::symlink_metadata(dst).map(|m| crate::sys::case_sensitive_dev(m.dev(), dst)).unwrap_or(true);
     let gone: std::collections::BTreeSet<&str> = gone.iter().copied().collect();
     let leaves = |rel: &str| rel.match_indices('/').map(|(i, _)| &rel[..i]).chain([rel]).any(|a| gone.contains(a));
     // Writes below one folder share its ancestors: check each once.
@@ -303,7 +352,8 @@ fn refuse_remaining_clashes(dst: &Path, gone: &[&str], write: &[&str]) -> Result
                 // After the removals, nothing but empty folders may stay there.
                 if !holds_no_files(dst, &other, &leaves) {
                     bail!(
-                        "{done} and {other} differ only in case, and the volume of this store does not tell them apart.\nRename one of them, or use a store on a case-sensitive APFS volume."
+                        "{done} and {other} {}",
+                        clash_reason(sensitive)
                     );
                 }
                 break;
@@ -321,9 +371,7 @@ fn refuse_remaining_clashes(dst: &Path, gone: &[&str], write: &[&str]) -> Result
 pub fn refuse_case_collisions<'a>(dst: &Path, paths: impl Iterator<Item = &'a str>) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
-        if crate::sys::case_sensitive(dst) {
-            return Ok(());
-        }
+        let sensitive = crate::sys::case_sensitive(dst);
         let mut seen: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> = Default::default();
         for p in paths {
             let mut prefix = String::new();
@@ -332,7 +380,7 @@ pub fn refuse_case_collisions<'a>(dst: &Path, paths: impl Iterator<Item = &'a st
                     prefix.push('/');
                 }
                 prefix.push_str(part);
-                seen.entry(case_key(&prefix)).or_default().insert(prefix.clone());
+                seen.entry(name_key(sensitive, &prefix)).or_default().insert(prefix.clone());
             }
         }
         let groups: Vec<String> =
@@ -340,9 +388,11 @@ pub fn refuse_case_collisions<'a>(dst: &Path, paths: impl Iterator<Item = &'a st
         if !groups.is_empty() {
             let shown: Vec<String> = groups.iter().take(10).map(|g| format!("  {g}")).collect();
             bail!(
-                "these names differ only in case, and the volume of this store does not tell them apart:\n{}{}\nRename all but one of each group, or use a store on a case-sensitive APFS volume.",
+                "these names differ only in {}, and the volume of this store does not tell them apart:\n{}{}\nRename all but one of each group{}.",
+                if sensitive { "Unicode normalization" } else { "case" },
                 shown.join("\n"),
-                if groups.len() > 10 { format!("\n  and {} more", groups.len() - 10) } else { String::new() }
+                if groups.len() > 10 { format!("\n  and {} more", groups.len() - 10) } else { String::new() },
+                if sensitive { "" } else { ", or use a store on a case-sensitive APFS volume" }
             );
         }
         Ok(())
@@ -512,25 +562,51 @@ fn open_ro(p: &Path) -> Result<File> {
     OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(p).with_context(|| format!("open {}", p.display()))
 }
 
+thread_local! {
+    /// The two compare buffers of `same_range`, reused by every call of the thread.
+    static COMPARE_BUFFERS: std::cell::RefCell<(Vec<u8>, Vec<u8>)> =
+        const { std::cell::RefCell::new((Vec::new(), Vec::new())) };
+}
+
 fn same_range(a: &mut File, b: &mut File, off: u64, len: u64) -> Result<bool> {
+    let _t = crate::trace::span("content compare");
     a.seek(SeekFrom::Start(off))?;
     b.seek(SeekFrom::Start(off))?;
-    let mut left = len;
-    let mut ba = vec![0u8; 1 << 16];
-    let mut bb = vec![0u8; 1 << 16];
-    while left > 0 {
-        let want = left.min(ba.len() as u64) as usize;
-        let na = read_full(a, &mut ba[..want])?;
-        let nb = read_full(b, &mut bb[..want])?;
-        if na != nb || ba[..na] != bb[..nb] {
-            return Ok(false);
+    COMPARE_BUFFERS.with(|cell| {
+        let (ba, bb) = &mut *cell.borrow_mut();
+        ba.resize(1 << 16, 0);
+        bb.resize(1 << 16, 0);
+        let mut left = len;
+        while left > 0 {
+            let want = left.min(ba.len() as u64) as usize;
+            let na = read_full(a, &mut ba[..want])?;
+            let nb = read_full(b, &mut bb[..want])?;
+            if na != nb || ba[..na] != bb[..nb] {
+                return Ok(false);
+            }
+            if na < want {
+                break;
+            }
+            left -= na as u64;
         }
-        if na < want {
-            break;
+        Ok(true)
+    })
+}
+
+/// The byte ranges as sorted, disjoint `(offset, length)` pairs inside a file of `size` bytes:
+/// overlapping and adjacent ranges merge, so no byte is compared twice.
+fn merged_ranges(ranges: &[(u64, u64)], size: u64) -> Vec<(u64, u64)> {
+    let mut v: Vec<(u64, u64)> =
+        ranges.iter().filter(|(off, _)| *off < size).map(|(off, len)| (*off, off.saturating_add(*len).min(size))).collect();
+    v.sort_unstable();
+    let mut out: Vec<(u64, u64)> = Vec::with_capacity(v.len());
+    for (start, end) in v {
+        match out.last_mut() {
+            Some(last) if start <= last.1 => last.1 = last.1.max(end),
+            _ => out.push((start, end)),
         }
-        left -= na as u64;
     }
-    Ok(true)
+    out.into_iter().map(|(start, end)| (start, end - start)).collect()
 }
 
 fn read_full(f: &mut File, buf: &mut [u8]) -> Result<usize> {
@@ -573,12 +649,8 @@ pub fn same_entry(
             let mut b = open_ro(&rb.at(pb)?)?;
             match ranges {
                 Some(rs) => {
-                    for (off, len) in rs {
-                        if *off >= ma.size {
-                            continue;
-                        }
-                        let l = (*len).min(ma.size - off);
-                        if !same_range(&mut a, &mut b, *off, l)? {
+                    for (off, len) in merged_ranges(rs, ma.size) {
+                        if !same_range(&mut a, &mut b, off, len)? {
                             return Ok(false);
                         }
                     }
@@ -645,7 +717,20 @@ pub fn copy_entry(
     dst_rel: &str,
     own: Option<(u32, u32)>,
 ) -> Result<()> {
-    copy_entry_impl(src_root, src_rel, dst_root, dst_rel, own, false)
+    copy_entry_impl(src_root, src_rel, dst_root, dst_rel, own, false, false)
+}
+
+/// `copy_entry` into a working folder. A written file gets the current time, as `git checkout`
+/// gives it: build tools such as Cargo and make compare times, and a file with the old time of
+/// its state would look older than the build output of other content.
+pub fn copy_work_entry(
+    src_root: &(impl Src + ?Sized),
+    src_rel: &str,
+    dst_root: &Path,
+    dst_rel: &str,
+    own: Option<(u32, u32)>,
+) -> Result<()> {
+    copy_entry_impl(src_root, src_rel, dst_root, dst_rel, own, false, true)
 }
 
 /// Copy into a private index. APFS can replace a single-link inode with a new clone.
@@ -656,7 +741,7 @@ pub fn copy_index_entry(
     dst_rel: &str,
     own: Option<(u32, u32)>,
 ) -> Result<()> {
-    copy_entry_impl(src_root, src_rel, dst_root, dst_rel, own, true)
+    copy_entry_impl(src_root, src_rel, dst_root, dst_rel, own, true, false)
 }
 
 fn copy_entry_impl(
@@ -666,6 +751,7 @@ fn copy_entry_impl(
     dst_rel: &str,
     own: Option<(u32, u32)>,
     _replace_index: bool,
+    now: bool,
 ) -> Result<()> {
     let src = src_root.at(src_rel)?;
     let m = fs::symlink_metadata(&src).with_context(|| format!("stat {}", src.display()))?;
@@ -692,7 +778,11 @@ fn copy_entry_impl(
     let s = open_ro(&src)?;
     let finish = |d: &File| -> Result<()> {
         d.set_permissions(fs::Permissions::from_mode(m.mode() & 0o7777))?;
-        set_mtime(d, m.mtime(), m.mtime_nsec())?;
+        if now {
+            set_mtime(d, 0, rustix::fs::UTIME_NOW as i64)?;
+        } else {
+            set_mtime(d, m.mtime(), m.mtime_nsec())?;
+        }
         fchown(d, own)
     };
     #[cfg(target_os = "macos")]
@@ -701,6 +791,35 @@ fn copy_entry_impl(
     }
     // Keep the inode of a file that is there: btrfs then reports an in-place change with byte
     // ranges, and running tools keep their file handles.
+    let fill = |d: &File| -> Result<()> {
+        if crate::storage::clone_file(&s, d).is_err() {
+            let mut s2 = open_ro(&src)?;
+            let mut d2 = d.try_clone()?;
+            d2.set_len(0)?;
+            std::io::copy(&mut s2, &mut d2)?;
+        }
+        Ok(())
+    };
+    // An index file is never written in place: a failed copy would lose the staged version,
+    // and a write would also change every other link to the inode. Publish a new file by rename.
+    if _replace_index {
+        if let Some(old) = t.open_write(dst_rel)? {
+            // btrfs: a reflink swaps the whole content of a single-link file in one step. The
+            // inode stays, and moves are found by inode. Elsewhere the new file gets a new inode.
+            #[cfg(target_os = "linux")]
+            if old.metadata()?.nlink() == 1 && rustix::fs::ioctl_ficlone(&old, &s).is_ok() {
+                return finish(&old);
+            }
+            return t.replace_file_atomic(dst_rel, |d| {
+                fill(d)?;
+                #[cfg(target_os = "linux")]
+                let _ = copy_xattrs(&old, d);
+                #[cfg(not(target_os = "linux"))]
+                let _ = &old;
+                finish(d)
+            });
+        }
+    }
     let (d, cloned) = match t.open_write(dst_rel)? {
         Some(d) => {
             d.set_len(0)?;
@@ -717,10 +836,8 @@ fn copy_entry_impl(
             }
         }
     };
-    if !cloned && crate::storage::clone_file(&s, &d).is_err() {
-        let mut s2 = open_ro(&src)?;
-        let mut d2 = d.try_clone()?;
-        std::io::copy(&mut s2, &mut d2)?;
+    if !cloned {
+        fill(&d)?;
     }
     finish(&d)
 }
@@ -871,6 +988,16 @@ fn walk_folder(root: &Path, rel: &str, f: &mut dyn FnMut(&str, &Meta) -> Result<
 
 /// Write `data` to `path` atomically: a temporary file, `fsync`, rename, `fsync` of the folder.
 pub fn atomic_write(path: &Path, data: &[u8], mode: u32) -> Result<()> {
+    write_durable(path, data, mode, true)
+}
+
+/// Write a rebuildable cache file: published atomically (never a partial file), without
+/// `fsync`. A crash can lose it; the next command makes it again.
+pub fn cache_write(path: &Path, data: &[u8], mode: u32) -> Result<()> {
+    write_durable(path, data, mode, false)
+}
+
+fn write_durable(path: &Path, data: &[u8], mode: u32, durable: bool) -> Result<()> {
     use std::io::Write;
     let dir = path.parent().ok_or_else(|| anyhow!("no parent"))?;
     // A new file with an unpredictable name, never through an existing name or a link.
@@ -883,10 +1010,14 @@ pub fn atomic_write(path: &Path, data: &[u8], mode: u32) -> Result<()> {
     {
         let mut f = OpenOptions::new().write(true).create_new(true).custom_flags(libc::O_NOFOLLOW).mode(mode).open(&tmp)?;
         f.write_all(data)?;
-        f.sync_all()?;
+        if durable {
+            f.sync_all()?;
+        }
     }
     fs::rename(&tmp, path)?;
-    File::open(dir)?.sync_all()?;
+    if durable {
+        File::open(dir)?.sync_all()?;
+    }
     Ok(())
 }
 
@@ -1040,4 +1171,146 @@ pub fn rename_tree(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
     return crate::storage::rename_tree(from.as_ref(), to.as_ref());
     #[cfg(not(feature = "overlayfs"))]
     Ok(fs::rename(from, to)?)
+}
+
+/// Disk space of a folder for `layr du`: the allocated bytes of its files, and the bytes that
+/// no clone, snapshot or state shares, which deleting the folder frees. A file with several
+/// links counts once.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct Space {
+    pub total: u64,
+    pub unique: u64,
+}
+
+/// What one file holds for `layr du`: its allocated bytes, the bytes that no other file shares,
+/// and data that clones of it share, by a key that names that data with its size (the APFS
+/// clone id, or the physical address of a Linux extent).
+pub struct Held<'a> {
+    pub alloc: u64,
+    /// Bytes that the file system reports as not shared (`layr du` of lines).
+    pub own: u64,
+    /// The part of `own` that has no key (`layr du --store` counts it for its part alone).
+    pub exclusive: u64,
+    pub shared: &'a [(u64, u64)],
+}
+
+impl Space {
+    /// Add one file: its own bytes are unique to the folder.
+    pub fn add(&mut self, h: &Held) {
+        self.total += h.alloc;
+        self.unique += h.own;
+    }
+}
+
+/// Visit the files of a folder on APFS: allocated size, private size and clone id of each.
+#[cfg(target_os = "macos")]
+pub fn apfs_visit(root: &Path, f: &mut dyn FnMut(&Held)) -> Result<()> {
+    use std::os::fd::AsFd;
+    fn walk(dir: &File, f: &mut dyn FnMut(&Held), seen: &mut std::collections::HashSet<u64>, buf: &mut Vec<u8>) -> Result<()> {
+        for e in crate::sys::apfs_space_read(dir.as_fd(), buf)? {
+            if e.dir {
+                let flags = rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::NOFOLLOW;
+                match rustix::fs::openat(dir, e.name.as_os_str(), flags, rustix::fs::Mode::empty()) {
+                    Ok(fd) => walk(&File::from(fd), f, seen, buf)?,
+                    Err(rustix::io::Errno::ACCESS) => {}
+                    Err(err) => return Err(err.into()),
+                }
+            } else if e.links <= 1 || seen.insert(e.ino) {
+                // Shared bytes without a clone id get a key of their own file (top bit set).
+                let rest = e.alloc.saturating_sub(e.private);
+                let key = if e.clone != 0 { e.clone } else { e.ino | 1 << 63 };
+                let shared = [(key, rest)];
+                let own = e.private.min(e.alloc);
+                f(&Held { alloc: e.alloc, own, exclusive: own, shared: &shared[..usize::from(rest > 0)] });
+            }
+        }
+        Ok(())
+    }
+    let dir = File::open(root).with_context(|| format!("open {}", root.display()))?;
+    walk(&dir, f, &mut Default::default(), &mut Vec::new())
+}
+
+/// `Space` of a folder on APFS.
+#[cfg(target_os = "macos")]
+pub fn apfs_space(root: &Path) -> Result<Space> {
+    let mut space = Space::default();
+    apfs_visit(root, &mut |h| space.add(h))?;
+    Ok(space)
+}
+
+/// Visit the files of a folder on Linux: the extents of each, shared ones by physical address.
+#[cfg(target_os = "linux")]
+pub fn fiemap_visit(root: &Path, f: &mut dyn FnMut(&Held)) -> Result<()> {
+    fn walk(dir: &Path, f: &mut dyn FnMut(&Held), seen: &mut std::collections::HashSet<(u64, u64)>) -> Result<()> {
+        let entries = match fs::read_dir(dir) {
+            Ok(v) => v,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return Ok(()),
+            Err(e) => return Err(anyhow!("{}: {e}", dir.display())),
+        };
+        for e in entries {
+            let e = e?;
+            let m = e.metadata()?;
+            if m.is_dir() {
+                walk(&e.path(), f, seen)?;
+            } else if m.is_file() && (m.nlink() <= 1 || seen.insert((m.dev(), m.ino()))) {
+                match File::open(e.path()).and_then(|file| crate::sys::fiemap_extents(&file)) {
+                    Ok(extents) => {
+                        let alloc = extents.iter().map(|x| x.1).sum();
+                        // Every extent has a key: ext4 never flags a shared extent, and a file seen
+                        // through an OverlayFS mount is the same extent as its layer file.
+                        let own = extents.iter().filter(|x| !x.2).map(|x| x.1).sum();
+                        let shared: Vec<(u64, u64)> = extents.iter().map(|x| (x.0, x.1)).collect();
+                        f(&Held { alloc, own, exclusive: 0, shared: &shared });
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {}
+                    Err(err) => return Err(anyhow!("{}: {err}", e.path().display())),
+                }
+            }
+        }
+        Ok(())
+    }
+    walk(root, f, &mut Default::default())
+}
+
+/// `Space` of a folder on Linux.
+#[cfg(target_os = "linux")]
+pub fn fiemap_space(root: &Path) -> Result<Space> {
+    let mut space = Space::default();
+    fiemap_visit(root, &mut |h| space.add(h))?;
+    Ok(space)
+}
+
+#[cfg(test)]
+mod range_tests {
+    use super::{copy_index_entry, merged_ranges};
+    use std::fs;
+
+    #[test]
+    fn ranges_merge_and_clip() {
+        let r = [(100, 50), (0, 10), (10, 5), (120, 100), (500, 1), (300, u64::MAX)];
+        assert_eq!(merged_ranges(&r, 400), vec![(0, 15), (100, 120), (300, 100)]);
+        assert_eq!(merged_ranges(&[], 400), vec![]);
+    }
+
+    #[test]
+    fn index_copy_keeps_old_file_and_other_links() {
+        let root = std::env::temp_dir().join(format!("layr-index-copy-{}", crate::ids::new_id()));
+        let (src, dst) = (root.join("src"), root.join("index"));
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(src.join("f"), b"new").unwrap();
+        fs::write(dst.join("f"), b"old").unwrap();
+        fs::hard_link(dst.join("f"), dst.join("g")).unwrap();
+        // A failed write leaves the old version and no temporary file.
+        let t = crate::tree::Tree::open(&dst).unwrap();
+        assert!(t.replace_file_atomic("f", |_| anyhow::bail!("copy failed")).is_err());
+        assert_eq!(fs::read(dst.join("f")).unwrap(), b"old");
+        assert_eq!(fs::read_dir(&dst).unwrap().count(), 2);
+        // A copy publishes a new file: the other link keeps the old content.
+        copy_index_entry(&src, "f", &dst, "f", None).unwrap();
+        assert_eq!(fs::read(dst.join("f")).unwrap(), b"new");
+        assert_eq!(fs::read(dst.join("g")).unwrap(), b"old");
+        assert_eq!(fs::read_dir(&dst).unwrap().count(), 2);
+        fs::remove_dir_all(&root).unwrap();
+    }
 }

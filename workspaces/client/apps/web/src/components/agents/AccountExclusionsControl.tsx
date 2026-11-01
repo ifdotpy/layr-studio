@@ -25,7 +25,7 @@ function EligibilityAccount({
   current: boolean;
   disabled: boolean;
 }) {
-  const { remaining } = useAccountLimitView(account);
+  const { remaining, color } = useAccountLimitView(account);
   const descriptionId = useId();
   const name = accountDisplayName(account);
   const fullName = [account.label, account.email].filter(Boolean).join(" — ");
@@ -56,6 +56,7 @@ function EligibilityAccount({
             </span>
             <AccountRemainingBar
               remaining={remaining}
+              color={color}
               label={`${name} remaining limit`}
             />
           </span>

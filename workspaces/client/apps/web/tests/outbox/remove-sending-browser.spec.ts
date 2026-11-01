@@ -178,10 +178,6 @@ test("remove-sending-browser", async ({ page: fixturePage }) => {
   for (const agent of initial.threads.filter((a) => a.source === "managed"))
     for (const item of (await queue(agent.id)).items)
       await post(standaloneCommand("withdraw", agent.id, { message: item.id }));
-  // Seed persisted pending rows on stopped disposable agents. A held active
-  // turn would still accept current-turn input before removal can inspect it.
-  for (const agent of [lead!, other!])
-    await post(standaloneCommand("stop", agent.id, {}));
   const database = new DatabaseSync(
     join(rustFixtureStateDirectory(evidence), "canvas.sqlite3"),
   );
@@ -196,6 +192,22 @@ test("remove-sending-browser", async ({ page: fixturePage }) => {
       createHash("sha256").update(String(payload)).digest("hex"),
     );
     database.exec("BEGIN IMMEDIATE");
+    // Pause the disposable agents in the store, as the former stop did. A held
+    // active turn would still accept current-turn input before removal can
+    // inspect the seeded rows. Stop only interrupts now, so it cannot do this.
+    for (const agent of [lead!, other!]) {
+      const row = database
+        .prepare("SELECT record FROM runtime_agents WHERE id=?")
+        .get(agent.id);
+      assert.ok(row && typeof row.record === "string");
+      const record = readAgentRecord(row!.record as string);
+      database
+        .prepare("UPDATE runtime_agents SET record=? WHERE id=?")
+        .run(
+          JSON.stringify({ ...record, status: "paused", autoWake: false }),
+          agent.id,
+        );
+    }
     for (const [agent, text, delivery] of [
       [lead!, "Remove one", "current_turn"],
       [lead!, "Remove two", "current_turn"],

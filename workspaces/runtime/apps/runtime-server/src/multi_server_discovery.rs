@@ -13,7 +13,11 @@ use futures_util::future::BoxFuture;
 use rusqlite::{OptionalExtension, params};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use studio_runtime_schema::{multi_server_protocol::ACCESS_PROTOCOL_VERSION, queue_command::Field};
+use studio_runtime_schema::{
+    multi_server_access::{AccessClientKind, AccessClientStatus, PersistedAccessClient},
+    multi_server_protocol::{ACCESS_PROTOCOL_VERSION, NonNegativeNumber},
+    queue_command::Field,
+};
 use studio_runtime_services::{
     multi_server,
     multi_server_auth::{AccessError, refused},
@@ -182,7 +186,10 @@ impl ServerDiscoveryPort for TailscaleServerDiscovery {
         store: Arc<RuntimeStore>,
         identity: &'a Value,
         public_origin: &'a str,
-    ) -> BoxFuture<'a, Result<Value, AccessError>> {
+    ) -> BoxFuture<
+        'a,
+        Result<studio_runtime_schema::multi_server_access::AccessSnapshot, AccessError>,
+    > {
         Box::pin(async move {
             let _guard = DiscoveryPassGuard::acquire(Arc::clone(&self.discovery_lock))?;
             let executable = self.executable.clone();
@@ -323,8 +330,7 @@ impl TailscaleServerDiscovery {
             .await
             .ok()
             .flatten()
-            .and_then(|record| serde_json::from_str::<Value>(&record).ok())
-            .and_then(multi_server_discovery::StoredPeer::from_value)
+            .and_then(|record| multi_server_discovery::StoredPeer::from_raw(&record))
             .is_some_and(|record| record.is_paired());
         if !paired {
             return;
@@ -387,19 +393,19 @@ impl TailscaleServerDiscovery {
                 let Some(raw) = raw else {
                     return Ok::<_, studio_runtime_store::StoreError>(false);
                 };
-                let client: Value = serde_json::from_str(&raw).map_err(|_| {
-                    studio_runtime_store::StoreError::SchemaMismatch(
-                        "invalid stored object runtime_access_clients".into(),
-                    )
-                })?;
-                let Some(mut client) = multi_server_discovery::StoredPeer::from_value(client)
-                else {
+                let Some(mut client) = multi_server_discovery::StoredPeer::from_raw(&raw) else {
                     return Ok(false);
                 };
                 if !client.is_paired() || client.public_key() != peer_public_key {
                     return Ok(false);
                 }
-                client.set_label(saved_label.as_str().unwrap_or_default().to_owned());
+                client
+                    .set_label(saved_label.as_str().unwrap_or_default().to_owned())
+                    .map_err(|_| {
+                        studio_runtime_store::StoreError::SchemaMismatch(
+                            "invalid peer label".into(),
+                        )
+                    })?;
                 tx.execute(
                     "UPDATE runtime_access_clients SET record=?1 WHERE id=?2",
                     params![serde_json::to_string(&client)?, id],
@@ -466,19 +472,14 @@ async fn save_auto_pair(
     store: &RuntimeStore,
     peer: &Value,
     owner: &str,
-    request_id: &str,
-    raw: &[u8],
-    reply: &Value,
+    _request_id: &str,
+    _raw: &[u8],
+    _reply: &Value,
     now: i64,
 ) -> Result<(), AccessError> {
     let id = text(peer, "serverId").to_owned();
-    let url = format!("{}{AUTO_PAIR_PATH}", text(peer, "origin"));
-    let fingerprint = remote_transport::multi_server_request_fingerprint("POST", &url, raw)
-        .map_err(|_| unavailable("The auto-pair response identity is invalid"))?;
     let peer = peer.clone();
-    let reply = reply.clone();
     let owner = owner.to_owned();
-    let request_id = request_id.to_owned();
     store.transaction_with(move |tx| {
         let auto_pair_enabled = tx
             .query_row(
@@ -499,16 +500,8 @@ async fn save_auto_pair(
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
-        let saved = saved_raw
-            .map(|raw| serde_json::from_str::<Value>(&raw))
-            .transpose()
-            .map_err(|_| {
-                studio_runtime_store::StoreError::SchemaMismatch(
-                    "invalid stored object runtime_access_clients".into(),
-                )
-            })?;
-        let existed = saved.is_some();
-        let saved = saved.and_then(multi_server_discovery::StoredPeer::from_value);
+        let existed = saved_raw.is_some();
+        let saved = saved_raw.as_deref().map(|raw| multi_server_discovery::StoredPeer::from_raw(raw).ok_or_else(|| studio_runtime_store::StoreError::SchemaMismatch("invalid stored object runtime_access_clients".into()))).transpose()?;
         if existed
             && (saved.as_ref().is_some_and(|saved| saved.is_revoked())
                 || saved.as_ref().map_or("", |saved| saved.public_key()) != text(&peer, "publicKey")
@@ -518,31 +511,32 @@ async fn save_auto_pair(
                 "auto-paired server identity changed".into(),
             ));
         }
-        let created = saved
-            .as_ref()
-            .and_then(|saved| saved.created())
-            .cloned()
-            .unwrap_or(json!(now));
-        let record = json!({
-            "id": id,
-            "clientId": id,
-            "serverId": id,
-            "kind": "server",
-            "label": peer["label"],
-            "origin": peer["origin"],
-            "publicKey": peer["publicKey"],
-            "tailscaleUser": owner,
-            "status": "paired",
-            "created": created,
-            "lastAccess": null,
-            "revoked": null,
-            "autoPairingRequestId": request_id,
-            "autoPairingHash": fingerprint,
-            "autoPairingReceipt": reply,
-        });
+        let invalid = || studio_runtime_store::StoreError::SchemaMismatch("invalid auto-paired identity".into());
+        let created = match saved.as_ref() { Some(saved) => saved.created().clone(), None => NonNegativeNumber::try_from(serde_json::Number::from(now)).map_err(|_| invalid())? };
+        let mut record = PersistedAccessClient {
+            id: id.clone().try_into().map_err(|_| invalid())?, client_id: id.clone().try_into().map_err(|_| invalid())?,
+            server_id: Field::Value(id.clone()), kind: AccessClientKind::Server,
+            label: text(&peer,"label").to_owned().try_into().map_err(|_| invalid())?,
+            origin: Field::Value(text(&peer,"origin").to_owned()), public_key: text(&peer,"publicKey").to_owned().try_into().map_err(|_| invalid())?,
+            tailscale_user: Field::Value(owner), status: AccessClientStatus::Paired, created,
+            last_access: Field::Null, revoked: Field::Null, last_seen: Field::Missing, auto_pair: Field::Missing,
+            reachability: Field::Missing, alias: Field::Missing, replaced_by: Field::Missing, grant: Field::Missing,
+            pairing_request_id: Field::Missing, pairing_hash: Field::Missing, pairing_receipt: Field::Missing,
+        };
+        if let Some(saved) = saved.as_ref() {
+            record.grant = saved.record().grant.clone();
+            record.alias = saved.record().alias.clone();
+            record.reachability = saved.record().reachability.clone();
+            record.replaced_by = saved.record().replaced_by.clone();
+            record.last_seen = saved.record().last_seen.clone();
+            record.auto_pair = saved.record().auto_pair.clone();
+            record.pairing_request_id = saved.record().pairing_request_id.clone();
+            record.pairing_hash = saved.record().pairing_hash.clone();
+            record.pairing_receipt = saved.record().pairing_receipt.clone();
+        }
         tx.execute(
             "INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",
-            params![id, record.to_string()],
+            params![id, serde_json::to_string(&record)?],
         )?;
         if !existed {
             tx.execute(
@@ -570,10 +564,9 @@ async fn mark_missing_peers_unreachable(
         .await
         .map_err(|_| unavailable("Stored discovery state is unavailable"))?;
     for raw in origins {
-        let peer: Value = serde_json::from_str(&raw)
-            .map_err(|_| unavailable("Stored discovery identity is invalid"))?;
-        let peer = multi_server_discovery::StoredPeer::from_value(peer);
-        let origin = peer.as_ref().map_or("", |peer| peer.origin());
+        let peer = multi_server_discovery::StoredPeer::from_raw(&raw)
+            .ok_or_else(|| unavailable("Stored discovery identity is invalid"))?;
+        let origin = peer.origin();
         if !snapshot.has_candidate(origin) {
             mark_origin_unreachable(store, origin).await?;
         }
@@ -594,12 +587,7 @@ async fn mark_origin_unreachable(store: &RuntimeStore, origin: &str) -> Result<(
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
             for (id, raw) in rows {
-                let peer: Value = serde_json::from_str(&raw).map_err(|_| {
-                    studio_runtime_store::StoreError::SchemaMismatch(
-                        "invalid stored object runtime_access_discovered".into(),
-                    )
-                })?;
-                let mut peer = multi_server_discovery::StoredPeer::from_value(peer).ok_or_else(|| {
+                let mut peer = multi_server_discovery::StoredPeer::from_raw(&raw).ok_or_else(|| {
                     studio_runtime_store::StoreError::SchemaMismatch("invalid stored object runtime_access_discovered".into())
                 })?;
                 peer.mark_unreachable();
@@ -635,7 +623,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     #[tokio::test]
-    async fn auto_pair_registration_preserves_partial_peer_and_created_evidence() {
+    async fn auto_pair_registration_preserves_valid_peers_and_refuses_invalid_records() {
         let root = tempfile::tempdir().unwrap();
         let store = RuntimeStore::open(Some(root.path())).await.unwrap();
         let peer = json!({"serverId":"peer","origin":"https://peer.example","publicKey":"key","label":"Peer"});
@@ -644,26 +632,26 @@ mod tests {
             (None, Some(json!(100)), 1),
             (
                 Some(r#"{"origin":"https://peer.example","publicKey":"key"}"#),
-                Some(json!(100)),
+                None,
                 0,
             ),
             (
                 Some(r#"{"origin":"https://peer.example","publicKey":"key","created":null}"#),
-                Some(Value::Null),
+                None,
                 0,
             ),
             (
                 Some(
                     r#"{"origin":"https://peer.example","publicKey":"key","created":{"opaque":[1]}}"#,
                 ),
-                Some(json!({"opaque":[1]})),
+                None,
                 0,
             ),
             (
                 Some(
                     r#"{"origin":"wrong","origin":"https://peer.example","publicKey":"old","publicKey":"key","created":1,"created":"last"}"#,
                 ),
-                Some(json!("last")),
+                None,
                 0,
             ),
             (
@@ -683,6 +671,20 @@ mod tests {
             ),
             (Some("null"), None, 0),
             (Some("{bad"), None, 0),
+            (
+                Some(
+                    r#"{"id":"peer","clientId":"peer","kind":"server","label":"Peer","created":17,"publicKey":"key","origin":"https://peer.example","status":"revoked"}"#,
+                ),
+                None,
+                0,
+            ),
+            (
+                Some(
+                    r#"{"id":"peer","clientId":"peer","kind":"server","label":"Peer","created":17,"publicKey":"key","origin":"https://peer.example","status":"paired"}"#,
+                ),
+                Some(json!(17)),
+                0,
+            ),
         ];
         for (raw, expected_created, expected_audit) in cases {
             let input = raw.map(str::to_owned);
@@ -964,11 +966,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn discovered_reachability_keeps_partial_records_and_extensions() {
+    async fn discovered_reachability_updates_strict_records() {
         let root = tempfile::tempdir().unwrap();
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.unwrap());
         store.transaction(|tx| {
-            for (id, raw) in [("gone", r#"{"origin":"https://gone.example","status":"discovered","extra":{"x":1}}"#), ("partial", r#"{"origin":null,"status":false}"#), ("live", r#"{"origin":"https://peer.test.ts.net","status":"discovered"}"#)] {
+            for (id, raw) in [("gone", r#"{"id":"gone","clientId":"gone","kind":"server","label":"Gone","created":1,"publicKey":"key","origin":"https://gone.example","status":"discovered"}"#), ("live", r#"{"id":"live","clientId":"live","kind":"server","label":"Live","created":1,"publicKey":"key","origin":"https://peer.test.ts.net","status":"discovered"}"#)] {
                 tx.execute("INSERT INTO runtime_access_discovered(id,record) VALUES(?1,?2)", params![id,raw])?;
             }
             Ok(())
@@ -990,8 +992,6 @@ mod tests {
             .unwrap()
         };
         assert_eq!(get("gone")["status"], "unreachable");
-        assert_eq!(get("gone")["extra"]["x"], 1);
-        assert_eq!(get("partial")["status"], false);
         assert_eq!(get("live")["status"], "discovered");
     }
 
@@ -1036,7 +1036,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn auto_pair_registration_uses_absolute_url_and_rechecks_setting_atomically() {
+    async fn auto_pair_registration_rechecks_setting_and_preserves_grant() {
         let root = tempfile::tempdir().unwrap();
         let store = RuntimeStore::open(Some(root.path())).await.unwrap();
         let peer = json!({
@@ -1107,22 +1107,47 @@ mod tests {
         )
         .await
         .expect("register after re-enabling auto-pair");
-        let expected = remote_transport::multi_server_request_fingerprint(
-            "POST",
-            "https://peer.example/api/multi-server/v1/auto-pair",
-            raw,
-        )
-        .expect("absolute HTTPS request fingerprint");
         let saved: String = store
             .test_reader()
             .unwrap()
             .query_row(
-                "SELECT json_extract(record,'$.autoPairingHash') FROM runtime_access_clients WHERE id='peer'",
+                "SELECT record FROM runtime_access_clients WHERE id='peer'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(saved, expected);
+        let saved =
+            multi_server_discovery::StoredPeer::from_raw(&saved).expect("strict paired client");
+        assert!(saved.is_paired());
+        assert_eq!(saved.public_key(), text(&peer, "publicKey"));
+        store.transaction(|tx| {
+            tx.execute("UPDATE runtime_access_clients SET record=json_set(record,'$.grant','observe','$.pairingRequestId','request','$.pairingHash','hash') WHERE id='peer'", [])?;
+            Ok(())
+        }).await.unwrap();
+        save_auto_pair(
+            &store,
+            &peer,
+            "owner@example.test",
+            "auto-request",
+            raw,
+            &reply,
+            101,
+        )
+        .await
+        .unwrap();
+        let saved: String = store
+            .test_reader()
+            .unwrap()
+            .query_row(
+                "SELECT record FROM runtime_access_clients WHERE id='peer'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let saved: Value = serde_json::from_str(&saved).unwrap();
+        assert_eq!(saved["grant"], "observe");
+        assert_eq!(saved["pairingRequestId"], "request");
+        assert_eq!(saved["pairingHash"], "hash");
     }
 
     #[tokio::test]

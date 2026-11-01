@@ -1,14 +1,8 @@
-import {
-  useServerSync,
-  useServerOutbox,
-} from "../servers/ServerServicesContext";
+import { useServerSync } from "../servers/ServerServicesContext";
 import { useEffect, useRef, useState } from "react";
 import "../api";
 import "../sync/send";
-import {
-  latestMessageReceipt,
-  type MessageReceipt,
-} from "../sync/messageReceipts";
+import { type MessageReceipt } from "../sync/messageReceipts";
 
 export function useMessageReceipts(
   room: string | null,
@@ -17,7 +11,6 @@ export function useMessageReceipts(
   ids: string[],
 ) {
   const { subscribeStateProjection } = useServerSync();
-  const { reconcileOutboxReceipts } = useServerOutbox();
 
   const requested = useRef(ids);
   requested.current = ids;
@@ -52,24 +45,12 @@ export function useMessageReceipts(
         queued = queued
           .then(async () => {
             if (!active || controller.signal.aborted) return;
-            // Publishing delivery can retire the local message and change the
-            // requested IDs, which aborts this effect. Persist the receipt first.
-            await reconcileOutboxReceipts(
-              room,
-              receipts,
-              workspaceId,
-              controller.signal,
-            );
             if (!active || controller.signal.aborted) return;
             setState((previous) => {
               const next = new Map(
                 previous.scope === scope ? previous.receipts : [],
               );
-              for (const receipt of receipts)
-                next.set(
-                  receipt.id,
-                  latestMessageReceipt(next.get(receipt.id), receipt),
-                );
+              for (const receipt of receipts) next.set(receipt.id, receipt);
               // Keep confirmed receipts while retained history still has an old
               // pending record. Bound this cache to the caller's current IDs.
               const keep = new Set(requested.current);
@@ -102,14 +83,7 @@ export function useMessageReceipts(
       controller.abort();
       stop();
     };
-  }, [
-    room,
-    scope,
-    workspaceId,
-    requestedKey,
-    subscribeStateProjection,
-    reconcileOutboxReceipts,
-  ]);
+  }, [room, scope, workspaceId, requestedKey, subscribeStateProjection]);
   return state.scope === scope
     ? state.receipts
     : new Map<string, MessageReceipt>();

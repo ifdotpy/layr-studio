@@ -1,3 +1,5 @@
+import { FrontendLocality } from "../src/generated/api";
+import { LimitColor, RunwayColor } from "../src/generated/api.ts";
 import { spawn } from "node:child_process";
 import {
   SYNC_IDENTITY_PROTOCOL_VERSION,
@@ -415,6 +417,17 @@ export function apiSchemaHandshakeEvent(overrides = {}) {
 
 export function protocol3SseEvent(name: string, value: unknown) {
   return `event: ${name}\ndata: ${JSON.stringify(value)}\n\n`;
+}
+
+/** The `session` event with the full SyncSessionEvent shape the server sends. */
+export function syncSessionSse(sessionId: string, workspaceId: string) {
+  return protocol3SseEvent("session", {
+    sessionId,
+    routes: [],
+    locality: FrontendLocality.local,
+    cachePolicies: [],
+    workspaceId,
+  } satisfies import("../src/generated/api.ts").components["schemas"]["SyncSessionEvent"]);
 }
 
 type FixtureScope = {
@@ -1188,8 +1201,7 @@ export type MonitorEntityDto =
   import("../src/generated/api.ts").components["schemas"]["MonitorEntityDto"];
 export type PeerTeamEntityDto =
   import("../src/generated/api.ts").components["schemas"]["PeerTeamEntityDto"];
-export type RequestEntityDto =
-  import("../src/generated/api.ts").components["schemas"]["RequestEntityDto"];
+export type TestApproval = import("../src/approvals.ts").Approval;
 
 export type TestAgent = AgentEntityDto;
 
@@ -1206,7 +1218,7 @@ export type TestRuntimeView = {
   projects: TestProject[];
   events: EventEntityDto[];
   peerTeams: PeerTeamEntityDto[];
-  requests: RequestEntityDto[];
+  requests: TestApproval[];
   rules: RuleEntityDto[];
   work: WorkEntityDto[];
   viewScopedAgents?: boolean;
@@ -1232,12 +1244,19 @@ export type TestRuntimeView = {
   >;
   terminals?: import("../src/generated/api.ts").components["schemas"]["TerminalEntityDto"][];
   studioErrors?: import("../src/generated/api.ts").components["schemas"]["StudioError"][];
-  rateLimits: AccountRateLimitsDto | null;
+  rateLimits:
+    | AccountRateLimitsDto
+    | import("../src/generated/api.ts").components["schemas"]["RateLimitView"]
+    | null;
   queuesByAgent?: Record<
     string,
     import("../src/generated/api.ts").components["schemas"]["QueueView"]
   >;
-  rateLimitsByAccount: Record<string, AccountRateLimitsDto>;
+  rateLimitsByAccount: Record<
+    string,
+    | AccountRateLimitsDto
+    | import("../src/generated/api.ts").components["schemas"]["RateLimitView"]
+  >;
   modelsByAccount?: Record<
     string,
     import("../src/generated/api.ts").components["schemas"]["ModelEntityDto"][]
@@ -1440,7 +1459,8 @@ export async function readTestState(
     const details = new Map<string, JsonObject>();
     for (const entry of baselines)
       for (const document of entry.entityChanges?.documents || [])
-        if (document.op === "upsert") details.set(document.id, document.value);
+        if (document.op === "upsert" && isJsonObject(document.value))
+          details.set(document.id, document.value);
     entities.set("agentDetail", details);
   }
   const agents = list("agentSummary").map((summary) => ({
@@ -1522,8 +1542,6 @@ const entityWorkspaceKeys: (keyof WorkspaceEntityDto)[] = [
 
 const snapshotOnlyAgentKeys: Set<string> = new Set([
   "activeTools",
-  "compactionsObservedOnly",
-  "complaintsPresented",
   "events",
   "executionSettingsAccountKey",
   "maxAgents",
@@ -1801,6 +1819,12 @@ function entityValuesFromSnapshot(
     id: row.id,
     value: {
       ...row,
+      policy: {
+        blockedBy: [],
+        displayStatus: row.status,
+        acceptAvailable: row.status === "review",
+        gateOverrideRequired: false,
+      },
       results: [],
       decisions: [],
       releases: [],
@@ -1907,7 +1931,58 @@ function entityValuesFromSnapshot(
       : {};
   for (const [account, value] of Object.entries(limits))
     if (isJsonObject(value))
-      values.push({ collection: "rateLimit", id: account, value });
+      values.push({
+        collection: "rateLimit",
+        id: account,
+        value:
+          "observation" in value
+            ? value
+            : {
+                observation: value,
+                projection: {
+                  buckets: {
+                    current: {
+                      buckets: [],
+                      remaining: null,
+                      color: LimitColor.paused,
+                      low: false,
+                    },
+                    next: {
+                      buckets: [],
+                      remaining: null,
+                      color: LimitColor.paused,
+                      low: false,
+                    },
+                    validUntil: null,
+                  },
+                  reset: {
+                    present: false,
+                    accountId: null,
+                    availableCount: null,
+                    countLabel: "Count unavailable",
+                    emptyMessage:
+                      "Reset credit details unavailable. Refresh to check.",
+                    credits: [],
+                  },
+                  runway: {
+                    computedAt: 0,
+                    validUntil: null,
+                    current: {
+                      color: RunwayColor.gray,
+                      days: null,
+                      unlimited: false,
+                      windows: [],
+                    },
+                    next: {
+                      color: RunwayColor.gray,
+                      days: null,
+                      unlimited: false,
+                      windows: [],
+                    },
+                  },
+                },
+              },
+      });
 
   const workspaceSource = {
     ...runtime,
@@ -2129,12 +2204,15 @@ export function handleEntitySyncFixtureRequest(
     workspaceId: string;
     unixSocket?: boolean | undefined;
     versionedResources?: boolean;
+    /** The multi-server discovery snapshot the real server attaches to its resource version. */
+    discoverySnapshot?: () => unknown;
     epoch?: string | undefined;
     onPull?: () => void;
     subscriptionUpdate?:
       | import("../src/generated/api.ts").components["schemas"]["SyncSubscriptionRequest"]
       | undefined;
     progress?: (resource: ResourceRef) => ResourceProgress | undefined;
+    processSnapshot?: () => import("../src/generated/api.ts").components["schemas"]["ProcessListing"];
     onStreamReady?: (
       notify: (
         resources: ResourceRef[],
@@ -2242,6 +2320,29 @@ export function handleEntitySyncFixtureRequest(
         const key = JSON.stringify(resource);
         const next = (resourceRevisions.get(key) || 0) + (advance ? 1 : 0);
         resourceRevisions.set(key, next || 1);
+        // An empty draft baseline lets the client post its unsent edits.
+        if (resource.kind === "drafts")
+          return {
+            resource,
+            revision: next || 1,
+            draftSnapshot: { complete: true, documents: [] },
+          };
+        if (resource.kind === "multi-server" && fixture.discoverySnapshot)
+          return {
+            resource,
+            revision: next || 1,
+            discoverySnapshot: fixture.discoverySnapshot() as NonNullable<
+              FixtureResourceVersions[number]["discoverySnapshot"]
+            >,
+          };
+        if (resource.kind === "processes" && fixture.processSnapshot) {
+          return {
+            resource,
+            revision: next || 1,
+            replyKind: "snapshot",
+            viewSnapshot: { processes: fixture.processSnapshot() },
+          };
+        }
         if (
           resource.kind === "state" &&
           fixture.snapshot.runtime.viewScopedAgents &&
@@ -2337,7 +2438,7 @@ export function handleEntitySyncFixtureRequest(
       "X-Accel-Buffering": "no",
     });
     const sessionId = randomUUID();
-    response.write(protocol3SseEvent("session", { sessionId }));
+    response.write(syncSessionSse(sessionId, identity.workspaceId));
     response.write(apiSchemaHandshakeSse());
 
     const writeFrame = (
@@ -2434,7 +2535,10 @@ export function handleEntitySyncFixtureRequest(
       }
       // Preserve the array observed by the caller's subscription assertions.
       requestedResources.splice(0, requestedResources.length, ...next);
-      writeFrame("subscriptions", { gen: update.gen });
+      writeFrame("subscriptions", {
+        gen: update.gen,
+        cachePolicies: [],
+      } satisfies import("../src/generated/api.ts").components["schemas"]["SyncSubscriptionAck"]);
       if (update.add.length)
         writeFrame("resources", {
           ...initial,

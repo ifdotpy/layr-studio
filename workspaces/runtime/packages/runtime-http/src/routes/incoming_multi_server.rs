@@ -69,11 +69,9 @@ fn link_connection(state: &HttpState, headers: &HeaderMap) -> Option<String> {
 pub(crate) async fn serve(state: HttpState, request: Request<Body>, next: Next) -> Response {
     let mut response = match link_connection(&state, request.headers()) {
         Some(connection) => {
-            LINK_CONNECTION
-                .scope(connection, serve_inner(state, request, next))
-                .await
+            Box::pin(LINK_CONNECTION.scope(connection, serve_inner(state, request, next))).await
         }
-        None => serve_inner(state, request, next).await,
+        None => Box::pin(serve_inner(state, request, next)).await,
     };
     response.headers_mut().insert(
         "access-control-allow-origin",
@@ -190,7 +188,7 @@ async fn serve_inner(state: HttpState, request: Request<Body>, next: Next) -> Re
         return match boundary.discovery_identity(store, &address, &logins).await {
             Ok(mut v) => {
                 if let Some(nonce) = nonce {
-                    let server_id = v["serverId"].as_str().unwrap_or_default();
+                    let server_id = v.identity.server_id.as_str();
                     let Some(message) =
                         studio_runtime_schema::multi_server_protocol::identity_proof_message(
                             server_id, &nonce,
@@ -202,7 +200,7 @@ async fn serve_inner(state: HttpState, request: Request<Body>, next: Next) -> Re
                         );
                     };
                     match credentials.sign(proof_store, message).await {
-                        Ok(proof) => v["proof"] = serde_json::Value::String(proof),
+                        Ok(proof) => v.proof = Some(proof),
                         Err(_) => {
                             return error_response(
                                 StatusCode::SERVICE_UNAVAILABLE,
@@ -211,10 +209,7 @@ async fn serve_inner(state: HttpState, request: Request<Body>, next: Next) -> Re
                         }
                     }
                 }
-                match super::generated_json::<crate::generated::DiscoveryIdentity>(v) {
-                    Ok(v) => Json(v).into_response(),
-                    Err(e) => e.into_response(),
-                }
+                Json(v).into_response()
             }
             Err(e) => failure(e),
         };
@@ -353,6 +348,8 @@ async fn serve_inner(state: HttpState, request: Request<Body>, next: Next) -> Re
     let tracked_request_id = Some(request_id.clone());
     enum IncomingReply {
         Orchestration(studio_runtime_store::multi_server_delivery::RemoteReply),
+        Invite(studio_runtime_schema::multi_server_access::InvitationResponse),
+        Access(studio_runtime_services::multi_server_pairing::AccessReply),
         Other(serde_json::Value),
     }
     let effect = async move {
@@ -371,7 +368,13 @@ async fn serve_inner(state: HttpState, request: Request<Body>, next: Next) -> Re
                 )
             })?;
             let outcome = driver
-                .receive(&principal, request.body(), now as i64)
+                .receive(
+                    &principal,
+                    request.orchestration_body().ok_or_else(|| {
+                        multi_server_auth::refused(400, "invalid_request", "Invalid signed request")
+                    })?,
+                    now as i64,
+                )
                 .await?;
             Ok(IncomingReply::Orchestration(outcome.to_reply(&request_id)))
         } else if is_name {
@@ -384,10 +387,12 @@ async fn serve_inner(state: HttpState, request: Request<Body>, next: Next) -> Re
                 )
                 .await?;
             let label = request
-                .body()
-                .get("label")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
+                .rename_body()
+                .ok_or_else(|| {
+                    multi_server_auth::refused(400, "invalid_request", "Invalid signed request")
+                })?
+                .label
+                .as_str()
                 .to_owned();
             let notification_sink = Arc::clone(&notifications);
             credentials
@@ -438,13 +443,15 @@ async fn serve_inner(state: HttpState, request: Request<Body>, next: Next) -> Re
             studio_runtime_services::multi_server::create_invite(
                 Arc::clone(&store),
                 &identity,
-                request.body(),
+                request.management_body().ok_or_else(|| {
+                    multi_server_auth::refused(400, "invalid_request", "Invalid signed request")
+                })?,
                 &actor,
                 Some(&owner),
             )
             .await
             .map_err(map_invite_error)
-            .map(IncomingReply::Other)
+            .map(IncomingReply::Invite)
         } else {
             match prepared_access.as_ref() {
                 Some(prepared) => boundary.apply_prepared_incoming(&store, prepared).await,
@@ -454,7 +461,7 @@ async fn serve_inner(state: HttpState, request: Request<Body>, next: Next) -> Re
                         .await
                 }
             }
-            .map(IncomingReply::Other)
+            .map(IncomingReply::Access)
         }
     };
     let peer_link_advert = peer_link_advert.clone();
@@ -468,6 +475,20 @@ async fn serve_inner(state: HttpState, request: Request<Body>, next: Next) -> Re
         }
         match result {
             Ok(IncomingReply::Orchestration(value)) => {
+                let mut response = Json(value).into_response();
+                if advertise_link {
+                    add_link_advert(&mut response, peer_link_advert.as_deref());
+                }
+                response
+            }
+            Ok(IncomingReply::Invite(value)) => {
+                let mut response = Json(value).into_response();
+                if advertise_link {
+                    add_link_advert(&mut response, peer_link_advert.as_deref());
+                }
+                response
+            }
+            Ok(IncomingReply::Access(value)) => {
                 let mut response = Json(value).into_response();
                 if advertise_link {
                     add_link_advert(&mut response, peer_link_advert.as_deref());
@@ -490,11 +511,12 @@ async fn serve_inner(state: HttpState, request: Request<Body>, next: Next) -> Re
         }
     };
     if is_mutation {
-        state
-            .run_tracked_mutation(tracked_route, tracked_request_id, async move {
+        Box::pin(
+            state.run_tracked_mutation(tracked_route, tracked_request_id, async move {
                 finish(effect.await)
-            })
-            .await
+            }),
+        )
+        .await
     } else {
         finish(effect.await)
     }

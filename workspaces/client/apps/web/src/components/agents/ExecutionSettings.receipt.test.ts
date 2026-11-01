@@ -1,12 +1,6 @@
-import {
-  AgentSource,
-  AgentStatus,
-  ProviderKind,
-  TransferScope,
-  TransferStatus,
-} from "../../generated/api";
+import { AgentSource, AgentStatus, ProviderKind } from "../../generated/api";
 import { Button, NativeSelect, Switch, Textarea } from "@mantine/core";
-import type { PostBody, PostResult } from "../../apiTypes";
+import type { PostBody } from "../../apiTypes";
 import { ApiError } from "../../api";
 import * as appLog from "../../appLog";
 import { AccountTransferStatus } from "../Accounts";
@@ -308,20 +302,15 @@ afterEach(() => {
   h.emptyCatalog = false;
 });
 
-test("transfer actions retain response identity and retry the same request after a lost response", async () => {
-  const operation = {
+test("transfer actions retry the same request and await streamed progress", async () => {
+  const progress = {
+    kind: "blocked",
     id: "saved-transfer",
-    leadId: initial.id,
     targetAccountKey: "work",
-    scope: TransferScope.team,
-    status: TransferStatus.pending,
-    created: 1,
-    updated: 2,
-    members: {},
-    canRetry: true,
-    blocked: [{ id: "lead", name: "Lead", reason: "Receipt missing" }],
-  } satisfies PostResult<"/api/agents/account-transfer">;
-  const agent: Agent = { ...initial, accountTransfer: operation };
+    reason: "Receipt missing",
+    actions: "retry_cancel",
+  } as const;
+  const agent: Agent = { ...initial, accountTransferProgress: progress };
   const transfer = () => {
     const status = children(render(agent).controls).find(
       (
@@ -331,54 +320,31 @@ test("transfer actions retain response identity and retry the same request after
     );
     return required(status).props;
   };
-  expect(transfer()).toHaveProperty("opened", false);
   h.post.mockRejectedValueOnce(new Error("response lost"));
-  transfer().onAction?.("retry");
+  transfer().onAction("retry");
   await vi.waitFor(() => expect(transfer().pending).toBe(false));
-  expect(transfer().transfer).toBe(operation);
-  expect(h.report).toHaveBeenCalledWith(
-    expect.objectContaining({ level: "error", reason: "response lost" }),
-  );
-  const response = {
-    ...operation,
-    updated: 3,
-    waiting: "Waiting for the current turn",
-  };
-  h.post.mockResolvedValueOnce(response);
-  transfer().onAction?.("retry");
+  h.post.mockResolvedValueOnce({});
+  transfer().onAction("retry");
   await vi.waitFor(() => expect(transfer().pending).toBe(false));
   expect(h.post).toHaveBeenCalledTimes(2);
   expect(h.post.mock.calls[0]).toEqual(h.post.mock.calls[1]);
   expect(h.post).toHaveBeenLastCalledWith("/api/agents/account-transfer", {
     action: "retry",
-    scope: "team",
-    request_id: operation.id,
+    request_id: progress.id,
   });
-  expect(transfer().transfer).toBe(response);
+  expect(transfer().transfer).toBe(progress);
+  expect(h.refresh).not.toHaveBeenCalled();
 });
 
-test("a remote transfer does not open the modal", () => {
-  render(initial);
-  const agent = {
-    ...initial,
-    accountTransfer: {
-      id: "remote",
-      status: TransferStatus.pending,
-      scope: TransferScope.team,
-      blocked: [{ id: "lead", name: "Lead", reason: "Receipt missing" }],
-    },
-  };
-  render(agent);
-  const controls = render(agent).controls;
-  const modal = children(controls).find(
-    (node) => node.type === AccountTransferStatus,
-  );
-  expect(required(modal).props.opened).toBe(false);
-});
-
-test("the transfer modal shows an action failure even without a start retry", () => {
+test("the transfer modal shows an action failure", () => {
   const modal = AccountTransferStatus({
-    transfer: { id: "transfer", status: "pending" },
+    transfer: {
+      kind: "blocked",
+      id: "transfer",
+      targetAccountKey: "work",
+      reason: "Receipt missing",
+      actions: "retry",
+    },
     error: "Cancel response lost",
     onAction: () => {},
   });
@@ -391,32 +357,19 @@ test("the transfer modal shows an action failure even without a start retry", ()
   ).toBe(true);
 });
 
-test("blocked members are reported but provider mismatches are not", () => {
+test("blocked transfer reason is reported", () => {
   render({
     ...initial,
-    accountTransfer: {
+    accountTransferProgress: {
+      kind: "blocked",
       id: "transfer",
-      status: "pending",
-      scope: TransferScope.team,
-      blocked: [{ id: "blocked", name: "Worker", reason: "Receipt missing" }],
-      leftOnSource: [
-        {
-          id: "left",
-          name: "Other",
-          provider: ProviderKind.claude,
-          reason: "Uses claude",
-        },
-      ],
+      targetAccountKey: "work",
+      reason: "Receipt missing",
+      actions: "none",
     },
   });
   expect(h.report).toHaveBeenCalledWith(
-    expect.objectContaining({
-      level: "error",
-      reason: "Worker: Receipt missing",
-    }),
-  );
-  expect(h.report).not.toHaveBeenCalledWith(
-    expect.objectContaining({ reason: expect.stringContaining("Uses claude") }),
+    expect.objectContaining({ level: "error", reason: "Receipt missing" }),
   );
 });
 
@@ -443,12 +396,22 @@ for (const provider of ["Future Provider", "codex", "claude"]) {
 }
 
 const unsupportedAgents: Agent[] = [
-  { ...initial, id: "missing-provider", provider: undefined, yoloMode: false },
-  { ...initial, id: "null-provider", provider: null, yoloMode: false },
+  {
+    ...initial,
+    id: "missing-provider",
+    provider: undefined,
+    permissionMode: "default",
+  },
+  {
+    ...initial,
+    id: "null-provider",
+    provider: null,
+    permissionMode: "default",
+  },
   {
     ...initial,
     id: "unknown-provider",
-    yoloMode: false,
+    permissionMode: "default",
     // @ts-expect-error A future wire identity must not gain Codex permission actions.
     provider: "future-provider",
   },
@@ -537,7 +500,7 @@ for (const agent of unsupportedAgents) {
     ).toEqual([]);
   });
   test(`${agent.id} cannot post Full access from the actual permissions consumer`, async () => {
-    h.post.mockResolvedValue({ ...agent, yoloMode: true });
+    h.post.mockResolvedValue({ ...agent, permissionMode: "bypassPermissions" });
     const permission = children(render(agent, true).controls).find(
       (node): node is ReactElement<SwitchFixtureProps> =>
         node.props["aria-label"] === "Full access without approval",
@@ -551,7 +514,7 @@ for (const agent of unsupportedAgents) {
 
 test("chat settings retains the known Codex permission caller and the Claude settings branch", () => {
   expect(
-    children(chatSettings({ ...initial, yoloMode: false })).some(
+    children(chatSettings({ ...initial, permissionMode: "default" })).some(
       (node) => node.type === ExecutionPermissions,
     ),
   ).toBe(true);
@@ -718,7 +681,7 @@ for (const role of ["implementer", "reviewer"] as const) {
       id: role,
       isLead: false,
       role,
-      yoloMode: false,
+      permissionMode: "default",
       status: AgentStatus.running,
       nextTurnSettingsSupported: true,
     };
@@ -738,7 +701,7 @@ for (const role of ["implementer", "reviewer"] as const) {
     expect(required(required(h.post.mock.calls[0])[1])).not.toHaveProperty(
       "yolo_mode",
     );
-    expect(render(agent).triggerAgent.yoloMode).toBe(false);
+    expect(render(agent).triggerAgent.permissionMode).toBe("default");
     expect(render(agent).model).toBe("Luna 6");
     expect(render(agent).label).toContain("Agent Luna 6 High");
   });
@@ -1006,6 +969,20 @@ test("review settings use their canonical response without a refresh", async () 
   expect(h.refresh).not.toHaveBeenCalled();
 });
 
+test("null review Fast inherits the agent setting", () => {
+  const agent: Agent = {
+    ...initial,
+    fastMode: true,
+    reviewDefaults: { model: null, effort: null, fastMode: null },
+  };
+  const onDraftChange = vi.fn();
+  render(agent, false, onDraftChange).picker.onRole("review");
+  render(agent, false, onDraftChange).picker.onFast();
+  expect(onDraftChange).toHaveBeenCalledWith({
+    review_defaults: { model: null, effort: null, fast_mode: false },
+  });
+});
+
 for (const draft of [false, true]) {
   test(`inherited review reasoning stays hidden while Fast remains editable in ${draft ? "new chat drafts" : "saved settings"}`, async () => {
     const agent: Agent = {
@@ -1236,7 +1213,7 @@ for (const status of ["running", "approval"] as const) {
         ...initial,
         status,
         inFlight: true,
-        yoloMode: false,
+        permissionMode: "default",
       },
       true,
     ).controls;
@@ -1283,7 +1260,7 @@ test("Codex explains when Ask takes effect for a turn started with Full", () => 
       ...initial,
       status: AgentStatus.running,
       inFlight: true,
-      yoloMode: false,
+      permissionMode: "default",
     },
     true,
   ).controls;
@@ -1297,7 +1274,10 @@ test("Codex explains when Ask takes effect for a turn started with Full", () => 
 });
 
 test("Codex describes the selected Ask mode truthfully", () => {
-  const controls = render({ ...initial, yoloMode: false }, true).controls;
+  const controls = render(
+    { ...initial, permissionMode: "default" },
+    true,
+  ).controls;
   const permission = children(controls).find(
     (node): node is ReactElement<SwitchFixtureProps> =>
       node.props["aria-label"] === "Full access without approval",
@@ -1311,8 +1291,8 @@ test("a superseding Ask intent prevents reuse of a lost Full request identity", 
       (node): node is ReactElement<SwitchFixtureProps> =>
         node.props["aria-label"] === "Full access without approval",
     )!;
-  const ask = { ...initial, yoloMode: false };
-  const full = { ...initial, yoloMode: true };
+  const ask = { ...initial, permissionMode: "default" as const };
+  const full = { ...initial, permissionMode: "bypassPermissions" as const };
   h.post.mockRejectedValueOnce(new Error("response lost"));
   control(ask).props.onChange({ currentTarget: { checked: true } });
   await vi.waitFor(() => expect(control(full).props.disabled).toBe(false));

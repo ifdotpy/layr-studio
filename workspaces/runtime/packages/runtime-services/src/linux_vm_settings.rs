@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use studio_runtime_schema::http_bounded_ingress as bounds;
 use thiserror::Error;
 
 use crate::linux_vm_guest::{GuestError, GuestRpc};
@@ -74,7 +75,9 @@ impl VmSettings {
                 "VM CPU count exceeds the available host CPUs.".to_owned(),
             ));
         }
-        if !(GIB..=64 * GIB).contains(&self.memory_bytes) {
+        if !(bounds::VM_MEMORY_MIN_BYTES as u64..=bounds::VM_MEMORY_MAX_BYTES)
+            .contains(&self.memory_bytes)
+        {
             return Err(SettingsError::Invalid(
                 "VM memory must be between 1 and 64 GiB.".to_owned(),
             ));
@@ -88,12 +91,16 @@ impl VmSettings {
                 )));
             }
         }
-        if !(8 * GIB..=128 * GIB).contains(&self.system_disk_bytes) {
+        if !(bounds::VM_SYSTEM_DISK_MIN_BYTES as u64..=bounds::VM_SYSTEM_DISK_MAX_BYTES)
+            .contains(&self.system_disk_bytes)
+        {
             return Err(SettingsError::Invalid(
                 "VM system disk must be between 8 and 128 GiB.".to_owned(),
             ));
         }
-        if !(8 * GIB..=1024 * GIB).contains(&self.data_disk_bytes) {
+        if !(bounds::VM_DATA_DISK_MIN_BYTES as u64..=bounds::VM_DATA_DISK_MAX_BYTES)
+            .contains(&self.data_disk_bytes)
+        {
             return Err(SettingsError::Invalid(
                 "VM data disk must be between 8 and 1024 GiB.".to_owned(),
             ));

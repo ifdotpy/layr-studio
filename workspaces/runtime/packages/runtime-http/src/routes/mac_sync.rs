@@ -170,9 +170,9 @@ async fn lead_for_project(
                     leads.push((
                         agent.status.as_str() != "failed",
                         agent
-                            .extra
-                            .get("created")
-                            .and_then(Value::as_f64)
+                            .created
+                            .value()
+                            .and_then(|number| number.number().as_f64())
                             .unwrap_or(0.0),
                         agent.id.0,
                     ));

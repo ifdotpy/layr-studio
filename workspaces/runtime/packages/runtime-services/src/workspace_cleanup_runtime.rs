@@ -156,7 +156,7 @@ pub async fn cleanup_agent_workspace_with_ports(
     ports: Arc<dyn CleanupPorts>,
 ) -> Result<WorkspaceCleanupResult, WorkspaceCleanupError> {
     let agent = read_agent(&store, agent_id.clone()).await?;
-    if agent.get("deletedAt").is_none() {
+    if agent.get("deletedAt").and_then(Value::as_f64).is_none() {
         return Err(WorkspaceCleanupError::InvalidRecord);
     }
     if action == CleanupAction::Archive && cleanup_archive(&agent).is_none() {

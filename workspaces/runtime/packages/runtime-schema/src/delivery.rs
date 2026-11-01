@@ -5,6 +5,123 @@ use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
+/// The observable server state of one message send.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Eq,
+    PartialEq,
+    Serialize,
+    schemars::JsonSchema,
+    strum::VariantNames,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum MessageSendStatus {
+    /// The server queues the input (workspaces/runtime/packages/runtime-services/src/coordination.rs:423).
+    Queued,
+    /// The scheduler dispatches the input (workspaces/runtime/packages/runtime-store/src/repositories/scheduler/lifecycle.rs:1037).
+    Sending,
+    /// The scheduler confirms delivery (workspaces/runtime/packages/runtime-store/src/repositories/scheduler/lifecycle.rs:3091).
+    Delivered,
+    /// The device records an unconfirmed outcome (workspaces/client/apps/web/src/sync/send.ts:281).
+    Uncertain,
+    /// The device records a refusal (workspaces/client/apps/web/src/sync/send.ts:281).
+    Failed,
+    /// The scheduler cancels the input (workspaces/runtime/packages/runtime-store/src/repositories/scheduler/lifecycle.rs:759).
+    Cancelled,
+    /// The server stores a remote input without local dispatch (workspaces/runtime/packages/runtime-services/src/event_write.rs:522).
+    StoredOnly,
+}
+
+impl MessageSendStatus {
+    /// Decode the existing persisted event and recipient vocabularies at the storage boundary.
+    pub fn from_persisted(value: &str) -> Option<Self> {
+        value
+            .parse::<crate::persistence::EventStatus>()
+            .ok()
+            .map(Self::from)
+            .or_else(|| {
+                value
+                    .parse::<crate::persistence::DeliveryStatus>()
+                    .ok()
+                    .map(Self::from)
+            })
+    }
+}
+
+impl From<crate::persistence::EventStatus> for MessageSendStatus {
+    fn from(value: crate::persistence::EventStatus) -> Self {
+        use crate::persistence::EventStatus;
+        match value {
+            EventStatus::Pending => Self::Queued,
+            EventStatus::Reserved | EventStatus::Dispatching => Self::Sending,
+            EventStatus::Delivered => Self::Delivered,
+            EventStatus::Uncertain => Self::Uncertain,
+            EventStatus::Failed => Self::Failed,
+            EventStatus::Cancelled => Self::Cancelled,
+            EventStatus::StoredOnly => Self::StoredOnly,
+        }
+    }
+}
+
+impl From<crate::persistence::DeliveryStatus> for MessageSendStatus {
+    fn from(value: crate::persistence::DeliveryStatus) -> Self {
+        use crate::persistence::DeliveryStatus;
+        match value {
+            DeliveryStatus::Queued | DeliveryStatus::Pending => Self::Queued,
+            DeliveryStatus::Accepted | DeliveryStatus::Sent | DeliveryStatus::Delivered => {
+                Self::Delivered
+            }
+            DeliveryStatus::StoredOnly => Self::StoredOnly,
+            DeliveryStatus::Uncertain => Self::Uncertain,
+            DeliveryStatus::Failed => Self::Failed,
+            DeliveryStatus::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+/// Public projection of a persisted recipient delivery.
+#[derive(Serialize, schemars::JsonSchema)]
+pub struct MessageRecipientDelivery {
+    pub status: MessageSendStatus,
+    pub error: Option<String>,
+}
+
+/// Serialize recipient maps with the same public status as the enclosing send.
+pub fn serialize_recipient_deliveries<S: serde::Serializer>(
+    deliveries: &std::collections::BTreeMap<String, crate::persistence::RecipientDelivery>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeMap;
+    let mut map = serializer.serialize_map(Some(deliveries.len()))?;
+    for (recipient, delivery) in deliveries {
+        map.serialize_entry(
+            recipient,
+            &MessageRecipientDelivery {
+                status: delivery.status.into(),
+                error: delivery.error.clone(),
+            },
+        )?;
+    }
+    map.end()
+}
+
+#[cfg(test)]
+mod message_send_status_tests {
+    #[test]
+    fn device_only_buffered_status_is_not_a_server_status() {
+        assert!(serde_json::from_str::<super::MessageSendStatus>("\"buffered\"").is_err());
+    }
+
+    #[test]
+    fn unknown_message_send_status_is_rejected() {
+        assert!(serde_json::from_str::<super::MessageSendStatus>("\"future-status\"").is_err());
+    }
+}
+
 /// When an accepted user or agent message may reach the recipient.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -116,15 +233,36 @@ impl DeliveryMoment {
         if let Some(delivery) = Self::metadata_delivery(metadata)? {
             return Ok(delivery);
         }
-        Ok(if kind == "agent_message" {
-            serde_json::from_str::<serde_json::Value>(text)
+        Ok(Self::event_default(kind, text))
+    }
+
+    /// Resolve a typed event's optional timing using the same legacy rules.
+    pub fn for_event_parts(
+        kind: &str,
+        text: &str,
+        delivery: Option<&str>,
+    ) -> Result<Self, InvalidDeliveryMoment> {
+        delivery
+            .map(Self::parse_legacy)
+            .unwrap_or_else(|| Ok(Self::event_default(kind, text)))
+    }
+
+    fn event_default(kind: &str, text: &str) -> Self {
+        #[derive(Deserialize)]
+        struct Importance {
+            importance: Option<String>,
+        }
+        if kind == "agent_message"
+            && serde_json::from_str::<crate::http_ingress::Object<Importance>>(text)
                 .ok()
-                .as_ref()
-                .map(Self::message_default)
-                .unwrap_or_default()
+                .and_then(|value| value.0.importance)
+                .as_deref()
+                == Some("progress")
+        {
+            Self::NextTurn
         } else {
-            Self::default()
-        })
+            Self::CurrentTurn
+        }
     }
 
     /// Resolve parsed message arguments without serializing their importance.
@@ -133,12 +271,26 @@ impl DeliveryMoment {
         Ok(Self::metadata_delivery(Some(args))?.unwrap_or_else(|| Self::message_default(args)))
     }
 
+    /// Resolve a typed message's optional timing and importance.
+    pub fn for_message_parts(
+        importance: Option<&str>,
+        delivery: Option<&str>,
+    ) -> Result<Self, InvalidDeliveryMoment> {
+        delivery
+            .map(Self::parse_legacy)
+            .unwrap_or_else(|| Ok(Self::importance_default(importance)))
+    }
+
     fn message_default(message: &serde_json::Value) -> Self {
-        if message
-            .get("importance")
-            .and_then(serde_json::Value::as_str)
-            == Some("progress")
-        {
+        Self::importance_default(
+            message
+                .get("importance")
+                .and_then(serde_json::Value::as_str),
+        )
+    }
+
+    fn importance_default(importance: Option<&str>) -> Self {
+        if importance == Some("progress") {
             Self::NextTurn
         } else {
             Self::CurrentTurn

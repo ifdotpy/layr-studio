@@ -70,6 +70,12 @@ fn corpus() -> &'static Value {
                         && fields.contains_key("status")
                     {
                         fields.entry("compactions").or_insert(json!(0));
+                        fields.entry("capacity").or_insert_with(|| {
+                            json!(studio_runtime_store::AgentCapacity::default())
+                        });
+                        fields
+                            .entry("naming")
+                            .or_insert_with(|| json!(studio_runtime_store::AgentNaming::default()));
                         for key in [
                             "parentId",
                             "threadId",
@@ -894,6 +900,11 @@ fn review_reservation_rolls_back_and_replays_without_second_child() {
     );
     let mut expected = case["child"].clone();
     expected["nativeReview"]["actionRequestId"] = json!(action_id);
+    // fe1e1f249 adds the canonical permissionMode to newly reserved reviews.
+    expected
+        .as_object_mut()
+        .expect("child fixture")
+        .insert("permissionMode".into(), json!("default"));
     assert_eq!(child, expected);
 }
 

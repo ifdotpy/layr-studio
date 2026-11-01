@@ -95,10 +95,16 @@ impl crate::managed_host_tools::SendPort for ProductionPorts {
                 snapshot.context().agent.as_str(),
                 request_id,
                 studio_runtime_schema::command::Command::Send {
-                    target: target.to_owned(),
+                    target: target
+                        .to_owned()
+                        .try_into()
+                        .map_err(|_| crate::managed_host_tools::Error::Invalid("Invalid target"))?,
                     body: studio_runtime_schema::command::SendBody {
-                        text: text.to_owned(),
-                        assets: Vec::new(),
+                        as_text_file: false,
+                        text: text.to_owned().try_into().map_err(|_| {
+                            crate::managed_host_tools::Error::Invalid("Invalid message text")
+                        })?,
+                        assets: Default::default(),
                         delivery: Some(
                             studio_runtime_schema::delivery::DeliveryMoment::for_event(
                                 "followup",
@@ -111,7 +117,8 @@ impl crate::managed_host_tools::SendPort for ProductionPorts {
                         ),
                     },
                 },
-            );
+            )
+            .map_err(followup_error)?;
             let principal = crate::principal::Principal::Agent {
                 id: snapshot.context().agent.as_str().to_owned(),
                 epoch: self.context.epoch,
@@ -1061,10 +1068,12 @@ pub(super) fn execute(
                 ));
             }
             let mut updated = actor.clone();
-            if updated["manualName"] != true {
+            if updated["naming"] != "manual" {
                 updated["name"] = json!(title);
             }
-            updated["needsTitle"] = json!(false);
+            if updated["naming"] != "manual" {
+                updated["naming"] = json!("automatic");
+            }
             // Python puts the agent row; the projection alone would be lost.
             super::super::storage::save_actor(tx, &updated)?;
             Ok(json!({"title":updated["name"]}))

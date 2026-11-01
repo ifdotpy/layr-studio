@@ -569,10 +569,30 @@ async fn limit_failure_refresh_publishes_account_entity_after_recording_failure_
                 |row| row.get(0),
             )
             .unwrap();
+        #[derive(serde::Deserialize)]
+        struct Entity {
+            value: View,
+        }
+        #[derive(serde::Deserialize)]
+        struct View {
+            observation: studio_runtime_schema::usage_limits::UsageLimitsResponse,
+        }
+        let entity: Entity = serde_json::from_str(&raw).unwrap();
         assert_eq!(
-            serde_json::from_str::<Value>(&raw).unwrap()["value"]["data"]["rateLimits"]["primary"]
-                ["usedPercent"],
-            100.0
+            entity
+                .value
+                .observation
+                .data
+                .unwrap()
+                .0
+                .rate_limits
+                .unwrap()
+                .0
+                .primary
+                .unwrap()
+                .0
+                .used_percent,
+            Some(100.0)
         );
         let cursor = peer
             .frame(
@@ -691,7 +711,7 @@ async fn a_claude_limit_named_only_by_its_notice_waits_and_delivers_held_events(
                     rusqlite::params![agent, stale.to_string()],
                 )?;
                 let mut row = AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
-                row.extra.insert("usageResume".into(), stale);
+                row.set_usage_resume(stale);
                 AgentRepository::put(tx, &row)?;
                 Ok(())
             })
@@ -731,7 +751,7 @@ async fn a_claude_limit_named_only_by_its_notice_waits_and_delivers_held_events(
                 child.parent_id = Some((agent).to_string());
                 child.is_lead = Some(false);
                 child.thread_id = Some("held-child-thread".to_string());
-                child.extra.remove("usageResume");
+                child.usage_resume = studio_runtime_schema::queue_command::Field::Missing;
                 AgentRepository::put(tx, &child)?;
                 let text = json!({"agent":"held-child","name":"Child","status":"completed",
                     "result":"the release notes are ready"});

@@ -203,10 +203,13 @@ pub(crate) fn source_terminal_attempt(
 }
 
 fn archive_previous_repair(agent: &mut Value) -> Result<(), RepairError> {
-    let previous = agent.get("contextRepair").cloned().unwrap_or(Value::Null);
-    if !previous.is_object() {
+    let Some(previous) = agent
+        .get("contextRepair")
+        .filter(|value| value.is_object())
+        .cloned()
+    else {
         return Ok(());
-    }
+    };
     if previous["phase"] == ContextRepairPhase::Completed.as_str()
         || studio_runtime_store::truthy(previous.get("rpcMethod"))
     {
@@ -225,8 +228,6 @@ fn archive_previous_repair(agent: &mut Value) -> Result<(), RepairError> {
             .as_array_mut()
             .ok_or(RepairError::Invalid("agent.contextRepairHistory"))?
             .push(previous);
-    } else {
-        agent["lastContextRepairCheck"] = previous;
     }
     Ok(())
 }
@@ -2025,6 +2026,14 @@ mod repair_history_tests {
     use serde_json::json;
 
     #[test]
+    fn undispatched_repair_does_not_create_an_unused_diagnostic() {
+        let mut agent = serde_json::from_str(r#"{"contextRepair":{"phase":"preparing"}}"#).unwrap();
+        archive_previous_repair(&mut agent).unwrap();
+        assert!(agent.get("lastContextRepairCheck").is_none());
+        assert!(agent.get("contextRepairHistory").is_none());
+    }
+
+    #[test]
     fn completed_repair_is_kept_in_the_history_used_by_late_callbacks() {
         let completed = json!({
             "id":"repair-1",
@@ -2152,7 +2161,6 @@ fn ensure_local_idle(tx: &Transaction<'_>, agent: &Value) -> Result<(), RepairEr
             "status",
             "'starting','running','pending','stopping'",
         ),
-        ("runtime_requests", "status", "'pending'"),
         ("runtime_tool_requests", "stage", "'queued','running'"),
     ] {
         if crate::sync_policy::table_exists(tx, table)? {
@@ -2163,6 +2171,15 @@ fn ensure_local_idle(tx: &Transaction<'_>, agent: &Value) -> Result<(), RepairEr
                 return Err(RepairError::ReceiptHold);
             }
         }
+    }
+    if crate::sync_policy::table_exists(tx, "approvals")?
+        && tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM approvals WHERE agent=?1 AND state='pending')",
+            [agent["id"].as_str()],
+            |row| row.get::<_, bool>(0),
+        )?
+    {
+        return Err(RepairError::ReceiptHold);
     }
     if crate::sync_policy::table_exists(tx, "voice_sessions")? {
         let active:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM voice_sessions WHERE agent=?1 AND state IS NOT NULL AND ended IS NULL)",[agent["id"].as_str()],|r|r.get(0))?;

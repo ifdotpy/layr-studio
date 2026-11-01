@@ -1,3 +1,4 @@
+import { AccessClientStatus, Reachability } from "../generated/api";
 import type { ConnectionHealth } from "../sync/connectionState";
 import { get, post, refreshSession, type GetResult } from "../api";
 import { serverLocalStorage } from "./storage";
@@ -59,15 +60,16 @@ export async function readProjectServers(
     ...snapshot.servers
       .filter(
         (server) =>
-          server.status !== "discovered" && server.status !== "revoked",
+          server.status !== AccessClientStatus.discovered &&
+          server.status !== AccessClientStatus.revoked,
       )
       .map((server) => ({
         id: server.id,
         connection: connections.find((row) => row.id === server.id),
         label: server.label,
         disabled:
-          server.status === "unreachable" ||
-          server.reachability === "unreachable",
+          server.status === AccessClientStatus.unreachable ||
+          server.reachability === Reachability.unreachable,
       })),
   ];
 }

@@ -18,7 +18,6 @@ export function browserIndexedDB(): IDBFactory | undefined {
 }
 
 const outboxPrefixes = {
-  messageSend: "studio-message-send:",
   nativeAction: "studio-native-action:",
   stableRequest: "request-id:",
   chatCreation: "codex-pending-creation:",

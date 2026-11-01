@@ -365,7 +365,7 @@ async fn run_native_action(
                         .map_err(|_| ApiError::internal())?,
                     )
                 };
-            Ok::<_, ApiError>((agent, prepared))
+            Ok::<_, ApiError>((Box::new(agent), prepared))
         })
         .await?;
     let prepared = prepared.prepare().await.map_err(|_| ApiError::internal())?;
@@ -853,9 +853,15 @@ mod native_review_preflight_tests {
                 context: None,
                 request_id: Some(request_id),
             };
-            let error = native_action(State(state.clone()), None, None, None, ApiJson(body))
-                .await
-                .unwrap_err();
+            let error = Box::pin(native_action(
+                State(state.clone()),
+                None,
+                None,
+                None,
+                ApiJson(body),
+            ))
+            .await
+            .unwrap_err();
             assert!(error.message().contains(expected), "{}", error.message());
         }
     }

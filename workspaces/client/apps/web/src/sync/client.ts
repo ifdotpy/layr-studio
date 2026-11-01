@@ -11,6 +11,11 @@ import {
 } from "../generated/sharedValues";
 
 import { LocalCollection, type Row } from "./localCollection";
+import {
+  createSubscriptionCache,
+  subscriptionRows,
+  type SubscriptionCacheStorage,
+} from "./subscriptionCache";
 
 import {
   applyEntityRows,
@@ -33,7 +38,12 @@ import {
 
 import type { SyncEntityPayload } from "../generated/api";
 
-import type { Snapshot, TranscriptPageData } from "../types";
+import type { Snapshot } from "../types";
+import {
+  readTranscriptMeta,
+  TRANSCRIPT_PROJECTION_FORMAT,
+  type TranscriptProjectionMeta,
+} from "./transcriptMetadata";
 
 import {
   entitySequenceInvalidationCovered,
@@ -102,18 +112,6 @@ export type { ResourceRef } from "./subscriptions/events";
 
 type TranscriptSyncPayload = components["schemas"]["TranscriptSyncPayload"];
 
-/** Local transcript metadata format; item hashes remain server-owned. */
-const TRANSCRIPT_PROJECTION_FORMAT = 3;
-/** Read persisted metadata written before the unused item revision map was removed. */
-const LEGACY_TRANSCRIPT_PROJECTION_FORMAT = 2;
-
-export type TranscriptProjectionMeta = {
-  format: typeof TRANSCRIPT_PROJECTION_FORMAT;
-  epoch?: string | undefined;
-  metadata: Omit<Partial<TranscriptPageData>, "items">;
-  order: string[];
-};
-
 type ProjectionState = {
   users: number;
   foreground: number;
@@ -132,6 +130,11 @@ export type { TranscriptProjectionPayload } from "../apiTypes.ts";
 
 import { clearTranscript } from "./transcriptCache";
 export type SyncClientOptions = {
+  cacheStorage?: SubscriptionCacheStorage | undefined;
+  onFreshReceipts?: (
+    workspaceId: string,
+    receipts: import("./messageReceipts").MessageReceipt[],
+  ) => void | Promise<void>;
   api: Pick<
     import("../api").ServerApi,
     | "syncGet"
@@ -176,6 +179,19 @@ export function createSyncClient(options: SyncClientOptions) {
   }
 
   let pending: ReturnType<typeof open> | undefined;
+  let subscriptionCache: ReturnType<typeof createSubscriptionCache> | undefined;
+  let cachePolicySession = {};
+  async function freshReceipts(
+    workspaceId: string,
+    documents: components["schemas"]["SyncEntity"][],
+  ) {
+    const receipts = documents.flatMap((row) =>
+      row.op === "upsert" && row.collection === "messageReceipt"
+        ? [row.value]
+        : [],
+    );
+    if (receipts.length) await options.onFreshReceipts?.(workspaceId, receipts);
+  }
 
   async function open() {
     const cached = saved<string>("codex-sync-workspace", "");
@@ -241,6 +257,12 @@ export function createSyncClient(options: SyncClientOptions) {
         ),
       ),
     };
+    if (options.cacheStorage)
+      subscriptionCache = createSubscriptionCache(
+        options.cacheStorage,
+        db.projections,
+        workspaceId,
+      );
     db.projections.$.subscribe((event) => {
       const doc = event.documentData;
       if (doc.id.startsWith("transcript:") && doc.id.split(":").length === 2)
@@ -405,6 +427,7 @@ export function createSyncClient(options: SyncClientOptions) {
 
   async function readSubscriptionCursor(resource: ResourceRef) {
     const { db, workspaceId } = await syncDatabase();
+    await subscriptionCache?.load(resource);
     if (resource.kind === "state") {
       // Both paginated bootstrap/recovery and inline state deliveries own this
       // checkpoint. A separate per-ref row cannot prove a pull's applied base.
@@ -448,6 +471,19 @@ export function createSyncClient(options: SyncClientOptions) {
         return undefined;
     }
     return cursor;
+  }
+
+  async function cacheSubscription(resource: ResourceRef) {
+    const cache = subscriptionCache;
+    if (!cache || !cache.canSave(resource)) return;
+    const cursor = await readSubscriptionCursor(resource);
+    if (!cursor) return;
+    const { db } = await syncDatabase();
+    cache.save(
+      resource,
+      cursor,
+      await subscriptionRows(resource, db.projections),
+    );
   }
 
   async function persistSubscriptionCursor(
@@ -765,6 +801,11 @@ export function createSyncClient(options: SyncClientOptions) {
       }
       await persistSubscriptionCursor(resource, interval.cursor, isCurrent);
     });
+    if (!isCurrent()) return;
+    for await (const page of interval.pages()) {
+      if (!isCurrent()) return;
+      await freshReceipts(workspaceId, page.documents);
+    }
   }
 
   async function persistResourceEntityChanges(
@@ -1006,6 +1047,12 @@ export function createSyncClient(options: SyncClientOptions) {
         isCurrent,
         event.epoch,
       );
+    }
+    if (!isCurrent()) return;
+    for (const entry of event.resourceVersions) {
+      if (!isCurrent()) return;
+      if (entry.entityChanges)
+        await freshReceipts(workspaceId, entry.entityChanges.documents);
     }
   }
 
@@ -1266,29 +1313,6 @@ export function createSyncClient(options: SyncClientOptions) {
     }
     const { items: _items, ...metadata } = value;
     return metadata;
-  }
-
-  function readTranscriptMeta(
-    payload: string,
-  ): TranscriptProjectionMeta | null {
-    try {
-      const value = JSON.parse(payload);
-      if (
-        (value?.format === TRANSCRIPT_PROJECTION_FORMAT ||
-          value?.format === LEGACY_TRANSCRIPT_PROJECTION_FORMAT) &&
-        value.metadata &&
-        Array.isArray(value.order)
-      )
-        return {
-          format: TRANSCRIPT_PROJECTION_FORMAT,
-          epoch: value.epoch,
-          metadata: value.metadata,
-          order: value.order,
-        };
-    } catch {
-      return null;
-    }
-    return null;
   }
 
   async function cacheStoredTranscript(
@@ -2543,6 +2567,29 @@ export function createSyncClient(options: SyncClientOptions) {
   }
   return {
     syncDatabase,
+    cacheSubscription,
+    setCachePolicies(
+      decisions: components["schemas"]["SubscriptionCacheDecision"][],
+    ) {
+      const session = cachePolicySession;
+      const apply = () => {
+        if (session !== cachePolicySession) return;
+        for (const decision of decisions)
+          void subscriptionCache
+            ?.setPolicy(decision.resource, decision.policy)
+            .catch(() => {});
+      };
+      if (subscriptionCache) apply();
+      else
+        void syncDatabase()
+          .then(apply)
+          .catch(() => {});
+    },
+    clearCachePolicies() {
+      cachePolicySession = {};
+      subscriptionCache?.clearPolicies();
+    },
+    disposeCache: () => subscriptionCache?.stop(),
     applyCommandRows,
     persistResourceEntityChanges,
     persistStagedEntityTransfer,
@@ -2583,6 +2630,8 @@ const defaultSyncClient = createSyncClient({
   databaseSuffix: serverDatabaseSuffix,
 });
 export const {
+  setCachePolicies,
+  clearCachePolicies,
   syncDatabase,
   applyCommandRows,
   persistResourceEntityChanges,

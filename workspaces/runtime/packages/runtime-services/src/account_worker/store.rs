@@ -418,8 +418,7 @@ fn completed_attempt(
     attempt: &studio_runtime_store::StartAttemptView,
 ) -> bool {
     attempt.turn_id.as_deref().is_some_and(|turn| {
-        !turn.is_empty()
-            && agent.extra.get("lastCompletedTurn").and_then(Value::as_str) == Some(turn)
+        !turn.is_empty() && agent.last_completed_turn.value().map(String::as_str) == Some(turn)
     })
 }
 /// Hold reason of an agent whose thread request outcome is unknown after a
@@ -1264,7 +1263,10 @@ pub(super) async fn submitted(
                             == Some(i.attempt_id.as_str())
                         && agent.start_attempt.as_ref().and_then(|a| a.submitted) == Some(false)
                         && agent.auto_wake == Some(true)
-                        && agent.extra.get("nativeFailureHold").unwrap_or(&Value::Null) != true
+                        && !matches!(
+                            agent.native_failure_hold.value(),
+                            Some(studio_runtime_store::NativeFailureHold::Boolean(true))
+                        )
                 }
             })
         })?;
@@ -2373,7 +2375,7 @@ fn record_manual_release_closure(
         return Ok(false);
     };
     let mut statement = tx.prepare_cached(
-        "SELECT record FROM runtime_agents WHERE thread_id=?1 AND account_key=?2 ORDER BY rowid LIMIT 2",
+        "SELECT record FROM runtime_agents WHERE id IN (SELECT chat FROM sessions WHERE thread_id=?1 AND state<>'ended') AND account_key=?2 ORDER BY rowid LIMIT 2",
     )?;
     let rows = statement
         .query_map(params![thread, identity.account], |row| {
@@ -2902,8 +2904,11 @@ pub(super) fn interrupt_intent(
     let Some(a) = AgentRepository::get(connection, &AgentId::from(agent))? else {
         return Ok(None);
     };
-    let provider = studio_runtime_providers::ProviderKind::of_field(a.extra.get("provider"))
-        .map_err(|_| WorkerError::PreparationRefused("agent/provider".into()))?;
+    let provider = a
+        .provider
+        .value()
+        .copied()
+        .ok_or_else(|| WorkerError::PreparationRefused("agent/provider".into()))?;
     let Some(attempt) = a.start_attempt.as_ref() else {
         return Ok(None);
     };
@@ -3088,6 +3093,48 @@ mod effect_obligation_tests {
     }
 
     #[test]
+    fn journal_resumes_after_the_supervisor_ack_of_a_new_generation() {
+        let mut db = rusqlite::Connection::open_in_memory().expect("database");
+        studio_runtime_store::receipt_schema::create(&db).expect("schema");
+        db.execute("INSERT INTO runtime_account_state VALUES('account',8,7,'connection',0,0,'null',NULL,NULL)", []).expect("account");
+        let tx = db.transaction().expect("transaction");
+        for (generation, cursor, ready) in [(6, 90, true), (7, 91, true), (7, 93, true)] {
+            let row = OutboxRow {
+                id: journal_operation("account", generation, cursor),
+                kind: OutboxKind::JournalEntry,
+                owner_kind: OwnerKind::Account,
+                owner_id: "account".into(),
+                request_id: None,
+                signature: cursor.to_string(),
+                status: OutboxStatus::Committed,
+                account: Some("account".into()),
+                stream_id: Some("account".into()),
+                generation: Some(generation as i64),
+                ordinal: Some(cursor as i64),
+                next_at: None,
+                payload: JournalSettlement {
+                    cursor,
+                    digest: cursor.to_string(),
+                    ready,
+                    committed: ready,
+                    notification: None,
+                },
+                created: 1,
+            };
+            Outbox::put(&tx, &row).expect("journal");
+        }
+        compact(&tx, "account", 7).expect("compact");
+        assert_eq!(checkpoint(&tx, "account", 7).expect("ack"), 0);
+        seed_ack(&tx, "account", 7, 89).expect("supervisor ack");
+        compact(&tx, "account", 7).expect("compact");
+        assert_eq!(
+            checkpoint(&tx, "account", 7).expect("ack"),
+            91,
+            "the stream resumes after the supervisor ACK; a gap still holds"
+        );
+    }
+
+    #[test]
     fn mixed_generation_journal_compacts_only_the_contiguous_ready_prefix() {
         let mut db = rusqlite::Connection::open_in_memory().expect("database");
         studio_runtime_store::receipt_schema::create(&db).expect("schema");
@@ -3232,6 +3279,22 @@ fn current_stream_generation(
         return Err(invalid(scope));
     }
     Ok(generation)
+}
+
+/// A new generation's ACK starts at 0, but the supervisor stream keeps its cursors
+/// and resumes after what it acknowledged. Raise the ACK to that cursor so
+/// compaction can reach the entries after it.
+pub(super) fn seed_ack(
+    tx: &studio_runtime_store::Transaction<'_>,
+    journal_scope: &str,
+    generation: u64,
+    acknowledged: u64,
+) -> Result<(), WorkerError> {
+    if acknowledged > checkpoint(tx, journal_scope, generation)? {
+        set_checkpoint(tx, journal_scope, generation, acknowledged)?;
+        super::retained::storage::checkpoint_covered(tx, journal_scope, generation, acknowledged)?;
+    }
+    Ok(())
 }
 
 fn set_checkpoint(
@@ -4504,10 +4567,12 @@ fn hold_before_claim(
 ) -> Result<(), WorkerError> {
     let mut agent = AgentRepository::get(tx, &AgentId::from(id))?.ok_or_else(|| invalid(id))?;
     agent.status = studio_runtime_store::AgentStatus::Waiting;
-    agent.extra.insert("nativeFailureHold".into(), json!(true));
+    agent.set_native_failure_hold(true);
     agent.auto_wake = Some(false);
     agent.in_flight = Some(false);
-    agent.extra.insert("error".into(), json!(reason));
+    agent.error = studio_runtime_schema::queue_command::Field::Value(
+        studio_runtime_schema::provider_errors::AgentError::Message((reason).to_string()),
+    );
     agent.start_outcome_hold = Some(studio_runtime_store::StoredStartOutcomeHold::Known(
         studio_runtime_store::StartOutcomeHold::Held {
             reason: Some(reason.into()),

@@ -1,7 +1,13 @@
-import { AgentSource, AgentStatus } from "../generated/api";
+import { RunwayColor } from "../generated/api";
+import type { UsageAccount } from "../components/Usage";
+import type { components } from "../generated/api";
+import { retainUsageAccounts } from "./snapshotSelection";
+import { AgentSource, AgentStatus, RoomKind } from "../generated/api";
 import { describe, expect, it } from "vitest";
 import { createChatSnapshotSelector } from "./snapshotSelection";
 import type { Agent, Snapshot } from "../types";
+import { backgroundDisplay } from "../components/componentTestFixtures";
+import { simpleRequest } from "../approvalFixtures";
 
 function fixture(): Snapshot {
   const threads: Agent[] = [
@@ -56,6 +62,23 @@ function changeAgent(
 }
 
 describe("chat snapshot selection", () => {
+  it("shows rooms in the server-projected lead scope", () => {
+    const data = fixture();
+    data.runtime.rooms = [
+      {
+        id: "room",
+        kind: RoomKind.private,
+        members: ["worker"],
+        leadIds: ["other"],
+        name: "Room",
+      },
+    ];
+    const select = createChatSnapshotSelector();
+    expect(select(data, "lead")!.runtime.rooms).toEqual([]);
+    expect(select(data, "other")!.runtime.rooms.map((room) => room.id)).toEqual(
+      ["room"],
+    );
+  });
   it("retains the selected tree after unrelated updates but publishes its real changes", () => {
     const select = createChatSnapshotSelector(true);
     const initial = fixture();
@@ -86,16 +109,18 @@ describe("chat snapshot selection", () => {
       ...initial,
       runtime: {
         ...initial.runtime,
-        requests: [{ id: "other-input", agent: "other" }],
+        requests: [simpleRequest({ id: "other-input", agent: "other" })],
       },
     };
     expect(select(another, "lead")).toBe(chosen);
-    const question = { id: "selected-input", agent: "worker" };
-    const globalQuestion = { id: "global-input" };
+    const question = simpleRequest({ id: "selected-input", agent: "worker" });
+    const globalQuestion = simpleRequest({ id: "global-input", agent: "" });
     const monitor = {
       id: "monitor",
       agent: "worker",
       status: "running" as const,
+      created: 1,
+      display: backgroundDisplay({ kind: "monitor", kindLabel: "monitor" }),
     };
     const next = select(
       {
@@ -162,4 +187,32 @@ describe("chat snapshot selection", () => {
     expect(next.token).toBe("new-token");
     expect(next.runtime.connected).toBe(false);
   });
+});
+
+it("updates a retained account when its server runway changes", () => {
+  const state: components["schemas"]["WeeklyRunwayState"] = {
+    color: RunwayColor.gray,
+    days: null,
+    unlimited: false,
+    windows: [],
+  };
+  const runway = {
+    computedAt: 100,
+    validUntil: 110,
+    current: state,
+    next: state,
+  };
+  const first: UsageAccount = {
+    key: "a",
+    label: "A",
+    limits: null,
+    loading: false,
+    reload: () => {},
+    runway,
+  };
+  const second: UsageAccount = {
+    ...first,
+    runway: { ...runway, computedAt: 101 },
+  };
+  expect(retainUsageAccounts([first], [second])[0]).toBe(second);
 });

@@ -1003,7 +1003,7 @@ async fn a_lead_prepared_with_the_old_progress_file_resumes_its_thread() {
                 .transaction_with(move |tx| {
                     let mut row =
                         AgentRepository::get(tx, &AgentId::from(record_id.as_str()))?.unwrap();
-                    row.extra.insert("yoloMode".into(), json!(false));
+                    row.permission_mode = Some(studio_runtime_schema::claude_permissions::PermissionMode::Default);
                     row.extra
                         .insert("nativeRoleGuidance".into(), json!(old_role));
                     let versions =
@@ -1131,7 +1131,7 @@ async fn cold_catalog_refreshes_and_wakes_without_an_external_command() {
             store
                 .transaction_with(move |tx| {
                     let mut row = AgentRepository::get(tx, &AgentId::from(id.as_str()))?.unwrap();
-                    row.extra.remove("nativeEffort");
+                    row.native_effort = studio_runtime_schema::queue_command::Field::Missing;
                     AgentRepository::put(tx, &row)?;
                     Ok(())
                 })
@@ -1184,9 +1184,8 @@ pub(super) async fn scenario_workspace_retry_wakes_after_restart() {
                     owner.id = AgentId::from("workspace-owner");
                     owner.status = studio_runtime_store::AgentStatus::Waiting;
                     owner.auto_wake = Some(false);
-                    owner
-                        .extra
-                        .insert("workspaceOperation".into(), json!("capture"));
+                    owner.workspace_operation =
+                        studio_runtime_schema::queue_command::Field::Value("capture".into());
                     AgentRepository::put(tx, &owner)?;
                     Ok(())
                 })
@@ -1216,7 +1215,8 @@ pub(super) async fn scenario_workspace_retry_wakes_after_restart() {
                 .transaction_with(move |tx| {
                     let mut owner =
                         AgentRepository::get(tx, &AgentId::from("workspace-owner"))?.unwrap();
-                    owner.extra.remove("workspaceOperation");
+                    owner.workspace_operation =
+                        studio_runtime_schema::queue_command::Field::Missing;
                     AgentRepository::put(tx, &owner)?;
                     Ok(())
                 })
@@ -1304,9 +1304,8 @@ async fn workspace_pending_wakes_when_the_blocking_owner_commits() {
                     owner.id = AgentId::from("workspace-owner");
                     owner.status = studio_runtime_store::AgentStatus::Waiting;
                     owner.auto_wake = Some(false);
-                    owner
-                        .extra
-                        .insert("workspaceOperation".into(), json!("capture"));
+                    owner.workspace_operation =
+                        studio_runtime_schema::queue_command::Field::Value("capture".into());
                     AgentRepository::put(tx, &owner)?;
                     Ok(())
                 })
@@ -1340,7 +1339,8 @@ async fn workspace_pending_wakes_when_the_blocking_owner_commits() {
                 .transaction_with(move |tx| {
                     let mut owner =
                         AgentRepository::get(tx, &AgentId::from("workspace-owner"))?.unwrap();
-                    owner.extra.remove("workspaceOperation");
+                    owner.workspace_operation =
+                        studio_runtime_schema::queue_command::Field::Missing;
                     AgentRepository::put(tx, &owner)?;
                     Ok(())
                 })

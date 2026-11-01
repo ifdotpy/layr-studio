@@ -11,6 +11,16 @@ pub enum Grant {
 }
 
 impl Grant {
+    pub fn from_access_record(
+        record: Option<&studio_runtime_schema::multi_server_access::PersistedAccessClient>,
+    ) -> Self {
+        match record.and_then(|record| record.grant.value()) {
+            Some(studio_runtime_schema::multi_server_access::AccessGrant::Observe) => Self::Observe,
+            Some(studio_runtime_schema::multi_server_access::AccessGrant::Full) | None => {
+                Self::Full
+            }
+        }
+    }
     /// A trust-list record without a `grant` field is `Full` (the default at pairing).
     pub fn from_record(record: &serde_json::Value) -> Self {
         match record.get("grant").and_then(serde_json::Value::as_str) {
@@ -125,6 +135,21 @@ pub fn access(principal: &Principal, class: CommandClass) -> Access {
     }
 }
 
+/// Only a paired device has a remote frontend cache.
+pub fn frontend_locality(
+    principal: &Principal,
+) -> studio_runtime_schema::sync_protocol::FrontendLocality {
+    use studio_runtime_schema::sync_protocol::FrontendLocality;
+    match principal {
+        Principal::Device { .. } => FrontendLocality::Remote,
+        Principal::Owner
+        | Principal::Peer { .. }
+        | Principal::Agent { .. }
+        | Principal::Federated { .. }
+        | Principal::Policy => FrontendLocality::Local,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,6 +160,18 @@ mod tests {
             id: "d".into(),
             grant,
         }
+    }
+
+    #[test]
+    fn paired_device_is_remote_and_owner_is_local() {
+        assert_eq!(
+            frontend_locality(&Principal::Owner),
+            studio_runtime_schema::sync_protocol::FrontendLocality::Local
+        );
+        assert_eq!(
+            frontend_locality(&device(Grant::Full)),
+            studio_runtime_schema::sync_protocol::FrontendLocality::Remote
+        );
     }
 
     #[test]

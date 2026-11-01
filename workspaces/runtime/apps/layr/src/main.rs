@@ -19,6 +19,7 @@ mod cache_overlay;
 mod changes;
 mod cmd;
 mod db;
+mod dedup;
 mod diff;
 mod disk;
 mod fsutil;
@@ -27,6 +28,7 @@ mod ids;
 use layr_store::http;
 mod ignore_rules;
 mod lineops;
+mod linepaths;
 mod merge;
 mod model;
 mod oci;
@@ -40,6 +42,7 @@ mod radar;
 mod recv;
 mod repo;
 mod revs;
+mod rootcheck;
 mod secrets;
 #[cfg(target_os = "linux")]
 mod send_cache;
@@ -68,6 +71,14 @@ use std::collections::HashMap;
 
 fn main() {
     let mut argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv.first().map(String::as_str) == Some("__empty-trash") && argv.len() == 2 {
+        // The trash of a store, emptied in the background after a command (`store::Lock`).
+        if let Err(e) = crate::store::empty_trash_process(std::path::Path::new(&argv[1])) {
+            eprintln!("layr empty trash: {e:#}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if argv.first().map(String::as_str) == Some("__registry-http") {
         let result = (|| -> anyhow::Result<()> {
             anyhow::ensure!(argv.len() == 3, "invalid internal registry arguments");
@@ -155,10 +166,24 @@ fn main() {
         },
         _ => {}
     }
+    if matches!(argv.first().map(String::as_str), Some("init" | "daemon")) {
+        // Before the store opens: the override applies to the process that opens the store.
+        rootcheck::take_allow_flag(&mut argv);
+    }
     if let Some(command) = argv.first() {
         if !cmd::COMMANDS.contains(&command.as_str()) {
             eprintln!("layr: '{command}' is not a layr command. See 'layr help'.");
             std::process::exit(1);
+        }
+    }
+    if argv.first().map(String::as_str) == Some("retest") {
+        // Runs in the caller's process: it starts cargo and takes minutes, which the daemon must not do.
+        match layr_retest::main(&argv[1..]) {
+            Ok(code) => std::process::exit(code),
+            Err(error) => {
+                eprintln!("layr retest: {error:#}");
+                std::process::exit(1);
+            }
         }
     }
     if argv.first().map(String::as_str) == Some("person") {

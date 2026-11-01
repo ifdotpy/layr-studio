@@ -40,10 +40,6 @@ const ACCESS_NONCES: &[TableRequirement] = &[TableRequirement {
     name: "runtime_access_nonces",
     columns: &["client", "nonce", "created"],
 }];
-const ACCESS_OUTBOUND: &[TableRequirement] = &[TableRequirement {
-    name: "runtime_access_outbound",
-    columns: &["server", "request_id", "hash", "record"],
-}];
 const FEDERATION_IDENTITY: &[TableRequirement] = &[TableRequirement {
     name: "runtime_federation_identity",
     columns: &["id", "record"],
@@ -64,12 +60,7 @@ pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     triggers: &[],
     conditional_triggers: &[],
     connection_functions: &[],
-    bootstrap_tables: &[
-        ACCESS_CLIENTS[0],
-        ACCESS_NONCES[0],
-        ACCESS_OUTBOUND[0],
-        FEDERATION_IDENTITY[0],
-    ],
+    bootstrap_tables: &[ACCESS_CLIENTS[0], ACCESS_NONCES[0], FEDERATION_IDENTITY[0]],
     bootstrap_triggers: &[],
     bootstrap_connection_functions: &[],
 };

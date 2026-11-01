@@ -15,7 +15,7 @@ use super::retained::{RequestActor, RequestResult, RetainedSessionPort, SessionR
 use crate::recovery_history::ConnectionScope;
 use serde_json::{Value, json};
 use std::sync::Arc;
-use studio_runtime_providers::{Method, ProviderKind};
+use studio_runtime_providers::Method;
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, RuntimeStore, SchedulerRepository,
 };
@@ -439,7 +439,6 @@ async fn request(
 /// The disconnect receipt of a turn that a stop ended without a provider
 /// request, on this provider generation, and not yet ended by a worker.
 fn stopped_turn(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
-    let extra = &agent.extra;
     let receipt = agent.disconnect_recovery.as_deref()?;
     let turn = receipt.turn_id.as_deref().filter(|turn| !turn.is_empty())?;
     let thread = receipt
@@ -475,12 +474,14 @@ fn stopped_turn(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
         // A delete tombstone clears the turn id; the epoch still names the stop.
         || agent.turn_id.as_deref().is_some_and(|current| current != turn)
         || agent.thread_id.as_deref() != Some(thread)
-        || extra.get("lastCompletedTurn").and_then(Value::as_str) == Some(turn)
+        || agent.last_completed_turn.value().map(String::as_str) == Some(turn)
     {
         return None;
     }
-    let terminals = ProviderKind::of_field(extra.get("provider"))
-        .ok()
+    let terminals = agent
+        .provider
+        .value()
+        .copied()
         .and_then(studio_runtime_providers::stop_terminals_method);
     let signature = studio_runtime_store::sha256_hex(
         json!([agent.id.0, epoch, generation, thread, turn])
@@ -501,7 +502,6 @@ fn stopped_turn(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
 /// worker settled: the stop found no live connection for it. A disconnect
 /// receipt that already ended this turn owns it instead.
 fn unsettled_stop(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
-    let extra = &agent.extra;
     let attempt = agent.start_attempt.as_ref()?;
     let interrupt = attempt.interrupt.as_ref()?;
     let ticket = interrupt.request_ticket.as_deref()?;
@@ -534,12 +534,14 @@ fn unsettled_stop(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
         // A delete tombstone clears the turn id; the epoch still names the stop.
         || agent.turn_id.as_deref().is_some_and(|current| current != turn)
         || agent.thread_id.as_deref() != Some(thread)
-        || extra.get("lastCompletedTurn").and_then(Value::as_str) == Some(turn)
+        || agent.last_completed_turn.value().map(String::as_str) == Some(turn)
     {
         return None;
     }
-    let terminals = ProviderKind::of_field(extra.get("provider"))
-        .ok()
+    let terminals = agent
+        .provider
+        .value()
+        .copied()
         .and_then(studio_runtime_providers::stop_terminals_method);
     Some(StoppedTurn {
         agent: agent.id.0.clone(),
@@ -559,14 +561,21 @@ fn ended_turn(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
     stopped_turn(agent, generation).or_else(|| unsettled_stop(agent, generation))
 }
 
+/// Candidate agents of an ended turn. A recovery-enabled chat with no unfinished
+/// turn is an ended turn; the turn rows decide busy, not the agent `in_flight` column.
+fn stopped_turn_candidates_sql() -> String {
+    format!(
+        "SELECT id FROM runtime_agents WHERE account_key=?1 AND ((EXISTS(SELECT 1 FROM chats ch WHERE ch.id=runtime_agents.id AND ch.auto_wake=0) AND has_disconnect_recovery=1 AND NOT {busy}) OR json_extract(record,'$.startAttempt.interrupt.outcome') IN ('unknown','unsent'))",
+        busy = studio_runtime_store::domain::chat_busy_sql("runtime_agents.id"),
+    )
+}
+
 fn stopped_turns(
     tx: &rusqlite::Transaction<'_>,
     account: &str,
     generation: u64,
 ) -> Result<Vec<StoppedTurn>, studio_runtime_store::StoreError> {
-    let mut statement = tx.prepare_cached(
-        "SELECT id FROM runtime_agents WHERE account_key=?1 AND ((EXISTS(SELECT 1 FROM chats ch WHERE ch.id=runtime_agents.id AND ch.auto_wake=0) AND has_disconnect_recovery=1 AND COALESCE(in_flight,0)=0) OR json_extract(record,'$.startAttempt.interrupt.outcome') IN ('unknown','unsent'))",
-    )?;
+    let mut statement = tx.prepare_cached(&stopped_turn_candidates_sql())?;
     let ids = statement
         .query_map([account], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
@@ -750,11 +759,60 @@ mod stop_epoch_tests {
     }
 
     #[test]
+    fn unsettled_stop_uses_typed_provider_and_completed_turn() {
+        let mut agent = staged(4, 4);
+        assert!(unsettled_stop(&agent, 3).unwrap().terminals.is_some());
+        agent.last_completed_turn =
+            studio_runtime_schema::queue_command::Field::Value("turn".into());
+        assert!(unsettled_stop(&agent, 3).is_none());
+    }
+
+    #[test]
     fn an_unsettled_stop_names_the_epoch_that_ran_the_turn() {
         // A stop that only interrupts leaves the epoch; a pause committed the next one.
         for (agent_epoch, attempt_epoch, found) in [(4, 4, true), (5, 4, true), (6, 4, false)] {
             let turn = unsettled_stop(&staged(agent_epoch, attempt_epoch), 3);
             assert_eq!(turn.map(|turn| turn.epoch), found.then_some(attempt_epoch));
         }
+    }
+}
+
+#[cfg(test)]
+mod busy_candidate_tests {
+    use super::*;
+
+    #[test]
+    fn recovery_candidates_exclude_busy_chats() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(studio_runtime_store::agent_columns::agent_table_sql())
+            .unwrap();
+        db.execute_batch(&studio_runtime_store::domain::tables_sql())
+            .unwrap();
+        for id in ["busy", "idle"] {
+            let record = json!({"id":id,"provider":"codex","accountKey":"acct","status":"idle",
+                "inFlight":true,"disconnectRecovery":{}});
+            db.execute(
+                "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                rusqlite::params![id, record.to_string()],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO chats(id,state,status,auto_wake) VALUES(?1,'idle','idle',0)",
+                [id],
+            )
+            .unwrap();
+        }
+        db.execute(
+            "INSERT INTO turns(id,chat,state) VALUES('t1','busy','starting')",
+            [],
+        )
+        .unwrap();
+        let mut statement = db.prepare(&stopped_turn_candidates_sql()).unwrap();
+        let ids = statement
+            .query_map(["acct"], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(ids, ["idle"]);
     }
 }

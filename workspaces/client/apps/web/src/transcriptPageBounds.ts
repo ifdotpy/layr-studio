@@ -1,4 +1,5 @@
 import type { Message } from "./types";
+import { isMessagePending } from "./messageSendStatus.ts";
 
 export const MAX_TRANSCRIPT_PAGE_ITEMS = 240;
 export const MAX_TRANSCRIPT_PAGE_BYTES = 4_000_000;
@@ -43,12 +44,18 @@ export function updateLiveTranscriptPage(
     // ranges are contiguous. Optimistic queue rows can span a history gap.
     const authoritative = new Set(
       liveItems
-        .filter((item) => !item.pending && item.materialized !== false)
+        .filter(
+          (item) =>
+            !isMessagePending(item) &&
+            !item.streamPending &&
+            item.materialized !== false,
+        )
         .map((item) => item.id),
     );
     const overlaps = page.items.some(
       (item) =>
-        !item.pending &&
+        !isMessagePending(item) &&
+        !item.streamPending &&
         item.materialized !== false &&
         authoritative.has(item.id),
     );
@@ -65,7 +72,8 @@ export function updateLiveTranscriptPage(
       page.items.filter(
         (item) =>
           present.has(item.id) ||
-          (!item.pending &&
+          (!isMessagePending(item) &&
+            !item.streamPending &&
             item.materialized !== false &&
             Number(item.at ?? item.created ?? 0) < firstAt),
       ),
