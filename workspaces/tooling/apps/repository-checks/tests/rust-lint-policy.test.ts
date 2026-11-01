@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -319,6 +320,42 @@ function absoluteRerunPaths(output: string): string[] {
     .filter((line) => /^cargo:rerun-if-changed=(\/|[A-Za-z]:[\\/])/.test(line));
 }
 
+type BuildOutput = { name: string; modified: number; output: string };
+function latestBuildOutputs(outputs: BuildOutput[]): BuildOutput[] {
+  const latest = new Map<string, BuildOutput>();
+  for (const entry of outputs) {
+    const prefix = entry.name.replace(/-[0-9a-f]{16}$/, "");
+    if (!latest.has(prefix) || entry.modified > latest.get(prefix)!.modified)
+      latest.set(prefix, entry);
+  }
+  return [...latest.values()];
+}
+
+test("build output selection ignores stale outputs and rejects a newer bad output", () => {
+  const old = {
+    name: "studio-test-1234567890abcdef",
+    modified: 1,
+    output: "cargo:rerun-if-changed=/repo/old",
+  };
+  const current = {
+    name: "studio-test-fedcba0987654321",
+    modified: 2,
+    output: "cargo:rerun-if-changed=relative",
+  };
+  assert.deepEqual(
+    latestBuildOutputs([old, current]).flatMap((entry) =>
+      absoluteRerunPaths(entry.output),
+    ),
+    [],
+  );
+  assert.deepEqual(
+    latestBuildOutputs([current, { ...old, modified: 3 }]).flatMap((entry) =>
+      absoluteRerunPaths(entry.output),
+    ),
+    [old.output],
+  );
+});
+
 // Static view of a build script: it must not print a path built from an absolute base.
 function absoluteRerunSources(source: string): string[] {
   return source
@@ -361,18 +398,28 @@ test("build scripts print relative rerun-if-changed paths", () => {
   // The schema script rewrites the generator output, so also check recorded outputs of this
   // checkout (paths inside the repository only) when a build exists.
   const builds = path.join(root, "target/debug/build");
-  if (existsSync(builds))
-    for (const name of readdirSync(builds)) {
+  if (existsSync(builds)) {
+    const outputs = readdirSync(builds).flatMap((name) => {
       // tauri-build prints absolute paths and has no option to change that (docs/testing.md).
-      if (name.startsWith("studio-native-client-")) continue;
+      if (name.startsWith("studio-native-client-")) return [];
       const output = path.join(builds, name, "output");
-      if (existsSync(output))
-        assert.deepEqual(
-          absoluteRerunPaths(readFileSync(output, "utf8")).filter((line) =>
-            line.slice("cargo:rerun-if-changed=".length).startsWith(root),
-          ),
-          [],
-          name,
-        );
-    }
+      return existsSync(output)
+        ? [
+            {
+              name,
+              modified: statSync(output).mtimeMs,
+              output: readFileSync(output, "utf8"),
+            },
+          ]
+        : [];
+    });
+    for (const entry of latestBuildOutputs(outputs))
+      assert.deepEqual(
+        absoluteRerunPaths(entry.output).filter((line) =>
+          line.slice("cargo:rerun-if-changed=".length).startsWith(root),
+        ),
+        [],
+        entry.name,
+      );
+  }
 });
