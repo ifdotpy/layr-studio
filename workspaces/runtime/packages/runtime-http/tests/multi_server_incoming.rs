@@ -337,6 +337,16 @@ async fn paired_fake_servers_create_and_recover_the_same_invitation() {
     serde_json::from_slice::<studio_runtime_http::generated::InvitationResponse>(&first_body)
         .expect("signed invitation response matches the generated contract");
     let first: Value = serde_json::from_slice(&first_body).expect("first invitation JSON");
+    let mut fractional = first.clone();
+    fractional["expires"] = serde_json::json!(1234.5);
+    fractional["invitation"]["expires"] = serde_json::json!(1234.5);
+    serde_json::from_value::<studio_runtime_http::generated::InvitationResponse>(fractional)
+        .expect("fractional Unix-second expiry matches the generated HTTP contract");
+    let snapshot =
+        studio_runtime_services::multi_server::snapshot(&receiver_store, &receiver_identity)
+            .await
+            .expect("new invite is visible in snapshot");
+    let _: studio_runtime_http::generated::AccessSnapshot = snapshot;
     assert_eq!(
         first["invitation"]["serverId"],
         receiver_identity["serverId"]

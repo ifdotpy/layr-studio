@@ -2643,135 +2643,66 @@ export interface components {
       /** Sequence */
       sequence: number;
     };
-    /** AccessClient */
     AccessClient: {
-      /**
-       * Alias
-       * @default null
-       */
-      alias?: null | string | undefined;
-      /**
-       * Autopair
-       * @default null
-       */
+      alias?: string | null | undefined;
       autoPair?: boolean | null | undefined;
-      /** Clientid */
       clientId: string;
-      /** Created */
+      /** @description Creation time in Unix seconds, including fractional seconds. */
       created: number;
-      /** Id */
       id: string;
-      /**
-       * Kind
-       * @enum {string}
-       */
-      kind: "ui" | "server";
-      /** Label */
+      kind: components["schemas"]["AccessClientKind"];
       label: string;
-      /** Lastaccess */
-      lastAccess: null | number;
-      /**
-       * Lastseen
-       * @default null
-       */
-      lastSeen?: null | number | undefined;
-      /** Origin */
-      origin: null | string;
-      /** Publickey */
+      /** @description Last access in Unix seconds, including fractional seconds. */
+      lastAccess?: number | null | undefined;
+      /** @description Discovery time in Unix seconds, including fractional seconds. */
+      lastSeen?: number | null | undefined;
+      origin?: string | null | undefined;
       publicKey: string;
-      /**
-       * Reachability
-       * @default null
-       */
-      reachability?:
-        | ("reachable" | "unreachable" | "unknown")
-        | null
-        | undefined;
-      /**
-       * Replacedby
-       * @description The server identity that succeeds this lost identity.
-       * @default null
-       */
-      replacedBy?: null | string | undefined;
-      /** Revoked */
-      revoked: null | number;
-      /** Serverid */
-      serverId: null | string;
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: "paired" | "revoked" | "discovered" | "unreachable";
-      /**
-       * Tailscaleuser
-       * @description The Tailscale owner; null for the previous identity of this server after a historical identity replacement.
-       */
-      tailscaleUser: null | string;
+      reachability?: components["schemas"]["Reachability"] | null | undefined;
+      replacedBy?: string | null | undefined;
+      /** @description Revocation time in Unix seconds, including fractional seconds. */
+      revoked?: number | null | undefined;
+      serverId?: string | null | undefined;
+      status: components["schemas"]["AccessClientStatus"];
+      tailscaleUser?: string | null | undefined;
     };
-    /** AccessInvitation */
+    /** @enum {string} */
+    AccessClientKind: "ui" | "server";
+    /** @enum {string} */
+    AccessClientStatus: "paired" | "revoked" | "discovered" | "unreachable";
     AccessInvitation: {
-      /** Expires */
+      /** @description Expiry in Unix seconds, including fractional seconds. */
       expires: number;
-      /** Inviteid */
       inviteId: string;
-      /** Label */
       label: string;
-      /** Origin */
       origin: string;
-      /**
-       * Protocol
-       * @constant
-       */
+      /** @constant */
       protocol: 1;
-      /** Publickey */
       publicKey: string;
-      /** Serverid */
       serverId: string;
-      /** Tailscaleuser */
       tailscaleUser: string;
-      /** Token */
       token: string;
     };
-    /** AccessSettings */
     AccessSettings: {
-      /**
-       * Aliases
-       * @default {}
-       */
+      /** @default {} */
       aliases?:
         | {
             [key: string]: string;
           }
         | undefined;
-      /** Autopair */
       autoPair: boolean;
-      /**
-       * Autoupdate
-       * @description Install a newer build that a paired server runs (docs/peer-updates.md).
-       * @default true
-       */
+      /** @default true */
       autoUpdate?: boolean | undefined;
     };
-    /** AccessSnapshot */
     AccessSnapshot: {
-      /** Clients */
       clients: components["schemas"]["AccessClient"][];
       identity: components["schemas"]["ServerIdentity"];
-      /**
-       * Identityalerts
-       * @description Warnings about references to previous server identities.
-       * @default []
-       */
+      /** @default [] */
       identityAlerts?: components["schemas"]["IdentityAlert"][] | undefined;
-      /** Invites */
       invites: components["schemas"]["InviteSummary"][];
-      /**
-       * Protocol
-       * @constant
-       */
+      /** @constant */
       protocol: 1;
-      /** Servers */
-      servers: components["schemas"]["DiscoveredServer"][];
+      servers: components["schemas"]["AccessClient"][];
       settings: components["schemas"]["AccessSettings"];
     };
     /**
@@ -12659,76 +12590,7 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
-    /**
-     * DiscoveredServer
-     * @description Stored discovery record; ``ServerDiscovery.servers`` passes it through.
-     */
-    DiscoveredServer: {
-      /**
-       * Alias
-       * @default null
-       */
-      alias?: null | string | undefined;
-      /**
-       * Autopair
-       * @default null
-       */
-      autoPair?: boolean | null | undefined;
-      /** Clientid */
-      clientId: string;
-      /** Created */
-      created: number;
-      /** Id */
-      id: string;
-      /**
-       * Kind
-       * @enum {string}
-       */
-      kind: "ui" | "server";
-      /** Label */
-      label: string;
-      /** Lastaccess */
-      lastAccess: null | number;
-      /**
-       * Lastseen
-       * @default null
-       */
-      lastSeen?: null | number | undefined;
-      /** Origin */
-      origin: null | string;
-      /** Publickey */
-      publicKey: string;
-      /**
-       * Reachability
-       * @default null
-       */
-      reachability?:
-        | ("reachable" | "unreachable" | "unknown")
-        | null
-        | undefined;
-      /**
-       * Replacedby
-       * @description The server identity that succeeds this lost identity.
-       * @default null
-       */
-      replacedBy?: null | string | undefined;
-      /** Revoked */
-      revoked: null | number;
-      /** Serverid */
-      serverId: null | string;
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: "paired" | "revoked" | "discovered" | "unreachable";
-      /**
-       * Tailscaleuser
-       * @description The Tailscale owner; null for the previous identity of this server after a historical identity replacement.
-       */
-      tailscaleUser: null | string;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
-    };
+    DiscoveredServer: components["schemas"]["AccessClient"];
     /** DiscoverServers */
     DiscoverServers: {
       /**
@@ -14023,25 +13885,15 @@ export interface components {
         [key: string]: number;
       };
     };
-    /**
-     * IdentityAlert
-     * @description A server identity change that leaves live references to the lost identity.
-     */
     IdentityAlert: {
-      /**
-       * Code
-       * @enum {string}
-       */
-      code: "peer_identity_changed" | "local_identity_changed";
-      /** Detail */
+      code: components["schemas"]["IdentityAlertCode"];
       detail: string;
-      /** Newserverid */
       newServerId: string;
-      /** Oldserverid */
       oldServerId: string;
-      /** Origin */
-      origin: null | string;
+      origin?: string | null | undefined;
     };
+    /** @enum {string} */
+    IdentityAlertCode: "peer_identity_changed" | "local_identity_changed";
     IdleCompactionSettings: {
       /** @default 150000 */
       minTokens: number;
@@ -14099,30 +13951,20 @@ export interface components {
       /** Threadid */
       threadId: string;
     };
-    /** InvitationResponse */
     InvitationResponse: {
-      /** Expires */
+      /** @description Expiry in Unix seconds, including fractional seconds. */
       expires: number;
       invitation: components["schemas"]["AccessInvitation"];
     };
-    /**
-     * InviteStatus
-     * @enum {string}
-     */
+    /** @enum {string} */
     InviteStatus: "open" | "used";
-    /** InviteSummary */
     InviteSummary: {
-      /** Created */
+      /** @description Creation time in Unix seconds, including fractional seconds. */
       created: number;
-      /** Expires */
+      /** @description Unix seconds, including fractional seconds. */
       expires: number;
-      /** Inviteid */
       inviteId: string;
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: "open" | "used";
+      status: components["schemas"]["InviteStatus"];
     };
     JsonObjectResponse: {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
@@ -19000,6 +18842,8 @@ export interface components {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
     RateLimitWindowDto: components["schemas"]["RateLimitWindow"];
+    /** @enum {string} */
+    Reachability: "reachable" | "unreachable" | "unknown";
     /** ReadStateBody */
     ReadStateBody: {
       /** Expected Revision */
@@ -21421,18 +21265,12 @@ export interface components {
         | null
         | undefined;
     };
-    /** ServerIdentity */
     ServerIdentity: {
-      /** Label */
       label: string;
-      /** Origin */
-      origin: null | string;
-      /** Publickey */
+      origin: string | null;
       publicKey: string;
-      /** Serverid */
       serverId: string;
-      /** Tailscaleuser */
-      tailscaleUser: null | string;
+      tailscaleUser: string | null;
     };
     /** ServerIdentityResponse */
     ServerIdentityResponse: {
@@ -38648,6 +38486,15 @@ export type WorkReleaseEntityDto =
 export type WorkResultEntityDto = components["schemas"]["WorkResultEntityDto"];
 export type WorkspaceEntityDto = components["schemas"]["WorkspaceEntityDto"];
 export type SyncEntityPayload = components["schemas"]["SyncEntityPayload"];
+export const AccessClientKind = { ui: "ui", server: "server" } as const;
+export type AccessClientKind = components["schemas"]["AccessClientKind"];
+export const AccessClientStatus = {
+  paired: "paired",
+  revoked: "revoked",
+  discovered: "discovered",
+  unreachable: "unreachable",
+} as const;
+export type AccessClientStatus = components["schemas"]["AccessClientStatus"];
 export const AccountStatus = {
   ready: "ready",
   signedOut: "signedOut",
@@ -38960,6 +38807,11 @@ export const HttpErrorKind = {
   unclassified: "unclassified",
 } as const;
 export type HttpErrorKind = components["schemas"]["HttpErrorKind"];
+export const IdentityAlertCode = {
+  peer_identity_changed: "peer_identity_changed",
+  local_identity_changed: "local_identity_changed",
+} as const;
+export type IdentityAlertCode = components["schemas"]["IdentityAlertCode"];
 export const InviteStatus = { open: "open", used: "used" } as const;
 export type InviteStatus = components["schemas"]["InviteStatus"];
 export const LimitColor = {
@@ -39234,6 +39086,12 @@ export const RadioStatus = {
   blocked: "blocked",
 } as const;
 export type RadioStatus = components["schemas"]["RadioStatus"];
+export const Reachability = {
+  reachable: "reachable",
+  unreachable: "unreachable",
+  unknown: "unknown",
+} as const;
+export type Reachability = components["schemas"]["Reachability"];
 export const RecoveryOutcome = {
   completed: "completed",
   failed: "failed",

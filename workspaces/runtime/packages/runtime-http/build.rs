@@ -107,6 +107,73 @@ fn main() -> Result<(), Box<dyn Error>> {
             .remove(name)
             .ok_or("missing draft ingress schema")?;
     }
+    for (name, owner) in [
+        (
+            "AccessSnapshot",
+            "studio_runtime_schema::multi_server_access::AccessSnapshot",
+        ),
+        (
+            "AccessClient",
+            "studio_runtime_schema::multi_server_access::PersistedAccessClient",
+        ),
+        (
+            "DiscoveredServer",
+            "studio_runtime_schema::multi_server_access::PersistedAccessClient",
+        ),
+        (
+            "InviteSummary",
+            "studio_runtime_schema::multi_server_access::InviteSummary",
+        ),
+        (
+            "AccessInvitation",
+            "studio_runtime_schema::multi_server_access::AccessInvitation",
+        ),
+        (
+            "InvitationResponse",
+            "studio_runtime_schema::multi_server_access::InvitationResponse",
+        ),
+        (
+            "AccessSettings",
+            "studio_runtime_schema::multi_server_access::AccessSettings",
+        ),
+        (
+            "ServerIdentity",
+            "studio_runtime_schema::multi_server_access::AccessIdentity",
+        ),
+        (
+            "IdentityAlert",
+            "studio_runtime_schema::multi_server_access::IdentityAlert",
+        ),
+        (
+            "IdentityAlertCode",
+            "studio_runtime_schema::multi_server_access::IdentityAlertCode",
+        ),
+        (
+            "AccessClientKind",
+            "studio_runtime_schema::multi_server_access::AccessClientKind",
+        ),
+        (
+            "AccessClientStatus",
+            "studio_runtime_schema::multi_server_access::AccessClientStatus",
+        ),
+        (
+            "Reachability",
+            "studio_runtime_schema::multi_server_access::Reachability",
+        ),
+        (
+            "InviteStatus",
+            "studio_runtime_schema::multi_server_protocol::InviteStatus",
+        ),
+    ] {
+        analysis
+            .schemas
+            .get_mut(name)
+            .ok_or("missing access response schema")?
+            .schema_type = SchemaType::Primitive {
+            rust_type: owner.into(),
+            serde_with: None,
+        };
+    }
     // The OpenAPI leaves own integer bounds. Preserve JSON number spellings
     // such as 7.0; the pull-output ingress validates them before typed decoding.
     for (name, owner) in [

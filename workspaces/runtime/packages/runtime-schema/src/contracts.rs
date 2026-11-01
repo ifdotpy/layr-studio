@@ -1285,6 +1285,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         }
     }
     crate::records::refresh_openapi(&mut openapi)?;
+    crate::multi_server_access::refresh_openapi(&mut openapi);
     crate::multi_server_protocol::refresh_openapi(&mut openapi);
     openapi["components"]["schemas"]["BackgroundShellPolicySettings"]["properties"]["quietThresholdMs"]
         ["not"] = serde_json::json!({"minimum":1,"maximum":crate::shell_policy::QUIET_MIN_MS - 1});
@@ -1526,6 +1527,10 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-annotation-record.schema.json".into(),
             text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-annotation-record.schema.json", &serde_json::to_string_pretty(&crate::annotation_record::schema()).map_err(|error| error.to_string())?)?,
+        },
+        Rendered {
+            path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-access-invite.schema.json".into(),
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-access-invite.schema.json", &serde_json::to_string_pretty(&crate::multi_server_protocol::invite_schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-terminal-record.schema.json".into(),
