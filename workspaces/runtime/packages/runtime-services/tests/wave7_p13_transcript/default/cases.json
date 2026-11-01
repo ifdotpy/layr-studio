@@ -149,8 +149,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -206,8 +205,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -251,8 +249,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -305,8 +302,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -350,8 +346,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -404,8 +399,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -475,8 +469,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -526,8 +519,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       }
@@ -928,8 +920,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -985,8 +976,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -1030,8 +1020,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -1084,8 +1073,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -1129,8 +1117,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -1183,8 +1170,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -1254,8 +1240,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -1305,8 +1290,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       }
@@ -1711,8 +1695,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -1771,8 +1754,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -1816,8 +1798,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -1870,8 +1851,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -1915,8 +1895,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -1969,8 +1948,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -2042,8 +2020,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -2094,8 +2071,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       }
@@ -2500,8 +2476,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -2560,8 +2535,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -2605,8 +2579,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -2659,8 +2632,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -2704,8 +2676,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -2758,8 +2729,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -2831,8 +2801,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       },
@@ -2883,8 +2852,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       }
@@ -3302,8 +3270,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       }
@@ -3313,7 +3280,7 @@
       "documents": [
         {
           "id": "transcript:agent",
-          "payload": "{\"items\": [{\"id\": \"agent:old-0\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 0\", \"truncated\": false, \"at\": 100.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-1\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 1\", \"truncated\": false, \"at\": 101.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-2\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 2\", \"truncated\": false, \"at\": 102.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-3\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 3\", \"truncated\": false, \"at\": 103.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-4\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 4\", \"truncated\": false, \"at\": 104.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-5\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 5\", \"truncated\": false, \"at\": 105.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-6\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 6\", \"truncated\": false, \"at\": 106.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-7\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 7\", \"truncated\": false, \"at\": 107.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:input\", \"role\": \"user\", \"title\": \"You\", \"text\": \"Needle submitted input\", \"truncated\": false, \"at\": 200.0, \"turnId\": \"turn\", \"inputs\": [{\"id\": \"input\", \"at\": 200.0, \"kind\": \"user\", \"text\": \"Needle submitted input\", \"truncated\": false, \"assets\": [], \"requestedDelivery\": \"current_turn\", \"clientMessageId\": \"input\", \"deliveryStatus\": \"delivered\", \"materialized\": true, \"deliveryError\": null}], \"turnStatus\": \"ended\"}, {\"id\": \"agent:answer\", \"role\": \"assistant\", \"title\": \"Assistant\", \"text\": \"Needle streamed answer\", \"truncated\": false, \"at\": 300.0, \"streaming\": true, \"turnId\": \"turn\", \"phase\": null, \"turnStatus\": \"ended\"}, {\"id\": \"agent:command\", \"role\": \"output\", \"title\": \"commandExecution\", \"text\": \"{\\\"id\\\": \\\"command\\\", \\\"type\\\": \\\"commandExecution\\\", \\\"exitCode\\\": 0, \\\"aggregatedOutput\\\": \\\"needle tool output\\\", \\\"outputTruncated\\\": false, \\\"durationMs\\\": 0}\", \"truncated\": false, \"at\": 300.0, \"toolStatus\": \"completed\", \"turnId\": \"turn\", \"turnStatus\": \"ended\"}, {\"id\": \"agent:compact\", \"role\": \"output\", \"title\": \"contextCompaction\", \"text\": \"{\\\"id\\\": \\\"compact\\\", \\\"type\\\": \\\"contextCompaction\\\", \\\"durationMs\\\": 0}\", \"truncated\": false, \"at\": 300.0, \"toolStatus\": \"completed\", \"turnId\": \"turn\", \"turnStatus\": \"ended\"}, {\"id\": \"agent:pending\", \"role\": \"user\", \"title\": \"You\", \"text\": \"pending receipt needle\", \"at\": 500.0, \"materialized\": false, \"assets\": [], \"requestedDelivery\": \"current_turn\", \"clientMessageId\": \"pending\", \"deliveryStatus\": \"queued\", \"deliveryError\": null}], \"truncated\": false, \"nextCursor\": null, \"nextAfterCursor\": null, \"historyVersion\": \"thread:None\", \"unavailable\": null, \"agent\": {\"id\": \"agent\", \"status\": \"approval\", \"activity\": {\"phase\": \"writing\", \"at\": 300.0}, \"inFlight\": true, \"contextUsage\": null, \"compactions\": 1, \"compactionsObservedOnly\": null}}",
+          "payload": "{\"items\": [{\"id\": \"agent:old-0\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 0\", \"truncated\": false, \"at\": 100.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-1\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 1\", \"truncated\": false, \"at\": 101.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-2\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 2\", \"truncated\": false, \"at\": 102.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-3\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 3\", \"truncated\": false, \"at\": 103.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-4\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 4\", \"truncated\": false, \"at\": 104.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-5\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 5\", \"truncated\": false, \"at\": 105.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-6\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 6\", \"truncated\": false, \"at\": 106.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-7\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 7\", \"truncated\": false, \"at\": 107.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:input\", \"role\": \"user\", \"title\": \"You\", \"text\": \"Needle submitted input\", \"truncated\": false, \"at\": 200.0, \"turnId\": \"turn\", \"inputs\": [{\"id\": \"input\", \"at\": 200.0, \"kind\": \"user\", \"text\": \"Needle submitted input\", \"truncated\": false, \"assets\": [], \"requestedDelivery\": \"current_turn\", \"clientMessageId\": \"input\", \"deliveryStatus\": \"delivered\", \"materialized\": true, \"deliveryError\": null}], \"turnStatus\": \"ended\"}, {\"id\": \"agent:answer\", \"role\": \"assistant\", \"title\": \"Assistant\", \"text\": \"Needle streamed answer\", \"truncated\": false, \"at\": 300.0, \"streaming\": true, \"turnId\": \"turn\", \"phase\": null, \"turnStatus\": \"ended\"}, {\"id\": \"agent:command\", \"role\": \"output\", \"title\": \"commandExecution\", \"text\": \"{\\\"id\\\": \\\"command\\\", \\\"type\\\": \\\"commandExecution\\\", \\\"exitCode\\\": 0, \\\"aggregatedOutput\\\": \\\"needle tool output\\\", \\\"outputTruncated\\\": false, \\\"durationMs\\\": 0}\", \"truncated\": false, \"at\": 300.0, \"toolStatus\": \"completed\", \"turnId\": \"turn\", \"turnStatus\": \"ended\"}, {\"id\": \"agent:compact\", \"role\": \"output\", \"title\": \"contextCompaction\", \"text\": \"{\\\"id\\\": \\\"compact\\\", \\\"type\\\": \\\"contextCompaction\\\", \\\"durationMs\\\": 0}\", \"truncated\": false, \"at\": 300.0, \"toolStatus\": \"completed\", \"turnId\": \"turn\", \"turnStatus\": \"ended\"}, {\"id\": \"agent:pending\", \"role\": \"user\", \"title\": \"You\", \"text\": \"pending receipt needle\", \"at\": 500.0, \"materialized\": false, \"assets\": [], \"requestedDelivery\": \"current_turn\", \"clientMessageId\": \"pending\", \"deliveryStatus\": \"queued\", \"deliveryError\": null}], \"truncated\": false, \"nextCursor\": null, \"nextAfterCursor\": null, \"historyVersion\": \"thread:None\", \"unavailable\": null, \"agent\": {\"id\": \"agent\", \"status\": \"approval\", \"activity\": {\"phase\": \"writing\", \"at\": 300.0}, \"inFlight\": true, \"contextUsage\": null, \"compactions\": 1}}",
           "seq": 37,
           "_deleted": false
         }
@@ -3482,8 +3449,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       }
@@ -3501,7 +3467,7 @@
       "documents": [
         {
           "id": "transcript:agent",
-          "payload": "{\"truncated\":false,\"nextCursor\":null,\"nextAfterCursor\":null,\"historyVersion\":\"thread:None\",\"unavailable\":null,\"agent\":{\"id\":\"agent\",\"status\":\"approval\",\"activity\":{\"phase\":\"writing\",\"at\":300.0},\"inFlight\":true,\"contextUsage\":null,\"compactions\":1,\"compactionsObservedOnly\":null},\"delta\":true,\"items\":[{\"id\":\"agent:input\",\"role\":\"user\",\"title\":\"You\",\"text\":\"Needle submitted input\",\"at\":200.0,\"truncated\":false,\"turnId\":\"turn\",\"turnStatus\":\"ended\",\"inputs\":[{\"id\":\"input\",\"at\":200.0,\"kind\":\"user\",\"text\":\"Needle submitted input\",\"truncated\":false,\"assets\":[],\"requestedDelivery\":\"current_turn\",\"clientMessageId\":\"input\",\"deliveryStatus\":\"delivered\",\"materialized\":true,\"deliveryError\":null}]},{\"id\":\"agent:answer\",\"role\":\"assistant\",\"title\":\"Assistant\",\"text\":\"Needle updated answer\",\"truncated\":false,\"at\":300.0,\"streaming\":true,\"turnId\":\"turn\",\"phase\":null,\"turnStatus\":\"ended\"},{\"id\":\"agent:pending\",\"role\":\"user\",\"title\":\"You\",\"text\":\"pending receipt needle\",\"at\":500.0,\"materialized\":false,\"assets\":[],\"requestedDelivery\":\"current_turn\",\"clientMessageId\":\"pending\",\"deliveryStatus\":\"queued\",\"deliveryError\":null}],\"itemRevisions\":{\"agent:answer\":\"e9e5be0bdc89f23fd49fc80687728696f07559b94e992cb11fbd6416925606f0\"},\"removed\":[\"agent:old-0\"],\"order\":[\"agent:old-1\",\"agent:old-2\",\"agent:old-3\",\"agent:old-4\",\"agent:old-5\",\"agent:old-6\",\"agent:old-7\",\"agent:input\",\"agent:answer\",\"agent:command\",\"agent:compact\",\"agent:pending\"]}",
+          "payload": "{\"truncated\":false,\"nextCursor\":null,\"nextAfterCursor\":null,\"historyVersion\":\"thread:None\",\"unavailable\":null,\"agent\":{\"id\":\"agent\",\"status\":\"approval\",\"activity\":{\"phase\":\"writing\",\"at\":300.0},\"inFlight\":true,\"contextUsage\":null,\"compactions\":1},\"delta\":true,\"items\":[{\"id\":\"agent:input\",\"role\":\"user\",\"title\":\"You\",\"text\":\"Needle submitted input\",\"at\":200.0,\"truncated\":false,\"turnId\":\"turn\",\"turnStatus\":\"ended\",\"inputs\":[{\"id\":\"input\",\"at\":200.0,\"kind\":\"user\",\"text\":\"Needle submitted input\",\"truncated\":false,\"assets\":[],\"requestedDelivery\":\"current_turn\",\"clientMessageId\":\"input\",\"deliveryStatus\":\"delivered\",\"materialized\":true,\"deliveryError\":null}]},{\"id\":\"agent:answer\",\"role\":\"assistant\",\"title\":\"Assistant\",\"text\":\"Needle updated answer\",\"truncated\":false,\"at\":300.0,\"streaming\":true,\"turnId\":\"turn\",\"phase\":null,\"turnStatus\":\"ended\"},{\"id\":\"agent:pending\",\"role\":\"user\",\"title\":\"You\",\"text\":\"pending receipt needle\",\"at\":500.0,\"materialized\":false,\"assets\":[],\"requestedDelivery\":\"current_turn\",\"clientMessageId\":\"pending\",\"deliveryStatus\":\"queued\",\"deliveryError\":null}],\"itemRevisions\":{\"agent:answer\":\"e9e5be0bdc89f23fd49fc80687728696f07559b94e992cb11fbd6416925606f0\"},\"removed\":[\"agent:old-0\"],\"order\":[\"agent:old-1\",\"agent:old-2\",\"agent:old-3\",\"agent:old-4\",\"agent:old-5\",\"agent:old-6\",\"agent:old-7\",\"agent:input\",\"agent:answer\",\"agent:command\",\"agent:compact\",\"agent:pending\"]}",
           "seq": 41,
           "_deleted": false
         }
@@ -3669,8 +3635,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       }
@@ -3687,7 +3652,7 @@
       "documents": [
         {
           "id": "transcript:agent",
-          "payload": "{\"items\": [{\"id\": \"agent:old-1\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 1\", \"truncated\": false, \"at\": 101.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-2\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 2\", \"truncated\": false, \"at\": 102.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-3\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 3\", \"truncated\": false, \"at\": 103.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-4\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 4\", \"truncated\": false, \"at\": 104.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-5\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 5\", \"truncated\": false, \"at\": 105.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-6\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 6\", \"truncated\": false, \"at\": 106.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-7\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 7\", \"truncated\": false, \"at\": 107.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:input\", \"role\": \"user\", \"title\": \"You\", \"text\": \"Needle submitted input\", \"truncated\": false, \"at\": 200.0, \"turnId\": \"turn\", \"inputs\": [{\"id\": \"input\", \"at\": 200.0, \"kind\": \"user\", \"text\": \"Needle submitted input\", \"truncated\": false, \"assets\": [], \"requestedDelivery\": \"current_turn\", \"clientMessageId\": \"input\", \"deliveryStatus\": \"delivered\", \"materialized\": true, \"deliveryError\": null}], \"turnStatus\": \"ended\"}, {\"id\": \"agent:answer\", \"role\": \"assistant\", \"title\": \"Assistant\", \"text\": \"Needle updated answer\", \"truncated\": false, \"at\": 300.0, \"streaming\": true, \"turnId\": \"turn\", \"phase\": null, \"turnStatus\": \"ended\"}, {\"id\": \"agent:command\", \"role\": \"output\", \"title\": \"commandExecution\", \"text\": \"{\\\"id\\\": \\\"command\\\", \\\"type\\\": \\\"commandExecution\\\", \\\"exitCode\\\": 0, \\\"aggregatedOutput\\\": \\\"needle tool output\\\", \\\"outputTruncated\\\": false, \\\"durationMs\\\": 0}\", \"truncated\": false, \"at\": 300.0, \"toolStatus\": \"completed\", \"turnId\": \"turn\", \"turnStatus\": \"ended\"}, {\"id\": \"agent:compact\", \"role\": \"output\", \"title\": \"contextCompaction\", \"text\": \"{\\\"id\\\": \\\"compact\\\", \\\"type\\\": \\\"contextCompaction\\\", \\\"durationMs\\\": 0}\", \"truncated\": false, \"at\": 300.0, \"toolStatus\": \"completed\", \"turnId\": \"turn\", \"turnStatus\": \"ended\"}, {\"id\": \"agent:pending\", \"role\": \"user\", \"title\": \"You\", \"text\": \"pending receipt needle\", \"at\": 500.0, \"materialized\": false, \"assets\": [], \"requestedDelivery\": \"current_turn\", \"clientMessageId\": \"pending\", \"deliveryStatus\": \"queued\", \"deliveryError\": null}], \"truncated\": false, \"nextCursor\": null, \"nextAfterCursor\": null, \"historyVersion\": \"thread:None\", \"unavailable\": null, \"agent\": {\"id\": \"agent\", \"status\": \"approval\", \"activity\": {\"phase\": \"writing\", \"at\": 300.0}, \"inFlight\": true, \"contextUsage\": null, \"compactions\": 1, \"compactionsObservedOnly\": null}}",
+          "payload": "{\"items\": [{\"id\": \"agent:old-1\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 1\", \"truncated\": false, \"at\": 101.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-2\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 2\", \"truncated\": false, \"at\": 102.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-3\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 3\", \"truncated\": false, \"at\": 103.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-4\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 4\", \"truncated\": false, \"at\": 104.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-5\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 5\", \"truncated\": false, \"at\": 105.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-6\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 6\", \"truncated\": false, \"at\": 106.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:old-7\", \"role\": \"assistant\", \"title\": \"Agent\", \"text\": \"needle history 7\", \"truncated\": false, \"at\": 107.0, \"turnId\": \"old-turn\"}, {\"id\": \"agent:input\", \"role\": \"user\", \"title\": \"You\", \"text\": \"Needle submitted input\", \"truncated\": false, \"at\": 200.0, \"turnId\": \"turn\", \"inputs\": [{\"id\": \"input\", \"at\": 200.0, \"kind\": \"user\", \"text\": \"Needle submitted input\", \"truncated\": false, \"assets\": [], \"requestedDelivery\": \"current_turn\", \"clientMessageId\": \"input\", \"deliveryStatus\": \"delivered\", \"materialized\": true, \"deliveryError\": null}], \"turnStatus\": \"ended\"}, {\"id\": \"agent:answer\", \"role\": \"assistant\", \"title\": \"Assistant\", \"text\": \"Needle updated answer\", \"truncated\": false, \"at\": 300.0, \"streaming\": true, \"turnId\": \"turn\", \"phase\": null, \"turnStatus\": \"ended\"}, {\"id\": \"agent:command\", \"role\": \"output\", \"title\": \"commandExecution\", \"text\": \"{\\\"id\\\": \\\"command\\\", \\\"type\\\": \\\"commandExecution\\\", \\\"exitCode\\\": 0, \\\"aggregatedOutput\\\": \\\"needle tool output\\\", \\\"outputTruncated\\\": false, \\\"durationMs\\\": 0}\", \"truncated\": false, \"at\": 300.0, \"toolStatus\": \"completed\", \"turnId\": \"turn\", \"turnStatus\": \"ended\"}, {\"id\": \"agent:compact\", \"role\": \"output\", \"title\": \"contextCompaction\", \"text\": \"{\\\"id\\\": \\\"compact\\\", \\\"type\\\": \\\"contextCompaction\\\", \\\"durationMs\\\": 0}\", \"truncated\": false, \"at\": 300.0, \"toolStatus\": \"completed\", \"turnId\": \"turn\", \"turnStatus\": \"ended\"}, {\"id\": \"agent:pending\", \"role\": \"user\", \"title\": \"You\", \"text\": \"pending receipt needle\", \"at\": 500.0, \"materialized\": false, \"assets\": [], \"requestedDelivery\": \"current_turn\", \"clientMessageId\": \"pending\", \"deliveryStatus\": \"queued\", \"deliveryError\": null}], \"truncated\": false, \"nextCursor\": null, \"nextAfterCursor\": null, \"historyVersion\": \"thread:None\", \"unavailable\": null, \"agent\": {\"id\": \"agent\", \"status\": \"approval\", \"activity\": {\"phase\": \"writing\", \"at\": 300.0}, \"inFlight\": true, \"contextUsage\": null, \"compactions\": 1}}",
           "seq": 554,
           "_deleted": false
         }
@@ -3866,8 +3831,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       }
@@ -4061,8 +4025,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       }
@@ -4256,8 +4219,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       }
@@ -4473,8 +4435,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       }
@@ -4963,8 +4924,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       }
@@ -5041,8 +5001,7 @@
           },
           "inFlight": true,
           "contextUsage": null,
-          "compactions": 1,
-          "compactionsObservedOnly": null
+          "compactions": 1
         }
       },
       "after": {
@@ -5070,8 +5029,7 @@
           },
           "inFlight": true,
           "contextUsage": null,
-          "compactions": 1,
-          "compactionsObservedOnly": null
+          "compactions": 1
         }
       },
       "record": {
@@ -5323,8 +5281,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       }
@@ -5616,8 +5573,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       }
@@ -12328,8 +12284,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       }
@@ -19053,8 +19008,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       }
@@ -19278,8 +19232,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       }
@@ -19503,8 +19456,7 @@
             },
             "inFlight": true,
             "contextUsage": null,
-            "compactions": 1,
-            "compactionsObservedOnly": null
+            "compactions": 1
           }
         }
       }
