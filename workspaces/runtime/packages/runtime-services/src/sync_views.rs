@@ -587,6 +587,9 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
     view.insert("kind".to_owned(), Value::String("agent".to_owned()));
     view.insert("source".to_owned(), Value::String("managed".to_owned()));
     let progress = crate::account_transfer::progress_view(record.get("accountTransfer")).ok()?;
+    if let Some(summary) = view.get_mut("accountTransfer").and_then(Value::as_object_mut) {
+        summary.remove("canCancel");
+    }
     let source = <AccountChangeAgent as serde::Deserialize>::deserialize(record).ok()?;
     let account_change = if source.is_lead != Some(true) {
         studio_runtime_schema::agent_progress::AccountChange::Unavailable {
