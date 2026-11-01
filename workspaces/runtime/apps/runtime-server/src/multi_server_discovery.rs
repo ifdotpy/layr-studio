@@ -518,7 +518,7 @@ async fn save_auto_pair(
             tailscale_user: Field::Value(owner), status: AccessClientStatus::Paired, created,
             last_access: Field::Null, revoked: Field::Null, last_seen: Field::Missing, auto_pair: Field::Missing,
             reachability: Field::Missing, alias: Field::Missing, replaced_by: Field::Missing, grant: Field::Missing,
-            pairing_request_id: Field::Missing, pairing_hash: Field::Missing,
+            pairing_request_id: Field::Missing, pairing_hash: Field::Missing, pairing_receipt: Field::Missing,
         };
         if let Some(saved) = saved.as_ref() {
             record.grant = saved.record().grant.clone();
@@ -529,6 +529,7 @@ async fn save_auto_pair(
             record.auto_pair = saved.record().auto_pair.clone();
             record.pairing_request_id = saved.record().pairing_request_id.clone();
             record.pairing_hash = saved.record().pairing_hash.clone();
+            record.pairing_receipt = saved.record().pairing_receipt.clone();
         }
         tx.execute(
             "INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",
