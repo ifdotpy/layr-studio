@@ -21995,6 +21995,7 @@
         "description": "One write action. The owner is runtime-schema/src/command.rs.",
         "discriminator": {
           "mapping": {
+            "resolve": "#/components/schemas/CommandRequestResolve",
             "send": "#/components/schemas/CommandRequestSend",
             "stop": "#/components/schemas/CommandRequestStop",
             "withdraw": "#/components/schemas/CommandRequestWithdraw"
@@ -22010,9 +22011,53 @@
           },
           {
             "$ref": "#/components/schemas/CommandRequestStop"
+          },
+          {
+            "$ref": "#/components/schemas/CommandRequestResolve"
           }
         ],
         "title": "CommandRequest"
+      },
+      "CommandRequestResolve": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "$ref": "#/components/schemas/CommandResolveBody"
+          },
+          "client": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[a-f0-9-]{36}$",
+            "type": "string"
+          },
+          "kind": {
+            "const": "resolve",
+            "type": "string"
+          },
+          "number": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target": {
+            "description": "Outbox entry id",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "client",
+          "number",
+          "kind",
+          "target",
+          "body"
+        ],
+        "type": "object"
       },
       "CommandRequestSend": {
         "additionalProperties": false,
@@ -22131,6 +22176,23 @@
           "kind",
           "target",
           "body"
+        ],
+        "type": "object"
+      },
+      "CommandResolveBody": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "retry",
+              "delivered",
+              "discard"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
         ],
         "type": "object"
       },

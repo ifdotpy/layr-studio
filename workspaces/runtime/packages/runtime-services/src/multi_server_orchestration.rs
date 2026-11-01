@@ -2921,7 +2921,7 @@ const PEER_REPLAY_SAFE_ACTIONS: &[ServerOperationKind] = &[
 ];
 
 /// The sender may deliver this queued or crashed outbox envelope again.
-fn outgoing_retry(action: ServerOperationKind) -> bool {
+pub(crate) fn outgoing_retry(action: ServerOperationKind) -> bool {
     action == ServerOperationKind::Export || peer_replay_safe(action)
 }
 

@@ -173,6 +173,9 @@ fn followup_error(error: crate::commands::CommandError) -> crate::managed_host_t
         | CommandError::Conflict(_)
         | CommandError::NotFound
         | CommandError::Lifecycle(_)
+        | CommandError::Outbox(_)
+        | CommandError::Missing(_)
+        | CommandError::Entity(_)
         | CommandError::Coordination(_) => Error::Invalid("Agent input was refused"),
     }
 }

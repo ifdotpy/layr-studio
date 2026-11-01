@@ -61,6 +61,7 @@ mod m2026_11_01_annotation_record;
 mod m2026_11_01_approval_secrets;
 mod m2026_11_01_chat_busy_deleted_index;
 mod m2026_11_01_chat_busy_indexes;
+mod m2026_11_01_outbox_cancelled;
 mod m2026_11_01_plan_record;
 mod m2026_11_01_project_context;
 mod m2026_11_01_project_revisions;
@@ -1160,6 +1161,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_01_work_detail_policy::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-outbox-cancelled",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Stores whose outbox status CHECK lacks cancelled",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_outbox_cancelled::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {

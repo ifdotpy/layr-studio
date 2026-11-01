@@ -58,6 +58,13 @@ pub enum CommandError {
     Lifecycle(#[from] crate::agent_management::ManagementError),
     #[error(transparent)]
     Coordination(#[from] crate::coordination::CoordinationError),
+    #[error(transparent)]
+    Outbox(#[from] studio_runtime_store::outbox::OutboxError),
+    #[error("{0}")]
+    Missing(&'static str),
+    /// A settled entity refused the change. The text is the entity's own message.
+    #[error("{0}")]
+    Entity(String),
 }
 
 impl From<rusqlite::Error> for CommandError {
@@ -102,7 +109,17 @@ pub fn authorize(
             let Principal::Agent { id, .. } = principal else {
                 return Err(CommandError::Forbidden);
             };
-            let below = crate::managed_host_tools::is_descendant(tx, id, command.target())
+            // A resolve acts on the entry's owner, not on its own id.
+            let chat = match command {
+                Command::Resolve { target, .. } => {
+                    crate::outbox_resolve::owner_chat(tx, target.as_str())?
+                        .ok_or(CommandError::Forbidden)?
+                }
+                Command::Send { target, .. }
+                | Command::Withdraw { target, .. }
+                | Command::Stop { target, .. } => target.as_str().to_owned(),
+            };
+            let below = crate::managed_host_tools::is_descendant(tx, id, &chat)
                 .map_err(|_| CommandError::Invalid("Invalid stored agent ancestry"))?;
             below.then_some(()).ok_or(CommandError::Forbidden)
         }
@@ -454,7 +471,7 @@ pub struct Executed {
 /// Write the text of a withdrawn message as a server draft of the chat. The draft stream
 /// delivers it to the composer. It is newer than every earlier version, so it wins, and a
 /// later edit of the user supersedes it like any other draft version.
-fn server_draft(
+pub(crate) fn server_draft(
     tx: &Transaction<'_>,
     chat: &str,
     text: &str,
@@ -527,6 +544,11 @@ pub fn execute_sync(
                 None => crate::agent_management_store::execute_in_transaction(tx, &action, now)?,
             };
             agent_reference(tx, target.as_str())?
+        }
+        Command::Resolve { target, body } => {
+            let entry = crate::outbox_resolve::read(tx, target.as_str())?;
+            crate::outbox_resolve::decide(&entry, body.action)?;
+            crate::outbox_resolve::apply(tx, &entry, body.action, now_ms)?
         }
         Command::Send { .. } => unreachable!("refused above"),
     };

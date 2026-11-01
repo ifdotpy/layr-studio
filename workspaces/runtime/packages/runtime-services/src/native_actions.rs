@@ -1484,6 +1484,24 @@ pub(crate) fn hold_action(tx: &Transaction<'_>, id: &str) -> Result<()> {
     )
 }
 
+/// Write `outcome` as the reply of an unknown action. Unlike `write_outcome`, the outbox row
+/// stays: the resolve command sets its status.
+pub(crate) fn settle_action(tx: &Transaction<'_>, id: &str, outcome: Outcome) -> Result<()> {
+    let row = Outbox::get::<NativeActionIntent>(tx, id)?.ok_or(NativeError::Changed)?;
+    let result = match &outcome {
+        Outcome::Acknowledged { result } => result.clone(),
+        Outcome::Pending { .. } | Outcome::Unknown { .. } | Outcome::Failed { .. } => None,
+    };
+    let reply = NativeActionReply {
+        receipt: row.payload.receipt,
+        outcome,
+        replayed: false,
+        result,
+    };
+    settle_request(tx, &row.payload.admitted, Some(&row.owner_id), &reply)?;
+    Ok(())
+}
+
 fn write_outcome(tx: &Transaction<'_>, id: &str, outcome: &Outcome) -> Result<()> {
     let Some(mut row) = Outbox::get::<NativeActionIntent>(tx, &action_outbox_id(id))? else {
         return if row(tx, id)?.is_some_and(|(_, _, saved)| saved == *outcome) {

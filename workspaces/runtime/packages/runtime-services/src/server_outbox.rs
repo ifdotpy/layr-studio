@@ -51,6 +51,7 @@ pub(crate) fn state(status: OutboxStatus) -> ServerDeliveryState {
         OutboxStatus::Submitted
         | OutboxStatus::Unknown
         | OutboxStatus::Committed
+        | OutboxStatus::Cancelled
         | OutboxStatus::Unrecognized => ServerDeliveryState::Running,
     }
 }
