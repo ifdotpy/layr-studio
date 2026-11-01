@@ -2272,7 +2272,7 @@ fn maintain_peer_team_entities(
             studio_runtime_schema::queue_command::Field::Null => None,
             studio_runtime_schema::queue_command::Field::Value(value) => Some(value),
         };
-        for team in &project.peer_teams {
+        for team in project.peer_teams.value().into_iter().flatten() {
             let mut selected = Vec::new();
             for member in &team.members {
                 if agents.get(member.as_str()).is_some_and(|agent| {

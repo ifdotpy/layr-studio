@@ -160,8 +160,10 @@ fn location_from_rows(
     if query.action.as_deref() == Some("matches") {
         let origin = project
             .locations
-            .iter()
-            .find_map(|row| row.git_origin.clone())
+            .value()
+            .into_iter()
+            .flatten()
+            .find_map(|row| row.git_origin.value().cloned())
             .or_else(|| {
                 (!project.path.starts_with("project:"))
                     .then_some(project.path.as_str())
@@ -185,7 +187,7 @@ fn location_from_rows(
                 candidates.push(LocationMatch {
                     project_id: id,
                     path: path.to_owned(),
-                    name: candidate.name,
+                    name: candidate.name.value().cloned(),
                 });
             }
         }
@@ -246,7 +248,9 @@ fn location_from_rows(
         .or_else(|| {
             project
                 .locations
-                .iter()
+                .value()
+                .into_iter()
+                .flatten()
                 .find(|row| row.server_id == server_id)
                 .map(|row| row.path.as_str())
         })

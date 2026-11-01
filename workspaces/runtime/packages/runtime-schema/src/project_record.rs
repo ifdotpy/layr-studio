@@ -26,64 +26,88 @@ pub enum ProjectRecord {
 pub struct ProjectLive {
     pub id: String,
     pub path: String,
-    #[serde(default)]
-    pub peer_teams: Vec<ProjectPeerTeam>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub account_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub account_groups: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub account_keys: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub locations: Vec<ProjectLocation>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub project_aliases: Vec<ProjectAlias>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub locations_revision: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub account_revision: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub account_groups_revision: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub home_server_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub created: Option<serde_json::Number>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub updated: Option<serde_json::Number>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sidebar_hidden: Option<bool>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<Vec<ProjectPeerTeam>>")]
+    pub peer_teams: Field<Vec<ProjectPeerTeam>>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub account_key: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<Vec<String>>")]
+    pub account_groups: Field<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<Vec<String>>")]
+    pub account_keys: Field<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub name: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<Vec<ProjectLocation>>")]
+    pub locations: Field<Vec<ProjectLocation>>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<Vec<ProjectAlias>>")]
+    pub project_aliases: Field<Vec<ProjectAlias>>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<u64>")]
+    pub locations_revision: Field<u64>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<u64>")]
+    pub account_revision: Field<u64>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<u64>")]
+    pub account_groups_revision: Field<u64>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub home_server_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<serde_json::Number>")]
+    pub created: Field<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<serde_json::Number>")]
+    pub updated: Field<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<bool>")]
+    pub sidebar_hidden: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<u64>")]
     pub peer_teams_revision: Field<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub organization_revision: Option<u64>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub folders: Vec<ProjectFolder>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub worker_base_ref: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub worker_base_revision: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub worker_environment: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub worker_environment_revision: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workspace_policy: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workspace_policy_revision: Option<u64>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub location_intents: BTreeMap<String, ProjectLocationIntent>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub registration: Option<ProjectRegistration>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<u64>")]
+    pub organization_revision: Field<u64>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<Vec<ProjectFolder>>")]
+    pub folders: Field<Vec<ProjectFolder>>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub worker_base_ref: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<u64>")]
+    pub worker_base_revision: Field<u64>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub worker_environment: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<u64>")]
+    pub worker_environment_revision: Field<u64>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub workspace_policy: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<u64>")]
+    pub workspace_policy_revision: Field<u64>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<BTreeMap<String, ProjectLocationIntent>>")]
+    pub location_intents: Field<BTreeMap<String, ProjectLocationIntent>>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<ProjectRegistration>")]
+    pub registration: Field<ProjectRegistration>,
 }
 impl ProjectLive {
     pub fn preference(&self) -> ProjectAccountPreference {
         ProjectAccountPreference {
-            account_key: self.account_key.clone(),
-            account_groups: self.account_groups.clone(),
-            account_keys: self.account_keys.clone(),
+            account_key: self.account_key.value().cloned(),
+            account_groups: self.account_groups.value().cloned().unwrap_or_default(),
+            account_keys: self.account_keys.value().cloned().unwrap_or_default(),
         }
     }
 }
@@ -112,10 +136,12 @@ pub struct ProjectLocation {
     pub server_id: String,
     pub path: String,
     pub project_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub git_origin: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub requested_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub git_origin: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub requested_path: Field<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
@@ -139,7 +165,9 @@ pub struct ProjectPeerTeam {
 pub struct ProjectFolder {
     pub id: String,
     pub name: String,
-    pub parent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub parent_id: Field<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
@@ -154,12 +182,15 @@ pub struct ProjectRegistration {
     pub server: String,
     pub path: String,
     pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub signature: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub request_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub status: Option<WorkEffectStatus>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub signature: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub request_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<WorkEffectStatus>")]
+    pub status: Field<WorkEffectStatus>,
 }
 
 pub(crate) fn schema() -> serde_json::Value {
@@ -181,6 +212,19 @@ pub(crate) fn check_schema_parity() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_live_preserves_field_presence() {
+        for raw in [
+            r#"{"recordKind":"live","id":"p","path":"/p"}"#,
+            r#"{"recordKind":"live","id":"p","path":"/p","name":null,"peerTeams":null,"locations":null}"#,
+            r#"{"recordKind":"live","id":"p","path":"/p","name":"","peerTeams":[],"locations":[{"serverId":"s","path":"/p","projectId":"p","gitOrigin":null}]}"#,
+        ] {
+            let expected: serde_json::Value = serde_json::from_str(raw).unwrap();
+            let record: ProjectRecord = serde_json::from_str(raw).unwrap();
+            assert_eq!(serde_json::to_value(record).unwrap(), expected);
+        }
+    }
 
     #[test]
     fn peer_teams_revision_preserves_missing_and_null() {

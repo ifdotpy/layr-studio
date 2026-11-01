@@ -667,56 +667,65 @@ async fn local_project_registration(
                 return Ok(());
             }
             if physical_id_for_write != project_id_for_write
-                && let Some(mut physical) = studio_runtime_store::ProjectsRepository::get_record(
+                && let Some(physical) = studio_runtime_store::ProjectsRepository::get_record(
                     tx,
                     &physical_id_for_write,
                 )?
             {
-                physical.project_aliases.retain(|alias| {
+                let mut aliases = physical
+                    .project_aliases
+                    .value()
+                    .cloned()
+                    .unwrap_or_default();
+                aliases.retain(|alias| {
                     alias.server_id != local_server_for_write
                         || alias.project_id != project_id_for_write
                 });
-                physical.project_aliases.push(
-                    studio_runtime_schema::project_record::ProjectAlias {
-                        server_id: local_server_for_write.clone(),
-                        project_id: project_id_for_write.clone(),
-                        name: name_for_write,
-                    },
-                );
+                aliases.push(studio_runtime_schema::project_record::ProjectAlias {
+                    server_id: local_server_for_write.clone(),
+                    project_id: project_id_for_write.clone(),
+                    name: name_for_write,
+                });
                 studio_runtime_store::ProjectsRepository::patch_project(
                     tx,
                     &physical_id_for_write,
                     &ProjectAliasesPatch {
-                        project_aliases: &physical.project_aliases,
+                        project_aliases: &aliases,
                     },
                 )?;
             }
-            let mut logical =
+            let logical =
                 studio_runtime_store::ProjectsRepository::get_record(tx, &project_id_for_write)?
                     .ok_or_else(|| {
                         ApiError::new(StatusCode::BAD_REQUEST, "The project is unavailable")
                     })?;
-            if !logical
-                .locations
+            let mut locations = logical.locations.value().cloned().unwrap_or_default();
+            if !locations
                 .iter()
                 .any(|location| location.server_id == local_server_for_write)
             {
-                logical
-                    .locations
-                    .push(studio_runtime_schema::project_record::ProjectLocation {
-                        server_id: local_server_for_write,
-                        path: canonical_for_write,
-                        project_id: physical_id_for_write,
-                        git_origin: git_origin_for_write,
-                        requested_path: None,
-                    });
+                locations.push(studio_runtime_schema::project_record::ProjectLocation {
+                    server_id: local_server_for_write,
+                    path: canonical_for_write,
+                    project_id: physical_id_for_write,
+                    git_origin: git_origin_for_write.map_or(
+                        studio_runtime_schema::queue_command::Field::Missing,
+                        studio_runtime_schema::queue_command::Field::Value,
+                    ),
+                    requested_path: studio_runtime_schema::queue_command::Field::Missing,
+                });
             }
             studio_runtime_store::ProjectsRepository::patch_project(
                 tx,
                 &project_id_for_write,
                 &ProjectLocationsPatch {
-                    locations: &logical.locations,
-                    locations_revision: logical.locations_revision.unwrap_or(0).saturating_add(1),
+                    locations: &locations,
+                    locations_revision: logical
+                        .locations_revision
+                        .value()
+                        .copied()
+                        .unwrap_or(0)
+                        .saturating_add(1),
                 },
             )?;
             studio_runtime_store::ProjectsRepository::patch_project(
@@ -915,7 +924,11 @@ async fn remote_project_write(
                 Ok::<_, ApiError>((record, admission))
             })
             .await?;
-        let locations = &record.locations;
+        let locations = record
+            .locations
+            .value()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         let existing = locations.iter().find(|row| row.server_id == server);
         if action == "remove_location" && locations.len() <= 1 {
             return Err(ApiError::new(
@@ -1244,8 +1257,10 @@ fn remote_location_action(
     let action = if query.get("action").and_then(Value::as_str) == Some("matches") {
         let origin = project
             .locations
-            .iter()
-            .find_map(|row| row.git_origin.clone())
+            .value()
+            .into_iter()
+            .flatten()
+            .find_map(|row| row.git_origin.value().cloned())
             .or_else(|| {
                 (!project.path.starts_with("project:"))
                     .then_some(project.path.as_str())
@@ -1269,7 +1284,9 @@ fn remote_location_action(
             .or_else(|| {
                 project
                     .locations
-                    .iter()
+                    .value()
+                    .into_iter()
+                    .flatten()
                     .find(|row| row.server_id == server)
                     .map(|row| row.path.as_str())
             })
@@ -1434,7 +1451,7 @@ mod local_registration_tests {
         let project = studio_runtime_store::ProjectsRepository::get_record(&db, "project")
             .unwrap()
             .unwrap();
-        let location = &project.locations[0];
+        let location = &project.locations.value().unwrap()[0];
         assert_eq!(location.server_id, "server");
     }
 
