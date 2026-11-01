@@ -189,9 +189,9 @@ pub(super) async fn send_message(
     }
     let prepared = prepared.ok_or_else(ApiError::internal)?;
     let admission = message_admission.unwrap_or_else(|| Arc::from(prepared));
-    let posted = store
+    let (posted, result) = store
         .transaction_with_error(move |transaction| {
-            coordination::post_message_with_admission(
+            let posted = coordination::post_message_with_admission(
                 transaction,
                 coordination::PostManagedMessage {
                     room: &body.room,
@@ -201,14 +201,19 @@ pub(super) async fn send_message(
                     assets: &assets,
                 },
                 admission.as_ref(),
-            )
+            )?;
+            let result = serde_json::to_value(&posted.receipt)
+                .and_then(
+                    serde_json::from_value::<crate::generated::StudioApiWorkModelsMessageReceipt>,
+                )
+                .map_err(|_| CoordinationError::InvalidStored {
+                    object: "message receipt",
+                    id: body.id.clone(),
+                })?;
+            Ok((posted, result))
         })
         .await
         .map_err(coordination_error)?;
-    let encoded = serde_json::to_vec(&posted.receipt).map_err(ApiError::json)?;
-    let result =
-        serde_json::from_slice::<crate::generated::StudioApiWorkModelsMessageReceipt>(&encoded)
-            .map_err(ApiError::json)?;
     posted.notify_committed(|| wake.notify_one());
     if remote_worker && let Some(driver) = &orchestration_driver {
         let now = studio_runtime_services::event_write::unix_time()

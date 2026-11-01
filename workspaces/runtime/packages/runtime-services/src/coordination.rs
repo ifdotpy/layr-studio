@@ -54,6 +54,7 @@ pub struct GroupMessageReply {
     pub author: String,
     pub text: String,
     pub at: f64,
+    #[serde(serialize_with = "studio_runtime_schema::delivery::serialize_recipient_deliveries")]
     pub deliveries: BTreeMap<String, studio_runtime_schema::persistence::RecipientDelivery>,
     pub status: studio_runtime_schema::delivery::MessageSendStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1833,13 +1834,21 @@ mod tests {
             reply: first.clone(),
             references: Vec::new(),
         };
+        let mut legacy = serde_json::to_value(&old).unwrap();
+        for delivery in legacy["reply"]["deliveries"]
+            .as_object_mut()
+            .unwrap()
+            .values_mut()
+        {
+            delivery["status"] = json!("pending");
+        }
         connection
             .execute(
                 "INSERT INTO request_results(id,signature,result,created) VALUES(?1,?2,?3,?4)",
                 rusqlite::params![
                     id,
                     signature,
-                    serde_json::to_string(&old).unwrap(),
+                    serde_json::to_string(&legacy).unwrap(),
                     chrono::Utc::now().timestamp_millis()
                 ],
             )
