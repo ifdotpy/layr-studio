@@ -2,7 +2,6 @@ import {
   AgentSource as GeneratedApiAgentSource,
   AgentStatus as GeneratedApiAgentStatus,
   RoomKind as GeneratedApiRoomKind,
-  AccountTransferScope as GeneratedApiAccountTransferScope,
 } from "../generated/api.ts";
 import { randomUUID } from "../uuid";
 import { ProviderKind } from "../generated/providerKind.ts";
@@ -2061,14 +2060,11 @@ export default function Conversation(p: {
                 );
               return (
                 <>
-                  {managed &&
-                    p.agent?.isLead &&
-                    p.agent.accountTransfer?.scope !==
-                      GeneratedApiAccountTransferScope.subagents && (
-                      <AccountTransferChip
-                        transfer={p.agent.accountTransfer ?? undefined}
-                      />
-                    )}
+                  {managed && p.agent?.isLead && (
+                    <AccountTransferChip
+                      transfer={p.agent.accountTransferProgress}
+                    />
+                  )}
                   <PromptInput
                     value={draft}
                     session={p.id || "new"}

@@ -478,7 +478,18 @@ async fn publish_accounts(state: &HttpState) -> Result<(), StoreError> {
 }
 
 fn accounts_summary(snapshot: studio_runtime_services::account_policy::AccountsSnapshot) -> Value {
-    json!({"accounts":snapshot.accounts,"archivedAccounts":snapshot.archived_accounts,"defaultAccountKey":snapshot.default_account_key,"defaultAccountGroups":snapshot.default_account_groups,"supportsDelete":true,"supportsDisconnect":true})
+    let rows = |accounts: Vec<studio_runtime_services::account_policy::PublicAccount>| {
+        accounts
+            .into_iter()
+            .map(|account| {
+                let eligibility = account.eligibility();
+                let mut row = json!(account);
+                row["eligibility"] = json!(eligibility);
+                row
+            })
+            .collect::<Vec<_>>()
+    };
+    json!({"accounts":rows(snapshot.accounts),"archivedAccounts":rows(snapshot.archived_accounts),"defaultAccountKey":snapshot.default_account_key,"defaultAccountGroups":snapshot.default_account_groups,"supportsDelete":true,"supportsDisconnect":true})
 }
 
 /// A scanner snapshot includes internal refresh metadata beside the public cost.
@@ -2228,6 +2239,7 @@ mod tests {
         .expect("accounts published");
         let value = entity(&state, "accounts", "current");
         assert_eq!(value["accounts"][0]["label"], "Source account");
+        assert_eq!(value["accounts"][0]["eligibility"]["kind"], "unavailable");
         assert!(value.get("logins").is_none());
         assert!(!value.to_string().contains("private-only"));
     }

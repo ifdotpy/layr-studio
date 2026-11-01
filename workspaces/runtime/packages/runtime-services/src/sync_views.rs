@@ -570,6 +570,36 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
     view.insert("id".to_owned(), Value::String(id.to_owned()));
     view.insert("kind".to_owned(), Value::String("agent".to_owned()));
     view.insert("source".to_owned(), Value::String("managed".to_owned()));
+    let progress = crate::account_transfer::progress_view(record.get("accountTransfer")).ok()?;
+    let account_change = if !truthy(record.get("isLead")) {
+        studio_runtime_schema::agent_progress::AccountChange::Unavailable {
+            reason: "Choose the lead chat to change its account".into(),
+        }
+    } else if matches!(
+        progress,
+        studio_runtime_schema::agent_progress::AccountTransferProgress::Waiting { .. }
+            | studio_runtime_schema::agent_progress::AccountTransferProgress::Moving { .. }
+            | studio_runtime_schema::agent_progress::AccountTransferProgress::Blocked { .. }
+    ) {
+        studio_runtime_schema::agent_progress::AccountChange::Unavailable {
+            reason: "Finish or cancel the current transfer first".into(),
+        }
+    } else if context.empty_lead
+        && !truthy(record.get("threadId"))
+        && !truthy(record.get("inFlight"))
+    {
+        studio_runtime_schema::agent_progress::AccountChange::Select
+    } else {
+        studio_runtime_schema::agent_progress::AccountChange::Transfer
+    };
+    view.insert(
+        "accountChange".into(),
+        serde::Serialize::serialize(&account_change, serde_json::value::Serializer).ok()?,
+    );
+    view.insert(
+        "accountTransferProgress".into(),
+        serde::Serialize::serialize(&progress, serde_json::value::Serializer).ok()?,
+    );
     let block = native_thread_block(record);
     let can_send = block.is_none()
         && !truthy(record.get("movedTo"))
@@ -971,6 +1001,48 @@ mod projection_plan_tests {
         schema_projection_properties,
     };
     use serde_json::json;
+
+    #[test]
+    fn agent_entity_publishes_account_change_mode() {
+        let lead = json!({"id":"lead","rootId":"lead","epoch":1,"isLead":true,"provider":"codex"});
+        let mut context = super::AgentViewContext {
+            empty_lead: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            super::agent_entity_view(&lead, &context).unwrap()["accountChange"],
+            json!({"kind":"select"})
+        );
+        context.empty_lead = false;
+        assert_eq!(
+            super::agent_entity_view(&lead, &context).unwrap()["accountChange"],
+            json!({"kind":"transfer"})
+        );
+        let worker =
+            json!({"id":"worker","rootId":"lead","epoch":1,"isLead":false,"provider":"codex"});
+        assert_eq!(
+            super::agent_entity_view(&worker, &context).unwrap()["accountChange"]["kind"],
+            "unavailable"
+        );
+    }
+
+    #[test]
+    fn agent_entity_publishes_transfer_actions_from_progress() {
+        let lead = json!({"id":"lead","rootId":"lead","epoch":1,"isLead":true,"provider":"codex",
+            "accountTransfer":{"id":"move","targetAccountKey":"target","status":"pending",
+                "blocked":[{"id":"lead","reason":"History unavailable"}],"canRetry":true,"movingNow":0}});
+        let view = super::agent_entity_view(&lead, &Default::default()).unwrap();
+        assert_eq!(view["accountTransferProgress"]["kind"], "blocked");
+        assert_eq!(
+            view["accountTransferProgress"]["actions"],
+            json!(["retry", "cancel"])
+        );
+        for collection in ["agentSummary", "agentDetail"] {
+            let projected = project_persisted_record(collection, &view).unwrap();
+            assert_eq!(projected["accountTransferProgress"]["kind"], "blocked");
+            assert_eq!(projected["accountChange"]["kind"], "unavailable");
+        }
+    }
 
     #[test]
     fn task_projection_matches_schema_projection() {

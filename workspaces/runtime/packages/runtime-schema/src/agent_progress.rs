@@ -2,6 +2,90 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Account changes available to this chat.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AccountChange {
+    Select,
+    Transfer,
+    Unavailable { reason: String },
+}
+
+/// Whether an account can be selected for a new turn.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AccountEligibility {
+    Available,
+    Unavailable { reason: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountTransferAction {
+    Retry,
+    Cancel,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum AccountTransferProgress {
+    None,
+    Waiting {
+        id: String,
+        target_account_key: String,
+        reason: String,
+        actions: Vec<AccountTransferAction>,
+    },
+    Moving {
+        id: String,
+        target_account_key: String,
+        actions: Vec<AccountTransferAction>,
+    },
+    Blocked {
+        id: String,
+        target_account_key: String,
+        reason: String,
+        actions: Vec<AccountTransferAction>,
+    },
+    Completed {
+        id: String,
+        target_account_key: String,
+    },
+    Cancelled {
+        id: String,
+        target_account_key: String,
+    },
+}
+
+pub(crate) fn account_change_schemas() -> [(&'static str, serde_json::Value); 4] {
+    let mut generator = schemars::generate::SchemaSettings::openapi3()
+        .for_serialize()
+        .into_generator();
+    [
+        (
+            "AccountChange",
+            AccountChange::json_schema(&mut generator).to_value(),
+        ),
+        (
+            "AccountEligibility",
+            AccountEligibility::json_schema(&mut generator).to_value(),
+        ),
+        (
+            "AccountTransferAction",
+            AccountTransferAction::json_schema(&mut generator).to_value(),
+        ),
+        (
+            "AccountTransferProgress",
+            AccountTransferProgress::json_schema(&mut generator).to_value(),
+        ),
+    ]
+}
+
 /// Persisted wait field shared by admission owners, status, and sync.
 pub const START_WAIT_FIELD: &str = "startWait";
 

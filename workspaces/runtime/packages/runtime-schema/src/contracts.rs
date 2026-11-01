@@ -1255,6 +1255,22 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     openapi["components"]["schemas"]["AdmittedRequest"] = admitted_request_schema();
     openapi["components"]["schemas"]["ServerOperationRequest"]["properties"]["action"] = serde_json::json!({"type":"string","enum":crate::persistence::ServerOperationKind::VARIANTS});
     crate::task_command::apply_api_contract(&mut openapi);
+    for (name, schema) in crate::agent_progress::account_change_schemas() {
+        openapi["components"]["schemas"][name] = schema;
+    }
+    for name in [
+        "AgentEntityDto",
+        "AgentSummaryEntityDto",
+        "AgentDetailEntityDto",
+    ] {
+        openapi["components"]["schemas"][name]["properties"]["accountChange"] =
+            serde_json::json!({"$ref":"#/components/schemas/AccountChange"});
+        openapi["components"]["schemas"][name]["properties"]["accountTransferProgress"] =
+            serde_json::json!({"$ref":"#/components/schemas/AccountTransferProgress"});
+    }
+    openapi["components"]["schemas"]["AgentEntityDto"]["properties"]["accountTransfer"] = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/AccountTransferSummaryDto"},{"type":"null"}]});
+    openapi["components"]["schemas"]["Account"]["properties"]["eligibility"] =
+        serde_json::json!({"$ref":"#/components/schemas/AccountEligibility"});
     for (name, schema) in crate::studio_errors::schemas()? {
         openapi["components"]["schemas"][name] = schema;
     }

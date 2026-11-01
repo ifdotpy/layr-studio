@@ -1,12 +1,6 @@
-import {
-  AgentSource,
-  AgentStatus,
-  ProviderKind,
-  TransferScope,
-  TransferStatus,
-} from "../../generated/api";
+import { AgentSource, AgentStatus, ProviderKind } from "../../generated/api";
 import { Button, NativeSelect, Switch, Textarea } from "@mantine/core";
-import type { PostBody, PostResult } from "../../apiTypes";
+import type { PostBody } from "../../apiTypes";
 import { ApiError } from "../../api";
 import * as appLog from "../../appLog";
 import { AccountTransferStatus } from "../Accounts";
@@ -308,20 +302,15 @@ afterEach(() => {
   h.emptyCatalog = false;
 });
 
-test("transfer actions retain response identity and retry the same request after a lost response", async () => {
-  const operation = {
+test("transfer actions retry the same request and await streamed progress", async () => {
+  const progress = {
+    kind: "blocked",
     id: "saved-transfer",
-    leadId: initial.id,
     targetAccountKey: "work",
-    scope: TransferScope.team,
-    status: TransferStatus.pending,
-    created: 1,
-    updated: 2,
-    members: {},
-    canRetry: true,
-    blocked: [{ id: "lead", name: "Lead", reason: "Receipt missing" }],
-  } satisfies PostResult<"/api/agents/account-transfer">;
-  const agent: Agent = { ...initial, accountTransfer: operation };
+    reason: "Receipt missing",
+    actions: ["retry", "cancel"],
+  } as const;
+  const agent: Agent = { ...initial, accountTransferProgress: progress };
   const transfer = () => {
     const status = children(render(agent).controls).find(
       (
@@ -331,54 +320,31 @@ test("transfer actions retain response identity and retry the same request after
     );
     return required(status).props;
   };
-  expect(transfer()).toHaveProperty("opened", false);
   h.post.mockRejectedValueOnce(new Error("response lost"));
-  transfer().onAction?.("retry");
+  transfer().onAction("retry");
   await vi.waitFor(() => expect(transfer().pending).toBe(false));
-  expect(transfer().transfer).toBe(operation);
-  expect(h.report).toHaveBeenCalledWith(
-    expect.objectContaining({ level: "error", reason: "response lost" }),
-  );
-  const response = {
-    ...operation,
-    updated: 3,
-    waiting: "Waiting for the current turn",
-  };
-  h.post.mockResolvedValueOnce(response);
-  transfer().onAction?.("retry");
+  h.post.mockResolvedValueOnce({});
+  transfer().onAction("retry");
   await vi.waitFor(() => expect(transfer().pending).toBe(false));
   expect(h.post).toHaveBeenCalledTimes(2);
   expect(h.post.mock.calls[0]).toEqual(h.post.mock.calls[1]);
   expect(h.post).toHaveBeenLastCalledWith("/api/agents/account-transfer", {
     action: "retry",
-    scope: "team",
-    request_id: operation.id,
+    request_id: progress.id,
   });
-  expect(transfer().transfer).toBe(response);
+  expect(transfer().transfer).toBe(progress);
+  expect(h.refresh).not.toHaveBeenCalled();
 });
 
-test("a remote transfer does not open the modal", () => {
-  render(initial);
-  const agent = {
-    ...initial,
-    accountTransfer: {
-      id: "remote",
-      status: TransferStatus.pending,
-      scope: TransferScope.team,
-      blocked: [{ id: "lead", name: "Lead", reason: "Receipt missing" }],
-    },
-  };
-  render(agent);
-  const controls = render(agent).controls;
-  const modal = children(controls).find(
-    (node) => node.type === AccountTransferStatus,
-  );
-  expect(required(modal).props.opened).toBe(false);
-});
-
-test("the transfer modal shows an action failure even without a start retry", () => {
+test("the transfer modal shows an action failure", () => {
   const modal = AccountTransferStatus({
-    transfer: { id: "transfer", status: "pending" },
+    transfer: {
+      kind: "blocked",
+      id: "transfer",
+      targetAccountKey: "work",
+      reason: "Receipt missing",
+      actions: ["retry"],
+    },
     error: "Cancel response lost",
     onAction: () => {},
   });
@@ -391,32 +357,19 @@ test("the transfer modal shows an action failure even without a start retry", ()
   ).toBe(true);
 });
 
-test("blocked members are reported but provider mismatches are not", () => {
+test("blocked transfer reason is reported", () => {
   render({
     ...initial,
-    accountTransfer: {
+    accountTransferProgress: {
+      kind: "blocked",
       id: "transfer",
-      status: "pending",
-      scope: TransferScope.team,
-      blocked: [{ id: "blocked", name: "Worker", reason: "Receipt missing" }],
-      leftOnSource: [
-        {
-          id: "left",
-          name: "Other",
-          provider: ProviderKind.claude,
-          reason: "Uses claude",
-        },
-      ],
+      targetAccountKey: "work",
+      reason: "Receipt missing",
+      actions: [],
     },
   });
   expect(h.report).toHaveBeenCalledWith(
-    expect.objectContaining({
-      level: "error",
-      reason: "Worker: Receipt missing",
-    }),
-  );
-  expect(h.report).not.toHaveBeenCalledWith(
-    expect.objectContaining({ reason: expect.stringContaining("Uses claude") }),
+    expect.objectContaining({ level: "error", reason: "Receipt missing" }),
   );
 });
 

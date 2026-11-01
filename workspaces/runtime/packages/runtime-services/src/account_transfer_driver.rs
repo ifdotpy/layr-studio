@@ -227,6 +227,14 @@ fn replay_in(
     ))
 }
 
+fn excludes_account(agent: &studio_runtime_store::AgentRecord, target: &str) -> bool {
+    agent
+        .extra
+        .get("excludedAccountKeys")
+        .and_then(Value::as_array)
+        .is_some_and(|keys| keys.iter().any(|key| key.as_str() == Some(target)))
+}
+
 /// Return a retained request before consulting mutable account eligibility.
 pub async fn replay(
     store: &RuntimeStore,
@@ -290,12 +298,7 @@ pub async fn request(
                     "Choose the orchestrator to transfer its team",
                 ));
             }
-            if actor
-                .extra
-                .get("excludedAccountKeys")
-                .and_then(Value::as_array)
-                .is_some_and(|keys| keys.iter().any(|key| key.as_str() == Some(target.as_str())))
-            {
+            if excludes_account(&actor, &target) {
                 return Err(TransferError::Refused(
                     "This account is disabled for this chat",
                 ));
