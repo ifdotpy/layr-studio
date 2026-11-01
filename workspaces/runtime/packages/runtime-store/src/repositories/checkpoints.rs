@@ -714,13 +714,37 @@ impl CheckpointsRepository {
             if !matches!(kind, Some("capture" | "checkpoint")) {
                 continue;
             }
-            let Some(_operation_id) = agent
+            let Some(operation_id) = agent
                 .record
                 .get("workspaceReservationId")
                 .and_then(Value::as_str)
             else {
                 return Err(invalid_record("runtime_agents", &agent.id));
             };
+            let diagnostic_id = format!(
+                "{}:orphan:{}:{}:{}",
+                kind.unwrap_or_default(),
+                agent.id.len(),
+                agent.id,
+                operation_id
+            );
+            let diagnostic = json!({
+                "id": diagnostic_id,
+                "kind": kind,
+                "agent": agent.id,
+                "phase": "failed",
+                "updated": now,
+                "result": {
+                    "checkpointError": "Server restarted with an orphaned checkpoint reservation",
+                    "reservationId": operation_id,
+                },
+            });
+            insert_object(
+                transaction,
+                "runtime_workspace_operations",
+                &diagnostic_id,
+                &diagnostic,
+            )?;
             let object = agent
                 .record
                 .as_object_mut()
@@ -1213,6 +1237,66 @@ mod tests {
 
         metadata_update.agent.epoch = 1;
         assert!(!same_workspace_activity(&metadata_update, &snapshot));
+    }
+
+    #[tokio::test]
+    async fn recovery_reports_orphan_reservations_without_overwriting_terminal_operations() {
+        for terminal in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let store = crate::RuntimeStore::open(Some(dir.path())).await.unwrap();
+            let original = json!({"id":"checkpoint:lost","kind":"checkpoint","agent":"a","phase":"completed","result":{"provider":"keep"},"error":"keep"});
+            let saved = original.clone();
+            store.transaction(move |tx| {
+                let mut agent = crate::AgentRecord::test_defaults().value();
+                agent["id"] = json!("a");
+                agent["rootId"] = json!("a");
+                agent["provider"] = json!("codex");
+                agent["workspaceOperation"] = json!("checkpoint");
+                agent["workspaceReservationId"] = json!("checkpoint:lost");
+                crate::AgentRepository::put(tx, &crate::AgentRecord::from_value(agent)?)?;
+                tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('agent','a',1,'fixture',?1,0)", [json!({"collection":"agent","id":"a","value":{"id":"a","workspaceOperation":"checkpoint","workspaceReservationId":"checkpoint:lost"}}).to_string()])?;
+                if terminal {
+                    super::insert_object(tx, "runtime_workspace_operations", "checkpoint:lost", &saved)?;
+                }
+                Ok(())
+            }).await.unwrap();
+            drop(store);
+            let store = crate::RuntimeStore::open(Some(dir.path())).await.unwrap();
+            store
+                .transaction(move |tx| {
+                    CheckpointsRepository::recover_captures(tx, 2.0)?;
+                    let agent = super::read_object(tx, "runtime_agents", "a")?
+                        .unwrap()
+                        .record;
+                    assert_eq!(agent["workspaceOperation"], json!(null));
+                    assert!(agent.get("workspaceReservationId").is_none());
+                    let operations = super::read_all(tx, "runtime_workspace_operations")?;
+                    assert_eq!(operations.len(), 1 + usize::from(terminal));
+                    let diagnostic = operations
+                        .iter()
+                        .find(|op| op.record["result"]["checkpointError"].is_string())
+                        .expect("diagnostic retained");
+                    let _: crate::WorkspaceOperationRecord =
+                        serde_json::from_value(diagnostic.record.clone())?;
+                    assert_eq!(
+                        diagnostic.record["result"]["reservationId"],
+                        "checkpoint:lost"
+                    );
+                    if terminal {
+                        assert_eq!(
+                            operations
+                                .iter()
+                                .find(|op| op.id == "checkpoint:lost")
+                                .unwrap()
+                                .record,
+                            original
+                        );
+                    }
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
     }
 
     #[test]
