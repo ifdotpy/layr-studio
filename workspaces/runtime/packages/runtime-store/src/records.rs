@@ -418,6 +418,11 @@ pub struct AgentRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
+    pub native_effort: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
     pub role: studio_runtime_schema::queue_command::Field<
         studio_runtime_schema::creation_intent::AgentRole,
     >,
@@ -868,6 +873,7 @@ impl AgentRecord {
             profile_id: Default::default(),
             profile_instructions: Default::default(),
             effort: Default::default(),
+            native_effort: Default::default(),
             role: Default::default(),
             provider: Default::default(),
             created: Default::default(),
@@ -2888,6 +2894,7 @@ mod tests {
             "profileId",
             "profileInstructions",
             "effort",
+            "nativeEffort",
             "lastCompletedTurn",
             "hostProjectPath",
             "lastCompletedTurnStatus",

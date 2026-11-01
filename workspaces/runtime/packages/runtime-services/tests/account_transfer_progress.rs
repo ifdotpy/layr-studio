@@ -362,7 +362,7 @@ async fn lazy_history_receipt_is_adopted_before_ordinary_preparation_returns() {
                 studio_runtime_schema::ProviderKind::Codex,
             );
             row.model = Some("gpt-6-astra".into());
-            row.extra.insert("nativeEffort".into(), Value::Null);
+            row.native_effort = studio_runtime_schema::queue_command::Field::Null;
             AgentRepository::put(tx, &row)
         })
         .await

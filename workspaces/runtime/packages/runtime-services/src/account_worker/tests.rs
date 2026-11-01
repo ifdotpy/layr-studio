@@ -1196,7 +1196,7 @@ async fn invalid_agent_record_is_held_without_stopping_other_agent_dispatch() {
                     .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
                     let mut good = AgentRepository::get(tx, &AgentId::from(write_good_id.as_str()))?
                         .expect("valid neighbor agent");
-                    good.extra.insert("nativeEffort".into(), Value::Null);
+                    good.native_effort = studio_runtime_schema::queue_command::Field::Null;
                     good.execution_settings_account_key = studio_runtime_schema::queue_command::Field::Value("default".into());
                     AgentRepository::put(tx, &good)?;
                     tx.execute(
@@ -2833,7 +2833,8 @@ async fn provider_worker(
                 row.provider = studio_runtime_schema::queue_command::Field::Value(
                     studio_runtime_schema::ProviderKind::Claude,
                 );
-                row.extra.insert("nativeEffort".into(), json!("medium"));
+                row.native_effort =
+                    studio_runtime_schema::queue_command::Field::Value("medium".into());
                 row.extra.insert("claudeOptions".into(), json!({}));
                 AgentRepository::put(tx, &row)?;
                 Ok(())

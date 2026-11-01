@@ -48,6 +48,7 @@ for (key, value) in [
                             "status":"pending","response":{}}),
                     ),
                 ] { match key {
+                    "nativeEffort" => row.native_effort = serde::Deserialize::deserialize(value).unwrap(),
                     "startAttempt" => row.start_attempt = Some(serde::Deserialize::deserialize(value).unwrap()),
                     "disconnectRecovery" => row.disconnect_recovery = Some(Box::new(serde::Deserialize::deserialize(value).unwrap())),
                     _ => { row.extra.insert(key.into(), value); }

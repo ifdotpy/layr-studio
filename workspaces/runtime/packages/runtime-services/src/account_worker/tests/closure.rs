@@ -1131,7 +1131,7 @@ async fn cold_catalog_refreshes_and_wakes_without_an_external_command() {
             store
                 .transaction_with(move |tx| {
                     let mut row = AgentRepository::get(tx, &AgentId::from(id.as_str()))?.unwrap();
-                    row.extra.remove("nativeEffort");
+                    row.native_effort = studio_runtime_schema::queue_command::Field::Missing;
                     AgentRepository::put(tx, &row)?;
                     Ok(())
                 })

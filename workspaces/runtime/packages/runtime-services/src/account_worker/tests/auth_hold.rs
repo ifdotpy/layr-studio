@@ -133,9 +133,8 @@ pub(super) async fn agents(state: &State, kind: ProviderKind, others: usize) -> 
                     template.provider = studio_runtime_schema::queue_command::Field::Value(
                         studio_runtime_schema::ProviderKind::Claude,
                     );
-                    template
-                        .extra
-                        .insert("nativeEffort".into(), json!("medium"));
+                    template.native_effort =
+                        studio_runtime_schema::queue_command::Field::Value("medium".into());
                     template.extra.insert("claudeOptions".into(), json!({}));
                 }
                 AgentRepository::put(tx, &template)?;
