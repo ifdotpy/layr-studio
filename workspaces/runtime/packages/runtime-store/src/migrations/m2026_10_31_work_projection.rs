@@ -38,7 +38,7 @@ mod tests {
     #[test]
     fn preserves_already_valid_row_bytes() {
         let mut db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE writes(id TEXT); CREATE TRIGGER log_write AFTER UPDATE ON runtime_work BEGIN INSERT INTO writes VALUES(new.id); END;").unwrap();
+        db.execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE writes(id TEXT); CREATE TRIGGER log_write AFTER UPDATE ON runtime_work BEGIN INSERT INTO writes VALUES(new.id); END;").unwrap();
         let original = r#"{ "status": "ready", "id": "a" }"#;
         db.execute("INSERT INTO runtime_work VALUES('a',?1)", [original])
             .unwrap();
@@ -60,7 +60,7 @@ mod tests {
     #[test]
     fn removes_non_string_agent_only_and_is_idempotent() {
         let mut db = Connection::open_in_memory().unwrap();
-        db.execute_batch(r#"CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+        db.execute_batch(r#"CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
             INSERT INTO runtime_work VALUES('a','{"id":"a","status":"ready","agent":42,"archive":{"x":1}}'),('b','{"id":"b","status":"ready","agent":null}'),('c','{"id":"c","status":"ready","agent":"worker"}');"#).unwrap();
         let tx = db.transaction().unwrap();
         apply(&tx).unwrap();

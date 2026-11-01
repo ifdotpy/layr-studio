@@ -1676,10 +1676,6 @@
       "fingerprint": "a0034e3d4920302af287ecb4ce6b83c0da7fe07e0374b62d0b457ae625856a49:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/workspace_views.rs",
-      "fingerprint": "ba0e4493df2553a721c1de1d70d2669deb2f37257a1aa0fc0cd6ff79c4ff892a:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/tests/account_transfer_driver.rs",
       "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
     },

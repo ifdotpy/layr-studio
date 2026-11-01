@@ -295,12 +295,38 @@ pub fn parse_task_cursor(
     }))
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskFeedResponse {
+    tasks: Vec<studio_runtime_schema::task_record::TaskRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cursor: Option<UpdatedCursor>,
+    has_more: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    has_more_changes: Option<bool>,
+    next_before: Option<BeforeCursor>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reset: Option<bool>,
+}
+
+#[derive(serde::Serialize)]
+struct UpdatedCursor {
+    updated: f64,
+    id: String,
+}
+
+#[derive(serde::Serialize)]
+struct BeforeCursor {
+    created: serde_json::Number,
+    id: String,
+}
+
 pub fn task_feed_response(
-    tasks: Vec<Value>,
+    tasks: Vec<studio_runtime_schema::task_record::TaskRecord>,
     has_more: bool,
     cursor: Option<&TaskFeedCursor>,
     before: Option<&TaskFeedCursor>,
-) -> Value {
+) -> TaskFeedResponse {
     let latest = tasks
         .iter()
         .map(task_cursor)
@@ -313,40 +339,58 @@ pub fn task_feed_response(
             id: String::new(),
             time: 0.0,
         });
-    let next_before = has_more.then(|| tasks.last()).flatten().map(|task| {
-        json!({
-            "created": task.get("created").cloned().unwrap_or(json!(0)),
-            "id": task.get("id").cloned().unwrap_or(Value::Null),
-        })
-    });
+    let next_before = has_more
+        .then(|| tasks.last())
+        .flatten()
+        .map(|task| BeforeCursor {
+            created: task.created_number().number().clone(),
+            id: task.id().0.clone(),
+        });
     if before.is_some() {
-        json!({"tasks": tasks, "hasMore": has_more, "nextBefore": next_before})
+        TaskFeedResponse {
+            tasks,
+            cursor: None,
+            has_more,
+            has_more_changes: None,
+            next_before,
+            reset: None,
+        }
     } else if let Some(cursor) = cursor {
         let next = tasks
             .last()
             .map(task_cursor)
             .unwrap_or_else(|| cursor.clone());
-        json!({
-            "tasks": tasks, "cursor": {"updated": next.time, "id": next.id},
-            "hasMore": false, "hasMoreChanges": has_more, "nextBefore": null, "reset": false,
-        })
+        TaskFeedResponse {
+            tasks,
+            cursor: Some(UpdatedCursor {
+                updated: next.time,
+                id: next.id,
+            }),
+            has_more: false,
+            has_more_changes: Some(has_more),
+            next_before: None,
+            reset: Some(false),
+        }
     } else {
-        json!({
-            "tasks": tasks, "cursor": {"updated": latest.time, "id": latest.id},
-            "hasMore": has_more, "nextBefore": next_before, "reset": false,
-        })
+        TaskFeedResponse {
+            tasks,
+            cursor: Some(UpdatedCursor {
+                updated: latest.time,
+                id: latest.id,
+            }),
+            has_more,
+            has_more_changes: None,
+            next_before,
+            reset: Some(false),
+        }
     }
 }
 
-fn task_cursor(task: &Value) -> TaskFeedCursor {
-    let created = task.get("created").and_then(Value::as_f64).unwrap_or(0.0);
-    let finished = task.get("finished").and_then(Value::as_f64).unwrap_or(0.0);
+fn task_cursor(task: &studio_runtime_schema::task_record::TaskRecord) -> TaskFeedCursor {
+    let created = task.created();
+    let finished = task.finished.unwrap_or(0.0);
     TaskFeedCursor {
-        id: task
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_owned(),
+        id: task.id().0.clone(),
         time: created.max(finished),
     }
 }
@@ -715,7 +759,7 @@ mod tests {
 
     #[test]
     fn changes_cursor_advances_to_the_last_row_and_empty_poll_preserves_it() {
-        let task = json!({"id":"a","created":1,"finished":2});
+        let task = serde_json::from_str(r#"{"id":"a","agent":"agent","created":1,"finished":2,"itemId":"item","turnId":"turn","kind":"command","status":"completed","type":"commandExecution","name":"command"}"#).unwrap();
         let first = task_feed_response(
             vec![task],
             false,
@@ -729,23 +773,29 @@ mod tests {
             id: "a".into(),
             time: 2.0,
         };
-        assert_eq!(first["cursor"], json!({"updated":2.0,"id":"a"}));
+        let first_cursor = first.cursor.unwrap();
+        assert_eq!((first_cursor.updated, first_cursor.id.as_str()), (2.0, "a"));
         let second = task_feed_response(vec![], false, Some(&cursor), None);
-        assert_eq!(second["cursor"], first["cursor"]);
-        assert!(second["tasks"].as_array().expect("tasks array").is_empty());
+        let second_cursor = second.cursor.unwrap();
+        assert_eq!(
+            (second_cursor.updated, second_cursor.id),
+            (first_cursor.updated, first_cursor.id)
+        );
+        assert!(second.tasks.is_empty());
     }
 
     #[test]
     fn first_page_cursor_and_history_cursor_follow_python_contract() {
-        let response = task_feed_response(
-            vec![json!({"id":"a","created":2.0,"finished":5.0})],
-            true,
-            None,
-            None,
+        let task = serde_json::from_str(r#"{"id":"a","agent":"agent","created":2.0,"finished":5.0,"itemId":"item","turnId":"turn","kind":"command","status":"completed","type":"commandExecution","name":"command"}"#).unwrap();
+        let response = task_feed_response(vec![task], true, None, None);
+        let cursor = response.cursor.unwrap();
+        assert_eq!((cursor.updated, cursor.id.as_str()), (5.0, "a"));
+        let before = response.next_before.unwrap();
+        assert_eq!(
+            (before.created.as_f64(), before.id.as_str()),
+            (Some(2.0), "a")
         );
-        assert_eq!(response["cursor"], json!({"updated":5.0,"id":"a"}));
-        assert_eq!(response["nextBefore"], json!({"created":2.0,"id":"a"}));
-        assert_eq!(response["hasMore"], true);
+        assert!(response.has_more);
     }
 
     #[cfg(unix)]

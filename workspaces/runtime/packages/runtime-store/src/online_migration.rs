@@ -196,6 +196,14 @@ pub fn step<M: OnlineMigration>(
     clock: &dyn Clock,
 ) -> StoreResult<Step> {
     let name = progress_name::<M>();
+    let complete: bool = tx.query_row(
+        "SELECT complete FROM runtime_payload_migrations WHERE name=?1",
+        [&name],
+        |row| row.get(0),
+    )?;
+    if complete {
+        return Ok(Step::Complete);
+    }
     let mut budget = Budget {
         clock,
         started: clock.now(),

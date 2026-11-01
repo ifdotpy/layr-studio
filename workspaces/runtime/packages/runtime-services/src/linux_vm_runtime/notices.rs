@@ -65,17 +65,23 @@ impl StoreChatNotices {
     }
 }
 
+/// VM chats that run a turn: an active status or a busy chat (an unfinished turn).
+fn vm_notice_chats_sql() -> String {
+    format!(
+        "SELECT id FROM runtime_agents WHERE deleted_at IS NULL \
+         AND json_extract(record,'$.executionMode')='vm' \
+         AND (status IN ('running','starting','approval') OR {}) \
+         ORDER BY id",
+        studio_runtime_store::domain::chat_busy_sql("runtime_agents.id")
+    )
+}
+
 impl VmChatNotices for StoreChatNotices {
     fn chats(&self) -> BoxFuture<'_, Result<Vec<String>, String>> {
         Box::pin(async move {
             self.store
                 .read_async("runtime-services/linux_vm_notices", |tx| {
-                    let mut statement = tx.prepare(
-                        "SELECT id FROM runtime_agents WHERE deleted_at IS NULL \
-                         AND json_extract(record,'$.executionMode')='vm' \
-                         AND (status IN ('running','starting','approval') OR in_flight=1) \
-                         ORDER BY id",
-                    )?;
+                    let mut statement = tx.prepare(&vm_notice_chats_sql())?;
                     let ids = statement
                         .query_map([], |row| row.get::<_, String>(0))?
                         .collect::<Result<Vec<_>, _>>()?;
@@ -135,5 +141,39 @@ impl VmChatNotices for StoreChatNotices {
                 .await
                 .map_err(|error| error.to_string())
         })
+    }
+}
+
+#[cfg(test)]
+mod busy_chat_tests {
+    use super::*;
+
+    #[test]
+    fn busy_vm_chats_are_listed_without_the_agent_flag() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(studio_runtime_store::agent_columns::agent_table_sql())
+            .unwrap();
+        db.execute_batch(&studio_runtime_store::domain::tables_sql())
+            .unwrap();
+        for id in ["busy", "idle"] {
+            let record = json!({"id":id,"provider":"codex","executionMode":"vm","status":"idle","inFlight":true});
+            db.execute(
+                "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                rusqlite::params![id, record.to_string()],
+            )
+            .unwrap();
+        }
+        db.execute(
+            "INSERT INTO turns(id,chat,state) VALUES('t1','busy','starting')",
+            [],
+        )
+        .unwrap();
+        let mut statement = db.prepare(&vm_notice_chats_sql()).unwrap();
+        let ids = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(ids, ["busy"]);
     }
 }

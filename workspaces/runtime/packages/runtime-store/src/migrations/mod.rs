@@ -59,6 +59,7 @@ mod m2026_11_01_agent_capacity;
 mod m2026_11_01_agent_naming;
 mod m2026_11_01_annotation_record;
 mod m2026_11_01_approval_secrets;
+mod m2026_11_01_chat_busy_deleted_index;
 mod m2026_11_01_chat_busy_indexes;
 mod m2026_11_01_plan_record;
 mod m2026_11_01_project_context;
@@ -824,21 +825,7 @@ static CATALOG: &[&dyn Migration] = &[
             supported_source: "Transcript copies in sync_entities and items without a change number entry",
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
-        apply: |c| {
-            crate::durable_seq::install(c.transaction)?;
-            // Old items are numbered by the online backfill (transcript_seq_backfill),
-            // which also runs the copy check and ends the copies. Without items there is
-            // nothing to number, so the check runs here. The old rows stay either way.
-            let items: bool = c.transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM runtime_items)",
-                [],
-                |row| row.get(0),
-            )?;
-            if !items {
-                crate::durable_seq::retire_transcript_copies(c.transaction)?;
-            }
-            Ok(())
-        },
+        apply: |c| crate::durable_seq::install(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {
@@ -1234,6 +1221,26 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_01_chat_busy_indexes::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-chat-busy-deleted-index",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Deleted agent index that reads the in_flight column",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_chat_busy_deleted_index::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-work-history-rows",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Work records whose results, decisions and releases exist only inside the record",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| crate::work_history::migrate(c.transaction),
     },
 ];
 

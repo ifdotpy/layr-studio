@@ -30,22 +30,12 @@ use thiserror::Error;
 
 const MAX_ITEMS: usize = 40;
 
-pub(crate) fn hold_unclean_jobs(tx: &rusqlite::Transaction<'_>) -> Result<(), TitleError> {
-    let mut query = tx.prepare("SELECT id FROM runtime_outbox WHERE kind=?1 AND status=?2")?;
-    let ids = query
-        .query_map(
-            rusqlite::params![OutboxKind::TitleGeneration, OutboxStatus::Pending],
-            |row| row.get::<_, String>(0),
-        )?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(query);
-    for id in ids {
-        let row = Outbox::get::<TitleJob>(tx, &id)?.ok_or(TitleError::Conflict)?;
-        let mut job = row.payload;
-        job.status = TitleStatus::Unknown;
-        write_job(tx, &job, false)?;
-    }
-    Ok(())
+/// Entity hook of the unclean-stop pass for one held title job.
+pub(crate) fn hold_job(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<(), TitleError> {
+    let row = Outbox::get::<TitleJob>(tx, id)?.ok_or(TitleError::Conflict)?;
+    let mut job = row.payload;
+    job.status = TitleStatus::Unknown;
+    write_job(tx, &job, false)
 }
 const MAX_ITEM_BYTES: usize = 1_048_576;
 /// Python's one-shot title generation deadline (`codex_rename.py:109-110`).

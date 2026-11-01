@@ -70,25 +70,6 @@ fn retained(row: &RetainedRow) -> Result<&RetainedCall, WorkerError> {
 fn put(tx: &rusqlite::Transaction<'_>, row: &RetainedRow) -> Result<(), WorkerError> {
     Outbox::put(tx, row).map_err(outbox_error)
 }
-pub(super) fn hold_unclean_pending(tx: &rusqlite::Transaction<'_>) -> Result<(), WorkerError> {
-    let mut statement = tx.prepare("SELECT id FROM runtime_outbox WHERE kind=?1 AND status=?2")?;
-    let ids = statement
-        .query_map(
-            rusqlite::params![OutboxKind::ProviderCall, OutboxStatus::Pending],
-            |row| row.get::<_, String>(0),
-        )?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(statement);
-    for id in ids {
-        let Some(mut row) = row(tx, &id)? else {
-            continue;
-        };
-        row.status = OutboxStatus::Unknown;
-        row.next_at = None;
-        put(tx, &row)?;
-    }
-    Ok(())
-}
 fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
@@ -1293,7 +1274,7 @@ mod replay_identity_tests {
                     call.clone(),
                 )?);
                 assert!(matches!(replay_recorded(tx, &call)?, Ok(Replay::Ready)));
-                hold_unclean_pending(tx)?;
+                Outbox::hold_pending(tx, OutboxKind::ProviderCall)?;
                 assert!(matches!(
                     replay_recorded(tx, &call)?,
                     Err(PortError::Unknown)
@@ -1326,7 +1307,7 @@ mod replay_identity_tests {
             saved.status = OutboxStatus::Pending;
             put(tx, &saved)?;
             assert!(matches!(replay_recorded(tx, &call)?, Ok(Replay::Retry(_))));
-            hold_unclean_pending(tx)?;
+            Outbox::hold_pending(tx, OutboxKind::ProviderCall)?;
             assert!(matches!(replay_recorded(tx, &call)?, Ok(Replay::Return(receipt)) if receipt.result == RequestResult::Unknown));
             assert!(retained(&row(tx, &key)?.ok_or(WorkerError::Capacity)?)?.outcome.is_some());
             record_outcome(tx, &key, None, Some(RequestResult::NotSent), 1)?;
