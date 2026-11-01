@@ -1337,6 +1337,9 @@ fn validate_agent(
     Ok(())
 }
 
+/// The event counter is optional in the agent schema and in `AgentRecord`;
+/// each notification starts or raises it. A stored value that is present must
+/// still be a counter.
 fn validate_agent_write_fields(
     agent: &Value,
     agent_id: &str,
@@ -1351,7 +1354,9 @@ fn validate_agent_write_fields(
             .and_then(Value::as_str)
             .is_none_or(str::is_empty)
         || agent.get("status").and_then(Value::as_str).is_none()
-        || agent.get("events").and_then(Value::as_u64).is_none()
+        || agent
+            .get("events")
+            .is_some_and(|events| !events.is_null() && events.as_u64().is_none())
     {
         return Err(stored("runtime_agents", agent_id));
     }
@@ -3234,6 +3239,86 @@ mod tests {
             .await
             .expect("submitted attempt is durable");
         (directory, store)
+    }
+
+    /// Live bug 2026-11-01: an agent record without the event counter is valid
+    /// (the schema and `AgentRecord` make it optional, and each notification
+    /// writes it), but the write check refused it and held the agent.
+    #[tokio::test]
+    async fn an_agent_without_an_event_counter_still_accepts_its_user_message_receipt() {
+        let (_directory, store) = submitted_chat_runtime().await;
+        store
+            .transaction(|tx| {
+                let mut agent = AgentRepository::get(tx, &"agent".into())?.expect("agent");
+                agent.events = None;
+                AgentRepository::put(tx, &agent)?;
+                assert_eq!(
+                    AgentRepository::get(tx, &"agent".into())?
+                        .expect("agent")
+                        .events,
+                    None
+                );
+                Ok(())
+            })
+            .await
+            .expect("counter removed");
+        let notification = frame(&json!({
+            "method":"item/started",
+            "params":{
+                "threadId":"thread",
+                "turnId":"turn-1",
+                "item":{"id":"input-1","type":"userMessage","clientId":"chat:message-1:agent"}
+            }
+        }));
+        let identity = identity(1);
+        let outcome = store
+            .transaction(move |tx| {
+                super::dispatch_notification_with_effects(
+                    tx,
+                    "agent",
+                    &PublicationContext::default(),
+                    &NotificationStreamBuffer::default(),
+                    &identity,
+                    &notification,
+                    2.0,
+                    &crate::notification_runtime_effects::RuntimeNotificationEffects,
+                )
+                .map(|result| result.outcome)
+                .map_err(|error| {
+                    studio_runtime_store::StoreError::SchemaMismatch(error.to_string())
+                })
+            })
+            .await
+            .expect("a missing counter is not invalid stored data");
+        assert_eq!(outcome, DispatchOutcome::Written);
+        store
+            .transaction(|tx| {
+                let agent = AgentRepository::get(tx, &"agent".into())?.expect("agent");
+                assert_eq!(agent.events, Some(1));
+                Ok(())
+            })
+            .await
+            .expect("the receipt starts the counter");
+    }
+
+    #[test]
+    fn the_event_counter_is_optional_but_never_malformed() {
+        let base = |events: Value| {
+            let mut agent = json!({"id":"a","rootId":"a","epoch":1,"status":"idle"});
+            if !events.is_null() {
+                agent["events"] = events;
+            }
+            agent
+        };
+        for ok in [Value::Null, json!(0), json!(7)] {
+            assert!(super::validate_agent_write_fields(&base(ok), "a").is_ok());
+        }
+        let mut explicit_null = base(Value::Null);
+        explicit_null["events"] = Value::Null;
+        assert!(super::validate_agent_write_fields(&explicit_null, "a").is_ok());
+        for bad in [json!(-1), json!("7"), json!(1.5), json!([])] {
+            assert!(super::validate_agent_write_fields(&base(bad), "a").is_err());
+        }
     }
 
     #[tokio::test]
