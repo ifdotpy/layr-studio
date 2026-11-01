@@ -274,6 +274,9 @@ type AccountTilesProps = {
   providers?: string[];
   onProvider?: (provider: string) => void;
   accountDisabled?: ((account: Account) => boolean) | undefined;
+  accountUnavailableReason?:
+    | ((account: Account) => string | undefined)
+    | undefined;
 } & (
   | { multiple?: false; value: string; onChange: (value: string) => void }
   | { multiple: true; value: string[]; onChange: (value: string[]) => void }
@@ -361,25 +364,33 @@ export function AccountTiles(p: AccountTilesProps) {
         {p.accounts
           .filter((account) => account.provider === provider)
           .map((account) => (
-            <AccountTile
-              key={account.id}
-              account={account}
-              selected={
-                p.multiple
-                  ? p.value.includes(account.id)
-                  : p.value === account.id
-              }
-              multiple={p.multiple}
-              readOnly={
-                !p.multiple &&
-                p.value === account.id &&
-                !p.automatic &&
-                p.accounts.filter((item) => item.provider === provider)
-                  .length === 1
-              }
-              disabled={!!p.disabled || !!p.accountDisabled?.(account)}
-              onSelect={() => select(account.id)}
-            />
+            <div key={account.id}>
+              <AccountTile
+                account={account}
+                selected={
+                  p.multiple
+                    ? p.value.includes(account.id)
+                    : p.value === account.id
+                }
+                multiple={p.multiple}
+                readOnly={
+                  !p.multiple &&
+                  p.value === account.id &&
+                  !p.automatic &&
+                  p.accounts.filter((item) => item.provider === provider)
+                    .length === 1
+                }
+                disabled={
+                  !!p.disabled ||
+                  !!p.accountDisabled?.(account) ||
+                  !!p.accountUnavailableReason?.(account)
+                }
+                onSelect={() => select(account.id)}
+              />
+              {p.accountUnavailableReason?.(account) && (
+                <small>{p.accountUnavailableReason(account)}</small>
+              )}
+            </div>
           ))}
       </div>
     </div>

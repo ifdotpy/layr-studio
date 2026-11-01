@@ -21,6 +21,9 @@ export type AgentSetupPickerProps = {
   onAccount: (key: string | null) => void;
   automaticAccount?: boolean;
   isAccountDisabled?: (account: Account) => boolean;
+  accountUnavailableReason?:
+    | ((account: Account) => string | undefined)
+    | undefined;
   models: ModelOption[];
   model: string;
   onModel: (model: string) => void;
@@ -82,6 +85,7 @@ export function AgentSetupPicker(p: AgentSetupPickerProps) {
           providers={p.providers.length > 1 ? p.providers : []}
           disabled={!!p.readOnlyReason || p.accountDisabled}
           accountDisabled={p.isAccountDisabled}
+          accountUnavailableReason={p.accountUnavailableReason}
           automatic={p.automaticAccount}
         />
       )}
