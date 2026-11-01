@@ -20250,6 +20250,7 @@ export interface components {
       id: string;
       kind?: components["schemas"]["RoomKind"] | null | undefined;
       lastMessage?: components["schemas"]["RoomLastMessage"] | null | undefined;
+      leadIds?: string[] | undefined;
       /** Localmembers */
       localMembers?: string[] | null | undefined;
       /** Members */

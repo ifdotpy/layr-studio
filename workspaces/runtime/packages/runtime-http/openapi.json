@@ -44739,6 +44739,12 @@
               }
             ]
           },
+          "leadIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "localMembers": {
             "anyOf": [
               {

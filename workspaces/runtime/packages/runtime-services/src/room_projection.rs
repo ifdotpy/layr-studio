@@ -16,6 +16,7 @@ pub(crate) struct RoomProjection {
     pub(crate) id: String,
     pub(crate) kind: RoomKind,
     pub(crate) members: Vec<String>,
+    pub(crate) lead_ids: Vec<String>,
     pub(crate) name: Option<String>,
     #[serde(skip_serializing_if = "Field::is_missing")]
     last_message: Field<RoomLastMessage>,
@@ -268,10 +269,42 @@ fn project_room_view(
             .map(|s| bounded(&s, ""))
             .collect()
     };
+    let lead_ids = if record.kind == RoomKind::Broadcast {
+        record
+            .root_id
+            .as_ref()
+            .filter(|root| !root.is_empty() && root.as_str() != "all")
+            .cloned()
+            .into_iter()
+            .collect()
+    } else {
+        let mut roots = Vec::new();
+        for agent in context.agents.iter().filter(|agent| {
+            agent.id.as_ref().is_some_and(|id| {
+                members
+                    .iter()
+                    .take(SYNC_ARRAY_ITEMS)
+                    .any(|member| member == id)
+            })
+        }) {
+            let root = if agent.is_lead == Some(true) {
+                agent.id.as_ref()
+            } else {
+                agent.root_id.as_ref()
+            };
+            if let Some(root) = root.filter(|root| !root.is_empty())
+                && !roots.contains(root)
+            {
+                roots.push(root.clone());
+            }
+        }
+        roots
+    };
     Some(RoomProjection {
         id: bounded(&record.id, "id"),
         kind: record.kind,
         members: bounded_members(members),
+        lead_ids: bounded_members(lead_ids),
         name: name.map(|s| bounded(&s, "name")),
         last_message: match last_message {
             Some(v) => Field::Value(v),
@@ -367,7 +400,9 @@ mod tests {
         ].into_iter().zip(expected) {
             let record: RoomRecord = serde_json::from_str(raw).unwrap();
             let actual = serde_json::to_string(&project_room(&record, &context).unwrap().unwrap()).unwrap();
-            assert_eq!(actual, expected);
+            let mut value: Value = serde_json::from_str(&actual).unwrap();
+            assert_eq!(value.as_object_mut().unwrap().remove("leadIds"), Some(json!(["a"])));
+            assert_eq!(value, serde_json::from_str::<Value>(expected).unwrap());
             if let Field::Value(state) = &record.radio {
                 let direct = serde_json::to_string(&
                     project_radio_room(&record, &context, state)

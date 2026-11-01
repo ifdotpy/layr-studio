@@ -11,6 +11,104 @@ use studio_runtime_store::{AgentRecord, AgentRepository, StoreError};
 const CHAT: &str = "published-chat";
 
 #[tokio::test]
+async fn room_roots_follow_live_agent_root_change() {
+    let (_dir, store) = store().await;
+    seed_chat(
+        &store,
+        chat(json!({"id":"child","rootId":"old","isLead":false})),
+    )
+    .await;
+    store.transaction(|tx| {
+        tx.execute("INSERT INTO runtime_rooms(id,record) VALUES('room',?1)", [json!({"id":"room","kind":"private","members":["child"]}).to_string()])?;
+        studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "room", "room", json!({"id":"room","kind":"private","members":["child"],"name":"Child","leadIds":["old"]}), false)?;
+        Ok(())
+    }).await.unwrap();
+    store.transaction(|tx| {
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','new') WHERE id='child'", [])?;
+        Ok(())
+    }).await.unwrap();
+    assert_eq!(
+        client_entity(&store, "room", "room").unwrap().1["leadIds"],
+        json!(["new"])
+    );
+}
+
+#[tokio::test]
+async fn startup_reprojects_legacy_room_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = studio_runtime_store::RuntimeStore::open(Some(dir.path()))
+        .await
+        .unwrap();
+    super::install(&store).await.unwrap();
+    seed_chat(
+        &store,
+        chat(json!({"id":"lead","rootId":"lead","isLead":true})),
+    )
+    .await;
+    store
+        .transaction(|tx| {
+            tx.execute(
+                "INSERT INTO runtime_rooms(id,record) VALUES('room',?1)",
+                [json!({"id":"room","kind":"private","members":["lead"]}).to_string()],
+            )?;
+            studio_runtime_store::SyncDocumentsRepository::put_entity(
+                tx,
+                "room",
+                "room",
+                json!({"id":"room","kind":"private","members":["lead"],"name":"Lead"}),
+                false,
+            )?;
+            tx.execute(
+                "DELETE FROM sync_entity_meta WHERE key='migration_catalog'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(
+        client_entity(&store, "room", "room")
+            .unwrap()
+            .1
+            .get("leadIds")
+            .is_none()
+    );
+    drop(store);
+    let store = studio_runtime_store::RuntimeStore::open(Some(dir.path()))
+        .await
+        .unwrap();
+    assert_eq!(
+        client_entity(&store, "room", "room").unwrap().1["leadIds"],
+        json!(["lead"])
+    );
+    let seq = store
+        .test_read_transaction(|tx| {
+            tx.query_row(
+                "SELECT seq FROM sync_entities WHERE collection='room' AND id='room'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(StoreError::from)
+        })
+        .unwrap();
+    drop(store);
+    let store = studio_runtime_store::RuntimeStore::open(Some(dir.path()))
+        .await
+        .unwrap();
+    let after = store
+        .test_read_transaction(|tx| {
+            tx.query_row(
+                "SELECT seq FROM sync_entities WHERE collection='room' AND id='room'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(StoreError::from)
+        })
+        .unwrap();
+    assert_eq!(after, seq);
+}
+
+#[tokio::test]
 async fn unreadable_summary_keeps_agent_and_exposes_reason() {
     let (_dir, store) = store().await;
     seed_chat(

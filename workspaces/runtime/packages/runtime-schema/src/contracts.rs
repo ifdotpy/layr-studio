@@ -1370,6 +1370,8 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     openapi["components"]["schemas"]["AgentEntityDto"]["properties"]["accountTransfer"] = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/AccountTransferSummaryDto"},{"type":"null"}]});
     openapi["components"]["schemas"]["Account"]["properties"]["eligibility"] =
         serde_json::json!({"$ref":"#/components/schemas/AccountEligibility"});
+    openapi["components"]["schemas"]["RoomEntityDto"]["properties"]["leadIds"] =
+        serde_json::json!({"type":"array","items":{"type":"string"}});
     for (name, schema) in crate::studio_errors::schemas()? {
         openapi["components"]["schemas"][name] = schema;
     }
