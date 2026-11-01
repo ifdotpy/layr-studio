@@ -18,6 +18,18 @@ use studio_runtime_store::{
 
 use crate::work_write::{WorkWriteError, current_submission_refusal};
 
+/// One history row of `work_history`: change id, seq, tombstone flag, record, parent
+/// work id, index, and the parent's `rootId`.
+type HistoryRow = (
+    String,
+    i64,
+    bool,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    Option<String>,
+);
+
 /// Rows that share one change number. A unit is never cut inside.
 struct Unit {
     seq: i64,
@@ -232,7 +244,7 @@ fn work_units(
             continue;
         }
         let table = work_history::table_of(kind);
-        let entries: Vec<(String, i64, bool, Option<String>, Option<String>, Option<i64>, Option<String>)> =
+        let entries: Vec<HistoryRow> =
             transaction
                 .prepare(&format!(
                     "SELECT d.id,d.seq,d.deleted,c.record,c.work,c.idx,json_extract(w.record,'$.rootId')
@@ -364,10 +376,11 @@ fn work_docs(
         })?;
     let record: Value = serde_json::from_str(&raw)?;
     let mut rows = Vec::new();
-    if !detail_only && wanted.contains("work") {
-        if let Some(summary) = crate::sync_views::project_work_record(&item) {
-            rows.push(upsert("work", id, seq, serde_json::to_value(summary)?));
-        }
+    if !detail_only
+        && wanted.contains("work")
+        && let Some(summary) = crate::sync_views::project_work_record(&item)
+    {
+        rows.push(upsert("work", id, seq, serde_json::to_value(summary)?));
     }
     if wanted.contains("workDetail") {
         let refusal = current_submission_refusal(transaction, &record).map_err(work_error)?;
@@ -423,6 +436,8 @@ fn work_error(error: WorkWriteError) -> StoreError {
         WorkWriteError::Expired => {
             studio_runtime_store::request_results::RequestResultError::Expired.into()
         }
-        other => StoreError::SchemaValidation(other.to_string()),
+        other @ (WorkWriteError::Event(_)
+        | WorkWriteError::NotImplemented(_)
+        | WorkWriteError::PreparationWorker) => StoreError::SchemaValidation(other.to_string()),
     }
 }

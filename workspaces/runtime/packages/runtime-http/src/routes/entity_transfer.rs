@@ -938,7 +938,7 @@ mod tests {
         let (_directory, state) = fixture().await;
         let store = state.store.as_ref().expect("store");
         let resource: ResourceRef =
-            serde_json::from_value(json!({"kind":"work","agentId":"lead"})).expect("work resource");
+            serde_json::from_str(r#"{"kind":"work","agentId":"lead"}"#).expect("work resource");
         let (_, _, first) = prepare(&state, &event(&state), resource.clone(), None)
             .await
             .expect("baseline");
