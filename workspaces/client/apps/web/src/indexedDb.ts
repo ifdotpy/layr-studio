@@ -10,7 +10,13 @@ export function indexedDb(
       const request = indexedDB.open(databaseName, version);
       request.onupgradeneeded = () =>
         request.result.createObjectStore(storeName);
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        request.result.onversionchange = () => {
+          request.result.close();
+          database = undefined;
+        };
+        resolve(request.result);
+      };
       request.onerror = () => reject(request.error);
     }).catch((error: unknown) => {
       database = undefined;
@@ -118,5 +124,14 @@ export function indexedDb(
       tx.onabort = tx.onerror = () => reject(tx.error);
     });
   }
-  return { get, put, putMany, scan, delete: remove, entries, update };
+  async function destroy() {
+    if (database) (await database).close();
+    database = undefined;
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(databaseName);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+  return { get, put, putMany, scan, delete: remove, entries, update, destroy };
 }

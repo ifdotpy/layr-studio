@@ -46,6 +46,11 @@ export function createServerServices(server: StudioServer) {
     transport.owner.id === "local" && hasNativeClient();
   const sequences = createEntitySequenceScope();
   const activity = createServerActivity();
+  const cacheStorage = indexedDb(
+    `studio-subscription-cache:${transport.owner.id}`,
+    "subscriptions",
+    1,
+  );
   const api = createApiScope({
     origin: transport.owner.origin,
     fetch: transport.fetch,
@@ -94,11 +99,7 @@ export function createServerServices(server: StudioServer) {
             );
         }
       },
-      cacheStorage: indexedDb(
-        `studio-subscription-cache:${transport.owner.id}`,
-        "subscriptions",
-        1,
-      ),
+      cacheStorage,
       databaseSuffix:
         transport.owner.id === "local"
           ? ""
@@ -195,12 +196,13 @@ export function createServerServices(server: StudioServer) {
     api,
     storage,
     ready,
-    close() {
+    close(removeCache = false) {
       audio.close();
       stopName();
       runtime?.resources.dispose();
       runtime?.sync.disposeCache();
       transport.close();
+      if (removeCache) void cacheStorage.destroy();
     },
   };
 }

@@ -440,3 +440,73 @@ it("restores a complete ordered transcript and its cursor", async () => {
   ).toBe('{"id":"one"}');
   cache.stop();
 });
+
+it.each([null, [], { id: "other" }])(
+  "rejects corrupt ordered transcript items",
+  async (item) => {
+    const storage = {
+      get: vi.fn().mockResolvedValue({
+        version: SUBSCRIPTION_CACHE_VERSION,
+        contractHash: API_SCHEMA_HASH,
+        subscription: subscriptionKey(ref),
+        cursor,
+        data: [
+          {
+            ...cachedRow,
+            payload: JSON.stringify({
+              format: TRANSCRIPT_PROJECTION_FORMAT,
+              metadata: {},
+              order: ["one"],
+            }),
+          },
+          {
+            kind: "transcript",
+            id: "transcript:item:agent:one",
+            seq: 4,
+            payload: JSON.stringify(item),
+          },
+        ],
+      }),
+      put: vi.fn(),
+      delete: vi.fn(),
+    };
+    const collection = new LocalCollection("fixture");
+    const cache = createSubscriptionCache(storage, collection, "workspace");
+    expect(await cache.load(ref)).toBeUndefined();
+    expect(storage.delete).toHaveBeenCalledOnce();
+    expect(collection.all()).toEqual([]);
+    cache.stop();
+  },
+);
+
+it("rejects an entity with an invalid value", async () => {
+  const selected = { kind: "agentDetail", agentId: "agent" } as const;
+  const storage = {
+    get: vi.fn().mockResolvedValue({
+      version: SUBSCRIPTION_CACHE_VERSION,
+      contractHash: API_SCHEMA_HASH,
+      subscription: subscriptionKey(selected),
+      cursor,
+      data: [
+        {
+          kind: "entity",
+          id: "entity:agentDetail:agent",
+          seq: 4,
+          entity: {
+            collection: "agentDetail",
+            id: "agent",
+            value: { id: "other" },
+          },
+        },
+      ],
+    }),
+    put: vi.fn(),
+    delete: vi.fn(),
+  };
+  const collection = new LocalCollection("fixture");
+  const cache = createSubscriptionCache(storage, collection, "workspace");
+  expect(await cache.load(selected)).toBeUndefined();
+  expect(storage.delete).toHaveBeenCalledOnce();
+  expect(collection.all()).toEqual([]);
+  cache.stop();
+});

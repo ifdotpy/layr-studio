@@ -47,6 +47,8 @@ function hasOnlyKeys(value: object, keys: readonly string[]) {
   return Object.keys(value).every((key) => keys.includes(key));
 }
 
+// Full generated DTO decoding is tracked by work-1793131928531406336-8.
+
 function decode(
   value: unknown,
   ref: ResourceRef,
@@ -115,6 +117,7 @@ function decode(
       const entity = "entity" in row ? parseEntityPayload(row.entity) : null;
       if (
         !entity ||
+        ("id" in entity.value && entity.value.id !== entity.id) ||
         !scope ||
         !scope.collections.includes(entity.collection) ||
         row.id !== `entity:${entity.collection}:${entity.id}` ||
@@ -160,7 +163,15 @@ function decode(
       );
       if (!row) return undefined;
       try {
-        JSON.parse(row.payload);
+        const value: unknown = JSON.parse(row.payload);
+        if (
+          !value ||
+          typeof value !== "object" ||
+          Array.isArray(value) ||
+          !("id" in value) ||
+          value.id !== item
+        )
+          return undefined;
       } catch {
         return undefined;
       }
