@@ -1963,6 +1963,24 @@
         "title": "AccountCostResponse",
         "type": "object"
       },
+      "AccountDestination": {
+        "additionalProperties": false,
+        "properties": {
+          "accountKey": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "eligibility": {
+            "$ref": "#/components/schemas/AccountEligibility"
+          }
+        },
+        "required": [
+          "accountKey",
+          "eligibility"
+        ],
+        "type": "object"
+      },
       "AccountDiscoverRequest": {
         "additionalProperties": false,
         "description": "The legacy discover operation accepts an empty JSON object or no body.",
@@ -2820,6 +2838,8 @@
                 "type": "string"
               },
               "targetAccountKey": {
+                "maxLength": 200,
+                "minLength": 1,
                 "type": "string"
               }
             },
@@ -2849,6 +2869,8 @@
                 "type": "string"
               },
               "targetAccountKey": {
+                "maxLength": 200,
+                "minLength": 1,
                 "type": "string"
               }
             },
@@ -2880,6 +2902,8 @@
                 "type": "string"
               },
               "targetAccountKey": {
+                "maxLength": 200,
+                "minLength": 1,
                 "type": "string"
               }
             },
@@ -2903,6 +2927,8 @@
                 "type": "string"
               },
               "targetAccountKey": {
+                "maxLength": 200,
+                "minLength": 1,
                 "type": "string"
               }
             },
@@ -2924,6 +2950,8 @@
                 "type": "string"
               },
               "targetAccountKey": {
+                "maxLength": 200,
+                "minLength": 1,
                 "type": "string"
               }
             },
@@ -3871,6 +3899,12 @@
         "properties": {
           "accountChange": {
             "$ref": "#/components/schemas/AccountChange"
+          },
+          "accountDestinations": {
+            "items": {
+              "$ref": "#/components/schemas/AccountDestination"
+            },
+            "type": "array"
           },
           "accountTransfer": {
             "anyOf": [
@@ -4920,6 +4954,12 @@
         "properties": {
           "accountChange": {
             "$ref": "#/components/schemas/AccountChange"
+          },
+          "accountDestinations": {
+            "items": {
+              "$ref": "#/components/schemas/AccountDestination"
+            },
+            "type": "array"
           },
           "accountKey": {
             "anyOf": [
@@ -10106,6 +10146,12 @@
         "properties": {
           "accountChange": {
             "$ref": "#/components/schemas/AccountChange"
+          },
+          "accountDestinations": {
+            "items": {
+              "$ref": "#/components/schemas/AccountDestination"
+            },
+            "type": "array"
           },
           "accountKey": {
             "anyOf": [

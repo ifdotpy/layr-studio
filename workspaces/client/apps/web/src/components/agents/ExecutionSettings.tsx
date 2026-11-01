@@ -683,8 +683,11 @@ function ScopedExecutionSettings({
   const connectedAccounts = accounts.filter((account) =>
     teamDefaults
       ? accountCanStart(account)
-      : account.eligibility?.kind === "available" &&
-        !agent.excludedAccountKeys?.includes(account.id),
+      : agent.accountDestinations?.some(
+          (destination) =>
+            destination.accountKey === account.id &&
+            destination.eligibility.kind === "available",
+        ),
   );
   const activeAccount = accounts.find(
     (account) => account.id === (effectiveAccount || accountOf(agent)),

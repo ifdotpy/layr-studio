@@ -3003,6 +3003,10 @@ export interface components {
       /** Stale */
       stale: boolean;
     };
+    AccountDestination: {
+      accountKey: string;
+      eligibility: components["schemas"]["AccountEligibility"];
+    };
     /**
      * AccountDiscoverRequest
      * @description The legacy discover operation accepts an empty JSON object or no body.
@@ -3836,6 +3840,9 @@ export interface components {
      */
     AgentDetailEntityDto: {
       accountChange?: components["schemas"]["AccountChange"] | undefined;
+      accountDestinations?:
+        | components["schemas"]["AccountDestination"][]
+        | undefined;
       accountTransfer?:
         | components["schemas"]["AccountTransferSummaryDto"]
         | null
@@ -4123,6 +4130,9 @@ export interface components {
     /** AgentEntityDto */
     AgentEntityDto: {
       accountChange?: components["schemas"]["AccountChange"] | undefined;
+      accountDestinations?:
+        | components["schemas"]["AccountDestination"][]
+        | undefined;
       /** Accountkey */
       accountKey?: null | string | undefined;
       accountTransfer?:
@@ -6493,6 +6503,9 @@ export interface components {
      */
     AgentSummaryEntityDto: {
       accountChange?: components["schemas"]["AccountChange"] | undefined;
+      accountDestinations?:
+        | components["schemas"]["AccountDestination"][]
+        | undefined;
       /** Accountkey */
       accountKey?: null | string | undefined;
       accountTransferProgress?:

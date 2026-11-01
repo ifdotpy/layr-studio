@@ -428,6 +428,7 @@ fn unset(value: &Value) -> bool {
 
 #[derive(Clone, Debug, Default)]
 pub struct AgentViewContext {
+    pub account_destinations: Vec<studio_runtime_schema::account_destination::AccountDestination>,
     pub project_server_id: Option<String>,
     pub launcher_alive: bool,
     pub empty_lead: bool,
@@ -586,6 +587,29 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
         summary.remove("canCancel");
     }
     let source = <AccountChangeAgent as serde::Deserialize>::deserialize(record).ok()?;
+    if source.is_lead == Some(true) {
+        let destinations = context
+            .account_destinations
+            .iter()
+            .cloned()
+            .map(|mut destination| {
+                if crate::account_transfer_driver::account_is_excluded(
+                    record.get("excludedAccountKeys"),
+                    destination.account_key.as_str(),
+                ) {
+                    destination.eligibility =
+                        studio_runtime_schema::agent_progress::AccountEligibility::Unavailable {
+                            reason: "This account is disabled for this chat".into(),
+                        };
+                }
+                destination
+            })
+            .collect::<Vec<_>>();
+        view.insert(
+            "accountDestinations".into(),
+            serde::Serialize::serialize(&destinations, serde_json::value::Serializer).ok()?,
+        );
+    }
     let account_change = if source.is_lead != Some(true) {
         studio_runtime_schema::agent_progress::AccountChange::Unavailable {
             reason: "Choose the lead chat to change its account".into(),
@@ -1016,6 +1040,22 @@ mod projection_plan_tests {
         schema_projection_properties,
     };
     use serde_json::json;
+
+    #[test]
+    fn destination_eligibility_includes_chat_exclusions() {
+        let lead = json!({"id":"lead","rootId":"lead","epoch":1,"isLead":true,
+            "provider":"codex","excludedAccountKeys":["blocked"]});
+        let context = super::AgentViewContext {
+            account_destinations: serde_json::from_value(json!([
+                {"accountKey":"blocked","eligibility":{"kind":"available"}},
+                {"accountKey":"other","eligibility":{"kind":"available"}}
+            ])).unwrap(),
+            ..Default::default()
+        };
+        let view = super::agent_entity_view(&lead, &context).unwrap();
+        assert_eq!(view["accountDestinations"][0]["eligibility"]["kind"], "unavailable");
+        assert_eq!(view["accountDestinations"][1]["eligibility"]["kind"], "available");
+    }
 
     #[test]
     fn agent_entity_publishes_account_change_mode() {

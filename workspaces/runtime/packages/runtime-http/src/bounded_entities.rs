@@ -469,12 +469,25 @@ async fn publish_accounts(state: &HttpState) -> Result<(), StoreError> {
     // Only this allowlisted DTO reaches sync_entities/RxDB. Login receipts,
     // URLs, device codes and credentials stay in the transient auth owner.
     let value = accounts_summary(snapshot);
-    replace(
-        state.store.as_ref().ok_or(StoreError::ReadTaskFailed)?,
-        "accounts",
-        vec![("current".into(), value)],
-    )
-    .await
+    state.store.as_ref().ok_or(StoreError::ReadTaskFailed)?
+        .transaction_with(move |tx| {
+            let payload = json!({"collection":"accounts","id":"current","value":value});
+            if !studio_runtime_schema::validate_sync_entity_payload_strict("accounts", "current", false, &payload)
+                .map_err(StoreError::SchemaValidation)? {
+                return Err(StoreError::InvalidSyncObject { scope: "accounts".into(), id: "current".into() });
+            }
+            if SyncDocumentsRepository::put_entity(tx, "accounts", "current", value, false)? {
+                let leads = {
+                    let mut statement = tx.prepare("SELECT id FROM runtime_agents WHERE json_valid(record) AND json_extract(record, '$.isLead') = 1")?;
+                    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+                    rows.collect::<rusqlite::Result<BTreeSet<_>>>()?
+                };
+                let changes = studio_runtime_services::sync_policy::EntityChanges { agents: leads, ..Default::default() };
+                let server_id = RuntimeStore::transaction_local_server_id(tx)?;
+                studio_runtime_services::sync_policy::publish_entity_changes(tx, &changes, server_id.as_deref(), &|_, _, _, _| true)?;
+            }
+            Ok(())
+        }).await
 }
 
 fn accounts_summary(snapshot: studio_runtime_services::account_policy::AccountsSnapshot) -> Value {
@@ -2242,6 +2255,56 @@ mod tests {
         assert_eq!(value["accounts"][0]["eligibility"]["kind"], "unavailable");
         assert!(value.get("logins").is_none());
         assert!(!value.to_string().contains("private-only"));
+    }
+
+    #[tokio::test]
+    async fn account_change_republishes_lead_destinations_without_touching_worker() {
+        let (_root, mut state) = state().await;
+        publish_accounts(&state).await.unwrap();
+        let store = state.store.as_ref().unwrap().clone();
+        store
+            .transaction(|tx| {
+                for (id, lead) in [("lead", true), ("worker", false)] {
+                    let value = json!({"compactions":0,"id":id,"rootId":"lead","epoch":1,
+                    "status":"idle","accountKey":"default","isLead":lead,"provider":"codex"});
+                    let agent = studio_runtime_store::AgentRecord::from_value(value.clone())?;
+                    studio_runtime_store::AgentRepository::put(tx, &agent)?;
+                    studio_runtime_services::agents_create::publish_agent(tx, &value)?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            entity(&state, "agentDetail", "lead")["accountDestinations"][0]["eligibility"]["kind"],
+            "unavailable"
+        );
+        let worker_before = entity(&state, "agentDetail", "worker");
+        let worker_seq =
+            || {
+                store.test_reader().unwrap().query_row(
+            "SELECT seq FROM sync_entities WHERE collection='agentDetail' AND id='worker'", [],
+            |row| row.get::<_, i64>(0),
+        ).unwrap()
+            };
+        let sequence_before = worker_seq();
+        let registry = json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,
+            "defaultAccountKey":"default","accounts":{"default":{"id":"default","home":"/fixture",
+            "label":"Source account","source":"fixture","provider":"codex","status":"ready"}},"logins":{}});
+        state.account_policy = Some(Arc::new(
+            studio_runtime_services::account_policy::AccountPolicyState::from_startup(
+                Some(registry.to_string().as_bytes()),
+                [],
+            )
+            .unwrap(),
+        ));
+        publish_accounts(&state).await.unwrap();
+        assert_eq!(
+            entity(&state, "agentDetail", "lead")["accountDestinations"][0]["eligibility"]["kind"],
+            "available"
+        );
+        assert_eq!(entity(&state, "agentDetail", "worker"), worker_before);
+        assert_eq!(worker_seq(), sequence_before);
     }
 
     #[tokio::test]

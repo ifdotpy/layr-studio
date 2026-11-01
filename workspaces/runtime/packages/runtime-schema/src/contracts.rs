@@ -1267,6 +1267,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             serde_json::json!({"$ref":"#/components/schemas/AccountChange"});
         openapi["components"]["schemas"][name]["properties"]["accountTransferProgress"] =
             serde_json::json!({"$ref":"#/components/schemas/AccountTransferProgress"});
+        openapi["components"]["schemas"][name]["properties"]["accountDestinations"] = serde_json::json!({"type":"array","items":{"$ref":"#/components/schemas/AccountDestination"}});
     }
     openapi["components"]["schemas"]["AgentEntityDto"]["properties"]["accountTransfer"] = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/AccountTransferSummaryDto"},{"type":"null"}]});
     openapi["components"]["schemas"]["Account"]["properties"]["eligibility"] =

@@ -904,8 +904,11 @@ export default function Accounts({
       !account ||
       actionLock.current ||
       pending ||
-      account.eligibility?.kind !== "available" ||
-      agent?.excludedAccountKeys?.includes(account.id) ||
+      !agent?.accountDestinations?.some(
+        (destination) =>
+          destination.accountKey === account.id &&
+          destination.eligibility.kind === "available",
+      ) ||
       !accountChange ||
       accountChange.kind === "unavailable"
     )

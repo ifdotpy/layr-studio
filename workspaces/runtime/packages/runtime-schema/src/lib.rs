@@ -1,6 +1,7 @@
 //! Compiled persisted-state validators and the Rust owners of the shared
 //! runtime contracts (`contracts` renders their copies in other languages).
 
+pub mod account_destination;
 pub mod account_key;
 pub mod account_registry;
 pub mod agent_limits;
