@@ -1279,6 +1279,9 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     openapi["components"]["schemas"]["FrontendLocality"] = serde_json::json!({
         "type": "string", "enum": <crate::sync_protocol::FrontendLocality as strum::VariantNames>::VARIANTS
     });
+    openapi["components"]["schemas"]["CommandErrorCode"] = serde_json::json!({
+        "type": "string", "enum": <crate::command::CommandErrorCode as strum::VariantNames>::VARIANTS
+    });
     openapi["components"]["schemas"]["MessageSendStatus"] = serde_json::json!({
         "type": "string", "enum": <crate::delivery::MessageSendStatus as strum::VariantNames>::VARIANTS
     });

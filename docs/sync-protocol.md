@@ -34,7 +34,8 @@ buffer. Input is written immediately and removed on server confirmation. Old
 RxDB unsent messages are intentionally not migrated.
 
 Message send receipts and queue projections use the Rust-owned `MessageSendStatus`
-contract generated into the web API. An uncertain result keeps its request identity.
+contract generated into the web API. An uncertain result keeps its request identity. An expired receipt retains the
+message on the device and cannot be retried with that identity.
 
 ## Routes and reconnect
 

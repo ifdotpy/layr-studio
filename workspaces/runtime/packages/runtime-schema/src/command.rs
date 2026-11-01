@@ -13,6 +13,14 @@ use crate::bounded_integer::BoundedInteger;
 use crate::bounded_text::BoundedText;
 use crate::continuation_snapshot::BoundedVec;
 
+/// A command response whose request identity can no longer be replayed safely.
+#[derive(Clone, Copy, Debug, Serialize, schemars::JsonSchema, strum::VariantNames)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum CommandErrorCode {
+    ReceiptExpired,
+}
+
 /// Maximum length of a client id. Unit: characters.
 pub const COMMAND_CLIENT_ID_MAX_CHARS: usize = 128;
 /// Largest response row payload. Larger rows are left to the stream. Unit: bytes.

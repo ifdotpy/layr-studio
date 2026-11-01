@@ -185,11 +185,11 @@ test("message retry http browser", async ({ page: runnerPage }) => {
     assert.equal(firstExpired.kind, "local");
     assert.equal(
       firstExpired.kind === "local" && firstExpired.state.kind,
-      "transport_failed",
+      "receipt_expired",
     );
     assert.match(
       firstExpired.kind === "local" &&
-        firstExpired.state.kind === "transport_failed"
+        firstExpired.state.kind === "receipt_expired"
         ? firstExpired.state.error
         : "",
       /expired/i,
@@ -201,7 +201,7 @@ test("message retry http browser", async ({ page: runnerPage }) => {
           (entry) =>
             entry.id === id &&
             entry.status.source === "device" &&
-            entry.status.state.kind === "transport_failed",
+            entry.status.state.kind === "receipt_expired",
         ),
       expired.id,
     );
@@ -210,7 +210,7 @@ test("message retry http browser", async ({ page: runnerPage }) => {
     assert.equal(secondExpired.kind, "local");
     assert.match(
       secondExpired.kind === "local" &&
-        secondExpired.state.kind === "transport_failed"
+        secondExpired.state.kind === "receipt_expired"
         ? secondExpired.state.error
         : "",
       /expired/i,

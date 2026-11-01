@@ -56,6 +56,7 @@ const localSendSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("stored") }),
   z.strictObject({ kind: z.literal("in_flight") }),
   z.strictObject({ kind: z.literal("transport_failed"), error: z.string() }),
+  z.strictObject({ kind: z.literal("receipt_expired"), error: z.string() }),
 ]);
 export type LocalSend = z.infer<typeof localSendSchema>;
 const sendSchema = z.strictObject({

@@ -592,11 +592,12 @@ it("labels every generated message send status", () => {
     stored: "Stored on device",
     in_flight: "Sending…",
     transport_failed: "Could not contact server",
+    receipt_expired: "Delivery outcome unknown",
     removed: "Removed from device",
   } as const;
   for (const [kind, label] of Object.entries(localLabels)) {
     const state =
-      kind === "transport_failed"
+      kind === "transport_failed" || kind === "receipt_expired"
         ? ({ kind, error: "offline" } as const)
         : { kind: kind as "stored" | "in_flight" | "removed" };
     assert.equal(

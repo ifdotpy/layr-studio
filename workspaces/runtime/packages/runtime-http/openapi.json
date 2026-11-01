@@ -21571,6 +21571,12 @@
         "title": "CodexLoginReceipt",
         "type": "object"
       },
+      "CommandErrorCode": {
+        "enum": [
+          "receipt_expired"
+        ],
+        "type": "string"
+      },
       "CommandId": {
         "description": "Identity of the outbox command that delivers an answer.",
         "type": "string"

@@ -10866,6 +10866,8 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /** @enum {string} */
+    CommandErrorCode: "receipt_expired";
     /** @description Identity of the outbox command that delivers an answer. */
     CommandId: string;
     /**
@@ -38728,6 +38730,8 @@ export const CapacityRetryStatus = {
   failed: "failed",
 } as const;
 export type CapacityRetryStatus = components["schemas"]["CapacityRetryStatus"];
+export const CommandErrorCode = { receipt_expired: "receipt_expired" } as const;
+export type CommandErrorCode = components["schemas"]["CommandErrorCode"];
 export const ComplaintResponseStatus = {
   in_progress: "in_progress",
   resolved: "resolved",

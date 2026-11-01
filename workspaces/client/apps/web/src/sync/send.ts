@@ -16,7 +16,7 @@ import {
 } from "../commands";
 import type { Attachment } from "../components/ComposerAttachments";
 import { watchResourceConnection } from "./subscriptions/events";
-import { MessageSendStatus } from "../generated/api";
+import { CommandErrorCode, MessageSendStatus } from "../generated/api";
 import type { MessageReceipt } from "./messageReceipts";
 
 export type DeliveryState =
@@ -159,6 +159,7 @@ export function createOutbox(options: {
     const existing = active.get(id);
     if (existing) return existing;
     const task = (async (): Promise<SendResult> => {
+      if (value.localState.kind === "receipt_expired") return result(value);
       let notified = false;
       let refused = false;
       const notifyPersisted = () => {
@@ -222,18 +223,26 @@ export function createOutbox(options: {
           kind: "server",
         };
       } catch (error) {
+        const expired =
+          error instanceof ApiError &&
+          error.status === 410 &&
+          !!error.response &&
+          typeof error.response === "object" &&
+          "code" in error.response &&
+          error.response.code === CommandErrorCode.receipt_expired;
         const definitive =
           error instanceof ApiError &&
           !serverMutationResponseIsUncertain(error.status, error.response);
         if (definitive) refused = true;
         const localState: LocalSend = {
-          kind: "transport_failed",
+          kind: expired ? "receipt_expired" : "transport_failed",
           error: errorText(error),
         };
         const failed: SavedSend = { ...value, localState };
         if (read(value.body.room, id)) {
           if (definitive)
             void remove(value.body.room, id).catch(reportUnsentFailure);
+          else if (expired) await write(failed);
           else void write(failed);
         }
         return result(failed);

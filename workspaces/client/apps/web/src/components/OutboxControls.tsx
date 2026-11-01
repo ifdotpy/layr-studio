@@ -48,13 +48,18 @@ export default function OutboxControls({
   return (
     <div className="outbox-controls">
       <div className="outbox-buttons">
-        <Button
-          size="compact-xs"
-          disabled={busy}
-          onClick={() => void run("resume")}
-        >
-          Retry
-        </Button>
+        {!(
+          entry.status.source === "device" &&
+          entry.status.state.kind === "receipt_expired"
+        ) && (
+          <Button
+            size="compact-xs"
+            disabled={busy}
+            onClick={() => void run("resume")}
+          >
+            Retry
+          </Button>
+        )}
         <Button
           size="compact-xs"
           disabled={busy}
