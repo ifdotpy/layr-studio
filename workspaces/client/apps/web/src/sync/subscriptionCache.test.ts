@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import {
+  SUBSCRIPTION_CACHE_INDEX_KEY,
   SUBSCRIPTION_CACHE_VERSION,
   createSubscriptionCache,
   subscriptionRows,
@@ -32,6 +33,12 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
+
+function recordPuts(storage: { put: { mock: { calls: unknown[][] } } }) {
+  return storage.put.mock.calls.filter(
+    ([key]) => key !== SUBSCRIPTION_CACHE_INDEX_KEY,
+  );
+}
 
 it("hydrates the cached data before returning its resume cursor", async () => {
   const storage = {
@@ -264,10 +271,11 @@ it("coalesces writes until five seconds and flushes on hide", async () => {
   cache.save(ref, cursor, [row]);
   expect(storage.put).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(5_000);
-  expect(storage.put).toHaveBeenCalledOnce();
+  expect(recordPuts(storage)).toHaveLength(1);
   cache.save(ref, cursor, [row]);
   events.dispatchEvent(new Event("visibilitychange"));
-  expect(storage.put).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(recordPuts(storage)).toHaveLength(2);
   cache.stop();
 });
 
@@ -542,5 +550,133 @@ it("rejects an entity with an invalid value", async () => {
   expect(await cache.load(selected)).toBeUndefined();
   expect(storage.delete).toHaveBeenCalledOnce();
   expect(collection.all()).toEqual([]);
+  cache.stop();
+});
+
+const PAYLOAD = 1_000;
+const agentRef = (agentId: string) =>
+  ({ kind: "transcript", agentId }) as const;
+// Stored size of one transcript record with PAYLOAD bytes (7-character agent ids, the longest used here).
+const ONE_RECORD_BYTES = new TextEncoder().encode(
+  JSON.stringify({
+    version: SUBSCRIPTION_CACHE_VERSION,
+    contractHash: API_SCHEMA_HASH,
+    subscription: subscriptionKey(agentRef("agent00")),
+    cursor,
+    data: [{ kind: "transcript", ...paddedTranscript("agent00", PAYLOAD) }],
+  }),
+).byteLength;
+// Budget for the eviction tests: two records fit, three do not.
+const BUDGET = 2 * ONE_RECORD_BYTES + 10;
+const keyOf = (agentId: string) =>
+  JSON.stringify(["workspace", subscriptionKey(agentRef(agentId))]);
+const recordKeys = (values: Map<string, unknown>) =>
+  [...values.keys()].filter((key) => key !== SUBSCRIPTION_CACHE_INDEX_KEY);
+
+function memoryStorage() {
+  const values = new Map<string, unknown>();
+  return {
+    values,
+    get: vi.fn(async (key: string) => values.get(key)),
+    put: vi.fn(async (key: string, value: unknown) => {
+      values.set(key, structuredClone(value));
+    }),
+    delete: vi.fn(async (key: string) => {
+      values.delete(key);
+    }),
+  };
+}
+
+function paddedTranscript(agentId: string, size: number) {
+  return {
+    id: `transcript:${agentId}`,
+    seq: 4,
+    payload: JSON.stringify({
+      format: TRANSCRIPT_PROJECTION_FORMAT,
+      metadata: { pad: "x".repeat(size) },
+      order: [],
+    }),
+  };
+}
+
+async function setupBudgetedCache(agentIds: string[]) {
+  vi.useFakeTimers();
+  const storage = memoryStorage();
+  const collection = new LocalCollection("fixture");
+  const cache = createSubscriptionCache(storage, collection, "workspace", {
+    maxBytes: BUDGET,
+  });
+  for (const agentId of agentIds)
+    await cache.setPolicy(agentRef(agentId), SubscriptionCachePolicy.cache);
+  const saveAndFlush = async (agentId: string, size = PAYLOAD) => {
+    cache.save(agentRef(agentId), cursor, [paddedTranscript(agentId, size)]);
+    await vi.advanceTimersByTimeAsync(5_000);
+  };
+  return { storage, collection, cache, saveAndFlush };
+}
+
+function recordBytes(values: Map<string, unknown>) {
+  return recordKeys(values).reduce(
+    (sum, key) =>
+      sum +
+      new TextEncoder().encode(JSON.stringify(values.get(key))).byteLength,
+    0,
+  );
+}
+
+it("evicts the least recently written record when a write exceeds the budget", async () => {
+  const { storage, cache, saveAndFlush } = await setupBudgetedCache([
+    "a",
+    "b",
+    "c",
+  ]);
+  await saveAndFlush("a");
+  await saveAndFlush("b");
+  expect(recordKeys(storage.values)).toEqual([keyOf("a"), keyOf("b")]);
+  await saveAndFlush("c");
+  expect(recordKeys(storage.values)).toEqual([keyOf("b"), keyOf("c")]);
+  expect(storage.delete).toHaveBeenCalledWith(keyOf("a"));
+  cache.stop();
+});
+
+it("a read makes a record the most recently used", async () => {
+  const { storage, cache, saveAndFlush } = await setupBudgetedCache([
+    "a",
+    "b",
+    "c",
+  ]);
+  await saveAndFlush("a");
+  await saveAndFlush("b");
+  expect(await cache.load(agentRef("a"))).toEqual(cursor);
+  await vi.advanceTimersByTimeAsync(0);
+  await saveAndFlush("c");
+  expect(recordKeys(storage.values)).toEqual([keyOf("a"), keyOf("c")]);
+  expect(storage.delete).toHaveBeenCalledWith(keyOf("b"));
+  cache.stop();
+});
+
+it("does not keep a record bigger than the whole budget", async () => {
+  const { storage, cache, saveAndFlush } = await setupBudgetedCache(["a"]);
+  await saveAndFlush("a", 3 * PAYLOAD);
+  expect(recordKeys(storage.values)).toEqual([]);
+  expect(storage.put.mock.calls.map(([key]) => key)).not.toContain(keyOf("a"));
+  await saveAndFlush("a");
+  expect(recordKeys(storage.values)).toEqual([keyOf("a")]);
+  await saveAndFlush("a", 3 * PAYLOAD);
+  expect(recordKeys(storage.values)).toEqual([]);
+  cache.stop();
+});
+
+it("keeps the stored records under the budget after many writes", async () => {
+  const agents = Array.from({ length: 20 }, (_, index) => `agent${index}`);
+  const { storage, cache, saveAndFlush } = await setupBudgetedCache(agents);
+  for (const agentId of agents) {
+    await saveAndFlush(agentId);
+    expect(recordBytes(storage.values)).toBeLessThanOrEqual(BUDGET);
+  }
+  expect(recordKeys(storage.values)).toEqual([
+    keyOf("agent18"),
+    keyOf("agent19"),
+  ]);
   cache.stop();
 });
