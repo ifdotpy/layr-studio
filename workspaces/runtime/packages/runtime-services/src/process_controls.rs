@@ -40,9 +40,9 @@ fn display(
     status: ProcessStatus,
     cancelling: bool,
     in_background_list: bool,
-    mut actions: Vec<BackgroundTaskAction>,
-    stdin_state: Option<ProcessStdinState>,
+    controls: (Vec<BackgroundTaskAction>, Option<ProcessStdinState>),
 ) -> BackgroundTaskDisplay {
+    let (mut actions, stdin_state) = controls;
     use BackgroundTaskIndicator as Indicator;
     use BackgroundTaskLabel as Label;
     use studio_runtime_schema::studio_errors::MonitorStatus as Monitor;
@@ -437,8 +437,7 @@ fn project_monitor_bound(
             status,
             cancelled,
             true,
-            actions,
-            monitor_stdin_state(monitor),
+            (actions, monitor_stdin_state(monitor)),
         ),
     };
     ProcessRecord {
@@ -713,8 +712,10 @@ pub fn project(
             status,
             false,
             true,
-            actions,
-            (!claude && raw.process_id().is_some()).then_some(ProcessStdinState::Open),
+            (
+                actions,
+                (!claude && raw.process_id().is_some()).then_some(ProcessStdinState::Open),
+            ),
         ),
     };
     ProcessRecord {
@@ -759,8 +760,7 @@ pub fn task_record_display(task: &studio_runtime_store::TaskRecord) -> Backgroun
         ProcessStatus::Task(task.status()),
         false,
         in_background_list,
-        actions,
-        None,
+        (actions, None),
     )
 }
 
@@ -787,8 +787,7 @@ pub fn monitor_record_display(
         ProcessStatus::Monitor(monitor.status),
         monitor.cancel_requested == Some(true),
         true,
-        actions,
-        monitor_stdin_state(monitor),
+        (actions, monitor_stdin_state(monitor)),
     )
 }
 
