@@ -92,7 +92,9 @@ async fn fixture() -> (tempfile::TempDir, Arc<RuntimeStore>, CallbackContext) {
                 let mut record = studio_runtime_store::AgentRecord::from_value(agent.clone())
                     .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
                 record.cwd = cwd.as_str().map(str::to_owned);
-                record.extra.insert("hostProjectPath".into(), cwd.clone());
+                record.host_project_path = studio_runtime_schema::queue_command::Field::Value(
+                    cwd.as_str().unwrap().to_owned(),
+                );
                 studio_runtime_store::AgentRepository::put(tx, &record)?;
                 crate::agents_create::publish_agent(tx, &record.value())?;
             }

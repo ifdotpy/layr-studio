@@ -108,9 +108,9 @@ impl Fixture {
                 let mut agent: studio_runtime_store::AgentRecord =
                     serde_json::from_str(include_str!("agent.json"))?;
                 agent.cwd = Some(workspace.to_string_lossy().into_owned());
-                agent
-                    .extra
-                    .insert("hostProjectPath".into(), json!(workspace));
+                agent.host_project_path = studio_runtime_schema::queue_command::Field::Value(
+                    workspace.to_string_lossy().into_owned(),
+                );
                 agent.id = "late-operation-recipient".into();
                 agent.root_id = agent.id.clone();
                 AgentRepository::put(tx, &agent)?;

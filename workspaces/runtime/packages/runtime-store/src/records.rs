@@ -437,6 +437,11 @@ pub struct AgentRecord {
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
     pub last_completed_turn: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub host_project_path: studio_runtime_schema::queue_command::Field<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree_ready: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -824,6 +829,7 @@ impl AgentRecord {
             created: Default::default(),
             queue_mutation_revision: None,
             last_completed_turn: Default::default(),
+            host_project_path: Default::default(),
             worktree_ready: None,
             approval_policy: None,
             native_response_turn: None,
@@ -2835,6 +2841,7 @@ mod tests {
             "profileInstructions",
             "effort",
             "lastCompletedTurn",
+            "hostProjectPath",
         ] {
             let raw = format!(
                 r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"{field}":42}}"#

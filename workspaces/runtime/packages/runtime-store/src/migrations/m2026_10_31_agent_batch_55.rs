@@ -7,7 +7,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         .map(|provider| format!("'{}'", provider.key()))
         .join(",");
     let max_revision = studio_runtime_schema::shared_values::MAX_SAFE_INTEGER;
-    let mut query = tx.prepare(&format!("SELECT id,record FROM runtime_agents WHERE json_valid(record) AND EXISTS (SELECT 1 FROM json_each(record) j WHERE j.key='complaintMisses' OR (j.key='layrReady' AND j.type NOT IN ('true','false')) OR (j.key='lastCompletedTurn' AND j.type NOT IN ('text','null')) OR (j.key='provider' AND (j.type NOT IN ('text','null') OR (j.type='text' AND j.value NOT IN ({providers})))) OR (j.key='created' AND (j.type NOT IN ('integer','real','null') OR j.atom < 0)) OR (j.key='queueMutationRevision' AND (j.type != 'integer' OR j.atom < 0 OR j.atom > {max_revision})) OR (j.key IN ('layrReady','lastCompletedTurn','provider','created','queueMutationRevision') AND (SELECT count(*) FROM json_each(record) d WHERE d.key=j.key)>1))"))?;
+    let mut query = tx.prepare(&format!("SELECT id,record FROM runtime_agents WHERE json_valid(record) AND EXISTS (SELECT 1 FROM json_each(record) j WHERE j.key='complaintMisses' OR (j.key='layrReady' AND j.type NOT IN ('true','false')) OR (j.key IN ('lastCompletedTurn','hostProjectPath') AND j.type NOT IN ('text','null')) OR (j.key='provider' AND (j.type NOT IN ('text','null') OR (j.type='text' AND j.value NOT IN ({providers})))) OR (j.key='created' AND (j.type NOT IN ('integer','real','null') OR j.atom < 0)) OR (j.key='queueMutationRevision' AND (j.type != 'integer' OR j.atom < 0 OR j.atom > {max_revision})) OR (j.key IN ('layrReady','lastCompletedTurn','hostProjectPath','provider','created','queueMutationRevision') AND (SELECT count(*) FROM json_each(record) d WHERE d.key=j.key)>1))"))?;
     let rows = query.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
@@ -22,11 +22,13 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         {
             record.remove("layrReady");
         }
-        if record
-            .get("lastCompletedTurn")
-            .is_some_and(|v| serde_json::from_str::<Option<String>>(v.get()).is_err())
-        {
-            record.remove("lastCompletedTurn");
+        for key in ["lastCompletedTurn", "hostProjectPath"] {
+            if record
+                .get(key)
+                .is_some_and(|v| serde_json::from_str::<Option<String>>(v.get()).is_err())
+            {
+                record.remove(key);
+            }
         }
         if record
             .get("provider")
@@ -62,7 +64,7 @@ mod tests {
     fn agent_batch_55_normalizes_all_owned_fields() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(r#"CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-        INSERT INTO runtime_agents VALUES('legacy','{"id":"legacy","provider":"future","created":-1,"complaintMisses":9,"layrReady":"bad","queueMutationRevision":-1,"lastCompletedTurn":42}');"#).unwrap();
+        INSERT INTO runtime_agents VALUES('legacy','{"id":"legacy","provider":"future","created":-1,"complaintMisses":9,"layrReady":"bad","queueMutationRevision":-1,"lastCompletedTurn":42,"hostProjectPath":42}');"#).unwrap();
         let tx = db.transaction().unwrap();
         super::apply(&tx).unwrap();
         super::apply(&tx).unwrap();

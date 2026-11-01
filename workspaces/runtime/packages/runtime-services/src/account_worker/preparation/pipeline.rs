@@ -1013,9 +1013,9 @@ async fn workspace_with_vm_action(
         // the guest's cwd. Keep the project binding frozen from creation time.
         let cwd = if allow_vm_native_action {
             ready
-                .extra
-                .get("hostProjectPath")
-                .and_then(Value::as_str)
+                .host_project_path
+                .value()
+                .map(String::as_str)
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| refusal("workspace-readiness/vm-host-project-required".into()))?
         } else {

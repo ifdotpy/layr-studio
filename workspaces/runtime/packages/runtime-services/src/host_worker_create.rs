@@ -422,7 +422,7 @@ pub fn recheck_worker(
         .and_then(Value::as_str)
         .ok_or(CreateError::IdentityChanged)?;
     if parent.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
-        && field(&parent, "hostProjectPath").and_then(Value::as_str) != Some(project_path)
+        && parent.host_project_path.value().map(String::as_str) != Some(project_path)
     {
         return Err(CreateError::IdentityChanged);
     }
