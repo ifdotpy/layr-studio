@@ -582,6 +582,11 @@ pub struct AgentRecord {
     pub auto_wake: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage_resume_enabled: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub native_failure_hold: studio_runtime_schema::queue_command::Field<NativeFailureHold>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_mode: Option<AgentExecutionMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -642,6 +647,33 @@ pub struct AgentRecord {
         studio_runtime_schema::queue_command::Field<crate::transfer_record::LazyTransferState>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
+}
+
+/// Historical non-boolean holds retain their original JSON and truthiness.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum NativeFailureHold {
+    Boolean(bool),
+    Unreadable(Value),
+}
+
+impl AgentRecord {
+    pub fn set_native_failure_hold(&mut self, value: bool) {
+        self.native_failure_hold =
+            studio_runtime_schema::queue_command::Field::Value(NativeFailureHold::Boolean(value));
+    }
+
+    pub fn clear_native_failure_hold(&mut self) {
+        self.native_failure_hold = studio_runtime_schema::queue_command::Field::Missing;
+    }
+
+    pub fn native_failure_held(&self) -> bool {
+        match self.native_failure_hold.value() {
+            Some(NativeFailureHold::Boolean(value)) => *value,
+            Some(NativeFailureHold::Unreadable(value)) => crate::truthy(Some(value)),
+            None => false,
+        }
+    }
 }
 
 fn deserialize_agent_epoch<'de, D: serde::Deserializer<'de>>(
@@ -991,6 +1023,7 @@ impl AgentRecord {
             in_flight: None,
             auto_wake: None,
             usage_resume_enabled: None,
+            native_failure_hold: Default::default(),
             execution_mode: None,
             turn_epoch: None,
             account_key: crate::cost_aggregate::DEFAULT_ACCOUNT.to_owned(),
@@ -3441,6 +3474,62 @@ mod tests {
                 value["turnId"] = turn;
             }
             assert_eq!(agent(value.clone()).into_value(), value);
+        }
+    }
+
+    #[test]
+    fn native_failure_hold_is_not_an_extension() {
+        let record = agent(json!({"compactions":0,
+            "id":"agent", "rootId":"agent", "epoch":2, "status":"idle",
+            "accountKey":"default", "nativeFailureHold":true
+        }));
+        assert!(!record.extra.contains_key("nativeFailureHold"));
+    }
+
+    #[test]
+    fn native_failure_hold_preserves_legacy_values_and_truthiness() {
+        for value in [
+            json!(true),
+            json!(false),
+            json!(0),
+            json!(2),
+            json!(""),
+            json!("hold"),
+            json!([]),
+            json!([1]),
+            json!({}),
+            json!({"reason":"pending"}),
+        ] {
+            let input = json!({"compactions":0, "id":"agent", "rootId":"agent",
+                "epoch":2, "status":"idle", "accountKey":"default", "naming":"automatic",
+                "capacity":{"kind":"automatic","max":64},
+                "nativeFailureHold":value});
+            let record = agent(input.clone());
+            assert_eq!(record.native_failure_held(), crate::truthy(Some(&value)));
+            assert_eq!(record.value(), input);
+            match (&value, record.native_failure_hold.value()) {
+                (Value::Bool(expected), Some(super::NativeFailureHold::Boolean(actual))) => {
+                    assert_eq!(expected, actual)
+                }
+                (_, Some(super::NativeFailureHold::Unreadable(actual))) => {
+                    assert_eq!(&value, actual)
+                }
+                _ => panic!("unexpected native failure hold variant"),
+            }
+        }
+        for value in [None, Some(Value::Null)] {
+            let mut input = json!({"compactions":0, "id":"agent", "rootId":"agent",
+                "epoch":2, "status":"idle", "accountKey":"default", "naming":"automatic",
+                "capacity":{"kind":"automatic","max":64}});
+            if let Some(value) = value {
+                input
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("nativeFailureHold".into(), value);
+            }
+            let record = agent(input.clone());
+            assert!(!record.native_failure_held());
+            assert_eq!(record.value(), input);
         }
     }
 

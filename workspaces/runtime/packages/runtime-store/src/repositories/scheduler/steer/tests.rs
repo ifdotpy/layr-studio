@@ -394,7 +394,7 @@ fn claim_refuses_every_ineligible_agent_state() {
                 Some(crate::StartAttemptAction::Compact);
         }),
         ("held", |a| {
-            a.extra.insert("nativeFailureHold".into(), json!(true));
+            a.set_native_failure_hold(true);
         }),
         ("stopped", |a| {
             a.auto_wake = Some(false);

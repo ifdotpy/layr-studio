@@ -637,7 +637,7 @@ impl ProposedAgent {
     pub(crate) fn clear_hold(&mut self) {
         remove(&mut self.evidence, "nativeFailureHold");
         if let Some(agent) = &mut self.identity {
-            agent.extra.remove("nativeFailureHold");
+            agent.clear_native_failure_hold();
         }
     }
     pub(crate) fn queued(&mut self) {

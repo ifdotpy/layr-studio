@@ -726,7 +726,7 @@ async fn tagged_radio_answer_claims_as_ordinary_input_without_a_hold() {
             let held = store
                 .transaction_with(move |tx| {
                     let row = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?.unwrap();
-                    Ok::<_, WorkerError>(row.extra.contains_key("nativeFailureHold"))
+                    Ok::<_, WorkerError>(!row.native_failure_hold.is_missing())
                 })
                 .await?;
             assert!(!held, "no permanent hold is written");

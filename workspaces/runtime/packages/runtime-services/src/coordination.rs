@@ -385,7 +385,7 @@ fn post_managed_message(
     // A manual send wakes a stopped agent in the same transaction as the event.
     agent.auto_wake = Some(true);
     agent.error = studio_runtime_schema::queue_command::Field::Null;
-    agent.extra.remove("nativeFailureHold");
+    agent.clear_native_failure_hold();
     capacity_reset(transaction, &mut agent)?;
     studio_runtime_store::AgentRepository::put(transaction, &agent)?;
     let projection = studio_runtime_store::projection_value(&agent);
@@ -617,7 +617,7 @@ fn send_followup_inner(
     if sender_identity.is_some() {
         recipient.auto_wake = Some(true);
         recipient.error = studio_runtime_schema::queue_command::Field::Null;
-        recipient.extra.remove("nativeFailureHold");
+        recipient.clear_native_failure_hold();
         capacity_reset(transaction, &mut recipient)?;
         studio_runtime_store::AgentRepository::put(transaction, &recipient)?;
         let projection = studio_runtime_store::projection_value(&recipient);

@@ -531,7 +531,7 @@ impl SchedulerRepository {
                     )
             }) {
                 let error = if status == AgentStatus::Failed {
-                    agent.extra.insert("nativeFailureHold".into(), json!(true));
+                    agent.set_native_failure_hold(true);
                     agent.last_completed_turn_error.value().cloned()
                 } else {
                     None
@@ -611,7 +611,7 @@ impl SchedulerRepository {
         {
             return Ok(false);
         }
-        agent.extra.remove("nativeFailureHold");
+        agent.clear_native_failure_hold();
         if !continuation_allowed(&agent) {
             return Ok(false);
         }
@@ -941,7 +941,7 @@ impl SchedulerRepository {
         if !idle
             || agent.is_deleted()
             || agent.in_flight == Some(true)
-            || agent.extra.get("nativeFailureHold").is_some_and(truthy)
+            || agent.native_failure_held()
             || agent.extra.get("remoteWorker").is_some_and(truthy)
             || agent.extra.get("remoteAnchor").is_some_and(truthy)
             || agent.auto_wake != Some(true)
@@ -1019,7 +1019,7 @@ impl SchedulerRepository {
             || agent.status != AgentStatus::Starting
             || agent.auto_wake != Some(true)
             || agent.in_flight != Some(true)
-            || agent.extra.get("nativeFailureHold").is_some_and(truthy)
+            || agent.native_failure_held()
             || attempt.id.as_deref() != Some(attempt_id)
             || attempt.epoch != Some(epoch)
             || attempt.submitted != Some(false)
@@ -1622,13 +1622,11 @@ impl SchedulerRepository {
                 == Some(attempt_id)
             {
                 agent.start_outcome_hold = None;
-                if agent
-                    .extra
-                    .get("nativeFailureHold")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-                {
-                    agent.extra.insert("nativeFailureHold".into(), json!(false));
+                if matches!(
+                    agent.native_failure_hold.value(),
+                    Some(crate::records::NativeFailureHold::Boolean(true))
+                ) {
+                    agent.set_native_failure_hold(false);
                 }
                 agent.error = studio_runtime_schema::queue_command::Field::Null;
             }
@@ -1821,7 +1819,7 @@ impl SchedulerRepository {
         agent.active_tools = Some(Vec::new());
         agent.in_flight = Some(false);
         if status == AgentStatus::Failed {
-            agent.extra.insert("nativeFailureHold".into(), json!(true));
+            agent.set_native_failure_hold(true);
         }
         agent.native_response_turn = None;
         agent.native_safety_buffering = None;
@@ -1842,15 +1840,15 @@ impl SchedulerRepository {
                 agent.error = studio_runtime_schema::queue_command::Field::Null;
             }
             if status == AgentStatus::Failed {
-                agent.extra.insert("nativeFailureHold".into(), json!(true));
+                agent.set_native_failure_hold(true);
             } else if clears_unknown {
-                agent.extra.insert("nativeFailureHold".into(), json!(false));
+                agent.set_native_failure_hold(false);
             }
             agent.status = status.clone();
         }
         if current_attempt
             && continuation_allowed(&agent)
-            && !agent.extra.get("nativeFailureHold").is_some_and(truthy)
+            && !agent.native_failure_held()
             && Self::has_pending_continuation_event(transaction, agent_id, epoch)?
         {
             // Python queues the worker here, and its next scheduler pass sets an
@@ -2320,12 +2318,9 @@ pub(super) fn clear_hold(agent: &mut AgentRecord) -> StoreResult<()> {
         return Ok(());
     };
     if previous_native_failure_hold.present {
-        agent.extra.insert(
-            "nativeFailureHold".into(),
-            previous_native_failure_hold.value,
-        );
+        agent.native_failure_hold = serde_json::from_value(previous_native_failure_hold.value)?;
     } else {
-        agent.extra.remove("nativeFailureHold");
+        agent.clear_native_failure_hold();
     }
     if agent.error_text() == Some(reason.as_str()) {
         agent.set_error_receipt(previous_error)?;
@@ -2534,7 +2529,7 @@ pub(super) fn disconnect_agent(
     }
     agent.auto_wake = Some(restart_input_wait);
     if restart_input_wait {
-        agent.extra.remove("nativeFailureHold");
+        agent.clear_native_failure_hold();
         agent.start_outcome_hold = None;
         let wait_error = agent.extra["contextRepairWait"]["error"].clone();
         agent.set_error_receipt(wait_error)?;
@@ -2827,7 +2822,7 @@ pub(super) fn continuation_allowed(agent: &AgentRecord) -> bool {
             .workspace_operation
             .value()
             .is_some_and(|value| !value.is_empty())
-        && !agent.extra.get("nativeFailureHold").is_some_and(truthy)
+        && !agent.native_failure_held()
         && agent.account_transfer_id.value().is_none()
         && !agent.extra.get("contextRepairWait").is_some_and(truthy)
         && !matches!(
@@ -3305,8 +3300,8 @@ mod account_scope_tests {
         super::clear_hold(&mut agent).unwrap();
         assert_eq!(agent.error_text(), Some("original"));
         assert_eq!(
-            agent.extra.get("nativeFailureHold"),
-            Some(&serde_json::json!("previous"))
+            serde_json::to_value(&agent.native_failure_hold).unwrap(),
+            serde_json::json!("previous")
         );
         assert!(agent.start_outcome_hold.is_none());
     }

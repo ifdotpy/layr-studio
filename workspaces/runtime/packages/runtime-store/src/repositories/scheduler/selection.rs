@@ -997,7 +997,7 @@ impl SchedulerRepository {
             || !continuation_allowed(&agent)
             || agent.auto_wake != Some(true)
             || agent.in_flight == Some(true)
-            || agent.extra.get("nativeFailureHold").is_some_and(truthy)
+            || agent.native_failure_held()
             || agent.extra.get("remoteWorker").is_some_and(truthy)
             || agent.extra.get("remoteAnchor").is_some_and(truthy)
         {
@@ -1173,9 +1173,7 @@ impl SchedulerRepository {
             agent.status = AgentStatus::Waiting;
             agent.in_flight = Some(false);
             agent.turn_id = Default::default();
-            agent
-                .extra
-                .insert("nativeFailureHold".to_owned(), Value::Bool(true));
+            agent.set_native_failure_hold(true);
             agent.error = studio_runtime_schema::queue_command::Field::Value(
                 studio_runtime_schema::provider_errors::AgentError::Message(reason.to_owned()),
             );
