@@ -23,7 +23,7 @@ pub enum QuestionsReadsError {
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct QuestionHistory<'a> {
+pub(crate) struct QuestionHistory {
     id: String,
     agent: String,
     method: studio_runtime_schema::request_record::RequestMethod,
@@ -35,7 +35,7 @@ pub(crate) struct QuestionHistory<'a> {
     deferred: Option<bool>,
     deferred_at: Option<f64>,
     deferred_by: Option<String>,
-    answer_history: Option<Vec<HistoryAnswer<'a>>>,
+    answer_history: Option<Vec<HistoryAnswer>>,
     answer_error: Option<String>,
     item_id: Option<String>,
     turn_id: Option<String>,
@@ -44,11 +44,11 @@ pub(crate) struct QuestionHistory<'a> {
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-struct HistoryAnswer<'a> {
+struct HistoryAnswer {
     id: String,
     question: String,
     is_secret: bool,
-    answer: Option<&'a serde_json::value::RawValue>,
+    answer: Option<Box<serde_json::value::RawValue>>,
 }
 
 #[derive(serde::Serialize)]
@@ -90,7 +90,7 @@ fn history_optional(value: Option<&str>, field: &str) -> Option<String> {
 /// Question history projection published per request.
 pub(crate) fn question_history_entity(
     record: &studio_runtime_store::RequestRecord,
-) -> Result<Option<QuestionHistory<'_>>, QuestionsReadsError> {
+) -> Result<Option<QuestionHistory>, QuestionsReadsError> {
     use studio_runtime_schema::request_record::RequestMethod;
     if record.deleted_at.is_some_and(|at| at != 0.0)
         || matches!(
@@ -207,18 +207,35 @@ pub(crate) fn question_history_entity(
         .as_deref()
         .filter(|s| !s.is_empty())
         .or(record.turn_id.as_deref().filter(|s| !s.is_empty()));
-    let answer_history = record.answer_history.as_ref().map(|entries| {
-        entries
-            .iter()
-            .take(crate::sync_views::SYNC_ARRAY_ITEMS)
-            .map(|entry| HistoryAnswer {
-                id: history_text(&entry.id, "id"),
-                question: history_text(&entry.question, "question"),
-                is_secret: entry.is_secret,
-                answer: (!entry.is_secret).then_some(entry.answer.as_ref()),
-            })
-            .collect()
-    });
+    let answer_history = record
+        .answer_history
+        .as_ref()
+        .map(|entries| {
+            entries
+                .iter()
+                .take(crate::sync_views::SYNC_ARRAY_ITEMS)
+                .map(|entry| {
+                    Ok(HistoryAnswer {
+                        id: history_text(&entry.id, "id"),
+                        question: history_text(&entry.question, "question"),
+                        is_secret: entry.is_secret,
+                        answer: if entry.is_secret {
+                            None
+                        } else {
+                            Some(
+                                crate::sync_views::bound_raw_json(
+                                    entry.answer.as_ref(),
+                                    "answer",
+                                    3,
+                                )
+                                .map_err(|_| invalid("requests", &record.id))?,
+                            )
+                        },
+                    })
+                })
+                .collect::<Result<Vec<_>, QuestionsReadsError>>()
+        })
+        .transpose()?;
     if record.id.is_empty() {
         return Ok(None);
     }
@@ -367,6 +384,27 @@ mod tests {
     use super::{QuestionsReadsError, checkpoint_list, complaint_detail};
     use serde_json::json;
     use studio_runtime_store::{AgentRecord, CheckpointRecord};
+
+    #[test]
+    fn history_bounds_nested_opaque_answers() {
+        let raw = json!({"id":"r","agent":"a","method":"mcpServer/elicitation/request","status":"answered","createdAt":1,"params":{"mode":"form","requestedSchema":{"properties":{"x":{"title":"X"}}}},"answerHistory":[{"id":"x","question":"X","isSecret":false,"answer":{"nested":{"long":"x".repeat(12_001),"items":vec![1;201]}}}]});
+        let record = serde::Deserialize::deserialize(&raw).unwrap();
+        let result = json!(super::question_history_entity(&record).unwrap().unwrap());
+        assert_eq!(
+            result["answerHistory"][0]["answer"]["nested"]["long"]
+                .as_str()
+                .unwrap()
+                .len(),
+            12_000
+        );
+        assert_eq!(
+            result["answerHistory"][0]["answer"]["nested"]["items"]
+                .as_array()
+                .unwrap()
+                .len(),
+            200
+        );
+    }
 
     #[test]
     fn history_retains_property_order_and_redacts_secret_answers() {

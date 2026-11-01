@@ -18,6 +18,46 @@ pub(crate) const AGENT_SYNC_LAST_ANSWER_CHARS: usize = 4_000;
 pub(crate) const SYNC_TEXT_CHARS: usize = 12_000;
 /// Maximum items in a projected sync array. Unit: array elements.
 pub(crate) const SYNC_ARRAY_ITEMS: usize = 200;
+/// Maximum sidebar order entries in a sync view. Unit: array elements.
+const SYNC_SIDEBAR_ORDER_ITEMS: usize = 10_000;
+/// Maximum recursive sync projection depth. Unit: nested JSON levels.
+const SYNC_JSON_DEPTH: usize = 32;
+
+pub(crate) fn bound_opaque_json(value: &mut Value, field: &str, depth: usize) {
+    if depth > SYNC_JSON_DEPTH {
+        *value = Value::Null;
+        return;
+    }
+    match value {
+        Value::String(text) => *text = bound_sync_text(text, field, false),
+        Value::Array(items) => {
+            items.truncate(if field == "sidebarOrder" {
+                SYNC_SIDEBAR_ORDER_ITEMS
+            } else {
+                SYNC_ARRAY_ITEMS
+            });
+            for item in items {
+                bound_opaque_json(item, "", depth + 1);
+            }
+        }
+        Value::Object(fields) => {
+            for (name, item) in fields {
+                bound_opaque_json(item, name, depth + 1);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
+pub(crate) fn bound_raw_json(
+    raw: &serde_json::value::RawValue,
+    field: &str,
+    depth: usize,
+) -> Result<Box<serde_json::value::RawValue>, serde_json::Error> {
+    let mut value: Value = serde_json::from_str(raw.get())?;
+    bound_opaque_json(&mut value, field, depth);
+    serde_json::value::to_raw_value(&value)
+}
 
 const AGENT_SHORT_STRING_OBJECTS: &[&str] = &[
     "activity",
@@ -64,7 +104,7 @@ fn collect_schema_properties<'a>(
     properties: &mut BTreeMap<&'a str, &'a Value>,
     depth: usize,
 ) {
-    if depth > 32 {
+    if depth > SYNC_JSON_DEPTH {
         return;
     }
     let schema = schema_definition(schema, document);
@@ -152,7 +192,7 @@ fn project_schema_value(
     agent_record: bool,
     agent_short_strings: bool,
 ) -> Value {
-    if depth > 32 {
+    if depth > SYNC_JSON_DEPTH {
         return Value::Null;
     }
     let schema = schema_definition(schema, document);
@@ -213,7 +253,7 @@ fn project_schema_value(
         Value::Array(items) => {
             let item_schema = schema.get("items").unwrap_or(&Value::Null);
             let limit = if field == "sidebarOrder" {
-                10_000
+                SYNC_SIDEBAR_ORDER_ITEMS
             } else {
                 SYNC_ARRAY_ITEMS
             };
@@ -363,7 +403,13 @@ pub fn project_work_record(
         root_id: field(record.root_id_field(), "rootId"),
         title: field(record.title_field(), "title"),
         agent: field(record.agent_field(), "agent"),
-        archive: record.archive_field().clone(),
+        archive: match record.archive_field() {
+            Field::Missing => Field::Missing,
+            Field::Null => Field::Null,
+            Field::Value(raw) => Field::Value(studio_runtime_schema::raw_json::RawJson(
+                bound_raw_json(&raw.0, "archive", 1).ok()?,
+            )),
+        },
     })
 }
 
@@ -373,18 +419,9 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
         "agent" => "AgentEntityDto",
         "agentSummary" => "AgentSummaryEntityDto",
         "agentDetail" => "AgentDetailEntityDto",
-        "task" => "TaskEntityDto",
-        "taskDetail" => "TaskDetailResponse",
-        "retainedWorktree" => "RetainedWorktreeEntityDto",
-        "monitor" => "MonitorEntityDto",
-        "request" => "RequestEntityDto",
-        "rule" => "RuleEntityDto",
-        "peerTeam" => "PeerTeamEntityDto",
-        "event" => "EventEntityDto",
-        "work" => "WorkEntityDto",
-        "workspace" => "WorkspaceEntityDto",
-        "chat" => "ChatEntityDto",
-        "edge" => "EdgeEntityDto",
+        #[cfg(test)]
+        other => test_fixture_schema(other)?,
+        #[cfg(not(test))]
         _ => return None,
     };
     record
@@ -409,6 +446,7 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
     }
     // Publish these fields only when set. The older view never published
     // them, and the client reads a missing one as its default.
+    #[cfg(test)]
     if let Some((_, field)) = UNSET_DEFAULT_FIELDS
         .iter()
         .find(|(owner, field)| *owner == collection && record.get(*field).is_some_and(unset))
@@ -425,6 +463,7 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
         collection == "agent",
         false,
     );
+    #[cfg(test)]
     if collection == "task"
         && let Some(tail) = record.get("tail").and_then(Value::as_str)
         && let Some(summary) = projected.get("tail").and_then(Value::as_str)
@@ -448,12 +487,25 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
     Some(projected)
 }
 
+#[cfg(test)]
+fn test_fixture_schema(collection: &str) -> Option<&'static str> {
+    match collection {
+        "task" => Some("TaskEntityDto"),
+        "monitor" => Some("MonitorEntityDto"),
+        "event" => Some("EventEntityDto"),
+        "work" => Some("WorkEntityDto"),
+        _ => None,
+    }
+}
+
 /// `(collection, field)` pairs that a sync view publishes only when set: a
 /// monitor's output patterns (empty means none). The client reads a missing
 /// one as that default.
+#[cfg(test)]
 const UNSET_DEFAULT_FIELDS: &[(&str, &str)] = &[("monitor", "outputPatterns")];
 
 /// Whether a field value is its unset default: null or an empty list.
+#[cfg(test)]
 fn unset(value: &Value) -> bool {
     value.is_null() || value.as_array().is_some_and(Vec::is_empty)
 }
@@ -730,9 +782,9 @@ pub struct ComplaintProjection {
     author: Option<String>,
     lead_id: Option<String>,
     status: studio_runtime_schema::complaint_record::ComplaintStatus,
-    created: Option<f64>,
-    updated: Option<f64>,
-    read_at: Option<f64>,
+    created: Option<studio_runtime_schema::complaint_record::ComplaintSeconds>,
+    updated: Option<studio_runtime_schema::complaint_record::ComplaintSeconds>,
+    read_at: Option<studio_runtime_schema::complaint_record::ComplaintSeconds>,
     title: String,
     recipient: studio_runtime_schema::complaint_record::ComplaintRecipient,
     version: Option<i64>,
@@ -783,9 +835,9 @@ pub fn project_complaint_record(
         author: author.map(|value| bound(value, "author")),
         lead_id: lead.map(|value| bound(value, "leadId")),
         status: record.status,
-        created: record.created,
-        updated: record.updated,
-        read_at: record.read_at,
+        created: record.created.clone(),
+        updated: record.updated.clone(),
+        read_at: record.read_at.clone(),
         title: record
             .text
             .as_deref()
@@ -882,6 +934,24 @@ mod projection_plan_tests {
     }
 
     #[test]
+    fn opaque_archive_projection_bounds_nested_text_and_arrays() {
+        let raw = json!({"id":"w","status":"ready","archive":{"nested":{"long":"x".repeat(12_001),"items":vec![1; 201]}}});
+        let record: studio_runtime_store::WorkItemRecord =
+            serde::Deserialize::deserialize(&raw).unwrap();
+        let view = super::project_work_record(&record).unwrap();
+        let encoded = serde_json::to_string(&view).unwrap();
+        let view: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(
+            view["archive"]["nested"]["long"].as_str().unwrap().len(),
+            12_000
+        );
+        assert_eq!(
+            view["archive"]["nested"]["items"].as_array().unwrap().len(),
+            200
+        );
+    }
+
+    #[test]
     fn work_projection_preserves_presence_and_opaque_archive() {
         for raw in [
             r#"{"id":"w","status":"ready"}"#,
@@ -967,6 +1037,24 @@ mod projection_plan_tests {
         assert_eq!(view["cleanup"]["reason"], serde_json::Value::Null);
         assert!(!view.to_string().contains("secret"));
         assert!(!view.to_string().contains("private"));
+    }
+
+    #[test]
+    fn complaint_projection_preserves_integer_seconds() {
+        let raw = r#"{"id":"c","author":null,"leadId":null,"text":null,"recipient":"lead","status":"open","created":1,"updated":2,"readAt":null,"version":null,"responses":[]}"#;
+        let record = serde_json::from_str(raw).unwrap();
+        let view =
+            super::project_complaint_record(&record, &super::ComplaintViewContext::default())
+                .unwrap();
+        let encoded = serde_json::to_string(&view).unwrap();
+        let actual: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(actual["created"], json!(1));
+        assert_eq!(actual["updated"], json!(2));
+        let stored = serde_json::to_string(&record).unwrap();
+        assert_eq!(
+            studio_runtime_store::sha256_hex(stored.as_bytes()),
+            "413cdeb2d2cd1fb25994cbbac3469ccb6fb478a625197a6ebd205b453f97e49a"
+        );
     }
 
     #[test]

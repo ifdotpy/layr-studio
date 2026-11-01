@@ -14,6 +14,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         let Ok(Value::Object(mut fields)) = serde_json::from_str::<Value>(&raw) else {
             continue;
         };
+        let original = fields.clone();
         fields.retain(|key, value| match key.as_str() {
             "id" => true,
             "agent" | "rootId" | "path" | "text" | "turnId" => value.is_null() || value.is_string(),
@@ -21,8 +22,8 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             "line" => studio_runtime_schema::annotation_record::valid_line(value),
             _ => false,
         });
-        let normalized = serde_json::to_string(&fields)?;
-        if normalized != raw {
+        if fields != original {
+            let normalized = serde_json::to_string(&fields)?;
             tx.execute(
                 "UPDATE runtime_annotations SET record=?2 WHERE id=?1",
                 (&id, normalized),
@@ -37,6 +38,28 @@ mod tests {
     use super::*;
     use rusqlite::Connection;
     use studio_runtime_schema::annotation_record::AnnotationRecord;
+
+    #[test]
+    fn preserves_already_valid_row_bytes() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_annotations(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE writes(id TEXT); CREATE TRIGGER log_write AFTER UPDATE ON runtime_annotations BEGIN INSERT INTO writes VALUES(new.id); END;").unwrap();
+        let original = r#"{ "text": "x", "id": "a" }"#;
+        db.execute("INSERT INTO runtime_annotations VALUES('a',?1)", [original])
+            .unwrap();
+        let tx = db.transaction().unwrap();
+        apply(&tx).unwrap();
+        assert_eq!(
+            tx.query_row("SELECT record FROM runtime_annotations", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            original
+        );
+        assert_eq!(
+            tx.query_row("SELECT count(*) FROM writes", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
 
     #[test]
     fn normalizes_annotations_idempotently() {

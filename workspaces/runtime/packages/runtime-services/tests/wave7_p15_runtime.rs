@@ -1224,20 +1224,9 @@ async fn permanent_cancel_refusal_settles_and_is_not_retried() {
                 record.error.as_ref().map(|error| error.as_str()),
                 Some("injected not sent")
             );
-            let raw: String = store
-                .test_reader()
-                .expect("read")
-                .query_row(
-                    "SELECT record FROM runtime_monitors WHERE id=?1",
-                    [id],
-                    |row| row.get(0),
-                )
-                .expect("stored monitor");
-            let raw = serde_json::from_str(&raw).expect("stored monitor JSON");
-            let view =
-                studio_runtime_services::sync_views::project_persisted_record("monitor", &raw)
-                    .expect("monitor DTO projection");
-            assert_eq!(view["error"], "injected not sent");
+            let view = studio_runtime_services::sync_policy::project_monitor_record(&record)
+                .expect("monitor DTO projection");
+            assert_eq!(view.error.as_deref(), Some("injected not sent"));
         }
         runtime
             .tick(2100.0)

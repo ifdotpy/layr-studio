@@ -14,6 +14,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         let Ok(Value::Object(mut fields)) = serde_json::from_str::<Value>(&raw) else {
             continue;
         };
+        let original = fields.clone();
         fields.retain(|key, _| {
             matches!(
                 key.as_str(),
@@ -40,8 +41,8 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 fields.remove("native");
             }
         }
-        let normalized = serde_json::to_string(&fields)?;
-        if normalized != raw {
+        if fields != original {
+            let normalized = serde_json::to_string(&fields)?;
             tx.execute(
                 "UPDATE runtime_plans SET record=?2 WHERE id=?1",
                 (&id, normalized),
@@ -56,6 +57,29 @@ mod tests {
     use super::*;
     use rusqlite::Connection;
     use studio_runtime_schema::plan_record::PlanRecord;
+
+    #[test]
+    fn preserves_already_valid_row_bytes() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_plans(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE writes(id TEXT); CREATE TRIGGER log_write AFTER UPDATE ON runtime_plans BEGIN INSERT INTO writes VALUES(new.id); END;").unwrap();
+        let original =
+            r#"{ "version": 1, "id": "a", "rootId": "r", "text": "x", "updated": null }"#;
+        db.execute("INSERT INTO runtime_plans VALUES('a',?1)", [original])
+            .unwrap();
+        let tx = db.transaction().unwrap();
+        apply(&tx).unwrap();
+        assert_eq!(
+            tx.query_row("SELECT record FROM runtime_plans", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            original
+        );
+        assert_eq!(
+            tx.query_row("SELECT count(*) FROM writes", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
 
     #[test]
     fn removes_unused_fields_and_is_idempotent() {

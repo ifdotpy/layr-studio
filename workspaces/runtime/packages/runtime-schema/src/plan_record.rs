@@ -117,16 +117,22 @@ impl PlanRecord {
     pub fn into_value(self) -> Value {
         self.value()
     }
-    pub fn sync_view(&self, bound: &impl Fn(&str, &str) -> String, max_items: usize) -> Self {
+    pub fn sync_view(
+        &self,
+        bound: &impl Fn(&str, &str) -> String,
+        max_items: usize,
+        bound_json: &impl Fn(&mut Value, usize),
+    ) -> Self {
         let mut view = self.clone();
         view.id = bound(&view.id, "id");
         view.root_id = bound(&view.root_id, "rootId");
         view.text = bound(&view.text, "text");
-        if let Field::Value(agent) = &mut view.agent {
-            *agent = bound(agent, "agent");
-        }
+        view.agent = Field::Missing;
         if let Some(steps) = &mut view.steps {
             steps.truncate(max_items);
+            for step in steps {
+                bound_json(step, 2);
+            }
         }
         if let Field::Value(native) = &mut view.native {
             for (field, name) in [
@@ -140,6 +146,9 @@ impl PlanRecord {
             }
             if let Some(plan) = &mut native.plan {
                 plan.truncate(max_items);
+                for step in plan {
+                    bound_json(step, 3);
+                }
             }
         }
         view
@@ -186,6 +195,17 @@ pub(crate) fn check_schema_parity() -> Result<(), String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn public_plan_omits_agent_without_changing_stored_record() {
+        let record = PlanRecord::from_value(
+            json!({"id":"a","rootId":"r","text":"x","version":1,"updated":null,"agent":"private"}),
+        )
+        .unwrap();
+        let view = record.sync_view(&|text, _| text.to_owned(), 200, &|_, _| {});
+        assert!(view.value().get("agent").is_none());
+        assert_eq!(record.value()["agent"], "private");
+    }
 
     #[test]
     fn native_plan_updates_keep_opaque_data_and_require_array_steps() {

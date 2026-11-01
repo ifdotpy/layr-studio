@@ -549,7 +549,11 @@ fn complaint_response(
         author: record.author.ok_or_else(ApiError::internal)?,
         lead_id: record.lead_id.ok_or_else(ApiError::internal)?,
         text: record.text.ok_or_else(ApiError::internal)?,
-        created: record.created.ok_or_else(ApiError::internal)?,
+        created: record
+            .created
+            .as_ref()
+            .and_then(|value| value.seconds())
+            .ok_or_else(ApiError::internal)?,
         status,
         recipient: Some(
             match record.recipient {
@@ -559,8 +563,8 @@ fn complaint_response(
             .to_owned(),
         ),
         version: record.version,
-        updated: record.updated,
-        read_at: Some(record.read_at),
+        updated: record.updated.as_ref().and_then(|value| value.seconds()),
+        read_at: Some(record.read_at.as_ref().and_then(|value| value.seconds())),
         responses: Some(responses),
         source_type: record.source_type.map(|value| {
             match value {
