@@ -578,6 +578,9 @@ pub fn completion_permission(
         && ["epoch", "accountKey", "threadId", "turnId"]
             .iter()
             .all(|k| previous.get(*k).unwrap_or(&Value::Null) == a.get(*k).unwrap_or(&Value::Null))
-        && a.get("turnEpoch").unwrap_or(&a["epoch"]) == &a["epoch"]
+        && a.get("turnEpoch")
+            .and_then(Value::as_i64)
+            .or_else(|| a.get("epoch").and_then(Value::as_i64))
+            == a.get("epoch").and_then(Value::as_i64)
         && !unresolved_receipts
 }

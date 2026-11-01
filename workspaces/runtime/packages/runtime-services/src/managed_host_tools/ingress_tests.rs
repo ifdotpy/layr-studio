@@ -2184,9 +2184,13 @@ impl crate::managed_child_create::ManagedCreationEnvironment for CreationEnviron
                 ),
             );
         }
-        let provider = crate::provider_adapter::model_provider(model)
-            .unwrap_or(studio_runtime_providers::ProviderKind::Codex)
-            .key();
+        let provider = if requested_account_key == Some("test-claude") {
+            studio_runtime_providers::ProviderKind::Claude
+        } else {
+            crate::provider_adapter::model_provider(model)
+                .unwrap_or(studio_runtime_providers::ProviderKind::Codex)
+        }
+        .key();
         Ok((
             key.to_owned(),
             crate::host_worker_create::AccountIdentity {
@@ -4196,4 +4200,41 @@ async fn layr_only_project_refuses_worktree_workers_explicit_and_inherited() {
     )
     .await;
     assert_eq!(inherited.as_deref(), Some(REFUSAL), "inherited WT worker");
+}
+
+#[tokio::test]
+async fn null_and_absent_model_select_the_same_provider_default() {
+    let (_dir, store, _) = fixture().await;
+    let load = std::collections::HashMap::new();
+    let mut choices = Vec::new();
+    for null in [false, true] {
+        let mut root = json!({"accountKey":"default", "workerDefaults":{}});
+        let mut spec = studio_runtime_schema::creation_intent::CreationIntent::default();
+        if null {
+            root["model"] = Value::Null;
+            spec.model = studio_runtime_schema::queue_command::Field::Null;
+        }
+        let settings = crate::managed_child_create::resolve_worker_settings(
+            &store,
+            &CreationEnvironment,
+            crate::managed_child_create::WorkerSettingsRequest {
+                parent: &root,
+                root: &root,
+                spec: &spec,
+                profile: None,
+                role: "implementer",
+                requested_account_key: Some("test-claude"),
+                account_load: &load,
+            },
+        )
+        .await
+        .unwrap();
+        choices.push(settings.model);
+    }
+    assert_eq!(choices[0], choices[1]);
+    assert_eq!(
+        choices[0],
+        crate::provider_adapter::adapter(studio_runtime_providers::ProviderKind::Claude)
+            .default_model()
+    );
 }

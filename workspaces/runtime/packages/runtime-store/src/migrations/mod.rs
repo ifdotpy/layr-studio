@@ -57,6 +57,7 @@ mod m2026_10_31_work_records;
 mod m2026_11_01_account_projection;
 mod m2026_11_01_agent_capacity;
 mod m2026_11_01_agent_naming;
+mod m2026_11_01_agent_null_parity;
 mod m2026_11_01_annotation_record;
 mod m2026_11_01_approval_secrets;
 mod m2026_11_01_chat_busy_indexes;
@@ -950,6 +951,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_10_31_agent_batch_55::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-agent-null-parity",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with null optional fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_agent_null_parity::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {
