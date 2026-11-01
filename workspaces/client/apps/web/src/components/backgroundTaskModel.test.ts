@@ -8,11 +8,9 @@ import {
 import { TaskKind, TaskStatus } from "../generated/api";
 import type { components } from "../generated/api";
 import type { DeepReadonly } from "../deepReadonly";
-import { componentSnapshot } from "./componentTestFixtures";
 import { expectTypeOf, it, expect } from "vitest";
 import {
   activeTask,
-  backgroundTasks,
   isCommandTask,
   processIdentity,
   type DisplayBackgroundTask,
@@ -58,12 +56,9 @@ it("uses the server's task-list membership and activity", () => {
       label: BackgroundTaskLabel.completed,
     },
   } satisfies components["schemas"]["MonitorEntityDto"];
-  const tasks = backgroundTasks(
-    componentSnapshot([], { tasks: [task, hidden], monitors: [monitor] }),
-  );
-  expect(tasks.map((entry) => entry.id)).toEqual(["monitor", "task"]);
-  expect(tasks.map(activeTask)).toEqual([false, true]);
-  expect(isCommandTask(tasks[1]!)).toBe(true);
+  expect([monitor, task].map(activeTask)).toEqual([false, true]);
+  expect(hidden.display.inBackgroundList).toBe(false);
+  expect(isCommandTask(task)).toBe(true);
 });
 
 it("preserves a server-provided process identity and presentation", () => {
@@ -99,6 +94,6 @@ it("preserves a server-provided process identity and presentation", () => {
     epoch: process.epoch,
   });
   expectTypeOf<DisplayBackgroundTask>().toEqualTypeOf<
-    DeepReadonly<components["schemas"]["BackgroundTaskView"]>
+    DeepReadonly<components["schemas"]["BackgroundTaskView"]["value"]>
   >();
 });

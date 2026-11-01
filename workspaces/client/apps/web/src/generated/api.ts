@@ -8625,8 +8625,16 @@ export interface components {
       | "waitingForExit"
       | "unknown";
     BackgroundTaskView:
-      | components["schemas"]["ProcessView"]
-      | components["schemas"]["TaskRecordView"];
+      | {
+          /** @constant */
+          source: "process";
+          value: components["schemas"]["ProcessView"];
+        }
+      | {
+          /** @constant */
+          source: "task";
+          value: components["schemas"]["TaskProjection"];
+        };
     /** BlockingPoolGroupMetrics */
     BlockingPoolGroupMetrics: {
       /** Closureavgms */
@@ -17303,6 +17311,7 @@ export interface components {
     };
     ProcessList: components["schemas"]["ProcessListing"];
     ProcessListing: {
+      activities: components["schemas"]["BackgroundTaskView"][];
       processes: components["schemas"]["ProcessView"][];
       responseTarget?:
         | components["schemas"]["ProcessResponseTarget"]
@@ -24085,16 +24094,40 @@ export interface components {
       /** Id */
       id: string;
     };
-    /**
-     * TaskKind
-     * @enum {string}
-     */
-    TaskKind: "monitor" | "command" | "tool";
+    /** @enum {string} */
+    TaskKind: "command" | "tool";
     TaskOutputResponse: {
       id: string;
       outputFile: string;
       text: string;
       truncated: boolean;
+    };
+    /** @description Bounded public task fields, serialized directly from the stored task. */
+    TaskProjection: {
+      agent: string;
+      command?: string | null | undefined;
+      /** Format: double */
+      created: number;
+      cwd?: string | null | undefined;
+      display: components["schemas"]["BackgroundTaskDisplay"];
+      /** Format: double */
+      durationMs?: number | null | undefined;
+      error?: string | null | undefined;
+      /** Format: int64 */
+      exitCode?: number | null | undefined;
+      /** Format: double */
+      finished?: number | null | undefined;
+      id: string;
+      interactive?: boolean | null | undefined;
+      kind: components["schemas"]["TaskKind"];
+      name: string;
+      outputFile?: string | null | undefined;
+      outputTruncated?: boolean | null | undefined;
+      processId?: components["schemas"]["ProcessId"] | null | undefined;
+      query?: string | null | undefined;
+      status: components["schemas"]["TaskStatus"];
+      tail?: string | null | undefined;
+      turnId: string;
     };
     /**
      * TaskKind
@@ -24138,22 +24171,17 @@ export interface components {
        */
       kind: "tasks";
     };
-    /**
-     * TaskStatus
-     * @enum {string}
-     */
+    /** @enum {string} */
     TaskStatus:
-      | "running"
       | "starting"
       | "approval"
-      | "queued"
-      | "waiting"
+      | "pending"
+      | "unknown"
+      | "running"
       | "completed"
       | "failed"
       | "interrupted"
-      | "cancelled"
-      | "lost"
-      | "unknown";
+      | "lost";
     TaskSubmissionRefusal: {
       errors: {
         message: string;
@@ -39246,11 +39274,7 @@ export const TailscaleStatus = {
   unavailable: "unavailable",
 } as const;
 export type TailscaleStatus = components["schemas"]["TailscaleStatus"];
-export const TaskKind = {
-  monitor: "monitor",
-  command: "command",
-  tool: "tool",
-} as const;
+export const TaskKind = { command: "command", tool: "tool" } as const;
 export type TaskKind = components["schemas"]["TaskKind"];
 export const TaskRecordKind = { command: "command", tool: "tool" } as const;
 export type TaskRecordKind = components["schemas"]["TaskRecordKind"];
@@ -39267,17 +39291,15 @@ export const TaskRecordStatus = {
 } as const;
 export type TaskRecordStatus = components["schemas"]["TaskRecordStatus"];
 export const TaskStatus = {
-  running: "running",
   starting: "starting",
   approval: "approval",
-  queued: "queued",
-  waiting: "waiting",
+  pending: "pending",
+  unknown: "unknown",
+  running: "running",
   completed: "completed",
   failed: "failed",
   interrupted: "interrupted",
-  cancelled: "cancelled",
   lost: "lost",
-  unknown: "unknown",
 } as const;
 export type TaskStatus = components["schemas"]["TaskStatus"];
 export const TerminalInputDelivery = {

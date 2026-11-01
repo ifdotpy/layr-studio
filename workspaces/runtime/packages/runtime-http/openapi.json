@@ -16253,12 +16253,38 @@
         "type": "string"
       },
       "BackgroundTaskView": {
-        "anyOf": [
+        "oneOf": [
           {
-            "$ref": "#/components/schemas/ProcessView"
+            "properties": {
+              "source": {
+                "const": "process",
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/components/schemas/ProcessView"
+              }
+            },
+            "required": [
+              "source",
+              "value"
+            ],
+            "type": "object"
           },
           {
-            "$ref": "#/components/schemas/TaskRecordView"
+            "properties": {
+              "source": {
+                "const": "task",
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/components/schemas/TaskProjection"
+              }
+            },
+            "required": [
+              "source",
+              "value"
+            ],
+            "type": "object"
           }
         ]
       },
@@ -36271,6 +36297,12 @@
       "ProcessListing": {
         "additionalProperties": false,
         "properties": {
+          "activities": {
+            "items": {
+              "$ref": "#/components/schemas/BackgroundTaskView"
+            },
+            "type": "array"
+          },
           "processes": {
             "items": {
               "$ref": "#/components/schemas/ProcessView"
@@ -36289,7 +36321,8 @@
           }
         },
         "required": [
-          "processes"
+          "processes",
+          "activities"
         ],
         "type": "object"
       },
@@ -54363,11 +54396,9 @@
       },
       "TaskKind": {
         "enum": [
-          "monitor",
           "command",
           "tool"
         ],
-        "title": "TaskKind",
         "type": "string"
       },
       "TaskOutputResponse": {
@@ -54391,6 +54422,127 @@
           "outputFile",
           "text",
           "truncated"
+        ],
+        "type": "object"
+      },
+      "TaskProjection": {
+        "description": "Bounded public task fields, serialized directly from the stored task.",
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created": {
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "display": {
+            "$ref": "#/components/schemas/BackgroundTaskDisplay"
+          },
+          "durationMs": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "exitCode": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "finished": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "interactive": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TaskKind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "outputFile": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outputTruncated": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "processId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProcessId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "query": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "tail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "turnId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "display",
+          "id",
+          "agent",
+          "created",
+          "kind",
+          "status",
+          "turnId",
+          "name"
         ],
         "type": "object"
       },
@@ -54458,19 +54610,16 @@
       },
       "TaskStatus": {
         "enum": [
-          "running",
           "starting",
           "approval",
-          "queued",
-          "waiting",
+          "pending",
+          "unknown",
+          "running",
           "completed",
           "failed",
           "interrupted",
-          "cancelled",
-          "lost",
-          "unknown"
+          "lost"
         ],
-        "title": "TaskStatus",
         "type": "string"
       },
       "TaskSubmissionRefusal": {

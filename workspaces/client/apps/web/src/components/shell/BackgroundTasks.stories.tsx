@@ -4,13 +4,25 @@ import {
   BackgroundTaskKindLabel,
   BackgroundTaskLabel,
   MonitorState,
+  ProcessSourceKind,
 } from "../../generated/api";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
 import { BackgroundTaskStrip } from "./BackgroundTasks";
 import type { components } from "../../generated/api";
-const task: components["schemas"]["MonitorEntityDto"] = {
+const task: components["schemas"]["ProcessView"] = {
   id: "monitor",
+  key: "monitor-key",
+  generation: "gen",
+  accountKey: "default",
+  epoch: 1,
+  source: ProcessSourceKind.monitor,
+  name: "Command monitor",
+  bytes: 0,
+  cancelRequested: false,
+  outputTruncated: false,
+  outputPatterns: [],
+  tail: "",
   agent: "worker",
   created: 1700000000,
   status: MonitorState.running,
@@ -72,7 +84,11 @@ export const Approval: Story = {
 export const Tool: Story = {
   args: {
     task: {
-      ...task,
+      id: "tool",
+      agent: "worker",
+      created: 1700000000,
+      status: "running",
+      turnId: "turn",
       kind: "tool",
       command: null,
       name: "webSearch",

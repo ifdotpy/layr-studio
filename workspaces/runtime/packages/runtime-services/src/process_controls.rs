@@ -7,10 +7,10 @@ use std::collections::{BTreeMap, HashSet};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::process_controls::{
     BackgroundTaskAction, BackgroundTaskDisplay, BackgroundTaskIndicator, BackgroundTaskKind,
-    BackgroundTaskKindLabel, BackgroundTaskLabel, ProcessActionResult, ProcessActionStatus,
-    ProcessControlRequest, ProcessEntry, ProcessListing, ProcessOutcome, ProcessReceipt,
-    ProcessResponseTarget, ProcessSourceKind, ProcessStatus, ProcessStdinState, ProcessView,
-    ProcessWakeBudget,
+    BackgroundTaskKindLabel, BackgroundTaskLabel, BackgroundTaskView, ProcessActionResult,
+    ProcessActionStatus, ProcessControlRequest, ProcessEntry, ProcessListing, ProcessOutcome,
+    ProcessReceipt, ProcessResponseTarget, ProcessSourceKind, ProcessStatus, ProcessStdinState,
+    ProcessView, ProcessWakeBudget, TaskProjection,
 };
 use studio_runtime_store::{
     ProcessActionKind, ProcessActionPhase, ProcessActionRecord, StoreError, Transaction,
@@ -91,11 +91,12 @@ fn display(
     };
     actions.retain(|action| match action {
         BackgroundTaskAction::Stop => active && !cancelling,
-        BackgroundTaskAction::Input | BackgroundTaskAction::Resize => {
+        BackgroundTaskAction::Input => {
             !cancelling
                 && matches!(status_label, Label::Running)
                 && stdin_state == Some(ProcessStdinState::Open)
         }
+        BackgroundTaskAction::Resize => !cancelling && matches!(status_label, Label::Running),
         BackgroundTaskAction::Approve | BackgroundTaskAction::ReadOutput => true,
     });
     if matches!(status_label, Label::Approval) {
@@ -368,12 +369,6 @@ fn project_monitor_bound(
         && (generation.is_some()
             || (source_thread.is_some_and(|v| !v.is_empty())
                 && source_thread == owner["threadId"].as_str()));
-    let can_input = same
-        && owner["autoWake"] == true
-        && monitor.interactive
-        && monitor.stdin_closed != Some(true)
-        && monitor.stdin_close_requested.is_none()
-        && monitor.status == MonitorStatus::Running;
     let output = monitor.tail.as_str();
     let bytes = monitor.bytes.get() as u64;
     let command = monitor.command.as_str();
@@ -383,9 +378,10 @@ fn project_monitor_bound(
         command
     };
     let mut actions = vec![BackgroundTaskAction::ReadOutput];
-    if can_input {
-        actions.extend([BackgroundTaskAction::Input, BackgroundTaskAction::Resize]);
-    }
+    actions.extend(crate::monitor_policy::input_actions(
+        monitor,
+        same && owner["autoWake"] == true,
+    ));
     if same
         || (pending && owner["epoch"].as_i64() == Some(epoch) && source_account == Some(account))
     {
@@ -885,14 +881,64 @@ pub fn listing(
     rows: &[(&Value, ProcessSource)],
     connections: &Connections,
 ) -> Result<ProcessListing, Error> {
-    let processes = processes(connection, rows, connections)?
+    let processes: Vec<_> = processes(connection, rows, connections)?
         .into_iter()
         .map(|process| process.view)
         .collect();
+    #[derive(serde::Deserialize)]
+    struct TaskEntity {
+        value: TaskProjection,
+    }
+    let owner_ids: HashSet<_> = owners
+        .iter()
+        .filter_map(|owner| owner["id"].as_str())
+        .collect();
+    let mut statement = connection
+        .prepare("SELECT payload FROM sync_entities WHERE collection='task' AND deleted=0")
+        .map_err(StoreError::from)?;
+    let entities = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(StoreError::from)?;
+    let mut tasks = Vec::new();
+    for entity in entities {
+        let entity: TaskEntity =
+            serde_json::from_str(&entity.map_err(StoreError::from)?).map_err(StoreError::from)?;
+        if owner_ids.contains(entity.value.agent.as_str()) && entity.value.display.active {
+            tasks.push(entity.value);
+        }
+    }
+    let activities = background_activities(&processes, &tasks);
     Ok(ProcessListing {
         response_target: stop_target(&owners[0], connections),
         processes,
+        activities,
     })
+}
+fn background_activities(
+    processes: &[ProcessView],
+    tasks: &[TaskProjection],
+) -> Vec<BackgroundTaskView> {
+    let process_ids: HashSet<_> = processes
+        .iter()
+        .filter(|row| row.display.active)
+        .map(|row| (row.agent.as_str(), row.id.as_str()))
+        .collect();
+    let mut activities: Vec<_> = processes
+        .iter()
+        .filter(|row| row.display.active)
+        .cloned()
+        .map(BackgroundTaskView::Process)
+        .collect();
+    activities.extend(
+        tasks
+            .iter()
+            .filter(|row| {
+                row.display.active && !process_ids.contains(&(row.agent.as_str(), row.id.as_str()))
+            })
+            .cloned()
+            .map(BackgroundTaskView::Task),
+    );
+    activities
 }
 pub fn matches(process: &ProcessRecord, identity: &ProcessRecord) -> bool {
     process.view.key == identity.view.key
@@ -1218,6 +1264,75 @@ mod claim_identity_tests {
     use super::*;
     use studio_runtime_schema::persistence::RequestIdentity;
     use studio_runtime_store::request_results::RequestResults;
+
+    #[test]
+    fn activity_snapshot_prefers_process_then_restores_task_after_exit() {
+        let raw = r#"{"id":"command","agent":"owner","created":1,"itemId":"item","turnId":"turn","kind":"command","status":"running","type":"commandExecution","name":"commandExecution","processId":"pid"}"#;
+        let task: studio_runtime_store::TaskRecord = serde_json::from_str(raw).unwrap();
+        let owner = json!({"id":"owner","epoch":1,"accountKey":"default","threadId":"thread","autoWake":true});
+        let process = project(
+            ProcessSourceKind::CodexTask,
+            &task,
+            &owner,
+            Some("connection"),
+        )
+        .view;
+        let task = crate::sync_views::project_task_record(&task).unwrap();
+        let before = background_activities(&[], std::slice::from_ref(&task));
+        let running =
+            background_activities(std::slice::from_ref(&process), std::slice::from_ref(&task));
+        let after = background_activities(&[], std::slice::from_ref(&task));
+        assert_eq!(before.len(), 1);
+        assert!(matches!(&before[0], BackgroundTaskView::Task(_)));
+        assert_eq!(running.len(), 1);
+        assert!(matches!(&running[0], BackgroundTaskView::Process(_)));
+        assert_eq!(after.len(), 1);
+        assert!(matches!(&after[0], BackgroundTaskView::Task(_)));
+    }
+
+    #[test]
+    fn monitor_actions_match_input_admission_for_pending_and_closed_stdin() {
+        let owner = json!({"id":"owner","rootId":"owner","compactions":0,"epoch":1,"accountKey":"default","threadId":"thread","autoWake":true,"provider":"codex","status":"idle","cwd":std::env::temp_dir()});
+        let fixture = format!(
+            r#"{{"id":"watch","agent":"owner","epoch":1,"status":"running","requestId":"request","created":1,"activityAt":1,"activityGeneration":0,"bytes":0,"command":"cat","cwd":{},"interactive":true,"livenessCommand":"","log":{},"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit","operation":{{"agent":"owner","epoch":1,"accountKey":"default","connectionId":"connection","threadId":"thread"}}}}"#,
+            serde_json::to_string(&std::env::temp_dir()).unwrap(),
+            serde_json::to_string(&std::env::temp_dir().join("watch.log")).unwrap()
+        );
+        let record: studio_runtime_store::MonitorRecord = serde_json::from_str(&fixture).unwrap();
+        for state in ["open", "closed", "pending"] {
+            let mut record = record.clone();
+            if state == "closed" {
+                record.stdin_closed = Some(true);
+            }
+            if state == "pending" {
+                record.input_attempt = Some(serde_json::from_str(r#"{"id":"old","agent":"owner","epoch":1,"accountKey":"default","connectionId":"connection","threadId":"thread","method":"command/exec/write","params":{"processId":"watch","deltaBase64":"YQ==","closeStdin":false},"status":"submitted","created":1}"#).unwrap());
+            }
+            let snapshot =
+                crate::monitor_policy::MonitorSnapshot::checked_stored(&record, owner.clone())
+                    .unwrap();
+            let operation = snapshot.operation().unwrap();
+            let projected = project_monitor_bound(&record, &owner, Some("connection"), None);
+            for (action, resize) in [
+                (BackgroundTaskAction::Input, false),
+                (BackgroundTaskAction::Resize, true),
+            ] {
+                let input = crate::monitor_policy::Input {
+                    text: "x".into(),
+                    rows: resize.then_some(24),
+                    cols: resize.then_some(80),
+                    close_stdin: false,
+                };
+                let admitted =
+                    crate::monitor_policy::begin_input(&snapshot, operation, "new", &input, 2.0)
+                        .is_ok();
+                assert_eq!(
+                    projected.view.display.actions.contains(&action),
+                    admitted,
+                    "{state}: {action:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn task_record_projection_publishes_background_display_policy() {

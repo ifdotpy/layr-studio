@@ -1,3 +1,4 @@
+import type { DeepReadonly } from "../../deepReadonly";
 import { BackgroundTaskAction, ProcessStdinState } from "../../generated/api";
 import { BackgroundTaskKind, BackgroundTaskLabel } from "../../generated/api";
 import {
@@ -115,7 +116,7 @@ function isJsonObject(
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-export { activeTask, backgroundTasks } from "../backgroundTaskModel";
+export { activeTask } from "../backgroundTaskModel";
 const labels: Record<components["schemas"]["BackgroundTaskLabel"], string> = {
   running: "Running",
   starting: "Starting",
@@ -200,9 +201,6 @@ export default function BackgroundTasks({
   const { get, post } = useServerApi();
   const services = useServerServices();
   const outbox = sessionOutboxRequests();
-  const taskRecords = useSubscription(
-    opened && leadId ? { kind: "tasks", agentId: leadId } : null,
-  );
   const controlSuffix = `${services?.owner.id || "local"}:${leadId}`;
   const controlStorageKey = outbox.key("processControl", controlSuffix);
   const controlScope = useRef(controlStorageKey);
@@ -220,7 +218,10 @@ export default function BackgroundTasks({
   const processes = useSubscription(
     opened && leadId ? { kind: "processes", agentId: leadId } : null,
   );
-  const processRecords = processes.data?.processes ?? [];
+  const activities = processes.data?.activities ?? [];
+  const processRecords = activities.flatMap((entry) =>
+    entry.source === "process" ? [entry.value] : [],
+  );
   const processLoadError = processes.error ? errorText(processes.error) : "";
   const processLoading = processes.status === "loading";
   const [controlPending, setControlPending] = useState(false);
@@ -233,17 +234,7 @@ export default function BackgroundTasks({
   const agents = data.threads,
     owner = (id: string) => agents.find((a) => a.id === id),
     scopeOwner = owner(leadId || ""),
-    streamedTarget = processes.data?.responseTarget,
-    responseTarget =
-      scopeOwner?.inFlight &&
-      streamedTarget &&
-      streamedTarget.agent === scopeOwner.id &&
-      streamedTarget.epoch === scopeOwner.epoch &&
-      streamedTarget.threadId === scopeOwner.threadId &&
-      streamedTarget.turnId === scopeOwner.turnId &&
-      streamedTarget.accountKey === (scopeOwner.accountKey || "default")
-        ? streamedTarget
-        : null;
+    responseTarget = processes.data?.responseTarget;
   useEffect(() => {
     if (!opened) return;
     const timer = setInterval(() => setNow(Date.now() / 1000), 1000);
@@ -264,20 +255,15 @@ export default function BackgroundTasks({
     }
   }, [leadId, controlStorageKey]);
   const processTasks = processRecords;
-  const inScope = (task: DisplayBackgroundTask) =>
-    !!leadId &&
-    (task.agent === leadId || owner(task.agent)?.rootId === leadId) &&
-    task.display.active &&
-    (kind === "all" || task.display.kind === kind);
-  const scopedProcesses = processTasks.filter(inScope);
-  const scopedTasks = (taskRecords.data ?? []).filter(inScope);
-  const active = scopedProcesses.length + scopedTasks.length;
+  const active = activities.length;
   const matchesSearch = (task: DisplayBackgroundTask) =>
     `${task.display.title} ${owner(task.agent)?.name} ${task.cwd ?? ""} ${labels[task.display.label]}`
       .toLowerCase()
       .includes(query.toLowerCase());
-  const filteredProcesses = scopedProcesses.filter(matchesSearch);
-  const filteredTasks = scopedTasks.filter(matchesSearch);
+  const filtered = activities.filter(
+    ({ value }) =>
+      (kind === "all" || value.display.kind === kind) && matchesSearch(value),
+  );
   const pendingFocus =
     opened &&
     initialFocus?.leadId === leadId &&
@@ -289,16 +275,14 @@ export default function BackgroundTasks({
     (selection && selection.scope === leadId && selection.requested
       ? selection.id
       : undefined);
-  const selectedTask = explicitId
-    ? (scopedProcesses.find((task) => task.id === explicitId) ??
-      scopedTasks.find((task) => task.id === explicitId))
+  const selectedEntry = explicitId
+    ? activities.find((entry) => entry.value.id === explicitId)
     : selection && selection.scope === leadId
-      ? selection.source === "task"
-        ? scopedTasks.find((task) => task.id === selection.id)
-        : scopedProcesses.find((task) => task.id === selection.id)
-      : (filteredProcesses[0] ?? filteredTasks[0]);
+      ? activities.find((entry) => entry.value.id === selection.id)
+      : filtered[0];
+  const selectedTask = selectedEntry?.value;
   const selectedProcess =
-    selectedTask && "key" in selectedTask ? selectedTask : undefined;
+    selectedEntry?.source === "process" ? selectedEntry.value : undefined;
   const submitControl = async (body: PostBody<"/api/processes/action">) => {
     setControlPending(true);
     try {
@@ -455,7 +439,6 @@ export default function BackgroundTasks({
           ...scope,
           action: control.action,
           processes: processTasks
-            .filter(activeTask)
             .filter(
               (task) =>
                 task.display.actions.includes(BackgroundTaskAction.stop) &&
@@ -476,13 +459,15 @@ export default function BackgroundTasks({
     void submitControl(body);
   };
   const selectedId = selectedTask?.id;
-  const selectedSource =
-    selectedTask && "key" in selectedTask ? "process" : "task";
+  const selectedSource = selectedEntry?.source;
   useEffect(() => {
     if (explicitId && !selectedId) return;
     setSelection((previous) =>
       selectedId
-        ? previous && previous.scope === leadId && previous.id === selectedId
+        ? previous &&
+          previous.scope === leadId &&
+          previous.id === selectedId &&
+          previous.source === selectedSource
           ? previous
           : { scope: leadId, id: selectedId, source: selectedSource }
         : null,
@@ -603,12 +588,6 @@ export default function BackgroundTasks({
         </p>
       )}
       {processLoading && <p role="status">Loading processes…</p>}
-      {taskRecords.error && (
-        <p role="alert" className="task-error">
-          Task list unavailable: {errorText(taskRecords.error)}
-        </p>
-      )}
-      {taskRecords.status === "loading" && <p role="status">Loading tasks…</p>}
       {controlResult?.response && (
         <p
           role={
@@ -664,45 +643,22 @@ export default function BackgroundTasks({
             />
           </div>
           <div className="tasks-rows">
-            {(
-              [
-                ["process", "Processes", filteredProcesses],
-                ["task", "Tasks", filteredTasks],
-              ] as const
-            ).map(([source, label, entries]) =>
-              entries.length ? (
-                <section key={source} aria-label={label}>
-                  <Text
-                    component="h3"
-                    size="xs"
-                    c="dimmed"
-                    fw={600}
-                    px="sm"
-                    py="xs"
-                    m={0}
-                  >
-                    {label}
-                  </Text>
-                  {entries.map((task) => (
-                    <BackgroundTaskStrip
-                      key={`${source}:${task.id}`}
-                      task={task}
-                      owner={owner(task.agent)}
-                      now={now}
-                      selected={
-                        selection?.source === source &&
-                        selectedTask?.id === task.id
-                      }
-                      select={() => {
-                        setSelection({ scope: leadId, id: task.id, source });
-                        setMobileDetail(true);
-                      }}
-                    />
-                  ))}
-                </section>
-              ) : null,
-            )}
-            {!filteredProcesses.length && !filteredTasks.length && (
+            {filtered.map(({ source, value: task }) => (
+              <BackgroundTaskStrip
+                key={`${source}:${task.id}`}
+                task={task}
+                owner={owner(task.agent)}
+                now={now}
+                selected={
+                  selection?.source === source && selectedTask?.id === task.id
+                }
+                select={() => {
+                  setSelection({ scope: leadId, id: task.id, source });
+                  setMobileDetail(true);
+                }}
+              />
+            ))}
+            {!filtered.length && (
               <div className="tasks-empty">
                 <Check size={24} />
                 <strong>
@@ -720,7 +676,7 @@ export default function BackgroundTasks({
         {selectedTask ? (
           <TaskDetail
             key={selectedTask.id}
-            task={selectedTask}
+            activity={selectedEntry!}
             owner={owner(selectedTask.agent)}
             now={now}
             requests={data.runtime.requests}
@@ -810,7 +766,7 @@ export function BackgroundTaskStrip({
 }
 
 export function TaskDetail({
-  task: summary,
+  activity,
   owner,
   now,
   requests,
@@ -822,7 +778,7 @@ export function TaskDetail({
   onStop,
   controlPending,
 }: {
-  task: DisplayBackgroundTask;
+  activity: DeepReadonly<components["schemas"]["BackgroundTaskView"]>;
   owner?: Agent | undefined;
   now: number;
   requests: PendingRequest[];
@@ -835,6 +791,8 @@ export function TaskDetail({
   controlPending: boolean;
 }) {
   const { get, post } = useServerApi();
+  const summary = activity.value;
+  const process = activity.source === "process" ? activity.value : undefined;
 
   const [fileOutput, setFileOutput] = useState<{
     text: string;
@@ -946,8 +904,8 @@ export function TaskDetail({
               Exit {task.exitCode}
             </span>
           )}
-          {task.timeout_ms != null && (
-            <span>Timeout {duration(task.timeout_ms / 1000)}</span>
+          {process?.timeout_ms != null && (
+            <span>Timeout {duration(process?.timeout_ms / 1000)}</span>
           )}
           {task.processId && <span>Process {task.processId}</span>}
         </div>
@@ -960,15 +918,14 @@ export function TaskDetail({
                 : "The agent receives the result when this command exits."}
             </p>
           )}
-        {task.display.kind === BackgroundTaskKind.monitor &&
-          "outputWakeBudget" in task &&
-          task.outputWakeBudget && (
+        {process?.display.kind === BackgroundTaskKind.monitor &&
+          process.outputWakeBudget && (
             <div className="task-wake-budget" role="status">
               <Text size="sm">
-                {task.outputWakeBudget.totalSuppressedMatches} matches
+                {process.outputWakeBudget.totalSuppressedMatches} matches
                 suppressed
               </Text>
-              {task.outputWakeBudget.paused && (
+              {process.outputWakeBudget.paused && (
                 <>
                   <Text fw={600} size="sm">
                     Output wakes paused
@@ -981,7 +938,11 @@ export function TaskDetail({
                 </>
               )}
               {activeTask(task) && (
-                <MonitorRestart task={task} notify={notify} refresh={refresh} />
+                <MonitorRestart
+                  task={process}
+                  notify={notify}
+                  refresh={refresh}
+                />
               )}
             </div>
           )}
@@ -1048,9 +1009,9 @@ export function TaskDetail({
             <ErrorDescription value={outputError} />
           </p>
         )}
-        {task.stdinError && (
+        {process?.stdinError && (
           <p role="alert" className="task-error">
-            <ErrorDescription value={task.stdinError} />
+            <ErrorDescription value={process?.stdinError} />
           </p>
         )}
         <div className="task-terminal">
@@ -1123,11 +1084,11 @@ export function TaskDetail({
                     : "No output recorded.")}
           </pre>
           {(task.outputTruncated ||
-            (task.bytes || 0) >
+            (process?.bytes || 0) >
               new TextEncoder().encode(outputTail || "").length) && (
             <p className="task-output-limit">
               Latest output shown
-              {task.log ? ". The saved log is available below." : "."}
+              {process?.log ? ". The saved log is available below." : "."}
             </p>
           )}
         </div>
@@ -1139,7 +1100,8 @@ export function TaskDetail({
             pending={pending}
             act={act}
             receiptOnly={
-              !task.display.actions.includes(BackgroundTaskAction.input)
+              !task.display.actions.includes(BackgroundTaskAction.input) &&
+              !task.display.actions.includes(BackgroundTaskAction.resize)
             }
           />
         )}
@@ -1154,10 +1116,10 @@ export function TaskDetail({
               <dd>{localDateTime(new Date(task.finished * 1000))}</dd>
             </div>
           )}
-          {task.log && (
+          {process?.log && (
             <div>
               <dt>Saved log</dt>
-              <dd>{task.log}</dd>
+              <dd>{process?.log}</dd>
             </div>
           )}
         </dl>

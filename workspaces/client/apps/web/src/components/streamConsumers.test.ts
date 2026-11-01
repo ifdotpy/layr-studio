@@ -1,4 +1,4 @@
-import { BackgroundTaskLabel, ProcessSourceKind } from "../generated/api";
+import { ProcessSourceKind } from "../generated/api";
 import {
   TaskStatus as GeneratedApiTaskStatus,
   TaskKind as GeneratedApiTaskKind,
@@ -203,6 +203,58 @@ const commandProcess = () =>
   }) satisfies ResourceData<
     Extract<ResourceRef, { kind: "processes" }>
   >["processes"][number];
+it("allows stopping a recovered server-verified response when the owner is not in flight", () => {
+  h.nullRefs = 100;
+  const props = processProps();
+  props.data.threads[0] = { id: "lead", epoch: 1, inFlight: false };
+  h.data.set("processes", {
+    processes: [],
+    activities: [],
+    responseTarget: {
+      agent: "lead",
+      accountKey: "default",
+      epoch: 1,
+      connectionId: "connection",
+      threadId: "thread",
+      turnId: "turn",
+    },
+  });
+  const button = elements(render(() => BackgroundTasks(props))).find(
+    (node) => node.props.children === "Stop response",
+  );
+  expect(button?.props.disabled).toBe(false);
+});
+it("keeps monitor resize available after stdin closes", () => {
+  h.nullRefs = 100;
+  const process = {
+    ...commandProcess(),
+    source: ProcessSourceKind.monitor,
+    display: backgroundDisplay({
+      kind: "monitor",
+      kindLabel: "monitor",
+      stdinState: "closed",
+      actions: ["resize", "readOutput"],
+    }),
+  };
+  h.data.set("processes", {
+    processes: [process],
+    activities: [{ source: "process", value: process }],
+  });
+  const detail = elements(render(() => BackgroundTasks(processProps()))).find(
+    (node) => node.props.canStop !== undefined,
+  )!;
+  const view = render(
+    () =>
+      (detail.type as typeof TaskDetail)(
+        detail.props as ComponentProps<typeof TaskDetail>,
+      ),
+    100,
+  );
+  const input = elements(view).find(
+    (node) => node.props.receiptOnly !== undefined,
+  );
+  expect(input?.props.receiptOnly).toBe(false);
+});
 it("an open process panel and its selected detail need only two distinct resource subscriptions", () => {
   h.nullRefs = 100;
   h.data.set(
@@ -211,6 +263,7 @@ it("an open process panel and its selected detail need only two distinct resourc
   );
   h.data.set("processes", {
     processes: [commandProcess()],
+    activities: [{ source: "process", value: commandProcess() }],
   } satisfies ResourceData<Extract<ResourceRef, { kind: "processes" }>>);
   const view = render(() => BackgroundTasks(processProps()));
   const detail = elements(view).find(
@@ -223,136 +276,49 @@ it("an open process panel and its selected detail need only two distinct resourc
       ),
     100,
   );
-  expect(h.refs).toEqual([
-    { kind: "tasks", agentId: "lead" },
-    { kind: "processes", agentId: "lead" },
-  ]);
+  expect(h.refs).toEqual([{ kind: "processes", agentId: "lead" }]);
   expect(h.get).not.toHaveBeenCalled();
 });
-it("process and task sections retain server order and their separate output", () => {
+it("renders the server activity exactly once as its process starts and ends", () => {
   h.nullRefs = 100;
   const props = processProps();
-  props.data.runtime.tasks = [
-    {
-      id: "stale",
-      agent: "lead",
-      created: 1,
-      status: GeneratedApiTaskStatus.running,
-      kind: GeneratedApiTaskKind.tool,
-      display: backgroundDisplay({
-        kind: "tool",
-        kindLabel: "tool",
-        inBackgroundList: false,
-      }),
-    },
-  ];
   const process = commandProcess();
-  h.data.set("processes", { processes: [process] } satisfies ResourceData<
-    Extract<ResourceRef, { kind: "processes" }>
-  >);
-  h.data.set("tasks", [
-    {
-      ...process,
-      kind: GeneratedApiTaskKind.command,
-      tail: "Older task output",
-      display: backgroundDisplay(),
-    },
-    {
-      id: "tool",
-      agent: "lead",
-      created: 1,
-      status: GeneratedApiTaskStatus.running,
-      kind: GeneratedApiTaskKind.tool,
-      name: "webSearch",
-      display: backgroundDisplay({
-        kind: "tool",
-        kindLabel: "tool",
-        title: "Web search",
-        inBackgroundList: false,
-      }),
-    },
-    {
-      id: "claude",
-      agent: "lead",
-      created: 1,
-      status: GeneratedApiTaskStatus.running,
-      kind: GeneratedApiTaskKind.tool,
-      display: backgroundDisplay({
-        kind: "backgroundTask",
-        kindLabel: "tool",
-        title: "Background task",
-      }),
-    },
-  ] satisfies ResourceData<Extract<ResourceRef, { kind: "tasks" }>>);
-  const read = () => BackgroundTasks(props);
-  const view = render(read);
-  const rows = elements(view).filter(
-    (node): node is ReactElement<ComponentProps<typeof BackgroundTaskStrip>> =>
-      node.props.select as boolean,
-  );
-  expect(rows.map((node) => node.props.task.id).sort()).toEqual([
-    "claude",
-    "command",
-    "command",
-    "tool",
-  ]);
-  expect(
-    rows.find((node) => node.props.task.id === "command")!.props.task.tail,
-  ).toBe("Streamed command output");
-  const detail = elements(view).find(
-    (node) => node.props.canStop !== undefined,
-  )!;
-  const detailView = render(
-    () =>
-      (detail.type as typeof TaskDetail)(
-        detail.props as ComponentProps<typeof TaskDetail>,
-      ),
-    100,
-  );
-  expect(
-    elements(detailView).find((node) =>
-      (node.props.className as string | undefined)?.startsWith("task-output"),
-    )!.props.children,
-  ).toBe("Streamed command output");
-  expect(detail.props.canStop).toBe(true);
+  const task = {
+    id: "command",
+    agent: "lead",
+    created: 2,
+    status: GeneratedApiTaskStatus.running,
+    kind: GeneratedApiTaskKind.command,
+    name: "command",
+    turnId: "turn",
+    tail: "Task output",
+    display: backgroundDisplay(),
+  };
+  const rows = () =>
+    elements(render(() => BackgroundTasks(props))).filter(
+      (
+        node,
+      ): node is ReactElement<ComponentProps<typeof BackgroundTaskStrip>> =>
+        !!node.props.select,
+    );
   h.data.set("processes", {
-    processes: [
-      {
-        ...process,
-        tail: "Updated output",
-        error: "Streamed error",
-        cancelRequested: true,
-        display: {
-          ...process.display,
-          label: BackgroundTaskLabel.waitingForExit,
-          actions: ["readOutput"],
-        },
-      },
-    ],
-  } satisfies ResourceData<Extract<ResourceRef, { kind: "processes" }>>);
-  const updated = elements(render(read)).find(
-    (node) => node.props.canStop !== undefined,
-  )!;
-  expect(updated.key).toBe(detail.key);
-  expect(updated.props.task).toMatchObject({
-    tail: "Updated output",
-    error: "Streamed error",
-    cancelRequested: true,
+    processes: [],
+    activities: [{ source: "task", value: task }],
   });
-  h.data.set(
-    "tasks",
-    [] satisfies ResourceData<Extract<ResourceRef, { kind: "tasks" }>>,
-  );
-  expect(
-    elements(render(read))
-      .filter(
-        (
-          node,
-        ): node is ReactElement<ComponentProps<typeof BackgroundTaskStrip>> =>
-          node.props.select as boolean,
-      )
-      .map((node) => node.props.task.id),
-  ).toEqual(["command"]);
+  expect(rows().map((row) => row.props.task.id)).toEqual(["command"]);
+  expect(rows()[0]?.props.task.tail).toBe("Task output");
+  h.data.set("processes", {
+    processes: [process],
+    activities: [{ source: "process", value: process }],
+  });
+  expect(rows().map((row) => row.props.task.id)).toEqual(["command"]);
+  expect(rows()[0]?.props.task.tail).toBe("Streamed command output");
+  h.data.set("processes", {
+    processes: [],
+    activities: [{ source: "task", value: task }],
+  });
+  expect(rows().map((row) => row.props.task.id)).toEqual(["command"]);
+  expect(rows()[0]?.props.task.tail).toBe("Task output");
   expect(h.get).not.toHaveBeenCalled();
 });
 it.each([false, true])(
@@ -370,37 +336,26 @@ it.each([false, true])(
     expect(h.get).not.toHaveBeenCalled();
   },
 );
-it("task-only stream failures remain visible beside available process rows", () => {
+it("process stream failures remain visible", () => {
   h.nullRefs = 100;
-  h.data.set("processes", {
-    processes: [commandProcess()],
-  } satisfies ResourceData<Extract<ResourceRef, { kind: "processes" }>>);
-  h.statuses.set("tasks", "error");
-  h.errors.set("tasks", new Error("Task stream unavailable"));
+  h.data.set("processes", { processes: [], activities: [] });
+  h.statuses.set("processes", "error");
+  h.errors.set("processes", new Error("Process stream unavailable"));
   const nodes = elements(render(() => BackgroundTasks(processProps())));
   expect(
     nodes
       .filter((node) => node.props.role === "alert")
       .flatMap((node) => node.props.children)
       .join(""),
-  ).toContain("Task stream unavailable");
-  expect(
-    nodes
-      .filter(
-        (
-          node,
-        ): node is ReactElement<ComponentProps<typeof BackgroundTaskStrip>> =>
-          node.props.select as boolean,
-      )
-      .map((node) => node.props.task.id),
-  ).toEqual(["command"]);
+  ).toContain("Process stream unavailable");
   expect(h.get).not.toHaveBeenCalled();
 });
 it("process owner/task events consume process records without GET /api/processes", () => {
   h.nullRefs = 100;
-  h.data.set("processes", { processes: [] } satisfies ResourceData<
-    Extract<ResourceRef, { kind: "processes" }>
-  >);
+  h.data.set("processes", {
+    processes: [],
+    activities: [],
+  } satisfies ResourceData<Extract<ResourceRef, { kind: "processes" }>>);
   const props = {
     opened: true,
     close: vi.fn(),
@@ -411,9 +366,10 @@ it("process owner/task events consume process records without GET /api/processes
     notify: vi.fn(),
   };
   render(() => BackgroundTasks(props));
-  h.data.set("processes", { processes: [] } satisfies ResourceData<
-    Extract<ResourceRef, { kind: "processes" }>
-  >);
+  h.data.set("processes", {
+    processes: [],
+    activities: [],
+  } satisfies ResourceData<Extract<ResourceRef, { kind: "processes" }>>);
   render(() =>
     BackgroundTasks({
       ...props,

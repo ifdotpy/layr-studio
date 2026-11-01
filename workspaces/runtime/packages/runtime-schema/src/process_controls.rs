@@ -169,11 +169,59 @@ pub struct ProcessView {
     pub display: BackgroundTaskDisplay,
 }
 
+/// Bounded public task fields, serialized directly from the stored task.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskProjection {
+    pub display: BackgroundTaskDisplay,
+    pub id: String,
+    pub agent: String,
+    #[schemars(with = "f64", range(min = 0))]
+    pub created: crate::task_record::NonnegativeNumber,
+    pub kind: crate::task_record::TaskKind,
+    pub status: crate::task_record::TaskStatus,
+    pub turn_id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<f64>")]
+    pub duration_ms: Option<crate::task_record::NonnegativeNumber>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finished: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interactive: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_truncated: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process_id: Option<crate::task_record::ProcessId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tail: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "source", content = "value", rename_all = "camelCase")]
+pub enum BackgroundTaskView {
+    Process(ProcessView),
+    Task(TaskProjection),
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProcessListing {
     pub response_target: Option<ProcessResponseTarget>,
     pub processes: Vec<ProcessView>,
+    pub activities: Vec<BackgroundTaskView>,
 }
 
 // JSON Schema integer ingress accepts integral decimal spellings. The retained
@@ -571,7 +619,6 @@ pub(crate) fn apply_background_views(document: &mut Value) {
         serde_json::json!({"$ref":"#/components/schemas/ProcessView"});
     schemas["ProcessList"] = serde_json::json!({"$ref":"#/components/schemas/ProcessListing"});
     schemas["TaskRecordView"] = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/TaskEntityDto"},{"$ref":"#/components/schemas/MonitorEntityDto"}]});
-    schemas["BackgroundTaskView"] = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/ProcessView"},{"$ref":"#/components/schemas/TaskRecordView"}]});
 }
 
 #[cfg(test)]
