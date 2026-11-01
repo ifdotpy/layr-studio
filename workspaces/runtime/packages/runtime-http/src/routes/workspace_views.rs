@@ -16,7 +16,6 @@ use studio_runtime_store::{
 
 use crate::error::ApiError;
 use crate::router::HttpState;
-use crate::validation::Registry;
 
 use super::extractors::QueryParams;
 use super::manifest::{OperationStatus, RouteGroup, get};
@@ -98,10 +97,9 @@ async fn workspace(
     let agent = query.nonempty_str("agent").map(str::to_owned);
     let view = query.nonempty_str("view").unwrap_or("full").to_owned();
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
-    let validators = state.validators.clone();
     let value = store
         .read_async("runtime-http/routes/workspace_views", move |transaction| {
-            workspace_view(transaction, &validators, agent.as_deref(), &view)
+            workspace_view(transaction, agent.as_deref(), &view)
         })
         .await?;
     Ok(Json(value))
@@ -168,7 +166,6 @@ fn empty_reported_changes() -> Value {
 
 fn workspace_view(
     connection: &Connection,
-    validators: &Registry,
     agent_id: Option<&str>,
     view: &str,
 ) -> Result<studio_runtime_services::workspace_views::WorkspaceViewResponse, ApiError> {
@@ -265,7 +262,6 @@ fn workspace_view(
         WorkspaceViewsRepository::records_for_agents::<RuleRecord>(connection, "agent", &ids)
             .map_err(ApiError::stored)?;
     let tasks = project_task_records(
-        validators,
         WorkspaceViewsRepository::snapshot_tasks(connection, root.as_deref())
             .map_err(ApiError::stored)?,
     )?;
@@ -365,15 +361,13 @@ fn record_values<T: serde::Serialize>(records: Vec<T>) -> Result<Vec<Value>, Api
 }
 
 fn project_task_records(
-    validators: &Registry,
     records: Vec<TaskRecord>,
-) -> Result<Vec<Value>, ApiError> {
+) -> Result<Vec<studio_runtime_services::sync_views::TaskProjection>, ApiError> {
     records
         .into_iter()
         .map(|task| {
             let id = task.id().as_ref().to_owned();
-            validators
-                .project_entity("task", &studio_runtime_store::projection_value(&task))
+            studio_runtime_services::sync_views::project_task_record(&task)
                 .ok_or_else(|| invalid_stored("runtime_tasks", &id))
         })
         .collect()
@@ -559,6 +553,19 @@ mod tests {
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
     use studio_runtime_store::StoreError;
+
+    #[test]
+    fn workspace_tasks_serialize_the_typed_projection() {
+        let task: studio_runtime_store::TaskRecord = serde_json::from_str(
+            r#"{"id":"a:item","agent":"a","created":1,"itemId":"item","kind":"command","status":"running","turnId":"turn","type":"commandExecution","name":"run","outputFile":"logs/out"}"#,
+        ).unwrap();
+        let tasks = super::project_task_records(vec![task]).unwrap();
+        let encoded = serde_json::to_string(&tasks).unwrap();
+        let actual: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(actual[0]["id"], "a:item");
+        assert_eq!(actual[0]["outputFile"], "logs/out");
+        assert!(actual[0].get("itemId").is_none());
+    }
 
     #[tokio::test]
     async fn reported_changes_http_preserves_payload_and_visibility_boundaries() {
