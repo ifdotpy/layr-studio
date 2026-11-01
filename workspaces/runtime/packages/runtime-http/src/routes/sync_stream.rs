@@ -5570,7 +5570,7 @@ mod tests {
         assert_eq!(baseline.resources, resources);
         store
             .transaction(|tx| {
-                studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"id":"other","rootId":"other","epoch":0,"status":"idle","provider":studio_runtime_schema::ProviderKind::Codex}))?)?;
+                studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","id":"other","rootId":"other","epoch":0,"status":"idle","provider":studio_runtime_schema::ProviderKind::Codex}))?)?;
                 Ok(())
             })
             .await
@@ -5914,7 +5914,7 @@ mod tests {
             .expect("baseline");
         store
             .transaction(|tx| {
-                studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"id":"other","rootId":"other","epoch":0,"status":"idle","provider":studio_runtime_schema::ProviderKind::Codex}))?)?;
+                studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","id":"other","rootId":"other","epoch":0,"status":"idle","provider":studio_runtime_schema::ProviderKind::Codex}))?)?;
                 Ok(())
             })
             .await
@@ -5933,7 +5933,7 @@ mod tests {
         );
         store
             .transaction(|tx| {
-                studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"id":"open","rootId":"open","epoch":0,"accountKey":"default","status":"running","provider":studio_runtime_schema::ProviderKind::Codex}))?)?;
+                studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"id":"open","rootId":"open","epoch":0,"accountKey":"default","status":"running","provider":studio_runtime_schema::ProviderKind::Codex}))?)?;
                 Ok(())
             })
             .await
