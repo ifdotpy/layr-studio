@@ -297,6 +297,8 @@ test("confirmed upload stays attached to the draft after reload", async ({
     page.getByRole("button", { name: "Remove pending confirmed.txt" }),
   ).toHaveCount(0);
   await page.reload();
+  await page.locator(`[data-chat="${chat!.id}"]`).click();
+  await page.locator("#message").waitFor();
   await expect(page.locator("#message")).toHaveValue(
     "Draft with confirmed upload",
   );
