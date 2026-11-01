@@ -48,6 +48,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                         LazyTransferState::Unreadable(UnreadableTransferSummary {
                             kind: UnreadableTransferKind::Unreadable,
                             reason,
+                            original: Some(serde_json::from_str(raw)?),
                         })
                     }
                 },
@@ -61,6 +62,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             let marker = serde_json::to_string(&UnreadableTransferSummary {
                 kind: UnreadableTransferKind::Unreadable,
                 reason,
+                original: None,
             })?;
             tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.accountTransfer',json(?2)) WHERE id=?1",params![id,marker])?;
         } else {
@@ -146,5 +148,10 @@ mod tests {
         assert_eq!(value["accountTransferId"], "move");
         assert_eq!(value["accountTransfer"]["kind"], "unreadable");
         assert_eq!(value["lazyAccountTransfer"]["kind"], "unreadable");
+        let original: String = tx.query_row("SELECT record->'$.lazyAccountTransfer.original' FROM runtime_agents WHERE id='lead'", [], |row| row.get(0)).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&original).unwrap(),
+            serde_json::json!({"id":"move","sourceAccountKey":"source","unexpected":true})
+        );
     }
 }

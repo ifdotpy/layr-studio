@@ -1417,6 +1417,36 @@ mod request_tests {
     }
 
     #[test]
+    fn account_transfer_startup_holds_unsupported_operation() {
+        let (root, store) = store_with_agents();
+        drop(store);
+        let raw = r#"{"id":"invalid","leadId":"lead","targetAccountKey":"target","targetProvider":"codex","status":"pending","created":1,"members":{},"futureField":true}"#;
+        let db = rusqlite::Connection::open(root.path().join("canvas.sqlite3")).unwrap();
+        db.execute(
+            "INSERT INTO runtime_account_transfers(id,record) VALUES('invalid',?1)",
+            [raw],
+        )
+        .unwrap();
+        db.execute(
+            "DELETE FROM sync_entity_meta WHERE key='migration_catalog'",
+            [],
+        )
+        .unwrap();
+        drop(db);
+        let store = run_async(RuntimeStore::open(Some(root.path()))).expect("store starts");
+        assert_eq!(
+            run_async(recover(&store, 10.0)).expect("recovery skips held operation"),
+            0
+        );
+        let db = store.test_reader().unwrap();
+        let (kind, original): (String, String) = db.query_row("SELECT json_extract(record,'$.kind'),json_extract(record,'$.original') FROM runtime_account_transfers WHERE id='invalid'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(kind, "unreadable");
+        assert_eq!(original, raw);
+        let marker: String = db.query_row("SELECT json_extract(record,'$.accountTransfer.kind') FROM runtime_agents WHERE id='lead'", [], |row| row.get(0)).unwrap();
+        assert_eq!(marker, "unreadable");
+    }
+
+    #[test]
     fn recovery_does_not_hide_unknown_or_missing_operation_status() {
         for status in [json!("future-status"), Value::Null] {
             let (_root, store) = store_with_agents();

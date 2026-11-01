@@ -668,6 +668,8 @@ pub enum AgentTransferState {
 pub struct UnreadableTransferSummary {
     pub kind: UnreadableTransferKind,
     pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

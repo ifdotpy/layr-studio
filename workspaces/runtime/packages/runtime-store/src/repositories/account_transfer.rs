@@ -84,7 +84,8 @@ impl AccountTransferRepository {
         let mut statement = db.prepare_cached(
             "SELECT id FROM runtime_account_transfers
              WHERE json_extract(record,'$.status') IS NOT 'completed'
-             AND json_extract(record,'$.status') IS NOT 'cancelled' ORDER BY rowid",
+             AND json_extract(record,'$.status') IS NOT 'cancelled'
+             AND json_extract(record,'$.kind') IS NOT 'unreadable' ORDER BY rowid",
         )?;
         Ok(statement
             .query_map([], |row| row.get::<_, String>(0))?

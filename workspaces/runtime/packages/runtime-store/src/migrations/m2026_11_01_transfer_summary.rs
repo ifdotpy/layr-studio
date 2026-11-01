@@ -36,6 +36,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                     crate::transfer_record::UnreadableTransferSummary {
                         kind: crate::transfer_record::UnreadableTransferKind::Unreadable,
                         reason: error.to_string(),
+                        original: None,
                     },
                 )
             }
