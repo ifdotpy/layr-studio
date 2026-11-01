@@ -466,7 +466,10 @@ pub fn submit_complaint(
         ));
     }
     let text = event_write::python_strip(text);
-    if text.is_empty() || text.chars().count() > 12_000 {
+    if text.is_empty()
+        || text.chars().count()
+            > studio_runtime_schema::http_bounded_ingress::COMPLAINT_TEXT_MAX_CHARS
+    {
         return Err(QuestionsWriteError::InvalidRequest(
             "Describe the complaint in 1 to 12000 characters",
         ));
@@ -598,7 +601,10 @@ pub fn respond_to_complaint(
         ));
     }
     let text = event_write::python_strip(text);
-    if text.is_empty() || text.chars().count() > 12_000 {
+    if text.is_empty()
+        || text.chars().count()
+            > studio_runtime_schema::http_bounded_ingress::COMPLAINT_TEXT_MAX_CHARS
+    {
         return Err(QuestionsWriteError::InvalidRequest(
             "Record an action or reason and select in_progress, resolved, or declined",
         ));

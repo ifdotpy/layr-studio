@@ -2,6 +2,7 @@
 
 use axum::{Json, extract::State, http::StatusCode};
 use serde_json::{Value, json};
+use studio_runtime_schema::http_bounded_ingress as bounds;
 use studio_runtime_services::{linux_vm_guest::UnixVmControlRpc, linux_vm_settings};
 
 use super::{
@@ -38,30 +39,21 @@ async fn get_settings(State(state): State<HttpState>) -> Result<Json<Value>, Api
 
 /// VM CPU count accepted by the HTTP contract.
 const VM_CPU_MAX: u64 = studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64;
-/// VM memory size bounds, in bytes.
-const VM_MEMORY_MIN_BYTES: i64 = 1_073_741_824;
-const VM_MEMORY_MAX_BYTES: u64 = 68_719_476_736;
-/// VM system disk size bounds, in bytes.
-const VM_SYSTEM_DISK_MIN_BYTES: i64 = 8_589_934_592;
-const VM_SYSTEM_DISK_MAX_BYTES: u64 = 137_438_953_472;
-/// VM data disk size bounds, in bytes.
-const VM_DATA_DISK_MIN_BYTES: i64 = 8_589_934_592;
-const VM_DATA_DISK_MAX_BYTES: u64 = 1_099_511_627_776;
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SettingsInput {
     cpus: studio_runtime_schema::bounded_integer::BoundedInteger<1, VM_CPU_MAX>,
     memory_bytes: studio_runtime_schema::bounded_integer::BoundedInteger<
-        VM_MEMORY_MIN_BYTES,
-        VM_MEMORY_MAX_BYTES,
+        { bounds::VM_MEMORY_MIN_BYTES },
+        { bounds::VM_MEMORY_MAX_BYTES },
     >,
     system_disk_bytes: studio_runtime_schema::bounded_integer::BoundedInteger<
-        VM_SYSTEM_DISK_MIN_BYTES,
-        VM_SYSTEM_DISK_MAX_BYTES,
+        { bounds::VM_SYSTEM_DISK_MIN_BYTES },
+        { bounds::VM_SYSTEM_DISK_MAX_BYTES },
     >,
     data_disk_bytes: studio_runtime_schema::bounded_integer::BoundedInteger<
-        VM_DATA_DISK_MIN_BYTES,
-        VM_DATA_DISK_MAX_BYTES,
+        { bounds::VM_DATA_DISK_MIN_BYTES },
+        { bounds::VM_DATA_DISK_MAX_BYTES },
     >,
 }
 

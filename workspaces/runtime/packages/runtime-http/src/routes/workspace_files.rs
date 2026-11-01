@@ -7,6 +7,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use base64::Engine;
+use studio_runtime_schema::http_bounded_ingress as bounds;
 use studio_runtime_schema::shared_values::USER_ATTACHMENT_LIMIT_LABEL;
 use studio_runtime_services::payload_store::{self, PayloadStoreError};
 use studio_runtime_services::workspace_files::{self, WorkspaceContext, WorkspaceFilesError};
@@ -25,18 +26,15 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
-/// Maximum attachment owner and ID length in Unicode code points.
-const ASSET_ID_MAX_CHARS: usize = 200;
-/// Maximum attachment name length in Unicode code points.
-const ASSET_NAME_MAX_CHARS: usize = 255;
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AssetUpload {
-    agent: studio_runtime_schema::bounded_text::BoundedText<1, ASSET_ID_MAX_CHARS>,
-    name: studio_runtime_schema::bounded_text::BoundedText<1, ASSET_NAME_MAX_CHARS>,
+    agent:
+        studio_runtime_schema::bounded_text::BoundedText<1, { bounds::ASSET_AGENT_ID_MAX_CHARS }>,
+    name: studio_runtime_schema::bounded_text::BoundedText<1, { bounds::ASSET_NAME_MAX_CHARS }>,
     base64: Option<String>,
     data: Option<String>,
-    id: Option<studio_runtime_schema::bounded_text::BoundedText<1, ASSET_ID_MAX_CHARS>>,
+    id: Option<studio_runtime_schema::bounded_text::BoundedText<1, { bounds::ASSET_ID_MAX_CHARS }>>,
 }
 
 async fn upload_asset(

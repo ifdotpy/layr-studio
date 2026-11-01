@@ -114,8 +114,15 @@ fn nonempty_text<'de, D: serde::Deserializer<'de>, const MAX: usize>(
 fn command_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     nonempty_text::<D, { usize::MAX }>(d)
 }
-fn backup_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
-    nonempty_text::<D, 1024>(d)
+fn backup_agent_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    nonempty_text::<D, { studio_runtime_schema::http_bounded_ingress::BACKUP_AGENT_ID_MAX_CHARS }>(
+        d,
+    )
+}
+fn backup_request_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    nonempty_text::<D, { studio_runtime_schema::http_bounded_ingress::BACKUP_REQUEST_ID_MAX_CHARS }>(
+        d,
+    )
 }
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -130,10 +137,10 @@ struct SessionCommand {
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BackupsRequest {
-    #[serde(deserialize_with = "backup_id")]
+    #[serde(deserialize_with = "backup_agent_id")]
     id: String,
     release: bool,
-    #[serde(deserialize_with = "backup_id")]
+    #[serde(deserialize_with = "backup_request_id")]
     request_id: String,
 }
 
@@ -171,7 +178,13 @@ mod session_request_tests {
         );
         assert!(
             serde_json::from_str::<super::BackupsRequest>(
-                r#"{"id":"a","release":true,"request_id":"","extra":1}"#
+                r#"{"id":"a","release":true,"request_id":"r","extra":1}"#
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<super::BackupsRequest>(
+                r#"{"id":"a","release":true,"request_id":""}"#
             )
             .is_err()
         );

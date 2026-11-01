@@ -3,6 +3,7 @@
 use axum::Json;
 use axum::extract::State;
 use serde_json::{Value, json};
+use studio_runtime_schema::http_bounded_ingress as bounds;
 use studio_runtime_services::panels::{self, ProfileField};
 use studio_runtime_store::{ProfileRepository, ProfileRole, ReasoningEffort, StoreError};
 
@@ -45,11 +46,20 @@ struct ProfileInput {
     effort: Option<crate::generated::ProfileBodyEffort>,
     id: Option<String>,
     #[serde(default, deserialize_with = "present_profile_instructions")]
-    instructions: Option<studio_runtime_schema::bounded_text::BoundedText<0, 16000>>,
+    instructions: Option<
+        studio_runtime_schema::bounded_text::BoundedText<
+            0,
+            { bounds::PROFILE_INSTRUCTIONS_MAX_CHARS },
+        >,
+    >,
     #[serde(rename = "isNew")]
     _is_new: Option<bool>,
-    model: Option<studio_runtime_schema::bounded_text::BoundedText<0, 100>>,
-    name: Option<studio_runtime_schema::bounded_text::BoundedText<0, 100>>,
+    model: Option<
+        studio_runtime_schema::bounded_text::BoundedText<0, { bounds::PROFILE_MODEL_MAX_CHARS }>,
+    >,
+    name: Option<
+        studio_runtime_schema::bounded_text::BoundedText<0, { bounds::PROFILE_NAME_MAX_CHARS }>,
+    >,
     #[serde(default, deserialize_with = "present_profile_role")]
     role: Option<crate::generated::ProfileBodyRole>,
 }
@@ -65,8 +75,16 @@ fn present_profile_role<'de, D: serde::Deserializer<'de>>(
 }
 fn present_profile_instructions<'de, D: serde::Deserializer<'de>>(
     d: D,
-) -> Result<Option<studio_runtime_schema::bounded_text::BoundedText<0, 16000>>, D::Error> {
-    <studio_runtime_schema::bounded_text::BoundedText<0, 16000> as serde::Deserialize>::deserialize(
+) -> Result<
+    Option<
+        studio_runtime_schema::bounded_text::BoundedText<
+            0,
+            { bounds::PROFILE_INSTRUCTIONS_MAX_CHARS },
+        >,
+    >,
+    D::Error,
+> {
+    <studio_runtime_schema::bounded_text::BoundedText<0, { bounds::PROFILE_INSTRUCTIONS_MAX_CHARS }> as serde::Deserialize>::deserialize(
         d,
     )
     .map(Some)

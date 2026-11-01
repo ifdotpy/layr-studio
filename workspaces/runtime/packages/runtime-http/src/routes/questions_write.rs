@@ -8,6 +8,7 @@ use axum::http::{HeaderMap, StatusCode};
 use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use studio_runtime_schema::http_bounded_ingress as bounds;
 use studio_runtime_services::questions_write::{
     self, ComplaintResponseWrite, ComplaintWriteReply, QuestionsWriteError,
 };
@@ -403,12 +404,12 @@ struct ComplaintBody {
     action: Option<crate::generated::ComplaintBodyAction>,
     #[serde(default, skip_serializing_if = "ComplaintField::is_missing")]
     complaint_id: ComplaintField<String>,
-    id: studio_runtime_schema::bounded_text::BoundedText<1, 200>,
+    id: studio_runtime_schema::bounded_text::BoundedText<1, { bounds::COMPLAINT_ID_MAX_CHARS }>,
     #[serde(default, skip_serializing_if = "ComplaintField::is_missing")]
     lead: ComplaintField<String>,
     #[serde(default, skip_serializing_if = "ComplaintField::is_missing")]
     status: ComplaintField<studio_runtime_schema::complaints::ComplaintResponseStatus>,
-    text: studio_runtime_schema::bounded_text::BoundedText<1, 12000>,
+    text: studio_runtime_schema::bounded_text::BoundedText<1, { bounds::COMPLAINT_TEXT_MAX_CHARS }>,
     #[serde(default, skip_serializing_if = "ComplaintField::is_missing")]
     version: ComplaintField<
         studio_runtime_schema::bounded_integer::BoundedInteger<

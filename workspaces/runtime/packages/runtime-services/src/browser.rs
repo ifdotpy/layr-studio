@@ -24,6 +24,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use studio_runtime_schema::http_bounded_ingress as forward_bounds;
 use studio_runtime_store::RuntimeStore;
 use studio_runtime_store::path_identity::CanonicalPath;
 use thiserror::Error;
@@ -143,17 +144,21 @@ fn forward_text<'de, D: serde::Deserializer<'de>, const MIN: usize, const MAX: u
     Ok(value.as_str().to_owned())
 }
 fn forward_server<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
-    forward_text::<D, 1, 200>(deserializer)
+    forward_text::<D, 1, { forward_bounds::FORWARD_SERVER_MAX_CHARS }>(deserializer)
 }
 fn forward_token<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
-    forward_text::<D, 16, 200>(deserializer)
+    forward_text::<
+        D,
+        { forward_bounds::FORWARD_TOKEN_MIN_CHARS },
+        { forward_bounds::FORWARD_TOKEN_MAX_CHARS },
+    >(deserializer)
 }
 fn forward_path<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
-    forward_text::<D, 1, 2048>(deserializer)
+    forward_text::<D, 1, { forward_bounds::FORWARD_PATH_MAX_CHARS }>(deserializer)
 }
 fn forward_bridge<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
     let value = <String as serde::Deserialize>::deserialize(deserializer)?;
-    if value.len() == 32
+    if value.len() == forward_bounds::FORWARD_BRIDGE_ID_BYTES
         && value
             .bytes()
             .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
@@ -173,7 +178,7 @@ fn forward_host<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Str
 }
 fn forward_port<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u16, D::Error> {
     let value = <u16 as serde::Deserialize>::deserialize(deserializer)?;
-    if value >= 1024 {
+    if value >= forward_bounds::FORWARD_PORT_MIN {
         Ok(value)
     } else {
         Err(serde::de::Error::custom("invalid port"))
@@ -685,22 +690,30 @@ impl BrowserForwarder {
     }
 }
 
+/// Maximum encoded forwarding server identity, in UTF-8 bytes.
+const FORWARD_SERVER_MAX_BYTES: usize = 200;
+/// Forwarding token byte length limits.
+const FORWARD_TOKEN_MIN_BYTES: usize = 16;
+const FORWARD_TOKEN_MAX_BYTES: usize = 200;
+/// Maximum encoded forwarding path, in UTF-8 bytes.
+const FORWARD_PATH_MAX_BYTES: usize = 2048;
+
 fn validate_forward(input: &ForwardInput) -> Result<(), BrowserError> {
     let host_valid = matches!(input.host.as_str(), "127.0.0.1" | "localhost" | "::1");
-    let id_valid = input.bridge_id.len() == 32
+    let id_valid = input.bridge_id.len() == forward_bounds::FORWARD_BRIDGE_ID_BYTES
         && input
             .bridge_id
             .bytes()
             .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase());
     if input.server.is_empty()
-        || input.server.len() > 200
+        || input.server.len() > FORWARD_SERVER_MAX_BYTES
         || !id_valid
-        || input.token.len() < 16
-        || input.token.len() > 200
+        || input.token.len() < FORWARD_TOKEN_MIN_BYTES
+        || input.token.len() > FORWARD_TOKEN_MAX_BYTES
         || !host_valid
-        || input.port < 1024
+        || input.port < forward_bounds::FORWARD_PORT_MIN
         || input.path.is_empty()
-        || input.path.len() > 2048
+        || input.path.len() > FORWARD_PATH_MAX_BYTES
         || !input.path.starts_with('/')
         || !input.expires_at.is_finite()
     {

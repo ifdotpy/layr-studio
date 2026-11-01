@@ -8,6 +8,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use serde::Deserialize;
 use std::sync::Arc;
+use studio_runtime_schema::http_bounded_ingress as bounds;
 use studio_runtime_services::account_driver::{AccountDriver, AccountDriverError};
 use studio_runtime_services::account_session_runtime::{
     AccountSessionError, LoginRequest, ProfileRequest,
@@ -97,8 +98,8 @@ struct RequiredAccountKeyBody {
 #[serde(deny_unknown_fields)]
 struct AccountNameBody {
     account_key: String,
-    label: studio_runtime_schema::bounded_text::BoundedText<0, 32>,
-    #[serde(deserialize_with = "uuid_text")]
+    label: studio_runtime_schema::bounded_text::BoundedText<0, { bounds::ACCOUNT_NAME_MAX_CHARS }>,
+    #[serde(deserialize_with = "account_mutation_id")]
     request_id: String,
 }
 
@@ -140,7 +141,7 @@ struct StartThrottleBody {
 #[serde(deny_unknown_fields)]
 struct DeleteAccountBody {
     account_key: String,
-    #[serde(deserialize_with = "uuid_text")]
+    #[serde(deserialize_with = "account_mutation_id")]
     request_id: String,
 }
 
@@ -153,14 +154,14 @@ struct RegisterAccountBody {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CancelLoginBody {
-    #[serde(deserialize_with = "uuid_text")]
+    #[serde(deserialize_with = "account_login_id")]
     login_id: String,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LoginBody {
-    #[serde(deserialize_with = "uuid_text")]
+    #[serde(deserialize_with = "account_login_id")]
     login_id: String,
     account_key: Option<String>,
     #[serde(default, deserialize_with = "login_email")]
@@ -188,17 +189,19 @@ fn login_text<'de, D: serde::Deserializer<'de>, const MIN: usize, const MAX: usi
 fn login_email<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<String>, D::Error> {
-    login_text::<D, 0, 320>(deserializer)
+    login_text::<D, 0, { bounds::LOGIN_EMAIL_MAX_CHARS }>(deserializer)
 }
 fn login_label<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<String>, D::Error> {
-    login_text::<D, 1, 32>(deserializer)
+    login_text::<D, 1, { bounds::LOGIN_LABEL_MAX_CHARS }>(deserializer)
 }
 
-fn uuid_text<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+fn uuid_text<'de, D: serde::Deserializer<'de>, const LENGTH: usize>(
+    deserializer: D,
+) -> Result<String, D::Error> {
     let text = String::deserialize(deserializer)?;
-    if text.len() != 36
+    if text.len() != LENGTH
         || [8, 13, 18, 23]
             .iter()
             .any(|index| text.as_bytes()[*index] != b'-')
@@ -207,6 +210,13 @@ fn uuid_text<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String
         return Err(serde::de::Error::custom("invalid request identifier"));
     }
     Ok(text)
+}
+
+fn account_mutation_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    uuid_text::<D, { bounds::ACCOUNT_MUTATION_ID_BYTES }>(d)
+}
+fn account_login_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    uuid_text::<D, { bounds::ACCOUNT_LOGIN_ID_BYTES }>(d)
 }
 
 fn account_group<'de, D: serde::Deserializer<'de>>(
