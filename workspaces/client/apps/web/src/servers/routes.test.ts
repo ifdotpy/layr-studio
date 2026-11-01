@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { identityProofInput, publicKeyPem } from "./pairing";
+import { publicKeyPem } from "./pairing";
+import { identityProofMessage } from "../wasm/client";
 import {
   ROUTE_FAILURE_COOLDOWN_MS,
   RouteIdentityError,
@@ -52,7 +53,7 @@ function network(answers: Record<string, Answer>) {
       const signature = await crypto.subtle.sign(
         "Ed25519",
         signer,
-        new TextEncoder().encode(identityProofInput("srv", nonce)),
+        new TextEncoder().encode(await identityProofMessage("srv", nonce)),
       );
       return Response.json({
         serverId: "srv",
@@ -159,7 +160,9 @@ describe("identity proof before credentials (rule 2)", () => {
     const stale = await crypto.subtle.sign(
       "Ed25519",
       keys.privateKey,
-      new TextEncoder().encode(identityProofInput("srv", "A".repeat(32))),
+      new TextEncoder().encode(
+        await identityProofMessage("srv", "A".repeat(32)),
+      ),
     );
     net.request = async (url: RequestInfo | URL) => {
       if (String(url).startsWith(PAIRED)) throw new TypeError("network down");

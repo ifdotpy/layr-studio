@@ -1,10 +1,9 @@
 import { randomUUID } from "../uuid";
 import { serveOrigin, type StudioServer } from "./registry";
-import { multiServerSigningBytes } from "../wasm/client";
+import { identityProofMessage, multiServerSigningBytes } from "../wasm/client";
 import {
   ACCESS_PROTOCOL_VERSION,
   IDENTITY_PROOF_NONCE_BYTES,
-  MULTI_SERVER_SIGNING_DOMAIN,
 } from "../generated/multiServerProtocol";
 export class PairingNotAppliedError extends Error {
   constructor() {
@@ -103,10 +102,6 @@ export function randomNonce(size: number) {
 export function newIdentityNonce() {
   return randomNonce(IDENTITY_PROOF_NONCE_BYTES);
 }
-/** The message a server signs for `nonce`; the Rust owner is `identity_proof_message`. */
-export function identityProofInput(serverId: string, nonce: string) {
-  return [MULTI_SERVER_SIGNING_DOMAIN, "identity", serverId, nonce].join("\n");
-}
 /** Whether `proof` is the signature of the server key `publicKey` (PEM) over the nonce. */
 export async function verifyIdentityProof(
   publicKey: string,
@@ -133,7 +128,7 @@ export async function verifyIdentityProof(
       "Ed25519",
       key,
       signature,
-      new TextEncoder().encode(identityProofInput(serverId, nonce)),
+      new TextEncoder().encode(await identityProofMessage(serverId, nonce)),
     );
   } catch {
     return false;

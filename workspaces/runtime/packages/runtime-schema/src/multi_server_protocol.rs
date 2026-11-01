@@ -3,10 +3,10 @@
 
 /// Version of the signed multi-server access protocol.
 pub const ACCESS_PROTOCOL_VERSION: u64 = 1;
-/// Domain separator prefixed to every signed multi-server message. Owned by `studio-request-signing`.
-pub use studio_request_signing::MULTI_SERVER_SIGNING_DOMAIN;
-/// Size of the random nonce that a client sends to prove a route's identity, in bytes.
-pub const IDENTITY_PROOF_NONCE_BYTES: usize = 24;
+// Owned by `studio-request-signing`; re-exported so callers keep one path.
+pub use studio_request_signing::{
+    IDENTITY_PROOF_NONCE_BYTES, MULTI_SERVER_SIGNING_DOMAIN, identity_proof_message,
+};
 /// File name of the remote access record in the state directory.
 pub const REMOTE_ACCESS_FILE: &str = "remote-access.json";
 /// Environment variable that overrides the public origin of this server.
@@ -16,16 +16,6 @@ pub const INVITE_ID_MAX_CHARS: usize = 128;
 pub const INVITE_OWNER_MAX_CHARS: usize = 254;
 /// Length of the lower-case SHA-256 token digest, in ASCII bytes.
 pub const INVITE_TOKEN_HASH_BYTES: usize = 64;
-
-/// The message a server signs to prove its identity for `nonce`. The nonce is
-/// unpadded base64url of `IDENTITY_PROOF_NONCE_BYTES` bytes; any other value gives `None`.
-pub fn identity_proof_message(server_id: &str, nonce: &str) -> Option<String> {
-    let valid = nonce.len() == (IDENTITY_PROOF_NONCE_BYTES * 4).div_ceil(3)
-        && nonce
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_');
-    valid.then(|| format!("{MULTI_SERVER_SIGNING_DOMAIN}\nidentity\n{server_id}\n{nonce}"))
-}
 
 /// A complete discovery response, checked while decoding.
 #[derive(serde::Deserialize)]

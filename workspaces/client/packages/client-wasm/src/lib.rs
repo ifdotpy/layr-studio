@@ -15,6 +15,13 @@ pub fn parse_markdown(text: &str, streaming: bool) -> Result<String, JsValue> {
         .map_err(|error| JsValue::from_str(&error))
 }
 
+/// The message a server signs to prove its identity for `nonce`. The owner is `studio-request-signing`.
+#[wasm_bindgen]
+pub fn identity_proof_message(server_id: &str, nonce: &str) -> Result<String, JsValue> {
+    studio_request_signing::identity_proof_message(server_id, nonce)
+        .ok_or_else(|| JsValue::from_str("invalid identity proof nonce"))
+}
+
 /// The canonical bytes of one signed multi-server request. The owner is `studio-request-signing`;
 /// the browser signs these bytes with its non-extractable device key.
 #[wasm_bindgen]

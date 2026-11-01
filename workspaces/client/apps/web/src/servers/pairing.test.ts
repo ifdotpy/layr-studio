@@ -1,4 +1,5 @@
 import { expect, it, vi } from "vitest";
+import { identityProofMessage } from "../wasm/client";
 import { createPublicKey, verify } from "node:crypto";
 import {
   parseInvitation,
@@ -150,9 +151,8 @@ it("pins pairing to the invitation's server identity, owner and public key", () 
 });
 
 it("builds the identity proof message like the Rust owner", async () => {
-  const { identityProofInput } = await import("./pairing");
   // Same vector as identity_proof_message_is_fixed_and_checks_the_nonce in Rust.
-  expect(identityProofInput("srv", "A".repeat(32))).toBe(
+  expect(await identityProofMessage("srv", "A".repeat(32))).toBe(
     "studio-multi-server-v1\nidentity\nsrv\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
   );
 });

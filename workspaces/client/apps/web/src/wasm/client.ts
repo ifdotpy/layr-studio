@@ -1,5 +1,6 @@
 import type { MarkdownBlock } from "../generated/rustOwned";
 import init, {
+  identity_proof_message,
   multi_server_signing_bytes,
   parse_markdown,
   sha256 as hashSha256,
@@ -18,6 +19,15 @@ async function initialize() {
 export async function sha256(bytes: Uint8Array): Promise<Uint8Array> {
   await initialize();
   return hashSha256(bytes);
+}
+
+/** The message a server signs for `nonce`. Rejects a nonce of the wrong shape. */
+export async function identityProofMessage(
+  serverId: string,
+  nonce: string,
+): Promise<string> {
+  await initialize();
+  return identity_proof_message(serverId, nonce);
 }
 
 /** The canonical bytes of a signed multi-server request. The owner is `studio-request-signing`. */

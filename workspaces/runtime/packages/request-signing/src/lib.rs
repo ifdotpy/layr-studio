@@ -11,6 +11,19 @@ use sha2::{Digest, Sha256};
 /// (`ACCESS_PROTOCOL_VERSION` in runtime-schema) must match this name; runtime-schema tests it.
 pub const MULTI_SERVER_SIGNING_DOMAIN: &str = "studio-multi-server-v1";
 
+/// Size of the random nonce that a client sends to prove a route's identity, in bytes.
+pub const IDENTITY_PROOF_NONCE_BYTES: usize = 24;
+
+/// The message a server signs to prove its identity for `nonce`. The nonce is unpadded
+/// base64url of `IDENTITY_PROOF_NONCE_BYTES` bytes; any other value gives `None`.
+pub fn identity_proof_message(server_id: &str, nonce: &str) -> Option<String> {
+    let valid = nonce.len() == (IDENTITY_PROOF_NONCE_BYTES * 4).div_ceil(3)
+        && nonce
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_');
+    valid.then(|| format!("{MULTI_SERVER_SIGNING_DOMAIN}\nidentity\n{server_id}\n{nonce}"))
+}
+
 /// Header names of a signed multi-server request. HTTP header names are case-insensitive.
 pub mod header {
     pub const CLIENT: &str = "X-Studio-Client";
@@ -130,6 +143,18 @@ mod tests {
             signing_bytes(fixed_request(b"{\"a\":1}")),
             b"studio-multi-server-v1\nPOST\n/api/x?q=1\nserver\ntest-identity\n1700000000\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nrequest-1\n015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862"
         );
+    }
+
+    #[test]
+    fn identity_proof_message_is_fixed_and_checks_the_nonce() {
+        // The web test (pairing.test.ts) asserts the same vector.
+        let nonce = "A".repeat(32);
+        assert_eq!(
+            identity_proof_message("srv", &nonce).as_deref(),
+            Some("studio-multi-server-v1\nidentity\nsrv\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+        );
+        assert_eq!(identity_proof_message("srv", "short"), None);
+        assert_eq!(identity_proof_message("srv", &"+".repeat(32)), None);
     }
 
     #[cfg(feature = "ed25519")]
