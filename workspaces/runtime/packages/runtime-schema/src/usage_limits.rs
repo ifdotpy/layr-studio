@@ -425,7 +425,11 @@ impl RateLimitView {
                 "rate-limit account identity mismatch",
             ));
         }
-        Ok(Self {
+        Ok(Self::from_observation(value, now))
+    }
+
+    pub fn from_observation(value: UsageLimitsResponse, now: f64) -> Self {
+        Self {
             projection: AccountLimitsProjection {
                 status: AccountLimitsStatus::Current,
                 runway: weekly_runway(&value, now),
@@ -434,7 +438,7 @@ impl RateLimitView {
                 agents: BTreeMap::new(),
             },
             observation: value,
-        })
+        }
     }
 }
 

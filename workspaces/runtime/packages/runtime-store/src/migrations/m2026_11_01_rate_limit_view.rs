@@ -115,7 +115,7 @@ mod tests {
         let snapshot = crate::account_state::latest_limits_snapshot(&tx, "a")
             .unwrap()
             .unwrap();
-        assert!(snapshot.get("at").is_none());
+        assert!(snapshot.at.is_none());
     }
 
     #[test]

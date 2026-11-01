@@ -120,26 +120,35 @@ pub fn normalized_limits_view(
         if bytes.len() > MAX_PERSISTED_DOCUMENT_BYTES || !persisted_document_within_bounds(bytes) {
             return None;
         }
-        let mut entity: serde_json::Value = serde_json::from_slice(bytes).ok()?;
-        if let Some(value) = entity.get("value")
-            && let Ok(view) = serde_json::from_value::<RateLimitView>(value.clone())
+        #[derive(serde::Deserialize)]
+        struct Entity<'a> {
+            #[serde(borrow)]
+            value: &'a serde_json::value::RawValue,
+        }
+        #[derive(serde::Deserialize)]
+        struct Projected<'a> {
+            #[serde(borrow)]
+            observation: &'a serde_json::value::RawValue,
+        }
+        #[derive(serde::Deserialize)]
+        struct Legacy {
+            #[serde(default, rename = "eligibility")]
+            _eligibility: Option<serde::de::IgnoredAny>,
+            #[serde(flatten)]
+            response: UsageLimitsResponse,
+        }
+        let entity: Entity<'_> = serde_json::from_slice(bytes).ok()?;
+        if let Ok(view) = serde_json::from_str::<RateLimitView>(entity.value.get())
             && view.observation.account_key == account
         {
             return Some(view);
         }
-        let value = entity.get_mut("value")?;
-        let observation = if value.get("observation").is_some() {
-            &mut value["observation"]
-        } else {
-            value
-        };
-        if let Some(object) = observation.as_object_mut() {
-            object.remove("eligibility");
-        }
-        let raw =
-            serde_json::value::RawValue::from_string(serde_json::to_string(observation).ok()?)
-                .ok()?;
-        RateLimitView::read(&raw, account, now).ok()
+        let observation = serde_json::from_str::<Projected<'_>>(entity.value.get())
+            .map(|view| view.observation)
+            .unwrap_or(entity.value);
+        let value: Legacy = serde_json::from_str(observation.get()).ok()?;
+        (value.response.account_key == account)
+            .then(|| RateLimitView::from_observation(value.response, now))
     })();
     if let Some(view) = parsed {
         return (view, false);
@@ -149,14 +158,7 @@ pub fn normalized_limits_view(
         account_key: account.to_owned(),
         ..Default::default()
     };
-    let raw = serde_json::value::RawValue::from_string(
-        serde_json::to_string(&empty).expect("empty limits serialize"),
-    )
-    .expect("serialized limits are JSON");
-    (
-        RateLimitView::read(&raw, account, now).expect("empty limits are valid"),
-        true,
-    )
+    (RateLimitView::from_observation(empty, now), true)
 }
 
 pub fn typed_limits_snapshot(
@@ -412,11 +414,9 @@ pub fn put_limits_observation(
 pub fn latest_limits_snapshot(
     connection: &Connection,
     account: &str,
-) -> StoreResult<Option<Value>> {
+) -> StoreResult<Option<studio_runtime_schema::usage_limits::UsageLimitsResponse>> {
     let stamp = LimitsStamp::read(limits_observation(connection, account)?)?;
-    typed_limits_snapshot(connection, account, &stamp)?
-        .map(|value| serde_json::to_value(value).map_err(StoreError::from))
-        .transpose()
+    typed_limits_snapshot(connection, account, &stamp)
 }
 
 /// Move persisted v3 workspace snapshots once, without changing their account identity.
@@ -695,9 +695,9 @@ mod tests {
                 .as_deref(),
             Some("A")
         );
-        assert_eq!(
-            super::latest_limits_snapshot(&db, "alpha").expect("latest"),
-            Some(serde_json::to_value(&restored.snapshots[0].1).unwrap())
+        assert!(
+            super::latest_limits_snapshot(&db, "alpha").expect("latest")
+                == Some(restored.snapshots[0].1.clone())
         );
     }
 
@@ -765,7 +765,7 @@ mod tests {
         let restored = limits_snapshots(&db).expect("read");
         assert!(restored.diagnostics.is_empty());
         let expected: studio_runtime_schema::usage_limits::UsageLimitsResponse =
-            serde_json::from_value(alpha).unwrap();
+            serde::Deserialize::deserialize(alpha).unwrap();
         assert!(
             restored
                 .snapshots

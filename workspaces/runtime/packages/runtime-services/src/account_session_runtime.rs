@@ -291,7 +291,7 @@ pub struct LimitsSnapshot {
 impl LimitsSnapshot {
     pub fn read(account: &str, value: Value) -> Result<Self, AccountSessionError> {
         let studio_runtime_schema::json_object::JsonObject(response): studio_runtime_schema::json_object::JsonObject<studio_runtime_schema::usage_limits::UsageLimitsResponse> =
-            serde_path_to_error::deserialize(&value).map_err(|error| {
+            serde_path_to_error::deserialize(value).map_err(|error| {
                 let mut pointer = String::new();
                 for segment in error.path() {
                     let part = match segment {
@@ -333,7 +333,8 @@ impl LimitsSnapshot {
 
     pub fn into_value(self) -> Value {
         // This response came from JSON and contains only serializable typed fields.
-        serde_json::to_value(self.response).expect("typed limits serialize")
+        serde::Serialize::serialize(&(self.response), serde_json::value::Serializer)
+            .expect("typed limits serialize")
     }
 }
 
@@ -1675,7 +1676,10 @@ impl AccountSessionPort for AccountSessionRuntime {
             .map_err(|_| AccountSessionError::Persistence)?
             .get(account)
         {
-            return Ok(serde_json::to_value(value).expect("typed limits serialize"));
+            return Ok(
+                serde::Serialize::serialize(&(value), serde_json::value::Serializer)
+                    .expect("typed limits serialize"),
+            );
         }
         self.limits
             .as_ref()
@@ -2491,7 +2495,11 @@ mod persistence_tests {
             "gray"
         );
         assert_eq!(
-            serde_json::to_value(cache.lock().unwrap().get("default")).unwrap(),
+            serde::Serialize::serialize(
+                &(cache.lock().unwrap().get("default")),
+                serde_json::value::Serializer
+            )
+            .unwrap(),
             value
         );
         let restored =
@@ -2805,7 +2813,7 @@ mod limits_runtime_tests {
         )
         .await
         .unwrap();
-        let data = serde_json::from_value(json!({"accountId":"new"})).unwrap();
+        let data = serde::Deserialize::deserialize(json!({"accountId":"new"})).unwrap();
         limits::persist(
             store.clone(),
             f.runtime.refreshed_limits.clone(),
@@ -3368,7 +3376,8 @@ mod limits_runtime_tests {
             .await
             .unwrap();
         assert_eq!(
-            serde_json::to_value(&cached).unwrap()["data"]["claudeRateLimit"]["overageStatus"],
+            serde::Serialize::serialize(&(&cached), serde_json::value::Serializer).unwrap()["data"]
+                ["claudeRateLimit"]["overageStatus"],
             "allowed"
         );
         assert_eq!(f.provider.calls.load(Ordering::SeqCst), 0);
@@ -3378,7 +3387,8 @@ mod limits_runtime_tests {
             .await
             .unwrap();
         assert_eq!(
-            serde_json::to_value(&fresh).unwrap()["data"]["rateLimits"]["primary"]["usedPercent"],
+            serde::Serialize::serialize(&(&fresh), serde_json::value::Serializer).unwrap()["data"]
+                ["rateLimits"]["primary"]["usedPercent"],
             0.0
         );
         assert_eq!(f.provider.calls.load(Ordering::SeqCst), 1);

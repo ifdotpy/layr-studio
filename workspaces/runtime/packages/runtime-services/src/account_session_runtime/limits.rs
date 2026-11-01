@@ -233,12 +233,12 @@ fn commit(
     if identical && !force_projection {
         return Ok((Some(value), false));
     }
-    let raw = serde_json::value::RawValue::from_string(serde_json::to_string(&value)?)?;
     if !identical {
         crate::continuation_runtime::stage_limits_changed_for_account(tx, account, &value, now)
             .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
     }
-    let mut view = studio_runtime_schema::usage_limits::RateLimitView::read(&raw, account, now)?;
+    let mut view =
+        studio_runtime_schema::usage_limits::RateLimitView::from_observation(value.clone(), now);
     populate_agents(tx, &mut view, now)?;
     if let Some(reset_at) = checking {
         mark_checking(&mut view, reset_at);

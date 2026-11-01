@@ -473,7 +473,7 @@ impl AccountPolicyState {
             if candidate.get("data").is_none_or(Value::is_null) {
                 continue;
             }
-            if let Ok(candidate) = serde_json::from_value(candidate) {
+            if let Ok(candidate) = serde::Deserialize::deserialize(candidate) {
                 limits.insert(key, candidate);
             }
         }
@@ -528,7 +528,10 @@ impl AccountPolicyState {
     pub fn limits(&self, account_key: &str) -> Value {
         self.limits
             .get(account_key)
-            .map(|value| serde_json::to_value(value).expect("typed limits serialize"))
+            .map(|value| {
+                serde::Serialize::serialize(&(value), serde_json::value::Serializer)
+                    .expect("typed limits serialize")
+            })
             .unwrap_or_else(
                 || serde_json::json!({"accountKey":account_key,"data":null,"at":null,"error":null}),
             )

@@ -842,7 +842,8 @@ mod tests {
         let known = json!({"status":"allowed", "rateLimitType":"five_hour", "utilization":0.2, "resetsAt":2000});
         let base = json!({"accountKey":"default", "at":1000, "data":{"rateLimits":{"limitId":"claude", "primary":{"usedPercent":20, "resetsAt":2000}}, "claudeRateLimit":known}});
         let typed_agent = studio_runtime_store::AgentRecord::from_value(agent.clone()).unwrap();
-        let typed_base: UsageLimitsResponse = serde_json::from_value(base.clone()).unwrap();
+        let typed_base: UsageLimitsResponse =
+            serde::Deserialize::deserialize(base.clone()).unwrap();
         assert!(limits_allowed(&typed_base, &typed_agent, 1000.0));
         for raw in [
             json!({"type":"unsupported", "raw":{"status":"future"}}),
@@ -871,7 +872,7 @@ mod tests {
                     "{raw}; bucket={bucket}"
                 );
                 let response: UsageLimitsResponse =
-                    serde_json::from_value(observation.clone()).unwrap();
+                    serde::Deserialize::deserialize(observation.clone()).unwrap();
                 assert!(!limits_allowed(&response, &typed_agent, 1000.0));
                 assert_eq!(observation, before);
             }
@@ -880,7 +881,7 @@ mod tests {
     #[test]
     fn null_optional_claude_evidence_is_absent_for_idle_admission() {
         let agent = studio_runtime_store::AgentRecord::from_value(json!({"id":"agent","rootId":"agent","epoch":1,"status":"idle","compactions":0,"accountKey":"default","provider":"claude","model":"sonnet"})).unwrap();
-        let limits: UsageLimitsResponse = serde_json::from_value(json!({"accountKey":"default","at":1000.0,"data":{"ordinaryUsageAllowed":null,"claudeRateLimit":null,"rateLimits":{"limitId":"claude","primary":{"usedPercent":20,"resetsAt":2000}}}})).unwrap();
+        let limits: UsageLimitsResponse = serde::Deserialize::deserialize(json!({"accountKey":"default","at":1000.0,"data":{"ordinaryUsageAllowed":null,"claudeRateLimit":null,"rateLimits":{"limitId":"claude","primary":{"usedPercent":20,"resetsAt":2000}}}})).unwrap();
         assert!(limits_allowed(&limits, &agent, 1000.0));
     }
     struct Clock(f64);

@@ -42,7 +42,7 @@ impl AccountSessionPort for Session {
         _account: &'a str,
         _after: f64,
     ) -> AccountSessionFuture<'a, studio_runtime_schema::usage_limits::UsageLimitsResponse> {
-        Box::pin(async { Ok(serde_json::from_value(limits(idle::wall_now())).unwrap()) })
+        Box::pin(async { Ok(serde::Deserialize::deserialize(limits(idle::wall_now())).unwrap()) })
     }
     fn current_scope(&self, _: &str) -> Option<ConnectionScope> {
         (!self.dormant.load(std::sync::atomic::Ordering::SeqCst)).then(Self::scope)
@@ -276,7 +276,7 @@ async fn actual_unload_deadline_advances_one_episode_and_its_receipt_releases_un
         store.clone(),
         "claude".into(),
         episode,
-        serde_json::from_value(limits(now)).unwrap(),
+        serde::Deserialize::deserialize(limits(now)).unwrap(),
         now,
         &host,
     )
@@ -350,7 +350,7 @@ async fn idle_claude_dispatches_once_and_restart_does_not_repeat() {
         store.clone(),
         "claude".into(),
         episode.clone(),
-        serde_json::from_value(limits(idle::wall_now())).unwrap(),
+        serde::Deserialize::deserialize(limits(idle::wall_now())).unwrap(),
         idle::wall_now(),
         &host,
     )
@@ -396,7 +396,7 @@ async fn a_dormant_account_worker_is_started_before_the_native_action() {
         store.clone(),
         "claude".into(),
         episode,
-        serde_json::from_value(limits(idle::wall_now())).unwrap(),
+        serde::Deserialize::deserialize(limits(idle::wall_now())).unwrap(),
         idle::wall_now(),
         &host,
     )
@@ -433,7 +433,7 @@ async fn active_and_queued_agents_never_reach_the_provider() {
             store.clone(),
             "claude".into(),
             episode.clone(),
-            serde_json::from_value(limits(idle::wall_now())).unwrap(),
+            serde::Deserialize::deserialize(limits(idle::wall_now())).unwrap(),
             idle::wall_now(),
             &host,
         )
@@ -466,7 +466,7 @@ async fn log_mode_has_a_durable_would_compact_receipt_and_sends_nothing() {
         store.clone(),
         "claude".into(),
         episode.clone(),
-        serde_json::from_value(limits(idle::wall_now())).unwrap(),
+        serde::Deserialize::deserialize(limits(idle::wall_now())).unwrap(),
         idle::wall_now(),
         &host,
     )
@@ -530,7 +530,7 @@ async fn input_during_preparation_refuses_handoff_and_restores_the_idle_agent() 
         Arc::new(idle::IdleAdmission {
             inner: Arc::new(Gate),
             episode: episode.clone(),
-            limits: serde_json::from_value(limits(idle::wall_now())).unwrap(),
+            limits: serde::Deserialize::deserialize(limits(idle::wall_now())).unwrap(),
         }),
         Arc::new(studio_runtime_services::native_action_ports::NativeActionAcceptance),
         &ChangeDuringPreparation(true),
@@ -587,7 +587,7 @@ async fn compact_boundary_writes_the_notice_once_and_advances_the_roster_epoch()
             store.clone(),
             "claude".into(),
             episode.clone(),
-            serde_json::from_value(limits(idle::wall_now())).unwrap(),
+            serde::Deserialize::deserialize(limits(idle::wall_now())).unwrap(),
             idle::wall_now(),
             &host,
         )
@@ -646,7 +646,7 @@ async fn log_selected_during_preparation_cannot_dispatch_compaction() {
         Arc::new(idle::IdleAdmission {
             inner: Arc::new(Gate),
             episode: episode.clone(),
-            limits: serde_json::from_value(limits(idle::wall_now())).unwrap(),
+            limits: serde::Deserialize::deserialize(limits(idle::wall_now())).unwrap(),
         }),
         Arc::new(studio_runtime_services::native_action_ports::NativeActionAcceptance),
         &ChangeDuringPreparation(false),
