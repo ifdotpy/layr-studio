@@ -94,7 +94,11 @@ impl Snapshot {
         snapshot.record = (!raw_record.is_null()).then_some(raw_record);
         if let (Some(key), Some(value)) = (reuse, embedded) {
             snapshot.agent[key] = value.clone();
-            snapshot.identity.extra.insert(key.to_owned(), value);
+            if key == "usageResume" {
+                snapshot.identity.set_usage_resume(value);
+            } else {
+                snapshot.identity.extra.insert(key.to_owned(), value);
+            }
         }
         let typed = &mut Arc::get_mut(&mut snapshot.typed)
             .expect("new snapshot is uniquely owned")
@@ -613,7 +617,11 @@ impl ProposedAgent {
     fn set_extra(&mut self, key: &str, value: Value) {
         self.evidence[key] = value.clone();
         if let Some(agent) = &mut self.identity {
-            agent.extra.insert(key.to_owned(), value);
+            if key == "usageResume" {
+                agent.set_usage_resume(value);
+            } else {
+                agent.extra.insert(key.to_owned(), value);
+            }
         }
     }
     pub(crate) fn continuation(&mut self, key: &str, value: Value) {
@@ -806,7 +814,14 @@ mod tests {
             assert_eq!(snapshot.agent, raw["agent"]);
             assert_eq!(snapshot.record, Some(record.clone()));
             assert_eq!(json!(snapshot.checked_record().unwrap()), record);
-            assert_eq!(snapshot.identity.extra.get(key), Some(&record));
+            if key == "usageResume" {
+                assert_eq!(
+                    snapshot.identity.usage_resume_value().unwrap(),
+                    Some(record.clone())
+                );
+            } else {
+                assert_eq!(snapshot.identity.extra.get(key), Some(&record));
+            }
             assert_eq!(
                 match key {
                     "usageResume" => json!(snapshot.agent_view().usage_resume.as_ref().unwrap()),
