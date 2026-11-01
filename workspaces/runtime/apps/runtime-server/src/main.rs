@@ -2407,7 +2407,7 @@ mod exit_logging_tests {
                     ("b-valid", serde_json::json!({"afterId":"","proofAt":1.0})),
                 ] {
                     let record = serde_json::json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
-                        "id":id, "rootId":id, "role":"main", "status":"idle", "epoch":1,
+                        "id":id, "rootId":id, "role":"orchestrator", "status":"idle", "epoch":1,
                         "authResumeProofPending":{"default":pending},
                     });
                     tx.execute(
@@ -2468,7 +2468,7 @@ mod exit_logging_tests {
                         serde_json::json!({"afterId":"", "proofAt":1.0})
                     };
                     let record = serde_json::json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
-                        "id":id, "rootId":id, "role":"main", "status":"idle", "epoch":1,
+                        "id":id, "rootId":id, "role":"orchestrator", "status":"idle", "epoch":1,
                         "authResumeProofPending":{"default":pending},
                     });
                     tx.execute(
