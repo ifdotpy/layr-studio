@@ -2491,7 +2491,7 @@ mod provider_receipt_tests {
         .unwrap();
         assert_eq!(member.phase, super::Phase::Lazy);
         assert_eq!(agent.account_transfer_id.value().unwrap().as_str(), "move");
-        let decision = snapshot.decide(super::Command::Restart).unwrap();
+        let mut decision = snapshot.decide(super::Command::Restart).unwrap();
         assert_eq!(decision.typed_public_view().unwrap().total, 1);
         let mut agents = decision.agent_records().unwrap();
         agents.insert("agent".into(), agent);
@@ -2513,7 +2513,7 @@ mod provider_receipt_tests {
             (id.to_owned(), serde_json::json!({"id":id,"rootId":"z","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0}).to_string())
         };
         let snapshot = super::Snapshot::read(raw, [agent("z"), agent("a")]).unwrap();
-        let mut decision = snapshot.decide(super::Command::Restart).unwrap();
+        let decision = snapshot.decide(super::Command::Restart).unwrap();
         let record = &decision.operation;
         assert_eq!(
             record
