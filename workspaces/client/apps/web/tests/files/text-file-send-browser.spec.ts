@@ -12,7 +12,15 @@ import {
 } from "../playwright.ts";
 import { fixtureStateDirectory } from "../fixtures/rust-ui-fixture.ts";
 
-for (const action of ["paste", "button", "stop"] as const) {
+for (const action of [
+  "paste",
+  "button",
+  "stop",
+  "auto-model-send",
+  "auto-model-tab",
+  "auto-stop-send",
+  "auto-stop-tab",
+] as const) {
   test(`long text ${action} sends one server asset`, async ({ browser }) => {
     test.setTimeout(90_000);
     const state = await mkdtemp(join(tmpdir(), "text-file-send-"));
@@ -43,7 +51,8 @@ for (const action of ["paste", "button", "stop"] as const) {
       const text =
         action === "paste"
           ? "\\".repeat(100_000)
-          : (action === "stop" ? "/stop " : "/model ") + "L".repeat(32_001);
+          : (action.includes("stop") ? "/stop " : "/model ") +
+            "L".repeat(32_001);
       if (action === "paste") {
         const nearlyFull = "Q".repeat(99_995);
         await composer.fill(nearlyFull);
@@ -91,17 +100,18 @@ for (const action of ["paste", "button", "stop"] as const) {
           response.request().postDataJSON()?.kind === "send",
         { timeout: 8_000 },
       );
-      if (action !== "paste")
+      if (action === "button" || action === "stop")
         await page
           .getByRole("button", { name: "Attach text as a file" })
           .click();
+      else if (action.endsWith("tab")) await composer.press("Tab");
       else await page.locator("#send").click();
       const response = await sent;
       expect(response.ok()).toBe(true);
       const command = response.request().postDataJSON();
       expect(command.body.text).toBe(text);
       expect(command.body.asTextFile).toBe(
-        action !== "paste" ? true : undefined,
+        action === "button" || action === "stop" ? true : undefined,
       );
       if (action !== "paste") await page.reload();
       await expect

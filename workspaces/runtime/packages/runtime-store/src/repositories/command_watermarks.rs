@@ -18,6 +18,13 @@ pub struct CommandWatermarks;
 pub const SEND_ADMISSIONS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS command_send_admissions (id TEXT PRIMARY KEY, signature TEXT NOT NULL, created INTEGER NOT NULL) WITHOUT ROWID; CREATE INDEX IF NOT EXISTS command_send_admissions_created ON command_send_admissions(created,id);";
 
 impl CommandWatermarks {
+    pub fn has_send(conn: &Connection, id: &str) -> rusqlite::Result<bool> {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM command_send_admissions WHERE id=?1)",
+            [id],
+            |row| row.get(0),
+        )
+    }
     /// Reserve the original fingerprint for the lifetime of the replay window.
     pub fn reserve_send(
         tx: &Transaction<'_>,

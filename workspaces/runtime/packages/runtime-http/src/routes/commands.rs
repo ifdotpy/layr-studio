@@ -453,6 +453,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pre_upgrade_send_conflict_does_not_poison_original_retry() {
+        let (app, store, _directory) = app_with_queue().await;
+        let id = RequestIdentity::issue_root();
+        let request = json!({"id":id,"client":"web-1","number":1,"kind":"send","target":"workspace","body":{"text":"hello"}});
+        assert_eq!(post(&app, None, request.clone()).await.0, 200);
+        store
+            .transaction(|tx| {
+                tx.execute("DELETE FROM command_send_admissions", [])?;
+                Ok(())
+            })
+            .await
+            .expect("pre-upgrade state");
+        let mut changed = request.clone();
+        changed["body"]["delivery"] = json!("next_turn");
+        assert_eq!(post(&app, None, changed).await.0, 409);
+        let mut changed = request.clone();
+        changed["body"]["asTextFile"] = json!(true);
+        assert_eq!(post(&app, None, changed).await.0, 409);
+        let mut changed = request.clone();
+        changed["body"]["assets"] = json!(["7f4ed766-564a-4e1c-ae4f-d8e7f9b4d384"]);
+        assert_eq!(post(&app, None, changed).await.0, 409);
+        assert_eq!(post(&app, None, request).await.0, 200);
+    }
+
+    #[tokio::test]
     async fn send_fingerprint_is_reserved_before_upload_and_checked_after_completion() {
         let (app, store, _directory) = app_with_queue().await;
         let id = RequestIdentity::issue_root();

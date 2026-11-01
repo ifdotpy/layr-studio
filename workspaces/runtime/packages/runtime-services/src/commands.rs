@@ -132,6 +132,7 @@ pub struct Begun {
     client: String,
     number: i64,
     records: bool,
+    legacy_send: bool,
 }
 
 #[derive(Debug)]
@@ -198,7 +199,33 @@ pub fn begin(
         });
     }
     let records = !is_create(&request.command);
+    // Pre-upgrade sends have a message receipt but no command admission. Let the
+    // message owner validate the receipt before recording this new fingerprint.
+    let legacy_send = if let Command::Send { body, .. } = &request.command {
+        if !CommandWatermarks::has_send(tx, identity.id())?
+            && (studio_runtime_store::QueueEventRepository::get(
+                tx,
+                &studio_runtime_store::QueueEventId::from(request.id.as_str()),
+            )?
+            .is_some()
+                || studio_runtime_store::CoordinationRepository::message(tx, request.id.as_str())?
+                    .is_some())
+        {
+            if body.as_text_file
+                || body.text.as_str().chars().count()
+                    > studio_runtime_schema::shared_values::MAX_MANAGED_MESSAGE_CODEPOINTS
+            {
+                return Err(CommandError::Conflict(MESSAGE_ID_CONFLICT));
+            }
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
     if !records
+        && !legacy_send
         && !CommandWatermarks::reserve_send(
             tx,
             identity.id(),
@@ -224,6 +251,7 @@ pub fn begin(
         client,
         number,
         records,
+        legacy_send,
     }))
 }
 
@@ -233,6 +261,20 @@ pub fn finish(
     begun: &Begun,
     reference: &RequestReference,
 ) -> Result<RequestReference, CommandError> {
+    if begun.legacy_send
+        && !CommandWatermarks::reserve_send(
+            tx,
+            begun.identity.id(),
+            &begun.signature,
+            begun.identity.issued_ms(),
+            begun.identity.issued_ms(),
+        )?
+    {
+        return Err(RequestResultError::Conflict {
+            id: begun.identity.id().into(),
+        }
+        .into());
+    }
     let reference = if begun.records {
         let admitted = AdmittedRequest::from_persisted_fields(
             begun.identity.id().into(),

@@ -5,6 +5,7 @@ import {
   AccountTransferScope as GeneratedApiAccountTransferScope,
 } from "../generated/api.ts";
 import { randomUUID } from "../uuid";
+import { sendsTextFile } from "../commands";
 import { ProviderKind } from "../generated/providerKind.ts";
 import type { ComponentProps, ReactNode } from "react";
 import { IdleCompactionNotice } from "./IdleCompactionNotice";
@@ -16,7 +17,6 @@ import { layoutQueries } from "../layout/layout-contract.generated";
 import {
   MAX_TURN_ATTACHMENTS,
   MAX_DRAFT_TEXT_CODEPOINTS,
-  MAX_MANAGED_MESSAGE_CODEPOINTS,
 } from "../generated/sharedValues";
 import { DeliveryMoment } from "../generated/deliveryMoment";
 import { useSendingMessageRemoval } from "./useSendingMessageRemoval";
@@ -898,7 +898,7 @@ export default function Conversation(p: {
     const draftTooLong = Array.from(draft).length > MAX_DRAFT_TEXT_CODEPOINTS;
     const modelCommand = /^\/model(?:\s|$)/i.test(draft.trim());
     const exactModelCommand = /^\/model$/i.test(draft.trim());
-    if (!asTextFile && modelCommand) {
+    if (!sendsTextFile(draft, asTextFile) && modelCommand) {
       if (!exactModelCommand) {
         p.notify("Use /model without arguments to choose a model.");
       } else if (!managed || !agent) {
@@ -1979,9 +1979,9 @@ export default function Conversation(p: {
             {(draft) => {
               const draftTooLong =
                 Array.from(draft).length > MAX_DRAFT_TEXT_CODEPOINTS;
-              const willAttachText =
-                Array.from(draft).length > MAX_MANAGED_MESSAGE_CODEPOINTS;
-              const modelCommand = /^\/model(?:\s|$)/i.test(draft.trim());
+              const willAttachText = sendsTextFile(draft);
+              const modelCommand =
+                !willAttachText && /^\/model(?:\s|$)/i.test(draft.trim());
               const exactModelCommand = /^\/model$/i.test(draft.trim());
               const queueControl = (className: string) =>
                 managed ? (

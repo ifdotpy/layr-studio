@@ -802,19 +802,42 @@ mod tests {
         let messages = room["messages"].as_array().expect("messages");
         assert!(!messages.is_empty() && messages.len() < initial_count);
         assert_eq!(room["nextBefore"], messages[0]["seq"]);
-        let before = room["nextBefore"].as_i64().expect("history boundary");
-        let history =
-            super::super::messages::room_snapshot(state, "room".into(), Some(before), None, 40)
-                .await
-                .expect("history");
-        let history = serde_json::to_value(history).expect("history value");
-        let history = history["messages"].as_array().expect("history messages");
-        assert!(!history.is_empty());
-        assert!(
-            history
-                .iter()
-                .all(|message| message["seq"].as_i64().is_some_and(|seq| seq < before))
-        );
+        let tail_ids: Vec<String> = messages
+            .iter()
+            .map(|v| v["id"].as_str().expect("id").to_owned())
+            .collect();
+        let mut all_ids = tail_ids.clone();
+        let mut cursor = room["nextBefore"].as_i64();
+        while let Some(before) = cursor {
+            let history = super::super::messages::room_snapshot(
+                state.clone(),
+                "room".into(),
+                Some(before),
+                None,
+                40,
+            )
+            .await
+            .expect("history");
+            let history = serde_json::to_value(history).expect("history value");
+            let rows = history["messages"].as_array().expect("history messages");
+            assert!(
+                rows.iter()
+                    .all(|message| message["seq"].as_i64().is_some_and(|seq| seq < before))
+            );
+            all_ids.extend(
+                rows.iter()
+                    .map(|v| v["id"].as_str().expect("id").to_owned()),
+            );
+            cursor = history["nextBefore"].as_i64();
+        }
+        all_ids.sort();
+        let mut expected: Vec<String> = (0..40).map(|i| format!("message-{i}")).collect();
+        expected.sort();
+        assert_eq!(all_ids, expected);
+        let expected_tail: Vec<String> = (40 - tail_ids.len()..40)
+            .map(|i| format!("message-{i}"))
+            .collect();
+        assert_eq!(tail_ids, expected_tail);
         assert!(
             serde_json::to_vec(room).expect("serialized tail").len()
                 <= SYNC_STREAM_EVENT_MAX_BYTES / 2

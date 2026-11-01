@@ -7,6 +7,11 @@
 import type { components } from "./generated/api.ts";
 import type { PendingCommands } from "./pendingCommands.ts";
 import { randomUUID } from "./uuid.ts";
+import { MAX_MANAGED_MESSAGE_CODEPOINTS } from "./generated/sharedValues";
+
+export function sendsTextFile(text: string, explicit = false): boolean {
+  return explicit || Array.from(text).length > MAX_MANAGED_MESSAGE_CODEPOINTS;
+}
 
 export type CommandRequest = components["schemas"]["CommandRequest"];
 export type CommandResponse = components["schemas"]["CommandResponse"];

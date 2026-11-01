@@ -21,7 +21,7 @@ import { useWorkspacePanelWidth } from "./components/shell/workspacePanelWidth";
 import { useWorkspaceLayout } from "./layout/useWorkspaceLayout";
 import { layoutQueries } from "./layout/layout-contract.generated";
 import { restoreSidebarFocus } from "./components/sidebar/SidebarFrame";
-import type { SendMessageBody } from "./commands";
+import { sendsTextFile, type SendMessageBody } from "./commands";
 import {
   StudioErrorsScope,
   useStudioErrorsState,
@@ -67,7 +67,7 @@ import {
   DEFAULT_LOCAL_SERVER_ALIAS,
 } from "./servers/serverAliases";
 import { serverLocalStorage as localStorage } from "./servers/storage";
-import { MAX_MANAGED_MESSAGE_CODEPOINTS, MAX_DRAFT_TEXT_CODEPOINTS } from "./generated/sharedValues";
+import { MAX_DRAFT_TEXT_CODEPOINTS } from "./generated/sharedValues";
 import SearchOverlay from "./components/shell/SearchOverlay";
 import { SettingsRow } from "./components/ui/primitives";
 import { modalSizes } from "./theme";
@@ -1613,11 +1613,8 @@ export default function App({ active = true }: { active?: boolean }) {
     if (schemaMismatch || isApiSchemaMismatch()) return;
     const draftKey = opened || "new",
       draft = getDraft(draftKey),
-      text =
-        options?.asTextFile ||
-        Array.from(draft).length > MAX_MANAGED_MESSAGE_CODEPOINTS
-          ? draft
-          : draft.trim();
+      fileSend = sendsTextFile(draft, options?.asTextFile),
+      text = fileSend ? draft : draft.trim();
     if ((!text && !options?.assets?.length) || sendingLock.current) return;
     const attempt = Symbol();
     sendingLock.current = attempt;
@@ -1630,13 +1627,13 @@ export default function App({ active = true }: { active?: boolean }) {
     };
     let request: SendMessageBody | undefined;
     try {
-      if (!options?.asTextFile && renameCommand(text) !== undefined && !opened)
+      if (!fileSend && renameCommand(text) !== undefined && !opened)
         throw new Error("Open a chat before using /rename.");
       const id = opened || (await newChat());
       if (!id) return;
       latestSend.current[id] = attempt;
       if (
-        !options?.asTextFile &&
+        !fileSend &&
         agent?.source === GeneratedApiAgentSource.managed &&
         studioCommand(text, agent.provider ?? undefined)
       ) {
