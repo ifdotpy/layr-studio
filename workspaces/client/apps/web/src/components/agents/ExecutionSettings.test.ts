@@ -22,6 +22,50 @@ const choices = vi.hoisted(() => ({
 
 const capability = vi.hoisted(() => ({ priority: false }));
 
+test("shows the server reason alongside an unavailable account", () => {
+  const markup = renderToStaticMarkup(
+    createElement(
+      MantineProvider,
+      null,
+      createElement(ExecutionSettings, {
+        presentation: "panel",
+        initialRole: "orchestrator",
+        agent: {
+          id: "lead",
+          isLead: true,
+          source: AgentSource.managed,
+          status: AgentStatus.idle,
+          provider: ProviderKind.codex,
+          accountKey: "source",
+          accountDestinations: [
+            {
+              accountKey: "target",
+              eligibility: {
+                kind: "unavailable",
+                reason: "Server says reconnect",
+              },
+            },
+          ],
+        },
+        accounts: [
+          {
+            id: "target",
+            label: "Target",
+            home: "",
+            source: "fixture",
+            provider: ProviderKind.codex,
+            status: AccountStatus.error,
+          },
+        ],
+        catalog: { models: [], loading: false, error: "", retry: () => {} },
+        refresh: async () => {},
+        onAccountChange: () => {},
+      }),
+    ),
+  );
+  expect(markup).toContain("Server says reconnect");
+});
+
 vi.mock("react", async (load) => {
   const actual = await load<typeof import("react")>();
   return {

@@ -688,9 +688,7 @@ function ScopedExecutionSettings({
     teamDefaults
       ? accountCanStart(account)
       : agent.accountDestinations?.some(
-          (destination) =>
-            destination.accountKey === account.id &&
-            destination.eligibility.kind === "available",
+          (destination) => destination.accountKey === account.id,
         ),
   );
   const activeAccount = accounts.find(
@@ -1489,6 +1487,18 @@ function ScopedExecutionSettings({
         providers={pickerProviders}
         onProvider={setBrowsedProvider}
         accounts={inheritedUnavailable ? [] : connectedAccounts}
+        accountUnavailableReason={
+          teamDefaults
+            ? undefined
+            : (account) => {
+                const destination = agent.accountDestinations?.find(
+                  (entry) => entry.accountKey === account.id,
+                );
+                return destination?.eligibility.kind === "unavailable"
+                  ? destination.eligibility.reason
+                  : undefined;
+              }
+        }
         accountKey={
           teamDefaults
             ? current.account_key ||
