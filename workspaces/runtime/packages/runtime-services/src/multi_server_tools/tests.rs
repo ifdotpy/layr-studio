@@ -1671,8 +1671,7 @@ async fn a_remote_worker_keeps_its_local_tools_and_names_the_driver_for_forwarde
     )
     .await;
     assert_eq!(local["success"], true, "{local}");
-    // The task board belongs to the home server; without a driver the call
-    // names its dependency and writes nothing.
+    // The home server has no task receiver, so refuse without writing an outbox row.
     let forwarded = call_named_tool(
         &store,
         remote,
@@ -1685,12 +1684,9 @@ async fn a_remote_worker_keeps_its_local_tools_and_names_the_driver_for_forwarde
     )
     .await;
     assert_eq!(forwarded["success"], false, "{forwarded}");
-    assert!(
-        parsed(&forwarded)
-            .as_str()
-            .unwrap()
-            .contains("multi-server/worker-call"),
-        "{forwarded}"
+    assert_eq!(
+        parsed(&forwarded),
+        "The home server does not support this action"
     );
     let outbox: i64 = store
         .test_read_transaction(|tx| {
