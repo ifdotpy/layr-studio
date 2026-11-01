@@ -1284,6 +1284,9 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             }
         }
     }
+    for (name, schema) in crate::sync_entity_payload::schemas()? {
+        openapi["components"]["schemas"][name] = schema;
+    }
     crate::records::refresh_openapi(&mut openapi)?;
     crate::multi_server_protocol::refresh_openapi(&mut openapi);
     openapi["components"]["schemas"]["BackgroundShellPolicySettings"]["properties"]["quietThresholdMs"]

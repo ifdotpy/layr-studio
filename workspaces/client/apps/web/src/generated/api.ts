@@ -12826,17 +12826,17 @@ export interface components {
        */
       kind: "drafts";
     };
-    /** EdgeEntityDto */
     EdgeEntityDto: {
-      /** Id */
       id: string;
-      /** Kind */
-      kind?: ("chat" | "spawn") | null | undefined;
-      /** Source */
-      source?: null | string | undefined;
-      /** Target */
-      target?: null | string | undefined;
+      /** @default null */
+      kind?: components["schemas"]["EdgeKind"] | null | undefined;
+      /** @default null */
+      source?: string | null | undefined;
+      /** @default null */
+      target?: string | null | undefined;
     };
+    /** @enum {string} */
+    EdgeKind: "chat" | "spawn";
     /** @enum {string} */
     ElicitationAction: "accept" | "decline" | "cancel";
     /** EmptyTransferRecoveryRecordResponse */
@@ -23217,14 +23217,12 @@ export interface components {
       /** Seq */
       seq: number;
     };
-    /** SyncEdgeEntityPayload */
     SyncEdgeEntityPayload: {
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
       collection: "edge";
-      /** Id */
       id: string;
       value: components["schemas"]["EdgeEntityDto"];
     };
@@ -38895,6 +38893,8 @@ export const DeliveryStatus = {
   uncertain: "uncertain",
 } as const;
 export type DeliveryStatus = components["schemas"]["DeliveryStatus"];
+export const EdgeKind = { chat: "chat", spawn: "spawn" } as const;
+export type EdgeKind = components["schemas"]["EdgeKind"];
 export const ElicitationAction = {
   accept: "accept",
   decline: "decline",

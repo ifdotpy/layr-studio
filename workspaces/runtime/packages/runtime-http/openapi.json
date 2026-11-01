@@ -26197,52 +26197,45 @@
         "additionalProperties": false,
         "properties": {
           "id": {
-            "title": "Id",
             "type": "string"
           },
           "kind": {
             "anyOf": [
               {
-                "enum": [
-                  "chat",
-                  "spawn"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/EdgeKind"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Kind"
+            "default": null
           },
           "source": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Source"
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "target": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Target"
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "id"
         ],
-        "title": "EdgeEntityDto",
         "type": "object"
+      },
+      "EdgeKind": {
+        "enum": [
+          "chat",
+          "spawn"
+        ],
+        "type": "string"
       },
       "ElicitationAction": {
         "enum": [
@@ -52273,11 +52266,9 @@
         "properties": {
           "collection": {
             "const": "edge",
-            "title": "Collection",
             "type": "string"
           },
           "id": {
-            "title": "Id",
             "type": "string"
           },
           "value": {
@@ -52289,7 +52280,6 @@
           "id",
           "value"
         ],
-        "title": "SyncEdgeEntityPayload",
         "type": "object"
       },
       "SyncEntity": {
