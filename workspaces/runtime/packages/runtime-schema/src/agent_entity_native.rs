@@ -45,7 +45,7 @@ pub struct ConnectionCheckDto {
     #[schemars(with = "Option<String>")]
     pub turn_id: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<crate::bounded_integer::BoundedInteger<0, 9007199254740991>>")]
+    #[schemars(with = "Option<SafeInteger>")]
     pub epoch: Field<SafeInteger>,
 }
 
@@ -108,14 +108,14 @@ pub struct NativeSafetyRetryDto {
     #[schemars(with = "Option<serde_json::Number>")]
     pub updated: Field<serde_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<crate::bounded_integer::BoundedInteger<0, 9007199254740991>>")]
+    #[schemars(with = "Option<SafeInteger>")]
     pub epoch: Field<SafeInteger>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<NativeSafetyStage>")]
     pub stage: Field<NativeSafetyStage>,
 }
 
-pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 5] {
+pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 5], String> {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
@@ -142,42 +142,65 @@ pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 5] {
         ),
     ];
     for (name, schema) in &mut schemas {
-        schema["title"] = (*name).into();
-        if let Some(properties) = schema.get_mut("properties").and_then(|p| p.as_object_mut()) {
-            for (key, value) in properties {
-                let title = format!("{}{}", key[..1].to_uppercase(), key[1..].to_lowercase());
-                if key == "at" {
-                    *value = serde_json::json!({"type":"number", "title":title});
-                    continue;
-                }
-                let inner = if key == "error"
-                    && (*name == "NativeThreadBlockDto" || *name == "NativeTurnErrorDto")
-                {
-                    serde_json::json!({"$ref":"#/components/schemas/NativeProviderError"})
-                } else if key == "stage" {
-                    serde_json::json!({"$ref":"#/components/schemas/NativeSafetyStage"})
-                } else if key == "epoch" {
-                    serde_json::json!({"type":"integer", "minimum":0, "maximum":crate::shared_values::MAX_SAFE_INTEGER})
-                } else if key == "created" || key == "updated" {
-                    serde_json::json!({"type":"number"})
-                } else {
-                    serde_json::json!({"type":"string"})
-                };
-                let reference =
-                    key == "stage" || (key == "error" && *name != "NativeSafetyRetryDto");
-                let variants = if reference || key == "epoch" {
-                    serde_json::json!([inner, {"type":"null"}])
-                } else {
-                    serde_json::json!([{"type":"null"}, inner])
-                };
-                *value = serde_json::json!({"anyOf":variants,"default":null});
-                if !reference {
-                    value["title"] = title.into();
-                }
+        let schema_object = schema
+            .as_object_mut()
+            .ok_or_else(|| format!("{name} must be an object"))?;
+        schema_object.insert("title".into(), (*name).into());
+        if *name == "NativeSafetyStage" {
+            continue;
+        }
+        let properties = schema_object
+            .get_mut("properties")
+            .and_then(serde_json::Value::as_object_mut)
+            .ok_or_else(|| format!("{name} must have properties"))?;
+        for (key, value) in properties {
+            let mut chars = key.chars();
+            let first = chars
+                .next()
+                .ok_or_else(|| format!("{name} has an empty property"))?;
+            let label = format!("{}{}", first.to_uppercase(), chars.as_str().to_lowercase());
+            let property = value
+                .as_object_mut()
+                .ok_or_else(|| format!("{name}.{key} must be an object"))?;
+            if *name == "ConnectionCheckDto" && key == "at" {
+                property.insert("title".into(), label.into());
+                continue;
             }
+            if let Some(variants) = property.get("anyOf") {
+                let variants = variants
+                    .as_array()
+                    .ok_or_else(|| format!("{name}.{key} anyOf must be an array"))?;
+                if variants.len() != 2
+                    || variants[0]
+                        .get("$ref")
+                        .and_then(serde_json::Value::as_str)
+                        .is_none()
+                    || variants[1].get("type").and_then(serde_json::Value::as_str) != Some("null")
+                {
+                    return Err(format!("{name}.{key} must be a nullable reference"));
+                }
+                property.insert("default".into(), serde_json::Value::Null);
+                continue;
+            }
+            let kinds = property
+                .get("type")
+                .and_then(serde_json::Value::as_array)
+                .ok_or_else(|| format!("{name}.{key} must have nullable type"))?;
+            if kinds.len() != 2 || kinds[1] != "null" || !kinds[0].is_string() {
+                return Err(format!("{name}.{key} must have one type and null"));
+            }
+            let kind = kinds[0].clone();
+            property.insert("type".into(), kind.clone());
+            let inner = value.clone();
+            let variants = if kind == "integer" {
+                serde_json::json!([inner,{"type":"null"}])
+            } else {
+                serde_json::json!([{"type":"null"},inner])
+            };
+            *value = serde_json::json!({"anyOf":variants,"default":null,"title":label});
         }
     }
-    schemas
+    Ok(schemas)
 }
 
 #[cfg(test)]
@@ -212,7 +235,7 @@ mod tests {
     fn published_components_match_owners() {
         let document: serde_json::Value =
             serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
-        for (name, schema) in schemas() {
+        for (name, schema) in schemas().unwrap() {
             assert_eq!(document["components"]["schemas"][name], schema, "{name}");
         }
     }
