@@ -482,7 +482,7 @@ mod tests {
                 json!({
                     "collection":"task",
                     "id":"task-1",
-                    "value":{"id":"task-1","legacyField":true}
+                    "value":{"id":"task-1","agent":"agent-1","created":1,"kind":"command","status":"running","turnId":"turn-1","name":"command","display":{"kind":"command","kindLabel":"command","title":"command","active":true,"indicator":"working","label":"running","inBackgroundList":true,"actions":[]},"legacyField":true}
                 }),
                 0,
             ),

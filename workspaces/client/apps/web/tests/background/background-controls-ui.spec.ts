@@ -1,10 +1,11 @@
+import { backgroundDisplay } from "../fixtures/background.ts";
 import { required } from "../teams/helpers.ts";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";
 import type {
   components,
   AgentEntityDto as Agent,
 } from "../../src/generated/api.ts";
-import type { Monitor, BackgroundTask } from "../../src/types.ts";
+import type { BackgroundTask } from "../../src/types.ts";
 import type { PostBody, PostResult, GetResult } from "../../src/apiTypes.ts";
 type FixtureSync = Parameters<typeof handleEntitySyncFixtureRequest>[2];
 type RecordedBody = Partial<
@@ -143,14 +144,16 @@ test("Background controls", async ({ context }, testInfo) => {
       stop: true,
     },
   };
-  const monitor: Monitor & Pick<BackgroundTask, "kind"> = {
+  const monitor = {
+    display: backgroundDisplay("monitor", "read value; echo $value"),
+    cancelRequested: false,
     id: "6f2ed4dd-f6ab-4d46-94a5-8a774333876a",
     agent: "lead",
     kind: "monitor",
     command: "read value; echo $value",
     interactive: true,
     timeout_ms: 1800000,
-    status: "running",
+    status: "running" as const,
     created: Date.now() / 1000,
     tail: "Monitor output text",
     error: "Monitor error line",

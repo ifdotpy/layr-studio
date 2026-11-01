@@ -66,7 +66,22 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             .get("role")
             .is_some_and(|value| serde_json::from_str::<Option<AgentRole>>(value.get()).is_err())
         {
-            record.remove("role");
+            let role = record
+                .get("role")
+                .and_then(|value| serde_json::from_str::<String>(value.get()).ok());
+            let native_review = record
+                .get("nativeReview")
+                .and_then(|value| serde_json::from_str(value.get()).ok());
+            let is_lead = record
+                .get("isLead")
+                .and_then(|value| serde_json::from_str::<bool>(value.get()).ok())
+                .unwrap_or(false);
+            let inferred = if role.as_deref() == Some("lead") {
+                AgentRole::Orchestrator
+            } else {
+                AgentRole::inferred(crate::truthy(native_review.as_ref()), is_lead)
+            };
+            record.insert("role".into(), serde_json::value::to_raw_value(&inferred)?);
         }
         tx.execute(
             "UPDATE runtime_agents SET record=?1 WHERE id=?2",
@@ -79,6 +94,37 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;
+
+    #[test]
+    fn retired_and_unknown_roles_remain_usable() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            r#"CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+          INSERT INTO runtime_agents VALUES
+          ('lead','{"role":"lead"}'),
+          ('review','{"role":"future","nativeReview":true}'),
+          ('owner','{"role":"future","isLead":true}'),
+          ('worker','{"role":"future"}');"#,
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        super::apply(&tx).unwrap();
+        for (id, expected) in [
+            ("lead", "orchestrator"),
+            ("review", "reviewer"),
+            ("owner", "orchestrator"),
+            ("worker", "implementer"),
+        ] {
+            let role: String = tx
+                .query_row(
+                    "SELECT json_extract(record,'$.role') FROM runtime_agents WHERE id=?1",
+                    [id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(role, expected, "{id}");
+        }
+    }
 
     #[test]
     fn agent_batch_migration_normalizes_all_owned_fields() {

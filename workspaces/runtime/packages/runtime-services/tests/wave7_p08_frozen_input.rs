@@ -13,8 +13,14 @@ fn fixtures() -> Vec<Value> {
         crate::turn_fixtures::load(include_bytes!("wave7_p08_input.json"));
     captured
         .into_iter()
-        .map(|value| {
+        .map(|mut value| {
             let _ = value.database;
+            if let Some(agent) = value.case.get_mut("agent") {
+                crate::turn_fixtures::current_agent(agent);
+            }
+            if let Some(source) = value.case.pointer_mut("/frozen/source") {
+                crate::turn_fixtures::current_source(source);
+            }
             value.case
         })
         .collect()
@@ -29,10 +35,7 @@ async fn seeded(path: &Path, case: &Value) -> RuntimeStore {
 }
 
 async fn seed(store: RuntimeStore, case: &Value) -> RuntimeStore {
-    let mut agent_fixture = case["agent"].clone();
-    if agent_fixture["role"] == "lead" {
-        agent_fixture["role"] = json!("orchestrator");
-    }
+    let agent_fixture = case["agent"].clone();
     let agent =
         studio_runtime_store::AgentRecord::from_value(agent_fixture).expect("fixture agent");
     let attempt = case["attempt"].to_string();
@@ -112,15 +115,7 @@ async fn fresh_freeze_matches_python_capture_and_legacy_retry_stays_held() {
             case["frozen"]
         );
         let agent = row(&db, "runtime_agents", "agent");
-        let mut projected = case["frozen"].clone();
-        if let Some(source) = projected.get_mut("source").and_then(Value::as_object_mut) {
-            for field in ["effort", "fastMode", "nativeEffort", "parentId"] {
-                if source.get(field).is_some_and(Value::is_null) {
-                    source.remove(field);
-                }
-            }
-        }
-        assert_eq!(agent["startAttempt"]["claudeInputRequest"], projected);
+        assert_eq!(agent["startAttempt"]["claudeInputRequest"], case["frozen"]);
         assert!(agent.get("claudePreInputRetry").is_none());
         drop(db);
         drop(store);

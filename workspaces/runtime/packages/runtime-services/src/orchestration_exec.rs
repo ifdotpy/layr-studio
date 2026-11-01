@@ -259,7 +259,7 @@ mod tests {
         assert!(matches!(compact, ExecPayload::Compacted(_)));
         assert!(
             serde_json::from_str::<ExecPayload>(
-                r#"{"actor":"lead","receiptDigest":"abc","cwd":"/tmp"}"#
+                r#"{"actor":"lead","receiptDigest":"abc","cwd":"/fixture"}"#
             )
             .is_err()
         );

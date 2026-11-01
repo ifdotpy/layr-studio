@@ -1241,7 +1241,7 @@ mod vault_maintenance_tests {
         let valid = json!({
             "collection":"task",
             "id":"task-1",
-            "value":{"id":"task-1"}
+            "value":{"id":"task-1","agent":"agent-1","created":1,"kind":"command","status":"running","turnId":"turn-1","name":"command","display":{"kind":"command","kindLabel":"command","title":"command","active":true,"indicator":"working","label":"running","inBackgroundList":true,"actions":[]}}
         });
         assert!(validate_entity_envelope(&valid, "task", "task-1", false));
         let tombstone = json!({
@@ -1254,7 +1254,7 @@ mod vault_maintenance_tests {
         let extra_envelope = json!({
             "collection":"task",
             "id":"task-1",
-            "value":{"id":"task-1"},
+            "value":{"id":"task-1","agent":"agent-1","created":1,"kind":"command","status":"running","turnId":"turn-1","name":"command","display":{"kind":"command","kindLabel":"command","title":"command","active":true,"indicator":"working","label":"running","inBackgroundList":true,"actions":[]}},
             "legacyEnvelopeField":true
         });
         assert!(!validate_entity_envelope(
@@ -1267,7 +1267,7 @@ mod vault_maintenance_tests {
         let extra_branch_field = json!({
             "collection":"task",
             "id":"task-1",
-            "value":{"id":"task-1","legacyEntityField":true}
+            "value":{"id":"task-1","agent":"agent-1","created":1,"kind":"command","status":"running","turnId":"turn-1","name":"command","display":{"kind":"command","kindLabel":"command","title":"command","active":true,"indicator":"working","label":"running","inBackgroundList":true,"actions":[]},"legacyEntityField":true}
         });
         assert!(!validate_entity_envelope(
             &extra_branch_field,

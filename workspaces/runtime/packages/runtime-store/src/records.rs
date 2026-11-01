@@ -1036,10 +1036,11 @@ mod plan_typed_tests {
             json!({"id":"a"}),
             json!({"id":"a","rootId":"r","text":"","version":1.5,"updated":null}),
             json!({"id":"a","rootId":"r","text":"","version":1,"updated":null,"native":[]}),
+            json!({"id":"a","rootId":"r","text":"","version":1,"updated":null,"future":[1]}),
         ] {
             assert!(PlanRecord::deserialize(invalid).is_err());
         }
-        let value = json!({"id":"different-from-row","rootId":"r","text":"x","version":1.0,"updated":null,"native":null,"future":[1]});
+        let value = json!({"id":"different-from-row","rootId":"r","text":"x","version":1.0,"updated":null,"native":{"plan":[{"future":[1]}]}});
         let record = PlanRecord::deserialize(value.clone()).unwrap();
         assert_eq!(record.into_value(), value);
     }
@@ -1049,7 +1050,7 @@ mod plan_typed_tests {
         let db = rusqlite::Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE runtime_plans(id TEXT PRIMARY KEY,record TEXT NOT NULL)")
             .unwrap();
-        let value = json!({"id":"payload-id","rootId":"root","text":"x","version":1.0,"updated":null,"future":true});
+        let value = json!({"id":"payload-id","rootId":"root","text":"x","version":1.0,"updated":null,"steps":[{"future":true}]});
         let record = PlanRecord::from_value(value.clone()).unwrap();
         let key = AgentId::from("row-id");
         Table::<PlanRecord>::new(&db).put_at(&key, &record).unwrap();

@@ -62,6 +62,13 @@ pub(crate) fn assert_agent_view_projections(db: &rusqlite::Connection) {
             }
         }
         for (field, value) in legacy["value"].as_object().expect("legacy object") {
+            // fe1e1f249 retired yoloMode from the split agent views; the
+            // compatibility projection can still contain a frozen legacy row.
+            if field == "yoloMode" {
+                assert!(value.is_boolean(), "{id}: legacy yoloMode is boolean");
+                assert!(!union.contains_key(field), "{id}: views omit yoloMode");
+                continue;
+            }
             assert_eq!(
                 union.get(field),
                 Some(value),

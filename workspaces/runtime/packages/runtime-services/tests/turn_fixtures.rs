@@ -4,6 +4,24 @@ use std::{collections::BTreeMap, path::Path};
 use serde::Deserialize;
 use serde_json::Value;
 
+// The current agent contract retired the lead role and yoloMode. Apply this
+// only to newly seeded agents and newly captured sources, never saved inputs.
+pub fn current_agent(value: &mut Value) {
+    let fields = value.as_object_mut().expect("captured agent object");
+    if fields.get("role").and_then(Value::as_str) == Some("lead") {
+        fields.insert("role".into(), Value::String("orchestrator".into()));
+    }
+    fields.remove("yoloMode");
+}
+
+pub fn current_source(value: &mut Value) {
+    current_agent(value);
+    value
+        .as_object_mut()
+        .expect("captured source object")
+        .insert("permissionMode".into(), Value::Null);
+}
+
 /// Small fixture syntax keeps boundary strings and repeated snapshots reviewable.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

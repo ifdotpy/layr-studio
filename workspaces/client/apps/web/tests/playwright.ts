@@ -1201,8 +1201,7 @@ export type MonitorEntityDto =
   import("../src/generated/api.ts").components["schemas"]["MonitorEntityDto"];
 export type PeerTeamEntityDto =
   import("../src/generated/api.ts").components["schemas"]["PeerTeamEntityDto"];
-export type RequestEntityDto =
-  import("../src/generated/api.ts").components["schemas"]["RequestEntityDto"];
+export type TestApproval = import("../src/approvals.ts").Approval;
 
 export type TestAgent = AgentEntityDto;
 
@@ -1219,7 +1218,7 @@ export type TestRuntimeView = {
   projects: TestProject[];
   events: EventEntityDto[];
   peerTeams: PeerTeamEntityDto[];
-  requests: RequestEntityDto[];
+  requests: TestApproval[];
   rules: RuleEntityDto[];
   work: WorkEntityDto[];
   viewScopedAgents?: boolean;
@@ -1245,12 +1244,19 @@ export type TestRuntimeView = {
   >;
   terminals?: import("../src/generated/api.ts").components["schemas"]["TerminalEntityDto"][];
   studioErrors?: import("../src/generated/api.ts").components["schemas"]["StudioError"][];
-  rateLimits: AccountRateLimitsDto | null;
+  rateLimits:
+    | AccountRateLimitsDto
+    | import("../src/generated/api.ts").components["schemas"]["RateLimitView"]
+    | null;
   queuesByAgent?: Record<
     string,
     import("../src/generated/api.ts").components["schemas"]["QueueView"]
   >;
-  rateLimitsByAccount: Record<string, AccountRateLimitsDto>;
+  rateLimitsByAccount: Record<
+    string,
+    | AccountRateLimitsDto
+    | import("../src/generated/api.ts").components["schemas"]["RateLimitView"]
+  >;
   modelsByAccount?: Record<
     string,
     import("../src/generated/api.ts").components["schemas"]["ModelEntityDto"][]
@@ -1453,7 +1459,8 @@ export async function readTestState(
     const details = new Map<string, JsonObject>();
     for (const entry of baselines)
       for (const document of entry.entityChanges?.documents || [])
-        if (document.op === "upsert") details.set(document.id, document.value);
+        if (document.op === "upsert" && isJsonObject(document.value))
+          details.set(document.id, document.value);
     entities.set("agentDetail", details);
   }
   const agents = list("agentSummary").map((summary) => ({
@@ -1929,51 +1936,54 @@ function entityValuesFromSnapshot(
       values.push({
         collection: "rateLimit",
         id: account,
-        value: {
-          observation: value,
-          projection: {
-            buckets: {
-              current: {
-                buckets: [],
-                remaining: null,
-                color: LimitColor.paused,
-                low: false,
+        value:
+          "observation" in value
+            ? value
+            : {
+                observation: value,
+                projection: {
+                  buckets: {
+                    current: {
+                      buckets: [],
+                      remaining: null,
+                      color: LimitColor.paused,
+                      low: false,
+                    },
+                    next: {
+                      buckets: [],
+                      remaining: null,
+                      color: LimitColor.paused,
+                      low: false,
+                    },
+                    validUntil: null,
+                  },
+                  reset: {
+                    present: false,
+                    accountId: null,
+                    availableCount: null,
+                    countLabel: "Count unavailable",
+                    emptyMessage:
+                      "Reset credit details unavailable. Refresh to check.",
+                    credits: [],
+                  },
+                  runway: {
+                    computedAt: 0,
+                    validUntil: null,
+                    current: {
+                      color: RunwayColor.gray,
+                      days: null,
+                      unlimited: false,
+                      windows: [],
+                    },
+                    next: {
+                      color: RunwayColor.gray,
+                      days: null,
+                      unlimited: false,
+                      windows: [],
+                    },
+                  },
+                },
               },
-              next: {
-                buckets: [],
-                remaining: null,
-                color: LimitColor.paused,
-                low: false,
-              },
-              validUntil: null,
-            },
-            reset: {
-              present: false,
-              accountId: null,
-              availableCount: null,
-              countLabel: "Count unavailable",
-              emptyMessage:
-                "Reset credit details unavailable. Refresh to check.",
-              credits: [],
-            },
-            runway: {
-              computedAt: 0,
-              validUntil: null,
-              current: {
-                color: RunwayColor.gray,
-                days: null,
-                unlimited: false,
-                windows: [],
-              },
-              next: {
-                color: RunwayColor.gray,
-                days: null,
-                unlimited: false,
-                windows: [],
-              },
-            },
-          },
-        },
       });
 
   const workspaceSource = {

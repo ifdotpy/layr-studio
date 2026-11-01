@@ -1099,8 +1099,9 @@ export type PermissionRecord = Optional<
 > &
   Partial<Pick<Schema["AgentResponse"], "cwd" | "role">> & {
     sandboxPolicy?: unknown;
-    yoloMode?: Schema["AgentDetailEntityDto"]["yoloMode"] | undefined;
-    claudeOptions?: Schema["AgentDetailEntityDto"]["claudeOptions"] | undefined;
+    permissionMode?:
+      | Schema["AgentDetailEntityDto"]["permissionMode"]
+      | undefined;
   };
 
 export function verifiedPermissions(
@@ -1124,8 +1125,8 @@ export function verifiedPermissions(
     !same(directoryIdentity(record.cwd!), expected)
   )
     throw new Error("Run folder identity changed");
-  if (record.yoloMode !== false || record.role !== "orchestrator")
-    throw new Error("Unsafe usage permissions: expected a non-YOLO lead");
+  if (record.permissionMode !== "default" || record.role !== "orchestrator")
+    throw new Error("Unsafe usage permissions: expected a default-mode lead");
   if (record.approvalPolicy != null && record.approvalPolicy !== "on-request")
     throw new Error("Unsafe usage approval policy");
   const supplied = (
@@ -1160,14 +1161,14 @@ export function verifiedPermissions(
     )
   )
     throw new Error("Unsafe usage permissions write outside the run folder");
-  const permissionMode = record.claudeOptions?.permissionMode ?? "default";
+  const permissionMode = record.permissionMode;
   if (provider === ProviderKind.Claude && permissionMode !== "default")
     throw new Error("Claude usage permissions must use default mode");
   return {
     verified: true,
     verifiedAt: new Date().toISOString(),
     source: "backend agent record; hidden policy fields via sqlite-ro",
-    yoloMode: false,
+    permissionMode,
     directoryIdentity: identity,
     cwd: identity.realpath,
     role: record.role,
@@ -1180,7 +1181,6 @@ export function verifiedPermissions(
     rawSandbox: record.sandbox ?? null,
     rawSandboxPolicy: record.sandboxPolicy ?? null,
     policyDerivedForIdleThread: supplied.length === 0,
-    ...(provider === ProviderKind.Claude ? { permissionMode } : {}),
     policyOwner:
       "runtime-services/src/thread_prepare.rs and claude-bridge/bridge.mjs permissionMode",
   };
@@ -1238,7 +1238,7 @@ r=c.execute('SELECT record FROM runtime_agents WHERE id=? LIMIT 1',(agent,)).fet
 if not r: raise RuntimeError('Missing owned agent')
 a=json.loads(r[0])
 if not a.get('name','').startswith('Studio smoke '+run+' '): raise RuntimeError('Agent is outside the evidence run')
-permissions={k:a.get(k) for k in ['yoloMode','cwd','role','sandbox','sandboxPolicy','approvalPolicy','claudeOptions']}
+permissions={k:a.get(k) for k in ['permissionMode','cwd','role','sandbox','sandboxPolicy','approvalPolicy']}
 result={'permissions':permissions}
 if analytics=='1':
  if a.get('provider')!=${JSON.stringify(ProviderKind.Claude)} or a.get('rootId',agent)!=agent: raise RuntimeError('SQLite analytics fallback is limited to the owned Claude lead')

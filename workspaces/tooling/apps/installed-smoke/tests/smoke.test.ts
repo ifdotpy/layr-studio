@@ -1380,7 +1380,9 @@ test("usage chat stays idle until returned permissions have been verified", asyn
           const record = {
             id: body.id,
             role: "orchestrator" as const,
-            yoloMode: unsafe,
+            permissionMode: unsafe
+              ? ("bypassPermissions" as const)
+              : ("default" as const),
             cwd: smoke.root,
             provider: "codex",
           };
@@ -1433,10 +1435,20 @@ test("permission evidence rejects outside writable roots and accepts the read-on
   try {
     const identity = directoryIdentity(root);
     const record: PermissionRecord = {
-      yoloMode: false,
+      permissionMode: "default",
       cwd: root,
       role: "orchestrator",
     };
+    assert.throws(
+      () =>
+        verifiedPermissions(
+          { ...record, permissionMode: null },
+          "codex",
+          root,
+          identity,
+        ),
+      /permission/i,
+    );
     assert.equal(
       verifiedPermissions(record, "claude", root, identity).permissionMode,
       "default",
@@ -1496,7 +1508,7 @@ test("permission verification rejects object bypass policies, unknown policies a
   const root = path.join(parent, "run");
   fs.mkdirSync(root);
   const record: PermissionRecord = {
-    yoloMode: false,
+    permissionMode: "default",
     cwd: root,
     role: "orchestrator",
   };
@@ -1664,7 +1676,7 @@ test("sqlite-ro recovery reads only the exact owned Claude run", async () => {
 root=pathlib.Path(sys.argv[1]); c=sqlite3.connect(root/'canvas.sqlite3')
 c.execute('CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT)')
 for id,name in [('owned','Studio smoke abcdef12 claude'),('owner','Owner chat')]:
- c.execute('INSERT INTO runtime_agents VALUES(?,?)',(id,json.dumps({'id':id,'rootId':id,'name':name,'provider':'claude','yoloMode':False,'role':'orchestrator','cwd':str(root),'sandbox':{'type':'workspaceWrite','writableRoots':[str(root)]}})))
+ c.execute('INSERT INTO runtime_agents VALUES(?,?)',(id,json.dumps({'id':id,'rootId':id,'name':name,'provider':'claude','permissionMode':'default','role':'orchestrator','cwd':str(root),'sandbox':{'type':'workspaceWrite','writableRoots':[str(root)]}})))
 c.commit();c.close()
 c=sqlite3.connect(root/'analytics.sqlite3')
 c.execute('CREATE TABLE analytics_usage(agent TEXT,at REAL,seq INTEGER,record TEXT)')

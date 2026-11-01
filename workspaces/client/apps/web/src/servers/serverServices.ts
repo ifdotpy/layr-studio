@@ -87,6 +87,7 @@ export function createServerServices(server: StudioServer) {
       cacheStorage: indexedDb(
         `studio-subscription-cache:${transport.owner.id}`,
         "subscriptions",
+        1,
       ),
       databaseSuffix:
         transport.owner.id === "local"

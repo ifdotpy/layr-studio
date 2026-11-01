@@ -28,6 +28,7 @@ pub(crate) struct RawRequest {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ValidatedRequest {
+    #[cfg(test)]
     pub query: Arc<Map<String, Value>>,
     #[cfg(test)]
     pub headers: Arc<Map<String, Value>>,
@@ -223,7 +224,6 @@ impl Registry {
             "ProjectMutationRecord",
             "QueueItem",
             "RequestRecordResponse",
-            "RequestEntityDto",
             "ResourceRef",
             "ResourceProgressEvent",
             "ResourceEntityTransferEvent",
@@ -438,6 +438,7 @@ impl Registry {
             validate_part(part, &mut headers, None)?;
         }
         Ok(ValidatedRequest {
+            #[cfg(test)]
             query: Arc::new(query.as_object().cloned().unwrap_or_default()),
             #[cfg(test)]
             headers: Arc::new(headers.as_object().cloned().unwrap_or_default()),
@@ -2191,7 +2192,7 @@ mod tests {
     fn persisted_record_schemas_validate_full_values_without_number_coercion() {
         let registry = Registry::compile(&[]).expect("stored schemas compile");
         assert!(
-            !registry.validate_stored("AgentRequest", &json!({})),
+            !registry.validate_stored("Approval", &json!({})),
             "HTTP retains its named-schema allowlist"
         );
         assert!(!registry.validate_stored("MissingSchema", &json!({})));

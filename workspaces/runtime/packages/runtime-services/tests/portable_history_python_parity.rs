@@ -181,6 +181,7 @@ fn frozen_archive_writer_and_context_are_read_without_loss() {
 #[tokio::test]
 async fn rust_writer_reads_frozen_state_and_refusal_publishes_nothing() {
     let root = isolated_test_root();
+    // fe1e1f249 migrated the frozen agent's yoloMode to permissionMode.
     let state: FrozenState =
         serde_json::from_str(include_str!("portable_history/fixtures/state.json"))
             .expect("frozen state identity");

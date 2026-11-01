@@ -1535,16 +1535,19 @@ async fn sign_in_shows_one_card_through_the_chat_bridge() {
     let card = value["requestId"].as_str().unwrap().to_owned();
     let saved = store
         .read_async("test", move |tx| {
-            studio_runtime_store::QuestionsWriteRepository::request(tx, &card)
+            Ok::<_, studio_runtime_store::StoreError>(studio_runtime_store::approvals::get(
+                tx,
+                &studio_runtime_schema::approvals::ApprovalId(card),
+            )?)
         })
         .await
         .unwrap()
         .expect("the card is written before the tool answers");
-    let saved: Value = serde_json::from_str(&saved).unwrap();
-    assert_eq!(
-        (saved["method"].as_str(), saved["agent"].as_str()),
-        (Some("browser/open"), lead["id"].as_str())
-    );
+    assert!(matches!(
+        saved.request,
+        studio_runtime_schema::approvals::Request::BrowserOpen(_)
+    ));
+    assert_eq!(Some(saved.agent.as_str()), lead["id"].as_str());
     let again = call_with_ports(
         &store,
         lead,
@@ -1671,8 +1674,7 @@ async fn a_remote_worker_keeps_its_local_tools_and_names_the_driver_for_forwarde
     )
     .await;
     assert_eq!(local["success"], true, "{local}");
-    // The task board belongs to the home server; without a driver the call
-    // names its dependency and writes nothing.
+    // The home server has no task receiver, so refuse without writing an outbox row.
     let forwarded = call_named_tool(
         &store,
         remote,
@@ -1685,12 +1687,9 @@ async fn a_remote_worker_keeps_its_local_tools_and_names_the_driver_for_forwarde
     )
     .await;
     assert_eq!(forwarded["success"], false, "{forwarded}");
-    assert!(
-        parsed(&forwarded)
-            .as_str()
-            .unwrap()
-            .contains("multi-server/worker-call"),
-        "{forwarded}"
+    assert_eq!(
+        parsed(&forwarded),
+        "The home server does not support this action"
     );
     let outbox: i64 = store
         .test_read_transaction(|tx| {

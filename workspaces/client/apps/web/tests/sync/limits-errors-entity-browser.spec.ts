@@ -1,10 +1,7 @@
+import { projectedLimits } from "../../src/usage/accountLimits.fixture.ts";
 import { StudioErrorLevel } from "../../src/generated/api.ts";
 import type { FixtureResourceChange } from "./helpers.ts";
-import type {
-  AccountRateLimitsDto,
-  AgentEntityDto,
-  SyncEntity,
-} from "../playwright.ts";
+import type { AgentEntityDto, SyncEntity } from "../playwright.ts";
 import type { components } from "../../src/generated/api.ts";
 import { fixtureResources } from "./helpers.ts";
 type PendingEntity = SyncEntity extends infer Entity
@@ -25,6 +22,7 @@ import {
   entityPullFixture,
   handleEntitySyncFixtureRequest,
   protocol3SseEvent,
+  syncSessionSse,
   test,
   expect,
 } from "../playwright.ts";
@@ -51,10 +49,12 @@ test("limits and Studio errors update from entities with no idle HTTP refresh", 
     inFlight: false,
     canSend: true,
   } satisfies AgentEntityDto;
-  const limits = (usedPercent: number, at: number): AccountRateLimitsDto => ({
-    accountKey: "default",
-    at,
-    data: {
+  const limits = (
+    usedPercent: number,
+    at: number,
+  ): components["schemas"]["RateLimitView"] => {
+    const view = projectedLimits("default", at, null);
+    view.observation.data = {
       rateLimits: {
         limitId: "codex",
         primary: {
@@ -63,8 +63,29 @@ test("limits and Studio errors update from entities with no idle HTTP refresh", 
           resetsAt: 4_000_000_000,
         },
       },
-    },
-  });
+    };
+    view.projection.buckets.current.remaining = 100 - usedPercent;
+    view.projection.buckets.current.buckets = [
+      {
+        id: "codex",
+        name: "Codex",
+        shortName: "Codex",
+        planType: null,
+        creditsLabel: null,
+        windows: [
+          {
+            label: "5h",
+            remaining: 100 - usedPercent,
+            reset: 4_000_000_000,
+            color: view.projection.buckets.current.color,
+            expired: false,
+            warning: false,
+          },
+        ],
+      },
+    ];
+    return view;
+  };
   const snapshot = {
     stateDir: "entity-fixture",
     chats: [],
@@ -128,6 +149,23 @@ test("limits and Studio errors update from entities with no idle HTTP refresh", 
         });
         res.end(JSON.stringify(value));
       };
+      if (url.pathname === "/api/sync/subscriptions" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => {
+          body += chunk;
+        });
+        req.on("end", () => {
+          const update: unknown = JSON.parse(body);
+          assert.ok(update && typeof update === "object" && "gen" in update);
+          assert.equal(typeof update.gen, "number");
+          for (const stream of streams)
+            stream.write(
+              protocol3SseEvent("subscriptions", { gen: update.gen }),
+            );
+          json({ gen: update.gen });
+        });
+        return;
+      }
       if (url.pathname === "/api/sync/stream") {
         const resources = fixtureResources(url.searchParams.get("resources"));
         res.writeHead(200, {
@@ -136,15 +174,16 @@ test("limits and Studio errors update from entities with no idle HTTP refresh", 
         });
         res.write(
           apiSchemaHandshakeSse(
-            protocol3SseEvent("resources", {
-              protocol: 4,
-              workspaceId,
-              epoch: "entity-fixture",
-              revision: through,
-              reason: "initial",
-              resources,
-              resourceVersions: [],
-            }),
+            syncSessionSse("fixture-session", workspaceId) +
+              protocol3SseEvent("resources", {
+                protocol: 4,
+                workspaceId,
+                epoch: "entity-fixture",
+                revision: through,
+                reason: "initial",
+                resources,
+                resourceVersions: [],
+              }),
           ),
         );
         streams.add(res);
@@ -202,6 +241,8 @@ test("limits and Studio errors update from entities with no idle HTTP refresh", 
             {
               resource: { kind: "state" },
               revision: through,
+              cursor: { workspaceId, seq: through },
+              replyKind: "delta",
               entityChanges: {
                 after: from,
                 through,
