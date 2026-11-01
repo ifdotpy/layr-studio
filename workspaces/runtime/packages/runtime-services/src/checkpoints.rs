@@ -713,7 +713,7 @@ pub fn ensure_workspace_agent_available(
         return Err(CheckpointsError::DeletedAgent);
     }
     if agent.workspace_mode == Some(studio_runtime_schema::records::WorkspaceMode::Image)
-        || agent.extra.get("imageWorkspace") == Some(&Value::Bool(true))
+        || agent.image_workspace.value() == Some(&true)
     {
         return Err(CheckpointsError::ExecutionWorkspace);
     }
@@ -1070,6 +1070,19 @@ mod tests {
     use super::{CheckpointsError, ensure_workspace_idle};
     use serde_json::json;
     use studio_runtime_store::{StoredCheckpointObject, WorkspaceSnapshot};
+
+    #[test]
+    fn image_workspace_blocks_checkpoint_operations() {
+        let raw = r#"{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"imageWorkspace":true}"#;
+        let image: studio_runtime_store::AgentRecord = serde_json::from_str(raw).unwrap();
+        assert!(matches!(
+            super::ensure_workspace_agent_available(&image),
+            Err(CheckpointsError::ExecutionWorkspace)
+        ));
+        let ordinary: studio_runtime_store::AgentRecord =
+            serde_json::from_str(&raw.replace("true", "false")).unwrap();
+        assert!(super::ensure_workspace_agent_available(&ordinary).is_ok());
+    }
 
     #[test]
     fn capture_reservation_allows_its_owner_but_keeps_other_activity_blocked() -> std::io::Result<()>

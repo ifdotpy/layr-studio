@@ -398,6 +398,11 @@ pub struct AgentRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
+    pub image_workspace: studio_runtime_schema::queue_command::Field<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
     pub prompt: studio_runtime_schema::queue_command::Field<String>,
     #[serde(
         default,
@@ -869,6 +874,7 @@ impl AgentRecord {
             max_agents: Default::default(),
             agent_mode_supported: None,
             layr_ready: None,
+            image_workspace: Default::default(),
             prompt: Default::default(),
             profile_id: Default::default(),
             profile_instructions: Default::default(),
@@ -2940,6 +2946,15 @@ mod tests {
         assert_eq!(decoded.value()["error"]["data"]["id"], 1);
         let via_value = AgentRecord::from_value(serde_json::from_str(raw).unwrap()).unwrap();
         assert_eq!(via_value.value()["error"]["data"]["id"], 1);
+    }
+
+    #[test]
+    fn agent_image_workspace_is_boolean_or_null() {
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"imageWorkspace":42}"#;
+        assert!(serde_json::from_str::<AgentRecord>(raw).is_err());
+        let null = raw.replace("42", "null");
+        let agent: AgentRecord = serde_json::from_str(&null).unwrap();
+        assert_eq!(agent.value().get("imageWorkspace"), Some(&Value::Null));
     }
 
     #[test]
