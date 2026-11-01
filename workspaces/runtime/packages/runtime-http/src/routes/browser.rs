@@ -389,3 +389,21 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod strict_forward_tests {
+    #[test]
+    fn forwarding_input_is_closed_and_bounded() {
+        let valid = r#"{"server":"s","bridgeId":"0123456789abcdef0123456789abcdef","token":"0123456789abcdef","host":"localhost","port":1024,"path":"/","expiresAt":1}"#;
+        assert!(serde_json::from_str::<super::ForwardInput>(valid).is_ok());
+        assert!(
+            serde_json::from_str::<super::ForwardInput>(&valid.replace("1024", "1023")).is_err()
+        );
+        assert!(
+            serde_json::from_str::<super::ForwardInput>(
+                &valid.replace(r#""expiresAt""#, r#""extra":1,"expiresAt""#)
+            )
+            .is_err()
+        );
+    }
+}

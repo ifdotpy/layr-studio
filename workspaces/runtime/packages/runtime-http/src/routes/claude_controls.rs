@@ -105,11 +105,43 @@ async fn repair_report(
     Ok(Json(evidence))
 }
 
+fn nonempty_text<'de, D: serde::Deserializer<'de>, const MAX: usize>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    let value = <studio_runtime_schema::bounded_text::BoundedText<1, MAX> as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(value.as_str().to_owned())
+}
+fn command_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    nonempty_text::<D, { usize::MAX }>(d)
+}
+fn backup_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    nonempty_text::<D, 1024>(d)
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SessionCommand {
+    #[serde(rename = "action")]
+    _action: crate::generated::ClaudeSessionCommandRequestAction,
+    id: String,
+    command: String,
+    #[serde(deserialize_with = "command_id")]
+    request_id: String,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BackupsRequest {
+    #[serde(deserialize_with = "backup_id")]
+    id: String,
+    release: bool,
+    #[serde(deserialize_with = "backup_id")]
+    request_id: String,
+}
+
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
 enum SessionRequest {
     Settings(ClaudeControlCommand),
-    Command(crate::generated::ClaudeSessionCommandRequest),
+    Command(SessionCommand),
     Read(ClaudeSessionRead),
 }
 
@@ -119,6 +151,30 @@ mod session_request_tests {
 
     #[test]
     fn session_request_rejects_extra_fields_and_unbounded_stop_identity() {
+        assert!(
+            serde_json::from_str::<SessionRequest>(
+                r#"{"id":"agent","action":"command","command":"/help","request_id":"id"}"#
+            )
+            .is_ok()
+        );
+        assert!(
+            serde_json::from_str::<SessionRequest>(
+                r#"{"id":"agent","action":"command","command":"/help","request_id":""}"#
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<super::BackupsRequest>(
+                r#"{"id":"a","release":true,"request_id":"r"}"#
+            )
+            .is_ok()
+        );
+        assert!(
+            serde_json::from_str::<super::BackupsRequest>(
+                r#"{"id":"a","release":true,"request_id":"","extra":1}"#
+            )
+            .is_err()
+        );
         for body in [
             r#"{"id":"agent","action":"state","extra":true}"#.to_owned(),
             r#"{"id":"agent","action":"command","command":"/help","request_id":"id","extra":true}"#
@@ -219,7 +275,7 @@ async fn session(
 
 async fn file_backups(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<crate::generated::ClaudeFileBackupsRequest>,
+    ApiJson(body): ApiJson<BackupsRequest>,
 ) -> Result<Json<crate::generated::ClaudeFileBackupsResponse>, ApiError> {
     tokio::spawn(async move {
         use studio_runtime_services::claude_controls::service::ControlScope;
@@ -385,10 +441,7 @@ async fn load_agent(
     loaded.ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Unknown managed agent"))
 }
 
-async fn command(
-    state: HttpState,
-    body: crate::generated::ClaudeSessionCommandRequest,
-) -> Result<Json<Value>, ApiError> {
+async fn command(state: HttpState, body: SessionCommand) -> Result<Json<Value>, ApiError> {
     let command = studio_runtime_services::claude_controls::service::native_command(&body.command)
         .map_err(|_| {
             ApiError::new(
@@ -396,12 +449,6 @@ async fn command(
                 "Supply one explicit Claude command",
             )
         })?;
-    if body.request_id.is_empty() {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "Supply a command request identity",
-        ));
-    }
     let message = crate::generated::ManagedMessageBody {
         id: body.request_id,
         room: body.id,

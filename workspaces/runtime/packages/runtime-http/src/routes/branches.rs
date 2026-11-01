@@ -145,9 +145,24 @@ fn branch_draft_request(
     })
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BranchRequest {
+    agent: String,
+    message_id: String,
+    id: String,
+    #[serde(default, deserialize_with = "present_before")]
+    before: Option<bool>,
+}
+fn present_before<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<bool>, D::Error> {
+    bool::deserialize(deserializer).map(Some)
+}
+
 async fn branch(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<crate::generated::BranchRequest>,
+    ApiJson(body): ApiJson<BranchRequest>,
 ) -> Result<Json<crate::generated::BranchResponse>, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let port = state.account_session.clone().ok_or_else(unavailable)?;
@@ -2404,5 +2419,24 @@ mod tests {
             .shutdown()
             .await
             .expect("catalog shutdown");
+    }
+}
+
+#[cfg(test)]
+mod branch_ingress_tests {
+    #[test]
+    fn branch_is_closed() {
+        assert!(
+            serde_json::from_str::<super::BranchRequest>(
+                r#"{"agent":"a","message_id":"m","id":"i"}"#
+            )
+            .is_ok()
+        );
+        assert!(
+            serde_json::from_str::<super::BranchRequest>(
+                r#"{"agent":"a","message_id":"m","id":"i","extra":1}"#
+            )
+            .is_err()
+        );
     }
 }

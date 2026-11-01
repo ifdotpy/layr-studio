@@ -25,21 +25,34 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
+/// Maximum attachment owner and ID length in Unicode code points.
+const ASSET_ID_MAX_CHARS: usize = 200;
+/// Maximum attachment name length in Unicode code points.
+const ASSET_NAME_MAX_CHARS: usize = 255;
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AssetUpload {
+    agent: studio_runtime_schema::bounded_text::BoundedText<1, ASSET_ID_MAX_CHARS>,
+    name: studio_runtime_schema::bounded_text::BoundedText<1, ASSET_NAME_MAX_CHARS>,
+    base64: Option<String>,
+    data: Option<String>,
+    id: Option<studio_runtime_schema::bounded_text::BoundedText<1, ASSET_ID_MAX_CHARS>>,
+}
+
 async fn upload_asset(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<crate::generated::AssetUpload>,
+    ApiJson(body): ApiJson<AssetUpload>,
 ) -> Result<Json<crate::generated::AssetRecord>, ApiError> {
     let encoded = body
         .base64
-        .flatten()
-        .or(body.data.flatten())
+        .or(body.data)
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid file data"))?;
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let asset = payload_store::upload(
         &store,
-        &body.agent,
-        &body.name,
-        body.id.flatten().as_deref(),
+        body.agent.as_str(),
+        body.name.as_str(),
+        body.id.as_ref().map(|id| id.as_str()),
         &encoded,
     )
     .await
@@ -472,5 +485,18 @@ mod typed_query_tests {
         assert!(!accepts::<super::FileQuery>(
             "agent=a&path=b&asset=c&unknown=x"
         ));
+    }
+}
+
+#[cfg(test)]
+mod asset_ingress_tests {
+    #[test]
+    fn asset_is_closed_and_bounded() {
+        assert!(serde_json::from_str::<super::AssetUpload>(r#"{"agent":"a","name":"n"}"#).is_ok());
+        assert!(serde_json::from_str::<super::AssetUpload>(r#"{"agent":"","name":"n"}"#).is_err());
+        assert!(
+            serde_json::from_str::<super::AssetUpload>(r#"{"agent":"a","name":"n","extra":1}"#)
+                .is_err()
+        );
     }
 }

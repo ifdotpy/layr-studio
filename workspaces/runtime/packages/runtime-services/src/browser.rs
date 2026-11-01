@@ -116,18 +116,68 @@ pub trait PairedExchange: Send + Sync {
 }
 
 #[derive(Clone, PartialEq, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ForwardInput {
+    #[serde(deserialize_with = "forward_server")]
     pub server: String,
+    #[serde(deserialize_with = "forward_bridge")]
     pub bridge_id: String,
+    #[serde(deserialize_with = "forward_token")]
     pub token: String,
+    #[serde(deserialize_with = "forward_host")]
     pub host: String,
+    #[serde(deserialize_with = "forward_port")]
     pub port: u16,
+    #[serde(deserialize_with = "forward_path")]
     pub path: String,
     pub expires_at: f64,
     #[cfg(test)]
     #[serde(skip)]
     observe_half_close: bool,
+}
+
+fn forward_text<'de, D: serde::Deserializer<'de>, const MIN: usize, const MAX: usize>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    let value = <studio_runtime_schema::bounded_text::BoundedText<MIN, MAX> as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(value.as_str().to_owned())
+}
+fn forward_server<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    forward_text::<D, 1, 200>(deserializer)
+}
+fn forward_token<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    forward_text::<D, 16, 200>(deserializer)
+}
+fn forward_path<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    forward_text::<D, 1, 2048>(deserializer)
+}
+fn forward_bridge<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+    if value.len() == 32
+        && value
+            .bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+    {
+        Ok(value)
+    } else {
+        Err(serde::de::Error::custom("invalid bridge identity"))
+    }
+}
+fn forward_host<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+    if matches!(value.as_str(), "127.0.0.1" | "localhost" | "::1") {
+        Ok(value)
+    } else {
+        Err(serde::de::Error::custom("invalid host"))
+    }
+}
+fn forward_port<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u16, D::Error> {
+    let value = <u16 as serde::Deserialize>::deserialize(deserializer)?;
+    if value >= 1024 {
+        Ok(value)
+    } else {
+        Err(serde::de::Error::custom("invalid port"))
+    }
 }
 
 impl ForwardInput {
