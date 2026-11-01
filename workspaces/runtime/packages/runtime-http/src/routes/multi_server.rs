@@ -164,7 +164,7 @@ fn semantic_snapshot(
 ) -> Result<Vec<u8>, serde_json::Error> {
     let mut semantic = snapshot.clone();
     for record in semantic.clients.iter_mut().chain(&mut semantic.servers) {
-        record.last_access = studio_runtime_schema::queue_command::Field::Missing;
+        record.last_access = None;
         record.last_seen = studio_runtime_schema::queue_command::Field::Missing;
     }
     serde_json::to_vec(&semantic)
@@ -1170,7 +1170,7 @@ mod tests {
         };
         let before: AccessSnapshot = serde_json::from_str(r#"{"protocol":1,"identity":{"serverId":"local","label":"Local","origin":null,"publicKey":"key","tailscaleUser":null},"clients":[{"id":"peer","clientId":"peer","kind":"server","label":"Peer","created":1,"publicKey":"key","status":"paired","lastAccess":10,"reachability":"reachable"}],"servers":[{"id":"peer","clientId":"peer","kind":"server","label":"Peer","created":1,"publicKey":"key","status":"paired","lastSeen":10,"reachability":"reachable"}],"invites":[],"settings":{"autoPair":true}}"#).unwrap();
         let mut after = before.clone();
-        after.clients[0].last_access = Field::Value(20.into());
+        after.clients[0].last_access = Some(20.into());
         after.servers[0].last_seen = Field::Value(20.into());
         assert_eq!(
             semantic_snapshot(&before).unwrap(),

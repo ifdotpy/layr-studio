@@ -114,11 +114,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         ),
         (
             "AccessClient",
-            "studio_runtime_schema::multi_server_access::PersistedAccessClient",
+            "studio_runtime_schema::multi_server_access::PublicAccessClient",
         ),
         (
             "DiscoveredServer",
-            "studio_runtime_schema::multi_server_access::PersistedAccessClient",
+            "studio_runtime_schema::multi_server_access::PublicAccessClient",
         ),
         (
             "InviteSummary",
@@ -127,6 +127,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         (
             "AccessInvitation",
             "studio_runtime_schema::multi_server_access::AccessInvitation",
+        ),
+        (
+            "AccessInvitationRequest",
+            "studio_runtime_schema::multi_server_ingress::AccessInvitation",
         ),
         (
             "InvitationResponse",

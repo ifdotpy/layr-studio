@@ -882,7 +882,7 @@
             "type": "string"
           },
           "invitation": {
-            "$ref": "#/components/schemas/AccessInvitation"
+            "$ref": "#/components/schemas/AccessInvitationRequest"
           },
           "requestId": {
             "maxLength": 128,
@@ -968,6 +968,7 @@
       },
       "AccessClient": {
         "additionalProperties": false,
+        "description": "Public projection of a stored client. Missing required fields become null.",
         "properties": {
           "alias": {
             "type": [
@@ -987,7 +988,6 @@
             "type": "string"
           },
           "created": {
-            "description": "Creation time in Unix seconds, including fractional seconds.",
             "minimum": 0,
             "type": "number"
           },
@@ -1005,14 +1005,12 @@
             "type": "string"
           },
           "lastAccess": {
-            "description": "Last access in Unix seconds, including fractional seconds.",
             "type": [
               "number",
               "null"
             ]
           },
           "lastSeen": {
-            "description": "Discovery time in Unix seconds, including fractional seconds.",
             "type": [
               "number",
               "null"
@@ -1045,7 +1043,6 @@
             ]
           },
           "revoked": {
-            "description": "Revocation time in Unix seconds, including fractional seconds.",
             "type": [
               "number",
               "null"
@@ -1074,7 +1071,12 @@
           "label",
           "created",
           "publicKey",
-          "status"
+          "status",
+          "serverId",
+          "origin",
+          "tailscaleUser",
+          "lastAccess",
+          "revoked"
         ],
         "type": "object"
       },
@@ -1153,6 +1155,65 @@
           "tailscaleUser",
           "expires",
           "token"
+        ],
+        "type": "object"
+      },
+      "AccessInvitationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expires": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "inviteId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "protocol": {
+            "maximum": 1,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "publicKey": {
+            "maxLength": 4096,
+            "type": "string"
+          },
+          "serverId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "tailscaleUser": {
+            "maxLength": 254,
+            "minLength": 1,
+            "type": "string"
+          },
+          "token": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol",
+          "inviteId",
+          "token",
+          "serverId",
+          "label",
+          "origin",
+          "publicKey",
+          "tailscaleUser",
+          "expires"
         ],
         "type": "object"
       },
@@ -34480,6 +34541,10 @@
         "title": "OrganizationBody",
         "type": "object"
       },
+      "Origin": {
+        "maxLength": 512,
+        "type": "string"
+      },
       "PairRequest": {
         "additionalProperties": false,
         "properties": {
@@ -40181,6 +40246,10 @@
         ],
         "title": "ProviderVersions",
         "type": "object"
+      },
+      "PublicAccessClient": {
+        "$ref": "#/components/schemas/AccessClient",
+        "description": "Public projection of a stored client, with missing required fields normalized to null."
       },
       "PullRequest": {
         "additionalProperties": false,

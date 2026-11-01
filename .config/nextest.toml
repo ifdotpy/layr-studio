@@ -87,6 +87,8 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & test(=transcript_seq_backfill::tests::copy_check_does_not_admit_a_writer_or_retire_copies)) |
     (package(=studio-runtime-services) & kind(lib) & test(=transcript_seq_backfill::tests::fresh_store_keeps_transcript_copies)) |
     (package(=studio-runtime-store) & test(=online_migration::driver_stops_resumes_and_reports_progress)) |
+    (package(=studio-runtime-schema) & kind(lib) & test(=multi_server_ingress::tests::accept_invite_expiry_schema_matches_ingress)) |
+    (package(=studio-runtime-http) & kind(test) & binary(=integration) & test(=multi_server_incoming::access_snapshot_projects_legacy_missing_fields_as_null)) |
     (package(=studio-runtime-services) & kind(lib) & test(=multi_server::tests::invitation_uses_injected_owner_identity_and_exact_retry_is_stable)) |
     (package(=studio-runtime-services) & kind(test) & binary(=integration) & test(=multi_server_corpus::real_invite_snapshot_pair_and_revoke)) |
     (package(=studio-runtime-http) & kind(test) & binary(=integration) & test(=multi_server_incoming::paired_fake_servers_create_and_recover_the_same_invitation)) |
@@ -471,6 +473,8 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & test(=transcript_seq_backfill::tests::copy_check_does_not_admit_a_writer_or_retire_copies)) |
     (package(=studio-runtime-services) & kind(lib) & test(=transcript_seq_backfill::tests::fresh_store_keeps_transcript_copies)) |
     (package(=studio-runtime-store) & test(=online_migration::driver_stops_resumes_and_reports_progress)) |
+    (package(=studio-runtime-schema) & kind(lib) & test(=multi_server_ingress::tests::accept_invite_expiry_schema_matches_ingress)) |
+    (package(=studio-runtime-http) & kind(test) & binary(=integration) & test(=multi_server_incoming::access_snapshot_projects_legacy_missing_fields_as_null)) |
     (package(=studio-runtime-services) & kind(lib) & test(=multi_server::tests::invitation_uses_injected_owner_identity_and_exact_retry_is_stable)) |
     (package(=studio-runtime-services) & kind(test) & binary(=integration) & test(=multi_server_corpus::real_invite_snapshot_pair_and_revoke)) |
     (package(=studio-runtime-http) & kind(test) & binary(=integration) & test(=multi_server_incoming::paired_fake_servers_create_and_recover_the_same_invitation)) |

@@ -235,11 +235,14 @@ pub(crate) fn refresh_openapi(openapi: &mut serde_json::Value) {
         .into_generator();
     generator.subschema_for::<AccessSnapshot>();
     generator.subschema_for::<InvitationResponse>();
+    generator.subschema_for::<crate::multi_server_ingress::AccessInvitation>();
     for (name, schema) in generator.take_definitions(true) {
         openapi["components"]["schemas"][name] = schema;
     }
     openapi["components"]["schemas"]["DiscoveredServer"] =
         serde_json::json!({"$ref":"#/components/schemas/AccessClient"});
+    openapi["components"]["schemas"]["AcceptInvite"]["properties"]["invitation"] =
+        serde_json::json!({"$ref":"#/components/schemas/AccessInvitationRequest"});
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
@@ -278,17 +281,100 @@ fn default_auto_update() -> bool {
 pub struct AccessSnapshot {
     pub protocol: AccessProtocolVersion,
     pub identity: AccessIdentity,
-    pub clients: Vec<PersistedAccessClient>,
-    pub servers: Vec<PersistedAccessClient>,
+    pub clients: Vec<PublicAccessClient>,
+    pub servers: Vec<PublicAccessClient>,
     pub invites: Vec<InviteSummary>,
     pub settings: AccessSettings,
     #[serde(default)]
     pub identity_alerts: Vec<IdentityAlert>,
 }
 
+/// Public projection of a stored client. Missing required fields become null.
 #[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[schemars(rename = "AccessClient")]
+pub struct PublicAccessClient {
+    pub id: BoundedText<1, CLIENT_ID_MAX_CHARS>,
+    pub client_id: BoundedText<1, CLIENT_ID_MAX_CHARS>,
+    pub kind: AccessClientKind,
+    pub label: BoundedText<1, CLIENT_LABEL_MAX_CHARS>,
+    pub created: NonNegativeNumber,
+    pub public_key: BoundedText<0, CLIENT_PUBLIC_KEY_MAX_CHARS>,
+    pub status: AccessClientStatus,
+    #[serde(deserialize_with = "required_nullable")]
+    #[schemars(with = "RequiredNullableString")]
+    pub server_id: Option<String>,
+    #[serde(deserialize_with = "required_nullable")]
+    #[schemars(with = "RequiredNullableString")]
+    pub origin: Option<String>,
+    #[serde(deserialize_with = "required_nullable")]
+    #[schemars(with = "RequiredNullableString")]
+    pub tailscale_user: Option<String>,
+    #[serde(deserialize_with = "required_nullable_number")]
+    #[schemars(with = "RequiredNullableNumber")]
+    pub last_access: Option<serde_json::Number>,
+    #[serde(deserialize_with = "required_nullable_number")]
+    #[schemars(with = "RequiredNullableNumber")]
+    pub revoked: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<serde_json::Number>")]
+    pub last_seen: Field<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<bool>")]
+    pub auto_pair: Field<bool>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<Reachability>")]
+    pub reachability: Field<Reachability>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub alias: Field<crate::multi_server_ingress::ServerAlias>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub replaced_by: Field<String>,
+}
+fn required_nullable_number<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<serde_json::Number>, D::Error> {
+    Option::<serde_json::Number>::deserialize(d)
+}
+struct RequiredNullableNumber;
+impl schemars::JsonSchema for RequiredNullableNumber {
+    fn inline_schema() -> bool {
+        true
+    }
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "RequiredNullableNumber".into()
+    }
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({"type":["number", "null"]})
+    }
+}
+impl From<PersistedAccessClient> for PublicAccessClient {
+    fn from(c: PersistedAccessClient) -> Self {
+        Self {
+            id: c.id,
+            client_id: c.client_id,
+            kind: c.kind,
+            label: c.label,
+            created: c.created,
+            public_key: c.public_key,
+            status: c.status,
+            server_id: c.server_id.value().cloned(),
+            origin: c.origin.value().cloned(),
+            tailscale_user: c.tailscale_user.value().cloned(),
+            last_access: c.last_access.value().cloned(),
+            revoked: c.revoked.value().cloned(),
+            last_seen: c.last_seen,
+            auto_pair: c.auto_pair,
+            reachability: c.reachability,
+            alias: c.alias,
+            replaced_by: c.replaced_by,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PersistedAccessClient {
     pub id: BoundedText<1, CLIENT_ID_MAX_CHARS>,
     pub client_id: BoundedText<1, CLIENT_ID_MAX_CHARS>,

@@ -2604,7 +2604,7 @@ export interface components {
        * @enum {string}
        */
       action: "accept_invite";
-      invitation: components["schemas"]["AccessInvitation"];
+      invitation: components["schemas"]["AccessInvitationRequest"];
       /** Requestid */
       requestId: string;
     };
@@ -2643,28 +2643,25 @@ export interface components {
       /** Sequence */
       sequence: number;
     };
+    /** @description Public projection of a stored client. Missing required fields become null. */
     AccessClient: {
       alias?: string | null | undefined;
       autoPair?: boolean | null | undefined;
       clientId: string;
-      /** @description Creation time in Unix seconds, including fractional seconds. */
       created: number;
       id: string;
       kind: components["schemas"]["AccessClientKind"];
       label: string;
-      /** @description Last access in Unix seconds, including fractional seconds. */
-      lastAccess?: number | null | undefined;
-      /** @description Discovery time in Unix seconds, including fractional seconds. */
+      lastAccess: number | null;
       lastSeen?: number | null | undefined;
-      origin?: string | null | undefined;
+      origin: string | null;
       publicKey: string;
       reachability?: components["schemas"]["Reachability"] | null | undefined;
       replacedBy?: string | null | undefined;
-      /** @description Revocation time in Unix seconds, including fractional seconds. */
-      revoked?: number | null | undefined;
-      serverId?: string | null | undefined;
+      revoked: number | null;
+      serverId: string | null;
       status: components["schemas"]["AccessClientStatus"];
-      tailscaleUser?: string | null | undefined;
+      tailscaleUser: string | null;
     };
     /** @enum {string} */
     AccessClientKind: "ui" | "server";
@@ -2678,6 +2675,17 @@ export interface components {
       origin: string;
       /** @constant */
       protocol: 1;
+      publicKey: string;
+      serverId: string;
+      tailscaleUser: string;
+      token: string;
+    };
+    AccessInvitationRequest: {
+      expires: number;
+      inviteId: string;
+      label: string;
+      origin: components["schemas"]["Origin"];
+      protocol: number;
       publicKey: string;
       serverId: string;
       tailscaleUser: string;
@@ -16379,6 +16387,7 @@ export interface components {
       /** @default null */
       read_state?: components["schemas"]["ReadStateBody"] | null | undefined;
     };
+    Origin: string;
     /** PairRequest */
     PairRequest: {
       /** Inviteid */
@@ -18522,6 +18531,8 @@ export interface components {
       /** Version */
       version: string;
     };
+    /** @description Public projection of a stored client, with missing required fields normalized to null. */
+    PublicAccessClient: components["schemas"]["AccessClient"];
     /** PullRequest */
     PullRequest: {
       /**

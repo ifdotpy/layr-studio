@@ -112,8 +112,8 @@ fn snapshot_in_transaction(
     Ok(AccessSnapshot {
         protocol: AccessProtocolVersion::current(),
         identity: identity.clone(),
-        clients,
-        servers,
+        clients: clients.into_iter().map(Into::into).collect(),
+        servers: servers.into_iter().map(Into::into).collect(),
         invites,
         settings: AccessSettings {
             auto_pair,
@@ -128,29 +128,16 @@ fn snapshot_in_transaction(
 /// discovery-merged server list without unpaired or revoked rows.
 pub fn paired_servers(
     tx: &rusqlite::Transaction<'_>,
-) -> Result<Vec<PersistedAccessClient>, StoreError> {
+) -> Result<Vec<studio_runtime_schema::multi_server_access::PublicAccessClient>, StoreError> {
     // Python `MultiServerService._public` names every public field, null when absent.
     let clients = project_records(tx, "runtime_access_clients")?;
     let discovered = project_records(tx, "runtime_access_discovered")?;
     Ok(server_list(&clients, discovered)
         .into_iter()
         .filter(|server| server.status == AccessClientStatus::Paired)
-        .map(|mut server| {
-            if server.server_id.is_missing() {
-                server.server_id = Field::Null;
-            }
-            if server.origin.is_missing() {
-                server.origin = Field::Null;
-            }
-            if server.tailscale_user.is_missing() {
-                server.tailscale_user = Field::Null;
-            }
-            if server.last_access.is_missing() {
-                server.last_access = Field::Null;
-            }
-            if server.revoked.is_missing() {
-                server.revoked = Field::Null;
-            }
+        .map(|server| {
+            let mut server =
+                studio_runtime_schema::multi_server_access::PublicAccessClient::from(server);
             if server.alias.is_missing() {
                 server.alias = Field::Null;
             }
