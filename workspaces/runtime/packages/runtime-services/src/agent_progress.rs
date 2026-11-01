@@ -228,7 +228,7 @@ mod tests {
     fn stored_review_boundary_progress_refuses_present_invalid_updated() {
         let connection = Connection::open_in_memory().expect("fixture database");
         connection
-            .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL)")
+            .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL)")
             .expect("fixture work table");
         for updated in [json!("bad"), json!(null), json!(false), json!([])] {
             connection.execute("INSERT OR REPLACE INTO runtime_work VALUES('assigned',?1)",[json!({"id":"assigned","status":"running","owner":"worker","dependencies":[],"updated":updated}).to_string()]).expect("corrupt timestamp fixture");
@@ -245,7 +245,7 @@ mod tests {
     fn stored_work_boundary_progress_refuses_missing_status_instead_of_omitting_assignment() {
         let connection = Connection::open_in_memory().expect("fixture database");
         connection
-            .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL)")
+            .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL)")
             .expect("fixture work table");
         for record in [
             json!({"id":"assigned","owner":"worker"}),

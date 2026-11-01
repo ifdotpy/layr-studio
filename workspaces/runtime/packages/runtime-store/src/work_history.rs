@@ -54,7 +54,7 @@ pub(crate) fn prepare_schema(tx: &Transaction<'_>) -> StoreResult<()> {
 
 /// Replace the child rows of one work record with its arrays. Unchanged entries keep
 /// their row, so they get no new change number.
-pub(crate) fn reconcile(connection: &Connection, id: &str, record: &Value) -> StoreResult<()> {
+pub fn reconcile(connection: &Connection, id: &str, record: &Value) -> StoreResult<()> {
     for kind in WorkHistoryKind::ALL {
         let table = table_of(kind);
         let entries: &[Value] = record
@@ -284,12 +284,12 @@ mod tests {
     fn child_rows_have_durable_entries_for_the_stream() {
         let db = crate::fresh_state::test_canvas();
         WorkItemsRepository::put_work(&db, "w", &work(json!([{"id":"r0"}]), json!([]))).unwrap();
-        match changes_since(&db, "runtime_work_results", None).unwrap() {
-            crate::durable_seq::DurableChanges::Snapshot { rows, .. } => {
-                assert_eq!(rows.len(), 1);
-                assert_eq!(rows[0].id, "w:0");
-            }
-            other => panic!("expected snapshot, got {other:?}"),
-        }
+        let crate::durable_seq::DurableChanges::Snapshot { rows, .. } =
+            changes_since(&db, "runtime_work_results", None).unwrap()
+        else {
+            panic!("a cursor-less read is a snapshot");
+        };
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "w:0");
     }
 }

@@ -4736,6 +4736,11 @@ mod work_parity_tests {
                     "INSERT INTO runtime_work(id,record) VALUES('w',?1)",
                     [&source],
                 )?;
+                studio_runtime_store::work_history::reconcile(
+                    transaction,
+                    "w",
+                    &serde_json::from_str::<serde_json::Value>(&source)?,
+                )?;
                 publish_entity_changes(
                     transaction,
                     &EntityChanges {
