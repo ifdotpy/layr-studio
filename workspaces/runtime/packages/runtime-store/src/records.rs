@@ -576,6 +576,13 @@ pub struct AgentRecord {
     pub worker_defaults: studio_runtime_schema::queue_command::Field<
         StoredTransferValue<studio_runtime_schema::agent_entity_nested::WorkerDefaultsDto>,
     >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub portable_history: studio_runtime_schema::queue_command::Field<
+        StoredTransferValue<crate::transfer_record::PortableHistory>,
+    >,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_mode: Option<AgentExecutionMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1023,6 +1030,7 @@ impl AgentRecord {
             native_failure_hold: Default::default(),
             prepare_attempt: Default::default(),
             worker_defaults: Default::default(),
+            portable_history: Default::default(),
             execution_mode: None,
             turn_epoch: None,
             account_key: crate::cost_aggregate::DEFAULT_ACCOUNT.to_owned(),
@@ -3490,6 +3498,30 @@ mod tests {
         let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
             "epoch":2, "status":"idle", "accountKey":"default", "prepareAttempt":"attempt"}));
         assert!(!record.extra.contains_key("prepareAttempt"));
+    }
+
+    #[test]
+    fn portable_history_is_not_an_extension() {
+        let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+            "epoch":2, "status":"idle", "accountKey":"default", "portableHistory":{
+                "version":1,"path":"archive","sha256":"hash","bytes":1,"counts":{},
+                "source":{"agentId":"agent","accountKey":"default","epoch":2,"threadId":"thread"},
+                "transferId":"transfer"}}));
+        assert!(!record.extra.contains_key("portableHistory"));
+        assert!(matches!(
+            record.portable_history.value(),
+            Some(super::StoredTransferValue::Known(_))
+        ));
+        let legacy = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+            "epoch":2, "status":"idle", "accountKey":"default", "portableHistory":{"legacy":42}}));
+        assert!(matches!(
+            legacy.portable_history.value(),
+            Some(super::StoredTransferValue::Unreadable(_))
+        ));
+        assert_eq!(
+            legacy.value().get("portableHistory"),
+            Some(&json!({"legacy":42}))
+        );
     }
 
     #[test]
