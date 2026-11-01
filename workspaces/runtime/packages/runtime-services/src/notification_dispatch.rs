@@ -1355,14 +1355,9 @@ fn validate_agent_write_fields(
             .and_then(Value::as_str)
             .is_none_or(str::is_empty)
         || agent.get("status").and_then(Value::as_str).is_none()
-<<<<<<< head
-||||||| base
-        || agent.get("events").and_then(Value::as_u64).is_none()
-=======
         || agent
             .get("events")
             .is_some_and(|events| !events.is_null() && events.as_u64().is_none())
->>>>>>> 68d933e
     {
         return Err(stored("runtime_agents", agent_id));
     }
