@@ -100,7 +100,38 @@ pub enum AgentStatus {
     WaitingOnMonitor,
 }
 
-pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 5] {
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum AgentNativeStatusValue {
+    #[serde(rename = "idle")]
+    Idle,
+    #[serde(rename = "notLoaded")]
+    NotLoaded,
+    #[serde(rename = "unsubscribed")]
+    Unsubscribed,
+    #[serde(rename = "notSubscribed")]
+    NotSubscribed,
+}
+
+/// Context repair wait fields rendered in native notices.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentEntityContextRepairWaitDto {
+    pub scope: String,
+    pub error: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MovePointerDto {
+    pub server: String,
+    #[serde(rename = "move")]
+    pub move_id: String,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub agent_id: Field<String>,
+}
+
+pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 8] {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
@@ -131,12 +162,27 @@ pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 5] {
     mode["title"] = "AgentMode".into();
     let mut status = AgentStatus::json_schema(&mut generator).to_value();
     status["title"] = "AgentStatus".into();
+    let mut native_status = AgentNativeStatusValue::json_schema(&mut generator).to_value();
+    native_status["title"] = "AgentNativeStatusValue".into();
+    let mut repair = AgentEntityContextRepairWaitDto::json_schema(&mut generator).to_value();
+    repair["title"] = "AgentEntityContextRepairWaitDto".into();
+    repair["properties"]["scope"]["title"] = "Scope".into();
+    repair["properties"]["error"]["title"] = "Error".into();
+    let mut pointer = MovePointerDto::json_schema(&mut generator).to_value();
+    pointer["title"] = "MovePointerDto".into();
+    pointer["properties"]["server"]["title"] = "Server".into();
+    pointer["properties"]["move"]["title"] = "Move".into();
+    let agent_id_type = pointer["properties"]["agentId"]["type"][0].clone();
+    pointer["properties"]["agentId"] = serde_json::json!({"anyOf":[{"type":"null"},{"type":agent_id_type}],"default":null,"title":"Agentid"});
     [
         ("AgentOverview", overview),
         ("AgentSource", source),
         ("AgentNaming", naming),
         ("AgentMode", mode),
         ("AgentStatus", status),
+        ("AgentNativeStatusValue", native_status),
+        ("AgentEntityContextRepairWaitDto", repair),
+        ("MovePointerDto", pointer),
     ]
 }
 

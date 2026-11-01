@@ -111,6 +111,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     // such as 7.0; the pull-output ingress validates them before typed decoding.
     for (name, owner) in [
         (
+            "AgentNativeStatusValue",
+            "studio_runtime_schema::agent_entity_nested::AgentNativeStatusValue",
+        ),
+        (
+            "AgentEntityContextRepairWaitDto",
+            "studio_runtime_schema::agent_entity_nested::AgentEntityContextRepairWaitDto",
+        ),
+        (
+            "MovePointerDto",
+            "studio_runtime_schema::agent_entity_nested::MovePointerDto",
+        ),
+        (
             "AgentMode",
             "studio_runtime_schema::agent_entity_nested::AgentMode",
         ),
