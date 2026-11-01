@@ -1,8 +1,13 @@
 //! Account transfer snapshot, replay and decision behavior.
 use serde_json::{Value, json};
-use studio_runtime_services::account_transfer::{
-    Action, Command as Transition, Snapshot, Ticket, before_start,
-};
+use studio_runtime_services::account_transfer::{Action, Command as Transition, Snapshot, Ticket};
+
+fn before_start(value: &Value) -> Result<(), String> {
+    let agent = studio_runtime_store::AgentRecord::from_value(value.clone())
+        .map_err(|error| error.to_string())?;
+    studio_runtime_services::account_transfer::before_start(&agent)
+        .map_err(|error| error.to_string())
+}
 
 fn fixture() -> (Value, Value, Ticket) {
     let op = json!({"id":"op","leadId":"a","targetAccountKey":"target","status":"pending","created":1.0,"members":{"a":{"phase":"waiting","sourceAccountKey":"source","lazy":false}}});
@@ -11,7 +16,7 @@ fn fixture() -> (Value, Value, Ticket) {
         operation: "op".into(),
         agent: "a".into(),
         epoch: 3,
-        account: "target".into(),
+        account: "target".to_owned().try_into().unwrap(),
         connection: "c1".into(),
         request: "r1".into(),
     };
@@ -187,6 +192,17 @@ fn subagents_summary_bypasses_only_an_unenrolled_leads_summary_hold() {
             "unknown summary state cannot bypass admission"
         );
     }
+}
+
+#[test]
+fn unreadable_summary_or_lazy_state_keeps_start_held() {
+    let (_, mut agent, _) = fixture();
+    agent.as_object_mut().unwrap().remove("accountTransferId");
+    agent["accountTransfer"] = json!({"kind":"unreadable","reason":"Unknown transfer field"});
+    assert!(before_start(&agent).is_err());
+    agent.as_object_mut().unwrap().remove("accountTransfer");
+    agent["lazyAccountTransfer"] = json!({"kind":"unreadable","reason":"Unknown lazy field"});
+    assert!(before_start(&agent).is_err());
 }
 
 #[test]

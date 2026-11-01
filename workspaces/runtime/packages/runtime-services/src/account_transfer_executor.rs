@@ -626,7 +626,7 @@ async fn session_reply(
     } else {
         driver::ProviderAdmission {
             root_request_id: String::new(),
-            admitted_request: None,
+            admitted_request: studio_runtime_schema::queue_command::Field::Null,
         }
     };
     let mut last_receipt = None;
@@ -636,7 +636,7 @@ async fn session_reply(
                 .session
                 .transfer_provider_request(TransferProviderRequest {
                     root_request_id: admission.root_request_id.clone(),
-                    admitted_request: admission.admitted_request.clone(),
+                    admitted_request: admission.admitted_request.value().cloned(),
                     transfer_id: context.transfer.into(),
                     member: context.agent.into(),
                     source_account: context.account.into(),
@@ -653,7 +653,7 @@ async fn session_reply(
                 .session
                 .provider_request(ProviderRequest {
                     root_request_id: admission.root_request_id.clone(),
-                    admitted_request: admission.admitted_request.clone(),
+                    admitted_request: admission.admitted_request.value().cloned(),
                     account: context.account.into(),
                     operation: call.operation.clone(),
                     actor: call.actor.clone(),
@@ -1388,7 +1388,10 @@ impl TransferExecutor for AccountTransferExecutor {
                     operation: transfer_id.into(),
                     agent: agent_id.into(),
                     epoch,
-                    account: target_account.into(),
+                    account: target_account
+                        .to_owned()
+                        .try_into()
+                        .map_err(|_| TransferError::Refused("Invalid destination account"))?,
                     connection: scope.connection.clone(),
                     request: operation_id,
                 },
@@ -1422,8 +1425,8 @@ impl TransferTransport for AccountTransferExecutor {
             .await?;
             let request = ProviderRequest {
                 root_request_id: admission.root_request_id,
-                admitted_request: admission.admitted_request,
-                account: ticket.account.clone(),
+                admitted_request: admission.admitted_request.value().cloned(),
+                account: ticket.account.as_str().to_owned(),
                 operation: ticket.request.clone(),
                 actor: Some(crate::account_worker::retained::RequestActor {
                     agent: ticket.agent.clone(),
@@ -1463,19 +1466,21 @@ pub async fn before_start(
     now: f64,
 ) -> Result<Value, TransferError> {
     let mut agent = transfer_member(&store, agent_id).await?;
-    if studio_runtime_store::truthy(agent.get("accountTransferId"))
-        && !studio_runtime_store::truthy(agent.get("lazyAccountTransfer"))
+    if agent.account_transfer_id.value().is_some()
+        && agent.lazy_account_transfer.value().is_none()
         && driver::release_waiting(&store, agent_id, now).await?
     {
         agent = transfer_member(&store, agent_id).await?;
     }
-    let lazy = agent
-        .get("lazyAccountTransfer")
-        .filter(|value| !value.is_null());
+    let lazy = agent.lazy_account_transfer.value();
     if let Some(lazy) = lazy {
-        let operation = lazy["id"]
-            .as_str()
-            .ok_or(TransferError::Refused("Invalid lazy transfer identity"))?;
+        let operation = lazy
+            .pending()
+            .ok_or(TransferError::Refused(
+                "Current transfer data is unreadable",
+            ))?
+            .id
+            .as_str();
         let owner = operation.to_owned();
         let member = agent_id.to_owned();
         let reading = store
@@ -1484,7 +1489,7 @@ pub async fn before_start(
         if reading {
             // The executor already owns this read. Ordinary preparation keeps
             // its snapshot's AccountTransfer hold and cannot repeat the move.
-            return Ok(agent);
+            return Ok(agent.value());
         }
         let session = session.ok_or(TransferError::Requires("provider-session/account-worker"))?;
         let executor = AccountTransferExecutor {
@@ -1500,24 +1505,27 @@ pub async fn before_start(
             driver::adopt_receipt(store.as_ref(), operation, agent_id, now).await?;
         }
     } else {
-        let agent = match driver::active_summary_id(&agent) {
-            Some(_) => driver::drop_orphan_summary(store.as_ref(), agent_id)
+        let agent = if driver::active_summary_id(&agent).is_some() {
+            driver::drop_orphan_summary(store.as_ref(), agent_id)
                 .await?
-                .unwrap_or(agent),
-            None => agent,
+                .unwrap_or(agent)
+        } else {
+            agent
         };
         crate::account_transfer::before_start(&agent)?;
     }
-    transfer_member(&store, agent_id).await
+    Ok(transfer_member(&store, agent_id).await?.value())
 }
 
-async fn transfer_member(store: &RuntimeStore, agent_id: &str) -> Result<Value, TransferError> {
+async fn transfer_member(
+    store: &RuntimeStore,
+    agent_id: &str,
+) -> Result<studio_runtime_store::AgentRecord, TransferError> {
     let agent_id = studio_runtime_store::AgentId::from(agent_id);
     store
         .read_async("runtime-services/account_transfer_executor", move |tx| {
             studio_runtime_store::AgentRepository::get(tx, &agent_id)?
                 .ok_or(TransferError::Refused("Unknown transfer member"))
-                .map(|agent| agent.value())
         })
         .await
 }

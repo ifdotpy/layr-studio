@@ -13,94 +13,25 @@ use studio_runtime_store::{
     AccountTransferRepository as Repository, AgentId, AgentRepository, RuntimeStore, Transaction,
 };
 
-use studio_runtime_schema::queue_command::Field;
+use studio_runtime_store::transfer_record::SavedTransferResponse;
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SavedNotice {
-    id: String,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    name: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    provider: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    reason: Field<String>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SavedMember {
-    phase: crate::account_transfer::Phase,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    source_account_key: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    source_thread_id: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    target_thread_id: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    provider: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    name: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    reason: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    error: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    waiting: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    lazy: Field<bool>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    interrupt_reason: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    interrupt_outcome: Field<SavedInterruptOutcome>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    continue_after_transfer: Field<bool>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum SavedInterruptOutcome {
-    Acknowledged,
-    Unknown,
-    Rejected,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum SavedScope {
-    Team,
-    Subagents,
-}
-
-/// The immutable response delivered for one transfer request.
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SavedTransferResponse {
-    id: String,
-    lead_id: String,
-    target_account_key: studio_runtime_schema::account_key::AccountKey,
-    status: crate::account_transfer::TransferStatus,
-    created: f64,
-    scope: SavedScope,
-    members: std::collections::BTreeMap<String, SavedMember>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    target_provider: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    updated: Field<f64>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    finish_history: Field<bool>,
-    total: usize,
-    completed: usize,
-    moved: usize,
-    native_history_pending: usize,
-    moving_now: usize,
-    can_finish_history: bool,
-    waiting_count: usize,
-    needs_attention: bool,
-    can_retry: bool,
-    interrupted: Vec<SavedNotice>,
-    left_on_source: Vec<SavedNotice>,
-    blocked: Vec<SavedNotice>,
+/// The operation named by a nonterminal, readable agent summary.
+pub(crate) fn active_summary_id(agent: &studio_runtime_store::AgentRecord) -> Option<&str> {
+    let studio_runtime_store::transfer_record::AgentTransferState::Summary(summary) =
+        agent.account_transfer.value()?
+    else {
+        return None;
+    };
+    if matches!(
+        summary.status.value(),
+        Some(
+            studio_runtime_store::transfer_record::TransferStatus::Completed
+                | studio_runtime_store::transfer_record::TransferStatus::Cancelled
+        )
+    ) {
+        return None;
+    }
+    summary.id.value().map(|id| id.as_str())
 }
 
 pub fn load(tx: &Transaction<'_>, id: &str) -> Result<Snapshot, TransferError> {
@@ -129,17 +60,6 @@ pub fn load(tx: &Transaction<'_>, id: &str) -> Result<Snapshot, TransferError> {
     Snapshot::read_typed(op, raw.len(), agents)
 }
 
-/// The operation id of a lead summary that still claims an active transfer.
-pub(crate) fn active_summary_id(agent: &Value) -> Option<&str> {
-    let summary = agent
-        .get("accountTransfer")
-        .filter(|value| !value.is_null())?;
-    if matches!(summary["status"].as_str(), Some("completed" | "cancelled")) {
-        return None;
-    }
-    summary["id"].as_str()
-}
-
 /// A lead summary mirrors its transfer row. An active summary without the row
 /// can never advance: a move to another server copies the agent record, not the
 /// source server's transfer row. Remove that summary so it neither holds the
@@ -147,33 +67,30 @@ pub(crate) fn active_summary_id(agent: &Value) -> Option<&str> {
 fn drop_orphan_summary_in(
     tx: &Transaction<'_>,
     agent_id: &str,
-) -> Result<Option<Value>, TransferError> {
+) -> Result<Option<studio_runtime_store::AgentRecord>, TransferError> {
     if !Repository::available(tx)? {
         return Ok(None);
     }
-    let Some(raw) = Repository::agent(tx, agent_id)? else {
+    let Some(mut agent) = AgentRepository::get(tx, &AgentId::from(agent_id))? else {
         return Ok(None);
     };
-    let mut value: Value =
-        serde_json::from_str(&raw).map_err(studio_runtime_store::StoreError::from)?;
-    let Some(operation) = active_summary_id(&value) else {
+    let Some(operation) = active_summary_id(&agent) else {
         return Ok(None);
     };
-    if Repository::get(tx, operation)?.is_some() {
+    if Repository::get_typed_with_raw(tx, operation)?.is_some() {
         return Ok(None);
     }
-    crate::account_transfer::remove(&mut value, &["accountTransfer"])?;
-    let agent =
-        serde_json::from_value(value.clone()).map_err(studio_runtime_store::StoreError::from)?;
+    agent.account_transfer = studio_runtime_schema::queue_command::Field::Missing;
     AgentRepository::put(tx, &agent)?;
+    let value = agent.value();
     crate::agents_create::publish_agent(tx, &value)?;
-    Ok(Some(value))
+    Ok(Some(agent))
 }
 
 pub async fn drop_orphan_summary(
     store: &RuntimeStore,
     agent_id: &str,
-) -> Result<Option<Value>, TransferError> {
+) -> Result<Option<studio_runtime_store::AgentRecord>, TransferError> {
     let agent_id = agent_id.to_owned();
     store
         .transaction_with_error(move |tx| drop_orphan_summary_in(tx, &agent_id))
@@ -204,19 +121,18 @@ pub(crate) fn release_waiting_in(
     if !Repository::available(tx)? {
         return Ok(false);
     }
-    let Some(raw) = Repository::agent(tx, agent_id)? else {
+    let Some(agent) = AgentRepository::get(tx, &AgentId::from(agent_id))? else {
         return Ok(false);
     };
-    let agent: Value =
-        serde_json::from_str(&raw).map_err(studio_runtime_store::StoreError::from)?;
     let Some(operation) = agent
-        .get("accountTransferId")
-        .and_then(Value::as_str)
-        .filter(|_| !studio_runtime_store::truthy(agent.get("lazyAccountTransfer")))
+        .account_transfer_id
+        .value()
+        .map(|id| id.as_str())
+        .filter(|_| agent.lazy_account_transfer.value().is_none())
     else {
         return Ok(false);
     };
-    if Repository::get(tx, operation)?.is_none() {
+    if Repository::get_typed_with_raw(tx, operation)?.is_none() {
         return Ok(false);
     }
     let Some(decision) = load(tx, operation)?.release_waiting(agent_id)? else {
@@ -234,8 +150,12 @@ pub fn owns_reading_member(
     member_id: &str,
 ) -> Result<bool, TransferError> {
     let snapshot = load(tx, transfer_id)?;
-    let operation = snapshot.operation();
-    if operation["status"] != "pending" || operation["members"][member_id]["phase"] != "reading" {
+    use studio_runtime_store::transfer_record::{TransferPhase, TransferStatus};
+    let operation = snapshot.record();
+    if operation.status != TransferStatus::Pending
+        || operation.members.get(member_id).map(|member| member.phase)
+            != Some(TransferPhase::Reading)
+    {
         return Ok(false);
     }
     let agent = snapshot.agent(member_id)?;
@@ -246,14 +166,14 @@ pub fn owns_reading_member(
 fn snapshot_agents(
     snapshot: &Snapshot,
 ) -> Result<std::collections::BTreeMap<String, Value>, TransferError> {
-    let operation = snapshot.operation();
-    let mut ids = operation["members"]
-        .as_object()
-        .map(|members| members.keys().cloned().collect::<Vec<_>>())
-        .unwrap_or_default();
-    let lead = operation["leadId"]
-        .as_str()
-        .ok_or(TransferError::Refused("Invalid transfer lead"))?;
+    let operation = snapshot.record();
+    let mut ids = operation
+        .members
+        .0
+        .iter()
+        .map(|(id, _)| id.clone())
+        .collect::<Vec<_>>();
+    let lead = operation.lead_id.as_str();
     if !ids.iter().any(|id| id == lead) {
         ids.push(lead.into());
     }
@@ -310,13 +230,26 @@ fn replay_in(
     };
     let snapshot = load(tx, &key)?;
     if snapshot.replay(id, lead, target, scope)? {
-        let saved = snapshot.operation()["requests"][id]
-            .get("savedResponse")
-            .ok_or(TransferError::Refused(
-                "The original transfer response is unavailable",
-            ))?;
-        let saved = SavedTransferResponse::deserialize(saved)
-            .map_err(|_| TransferError::Refused("The original transfer response is invalid"))?;
+        use studio_runtime_schema::queue_command::Field;
+        let response = snapshot
+            .record()
+            .requests
+            .value()
+            .and_then(|requests| requests.get(id))
+            .map(|request| &request.saved_response);
+        let saved = match response {
+            None | Some(Field::Missing) => {
+                return Err(TransferError::Refused(
+                    "The original transfer response is unavailable",
+                ));
+            }
+            Some(Field::Null) => {
+                return Err(TransferError::Refused(
+                    "The original transfer response is invalid",
+                ));
+            }
+            Some(Field::Value(saved)) => saved,
+        };
         return saved
             .serialize(serde_json::value::Serializer)
             .map(Some)
@@ -445,7 +378,7 @@ pub async fn request(
                 let active_id = active
                     .id
                     .value()
-                    .map(String::as_str)
+                    .map(|id| id.as_str())
                     .ok_or(TransferError::Refused("Invalid current transfer"))?;
                 let snapshot = load(tx, active_id)?;
                 let mut operation = snapshot.operation().clone();
@@ -790,30 +723,31 @@ pub(crate) struct ProviderReadIntent<'a> {
 
 /// The root is created only with a new transfer obligation. Imported obligations
 /// carry their final provider token from the migration.
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ProviderAdmission {
-    pub root_request_id: String,
-    pub admitted_request: Option<studio_runtime_store::request_results::AdmittedRequest>,
-}
+pub(crate) use studio_runtime_store::transfer_record::ProviderAdmission;
 
 fn admit_mutation(
     snapshot: &Snapshot,
     decision: &mut Decision,
     agent: &str,
 ) -> Result<(), TransferError> {
-    if snapshot.operation()["members"][agent]
-        .get("providerIntent")
-        .is_none()
-    {
-        decision.operation["members"][agent]["providerAdmission"] = json!(ProviderAdmission {
+    let member = snapshot
+        .record()
+        .members
+        .get(agent)
+        .ok_or(TransferError::Refused("Unknown transfer member"))?;
+    if member.provider_intent.is_missing() {
+        use studio_runtime_schema::queue_command::Field;
+        let mut operation = decision.operation_record()?;
+        let member = operation
+            .members
+            .get_mut(agent)
+            .ok_or(TransferError::Refused("Unknown transfer member"))?;
+        member.provider_admission = Field::Value(ProviderAdmission {
             root_request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
-            admitted_request: None,
+            admitted_request: Field::Null,
         });
-    } else if snapshot.operation()["members"][agent]
-        .get("providerAdmission")
-        .is_none()
-    {
+        decision.replace_operation_record(operation)?;
+    } else if member.provider_admission.is_missing() {
         return Err(TransferError::Refused(
             "The transfer provider admission is missing",
         ));
@@ -833,14 +767,28 @@ pub(crate) async fn provider_admission(
     store
         .read_async("account-transfer/provider-admission", move |tx| {
             let snapshot = load(tx, &transfer)?;
-            let member = &snapshot.operation()["members"][&agent];
-            let admission = if member["providerIntent"]["operation"] == operation {
-                &member["providerAdmission"]
+            let member = snapshot
+                .record()
+                .members
+                .get(&agent)
+                .ok_or(TransferError::Refused(
+                    "The transfer provider admission is missing",
+                ))?;
+            let admission = if member
+                .provider_intent
+                .value()
+                .is_some_and(|intent| intent.operation == operation)
+            {
+                member.provider_admission.value()
             } else {
-                &member["providerReadAdmissions"][&operation]
+                member
+                    .provider_read_admissions
+                    .value()
+                    .and_then(|admissions| admissions.get(&operation))
             };
-            serde_json::from_value(admission.clone())
-                .map_err(|_| TransferError::Refused("The transfer provider admission is missing"))
+            admission.cloned().ok_or(TransferError::Refused(
+                "The transfer provider admission is missing",
+            ))
         })
         .await
 }
@@ -889,7 +837,7 @@ pub(crate) async fn provider_read_intent(
                         json!(ProviderAdmission {
                             root_request_id:
                                 studio_runtime_schema::persistence::RequestIdentity::issue_root(),
-                            admitted_request: None,
+                            admitted_request: studio_runtime_schema::queue_command::Field::Null,
                         });
                 } else if snapshot.operation()["members"][&agent]["providerReadAdmissions"]
                     .get(&operation)
@@ -1897,7 +1845,9 @@ mod provider_admission_tests {
             "status":"pending","created":1.0,"scope":"team",
             "members":{"agent":{"phase":"reading","sourceAccountKey":"source","sourceThreadId":"thread"}}});
         if intent {
-            operation["members"]["agent"]["providerIntent"] = json!({"operation":"start"});
+            operation["members"]["agent"]["providerIntent"] = json!({"operation":"start",
+                "scope":{"account":"target","connection":"connection","generation":1},
+                "method":"thread/start","params":{}});
         }
         if let Some(admission) = admission {
             operation["members"]["agent"]["providerAdmission"] = admission;
@@ -1915,7 +1865,7 @@ mod provider_admission_tests {
         let saved = decision.operation["members"]["agent"]["providerAdmission"].clone();
         let admission: ProviderAdmission =
             serde_json::from_value(saved.clone()).expect("admission");
-        assert!(admission.admitted_request.is_none());
+        assert!(admission.admitted_request.value().is_none());
         studio_runtime_schema::persistence::RequestIdentity::new(
             "test",
             &[],

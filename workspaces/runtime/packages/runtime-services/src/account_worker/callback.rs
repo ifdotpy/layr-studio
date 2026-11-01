@@ -520,7 +520,7 @@ pub(super) fn managed_reply_authority_in(
     };
     let value = actor.value();
     if studio_runtime_store::truthy(value.get("executionMove"))
-        || crate::account_transfer::before_start(&value).is_err()
+        || crate::account_transfer::before_start(&actor).is_err()
     {
         return Ok(None);
     }

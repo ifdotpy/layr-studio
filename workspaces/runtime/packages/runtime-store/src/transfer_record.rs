@@ -10,6 +10,20 @@ use studio_runtime_schema::queue_command::Field;
 /// A JSON object whose insertion order survives decode and encode.
 #[derive(Clone, Debug)]
 pub struct OrderedMembers<T>(pub Vec<(String, T)>);
+impl<T> OrderedMembers<T> {
+    pub fn get(&self, id: &str) -> Option<&T> {
+        self.0
+            .iter()
+            .find(|(key, _)| key == id)
+            .map(|(_, value)| value)
+    }
+    pub fn get_mut(&mut self, id: &str) -> Option<&mut T> {
+        self.0
+            .iter_mut()
+            .find(|(key, _)| key == id)
+            .map(|(_, value)| value)
+    }
+}
 impl<'de, T: Deserialize<'de>> Deserialize<'de> for OrderedMembers<T> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct OrderedVisitor<T>(std::marker::PhantomData<T>);
@@ -42,7 +56,7 @@ impl<T: Serialize> Serialize for OrderedMembers<T> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TransferPhase {
     Waiting,
@@ -57,7 +71,18 @@ pub enum TransferPhase {
     Completed,
     Left,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+impl TransferPhase {
+    pub fn terminal(self) -> bool {
+        matches!(self, Self::Completed | Self::Left)
+    }
+    pub fn moving(self) -> bool {
+        matches!(
+            self,
+            Self::Reading | Self::Interrupting | Self::Submitted | Self::LazySubmitted
+        )
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TransferStatus {
     Pending,
@@ -85,7 +110,8 @@ pub struct TransferSource {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub thread_id: Field<String>,
     pub epoch: i64,
-    pub cwd: String,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub cwd: Field<String>,
 }
 
 /// Native provider payloads remain opaque and retain their exact JSON bytes.
@@ -262,7 +288,7 @@ pub struct SourceEmptyProof {
     pub native_history: Field<EmptyNativeHistory>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TransportTicket {
     pub operation: String,
@@ -502,7 +528,7 @@ pub enum UnreadableTransferKind {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentTransferSummary {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub id: Field<String>,
+    pub id: Field<TransferId>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub target_account_key: Field<AccountKey>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]

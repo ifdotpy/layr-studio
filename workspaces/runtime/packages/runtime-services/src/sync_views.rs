@@ -600,11 +600,15 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
                 reason: reason.clone(),
             }
         }
-        observation => crate::account_transfer::progress_view(
-            record.get("accountTransfer"),
-            matches!(observation, TransferObservation::Cancellable),
-        )
-        .ok()?,
+        observation => {
+            let summary = record.get("accountTransfer").filter(|value| !value.is_null())
+                .map(<studio_runtime_store::transfer_record::AgentTransferState as serde::Deserialize>::deserialize).transpose().ok()?;
+            crate::account_transfer::progress_view(
+                summary.as_ref(),
+                matches!(observation, TransferObservation::Cancellable),
+            )
+            .ok()?
+        }
     };
     if let Some(summary) = view
         .get_mut("accountTransfer")

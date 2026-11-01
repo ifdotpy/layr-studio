@@ -159,32 +159,7 @@ pub enum TransferError {
     Store(#[from] studio_runtime_store::StoreError),
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum Phase {
-    Waiting,
-    Lazy,
-    Reading,
-    Interrupting,
-    Submitted,
-    LazySubmitted,
-    Ready,
-    Blocked,
-    Unknown,
-    Completed,
-    Left,
-}
-impl Phase {
-    fn terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Left)
-    }
-    fn moving(self) -> bool {
-        matches!(
-            self,
-            Self::Reading | Self::Interrupting | Self::Submitted | Self::LazySubmitted
-        )
-    }
-}
+pub use studio_runtime_store::transfer_record::TransferPhase as Phase;
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Action {
@@ -198,78 +173,47 @@ pub enum Command {
     Action(Action),
 }
 
-/// A transport ticket identifies one exact mutation, including a captured epoch.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct Ticket {
-    pub operation: String,
-    pub agent: String,
-    pub epoch: i64,
-    pub account: String,
-    pub connection: String,
-    pub request: String,
-}
+pub use studio_runtime_store::transfer_record::TransportTicket as Ticket;
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct TransferIdentity {
-    id: String,
-    lead_id: String,
-    target_account_key: studio_runtime_schema::account_key::AccountKey,
-    status: TransferStatus,
-}
-#[derive(Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum TransferStatus {
-    Pending,
-    Completed,
-    Cancelled,
-}
+use studio_runtime_store::transfer_record::TransferStatus;
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SummaryProgress {
-    id: String,
-    target_account_key: studio_runtime_schema::account_key::AccountKey,
-    status: TransferStatus,
-    #[serde(default)]
-    waiting: Option<String>,
-    #[serde(default)]
-    blocked: Vec<SummaryBlock>,
-    #[serde(default)]
-    can_retry: bool,
-    #[serde(default)]
-    moving_now: u64,
-}
-
-#[derive(Deserialize)]
-struct SummaryBlock {
-    reason: Option<String>,
-}
-
-/// Project the legacy saved summary into the closed renderer progress contract.
+/// Project the stored summary into the closed renderer progress contract.
 pub fn progress_view(
-    summary: Option<&Value>,
+    summary: Option<&studio_runtime_store::transfer_record::AgentTransferState>,
     can_cancel: bool,
 ) -> Result<studio_runtime_schema::agent_progress::AccountTransferProgress, TransferError> {
     use studio_runtime_schema::agent_progress::{
         AccountTransferActions as Actions, AccountTransferProgress as Progress,
         MovingTransferActions, WaitingTransferActions,
     };
-    let Some(summary) = summary.filter(|value| !value.is_null()) else {
+    let Some(summary) = summary else {
         return Ok(Progress::None);
     };
-    let summary: SummaryProgress = SummaryProgress::deserialize(summary)
-        .map_err(|_| invalid("account transfer summary", "/"))?;
-    let SummaryProgress {
-        id,
-        target_account_key,
-        status,
-        waiting,
-        blocked,
-        can_retry,
-        moving_now,
-    } = summary;
+    let summary = match summary {
+        studio_runtime_store::transfer_record::AgentTransferState::Unreadable(value) => {
+            return Ok(Progress::Unreadable {
+                reason: value.reason.clone(),
+            });
+        }
+        studio_runtime_store::transfer_record::AgentTransferState::Summary(value) => value,
+    };
+    let id = summary
+        .id
+        .value()
+        .ok_or_else(|| invalid("account transfer summary", "/id"))?
+        .as_str()
+        .to_owned();
+    let target_account_key = summary
+        .target_account_key
+        .value()
+        .ok_or_else(|| invalid("account transfer summary", "/targetAccountKey"))?
+        .clone();
+    let status = summary
+        .status
+        .value()
+        .ok_or_else(|| invalid("account transfer summary", "/status"))?;
+    let waiting = summary.waiting.value().cloned();
+    let can_retry = summary.can_retry.value() == Some(&true);
     Ok(match status {
         TransferStatus::Completed => Progress::Completed {
             id,
@@ -286,14 +230,19 @@ pub fn progress_view(
                 (false, true) => Actions::Cancel,
                 (true, true) => Actions::RetryCancel,
             };
-            if let Some(block) = blocked.into_iter().next() {
+            if let Some(block) = summary.blocked.value().and_then(|blocked| blocked.first()) {
                 Progress::Blocked {
                     id,
                     target_account_key,
-                    reason: block.reason.or(waiting).unwrap_or_default(),
+                    reason: block
+                        .reason
+                        .value()
+                        .cloned()
+                        .or(waiting)
+                        .unwrap_or_default(),
                     actions,
                 }
-            } else if moving_now > 0 {
+            } else if summary.moving_now.value().copied().unwrap_or(0) > 0 {
                 Progress::Moving {
                     id,
                     target_account_key,
@@ -317,7 +266,7 @@ pub fn progress_view(
 
 /// Validated snapshot with original member insertion order retained for the UI.
 pub struct Snapshot {
-    identity: TransferIdentity,
+    identity: studio_runtime_store::transfer_record::TransferRecord,
     operation: Value,
     order: Vec<String>,
     agents: BTreeMap<String, Value>,
@@ -376,10 +325,11 @@ impl Snapshot {
         raw: &str,
         agents: impl IntoIterator<Item = Result<(String, String), TransferError>>,
     ) -> Result<Self, TransferError> {
-        let operation = read_record(raw, "PersistedAccountTransferRecord", "account transfer")?;
-        let order: MemberOrder =
-            serde_json::from_str(raw).map_err(|_| invalid("account transfer", "/members"))?;
-        Self::from_parts(operation, order.members, raw.len(), agents)
+        if raw.len() > MAX_RECORD_BYTES {
+            return Err(invalid("account transfer", "/resourceLimit"));
+        }
+        let operation = serde_json::from_str(raw).map_err(|_| invalid("account transfer", "/"))?;
+        Self::read_typed(operation, raw.len(), agents)
     }
 
     /// The store already decoded this operation; keep its ordered members.
@@ -390,16 +340,17 @@ impl Snapshot {
     ) -> Result<Self, TransferError> {
         let order = record.members.0.iter().map(|(id, _)| id.clone()).collect();
         let operation =
-            serde_json::to_value(record).map_err(|_| invalid("account transfer", "/"))?;
+            serde_json::to_value(&record).map_err(|_| invalid("account transfer", "/"))?;
         validate(
             "PersistedAccountTransferRecord",
             "account transfer",
             &operation,
         )?;
-        Self::from_parts(operation, order, raw_len, agents)
+        Self::from_parts(record, operation, order, raw_len, agents)
     }
 
     fn from_parts(
+        identity: studio_runtime_store::transfer_record::TransferRecord,
         operation: Value,
         order: Vec<String>,
         raw_len: usize,
@@ -431,8 +382,6 @@ impl Snapshot {
                 return Err(invalid("transfer agent", "/id"));
             }
         }
-        let identity = serde_json::from_value(operation.clone())
-            .map_err(|_| invalid("account transfer", "/"))?;
         Ok(Self {
             identity,
             operation,
@@ -449,8 +398,11 @@ impl Snapshot {
     pub fn operation(&self) -> &Value {
         &self.operation
     }
+    pub(crate) fn record(&self) -> &studio_runtime_store::transfer_record::TransferRecord {
+        &self.identity
+    }
     pub(crate) fn can_cancel(&self) -> bool {
-        self.pending() && check_cancel(&self.operation, &self.order, &self.agents).is_ok()
+        self.pending() && check_cancel(&self.identity, &self.agents).is_ok()
     }
     pub fn agent(&self, id: &str) -> Result<&Value, TransferError> {
         self.agents
@@ -458,8 +410,11 @@ impl Snapshot {
             .ok_or(TransferError::Refused("Unknown transfer member"))
     }
     fn phase(&self, id: &str) -> Result<Phase, TransferError> {
-        serde_json::from_value(self.operation["members"][id]["phase"].clone())
-            .map_err(|_| invalid("account transfer", "/members/phase"))
+        self.identity
+            .members
+            .get(id)
+            .map(|member| member.phase)
+            .ok_or_else(|| invalid("account transfer", "/members/phase"))
     }
     fn pending(&self) -> bool {
         self.identity.status == TransferStatus::Pending
@@ -487,20 +442,32 @@ impl Snapshot {
         target: &str,
         scope: &str,
     ) -> Result<bool, TransferError> {
-        let receipt = self.operation.get("requests").and_then(|r| r.get(request));
-        let candidate =
-            receipt.or_else(|| (self.identity.id == request).then_some(&self.operation));
-        let Some(candidate) = candidate else {
+        use studio_runtime_store::transfer_record::TransferScope;
+        let receipt = self
+            .identity
+            .requests
+            .value()
+            .and_then(|requests| requests.get(request));
+        let (saved_lead, saved_target, saved_scope) = if let Some(receipt) = receipt {
+            (
+                &receipt.lead_id,
+                &receipt.target_account_key,
+                &receipt.scope,
+            )
+        } else if self.identity.id == request {
+            (
+                &self.identity.lead_id,
+                &self.identity.target_account_key,
+                &self.identity.scope,
+            )
+        } else {
             return Ok(false);
         };
-        if candidate["leadId"] != lead
-            || candidate["targetAccountKey"] != target
-            || candidate
-                .get("scope")
-                .and_then(Value::as_str)
-                .unwrap_or("team")
-                != scope
-        {
+        let saved_scope = match saved_scope.value() {
+            Some(TransferScope::Subagents) => "subagents",
+            Some(TransferScope::Team) | None => "team",
+        };
+        if saved_lead != lead || saved_target.as_str() != target || saved_scope != scope {
             return Err(TransferError::Refused(
                 "This transfer id has different content",
             ));
@@ -596,7 +563,7 @@ impl Snapshot {
                 }
             }
             Command::Action(Action::Cancel) => {
-                check_cancel(&op, &self.order, &agents)?;
+                check_cancel(&self.identity, &agents)?;
                 op["status"] = json!("cancelled");
                 for id in &self.order {
                     let a = agents
@@ -1345,17 +1312,23 @@ impl Snapshot {
         ticket: &Ticket,
         result: Option<Value>,
     ) -> Result<Decision, TransferError> {
-        let m = &self.operation["members"][&ticket.agent];
-        let expected =
-            serde_json::to_value(ticket).map_err(|_| invalid("transport ticket", "/"))?;
-        if m.get("transportTicket") != Some(&expected) {
+        let member = self
+            .identity
+            .members
+            .get(&ticket.agent)
+            .ok_or(TransferError::Refused(
+                "The transfer receipt belongs to another native request",
+            ))?;
+        if member.transport_ticket.value() != Some(ticket) {
             return Err(TransferError::Refused(
                 "The transfer receipt belongs to another native request",
             ));
         }
         self.check_ticket_agent(ticket)?;
-        if let Some(saved) = m.get("result").filter(|v| !v.is_null()) {
-            if result.as_ref() == Some(saved) {
+        if let Some(saved) = member.result.value() {
+            let saved: Value = serde_json::from_str(saved.get())
+                .map_err(|_| invalid("account transfer", "/members/result"))?;
+            if result.as_ref() == Some(&saved) {
                 return Ok(self.decision(self.operation.clone(), self.agents.clone(), vec![]));
             }
             return Err(TransferError::Refused(
@@ -1395,20 +1368,25 @@ impl Snapshot {
             .agents
             .get(&ticket.agent)
             .ok_or(TransferError::Refused("Unknown transfer member"))?;
-        let m = &self.operation["members"][&ticket.agent];
+        let member = self
+            .identity
+            .members
+            .get(&ticket.agent)
+            .ok_or(TransferError::Refused(
+                "The transfer receipt identity is stale",
+            ))?;
         if self.identity.id != ticket.operation
-            || self.identity.target_account_key.as_str() != ticket.account
+            || self.identity.target_account_key.as_str() != ticket.account.as_str()
             || a["epoch"].as_i64() != Some(ticket.epoch)
             || studio_runtime_store::truthy(a.get("deletedAt"))
             || a.get("accountKey")
                 .and_then(Value::as_str)
                 .unwrap_or("default")
-                != if flag(m, "lazy") {
+                != if member.lazy.value() == Some(&true) {
                     self.identity.target_account_key.as_str()
                 } else {
-                    m["sourceAccountKey"].as_str().unwrap_or("default")
+                    member.source_account_key.as_str()
                 }
-            || !m.is_object()
             || ticket.request.is_empty()
             || ticket.connection.is_empty()
             || (a["accountTransferId"] != ticket.operation && self.pending())
@@ -1549,17 +1527,25 @@ pub(crate) fn enroll(
     Ok(member)
 }
 
-pub fn before_start(agent: &Value) -> Result<(), TransferError> {
-    validate("PersistedAgentRecord", "transfer agent", agent)?;
-    if agent.get("accountTransfer").is_some_and(|v| {
-        !v.is_null()
-            && !matches!(v["status"].as_str(), Some("completed" | "cancelled"))
-            // A subagent transfer's summary belongs to its unenrolled lead.
-            // Its own member/recovery markers below still hold admission.
-            && !(v["status"] == "pending" && v["scope"] == "subagents" && agent["isLead"] == true)
-    }) || studio_runtime_store::truthy(agent.get("accountTransferId"))
-        || studio_runtime_store::truthy(agent.get("lazyAccountTransfer"))
+pub fn before_start(agent: &studio_runtime_store::AgentRecord) -> Result<(), TransferError> {
+    use studio_runtime_store::transfer_record::{AgentTransferState, TransferScope};
+    let summary_holds = match agent.account_transfer.value() {
+        None => false,
+        Some(AgentTransferState::Unreadable(_)) => true,
+        Some(AgentTransferState::Summary(summary)) => {
+            !matches!(
+                summary.status.value(),
+                Some(TransferStatus::Completed | TransferStatus::Cancelled)
+            ) && !(matches!(summary.status.value(), Some(TransferStatus::Pending))
+                && matches!(summary.scope.value(), Some(TransferScope::Subagents))
+                && agent.is_lead == Some(true))
+        }
+    };
+    if summary_holds
+        || agent.account_transfer_id.value().is_some()
+        || agent.lazy_account_transfer.value().is_some()
         || agent
+            .extra
             .get("emptyTransferRecovery")
             .is_some_and(|r| !r.is_null() && r["phase"] != "completed")
     {
@@ -1601,84 +1587,59 @@ const SOURCE_STATE_FIELDS: &[&str] = &[
 ];
 const CANCEL_FOLLOWUP: &str = "The account transfer was cancelled after this turn was interrupted. Continue the existing task on this account from saved context. Preserve completed work and check existing receipts before any command with an unknown outcome.";
 
-#[derive(Deserialize)]
-struct MemberOrder {
-    #[serde(deserialize_with = "member_order")]
-    members: Vec<String>,
-}
-fn member_order<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Vec<String>, D::Error> {
-    struct Visitor;
-    impl<'de> serde::de::Visitor<'de> for Visitor {
-        type Value = Vec<String>;
-        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("transfer members")
-        }
-        fn visit_map<M: serde::de::MapAccess<'de>>(
-            self,
-            mut map: M,
-        ) -> Result<Self::Value, M::Error> {
-            let mut keys = Vec::new();
-            while let Some(key) = map.next_key::<String>()? {
-                if keys.contains(&key) {
-                    return Err(serde::de::Error::custom("duplicate member"));
-                }
-                map.next_value::<serde::de::IgnoredAny>()?;
-                keys.push(key);
-            }
-            Ok(keys)
-        }
-    }
-    deserializer.deserialize_map(Visitor)
-}
-
-fn phase(operation: &Value, id: &str) -> Result<Phase, TransferError> {
-    serde_json::from_value(operation["members"][id]["phase"].clone())
-        .map_err(|_| invalid("account transfer", "/members/phase"))
-}
-
 fn check_cancel(
-    operation: &Value,
-    order: &[String],
+    operation: &studio_runtime_store::transfer_record::TransferRecord,
     agents: &BTreeMap<String, Value>,
 ) -> Result<(), TransferError> {
-    for id in order {
-        let m = &operation["members"][id];
-        let phase = phase(operation, id)?;
+    use studio_runtime_store::transfer_record::InterruptOutcome;
+    for (_, member) in &operation.members.0 {
+        let phase = member.phase;
+        let submitted = member
+            .submitted_at
+            .value()
+            .and_then(serde_json::Number::as_f64)
+            .is_some_and(|value| value != 0.0);
+        let result = member
+            .result
+            .value()
+            .and_then(|raw| serde_json::from_str(raw.get()).ok())
+            .is_some_and(|value| studio_runtime_store::truthy(Some(&value)));
         // Only a native thread request moves history. Source and
         // catalog reads do not, so a member without one may return.
         let native_request = matches!(
             phase,
             Phase::Reading | Phase::Submitted | Phase::LazySubmitted | Phase::Ready
-        ) || ["providerIntent", "transportTicket", "submittedAt", "result"]
-            .iter()
-            .any(|key| studio_runtime_store::truthy(m.get(*key)));
-        if flag(m, "lazy")
+        ) || member.provider_intent.is_some()
+            || member.transport_ticket.is_some()
+            || submitted
+            || result;
+        if member.lazy.value() == Some(&true)
             && !phase.terminal()
             && phase != Phase::Lazy
             && native_request
             && !(phase == Phase::Blocked
-                && flag(m, "archiveInvalidated")
-                && (!studio_runtime_store::truthy(m.get("submittedAt"))
-                    || studio_runtime_store::truthy(m.get("result"))))
+                && member.archive_invalidated.value() == Some(&true)
+                && (!submitted || result))
         {
             return Err(TransferError::Refused(
                 "A native history move has started. Resolve its receipt before cancelling.",
             ));
         }
     }
-    if order.iter().any(|id| {
-        let m = &operation["members"][id];
-        studio_runtime_store::truthy(m.get("interruptSubmittedAt"))
-            && m["interruptOutcome"] != "acknowledged"
+    if operation.members.0.iter().any(|(_, member)| {
+        member
+            .interrupt_submitted_at
+            .value()
+            .and_then(serde_json::Number::as_f64)
+            .is_some_and(|value| value != 0.0)
+            && member.interrupt_outcome.value() != Some(&InterruptOutcome::Acknowledged)
     }) {
         return Err(TransferError::Refused(
             "Retry the unresolved turn interruption before cancelling this transfer",
         ));
     }
-    if order.iter().any(|id| {
-        operation["members"][id]["interruptOutcome"] == "acknowledged"
+    if operation.members.0.iter().any(|(id, member)| {
+        member.interrupt_outcome.value() == Some(&InterruptOutcome::Acknowledged)
             && flag(&agents[id], "inFlight")
     }) {
         return Err(TransferError::Refused(
@@ -1689,6 +1650,44 @@ fn check_cancel(
 }
 
 impl Decision {
+    /// Read or replace the complete persisted operation through its closed type.
+    pub(crate) fn operation_record(
+        &self,
+    ) -> Result<studio_runtime_store::transfer_record::TransferRecord, TransferError> {
+        let mut operation: studio_runtime_store::transfer_record::TransferRecord =
+            serde_json::from_value(self.operation.clone())
+                .map_err(|_| invalid("account transfer", "/"))?;
+        let positions: BTreeMap<&str, usize> = self
+            .order
+            .iter()
+            .enumerate()
+            .map(|(position, id)| (id.as_str(), position))
+            .collect();
+        operation
+            .members
+            .0
+            .sort_by_key(|(id, _)| positions.get(id.as_str()).copied().unwrap_or(usize::MAX));
+        Ok(operation)
+    }
+
+    pub(crate) fn replace_operation_record(
+        &mut self,
+        operation: studio_runtime_store::transfer_record::TransferRecord,
+    ) -> Result<(), TransferError> {
+        let order = operation
+            .members
+            .0
+            .iter()
+            .map(|(id, _)| id.clone())
+            .collect();
+        let operation =
+            serde_json::to_value(operation).map_err(|_| invalid("account transfer", "/"))?;
+        self.changed |= self.operation != operation || self.order != order;
+        self.operation = operation;
+        self.order = order;
+        Ok(())
+    }
+
     /// Atomically maintained renderer summary; a newer operation owns its lead.
     pub fn stamp(&mut self, now: f64, previous_created: Option<f64>) -> Result<(), TransferError> {
         if !self.changed {
@@ -1988,6 +1987,29 @@ fn validate_source_for_submission(member: &Value, agent: &Value) -> Result<(), T
 #[cfg(test)]
 mod provider_receipt_tests {
     #[test]
+    fn typed_decision_preserves_member_order() {
+        let raw = r#"{"id":"move","leadId":"z","targetAccountKey":"target","status":"pending","created":1,"members":{"z":{"phase":"waiting","sourceAccountKey":"source"},"a":{"phase":"waiting","sourceAccountKey":"source"}}}"#;
+        let agent = |id: &str| {
+            (id.to_owned(), serde_json::json!({"id":id,"rootId":"z","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0}).to_string())
+        };
+        let snapshot = super::Snapshot::read(raw, [agent("z"), agent("a")]).unwrap();
+        let mut decision = snapshot.decide(super::Command::Restart).unwrap();
+        let record = decision.operation_record().unwrap();
+        assert_eq!(
+            record
+                .members
+                .0
+                .iter()
+                .map(|(id, _)| id.as_str())
+                .collect::<Vec<_>>(),
+            ["z", "a"]
+        );
+        decision.replace_operation_record(record).unwrap();
+        let encoded = decision.encoded().unwrap();
+        assert!(encoded.find("\"z\":{").unwrap() < encoded.find("\"a\":{").unwrap());
+    }
+
+    #[test]
     fn spilled_provider_reply_has_stable_bytes_and_digest() {
         let mut record = serde_json::json!({"result":{"kind":"reply","value":"x".repeat(65537)}});
         let (digest, bytes) = super::spill_reply(&mut record).expect("large reply spills");
@@ -2146,7 +2168,7 @@ mod provider_receipt_tests {
         });
         if native_intent {
             member["providerIntent"] = json!({"operation":"transfer:agent:thread-start",
-                "scope":{"account":"target"},"method":"thread/start","params":{}});
+                "scope":{"account":"target","connection":"target-connection","generation":1},"method":"thread/start","params":{}});
         }
         let operation = json!({
             "id":"transfer", "leadId":"agent", "targetAccountKey":"target",
@@ -2180,11 +2202,11 @@ mod provider_receipt_tests {
             order: snapshot.order.clone(),
         };
         decision.stamp(2.0, None).unwrap();
-        let progress = progress_view(
-            decision.agents["agent"].get("accountTransfer"),
-            snapshot.can_cancel(),
+        let summary = studio_runtime_store::transfer_record::AgentTransferState::deserialize(
+            decision.agents["agent"].get("accountTransfer").unwrap(),
         )
         .unwrap();
+        let progress = progress_view(Some(&summary), snapshot.can_cancel()).unwrap();
         let encoded = serde_json::to_value(progress).unwrap();
         assert!(!matches!(
             encoded["actions"].as_str(),
