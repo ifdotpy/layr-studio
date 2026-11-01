@@ -1696,7 +1696,9 @@ fn extra_field<T: serde::de::DeserializeOwned>(
     key: &str,
 ) -> Result<studio_runtime_schema::queue_command::Field<T>, TransferError> {
     use studio_runtime_schema::queue_command::Field;
-    match agent.extra.get(key) {
+    let record =
+        serde_json::to_value(agent).map_err(|_| invalid("transfer agent", format!("/{key}")))?;
+    match record.get(key) {
         None => Ok(Field::Missing),
         Some(value) => serde::Deserialize::deserialize(value.clone())
             .map_err(|_| invalid("transfer agent", format!("/{key}"))),
@@ -1823,13 +1825,11 @@ pub fn typed_enroll(
         })));
     agent.account_key = target.as_str().to_owned();
     if provider != target_provider {
-        agent
-            .extra
-            .insert("provider".into(), json!(target_provider));
+        agent.provider = Field::Value(target_provider);
         agent.model = Some(crate::provider_adapter::default_model(target_provider).into());
-        agent.extra.insert("effort".into(), Value::Null);
+        agent.effort = Field::Null;
         agent.extra.insert("nativeEffort".into(), json!("medium"));
-        agent.extra.insert("fastMode".into(), json!(false));
+        agent.fast_mode = Some(false);
         agent.extra.insert("daybreakEnabled".into(), json!(false));
         agent
             .extra
@@ -1855,9 +1855,7 @@ pub fn typed_enroll(
         },
     );
     if !has_pending {
-        agent
-            .extra
-            .insert("executionSettingsAccountKey".into(), json!(source));
+        agent.execution_settings_account_key = Field::Value(source.as_str().to_owned());
     }
     Ok(member)
 }
