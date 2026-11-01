@@ -994,7 +994,7 @@ mod projection_plan_tests {
         assert!(projected.get("workspaceBackend").is_none());
         assert_eq!(
             studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
-            "331e9f9d3338dd940d71775993842096c0457bcbcc1dfac427e79f0d7f826e20"
+            "b2ae13a4c60b1d7373b79ab982292d2d02ec8c576b257f881cb777bd35d3178d"
         );
     }
 
@@ -1007,7 +1007,7 @@ mod projection_plan_tests {
         assert!(projected.get("compactionsObservedOnly").is_none());
         assert_eq!(
             studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
-            "331e9f9d3338dd940d71775993842096c0457bcbcc1dfac427e79f0d7f826e20"
+            "b2ae13a4c60b1d7373b79ab982292d2d02ec8c576b257f881cb777bd35d3178d"
         );
     }
 
@@ -1040,7 +1040,7 @@ mod projection_plan_tests {
             super::agent_entity_view(&agent.value(), &super::AgentViewContext::default()).unwrap();
         assert_eq!(
             studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
-            "0375690c54e6b6a10c9913b01c9e4690b922aad5961015481d0a6c4a6d903594"
+            "69870ccec982e294904c5df141fbc2d9d3f1358ccf49d5e275a02bf299f55a73"
         );
     }
 
@@ -1058,7 +1058,7 @@ mod projection_plan_tests {
         assert_eq!(legacy, normalized);
         assert_eq!(
             studio_runtime_store::sha256_hex(&normalized),
-            "331e9f9d3338dd940d71775993842096c0457bcbcc1dfac427e79f0d7f826e20"
+            "b2ae13a4c60b1d7373b79ab982292d2d02ec8c576b257f881cb777bd35d3178d"
         );
     }
 
