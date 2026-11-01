@@ -336,13 +336,18 @@ pub enum QuestionAnswerRoute {
 pub fn route_question_answer(
     db: &Transaction<'_>,
     prepared: &PreparedHost,
-    question: &studio_runtime_schema::request_record::RequestRecord,
+    question: &studio_runtime_schema::approvals::Approval,
     text: &str,
     receipt: Option<&NativeAcceptanceReceipt>,
     now: f64,
 ) -> Result<QuestionAnswerRoute, ProjectsError> {
-    if question.method != studio_runtime_schema::request_record::RequestMethod::AsyncQuestion
-        || question.turn_id.as_deref().is_none_or(str::is_empty)
+    if !matches!(
+        question.request,
+        studio_runtime_schema::approvals::Request::AgentQuestion { .. }
+    ) || question
+        .turn
+        .as_ref()
+        .is_none_or(|turn| turn.as_str().is_empty())
     {
         return Ok(QuestionAnswerRoute::OrdinaryFollowup);
     }
@@ -351,7 +356,7 @@ pub fn route_question_answer(
         let Some(active) = room.radio.active.as_ref() else {
             continue;
         };
-        if active.agent_id != question.agent {
+        if active.agent_id != question.agent.as_str() {
             continue;
         }
         let Some(agent) = records::get(db, "runtime_agents", &active.agent_id)? else {
@@ -359,7 +364,7 @@ pub fn route_question_answer(
         };
         let event = event(db, active)?;
         let turn = turn(&agent, active, event.as_ref());
-        if turn.as_deref() != question.turn_id.as_deref()
+        if turn.as_deref() != question.turn.as_ref().map(|turn| turn.as_str())
             || question.epoch != Some(active.epoch)
             || agent["epoch"] != active.epoch
             || agent["threadId"] != json!(active.thread_id)
@@ -374,11 +379,12 @@ pub fn route_question_answer(
                 "The shared reply is stopped or blocked",
             ));
         }
-        let key = format!("{}:answer", question.id);
+        let key = format!("{}:answer", question.id.as_str());
         if let Some(receipt) = receipt {
             if receipt.agent_id != active.agent_id
                 || receipt.epoch != active.epoch
-                || Some(receipt.turn_id.as_str()) != question.turn_id.as_deref()
+                || Some(receipt.turn_id.as_str())
+                    != question.turn.as_ref().map(|turn| turn.as_str())
                 || receipt.event_id != active.event_id
             {
                 return Ok(QuestionAnswerRoute::OrdinaryFollowup);
@@ -446,12 +452,17 @@ pub fn route_question_answer(
 pub fn record_question_answer_followup(
     db: &Transaction<'_>,
     prepared: &PreparedHost,
-    question: &studio_runtime_schema::request_record::RequestRecord,
+    question: &studio_runtime_schema::approvals::Approval,
     text: &str,
     now: f64,
 ) -> Result<(), ProjectsError> {
-    if question.method != studio_runtime_schema::request_record::RequestMethod::AsyncQuestion
-        || question.turn_id.as_deref().is_none_or(str::is_empty)
+    if !matches!(
+        question.request,
+        studio_runtime_schema::approvals::Request::AgentQuestion { .. }
+    ) || question
+        .turn
+        .as_ref()
+        .is_none_or(|turn| turn.as_str().is_empty())
     {
         return Ok(());
     }
@@ -460,14 +471,16 @@ pub fn record_question_answer_followup(
         let Some(active) = room.radio.active.as_ref() else {
             continue;
         };
-        if active.agent_id != question.agent || question.epoch != Some(active.epoch) {
+        if active.agent_id != question.agent.as_str() || question.epoch != Some(active.epoch) {
             continue;
         }
         let Some(agent) = records::get(db, "runtime_agents", &active.agent_id)? else {
             continue;
         };
         let active_event = event(db, active)?;
-        if turn(&agent, active, active_event.as_ref()).as_deref() != question.turn_id.as_deref() {
+        if turn(&agent, active, active_event.as_ref()).as_deref()
+            != question.turn.as_ref().map(|turn| turn.as_str())
+        {
             continue;
         }
         if agent["epoch"] != active.epoch || agent["threadId"] != json!(active.thread_id) {
@@ -481,7 +494,7 @@ pub fn record_question_answer_followup(
                 "The shared reply is stopped or blocked",
             ));
         }
-        let key = format!("{}:answer", question.id);
+        let key = format!("{}:answer", question.id.as_str());
         let old = db
             .query_row(
                 "SELECT text FROM runtime_chat_messages WHERE id=?1",

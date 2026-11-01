@@ -6445,6 +6445,41 @@ mod tests {
         );
     }
 
+    /// Live deltas skip `SYNC_FRAME_MIN_INTERVAL`: one goes out while the resource and token
+    /// frame windows are still open.
+    #[tokio::test(start_paused = true)]
+    async fn live_delta_is_sent_while_frame_intervals_are_pending() {
+        let hub = Arc::new(ChangeNotificationHub::new());
+        let tokens = TokenRateHub::new();
+        let notifications = Arc::new(ResourceNotifications::new(hub.clone()));
+        let mut state = test_stream(
+            &hub,
+            &tokens,
+            notifications.clone(),
+            &[json!({"kind":"transcript","agentId":"a"})],
+        );
+        let window = Instant::now() + SYNC_FRAME_MIN_INTERVAL;
+        state.next_resources_frame_at = Some(window);
+        state.next_token_frame_at = Some(window);
+        hub.notify_one();
+        notifications.publish_live(LiveDelta {
+            agent_id: "a".into(),
+            item_id: "a:item".into(),
+            offset: 0,
+            text: "live".into(),
+        });
+        let started = Instant::now();
+        let (frame, _) = next_frame(state).await.expect("live frame");
+        assert!(
+            started.elapsed() < SYNC_FRAME_MIN_INTERVAL,
+            "a live delta waited for the frame interval"
+        );
+        assert_eq!(
+            event_document(frame).await,
+            json!({"agentId":"a","itemId":"a:item","offset":0,"text":"live"})
+        );
+    }
+
     fn test_stream(
         hub: &Arc<ChangeNotificationHub>,
         tokens: &TokenRateHub,
