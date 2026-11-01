@@ -31,11 +31,7 @@ fn binding(
         return Ok(None);
     };
     let fields = &record.extra;
-    let Some(provider) = fields
-        .get("provider")
-        .and_then(Value::as_str)
-        .filter(|provider| matches!(*provider, "codex" | "claude"))
-    else {
+    let Some(provider) = record.provider.value().map(|provider| provider.key()) else {
         return Ok(None);
     };
     if !crate::linux_vm_provider::vm_actor_matches(

@@ -312,12 +312,7 @@ async fn capture_before_restore_inner(
         .and_then(Value::as_i64);
     let root_id = snapshot.agent.root_id.0.clone();
     let thread_id = snapshot.agent.thread_id.clone();
-    let turn_id = snapshot
-        .agent
-        .extra
-        .get("lastCompletedTurn")
-        .cloned()
-        .unwrap_or(Value::Null);
+    let turn_id = snapshot.agent.last_completed_turn.value().cloned();
     let transaction_operation_id = operation_id;
     let transaction_agent_id = agent_id;
     let transaction_checkpoint_id = checkpoint_id;
@@ -540,12 +535,7 @@ async fn capture_reserved(
                     .and_then(Value::as_i64);
                 let root_id = snapshot.agent.root_id.0.clone();
                 let thread_id = snapshot.agent.thread_id.clone();
-                let turn_id = snapshot
-                    .agent
-                    .extra
-                    .get("lastCompletedTurn")
-                    .cloned()
-                    .unwrap_or(Value::Null);
+                let turn_id = snapshot.agent.last_completed_turn.value().cloned();
                 Ok::<_, CheckpointsError>((
                     parent_id,
                     parent_boundary,

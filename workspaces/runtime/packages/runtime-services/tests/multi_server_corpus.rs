@@ -1335,8 +1335,8 @@ async fn child_result_requires_link_membership_and_updates_proxy() {
         .unwrap();
     assert_eq!(proxy.last_answer.as_deref(), Some("done"));
     assert_eq!(
-        proxy.extra.get("lastCompletedTurn"),
-        Some(&json!("child-result-1"))
+        proxy.last_completed_turn.value().map(String::as_str),
+        Some("child-result-1")
     );
     drop(connection);
     let structured = json!({"requestId":"child-result-structured","operation":[],"action":"event","payload":{"link":"result-link","parentEpoch":3,"kind":"child_result","text":json!({"agent_id":"result-child","result":{"ok":true}}).to_string()}});

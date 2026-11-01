@@ -391,7 +391,6 @@ fn post_managed_message(
     // A manual send wakes a stopped agent in the same transaction as the event.
     agent.auto_wake = Some(true);
     agent.extra.insert("error".to_owned(), Value::Null);
-    agent.extra.insert("complaintMisses".to_owned(), json!(0));
     agent.extra.remove("nativeFailureHold");
     capacity_reset(transaction, &mut agent)?;
     studio_runtime_store::AgentRepository::put(transaction, &agent)?;
@@ -624,7 +623,6 @@ fn send_followup_inner(
     if sender_identity.is_some() {
         recipient.auto_wake = Some(true);
         recipient.extra.insert("error".into(), Value::Null);
-        recipient.extra.insert("complaintMisses".into(), json!(0));
         recipient.extra.remove("nativeFailureHold");
         capacity_reset(transaction, &mut recipient)?;
         studio_runtime_store::AgentRepository::put(transaction, &recipient)?;

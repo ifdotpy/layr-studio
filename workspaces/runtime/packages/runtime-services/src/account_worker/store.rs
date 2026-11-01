@@ -418,8 +418,7 @@ fn completed_attempt(
     attempt: &studio_runtime_store::StartAttemptView,
 ) -> bool {
     attempt.turn_id.as_deref().is_some_and(|turn| {
-        !turn.is_empty()
-            && agent.extra.get("lastCompletedTurn").and_then(Value::as_str) == Some(turn)
+        !turn.is_empty() && agent.last_completed_turn.value().map(String::as_str) == Some(turn)
     })
 }
 /// Hold reason of an agent whose thread request outcome is unknown after a

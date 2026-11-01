@@ -204,7 +204,7 @@ fn apply_read_state(
     let read_value = read.read;
     let revision = read.expected_revision.get();
     if agent.thread_id.as_deref() != Some(thread)
-        || agent.extra.get("lastCompletedTurn").and_then(Value::as_str) != Some(turn)
+        || agent.last_completed_turn.value().map(String::as_str) != Some(turn)
         || agent
             .extra
             .get("lastCompletedTurnStatus")

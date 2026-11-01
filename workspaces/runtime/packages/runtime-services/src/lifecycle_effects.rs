@@ -1385,7 +1385,7 @@ pub(crate) fn notify_parent_of_failed_turn(
     };
     if agent.status != AgentStatus::Failed
         || !agent.parent_id.is_some()
-        || agent.extra.get("lastCompletedTurn") != Some(&json!(turn_id))
+        || agent.last_completed_turn.value().map(String::as_str) != Some(turn_id)
         || agent.auto_wake != Some(true)
         || !reports_turns(&agent)
         || retrying("capacityRetry")

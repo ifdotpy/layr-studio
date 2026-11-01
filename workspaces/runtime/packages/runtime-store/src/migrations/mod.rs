@@ -40,6 +40,7 @@ mod m2026_10_30_unused_start_action;
 mod m2026_10_30_vm_stream_owners;
 mod m2026_10_31_access_clients;
 mod m2026_10_31_access_invites;
+mod m2026_10_31_agent_batch_55;
 mod m2026_10_31_agent_core;
 mod m2026_10_31_agent_permissions;
 mod m2026_10_31_current_checks;
@@ -911,6 +912,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_10_31_agent_core::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-agent-batch-55",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with legacy provider, timestamps and queue fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_agent_batch_55::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {

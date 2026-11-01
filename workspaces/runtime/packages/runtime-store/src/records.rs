@@ -424,6 +424,17 @@ pub struct AgentRecord {
     )]
     pub created:
         studio_runtime_schema::queue_command::Field<studio_runtime_schema::NonnegativeNumber>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_safe_counter"
+    )]
+    pub queue_mutation_revision: Option<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub last_completed_turn: studio_runtime_schema::queue_command::Field<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree_ready: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -527,6 +538,12 @@ fn deserialize_safe_counter<'de, D: serde::Deserializer<'de>>(
     } else {
         Err(serde::de::Error::custom("counter outside safe range"))
     }
+}
+
+fn present_safe_counter<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<u64>, D::Error> {
+    deserialize_safe_counter(deserializer).map(Some)
 }
 
 pub(crate) fn deserialize_optional_safe_counter<'de, D: serde::Deserializer<'de>>(
@@ -802,6 +819,8 @@ impl AgentRecord {
             role: Default::default(),
             provider: Default::default(),
             created: Default::default(),
+            queue_mutation_revision: None,
+            last_completed_turn: Default::default(),
             worktree_ready: None,
             approval_policy: None,
             native_response_turn: None,
@@ -2806,7 +2825,13 @@ mod tests {
 
     #[test]
     fn agent_text_settings_are_strings_with_distinct_null_and_absence() {
-        for field in ["prompt", "profileId", "profileInstructions", "effort"] {
+        for field in [
+            "prompt",
+            "profileId",
+            "profileInstructions",
+            "effort",
+            "lastCompletedTurn",
+        ] {
             let raw = format!(
                 r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"{field}":42}}"#
             );
@@ -2834,6 +2859,19 @@ mod tests {
                 .unwrap()
                 .contains("\"role\":null")
         );
+    }
+
+    #[test]
+    fn agent_queue_revision_is_a_nonnegative_integer() {
+        for value in ["-1", "null", "1.5", "\"1\""] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"queueMutationRevision":{value}}}"#
+            );
+            assert!(
+                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                "{value}"
+            );
+        }
     }
 
     #[test]

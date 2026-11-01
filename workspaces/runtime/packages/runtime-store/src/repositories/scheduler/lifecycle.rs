@@ -489,9 +489,9 @@ impl SchedulerRepository {
                 continue;
             }
             let last = agent
-                .extra
-                .get("lastCompletedTurn")
-                .and_then(Value::as_str)
+                .last_completed_turn
+                .value()
+                .map(String::as_str)
                 .filter(|turn| !turn.is_empty())
                 .map(str::to_owned);
             let mut changed = false;
@@ -1809,9 +1809,8 @@ impl SchedulerRepository {
             agent.start_outcome_hold = None;
         }
         crate::domain::complete_turn(transaction, agent_id, turn_id)?;
-        agent
-            .extra
-            .insert("lastCompletedTurn".into(), json!(turn_id));
+        agent.last_completed_turn =
+            studio_runtime_schema::queue_command::Field::Value(turn_id.to_owned());
         agent
             .extra
             .insert("lastCompletedTurnStatus".into(), json!(outcome));
@@ -1872,9 +1871,6 @@ impl SchedulerRepository {
         }
         if current_attempt {
             parked_after_turn(&mut agent);
-        }
-        if native_status == "completed" && current_attempt {
-            agent.extra.insert("complaintMisses".into(), json!(0));
         }
         publish_agent(transaction, &agent)?;
         crate::ExecutionHistoryRepository::terminal(
@@ -2705,7 +2701,7 @@ pub(super) fn settled_attempt(
     attempt: &crate::StartAttemptView,
 ) -> StoreResult<bool> {
     if let Some(turn) = bound_turn(agent, attempt).filter(|turn| !turn.is_empty())
-        && (agent.extra.get("lastCompletedTurn").and_then(Value::as_str) == Some(turn)
+        && (agent.last_completed_turn.value().map(String::as_str) == Some(turn)
             || completed_turn(connection, &agent.id.0, turn)?)
     {
         return Ok(true);
