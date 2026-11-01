@@ -403,6 +403,16 @@ pub struct AgentRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
+    pub archived: studio_runtime_schema::queue_command::Field<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub pinned: studio_runtime_schema::queue_command::Field<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
     pub prompt: studio_runtime_schema::queue_command::Field<String>,
     #[serde(
         default,
@@ -906,6 +916,8 @@ impl AgentRecord {
             agent_mode_supported: None,
             layr_ready: None,
             image_workspace: Default::default(),
+            archived: Default::default(),
+            pinned: Default::default(),
             prompt: Default::default(),
             profile_id: Default::default(),
             profile_instructions: Default::default(),
@@ -2998,12 +3010,19 @@ mod tests {
     }
 
     #[test]
-    fn agent_image_workspace_is_boolean_or_null() {
-        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"imageWorkspace":42}"#;
-        assert!(serde_json::from_str::<AgentRecord>(raw).is_err());
-        let null = raw.replace("42", "null");
-        let agent: AgentRecord = serde_json::from_str(&null).unwrap();
-        assert_eq!(agent.value().get("imageWorkspace"), Some(&Value::Null));
+    fn agent_nullable_flags_are_boolean_or_null() {
+        for field in ["imageWorkspace", "archived", "pinned"] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"{field}":42}}"#
+            );
+            assert!(
+                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                "{field}"
+            );
+            let null = raw.replace("42", "null");
+            let agent: AgentRecord = serde_json::from_str(&null).unwrap();
+            assert_eq!(agent.value().get(field), Some(&Value::Null), "{field}");
+        }
     }
 
     #[test]

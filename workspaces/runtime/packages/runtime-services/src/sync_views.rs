@@ -984,6 +984,18 @@ mod projection_plan_tests {
     }
 
     #[test]
+    fn chat_organization_flags_preserve_agent_projection_hash() {
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"archived":true,"pinned":true}"#;
+        let agent: studio_runtime_store::AgentRecord = serde_json::from_str(raw).unwrap();
+        let projected =
+            super::agent_entity_view(&agent.value(), &super::AgentViewContext::default()).unwrap();
+        assert_eq!(
+            studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
+            "dac0d278dab7d28319ef6df742ffdb9bb431c95b23750a2e0e4e48a598fd848c"
+        );
+    }
+
+    #[test]
     fn legacy_image_metadata_does_not_change_agent_projection_hash() {
         let before = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"authResumeAttempt":1,"turnRecovery":{"outcome":"idle"},"lastContextRepairWait":{"status":"superseded"},"lastContextRepairCheck":{"phase":"waiting"},"completedWorkerTurns":2,"supervisorRestore":{"status":"not_restored"},"countedWorkerTurn":true,"imageWorkspaceBaseError":"old","imageWorkspaceBaseRef":"main","imageWorkspaceCreatedAt":2,"imageWorkspaceError":"old","imageWorkspaceHasGit":true,"imageWorkspaceNoticeSent":true,"imageWorkspaceNoticeText":"old","imageWorkspaceRelative":".","imageWorkspaceStartCommit":"abc","imageWorkspaceSubpath":"."}"#;
         let after = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"authResumeAttempt":1}"#;

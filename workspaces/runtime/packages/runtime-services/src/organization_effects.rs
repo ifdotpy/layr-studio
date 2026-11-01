@@ -160,7 +160,15 @@ pub fn apply(tx: &Transaction<'_>, body: &OrganizationRequest) -> Result<Value, 
                     "Stop active work before archiving this conversation",
                 ));
             }
-            agent.extra.insert(field.into(), json!(enabled));
+            match field {
+                "archived" => {
+                    agent.archived = studio_runtime_schema::queue_command::Field::Value(enabled)
+                }
+                "pinned" => {
+                    agent.pinned = studio_runtime_schema::queue_command::Field::Value(enabled)
+                }
+                _ => unreachable!(),
+            }
         }
     }
     if !body.project.is_missing() {
