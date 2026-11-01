@@ -96,6 +96,11 @@ pub enum AgentError {
 impl<'de> Deserialize<'de> for AgentError {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let original = Value::deserialize(deserializer)?;
+        if let Value::String(text) = &original
+            && readable_message(&original, 0).as_deref() == Some(text.as_str())
+        {
+            return Ok(Self::Message(text.clone()));
+        }
         if original.get(STUDIO_RAW_EVIDENCE).is_some()
             && let Ok(canonical) = NativeProviderError::deserialize(original.clone())
         {
@@ -372,6 +377,13 @@ mod tests {
             document["components"]["schemas"]["NativeProviderError"],
             native_provider_error_schema()
         );
+    }
+
+    #[test]
+    fn plain_studio_disconnect_remains_a_string_after_round_trip() {
+        let raw = json!(crate::shared_values::PROVIDER_DISCONNECTED_TURN_ERROR);
+        let decoded: AgentError = serde_json::from_value(raw.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), raw);
     }
 
     #[test]

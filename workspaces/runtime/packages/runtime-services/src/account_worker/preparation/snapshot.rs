@@ -1887,8 +1887,12 @@ mod resource_tests {
                     assert!(matches!(plan, thread::Outcome::Resume(_)), "{plan:?}");
                 }
                 let saved = agent(tx, "lead")?.value();
-                assert_eq!(saved["error"], error);
-                assert_eq!(saved["lastCompletedTurnError"], error);
+                let mut expected = error.clone();
+                if let Some(fields) = expected.as_object_mut() {
+                    fields.insert("studioRawEvidence".into(), error.clone());
+                }
+                assert_eq!(saved["error"], expected);
+                assert_eq!(saved["lastCompletedTurnError"], expected);
             }
             Ok::<_, WorkerError>(())
         }).await.expect("valid structured errors preserve preparation and holds");
