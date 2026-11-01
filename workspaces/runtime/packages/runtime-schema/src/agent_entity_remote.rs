@@ -40,34 +40,72 @@ pub struct ReviewDefaultsDto {
         deserialize_with = "present",
         skip_serializing_if = "Option::is_none"
     )]
+    #[schemars(with = "bool")]
     pub fast_mode: Option<bool>,
 }
 
-pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 3] {
+fn object(
+    value: &mut serde_json::Value,
+) -> Result<&mut serde_json::Map<String, serde_json::Value>, String> {
+    value
+        .as_object_mut()
+        .ok_or_else(|| "remote agent schema must be an object".into())
+}
+
+fn title(schema: &mut serde_json::Value, value: &str) -> Result<(), String> {
+    object(schema)?.insert("title".into(), value.into());
+    Ok(())
+}
+
+fn property<'a>(
+    schema: &'a mut serde_json::Value,
+    name: &str,
+) -> Result<&'a mut serde_json::Value, String> {
+    object(schema)?
+        .get_mut("properties")
+        .and_then(serde_json::Value::as_object_mut)
+        .and_then(|properties| properties.get_mut(name))
+        .ok_or_else(|| format!("missing remote agent property {name}"))
+}
+
+fn normalize_nullable(value: &mut serde_json::Value, label: &str) -> Result<(), String> {
+    let mut inner = value.clone();
+    let obj = object(&mut inner)?;
+    let types = obj
+        .get("type")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("nullable property must have a type array")?;
+    if types.len() != 2 || types[1] != "null" || !types[0].is_string() {
+        return Err("nullable property must have one type and null".into());
+    }
+    let kind = types[0].clone();
+    obj.insert("type".into(), kind);
+    *value = serde_json::json!({"anyOf":[{"type":"null"},inner],"title":label});
+    Ok(())
+}
+
+pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 3], String> {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
     let mut parent = RemoteParentLinkDto::json_schema(&mut generator).to_value();
-    parent["title"] = "RemoteParentLinkDto".into();
-    parent["properties"]["home"]["title"] = "Home".into();
-    parent["properties"]["link"]["title"] = "Link".into();
+    title(&mut parent, "RemoteParentLinkDto")?;
+    title(property(&mut parent, "home")?, "Home")?;
+    title(property(&mut parent, "link")?, "Link")?;
     let mut worker = RemoteWorkerLinkDto::json_schema(&mut generator).to_value();
-    worker["title"] = "RemoteWorkerLinkDto".into();
-    worker["properties"]["server"]["title"] = "Server".into();
-    worker["properties"]["link"]["title"] = "Link".into();
+    title(&mut worker, "RemoteWorkerLinkDto")?;
+    title(property(&mut worker, "server")?, "Server")?;
+    title(property(&mut worker, "link")?, "Link")?;
     let mut review = ReviewDefaultsDto::json_schema(&mut generator).to_value();
-    review["title"] = "ReviewDefaultsDto".into();
-    for (name, title) in [("model", "Model"), ("effort", "Effort")] {
-        review["properties"][name] =
-            serde_json::json!({"anyOf":[{"type":"null"},{"type":"string"}],"title":title});
+    title(&mut review, "ReviewDefaultsDto")?;
+    for (name, label) in [("model", "Model"), ("effort", "Effort")] {
+        normalize_nullable(property(&mut review, name)?, label)?;
     }
-    review["properties"]["fastMode"] = serde_json::json!({"type":"boolean"});
-    review["required"] = serde_json::json!(["model", "effort"]);
-    [
+    Ok([
         ("RemoteParentLinkDto", parent),
         ("RemoteWorkerLinkDto", worker),
         ("ReviewDefaultsDto", review),
-    ]
+    ])
 }
 
 #[cfg(test)]
@@ -97,8 +135,18 @@ mod tests {
     fn published_components_match_owners() {
         let document: serde_json::Value =
             serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
-        for (name, schema) in schemas() {
+        for (name, schema) in schemas().unwrap() {
             assert_eq!(document["components"]["schemas"][name], schema, "{name}");
         }
+    }
+
+    #[test]
+    fn nullable_normalization_keeps_field_constraints() {
+        let mut field = json!({"type":["string","null"],"minLength":2});
+        normalize_nullable(&mut field, "Model").unwrap();
+        assert_eq!(
+            field,
+            json!({"anyOf":[{"type":"null"},{"type":"string","minLength":2}],"title":"Model"})
+        );
     }
 }
