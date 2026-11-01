@@ -602,7 +602,7 @@ pub(crate) fn settle_terminal_in_transaction(
     if result {
         if agent.as_ref().is_some_and(|record| {
             record.workspace_mode == Some(studio_runtime_schema::records::WorkspaceMode::LayrNative)
-                && record.extra.get("layrReady").and_then(Value::as_bool) == Some(true)
+                && record.layr_ready == Some(true)
         }) {
             crate::layr_native::stage_turn_save(transaction, &identity.agent_id, turn_id)?;
         }

@@ -936,7 +936,7 @@ async fn workspace_with_vm_action(
 ) -> Result<crate::workspace_ready::ReadyToken, WorkerError> {
     let record = workspace_agent(&store, &intent.agent_id).await?;
     if record.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm) {
-        if record.extra.get("layrReady").and_then(Value::as_bool) != Some(true) {
+        if record.layr_ready != Some(true) {
             let start_attempt = record
                 .start_attempt
                 .as_ref()
@@ -1004,7 +1004,7 @@ async fn workspace_with_vm_action(
             })?;
         }
         let ready = workspace_agent(&store, &intent.agent_id).await?;
-        if ready.extra.get("layrReady").and_then(Value::as_bool) != Some(true) {
+        if ready.layr_ready != Some(true) {
             return Err(WorkerError::PreparationAwaitsAgent(
                 "workspace-readiness/vm-not-ready".into(),
             ));

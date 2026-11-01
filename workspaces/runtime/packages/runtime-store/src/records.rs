@@ -386,6 +386,8 @@ pub struct AgentRecord {
     pub max_agents_explicit: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_mode_supported: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layr_ready: Option<bool>,
     #[serde(
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
@@ -812,6 +814,7 @@ impl AgentRecord {
             manual_name: None,
             max_agents_explicit: None,
             agent_mode_supported: None,
+            layr_ready: None,
             prompt: Default::default(),
             profile_id: Default::default(),
             profile_instructions: Default::default(),
@@ -2809,6 +2812,7 @@ mod tests {
             "manualName",
             "maxAgentsExplicit",
             "agentModeSupported",
+            "layrReady",
         ] {
             let raw = format!(
                 r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"{field}":"false"}}"#

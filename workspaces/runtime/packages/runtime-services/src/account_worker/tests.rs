@@ -4850,7 +4850,7 @@ async fn vm_actor_turn_with_host_mcp(child: bool) {
                         );
                     }
                     record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
-                    record.extra.insert("layrReady".into(), json!(true));
+                    record.layr_ready = Some(true);
                     record.cwd = Some("/home/studio/project".into());
                     record.workspace_mode =
                         Some(studio_runtime_schema::records::WorkspaceMode::Layr);
@@ -4967,14 +4967,14 @@ async fn vm_session_identity_refusal_holds_one_actor_and_keeps_sibling_usable() 
                         AgentRepository::get(tx, &AgentId::from(primary_id.as_str()))?
                             .expect("fixture agent");
                     primary.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
-                    primary.extra.insert("layrReady".into(), json!(true));
+                    primary.layr_ready = Some(true);
                     primary.cwd = Some("/home/studio/project".into());
                     primary.workspace_mode =
                         Some(studio_runtime_schema::records::WorkspaceMode::Layr);
                     primary.thread_id = None;
                     AgentRepository::put(tx, &primary)?;
 
-                    let mut sibling_record = primary.clone();
+                    let mut sibling_record = primary;
                     sibling_record.id = AgentId::from(sibling.as_str());
                     sibling_record.root_id = sibling_record.id.clone();
                     sibling_record.status = studio_runtime_store::AgentStatus::Queued;
@@ -5131,14 +5131,14 @@ async fn vm_adapter_exit_recovers_only_its_actor_and_keeps_sibling_usable() {
                         AgentRepository::get(tx, &AgentId::from(primary_id.as_str()))?
                             .expect("fixture agent");
                     primary.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
-                    primary.extra.insert("layrReady".into(), json!(true));
+                    primary.layr_ready = Some(true);
                     primary.cwd = Some("/home/studio/project".into());
                     primary.workspace_mode =
                         Some(studio_runtime_schema::records::WorkspaceMode::Layr);
                     primary.thread_id = None;
                     AgentRepository::put(tx, &primary)?;
 
-                    let mut sibling_record = primary.clone();
+                    let mut sibling_record = primary;
                     sibling_record.id = AgentId::from(sibling.as_str());
                     sibling_record.root_id = sibling_record.id.clone();
                     sibling_record.status = studio_runtime_store::AgentStatus::Queued;
@@ -5349,7 +5349,7 @@ async fn vm_claude_refresh_copies_rotation_to_active_guest_without_restart() {
                     record.provider = studio_runtime_schema::queue_command::Field::Value(
                         studio_runtime_schema::ProviderKind::Claude,
                     );
-                    record.extra.insert("layrReady".into(), json!(true));
+                    record.layr_ready = Some(true);
                     record.cwd = Some("/home/studio/project".into());
                     record.workspace_mode =
                         Some(studio_runtime_schema::records::WorkspaceMode::Layr);
@@ -5638,7 +5638,7 @@ async fn retained_vm_notification_is_epoch_fenced_and_committed_before_delivery(
                     let mut record = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
                         .expect("fixture agent");
                     record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
-                    record.extra.insert("layrReady".into(), json!(true));
+                    record.layr_ready = Some(true);
                     record.cwd = Some("/home/studio/project".into());
                     record.workspace_mode =
                         Some(studio_runtime_schema::records::WorkspaceMode::Layr);
@@ -5724,7 +5724,7 @@ async fn retained_vm_auth_callback_replies_through_the_account_session() {
                     let mut record = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
                         .expect("fixture agent");
                     record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
-                    record.extra.insert("layrReady".into(), json!(true));
+                    record.layr_ready = Some(true);
                     record.cwd = Some("/home/studio/project".into());
                     record.workspace_mode =
                         Some(studio_runtime_schema::records::WorkspaceMode::Layr);
@@ -5800,7 +5800,7 @@ async fn retained_vm_reply_uses_its_actor_cursor_when_host_cursor_is_zero() {
                     let mut record = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
                         .expect("fixture agent");
                     record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
-                    record.extra.insert("layrReady".into(), json!(true));
+                    record.layr_ready = Some(true);
                     record.cwd = Some("/home/studio/project".into());
                     record.workspace_mode =
                         Some(studio_runtime_schema::records::WorkspaceMode::Layr);
@@ -5902,7 +5902,7 @@ async fn retained_unknown_replay_precedes_changed_vm_session_fence() {
                     let mut record = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
                         .expect("fixture agent");
                     record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
-                    record.extra.insert("layrReady".into(), json!(true));
+                    record.layr_ready = Some(true);
                     record.cwd = Some("/home/studio/project".into());
                     record.workspace_mode =
                         Some(studio_runtime_schema::records::WorkspaceMode::Layr);
@@ -6056,7 +6056,7 @@ async fn vm_auth_callback_is_not_sent_after_account_reconnect_at_final_fence() {
                     let mut record = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
                         .expect("fixture agent");
                     record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
-                    record.extra.insert("layrReady".into(), json!(true));
+                    record.layr_ready = Some(true);
                     record.cwd = Some("/home/studio/project".into());
                     record.workspace_mode =
                         Some(studio_runtime_schema::records::WorkspaceMode::Layr);
@@ -6139,7 +6139,7 @@ async fn vm_auth_callback_shutdown_waits_for_final_generation_fence() {
                     let mut record = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
                         .expect("fixture agent");
                     record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
-                    record.extra.insert("layrReady".into(), json!(true));
+                    record.layr_ready = Some(true);
                     record.cwd = Some("/home/studio/project".into());
                     record.workspace_mode =
                         Some(studio_runtime_schema::records::WorkspaceMode::Layr);
@@ -6224,7 +6224,7 @@ async fn vm_worker_restart_reconciles_uncertain_provider_start_without_resending
                     let mut record = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
                         .expect("fixture agent");
                     record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
-                    record.extra.insert("layrReady".into(), json!(true));
+                    record.layr_ready = Some(true);
                     record.cwd = Some("/home/studio/project".into());
                     record.workspace_mode =
                         Some(studio_runtime_schema::records::WorkspaceMode::Layr);

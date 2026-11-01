@@ -307,7 +307,7 @@ pub(super) fn prepare_parent_workspace(
                 .ok_or(studio_runtime_services::provider_callbacks::ManagedCreationEnvironmentError::Invalid(
                     "The parent layr line is not ready",
                 ))?;
-        if actor.extra.get("layrReady").and_then(Value::as_bool) != Some(true) {
+        if actor.layr_ready != Some(true) {
             return Err(studio_runtime_services::provider_callbacks::ManagedCreationEnvironmentError::Invalid(
                     "The parent layr line is not ready",
                 ));
@@ -545,7 +545,7 @@ impl studio_runtime_services::monitor_runtime::WorkspaceAdmission for VmManagedW
             || actor.epoch != self.epoch
             || actor.cwd.as_deref() != Some(self.cwd.as_str())
             || actor.execution_mode != Some(studio_runtime_store::AgentExecutionMode::Vm)
-            || extra.get("layrReady").and_then(Value::as_bool) != Some(true)
+            || actor.layr_ready != Some(true)
             || extra.get("layrProjectId").and_then(Value::as_str) != Some(self.project_id.as_str())
             || extra.get("layrLine").and_then(Value::as_str) != Some(self.line.as_str())
         {
