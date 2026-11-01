@@ -838,7 +838,7 @@ pub fn apply(
 }
 
 /// The rules adapter implements this using rules_tick::finish_in_transaction.
-/// A false/stale rule identity must return an error, rolling back the monitor too.
+/// A stale rule identity finishes nothing and must not block the monitor's own end.
 pub trait RuleFinish {
     fn finish(
         &self,
