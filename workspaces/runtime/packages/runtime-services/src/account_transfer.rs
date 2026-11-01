@@ -826,7 +826,7 @@ impl Snapshot {
         operation: &str,
         scope: studio_runtime_schema::provider_call_contract::ConnectionScope,
         method: studio_runtime_store::transfer_record::TransferMethod,
-        params: studio_runtime_store::transfer_record::ProviderPayload,
+        params: &serde_json::value::RawValue,
     ) -> Result<Decision, TransferError> {
         let method = method.as_str();
         let scope = serde_json::to_value(scope).map_err(|_| invalid("provider scope", "/"))?;
@@ -1409,6 +1409,39 @@ impl Snapshot {
 
     /// Release a failed preparation without changing a submitted request or a
     /// newer source snapshot. Restart also recovers a crash before this write.
+    pub fn typed_preparation_failed(
+        &self,
+        agent: &str,
+        source: &studio_runtime_schema::queue_command::Field<
+            studio_runtime_store::transfer_record::TransferSource,
+        >,
+    ) -> Result<Decision, TransferError> {
+        use studio_runtime_schema::queue_command::Field;
+        let Some(member) = self.identity.members.get(agent) else {
+            return Ok(self.decision(self.operation.clone(), self.agents.clone(), vec![]));
+        };
+        let source_matches = match (&member.source, source) {
+            (Field::Null, Field::Missing | Field::Null) => true,
+            (Field::Value(saved), Field::Value(source)) => saved == source,
+            (Field::Missing, _)
+            | (Field::Null, Field::Value(_))
+            | (Field::Value(_), Field::Missing | Field::Null) => false,
+        };
+        if !self.pending() || member.phase != Phase::Reading || !source_matches {
+            return Ok(self.decision(self.operation.clone(), self.agents.clone(), vec![]));
+        }
+        let mut operation = self.identity.clone();
+        let member = operation
+            .members
+            .get_mut(agent)
+            .ok_or(TransferError::Refused("Unknown transfer member"))?;
+        member.phase = Phase::Blocked;
+        member.error = Field::Value("Transfer preparation failed before native submission".into());
+        let operation =
+            serde_json::to_value(operation).map_err(|_| invalid("account transfer", "/"))?;
+        Ok(self.decision(operation, self.agents.clone(), vec![]))
+    }
+
     pub fn preparation_failed(
         &self,
         agent: &str,
@@ -2205,6 +2238,43 @@ fn validate_source_for_submission(member: &Value, agent: &Value) -> Result<(), T
 
 #[cfg(test)]
 mod provider_receipt_tests {
+    #[test]
+    fn typed_preparation_failure_distinguishes_missing_and_null_source() {
+        use studio_runtime_schema::queue_command::Field;
+        let raw = r#"{"id":"move","leadId":"agent","targetAccountKey":"target","status":"pending","created":1,"members":{"agent":{"phase":"reading","sourceAccountKey":"source","source":null}}}"#;
+        let agent = serde_json::json!({"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0});
+        let snapshot = super::Snapshot::read(raw, [("agent".into(), agent.to_string())]).unwrap();
+        assert!(
+            snapshot
+                .typed_preparation_failed("agent", &Field::Missing)
+                .unwrap()
+                .changed
+        );
+        let decision = snapshot
+            .typed_preparation_failed("agent", &Field::Null)
+            .unwrap();
+        assert!(decision.changed);
+        assert_eq!(
+            decision
+                .operation_record()
+                .unwrap()
+                .members
+                .get("agent")
+                .unwrap()
+                .phase,
+            super::Phase::Blocked
+        );
+        let absent = raw.replace(",\"source\":null", "");
+        let snapshot =
+            super::Snapshot::read(&absent, [("agent".into(), agent.to_string())]).unwrap();
+        assert!(
+            !snapshot
+                .typed_preparation_failed("agent", &Field::Null)
+                .unwrap()
+                .changed
+        );
+    }
+
     #[test]
     fn typed_boundary_exposes_agent_and_public_transfer() {
         let raw = r#"{"id":"move","leadId":"agent","targetAccountKey":"target","status":"pending","created":1,"members":{"agent":{"phase":"waiting","sourceAccountKey":"source"}}}"#;

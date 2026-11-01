@@ -16,7 +16,7 @@ fn fixture() -> (Value, Value, Ticket) {
         operation: "op".into(),
         agent: "a".into(),
         epoch: 3,
-        account: "target".to_owned().try_into().unwrap(),
+        account: "target".to_owned().try_into().expect("account key"),
         connection: "c1".into(),
         request: "r1".into(),
     };

@@ -23,7 +23,7 @@ fn ticket() -> Ticket {
         operation: OPERATION.into(),
         agent: "lead".into(),
         epoch: 3,
-        account: "target".to_owned().try_into().unwrap(),
+        account: "target".to_owned().try_into().expect("account key"),
         connection: "retained-connection".into(),
         request: "exact-native-request".into(),
     }

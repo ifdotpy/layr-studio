@@ -282,12 +282,10 @@ pub(crate) fn idle(
     for id in studio_runtime_store::AccountTransferRepository::recovery_ids(db)? {
         if let Some((transfer, _)) =
             studio_runtime_store::AccountTransferRepository::get_typed_with_raw(db, &id)?
+            && transfer.status == studio_runtime_store::transfer_record::TransferStatus::Pending
+            && ids.iter().any(|id| transfer_involves(&transfer, id))
         {
-            if transfer.status == studio_runtime_store::transfer_record::TransferStatus::Pending
-                && ids.iter().any(|id| transfer_involves(&transfer, id))
-            {
-                return Err(ProjectsError::Invalid("Finish pending operations first"));
-            }
+            return Err(ProjectsError::Invalid("Finish pending operations first"));
         }
     }
     for table in [

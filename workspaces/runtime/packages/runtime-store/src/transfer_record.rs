@@ -103,13 +103,15 @@ pub enum InterruptOutcome {
     Rejected,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TransferSource {
-    pub account_key: AccountKey,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub account_key: Field<AccountKey>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub thread_id: Field<String>,
-    pub epoch: i64,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub epoch: Field<i64>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub cwd: Field<String>,
 }
@@ -774,6 +776,16 @@ pub struct LazySourceState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transfer_source_preserves_missing_and_null_fields() {
+        let source: TransferSource =
+            serde_json::from_str(r#"{"accountKey":null,"epoch":null,"cwd":null}"#).unwrap();
+        assert_eq!(
+            serde_json::to_value(source).unwrap(),
+            serde_json::json!({"accountKey":null,"epoch":null,"cwd":null})
+        );
+    }
 
     #[test]
     fn team_record_keeps_request_identity_and_terminal_status() {

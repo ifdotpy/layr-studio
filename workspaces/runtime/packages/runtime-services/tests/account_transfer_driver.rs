@@ -68,7 +68,7 @@ fn ticket() -> Ticket {
         operation: OP.into(),
         agent: "lead".into(),
         epoch: 3,
-        account: "target".to_owned().try_into().unwrap(),
+        account: "target".to_owned().try_into().expect("account key"),
         connection: "connection-1".into(),
         request: "request-1".into(),
     }
