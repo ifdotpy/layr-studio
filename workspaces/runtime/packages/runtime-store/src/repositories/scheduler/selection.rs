@@ -1166,10 +1166,7 @@ impl SchedulerRepository {
             .pending_settings
             .value()
             .is_some_and(|value| match value {
-                crate::StoredTransferObject::Known(value) => serde_json::to_value(value)
-                    .ok()
-                    .as_ref()
-                    .is_some_and(truthy),
+                crate::StoredTransferObject::Known(_) => true,
                 crate::StoredTransferObject::Unreadable(value) => truthy(value),
             })
         {

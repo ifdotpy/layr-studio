@@ -569,7 +569,7 @@ pub struct AgentRecord {
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
     pub usage_resume: studio_runtime_schema::queue_command::Field<
-        StoredTransferObject<studio_runtime_schema::continuation_snapshot::UsageContinuation>,
+        StoredTransferObject<Box<studio_runtime_schema::continuation_snapshot::UsageContinuation>>,
     >,
     #[serde(
         default,
@@ -591,7 +591,7 @@ pub struct AgentRecord {
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
     pub pending_settings: studio_runtime_schema::queue_command::Field<
-        StoredTransferObject<crate::transfer_record::TransferSettings>,
+        StoredTransferObject<Box<crate::transfer_record::TransferSettings>>,
     >,
     #[serde(
         default,
@@ -720,7 +720,7 @@ where
     if !value.is_object() {
         return Err(serde::de::Error::custom("expected an object"));
     }
-    serde_json::from_value(value).map_err(serde::de::Error::custom)
+    serde::Deserialize::deserialize(value).map_err(serde::de::Error::custom)
 }
 
 /// An object-shaped typed value or its unchanged legacy representation.
@@ -756,7 +756,7 @@ impl AgentRecord {
         } else {
             let known = value
                 .is_object()
-                .then(|| serde_json::from_value(value.clone()))
+                .then(|| serde::Deserialize::deserialize(value.clone()))
                 .transpose();
             self.usage_resume = Field::Value(match known {
                 Ok(Some(known)) => StoredTransferObject::Known(known),
@@ -768,7 +768,7 @@ impl AgentRecord {
     pub fn usage_resume_value(&self) -> Result<Option<Value>, serde_json::Error> {
         self.usage_resume
             .value()
-            .map(serde_json::to_value)
+            .map(|value| serde::Serialize::serialize(value, serde_json::value::Serializer))
             .transpose()
     }
 
@@ -3922,7 +3922,7 @@ mod tests {
     fn transfer_defaults_enforce_shared_delegation_depth() {
         for depth in [0, 4] {
             assert!(
-                serde_json::from_value::<crate::transfer_record::TransferWorkerDefaults>(
+                <crate::transfer_record::TransferWorkerDefaults as serde::Deserialize>::deserialize(
                     json!({"delegationDepth":depth})
                 )
                 .is_err()
@@ -3955,7 +3955,11 @@ mod tests {
                 record.worker_defaults.value()
             {
                 let transfer: crate::transfer_record::TransferWorkerDefaults = defaults.clone();
-                assert_eq!(serde_json::to_value(transfer).unwrap(), value);
+                assert_eq!(
+                    serde::Serialize::serialize(&(transfer), serde_json::value::Serializer)
+                        .unwrap(),
+                    value
+                );
             }
         }
     }
@@ -4794,7 +4798,7 @@ mod activity_projection_tests {
         };
         let projected = WireActivity::try_from(&activity).unwrap();
         assert_eq!(
-            serde_json::to_value(projected).unwrap(),
+            serde::Serialize::serialize(&(projected), serde_json::value::Serializer).unwrap(),
             serde_json::json!({"phase":"running","tools":[{"id":"id","name":"tool","type":"call"}]})
         );
         activity.tools.as_mut().unwrap()[0].id = None;

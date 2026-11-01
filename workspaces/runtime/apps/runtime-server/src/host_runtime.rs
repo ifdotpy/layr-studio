@@ -2506,7 +2506,7 @@ mod voice_composition_tests {
                         in_flight: None,
                         execution_mode: None,
                         turn_epoch: None,
-                        turn_id: studio_runtime_schema::queue_command::Field::Missing,
+                        turn_id: None,
                         provider: studio_runtime_schema::queue_command::Field::Value(
                             studio_runtime_schema::ProviderKind::Codex,
                         ),

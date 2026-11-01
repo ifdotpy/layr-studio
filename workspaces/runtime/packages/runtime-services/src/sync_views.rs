@@ -726,14 +726,14 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
         }
     };
     if let Some(summary) = record.get("accountTransfer").and_then(|value| {
-        serde_json::from_value::<studio_runtime_store::transfer_record::AgentTransferSummary>(
+        <studio_runtime_store::transfer_record::AgentTransferSummary as serde::Deserialize>::deserialize(
             value.clone(),
         )
         .ok()
     }) {
         let dto =
             studio_runtime_schema::agent_entity_transfer::AccountTransferSummaryDto::from(summary);
-        view.insert("accountTransfer".into(), serde_json::to_value(dto).ok()?);
+        view.insert("accountTransfer".into(), serde::Serialize::serialize(&(dto), serde_json::value::Serializer).ok()?);
     } else if let Some(summary) = view
         .get_mut("accountTransfer")
         .and_then(Value::as_object_mut)

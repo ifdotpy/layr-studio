@@ -929,10 +929,11 @@ fn cancel_resume(tx: &Transaction<'_>, effect: &LifecycleEffect) -> Result<(), M
         });
         stored["dueAt"] = Value::Null;
         stored["reason"] = json!("The agent was stopped.");
-        if projection == "usageResume" && stored.get("waitingForAuth").is_some_and(Value::is_null) {
-            if let Some(object) = stored.as_object_mut() {
-                object.remove("waitingForAuth");
-            }
+        if projection == "usageResume"
+            && stored.get("waitingForAuth").is_some_and(Value::is_null)
+            && let Some(object) = stored.as_object_mut()
+        {
+            object.remove("waitingForAuth");
         }
         ContinuationRepository::put_record(tx, table, agent_id, &stored)?;
         if projection == "usageResume"
@@ -946,10 +947,10 @@ fn cancel_resume(tx: &Transaction<'_>, effect: &LifecycleEffect) -> Result<(), M
                 updated["status"] = json!("cancelled");
                 updated["dueAt"] = Value::Null;
                 updated["reason"] = stored["reason"].clone();
-                if updated.get("waitingForAuth").is_some_and(Value::is_null) {
-                    if let Some(object) = updated.as_object_mut() {
-                        object.remove("waitingForAuth");
-                    }
+                if updated.get("waitingForAuth").is_some_and(Value::is_null)
+                    && let Some(object) = updated.as_object_mut()
+                {
+                    object.remove("waitingForAuth");
                 }
                 current.set_usage_resume(updated);
                 AgentRepository::put(tx, &current)?;

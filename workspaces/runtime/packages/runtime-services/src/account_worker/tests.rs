@@ -4263,7 +4263,7 @@ async fn scenario_new_thread_freezes_settings_and_accepts_context() {
                     record.thread_id = None;
                     record.extra.remove("nativeToolCatalog");
                     record.pending_settings = studio_runtime_schema::queue_command::Field::Value(
-                        studio_runtime_store::StoredTransferObject::Known(
+                        studio_runtime_store::StoredTransferObject::Known(Box::new(
                             studio_runtime_store::transfer_record::TransferSettings {
                                 model: studio_runtime_schema::queue_command::Field::Value(
                                     "pending-model".into(),
@@ -4277,7 +4277,7 @@ async fn scenario_new_thread_freezes_settings_and_accepts_context() {
                                 fast_mode: studio_runtime_schema::queue_command::Field::Value(true),
                                 ..Default::default()
                             },
-                        ),
+                        )),
                     );
                     AgentRepository::put(tx, &record)
                 })
@@ -6561,7 +6561,7 @@ async fn preparation_commit_rechecks_workspace_settings_and_input() {
                     if mutation == "workspace" {
                         row.workspace_mode = Some(studio_runtime_schema::records::WorkspaceMode::Image);
                     } else {
-                        row.pending_settings = studio_runtime_schema::queue_command::Field::Value(studio_runtime_store::StoredTransferObject::Known(studio_runtime_store::transfer_record::TransferSettings { model: studio_runtime_schema::queue_command::Field::Value("changed-model".into()), ..Default::default() }));
+                        row.pending_settings = studio_runtime_schema::queue_command::Field::Value(studio_runtime_store::StoredTransferObject::Known(Box::new(studio_runtime_store::transfer_record::TransferSettings { model: studio_runtime_schema::queue_command::Field::Value("changed-model".into()), ..Default::default() })));
                     }
                     AgentRepository::put(tx, &row)?;
                 }

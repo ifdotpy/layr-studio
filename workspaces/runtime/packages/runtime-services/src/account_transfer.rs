@@ -704,10 +704,9 @@ impl Snapshot {
                                 &mut a.pending_settings_account_key,
                                 exact,
                             );
-                            let pending = source
-                                .pending_settings
-                                .clone()
-                                .map(studio_runtime_store::StoredTransferObject::Known);
+                            let pending = source.pending_settings.clone().map(|value| {
+                                studio_runtime_store::StoredTransferObject::Known(Box::new(value))
+                            });
                             restore_source_field(&pending, &mut a.pending_settings, exact);
                             let execution_account = source
                                 .execution_settings_account_key
@@ -734,8 +733,11 @@ impl Snapshot {
                         }
                         if unreadable {
                             m.error = Field::Value("The saved transfer source is incomplete; its original state was retained".into());
-                            let original = serde_json::to_value(&lazy)
-                                .map_err(|_| invalid("transfer agent", "/lazyAccountTransfer"))?;
+                            let original = serde::Serialize::serialize(
+                                &(&lazy),
+                                serde_json::value::Serializer,
+                            )
+                            .map_err(|_| invalid("transfer agent", "/lazyAccountTransfer"))?;
                             append_history(
                                 a,
                                 studio_runtime_store::StoredTransferObject::Unreadable(original),
@@ -933,11 +935,15 @@ impl Snapshot {
             cwd: a.cwd.clone().map_or(Field::Null, Field::Value),
         });
         member.settings = Field::Value(settings_snapshot(a)?);
-        member.pending_settings =
-            match known_transfer_object(&a.pending_settings, "pendingSettings")? {
-                Field::Missing => Field::Null,
-                value @ (Field::Null | Field::Value(_)) => value,
-            };
+        member.pending_settings = match known_transfer_object(
+            &a.pending_settings,
+            "pendingSettings",
+        )?
+        .map(|value| *value)
+        {
+            Field::Missing => Field::Null,
+            value @ (Field::Null | Field::Value(_)) => value,
+        };
         member.pending_settings_account_key = match known_transfer_value(
             &a.pending_settings_account_key,
             "pendingSettingsAccountKey",
@@ -1306,7 +1312,8 @@ impl Snapshot {
             .get(agent)
             .ok_or(TransferError::Refused("Unknown transfer member"))?;
         let settings = settings_snapshot(current)?;
-        let pending = known_transfer_object(&current.pending_settings, "pendingSettings")?;
+        let pending = known_transfer_object(&current.pending_settings, "pendingSettings")?
+            .map(|value| *value);
         let pending_account = known_transfer_value(
             &current.pending_settings_account_key,
             "pendingSettingsAccountKey",
@@ -1564,7 +1571,7 @@ impl Snapshot {
             &target_settings
                 .pending_settings
                 .clone()
-                .map(studio_runtime_store::StoredTransferObject::Known),
+                .map(|value| studio_runtime_store::StoredTransferObject::Known(Box::new(value))),
             &mut a.pending_settings,
         );
         if !member.portable_history.is_missing() {
@@ -1979,7 +1986,8 @@ pub fn typed_enroll(
             AgentStatus::Running | AgentStatus::Starting | AgentStatus::Approval
         );
     let lazy = !done && !active;
-    let pending = known_transfer_object(&agent.pending_settings, "pendingSettings")?;
+    let pending =
+        known_transfer_object(&agent.pending_settings, "pendingSettings")?.map(|value| *value);
     let pending_account = known_transfer_value(
         &agent.pending_settings_account_key,
         "pendingSettingsAccountKey",
@@ -2627,7 +2635,9 @@ fn validate_source_for_submission(
         || !matches_field(&source.cwd, agent.cwd.as_ref())
         || member.settings.value() != Some(&settings_snapshot(agent)?)
         || member.pending_settings.value()
-            != known_transfer_object(&agent.pending_settings, "pendingSettings")?.value()
+            != known_transfer_object(&agent.pending_settings, "pendingSettings")?
+                .map(|value| *value)
+                .value()
         || member.pending_settings_account_key.value()
             != known_transfer_value(
                 &agent.pending_settings_account_key,
@@ -2771,7 +2781,7 @@ mod provider_receipt_tests {
         ] {
             let mut agent: studio_runtime_store::AgentRecord =
                 serde_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0}"#).unwrap();
-            agent.worker_defaults = serde_json::from_value(defaults.clone()).unwrap();
+            agent.worker_defaults = serde::Deserialize::deserialize(defaults.clone()).unwrap();
             let id = "move".to_owned().try_into().unwrap();
             let target = "target".to_owned().try_into().unwrap();
             super::typed_enroll(
@@ -2789,7 +2799,11 @@ mod provider_receipt_tests {
                 .unwrap();
             let source = lazy.source_state.value().unwrap();
             assert_eq!(
-                serde_json::to_value(&source.worker_defaults).unwrap(),
+                serde::Serialize::serialize(
+                    &(&source.worker_defaults),
+                    serde_json::value::Serializer
+                )
+                .unwrap(),
                 defaults
             );
         }
@@ -3364,7 +3378,7 @@ mod provider_receipt_tests {
                 .get_mut("agent")
                 .unwrap()
                 .target_settings = studio_runtime_schema::queue_command::Field::Value(
-                serde_json::from_value(settings.clone()).unwrap(),
+                serde::Deserialize::deserialize(settings.clone()).unwrap(),
             );
             let adopted = varied.adopt_receipt("agent").unwrap();
             let agent = adopted.agents.get("agent").unwrap().value();

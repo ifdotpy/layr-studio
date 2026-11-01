@@ -323,7 +323,7 @@ where
                 if !value.is_object() {
                     return Err(serde::de::Error::custom("expected an object"));
                 }
-                serde_json::from_value(value).map_err(serde::de::Error::custom)
+                serde::Deserialize::deserialize(value).map_err(serde::de::Error::custom)
             })
             .collect::<Result<Vec<_>, _>>()
             .map(Field::Value),
@@ -1059,10 +1059,14 @@ mod tests {
     #[test]
     fn destination_settings_preserve_pending_and_reject_unknown_fields() {
         let value = serde_json::json!({"model":"model", "pendingSettings":{"model":"queued"}, "pendingSettingsAccountKey":"account"});
-        let settings: super::DestinationSettings = serde_json::from_value(value.clone()).unwrap();
-        assert_eq!(serde_json::to_value(settings).unwrap(), value);
+        let settings: super::DestinationSettings =
+            serde::Deserialize::deserialize(value.clone()).unwrap();
+        assert_eq!(
+            serde::Serialize::serialize(&(settings), serde_json::value::Serializer).unwrap(),
+            value
+        );
         assert!(
-            serde_json::from_value::<super::DestinationSettings>(
+            <super::DestinationSettings as serde::Deserialize>::deserialize(
                 serde_json::json!({"unexpected":true})
             )
             .is_err()
@@ -1095,7 +1099,7 @@ mod tests {
             left.provider.value(),
             Some(&studio_runtime_schema::ProviderKind::Claude)
         );
-        let actual = serde_json::to_value(dto).unwrap();
+        let actual = serde::Serialize::serialize(&(dto), serde_json::value::Serializer).unwrap();
         assert!(
             actual
                 .as_object()
@@ -1208,7 +1212,7 @@ mod tests {
         let input = serde_json::json!({"id":"transfer","leadId":"lead","targetAccountKey":"target",
             "status":"pending","created":1.0,"members":{"lead":{"phase":"waiting",
             "sourceAccountKey":"source","settings":{"portableHistory":[1,"legacy"]}}}});
-        let record: TransferRecord = serde_json::from_value(input.clone()).unwrap();
+        let record: TransferRecord = serde::Deserialize::deserialize(input.clone()).unwrap();
         let history = record
             .members
             .get("lead")
@@ -1223,7 +1227,10 @@ mod tests {
             history,
             crate::StoredTransferObject::Unreadable(_)
         ));
-        assert_eq!(serde_json::to_value(record).unwrap(), input);
+        assert_eq!(
+            serde::Serialize::serialize(&(record), serde_json::value::Serializer).unwrap(),
+            input
+        );
     }
 
     #[test]

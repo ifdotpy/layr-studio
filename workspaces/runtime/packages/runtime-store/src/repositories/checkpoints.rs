@@ -83,7 +83,7 @@ pub struct StoredCheckpointObject {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorkspaceSnapshot {
-    pub agent: AgentRecord,
+    pub agent: Box<AgentRecord>,
     pub parent_checkpoint: Option<StoredCheckpointObject>,
     pub agents: Vec<StoredCheckpointObject>,
     pub operations: Vec<StoredCheckpointObject>,
@@ -195,7 +195,7 @@ impl CheckpointsRepository {
             .transpose()?
             .flatten();
         Ok(Some(WorkspaceSnapshot {
-            agent,
+            agent: Box::new(agent),
             parent_checkpoint,
             agents: read_live_or_reserved_agents(connection)?,
             operations: read_active(
@@ -226,7 +226,7 @@ impl CheckpointsRepository {
             return Ok(None);
         };
         Ok(Some(WorkspaceSnapshot {
-            agent,
+            agent: Box::new(agent),
             parent_checkpoint: None,
             agents: read_reserving_agents(connection)?,
             operations: read_active(
@@ -1203,7 +1203,7 @@ mod tests {
             }),
         };
         let snapshot = WorkspaceSnapshot {
-            agent: crate::AgentRecord::from_value(agent.record.clone()).unwrap(),
+            agent: Box::new(crate::AgentRecord::from_value(agent.record.clone()).unwrap()),
             parent_checkpoint: None,
             agents: vec![agent, other_agent],
             operations: Vec::new(),

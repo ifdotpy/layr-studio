@@ -2312,7 +2312,8 @@ pub(super) fn clear_hold(agent: &mut AgentRecord) -> StoreResult<()> {
         return Ok(());
     };
     if previous_native_failure_hold.present {
-        agent.native_failure_hold = serde_json::from_value(previous_native_failure_hold.value)?;
+        agent.native_failure_hold =
+            serde::Deserialize::deserialize(previous_native_failure_hold.value)?;
     } else {
         agent.clear_native_failure_hold();
     }
@@ -3294,7 +3295,11 @@ mod account_scope_tests {
         super::clear_hold(&mut agent).unwrap();
         assert_eq!(agent.error_text(), Some("original"));
         assert_eq!(
-            serde_json::to_value(&agent.native_failure_hold).unwrap(),
+            serde::Serialize::serialize(
+                &(&agent.native_failure_hold),
+                serde_json::value::Serializer
+            )
+            .unwrap(),
             serde_json::json!("previous")
         );
         assert!(agent.start_outcome_hold.is_none());

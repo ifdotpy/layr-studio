@@ -887,7 +887,7 @@ pub(crate) fn check_identity(canvas: &Connection, agent: &Value) -> Result<(), C
         .transpose()?
         .ok_or(CaptureError::StaleIdentity)?;
     let expected: CaptureIdentity =
-        serde_json::from_value(agent.clone()).map_err(StoreError::from)?;
+        serde::Deserialize::deserialize(agent.clone()).map_err(StoreError::from)?;
     if current.thread_id != expected.thread_id
         || current.account_key.as_ref() != agent.get("accountKey")
         || current.epoch.as_ref() != agent.get("epoch")

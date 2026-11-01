@@ -365,7 +365,7 @@ async fn run_native_action(
                         .map_err(|_| ApiError::internal())?,
                     )
                 };
-            Ok::<_, ApiError>((agent, prepared))
+            Ok::<_, ApiError>((Box::new(agent), prepared))
         })
         .await?;
     let prepared = prepared.prepare().await.map_err(|_| ApiError::internal())?;

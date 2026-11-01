@@ -99,14 +99,14 @@ pub async fn checkpoint_after_turn(
     }
     // The shared capture adapter persists settlement even if the child fails.
     Ok(Some(
-        Box::pin(checkpoints::finish_reserved(
+        checkpoints::finish_reserved(
             Arc::clone(&store),
             snapshot,
             "After turn".to_owned(),
             checkpoint_id,
             operation_id,
             CaptureKind::Turn,
-        ))
+        )
         .await?,
     ))
 }

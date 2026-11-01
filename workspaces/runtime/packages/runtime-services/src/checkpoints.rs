@@ -195,14 +195,14 @@ pub async fn capture(
     if !reserved {
         return Err(CheckpointsError::ActivityChanged);
     }
-    Box::pin(finish_reserved(
+    finish_reserved(
         store,
         snapshot,
         label,
         checkpoint_id,
         operation_id,
         CaptureKind::Manual,
-    ))
+    )
     .await
 }
 
@@ -1121,7 +1121,9 @@ mod tests {
             }),
         };
         let snapshot = WorkspaceSnapshot {
-            agent: studio_runtime_store::AgentRecord::from_value(agent.record.clone()).unwrap(),
+            agent: Box::new(
+                studio_runtime_store::AgentRecord::from_value(agent.record.clone()).unwrap(),
+            ),
             parent_checkpoint: None,
             agents: vec![agent, unavailable_agent],
             operations: vec![operation, unavailable_operation],

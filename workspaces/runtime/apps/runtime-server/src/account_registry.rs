@@ -2138,7 +2138,7 @@ mod bounded_reconcile_tests {
                         execution_mode: None,
                         turn_epoch: None,
                         thread_id: None,
-                        turn_id: studio_runtime_schema::queue_command::Field::Missing,
+                        turn_id: None,
                         provider: studio_runtime_schema::queue_command::Field::Value(
                             studio_runtime_schema::ProviderKind::Codex,
                         ),
@@ -2319,7 +2319,7 @@ mod bounded_reconcile_tests {
                         auto_wake: Some(true),
                         usage_resume_enabled: None,
                         in_flight: Some(false),
-                        execution_mode: None, turn_epoch: None, thread_id: None, turn_id: studio_runtime_schema::queue_command::Field::Missing,
+                        execution_mode: None, turn_epoch: None, thread_id: None, turn_id: None,
                         provider: studio_runtime_schema::queue_command::Field::Value(studio_runtime_schema::ProviderKind::Codex),
                         ..AgentRecord::test_defaults()
                     },
@@ -2382,7 +2382,7 @@ mod bounded_reconcile_tests {
                             execution_mode: None,
                             turn_epoch: None,
                             thread_id: None,
-                            turn_id: studio_runtime_schema::queue_command::Field::Missing,
+                            turn_id: None,
                             provider: studio_runtime_schema::queue_command::Field::Value(
                                 studio_runtime_schema::ProviderKind::Codex,
                             ),
