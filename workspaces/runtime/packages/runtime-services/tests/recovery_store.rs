@@ -854,7 +854,18 @@ async fn start_absence_failpoints_roll_back_restore_wait_and_hold() {
                 },
             )
             .await;
-            assert!(result.is_err(), "{name}/{table}/{timing}");
+            if name == "waiting" {
+                assert_eq!(
+                    result.expect("waiting is read-only").outcome,
+                    RecoveryOutcome::Applied(
+                        studio_runtime_services::recovery::RecoveryReceipt::Unknown(
+                            json!({"status":"unconfirmed"})
+                        )
+                    )
+                );
+            } else {
+                assert!(result.is_err(), "{name}/{table}/{timing}: {result:?}");
+            }
             drop(store);
             let reopened = open_store(root.path()).await;
             assert_eq!(
