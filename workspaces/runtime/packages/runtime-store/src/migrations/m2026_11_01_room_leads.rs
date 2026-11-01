@@ -32,6 +32,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 }
             }
         }
+        leads.sort_unstable();
         room["leadIds"] = serde_json::to_value(leads)?;
         SyncDocumentsRepository::put_entity(tx, "room", &id, room, false)?;
     }

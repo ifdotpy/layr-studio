@@ -303,6 +303,7 @@ fn project_room_view(
                 roots.push(root.clone());
             }
         }
+        roots.sort_unstable();
         roots
     };
     Some(RoomProjection {
@@ -362,6 +363,31 @@ fn bound_radio(mut state: RadioProjection) -> RadioProjection {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn room_leads_are_stable_across_publication_order() {
+        let agent = |id: &str| AgentAuthorityRow {
+            id: Some(id.into()),
+            root_id: Some(id.into()),
+            parent_id: None,
+            is_lead: Some(true),
+            deleted_at: None,
+            cwd: None,
+            name: crate::submit_gates::StoredField::Value(id.into()),
+            shared_room_id: None,
+            execution_mode: None,
+        };
+        let room: RoomRecord = serde_json::from_value(json!({"id":"radio:x","kind":"private","members":["a","b"],"radio":{"teamId":"x","revision":0,"status":"idle","speaker":null,"next":[],"active":null,"error":null,"direct":false,"seen":{}}})).unwrap();
+        let first = RoomViewContext::new(vec![agent("b"), agent("a")], vec![]);
+        let second = RoomViewContext::new(vec![agent("a"), agent("b")], vec![]);
+        let Field::Value(radio) = &room.radio else {
+            panic!("radio")
+        };
+        let ordinary = project_room(&room, &first).unwrap().unwrap();
+        let turn = project_radio_room(&room, &second, radio).unwrap().unwrap();
+        assert_eq!(ordinary.lead_ids, vec!["a", "b"]);
+        assert_eq!(ordinary.lead_ids, turn.lead_ids);
+    }
 
     #[test]
     fn room_projection_matches_existing_view() {

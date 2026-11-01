@@ -7,6 +7,8 @@ export default {
     ...base.test,
     name: "fast",
     include: [
+      "src/accountName.test.ts",
+      "src/components/RadioChat.test.ts",
       "src/layout/deriveWorkspaceLayout.test.ts",
       "src/hooks/mobileViewport.test.ts",
       "src/layout/terminalGeometry.test.ts",

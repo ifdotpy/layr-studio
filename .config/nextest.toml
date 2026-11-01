@@ -84,6 +84,9 @@ inherits = "ci"
 # Reviewer permissions stay read-only under yolo across preparation, turns, and monitors.
 # Command replay witnesses feed recorded management commands through decide and compare the canonical outcome.
 default-filter = '''
+    (package(=studio-runtime-http) & kind(lib) & (test(chat_read_accepts_projected_room_roots) | test(account_response_includes_server_eligibility))) |
+    (package(=studio-runtime-schema) & kind(lib) & test(controls_cover_radio_states_and_active_block)) |
+    (package(=studio-runtime-services) & kind(lib) & (test(operational_status_preserves_precedence_and_live_waits) | test(operational_status_covers_deferral_stops_and_active_work) | test(room_roots_follow_live_agent_root_change) | test(startup_reprojects_legacy_room_once) | test(room_leads_are_stable_across_publication_order) | test(room_projection_matches_existing_view) | test(public_account_projection_preserves_presence_and_nested_numbers))) |
     (package(=studio-runtime-store) & kind(lib) & test(=path::tests::missing_state_directory_is_created)) |
     (package(=studio-runtime-server) & (test(templates_use_the_shared_delivery_layout_and_escape_paths) | test(systemd_verifies_rendered_unit_with_specifiers_in_path))) |
     (package(=studio-runtime-services) & kind(lib) & test(/^account_driver::tests::vm_/)) |
@@ -461,6 +464,9 @@ platform = 'cfg(target_os = "linux")'
 # Reviewer permissions stay read-only under yolo across preparation, turns, and monitors.
 # Command replay witnesses feed recorded management commands through decide and compare the canonical outcome.
 default-filter = '''
+    (package(=studio-runtime-http) & kind(lib) & (test(chat_read_accepts_projected_room_roots) | test(account_response_includes_server_eligibility))) |
+    (package(=studio-runtime-schema) & kind(lib) & test(controls_cover_radio_states_and_active_block)) |
+    (package(=studio-runtime-services) & kind(lib) & (test(operational_status_preserves_precedence_and_live_waits) | test(operational_status_covers_deferral_stops_and_active_work) | test(room_roots_follow_live_agent_root_change) | test(startup_reprojects_legacy_room_once) | test(room_leads_are_stable_across_publication_order) | test(room_projection_matches_existing_view) | test(public_account_projection_preserves_presence_and_nested_numbers))) |
     (package(=studio-runtime-store) & kind(lib) & test(=path::tests::missing_state_directory_is_created)) |
     (package(=studio-runtime-server) & (test(templates_use_the_shared_delivery_layout_and_escape_paths) | test(systemd_verifies_rendered_unit_with_specifiers_in_path))) |
     (package(=studio-runtime-services) & kind(lib) & test(/^account_driver::tests::vm_/)) |
