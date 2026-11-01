@@ -311,7 +311,11 @@ test("accounts settings show per-server state and provider choices", async ({
     "local-shared": { ageSeconds: 600, usedPercent: 10 },
     "remote-shared": { ageSeconds: 180, usedPercent: 67 },
   };
-  const local = await fixture("Local", false, localAccounts);
+  // Versioned frames carry the discovery snapshot that names this server.
+  const local = await fixture("Local", false, {
+    accounts: localAccounts,
+    entityFrames: true,
+  });
   const remote = await fixture("Remote", true, remoteAccounts);
   const empty = await fixture("Empty", true, []);
   await context.addInitScript(

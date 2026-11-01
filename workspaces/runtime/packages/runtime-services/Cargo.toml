@@ -26,7 +26,7 @@ icu_normalizer = { version = "=2.4.0", default-features = false, features = ["co
 nix = { workspace = true, features = ["signal"] }
 notify = { workspace = true }
 process-wrap = { workspace = true }
-regex = "=1.13.1"
+regex.workspace = true
 ring = { workspace = true }
 rustls = { workspace = true }
 rustls-pki-types = { workspace = true }

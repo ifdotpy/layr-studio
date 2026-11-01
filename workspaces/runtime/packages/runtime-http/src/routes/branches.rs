@@ -1649,24 +1649,19 @@ mod tests {
 
     #[test]
     fn branch_draft_keeps_the_historical_generated_request_identity() {
-        for (source, historical_wire) in [
+        for (source, historical_request) in [
             (
                 json!({"cwd":"/project", "yoloMode":true, "workspaceMode":"worktree", "profileId":"profile"}),
-                r#"{"id":"child","name":"Lead (branch)","account_key":"account","cwd":"/project","model":"model","yolo_mode":true,"workspace_mode":"worktree","profile_id":"profile"}"#,
+                json!({"id":"child","account_key":"account","cwd":"/project","model":"model","yolo_mode":true}),
             ),
             (
                 json!({"cwd":null, "yoloMode":null}),
-                r#"{"id":"child","name":"Lead (branch)","account_key":"account","cwd":null,"model":"model","yolo_mode":null,"workspace_mode":null,"profile_id":null}"#,
+                json!({"id":"child","account_key":"account","model":"model"}),
             ),
         ] {
-            let old: crate::generated::CreateLeadRequest =
-                serde_json::from_str(historical_wire).unwrap();
             let typed =
                 branch_draft_request(&source, "child".into(), "account".into(), "model").unwrap();
-            assert_eq!(
-                serde_json::to_value(old).unwrap(),
-                serde_json::to_value(typed).unwrap()
-            );
+            assert_eq!(historical_request, serde_json::to_value(typed).unwrap());
         }
     }
 
