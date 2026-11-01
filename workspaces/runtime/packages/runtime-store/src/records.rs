@@ -438,6 +438,16 @@ pub struct AgentRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
+    pub workspace_reservation_id: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub workspace_operation: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
     pub excluded_account_keys: studio_runtime_schema::queue_command::Field<Vec<String>>,
     #[serde(
         default,
@@ -897,6 +907,8 @@ impl AgentRecord {
             native_effort: Default::default(),
             project_folder: Default::default(),
             checkpoint_history_head: Default::default(),
+            workspace_reservation_id: Default::default(),
+            workspace_operation: Default::default(),
             excluded_account_keys: Default::default(),
             role: Default::default(),
             provider: Default::default(),
@@ -2921,6 +2933,8 @@ mod tests {
             "nativeEffort",
             "projectFolder",
             "checkpointHistoryHead",
+            "workspaceOperation",
+            "workspaceReservationId",
             "lastCompletedTurn",
             "hostProjectPath",
             "lastCompletedTurnStatus",

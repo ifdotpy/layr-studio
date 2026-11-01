@@ -2,7 +2,6 @@
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
-use serde_json::json;
 use studio_runtime_store::{AgentRepository, RuntimeStore};
 
 struct Gate {
@@ -54,15 +53,9 @@ pub async fn start_late_operation(
     store
         .transaction(move |tx| {
             let mut other = AgentRepository::get(tx, &"other".into())?.expect("idle other");
-            assert!(
-                other
-                    .extra
-                    .get("workspaceOperation")
-                    .is_none_or(serde_json::Value::is_null)
-            );
-            other
-                .extra
-                .insert("workspaceOperation".into(), json!("restore"));
+            assert!(other.workspace_operation.value().is_none());
+            other.workspace_operation =
+                studio_runtime_schema::queue_command::Field::Value("restore".into());
             AgentRepository::put(tx, &other)
         })
         .await

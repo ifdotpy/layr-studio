@@ -177,9 +177,8 @@ async fn send(
                 let mut agent =
                     studio_runtime_store::AgentRepository::get(tx, &room_for_write.into())?
                         .expect("agent");
-                agent
-                    .extra
-                    .insert("workspaceOperation".into(), json!(operation));
+                agent.workspace_operation =
+                    studio_runtime_schema::queue_command::Field::Value(operation);
                 studio_runtime_store::AgentRepository::put(tx, &agent)?;
                 studio_runtime_services::agents_create::publish_agent(
                     tx,
@@ -996,13 +995,13 @@ async fn voice_delivery_prepares_workspace_admission() {
                 let mut other = studio_runtime_store::AgentRepository::get(tx, &"agent".into())?
                     .expect("agent");
                 other.id = "other".into();
-                other.extra.insert(
-                    "workspaceOperation".into(),
-                    json!(if operation == "unrelated" {
+                other.workspace_operation = studio_runtime_schema::queue_command::Field::Value(
+                    if operation == "unrelated" {
                         "restore"
                     } else {
                         operation
-                    }),
+                    }
+                    .into(),
                 );
                 if operation == "unrelated" {
                     other.cwd = Some(root.to_string_lossy().into_owned());
@@ -1125,9 +1124,8 @@ async fn late_operation_paths_use_the_prepared_canonical_relation() {
             .prepare()
             .await
             .expect("prepare");
-        other
-            .extra
-            .insert("workspaceOperation".into(), json!("capture"));
+        other.workspace_operation =
+            studio_runtime_schema::queue_command::Field::Value("capture".into());
         store
             .transaction({
                 let other = other.clone();

@@ -2041,9 +2041,8 @@ async fn unrelated_reservation_started_after_path_capture_does_not_refuse_ready_
                 &studio_runtime_store::AgentId::from("unrelated"),
             )?
             .expect("unrelated agent");
-            agent
-                .extra
-                .insert("workspaceOperation".into(), json!("checkpoint"));
+            agent.workspace_operation =
+                studio_runtime_schema::queue_command::Field::Value("checkpoint".into());
             studio_runtime_store::AgentRepository::put(tx, &agent)?;
             assert!(
                 token.validate(tx)?.is_ok(),

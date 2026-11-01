@@ -233,15 +233,15 @@ async fn capture_before_restore_inner(
         move || {
             if snapshot
                 .agent
-                .extra
-                .get("workspaceOperation")
-                .and_then(Value::as_str)
+                .workspace_operation
+                .value()
+                .map(String::as_str)
                 != Some("restore")
                 || snapshot
                     .agent
-                    .extra
-                    .get("workspaceReservationId")
-                    .and_then(Value::as_str)
+                    .workspace_reservation_id
+                    .value()
+                    .map(String::as_str)
                     != Some(read_operation.as_str())
             {
                 return Err(CheckpointsError::ActivityChanged);
@@ -454,15 +454,15 @@ async fn capture_reserved(
         move || {
             if snapshot
                 .agent
-                .extra
-                .get("workspaceReservationId")
-                .and_then(Value::as_str)
+                .workspace_reservation_id
+                .value()
+                .map(String::as_str)
                 != Some(preflight_operation_id.as_str())
                 || snapshot
                     .agent
-                    .extra
-                    .get("workspaceOperation")
-                    .and_then(Value::as_str)
+                    .workspace_operation
+                    .value()
+                    .map(String::as_str)
                     != Some(kind.as_str())
             {
                 return Err(CheckpointsError::ActivityChanged);

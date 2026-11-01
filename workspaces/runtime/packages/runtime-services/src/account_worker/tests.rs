@@ -6463,8 +6463,8 @@ async fn scenario_workspace_pending_reuses_reserved_attempt() {
                     row.id = AgentId::from("workspace-owner");
                     row.status = studio_runtime_store::AgentStatus::Waiting;
                     row.auto_wake = Some(false);
-                    row.extra
-                        .insert("workspaceOperation".into(), json!("capture"));
+                    row.workspace_operation =
+                        studio_runtime_schema::queue_command::Field::Value("capture".into());
                     AgentRepository::put(tx, &row)
                 })
                 .await?;
@@ -6496,7 +6496,7 @@ async fn scenario_workspace_pending_reuses_reserved_attempt() {
                 .transaction(move |tx| {
                     let mut row =
                         AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
-                    row.extra.remove("workspaceOperation");
+                    row.workspace_operation = studio_runtime_schema::queue_command::Field::Missing;
                     AgentRepository::put(tx, &row)
                 })
                 .await?;
