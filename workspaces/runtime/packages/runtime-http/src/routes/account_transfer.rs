@@ -157,6 +157,18 @@ async fn transfer(
                     Value::String("account_key".into()),
                 ])
             })?;
+        if let Some(saved) = account_transfer_driver::replay(
+            &store,
+            request_id.as_str(),
+            lead,
+            target,
+            scope.as_ref().map_or("team", |value| value.as_str()),
+        )
+        .await
+        .map_err(error)?
+        {
+            return super::generated_json::<generated::TransferResponse>(saved).map(Json);
+        }
         let registered = if let Some(driver) = state.account_driver.clone() {
             studio_runtime_process::blocking_pool::spawn_blocking(
                 "runtime-http/routes/account_transfer",
@@ -274,6 +286,90 @@ mod ingress_bounds_tests {
                 r#"{"id":"a","account_key":"b","unknown":1}"#
             )
             .is_err()
+        );
+    }
+}
+
+#[cfg(test)]
+mod replay_tests {
+    use axum::{
+        body::{Body, to_bytes},
+        extract::ConnectInfo,
+        http::Request,
+    };
+    use serde_json::{Value, json};
+    use std::sync::Arc;
+    use studio_runtime_services::account_policy::AccountPolicyState;
+    use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore};
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn exact_transfer_retry_survives_destination_disconnect() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(RuntimeStore::open(Some(root.path())).await.unwrap());
+        let agent = AgentRecord::from_value(json!({"compactions":0,"id":"lead","rootId":"lead",
+            "epoch":1,"status":"idle","isLead":true,"accountKey":"source","provider":"codex",
+            "model":"gpt-6-astra","cwd":root.path()}))
+        .unwrap();
+        store
+            .transaction(move |tx| AgentRepository::put(tx, &agent))
+            .await
+            .unwrap();
+        let app = |disconnected| {
+            let registry = json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,
+                "defaultAccountKey":"target","logins":{},"accounts":{"target":{
+                    "id":"target","provider":"codex","home":root.path(),"label":"Target",
+                    "source":"fixture","status":"ready","disconnected":disconnected}}});
+            let policy =
+                AccountPolicyState::from_startup(Some(&serde_json::to_vec(&registry).unwrap()), [])
+                    .unwrap();
+            crate::router(crate::HttpState::new(
+                "token".into(),
+                "fixture".into(),
+                root.path().display().to_string(),
+                49171,
+                None,
+                Some(store.clone()),
+                Some(Arc::new(policy)),
+            ))
+            .unwrap()
+        };
+        let body = json!({"id":"lead","account_key":"target","request_id":"5a300f72-4ea6-4d30-8a0e-9b2c13c4226a"});
+        let call = |app: axum::Router, body: Value| async move {
+            let request = Request::builder()
+                .method("POST")
+                .uri("/api/agents/account-transfer")
+                .header("host", "127.0.0.1:49171")
+                .header("content-type", "application/json")
+                .header("x-canvas-token", "token")
+                .header(crate::API_SCHEMA_HASH_HEADER, crate::api_schema_hash())
+                .extension(ConnectInfo(
+                    "127.0.0.1:12345".parse::<std::net::SocketAddr>().unwrap(),
+                ))
+                .body(Body::from(body.to_string()))
+                .unwrap();
+            let response = app.oneshot(request).await.unwrap();
+            let status = response.status();
+            let body = serde_json::from_slice::<Value>(
+                &to_bytes(response.into_body(), 1024 * 1024).await.unwrap(),
+            )
+            .unwrap();
+            (status, body)
+        };
+        let first = call(app(false), body.clone()).await;
+        assert_eq!(first.0, 200, "initial request: {:?}", first.1);
+        let retry = call(app(true), body.clone()).await;
+        assert_eq!(
+            retry, first,
+            "exact retry returns the accepted result after disconnect"
+        );
+        let mut changed = body;
+        changed["account_key"] = json!("another");
+        let conflict = call(app(true), changed).await;
+        assert_eq!(conflict.0, 400);
+        assert_eq!(
+            conflict.1["error"],
+            "This transfer id has different content"
         );
     }
 }
