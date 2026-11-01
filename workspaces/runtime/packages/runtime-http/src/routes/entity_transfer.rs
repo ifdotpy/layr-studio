@@ -136,7 +136,15 @@ async fn prepare(
         loop {
             let checkpoint = page.checkpoint;
             let final_sql_page = checkpoint == through;
-            let documents = page.rows.iter().filter(|row| !snapshot || !row.deleted).map(super::sync_documents::entity_document).collect::<Option<Vec<_>>>().ok_or_else(ApiError::internal)?;
+            // A stored row the current contract cannot read is skipped with a log line,
+            // so one legacy row cannot stop the whole stream.
+            let documents = page.rows.iter().filter(|row| !snapshot || !row.deleted).filter_map(|row| {
+                let document = super::sync_documents::entity_document(row);
+                if document.is_none() {
+                    eprintln!("warning: sync entity skipped, payload does not match the contract: collection={} id={} seq={}", row.collection, row.id, row.sequence);
+                }
+                document
+            }).collect::<Vec<_>>();
             let batches = byte_pages(after, checkpoint, documents)?;
             for (index, batch) in batches.iter().enumerate() {
                 let complete = final_sql_page && index + 1 == batches.len();
