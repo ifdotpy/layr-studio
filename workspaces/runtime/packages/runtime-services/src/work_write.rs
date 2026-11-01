@@ -948,7 +948,7 @@ fn accepted_archive_preflight(
         let canonical = archive_marker["by"] == root_id
             && archive_marker["reason"] == "Accepted task result is on main"
             && archive_marker["epoch"] == owner.epoch
-            && archive_marker.get("at") == owner_value.get("deletedAt")
+            && archive_marker.get("at") == owner_value.get("deletedAt").filter(|v| !v.is_null())
             && archive_marker["at"].as_f64().unwrap_or_default() >= intent.created
             && archive_marker["cleanupPending"] == false
             && !event_write::truthy(archive_marker.get("cleanupPending"));

@@ -105,7 +105,7 @@ pub(crate) fn submit_agent_complaint(
     SyncDocumentsRepository::put_entity(tx, "complaint", &complaint_id, view, false)?;
     if recipient == ComplaintRecipient::Lead {
         let complaint = ordered_text(
-            &json!({"complaint_id":complaint_id,"author":agent_id,"author_name":agent.get("name").unwrap_or(&agent["id"]),"text":text,"status":"open","created":at}),
+            &json!({"complaint_id":complaint_id,"author":agent_id,"author_name":agent.get("name").filter(|v| !v.is_null()).unwrap_or(&agent["id"]),"text":text,"status":"open","created":at}),
             [
                 "complaint_id",
                 "author",

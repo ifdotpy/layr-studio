@@ -367,7 +367,7 @@ impl CheckpointsRepository {
         if object.get("phase").and_then(Value::as_str) != Some("capture_pending")
             || object.get("kind") != agent.get("workspaceOperation")
             || object.get("agent").and_then(Value::as_str) != Some(expected.agent.id.0.as_str())
-            || object.get("cwd") != agent.get("cwd")
+            || object.get("cwd").and_then(Value::as_str) != expected.agent.cwd.as_deref()
             || object.get("epoch") != agent.get("epoch")
         {
             return Ok(false);

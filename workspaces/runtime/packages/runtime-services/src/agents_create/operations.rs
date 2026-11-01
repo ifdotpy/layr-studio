@@ -1379,9 +1379,13 @@ async fn create_child(
         .unwrap_or("default");
     let parent_project_id = parent.get("projectId").cloned();
     let parent_project_server_id = parent.get("projectServerId").cloned();
-    let root_permission = root.get("permissionMode").cloned().unwrap_or(json!(
-        studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
-    ));
+    let root_permission = root
+        .get("permissionMode")
+        .filter(|mode| !mode.is_null())
+        .cloned()
+        .unwrap_or(json!(
+            studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
+        ));
     let root_max_agents = super::capacity_max(&root);
     let prepare_cwd = cwd.to_owned();
     let prepare_host_cwd = host_cwd.to_owned();

@@ -18,12 +18,6 @@ pub(crate) mod validation_counts {
     }
 }
 
-fn present_start_wait<'de, D: serde::Deserializer<'de>>(
-    d: D,
-) -> Result<Option<studio_runtime_schema::agent_progress::AgentStartWait>, D::Error> {
-    studio_runtime_schema::agent_progress::AgentStartWait::deserialize(d).map(Some)
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentDraft {
@@ -32,18 +26,6 @@ pub struct AgentDraft {
     pub assets: Vec<studio_runtime_schema::transcript_asset::TranscriptAssetView>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
-}
-
-fn present_agent_draft<'de, D: serde::Deserializer<'de>>(
-    d: D,
-) -> Result<Option<Box<AgentDraft>>, D::Error> {
-    AgentDraft::deserialize(d).map(Box::new).map(Some)
-}
-
-fn present_creation_intent<'de, D: serde::Deserializer<'de>>(
-    d: D,
-) -> Result<Option<studio_runtime_schema::creation_intent::CreationIntent>, D::Error> {
-    studio_runtime_schema::creation_intent::CreationIntent::deserialize(d).map(Some)
 }
 
 macro_rules! string_id {
@@ -362,11 +344,7 @@ pub use studio_runtime_schema::agent_limits::AgentCapacity;
 #[serde(rename_all = "camelCase")]
 pub struct AgentRecord {
     pub id: AgentId,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "present_agent_draft"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub draft: Option<Box<AgentDraft>>,
     pub root_id: AgentId,
     #[serde(deserialize_with = "deserialize_agent_epoch")]
@@ -398,7 +376,7 @@ pub struct AgentRecord {
     pub cwd: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    #[serde(deserialize_with = "deserialize_optional_safe_counter")]
+    #[serde(default, deserialize_with = "deserialize_optional_safe_counter")]
     pub compactions: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fast_mode: Option<bool>,
@@ -498,13 +476,13 @@ pub struct AgentRecord {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "present_safe_counter"
+        deserialize_with = "deserialize_optional_safe_counter"
     )]
     pub queue_mutation_revision: Option<u64>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "present_safe_counter"
+        deserialize_with = "deserialize_optional_safe_counter"
     )]
     pub auth_resume_attempt: Option<u64>,
     #[serde(
@@ -549,11 +527,7 @@ pub struct AgentRecord {
     pub native_response_turn: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parked_event: Option<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "present_start_wait"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_wait: Option<studio_runtime_schema::agent_progress::AgentStartWait>,
     #[serde(
         default,
@@ -693,11 +667,7 @@ pub struct AgentRecord {
     pub vm_auth_bootstrap: Option<VmAuthBootstrap>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_release: Option<NativeRelease>,
-    #[serde(
-        default,
-        deserialize_with = "present_creation_intent",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub creation_intent: Option<studio_runtime_schema::creation_intent::CreationIntent>,
     #[serde(
         default,
@@ -844,12 +814,6 @@ fn deserialize_safe_counter<'de, D: serde::Deserializer<'de>>(
     } else {
         Err(serde::de::Error::custom("counter outside safe range"))
     }
-}
-
-fn present_safe_counter<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<u64>, D::Error> {
-    deserialize_safe_counter(deserializer).map(Some)
 }
 
 pub(crate) fn deserialize_optional_safe_counter<'de, D: serde::Deserializer<'de>>(
@@ -3231,8 +3195,23 @@ mod tests {
         assert!(serde_json::from_str::<AgentRecord>(raw).is_err());
         let null_mode = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"creationIntent":{"permission_mode":null}}"#;
         assert!(serde_json::from_str::<AgentRecord>(null_mode).is_err());
-        let null_intent = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"creationIntent":null}"#;
-        assert!(serde_json::from_str::<AgentRecord>(null_intent).is_err());
+        let null_intent = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"creationIntent":null,"draft":null,"queueMutationRevision":null,"authResumeAttempt":null,"startWait":null}"#;
+        let absent = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0}"#;
+        assert_eq!(
+            serde_json::from_str::<AgentRecord>(null_intent).unwrap(),
+            serde_json::from_str::<AgentRecord>(absent).unwrap()
+        );
+    }
+
+    #[test]
+    fn agent_compactions_null_and_absence_are_equivalent() {
+        let absent =
+            r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default"}"#;
+        let null = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":null}"#;
+        let absent: AgentRecord = serde_json::from_str(absent).unwrap();
+        let null: AgentRecord = serde_json::from_str(null).unwrap();
+        assert_eq!(absent, null);
+        assert!(null.value().get("compactions").unwrap().is_null());
     }
 
     #[test]
@@ -3413,7 +3392,7 @@ mod tests {
 
     #[test]
     fn agent_queue_revision_is_a_nonnegative_integer() {
-        for value in ["-1", "null", "1.5", "\"1\""] {
+        for value in ["-1", "1.5", "\"1\""] {
             let raw = format!(
                 r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"queueMutationRevision":{value}}}"#
             );
@@ -4484,7 +4463,7 @@ mod agent_projection_tests {
 
     #[test]
     fn stored_agent_rejects_legacy_start_wait_shapes() {
-        for wait in [r#"{"reason":"slot","epoch":1,"runningTurns":null}"#, "null"] {
+        for wait in [r#"{"reason":"slot","epoch":1,"runningTurns":null}"#] {
             let raw = format!(
                 r#"{{"id":"a","rootId":"a","epoch":1,"status":"queued","accountKey":"default","compactions":0,"startWait":{wait}}}"#
             );
@@ -4640,10 +4619,15 @@ mod agent_projection_tests {
     }
 
     #[test]
-    fn stored_agent_requires_explicit_compactions_but_accepts_unknown() {
+    fn stored_agent_accepts_absent_and_unknown_compactions() {
         let missing = r#"{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default"}"#;
         let unknown = r#"{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":null}"#;
-        assert!(serde_json::from_str::<AgentRecord>(missing).is_err());
+        assert_eq!(
+            serde_json::from_str::<AgentRecord>(missing)
+                .unwrap()
+                .compactions,
+            None
+        );
         assert_eq!(
             serde_json::from_str::<AgentRecord>(unknown)
                 .unwrap()
