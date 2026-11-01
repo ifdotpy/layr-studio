@@ -106,6 +106,41 @@ pub enum AgentNativeStatusValue {
     NotSubscribed,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum NativeStatusPhase {
+    Safety,
+    Retrying,
+    Auth,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum AgentNativeStatusError {
+    NativeProviderError(crate::provider_errors::NativeProviderError),
+    String(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentNativeStatus {
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<f64>")]
+    pub at: Field<f64>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<AgentNativeStatusError>")]
+    pub error: Field<AgentNativeStatusError>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub message: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<NativeStatusPhase>")]
+    pub phase: Field<NativeStatusPhase>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub turn_id: Field<String>,
+}
+
 /// Context repair wait fields rendered in native notices.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -257,7 +292,7 @@ fn nullable(
     Ok(())
 }
 
-pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 10], String> {
+pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 11], String> {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
@@ -282,6 +317,26 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 10], Strin
     title(&mut status, "AgentStatus")?;
     let mut native_status = AgentNativeStatusValue::json_schema(&mut generator).to_value();
     title(&mut native_status, "AgentNativeStatusValue")?;
+    let mut native_status_record = AgentNativeStatus::json_schema(&mut generator).to_value();
+    title(&mut native_status_record, "AgentNativeStatus")?;
+    for (name, label) in [("at", "At"), ("message", "Message"), ("turnId", "Turnid")] {
+        nullable(&mut native_status_record, name, label, true)?;
+    }
+    let mut error = AgentNativeStatusError::json_schema(&mut generator).to_value();
+    let variants = object(&mut error)?
+        .get_mut("anyOf")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or("native status error must have variants")?;
+    if variants.len() != 2 {
+        return Err("native status error must have two variants".into());
+    }
+    variants.insert(1, serde_json::json!({"type":"null"}));
+    object(&mut error)?.insert("default".into(), serde_json::Value::Null);
+    title(&mut error, "Error")?;
+    *property(&mut native_status_record, "error")? = error;
+    let phase = NativeStatusPhase::json_schema(&mut generator).to_value();
+    *property(&mut native_status_record, "phase")? =
+        serde_json::json!({"anyOf":[phase,{"type":"null"}],"default":null,"title":"Phase"});
     let mut repair = AgentEntityContextRepairWaitDto::json_schema(&mut generator).to_value();
     title(&mut repair, "AgentEntityContextRepairWaitDto")?;
     for (name, label) in [("scope", "Scope"), ("error", "Error")] {
@@ -343,6 +398,7 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 10], Strin
         ("AgentMode", mode),
         ("AgentStatus", status),
         ("AgentNativeStatusValue", native_status),
+        ("AgentNativeStatus", native_status_record),
         ("AgentEntityContextRepairWaitDto", repair),
         ("MovePointerDto", pointer),
         ("WorkerDefaultsDto", defaults),
@@ -393,6 +449,14 @@ mod tests {
             assert_eq!(serde_json::to_value(settings).unwrap(), value);
         }
         assert!(serde_json::from_value::<ExecutionSettingsDto>(json!({"extra":true})).is_err());
+    }
+
+    #[test]
+    fn native_status_preserves_optional_fields_and_rejects_unknown_phase() {
+        let value = json!({"phase":"safety","error":"failed","at":null});
+        let status: AgentNativeStatus = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(status).unwrap(), value);
+        assert!(serde_json::from_value::<AgentNativeStatus>(json!({"phase":"unknown"})).is_err());
     }
 
     #[test]

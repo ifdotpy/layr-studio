@@ -111,6 +111,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     // such as 7.0; the pull-output ingress validates them before typed decoding.
     for (name, owner) in [
         (
+            "AgentNativeStatus",
+            "studio_runtime_schema::agent_entity_nested::AgentNativeStatus",
+        ),
+        (
             "ExecutionSettingsDto",
             "studio_runtime_schema::agent_entity_nested::ExecutionSettingsDto",
         ),
@@ -248,6 +252,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     analysis.schemas.retain(|name, _| {
         ![
             "AgentEntityStartWaitDtoVariant",
+            "AgentNativeStatusError",
+            "AgentNativeStatusPhase",
             "AccountChangeVariant",
             "AccountChangeKind",
             "AccountTransferProgressVariant",

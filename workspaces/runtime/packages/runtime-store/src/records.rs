@@ -280,13 +280,7 @@ pub struct NativeSafetyBuffering {
     pub turn_id: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum NativeStatusPhase {
-    Safety,
-    Retrying,
-    Auth,
-}
+pub use studio_runtime_schema::agent_entity_nested::NativeStatusPhase;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
