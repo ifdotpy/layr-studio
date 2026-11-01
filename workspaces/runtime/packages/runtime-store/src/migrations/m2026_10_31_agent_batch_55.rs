@@ -253,7 +253,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             raw,
-            r#"{"error":{"message":"{\"reason\":\"blocked\"}","data":{"request":"one"},"additionalDetails":"detail","ignored":true,"reason":"blocked"},"id":"details"}"#
+            r#"{"error":{"message":"{\"reason\":\"blocked\"}","data":{"request":"one"},"additionalDetails":"detail","ignored":true,"rawEvidence":{"additionalDetails":"detail","data":{"request":"one"},"ignored":true,"message":{"reason":"blocked"}},"reason":"blocked"},"id":"details"}"#
         );
     }
 
