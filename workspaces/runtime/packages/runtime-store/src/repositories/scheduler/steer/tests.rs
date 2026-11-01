@@ -428,7 +428,12 @@ fn claim_refuses_every_ineligible_agent_state() {
 fn unclean_restart_does_not_release_a_reserved_steer() {
     let mut connection = database();
     claim(&mut connection, "s1").expect("claims");
-    settle(&mut connection, SchedulerRepository::hold_unclean_steers);
+    settle(&mut connection, |tx| {
+        for id in Outbox::hold_pending(tx, OutboxKind::Steer)? {
+            SchedulerRepository::hold_steer(tx, &id)?;
+        }
+        Ok(())
+    });
     settle(&mut connection, |tx| {
         SchedulerRepository::abandon_steers(tx, "acct", 8)
     });
