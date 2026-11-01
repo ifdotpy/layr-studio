@@ -2516,8 +2516,8 @@ export default function App({ active = true }: { active?: boolean }) {
           onClick={toggleTeam}
         >
           Team{" "}
-          {workers.filter((worker) => busy.has(worker.status ?? "")).length}/
-          {workers.length}
+          {lead?.teamCounts &&
+            `${lead.teamCounts.working}/${lead.teamCounts.total}`}
         </Menu.Item>
       )}
       {agent?.source === GeneratedApiAgentSource.managed && (
@@ -2788,19 +2788,13 @@ export default function App({ active = true }: { active?: boolean }) {
                   leftSection={<Users size={16} />}
                   id="team-toggle"
                   aria-label="Team"
-                  title={`Team: ${workers.filter((worker) => busy.has(worker.status ?? "")).length} working of ${workers.length}`}
                   aria-expanded={narrowTeam ? teamOpen : wideTeamOpen}
                   onClick={toggleTeam}
                 >
                   Team
-                  {workers.length > 0 && (
+                  {lead?.teamCounts && lead.teamCounts.total > 0 && (
                     <span className="team-button-count">
-                      {
-                        workers.filter((worker) =>
-                          busy.has(worker.status ?? ""),
-                        ).length
-                      }
-                      /{workers.length}
+                      {lead.teamCounts.working}/{lead.teamCounts.total}
                     </span>
                   )}
                 </Button>

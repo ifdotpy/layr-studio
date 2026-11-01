@@ -83,6 +83,155 @@ async fn interrupted_child_turn_end_republishes_lead_cancel_eligibility() {
 }
 
 #[tokio::test]
+async fn worker_rowid_reuse_refreshes_both_teams() {
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    seed_chat(&store, chat(json!({"id":"other", "rootId":"other"}))).await;
+    seed_chat(&store, chat(json!({"id":"old-worker", "rootId":CHAT, "parentId":CHAT, "isLead":false, "status":"running"}))).await;
+    let replacement = chat(
+        json!({"id":"new-worker", "rootId":"other", "parentId":"other", "isLead":false, "status":"running"}),
+    );
+    store
+        .transaction_with(move |tx| {
+            let old_rowid: i64 = tx.query_row(
+                "SELECT rowid FROM runtime_agents WHERE id='old-worker'",
+                [],
+                |row| row.get(0),
+            )?;
+            studio_runtime_store::Table::<AgentRecord>::new(tx)
+                .delete(&studio_runtime_store::AgentId::from("old-worker"))?;
+            AgentRepository::put(tx, &AgentRecord::from_value(replacement)?)?;
+            let new_rowid: i64 = tx.query_row(
+                "SELECT rowid FROM runtime_agents WHERE id='new-worker'",
+                [],
+                |row| row.get(0),
+            )?;
+            assert_eq!(old_rowid, new_rowid, "fixture must reuse the rowid");
+            Ok::<_, StoreError>(())
+        })
+        .await
+        .expect("replace worker");
+    assert_eq!(
+        client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
+        json!({"working":0,"total":0})
+    );
+    assert_eq!(
+        client_entity(&store, "agentSummary", "other")
+            .expect("other")
+            .1["teamCounts"],
+        json!({"working":1,"total":1})
+    );
+}
+
+#[tokio::test]
+async fn worker_status_changes_publish_lead_team_counts() {
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    seed_chat(&store, chat(json!({"id":"worker", "rootId":CHAT, "parentId":CHAT, "isLead":false, "status":"running"}))).await;
+    assert_eq!(
+        client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
+        json!({"working":1,"total":1})
+    );
+    write(
+        &store,
+        "UPDATE runtime_agents SET record=json_set(record,'$.status','completed') WHERE id=?1",
+        vec!["worker".into()],
+    )
+    .await;
+    assert_eq!(
+        client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
+        json!({"working":0,"total":1})
+    );
+    write(&store, "UPDATE runtime_agents SET record=json_set(record,'$.status','waiting_on_monitor') WHERE id=?1", vec!["worker".into()]).await;
+    assert_eq!(
+        client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
+        json!({"working":1,"total":1})
+    );
+    write(
+        &store,
+        "UPDATE runtime_agents SET record=json_set(record,'$.status','queued') WHERE id=?1",
+        vec!["worker".into()],
+    )
+    .await;
+    assert_eq!(
+        client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
+        json!({"working":0,"total":1})
+    );
+    seed_chat(&store, chat(json!({"id":"nested", "rootId":CHAT, "parentId":"worker", "isLead":false, "status":"paused", "autoWake":true}))).await;
+    assert_eq!(
+        client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
+        json!({"working":1,"total":2})
+    );
+    let before = client_entity(&store, "agentSummary", CHAT).expect("lead").1;
+    let sequence = || {
+        store
+            .test_read_transaction(|tx| {
+                tx.query_row(
+                    "SELECT seq FROM sync_entities WHERE collection='agentSummary' AND id=?1",
+                    [CHAT],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(StoreError::from)
+            })
+            .expect("lead sequence")
+    };
+    let before_sequence = sequence();
+    let result = store.transaction_with(|tx| {
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.status','completed') WHERE id='nested'", [])?;
+        Err::<(), _>(StoreError::RecordContract("rollback fixture"))
+    }).await;
+    assert!(result.is_err());
+    assert_eq!(sequence(), before_sequence, "rollback publishes no event");
+    assert_eq!(
+        client_entity(&store, "agentSummary", CHAT).expect("lead").1,
+        before
+    );
+    write(
+        &store,
+        "UPDATE runtime_agents SET record=json_set(record,'$.deletedAt',1) WHERE id=?1",
+        vec!["nested".into()],
+    )
+    .await;
+    assert_eq!(
+        client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
+        json!({"working":0,"total":1})
+    );
+    store
+        .test_read_transaction(|tx| {
+            let mut query = tx.prepare(crate::sync_entity_context::TEAM_COUNT_INPUTS_SQL)?;
+            let statuses = query
+                .query_map([CHAT], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            assert_eq!(
+                statuses,
+                ["queued"],
+                "archived nested worker is not read or decoded"
+            );
+            let plan: String = tx.query_row(
+                &format!(
+                    "EXPLAIN QUERY PLAN {}",
+                    crate::sync_entity_context::TEAM_COUNT_INPUTS_SQL
+                ),
+                [CHAT],
+                |row| row.get(3),
+            )?;
+            assert!(plan.contains("runtime_agent_live_root_v2"), "{plan}");
+            Ok(())
+        })
+        .expect("count query uses the live-only index");
+    write(
+        &store,
+        "DELETE FROM runtime_agents WHERE id=?1",
+        vec!["worker".into()],
+    )
+    .await;
+    assert_eq!(
+        client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
+        json!({"working":0,"total":0})
+    );
+}
+
+#[tokio::test]
 async fn legacy_blocked_summary_offers_cancel_when_operation_allows_it() {
     let (_dir, store) = store().await;
     let op = json!({"id":"move","leadId":CHAT,"targetAccountKey":"target",

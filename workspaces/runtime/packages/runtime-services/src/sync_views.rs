@@ -436,6 +436,7 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
 pub struct AgentViewContext {
     pub account_destinations: Vec<studio_runtime_schema::account_destination::AccountDestination>,
     pub transfer_can_cancel: bool,
+    pub team_counts: Option<studio_runtime_schema::agent_progress::TeamCounts>,
     pub project_server_id: Option<String>,
     pub launcher_alive: bool,
     pub empty_lead: bool,
@@ -683,6 +684,9 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
         view.remove("nativeThreadBlock");
     }
     if truthy(record.get("isLead")) {
+        if let Some(counts) = &context.team_counts {
+            view.insert("teamCounts".to_owned(), serde_json::to_value(counts).ok()?);
+        }
         view.remove("overview");
         view.insert("empty".to_owned(), Value::Bool(context.empty_lead));
     } else {

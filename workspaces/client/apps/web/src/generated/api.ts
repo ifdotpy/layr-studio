@@ -4385,6 +4385,7 @@ export interface components {
       /** Tail */
       tail?: null | string | undefined;
       taskDefaultGate?: components["schemas"]["TaskAcceptanceGate"] | undefined;
+      teamCounts?: components["schemas"]["TeamCounts"] | undefined;
       /** Threadid */
       threadId?: null | string | undefined;
       /** Turnid */
@@ -6262,6 +6263,7 @@ export interface components {
        * @default null
        */
       tail?: null | string | undefined;
+      teamCounts?: components["schemas"]["TeamCounts"] | undefined;
       /**
        * Threadid
        * @default null
@@ -6494,6 +6496,7 @@ export interface components {
       source?: components["schemas"]["AgentSource"] | null | undefined;
       stall?: components["schemas"]["AgentStall"] | null | undefined;
       status?: components["schemas"]["AgentStatus"] | null | undefined;
+      teamCounts?: components["schemas"]["TeamCounts"] | undefined;
       /** Threadid */
       threadId?: null | string | undefined;
       /** Turnid */
@@ -9287,6 +9290,7 @@ export interface components {
        * @default null
        */
       tail?: null | string | undefined;
+      teamCounts?: components["schemas"]["TeamCounts"] | undefined;
       /**
        * Threadid
        * @default null
@@ -24337,6 +24341,13 @@ export interface components {
       /** @constant */
       limit: 3;
       retryAllowed: boolean;
+    };
+    /** @description Counts of live descendant workers. Working uses the team progress status definition. */
+    TeamCounts: {
+      /** Format: uint */
+      total: number;
+      /** Format: uint */
+      working: number;
     };
     /** TerminalClose */
     TerminalClose: {

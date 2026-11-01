@@ -140,8 +140,7 @@ pub(crate) fn register_work_change_functions(connection: &Connection) -> crate::
     Ok(())
 }
 
-/// Classify changes while OLD and NEW are already owned by the SQLite write.
-/// Metadata writes compare source fields but never enumerate history entries.
+/// Classify work changes while OLD and NEW are available to the source journal.
 pub(crate) fn prepare_work_change_journal(transaction: &Transaction<'_>) -> crate::StoreResult<()> {
     for kind in WorkHistoryKind::ALL {
         let field = kind.field();
@@ -287,6 +286,7 @@ enum Event {
     WorkHistory(String, WorkHistoryKind, usize),
     WorkRefusalOwner(String),
     WorkRefusalTask,
+    TeamRoot(String),
 }
 
 thread_local! {
@@ -301,6 +301,30 @@ fn push(event: Event) {
             events.push(event);
         }
     });
+}
+
+/// Capture the old team root before an indexed write can move or remove it.
+pub(crate) fn agent_team_root(connection: &Connection, id: &str) -> StoreResult<Option<String>> {
+    if !active() {
+        return Ok(None);
+    }
+    Ok(connection
+        .query_row(
+            "SELECT root_id FROM runtime_agents WHERE id=?1",
+            [id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+/// Enqueue roots only after the indexed row has actually changed.
+pub(crate) fn mark_agent_team_roots(id: &str, old_root: Option<&str>, new_root: Option<&str>) {
+    for root in old_root.as_deref().into_iter().chain(new_root) {
+        if root != id {
+            push(Event::TeamRoot(root.to_owned()));
+        }
+    }
 }
 
 /// Start the journal of a writer transaction.
@@ -384,6 +408,27 @@ pub(crate) fn pending(
         }
     }
     for ((source, _), id) in &ids {
+        if *source == Source::Agent {
+            if let Some(id) = id {
+                let root: Option<String> = transaction
+                    .query_row(
+                        "SELECT root_id FROM runtime_agents WHERE id=?1 AND root_id<>id",
+                        [id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if let Some(root) = root {
+                    pending.agents.insert(root);
+                }
+            } else {
+                let mut statement = transaction.prepare(
+                    "SELECT id FROM runtime_agents WHERE root_id=id AND deleted_at IS NULL",
+                )?;
+                for row in statement.query_map([], |row| row.get::<_, String>(0))? {
+                    pending.agents.insert(row?);
+                }
+            }
+        }
         if matches!(
             source,
             Source::Agent | Source::Event | Source::EventMeta | Source::QueueAsset
@@ -502,6 +547,9 @@ pub(crate) fn pending(
             }
             // The submission refusal is derived on every work publication.
             Event::WorkRefusalTask => {}
+            Event::TeamRoot(id) => {
+                pending.agents.insert(id);
+            }
         }
     }
     for ((source, id), index) in changed {

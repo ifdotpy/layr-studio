@@ -292,6 +292,43 @@ async fn changed_agents_decode_once_through_final_publication() {
             .expect("replay accounting"),
         "replay does no decoding"
     );
+    crate::entity_publication::install(&store)
+        .await
+        .expect("publisher");
+    store.transaction(|tx| {
+        for (id, root, lead) in [("cost-lead", "cost-lead", true), ("cost-worker", "cost-lead", false)] {
+            let agent = AgentRecord::from_value(json!({"compactions":0,"id":id,"rootId":root,"isLead":lead,"epoch":1,"status":"running","accountKey":"default","provider":"codex"}))?;
+            AgentRepository::put(tx, &agent)?;
+        }
+        Ok(())
+    }).await.expect("team fixture");
+    for change in [true, false] {
+        start_counting(&store).await;
+        store
+            .transaction(move |tx| {
+                let mut worker = AgentRepository::get(tx, &AgentId::from("cost-worker"))?
+                    .expect("worker")
+                    .value();
+                if change {
+                    worker["tail"] = json!("new tail");
+                }
+                AgentRepository::put(tx, &AgentRecord::from_value(worker)?)
+            })
+            .await
+            .expect("volatile or unchanged write");
+        assert!(
+            !calls(&store).await.contains_key("cost-lead"),
+            "volatile or unchanged worker writes must not project the lead"
+        );
+        let work = store
+            .transaction(|_| Ok(studio_runtime_store::agent_volatile::publication_work::take()))
+            .await
+            .expect("decode accounting");
+        assert!(
+            !work.contains_key("cost-lead"),
+            "volatile or unchanged worker writes must not decode the lead"
+        );
+    }
 }
 
 /// Recovery may commit while the account worker still holds an older cache.
