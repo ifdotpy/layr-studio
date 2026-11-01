@@ -1,6 +1,31 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import { readFileSync } from "node:fs";
 import { publicKeyPem } from "./pairing";
 import { identityProofMessage } from "../wasm/client";
+
+// The browser loads client_bg.wasm by URL. Node serves the same bytes from disk.
+beforeAll(() => {
+  vi.stubGlobal(
+    "fetch",
+    async () =>
+      new Response(
+        readFileSync(
+          new URL("../wasm/generated/client_bg.wasm", import.meta.url),
+        ),
+        { headers: { "Content-Type": "application/wasm" } },
+      ),
+  );
+});
+afterAll(() => vi.unstubAllGlobals());
 import {
   ROUTE_FAILURE_COOLDOWN_MS,
   RouteIdentityError,

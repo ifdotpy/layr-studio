@@ -1,6 +1,22 @@
-import { expect, it, vi } from "vitest";
+import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { identityProofMessage } from "../wasm/client";
+import { readFileSync } from "node:fs";
 import { createPublicKey, verify } from "node:crypto";
+
+// The browser loads client_bg.wasm by URL. Node serves the same bytes from disk.
+beforeAll(() => {
+  vi.stubGlobal(
+    "fetch",
+    async () =>
+      new Response(
+        readFileSync(
+          new URL("../wasm/generated/client_bg.wasm", import.meta.url),
+        ),
+        { headers: { "Content-Type": "application/wasm" } },
+      ),
+  );
+});
+afterAll(() => vi.unstubAllGlobals());
 import {
   parseInvitation,
   pairedServer,
