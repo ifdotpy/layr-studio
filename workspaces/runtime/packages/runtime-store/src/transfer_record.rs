@@ -372,6 +372,51 @@ pub struct PortableHistory {
     pub transfer_id: String,
 }
 
+/// A historical account move. Unknown legacy shapes remain in the enclosing raw variant.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TransferAccountHistoryEntry {
+    pub account_key: AccountKey,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub thread_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub provider: Field<studio_runtime_schema::ProviderKind>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub transfer_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub target_account_key: Field<AccountKey>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub target_provider: Field<studio_runtime_schema::ProviderKind>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub target_thread_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub at: Field<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub portable_history: Field<PortableHistory>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub tool_refresh_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub result: Field<serde_json::Value>,
+}
+
+impl TransferAccountHistoryEntry {
+    pub fn new(account_key: AccountKey) -> Self {
+        Self {
+            account_key,
+            thread_id: Field::Missing,
+            provider: Field::Missing,
+            transfer_id: Field::Missing,
+            target_account_key: Field::Missing,
+            target_provider: Field::Missing,
+            target_thread_id: Field::Missing,
+            at: Field::Missing,
+            portable_history: Field::Missing,
+            tool_refresh_id: Field::Missing,
+            result: Field::Missing,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SourceEmptyProof {

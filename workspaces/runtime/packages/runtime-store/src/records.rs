@@ -587,6 +587,15 @@ pub struct AgentRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
+    pub account_history: studio_runtime_schema::queue_command::Field<
+        StoredTransferValue<
+            Vec<StoredTransferValue<crate::transfer_record::TransferAccountHistoryEntry>>,
+        >,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
     pub cyber_access_program:
         studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
     #[serde(
@@ -1044,6 +1053,7 @@ impl AgentRecord {
             prepare_attempt: Default::default(),
             worker_defaults: Default::default(),
             portable_history: Default::default(),
+            account_history: Default::default(),
             cyber_access_program: Default::default(),
             claude_options: Default::default(),
             execution_mode: None,
@@ -3536,6 +3546,37 @@ mod tests {
         assert_eq!(
             legacy.value().get("portableHistory"),
             Some(&json!({"legacy":42}))
+        );
+    }
+
+    #[test]
+    fn account_history_is_not_an_extension() {
+        let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+        "epoch":2, "status":"idle", "accountKey":"default", "accountHistory":[{
+            "accountKey":"source","threadId":"thread","provider":"codex","at":1.0
+        }]}));
+        assert!(!record.extra.contains_key("accountHistory"));
+        assert!(matches!(
+            record.account_history.value(),
+            Some(super::StoredTransferValue::Known(_))
+        ));
+        let legacy = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+            "epoch":2, "status":"idle", "accountKey":"default", "accountHistory":[{"future":true}]}));
+        assert!(
+            matches!(legacy.account_history.value(), Some(super::StoredTransferValue::Known(entries))
+            if matches!(entries.as_slice(), [super::StoredTransferValue::Unreadable(_)]))
+        );
+        assert_eq!(
+            legacy.value().get("accountHistory"),
+            Some(&json!([{"future":true}]))
+        );
+        let connection = database();
+        let table = Table::<AgentRecord>::new(&connection);
+        table.put(&legacy).unwrap();
+        let restored = table.get(&AgentId::from("agent")).unwrap().unwrap();
+        assert_eq!(
+            restored.value().get("accountHistory"),
+            Some(&json!([{"future":true}]))
         );
     }
 
