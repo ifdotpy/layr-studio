@@ -11,6 +11,7 @@ import {
   readBaseline,
   RATCHET_BASELINE,
   type Violation,
+  type Baseline,
 } from "./ratchet.ts";
 
 const root = fileURLToPath(new URL("../../../..", import.meta.url));
@@ -140,9 +141,9 @@ export function collect(output: string): Record<string, Violation[]> {
 const nativePath = "workspaces/client/apps/native/src-tauri/";
 
 export function scopedBaseline(
-  baseline: Record<string, Violation[]>,
+  baseline: Baseline,
   excludeNative: boolean,
-): Record<string, Violation[]> {
+): Baseline {
   return Object.fromEntries(
     Object.entries(baseline).map(([rule, entries]) => [
       rule,
