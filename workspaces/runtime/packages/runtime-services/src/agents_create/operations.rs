@@ -3123,10 +3123,7 @@ async fn mutate(
     context: &Context<'_>,
     operation: impl FnOnce(&Transaction<'_>) -> Result<Value, OperationError> + Send + 'static,
 ) -> Result<Value, OperationError> {
-    context
-        .store
-        .transaction_with_error(move |tx| Ok(operation(tx)?))
-        .await
+    context.store.transaction_with_error(operation).await
 }
 
 #[cfg(test)]

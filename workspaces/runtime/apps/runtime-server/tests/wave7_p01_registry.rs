@@ -3526,7 +3526,8 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
         )
         .unwrap();
         std::fs::set_permissions(&node_wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let child = tokio::process::Command::new(std::env::current_exe().unwrap())
+        let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
+        command
             .args([
                 "--exact",
                 "wave7_p01_registry::rust_direct_claude_launch_runs_the_scripted_bridge_turn",
@@ -3545,14 +3546,26 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
             .env("HOME", &home)
             .env_remove("CODEX_AGENTS_SUPERVISOR_MODE")
             .kill_on_drop(true)
-            .output()
-            .await
-            .unwrap();
+            .stdout(std::fs::File::create(temp.path().join("child.out")).unwrap())
+            .stderr(std::fs::File::create(temp.path().join("child.err")).unwrap());
+        let status =
+            tokio::time::timeout(std::time::Duration::from_secs(75), command.status()).await;
+        let output =
+            |name: &str| std::fs::read_to_string(temp.path().join(name)).unwrap_or_default();
+        let Ok(status) = status else {
+            panic!(
+                "the scripted Claude child hung; sdk-log={:?}; node-stderr={:?}; stdout={}; stderr={}",
+                std::fs::read_to_string(&loader_log).unwrap_or_default(),
+                std::fs::read_to_string(&node_log).unwrap_or_default(),
+                output("child.out"),
+                output("child.err")
+            );
+        };
         assert!(
-            child.status.success(),
+            status.unwrap().success(),
             "{}\n{}",
-            String::from_utf8_lossy(&child.stdout),
-            String::from_utf8_lossy(&child.stderr)
+            output("child.out"),
+            output("child.err")
         );
         return;
     }
@@ -3599,27 +3612,33 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
         None,
     )
     .with_account_driver(accounts.clone());
-    let runtime = start_host(
-        &mut state,
-        fixture.store.clone(),
-        accounts.clone(),
-        None,
-        test_registry_config(),
+    let runtime = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        start_host(
+            &mut state,
+            fixture.store.clone(),
+            accounts.clone(),
+            None,
+            test_registry_config(),
+        ),
     )
     .await
+    .expect("the host started within 30 s")
     .unwrap();
     let app = studio_runtime_http::router(state.clone()).unwrap();
     let mut changes = state.sync_changes_handle().subscribe();
     let message_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-    assert_eq!(
+    let posted = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
         app.clone()
-            .oneshot(direct_message_post(&agent_id, &message_id, "split-stream"))
-            .await
-            .unwrap()
-            .status(),
-        200
-    );
-    let completed = tokio::time::timeout(TEST_HANG_GUARD, async {
+            .oneshot(direct_message_post(&agent_id, &message_id, "split-stream")),
+    )
+    .await
+    .expect("the message post answered within 30 s")
+    .unwrap();
+    assert_eq!(posted.status(), 200);
+    eprintln!("STAGE posted");
+    let completed = tokio::time::timeout(std::time::Duration::from_secs(60), async {
         loop {
             let raw = fixture
                 .store
@@ -3650,6 +3669,7 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
         );
     });
     assert_eq!(completed["status"], "completed");
+    eprintln!("STAGE first-turn-completed");
     let transcript = app
         .clone()
         .oneshot(
@@ -3715,6 +3735,7 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
             })
             .collect::<Vec<_>>()
     };
+    eprintln!("STAGE transcript-read");
     let mut expected: Vec<Value> =
         serde_json::from_str(include_str!("fixtures/claude-stream-items.json")).unwrap();
     // The input includes runtime instructions; compare its complete persisted text.
@@ -3765,6 +3786,7 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
         std::fs::read_to_string(&queries).unwrap().lines().count(),
         1
     );
+    eprintln!("STAGE queries-counted");
     let (_query_watcher, mut query_events) = watch_file_changes(&queries);
     assert_eq!(
         app.clone()
@@ -3778,7 +3800,21 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
             .status(),
         200
     );
-    wait_for_durable_agent_status(&fixture, &agent_id, "completed").await;
+    eprintln!("STAGE second-posted");
+    if tokio::time::timeout(
+        std::time::Duration::from_secs(40),
+        wait_for_durable_agent_status(&fixture, &agent_id, "completed"),
+    )
+    .await
+    .is_err()
+    {
+        panic!(
+            "the peers turn did not complete: {}; direct-generation={}",
+            direct_agent_debug(&fixture.store, &agent_id),
+            direct_generation(&fixture.store)
+        );
+    }
+    eprintln!("STAGE second-turn-completed");
     let managed_calls: i64 = fixture.store.test_reader().unwrap().query_row(
         "SELECT count(*) FROM runtime_tool_requests t JOIN request_results r ON r.id=json_extract(t.record,'$.admitted.id') WHERE json_extract(t.record,'$.agent')=?1 AND json_extract(t.record,'$.tool')='orchestration_peers' AND json_extract(t.record,'$.stage')='completed' AND json_extract(r.result,'$.reply.success')=1",
         [&agent_id],
@@ -3813,6 +3849,7 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
         200
     );
     wait_for_file_lines(&queries, 2, &mut query_events).await;
+    eprintln!("STAGE restart-turn-started");
     runtime_shutdown::close(runtime, &state).await.unwrap();
     let mut restarted_state = state.clone();
     let restarted = start_host(
@@ -3824,6 +3861,7 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
     )
     .await
     .unwrap();
+    eprintln!("STAGE restarted");
     let mut restart_changes = restarted_state.sync_changes_handle().subscribe();
     // Shutdown closes the bridge's query; whether the bridge persists the
     // aborted turn as interrupted before it exits is a race. An unknown input
