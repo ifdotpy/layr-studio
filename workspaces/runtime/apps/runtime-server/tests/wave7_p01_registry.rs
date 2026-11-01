@@ -3801,7 +3801,19 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
         200
     );
     eprintln!("STAGE second-posted");
-    wait_for_durable_agent_status(&fixture, &agent_id, "completed").await;
+    if tokio::time::timeout(
+        std::time::Duration::from_secs(40),
+        wait_for_durable_agent_status(&fixture, &agent_id, "completed"),
+    )
+    .await
+    .is_err()
+    {
+        panic!(
+            "the peers turn did not complete: {}; direct-generation={}",
+            direct_agent_debug(&fixture.store, &agent_id),
+            direct_generation(&fixture.store)
+        );
+    }
     eprintln!("STAGE second-turn-completed");
     let managed_calls: i64 = fixture.store.test_reader().unwrap().query_row(
         "SELECT count(*) FROM runtime_tool_requests t JOIN request_results r ON r.id=json_extract(t.record,'$.admitted.id') WHERE json_extract(t.record,'$.agent')=?1 AND json_extract(t.record,'$.tool')='orchestration_peers' AND json_extract(t.record,'$.stage')='completed' AND json_extract(r.result,'$.reply.success')=1",
