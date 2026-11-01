@@ -147,7 +147,7 @@ impl SchedulerRepository {
         if agent.status != AgentStatus::Paused || agent.in_flight != Some(true) {
             return false;
         }
-        let Some(turn) = agent.turn_id.as_deref() else {
+        let Some(turn) = agent.turn_id.value().map(String::as_str) else {
             return false;
         };
         let Some(attempt_id) = stored_attempt(agent).and_then(|attempt| attempt.id.as_deref())
@@ -247,7 +247,7 @@ impl SchedulerRepository {
         });
         agent.active_tools = Some(Vec::new());
         agent.last_answer = Some(String::new());
-        agent.turn_id = Some(turn_id.to_string());
+        agent.turn_id = studio_runtime_schema::queue_command::Field::Value(turn_id.to_string());
         agent.native_response_turn = None;
         agent.native_safety_buffering = None;
         agent.native_status = None;
@@ -384,7 +384,7 @@ impl SchedulerRepository {
                 agent.auto_wake = Some(true);
                 agent.in_flight = Some(true);
                 agent.error = studio_runtime_schema::queue_command::Field::Null;
-                agent.extra.insert("connectionRecovery".into(),json!({"source":"native_thread_read","at":at,"turnId":agent.turn_id.as_deref(),"outcome":"active","automatic":true,"previousError":previous_error}));
+                agent.extra.insert("connectionRecovery".into(),json!({"source":"native_thread_read","at":at,"turnId":agent.turn_id.value().map(String::as_str),"outcome":"active","automatic":true,"previousError":previous_error}));
                 if let Some(marker) = agent.restart_recovery.as_deref_mut() {
                     marker.stage = Some("continued".into());
                     marker.extra.insert("observedAt".into(), json!(at));
@@ -400,7 +400,7 @@ impl SchedulerRepository {
                 agent.extra.insert(
                     "connectionRecovery".into(),
                     json!({
-                        "source":"native_thread_read", "at":at, "turnId":agent.turn_id.as_deref(),
+                        "source":"native_thread_read", "at":at, "turnId":agent.turn_id.value().map(String::as_str),
                         "outcome":"active", "automatic":true, "previousError":previous_error,
                         "supervisor":null
                     }),
@@ -477,7 +477,11 @@ impl SchedulerRepository {
                 continue;
             }
             // A later turn that is still open is not proven ended.
-            if let Some(turn) = agent.turn_id.as_deref().filter(|turn| !turn.is_empty())
+            if let Some(turn) = agent
+                .turn_id
+                .value()
+                .map(String::as_str)
+                .filter(|turn| !turn.is_empty())
                 && !completed_turn(transaction, &agent.id.0, turn)?
             {
                 continue;
@@ -575,7 +579,8 @@ impl SchedulerRepository {
             || agent.in_flight == Some(true)
             || agent
                 .turn_id
-                .as_deref()
+                .value()
+                .map(String::as_str)
                 .is_some_and(|turn| !turn.is_empty())
             || agent
                 .active_tools
@@ -1603,7 +1608,7 @@ impl SchedulerRepository {
         if agent.epoch == epoch {
             attempt.execution_outcome = None;
         }
-        agent.turn_id = Some(turn_id.to_string());
+        agent.turn_id = studio_runtime_schema::queue_command::Field::Value(turn_id.to_string());
         agent.in_flight = Some(true);
         if current_attempt || recovering(&agent, epoch) {
             if current_attempt {
@@ -1811,7 +1816,7 @@ impl SchedulerRepository {
             ),
             _ => studio_runtime_schema::queue_command::Field::Null,
         };
-        agent.turn_id = None;
+        agent.turn_id = Default::default();
         agent.activity = None;
         agent.active_tools = Some(Vec::new());
         agent.in_flight = Some(false);
@@ -2115,7 +2120,8 @@ pub(super) fn apply_start_error(
             "steerRejectedTurnId".into(),
             agent
                 .turn_id
-                .clone()
+                .value()
+                .cloned()
                 .map(Value::String)
                 .filter(|v| v.is_string())
                 .unwrap_or(json!("")),
@@ -2762,7 +2768,7 @@ pub(super) fn restart_continuation_allowed(agent: &AgentRecord) -> bool {
             .and_then(|r| r.auto_wake)
             == Some(true)
         && marker.turn_id.is_some()
-        && marker.turn_id.as_deref() == agent.turn_id.as_deref()
+        && marker.turn_id.as_deref() == agent.turn_id.value().map(String::as_str)
         && marker
             .epoch
             .as_ref()
@@ -2800,7 +2806,7 @@ pub(super) fn transport_continuation_allowed(agent: &AgentRecord) -> bool {
         && previous.auto_wake == Some(true)
         && previous.account_key.as_deref().unwrap_or("default") == agent.account_key
         && previous.thread_id.as_deref() == agent.thread_id.as_deref()
-        && previous.turn_id.as_deref() == agent.turn_id.as_deref()
+        && previous.turn_id.as_deref() == agent.turn_id.value().map(String::as_str)
         && previous
             .epoch
             .as_ref()
@@ -2869,7 +2875,7 @@ fn manual_delivery_hold_tracks(
     agent.epoch == identity.epoch
         && agent.auto_wake == Some(false)
         && agent.turn_epoch == Some(identity.epoch)
-        && agent.turn_id.as_deref() == Some(turn)
+        && agent.turn_id.value().map(String::as_str) == Some(turn)
         && attempt.id.as_deref() == Some(identity.attempt_id.as_str())
         && attempt.epoch == Some(identity.epoch)
         && bound_turn(agent, attempt) == Some(turn)
@@ -3244,7 +3250,7 @@ pub(super) fn bound_turn<'a>(
         (native_action_attempt(attempt)
             && attempt.thread_id.is_some()
             && attempt.thread_id.as_deref() == agent.thread_id.as_deref())
-        .then_some(agent.turn_id.as_deref())
+        .then_some(agent.turn_id.value().map(String::as_str))
         .flatten()
     })
 }

@@ -589,8 +589,11 @@ pub struct AgentRecord {
     pub account_key: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn_id: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub turn_id: studio_runtime_schema::queue_command::Field<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_job: Option<StoredTitleJob>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -992,7 +995,7 @@ impl AgentRecord {
             turn_epoch: None,
             account_key: crate::cost_aggregate::DEFAULT_ACCOUNT.to_owned(),
             thread_id: None,
-            turn_id: None,
+            turn_id: Default::default(),
             title_job: None,
             start_attempt: None,
             disconnect_recovery: None,
@@ -3421,8 +3424,24 @@ mod tests {
         assert_eq!(record.turn_epoch, Some(2));
         assert_eq!(record.account_key, "account");
         assert_eq!(record.thread_id.as_deref(), Some("thread"));
-        assert_eq!(record.turn_id.as_deref(), Some("turn"));
+        assert_eq!(record.turn_id.value().map(String::as_str), Some("turn"));
         assert_eq!(record.value(), value);
+    }
+
+    #[test]
+    fn agent_round_trip_preserves_null_and_missing_turn_id() {
+        let base = json!({"compactions":0,
+            "id":"agent", "rootId":"agent", "epoch":2, "status":"idle",
+            "accountKey":"default", "capacity":{"kind":"automatic","max":64},
+            "naming":"automatic"
+        });
+        for turn in [None, Some(Value::Null), Some(json!("turn"))] {
+            let mut value = base.clone();
+            if let Some(turn) = turn {
+                value["turnId"] = turn;
+            }
+            assert_eq!(agent(value.clone()).into_value(), value);
+        }
     }
 
     #[test]

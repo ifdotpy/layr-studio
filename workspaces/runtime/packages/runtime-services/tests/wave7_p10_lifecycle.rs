@@ -820,7 +820,8 @@ impl InterruptFixture {
                         let needs_settlement = agent.in_flight == Some(true)
                             || agent
                                 .turn_id
-                                .as_deref()
+                                .value()
+                                .map(String::as_str)
                                 .is_some_and(|turn| !turn.is_empty())
                             || attempt.and_then(|value| value.active_at_reservation) == Some(true)
                             || matches!(
@@ -833,7 +834,7 @@ impl InterruptFixture {
                             continue;
                         }
                         agent.in_flight = Some(false);
-                        agent.turn_id = None;
+                        agent.turn_id = Default::default();
                         agent.activity = None;
                         agent.active_tools = Some(Vec::new());
                         if let Some(attempt) = agent.start_attempt.as_mut()

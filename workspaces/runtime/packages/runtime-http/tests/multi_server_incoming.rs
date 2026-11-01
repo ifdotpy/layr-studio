@@ -838,7 +838,7 @@ async fn signed_remote_event_crosses_http_boundary_and_persists_once() {
         in_flight: None,
         account_key: "default".into(),
         thread_id: None,
-        turn_id: None,
+        turn_id: Default::default(),
         auto_wake: None,
         usage_resume_enabled: None,
         execution_mode: None,

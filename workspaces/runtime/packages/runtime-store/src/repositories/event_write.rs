@@ -268,7 +268,7 @@ impl EventWriteRepository {
                 for (key, field) in [
                     ("turnEpoch", agent.turn_epoch.map(Value::from)),
                     ("autoWake", agent.auto_wake.map(Value::Bool)),
-                    ("turnId", agent.turn_id.clone().map(Value::String)),
+                    ("turnId", agent.turn_id.value().cloned().map(Value::String)),
                 ] {
                     if let Some(field) = field {
                         value.insert(key.to_owned(), field);

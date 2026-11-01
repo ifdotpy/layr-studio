@@ -1172,7 +1172,7 @@ impl SchedulerRepository {
         if !preparation && let Some(reason) = unsupported {
             agent.status = AgentStatus::Waiting;
             agent.in_flight = Some(false);
-            agent.turn_id = None;
+            agent.turn_id = Default::default();
             agent
                 .extra
                 .insert("nativeFailureHold".to_owned(), Value::Bool(true));
@@ -1226,7 +1226,7 @@ impl SchedulerRepository {
         // The start gate's wait record (`startWait`) ends with the claim.
         agent.start_wait = None;
         agent.in_flight = Some(true);
-        agent.turn_id = None;
+        agent.turn_id = Default::default();
         agent.turn_epoch = Some(epoch);
         agent.start_attempt = Some(Box::new(crate::StartAttemptView {
             id: Some(attempt_id.to_owned()),
@@ -1567,7 +1567,7 @@ impl SchedulerRepository {
                 agent,
                 record.status.as_str(),
                 record.in_flight == Some(true),
-                record.turn_id.as_deref(),
+                record.turn_id.value().map(String::as_str),
             )?;
         }
         Ok(())

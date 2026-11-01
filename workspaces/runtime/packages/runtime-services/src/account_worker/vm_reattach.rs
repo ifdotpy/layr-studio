@@ -88,7 +88,7 @@ fn binding(
         || attempt.account_key.as_deref() != Some(account)
         || attempt.submitted != Some(true)
         || record.thread_id.as_deref() != Some(thread.as_str())
-        || record.turn_id.as_deref() != Some(turn.as_str())
+        || record.turn_id.value().map(String::as_str) != Some(turn.as_str())
         || record
             .native_response_turn
             .as_deref()

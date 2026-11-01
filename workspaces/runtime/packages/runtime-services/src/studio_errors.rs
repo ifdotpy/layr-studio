@@ -595,7 +595,8 @@ fn build(tx: &Transaction<'_>, now: f64) -> Result<(Vec<StudioError>, Baseline),
         };
         let turn = record
             .turn_id
-            .as_deref()
+            .value()
+            .map(String::as_str)
             .or_else(|| record.last_completed_turn.value().map(String::as_str))
             .map(str::to_owned);
         let at = record

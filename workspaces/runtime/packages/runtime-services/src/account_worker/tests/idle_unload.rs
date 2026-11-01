@@ -138,7 +138,9 @@ async fn set_agent_in_use(state: &State, thread: &str, in_use: bool) {
                         .expect("test agent exists");
                     agent.thread_id = Some(thread.to_string());
                     agent.in_flight = Some(in_use);
-                    agent.turn_id = Some(if in_use { "busy" } else { "" }.to_string());
+                    agent.turn_id = studio_runtime_schema::queue_command::Field::Value(
+                        if in_use { "busy" } else { "" }.to_string(),
+                    );
                     agent.status = if in_use {
                         AgentStatus::Running
                     } else {

@@ -472,7 +472,7 @@ fn stopped_turn(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
         || receipt.start_attempt.as_deref().and_then(|v| v.connection_generation) != Some(generation)
         || receipt.start_attempt.as_deref().and_then(|v| v.turn_id.as_deref()) != Some(turn)
         // A delete tombstone clears the turn id; the epoch still names the stop.
-        || agent.turn_id.as_deref().is_some_and(|current| current != turn)
+        || agent.turn_id.value().map(String::as_str).is_some_and(|current| current != turn)
         || agent.thread_id.as_deref() != Some(thread)
         || agent.last_completed_turn.value().map(String::as_str) == Some(turn)
     {
@@ -532,7 +532,7 @@ fn unsettled_stop(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
         || interrupt.generation != Some(generation)
         || attempt.connection_generation != Some(generation)
         // A delete tombstone clears the turn id; the epoch still names the stop.
-        || agent.turn_id.as_deref().is_some_and(|current| current != turn)
+        || agent.turn_id.value().map(String::as_str).is_some_and(|current| current != turn)
         || agent.thread_id.as_deref() != Some(thread)
         || agent.last_completed_turn.value().map(String::as_str) == Some(turn)
     {

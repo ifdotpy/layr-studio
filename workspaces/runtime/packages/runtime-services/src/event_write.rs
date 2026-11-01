@@ -624,7 +624,11 @@ fn queue_agent(connection: &Transaction<'_>, agent: &AgentRecord) -> Result<(), 
     let status = match agent.status {
         AgentStatus::Running | AgentStatus::Starting => {
             agent.in_flight != Some(true)
-                && agent.turn_id.as_deref().is_none_or(str::is_empty)
+                && agent
+                    .turn_id
+                    .value()
+                    .map(String::as_str)
+                    .is_none_or(str::is_empty)
                 && agent
                     .start_attempt
                     .as_ref()

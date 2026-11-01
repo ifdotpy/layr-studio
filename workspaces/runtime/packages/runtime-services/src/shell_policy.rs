@@ -732,7 +732,10 @@ mod receipt_tests {
             partial.account_key.as_deref(),
             Some(owner.account_key.as_str())
         );
-        assert_eq!(partial.turn_id.as_deref(), owner.turn_id.as_deref());
+        assert_eq!(
+            partial.turn_id.as_deref(),
+            owner.turn_id.value().map(String::as_str)
+        );
         assert_eq!(partial.execution_mode.as_deref(), Some("host"));
         assert_eq!(
             owner.execution_mode,

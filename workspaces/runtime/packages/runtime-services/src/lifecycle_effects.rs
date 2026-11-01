@@ -1519,7 +1519,7 @@ fn finalize_deleted(tx: &Transaction<'_>, id: &str) -> Result<(), ManagementErro
     }
     agent.status = studio_runtime_store::AgentStatus::Paused;
     agent.in_flight = Some(false);
-    agent.turn_id = None;
+    agent.turn_id = Default::default();
     agent.activity = None;
     agent.active_tools = Some(Vec::new());
     if let Some(attempt) = agent.start_attempt.as_mut()
@@ -1536,7 +1536,8 @@ fn needs_deleted_settlement(agent: &AgentRecord) -> bool {
         && (agent.in_flight == Some(true)
             || agent
                 .turn_id
-                .as_deref()
+                .value()
+                .map(String::as_str)
                 .is_some_and(|turn| !turn.is_empty())
             || agent
                 .start_attempt

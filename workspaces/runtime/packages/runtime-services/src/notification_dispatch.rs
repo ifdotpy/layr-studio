@@ -3291,7 +3291,7 @@ mod tests {
                 assert_eq!(event.turn_id.as_deref(), Some("turn-1"));
                 let agent =
                     AgentRepository::get(tx, &"agent".into())?.expect("accepted agent remains");
-                assert_eq!(agent.turn_id.as_deref(), Some("turn-1"));
+                assert_eq!(agent.turn_id.value().map(String::as_str), Some("turn-1"));
                 assert_eq!(agent.events, Some(1));
                 assert!(agent.last_event.is_some());
                 let message = MessageRepository::get(tx, &ChatMessageId::from("message-1"))?

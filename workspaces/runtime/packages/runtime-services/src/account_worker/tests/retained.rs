@@ -2190,7 +2190,7 @@ async fn seed_transport_turn(state: &State) {
             let mut agent = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?.unwrap();
             agent.status = studio_runtime_store::AgentStatus::Running;
             agent.thread_id = Some("fake-thread-0".to_string());
-            agent.turn_id = Some("old-turn".to_string());
+            agent.turn_id = studio_runtime_schema::queue_command::Field::Value("old-turn".to_string());
             agent.turn_epoch = Some(agent.epoch);
             agent.in_flight = Some(true);
             agent.auto_wake = Some(true);
@@ -2234,7 +2234,7 @@ async fn seed_restart_turn(state: &State) {
                     marker["stage"] = json!("pending");
                     agent.status = studio_runtime_store::AgentStatus::Interrupted;
                     agent.thread_id = Some("fake-thread-0".to_string());
-                    agent.turn_id = Some("old-turn".to_string());
+                    agent.turn_id = studio_runtime_schema::queue_command::Field::Value("old-turn".to_string());
                     agent.turn_epoch = Some(epoch);
                     agent.auto_wake = Some(false);
                     agent.in_flight = Some(false);
@@ -2355,7 +2355,7 @@ async fn automatic_recovery_case(restart: bool, child: bool, stopped: bool) {
                 agent.role = studio_runtime_schema::queue_command::Field::Value(studio_runtime_schema::creation_intent::AgentRole::Implementer);
             }
             agent.status = studio_runtime_store::AgentStatus::Running;
-            agent.turn_id = Some("old-turn".to_string());
+            agent.turn_id = studio_runtime_schema::queue_command::Field::Value("old-turn".to_string());
             agent.in_flight = Some(true);
             agent.start_attempt = Some(Box::new(studio_runtime_store::StartAttemptView { id: Some("old-attempt".into()), account_key: Some("default".into()), epoch: Some(agent.epoch), thread_id: Some("fake-thread-0".into()), turn_id: Some("old-turn".into()), submitted: Some(true), connection_generation: Some(1), events: Some(vec!["annotation:input".into()]), active_at_reservation: Some(false), settings_fixed: Some(true), ..Default::default() }));
             AgentRepository::put(tx, &agent)?;
@@ -2553,7 +2553,7 @@ async fn seed_adopted_turn_checked_while_running(state: &State) {
                     marker["observedAt"] = json!(2.0);
                     agent.status = studio_runtime_store::AgentStatus::Running;
                     agent.thread_id = Some("fake-thread-0".to_string());
-                    agent.turn_id = Some("old-turn".to_string());
+                    agent.turn_id = studio_runtime_schema::queue_command::Field::Value("old-turn".to_string());
                     agent.turn_epoch = Some(epoch);
                     agent.auto_wake = Some(true);
                     agent.in_flight = Some(false);
