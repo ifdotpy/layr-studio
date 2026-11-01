@@ -1635,21 +1635,33 @@ export default function App({ active = true }: { active?: boolean }) {
             command.slice(1) as "compact" | "review",
           );
       } else {
+        const pending = outbox.entries.some(
+          (entry) =>
+            entry.id === sends.current[id]?.id &&
+            !(
+              entry.status.source === "device" &&
+              entry.status.state.kind === "receipt_expired"
+            ),
+        );
         if (
-          sends.current[id]?.text !== text ||
-          JSON.stringify(sends.current[id]?.assets || []) !==
-            JSON.stringify(options?.assets || []) ||
-          sends.current[id]?.delivery !==
+          pending &&
+          sends.current[id]?.text === text &&
+          JSON.stringify(sends.current[id]?.assets || []) ===
+            JSON.stringify(options?.assets || []) &&
+          sends.current[id]?.delivery ===
             (options?.delivery || DeliveryMoment.CurrentTurn)
-        )
-          sends.current[id] = {
-            id: randomUUID(),
-            room: id,
-            text,
-            assets: options?.assets || [],
-            // Enter delivers after the current tool call; Tab after the turn.
-            delivery: options?.delivery || DeliveryMoment.CurrentTurn,
-          };
+        ) {
+          notify("This message is still pending on this device.");
+          return;
+        }
+        sends.current[id] = {
+          id: randomUUID(),
+          room: id,
+          text,
+          assets: options?.assets || [],
+          // Enter delivers after the current tool call; Tab after the turn.
+          delivery: options?.delivery || DeliveryMoment.CurrentTurn,
+        };
         request = sends.current[id];
         const entry: OutgoingMessage = {
           id: request.id,
@@ -1712,9 +1724,6 @@ export default function App({ active = true }: { active?: boolean }) {
               status: { source: "device", state: result.state },
             },
           }));
-        }
-        if (sends.current[id]?.id === entry.id) {
-          delete sends.current[id];
         }
         if (
           result.kind === "server" &&

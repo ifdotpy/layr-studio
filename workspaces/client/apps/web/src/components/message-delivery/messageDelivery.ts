@@ -129,7 +129,10 @@ export function outgoingTranscript(
             entry.body.delivery ?? DeliveryMoment.CurrentTurn,
           ),
         };
-      if (entry.status.source === "device")
+      if (
+        entry.status.source === "device" ||
+        entry.receipt?.status === MessageSendStatus.uncertain
+      )
         shown = { ...shown, localDelivery: true };
       updates.set(present.id, shown);
       if (!shown.deliveryStatus)

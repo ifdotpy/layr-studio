@@ -798,3 +798,17 @@ it("keeps a stored request actionable beside a cached delivered transcript row",
   assert.equal(result.items[0]?.localDelivery, true);
   assert.deepEqual(result.observed, ["one"]);
 });
+
+it("keeps recovery controls on a matching transcript row for a fresh uncertain receipt", () => {
+  const entry: OutgoingMessage = {
+    ...receipt,
+    status: { source: "server", status: MessageSendStatus.uncertain },
+    receipt: { id: "one", status: "uncertain" },
+  };
+  const result = outgoingTranscript(
+    [{ ...pending, clientMessageId: "one" }],
+    [entry],
+  );
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0]?.localDelivery, true);
+});

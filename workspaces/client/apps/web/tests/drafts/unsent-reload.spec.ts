@@ -342,3 +342,96 @@ test("a stored send is not restored to the composer after a lost response", asyn
   await expect(page.locator("#message")).toHaveValue("");
   expect(ids).toHaveLength(1);
 });
+
+test("a failed buffer write and lost committed response retain the command identity", async ({
+  page,
+}) => {
+  const root = await mkdtemp(join(tmpdir(), "studio-send-buffer-failure-"));
+  const fixture = spawnFixture(process.execPath, [rustUiFixture, root], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let log = "";
+  fixture.stderr!.on("data", (chunk) => {
+    log += chunk;
+  });
+  const port = await waitForFixturePort(fixture, { diagnostics: () => log });
+  const origin = `http://127.0.0.1:${port}`;
+  const initial = await readTestState(origin);
+  const chat = initial.threads.find((agent) => agent.name === "Other project");
+  expect(chat).toBeDefined();
+  await page.addInitScript(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (value, key) {
+      if (this.transaction.db.name === "studio-unsent-input")
+        throw new DOMException("buffer unavailable", "QuotaExceededError");
+      return put.call(this, value, key);
+    };
+    const originalFetch = window.fetch;
+    window.fetch = async (input, init) => {
+      const response = await originalFetch(input, init);
+      const url = input instanceof Request ? input.url : String(input);
+      if (!url.includes("/api/sync/stream") || !response.body) return response;
+      const body = response.body.pipeThrough(
+        new TransformStream({
+          async transform(chunk, controller) {
+            if (Reflect.get(window, "holdReceiptStream"))
+              await new Promise<void>((resolve) =>
+                window.addEventListener(
+                  "release-receipt-stream",
+                  () => resolve(),
+                  { once: true },
+                ),
+              );
+            controller.enqueue(chunk);
+          },
+        }),
+      );
+      return new Response(body, {
+        status: response.status,
+        headers: response.headers,
+      });
+    };
+  });
+  const commands: Array<{ id: string }> = [];
+  await page.route("**/api/commands", async (route) => {
+    const send = commandOf(route.request(), "send");
+    if (!send) return route.continue();
+    commands.push(send);
+    if (commands.length === 1) {
+      await route.fetch();
+      return route.abort("failed");
+    }
+    return route.continue();
+  });
+  await page.goto(origin);
+  await page.locator(`[data-chat="${chat!.id}"]`).click();
+  await page.locator("#message").fill("Keep the original command identity");
+  await page.evaluate(() => Reflect.set(window, "holdReceiptStream", true));
+  await page.locator("#send").click();
+  await expect(page.getByText("Could not contact server")).toBeVisible();
+  await expect(page.locator("#message")).toHaveValue(
+    "Keep the original command identity",
+  );
+  const outgoing = page
+    .locator("[data-message]")
+    .filter({ hasText: "Keep the original command identity" });
+  await expect(
+    outgoing.getByRole("button", { name: "Retry", exact: true }),
+  ).toBeVisible();
+  await expect(
+    outgoing.getByRole("button", { name: "Discard", exact: true }),
+  ).toBeVisible();
+  await page.locator("#send").click();
+  await expect(
+    page.getByText("This message is still pending on this device."),
+  ).toBeVisible();
+  expect(commands).toHaveLength(1);
+  await page.evaluate(() => {
+    Reflect.set(window, "holdReceiptStream", false);
+    window.dispatchEvent(new Event("release-receipt-stream"));
+  });
+  await expect(page.getByText("Sent", { exact: true }).last()).toBeVisible();
+  await page.locator("#send").click();
+  await expect.poll(() => commands.length).toBe(2);
+  expect(commands[1]?.id).not.toBe(commands[0]?.id);
+});
