@@ -237,9 +237,15 @@ async fn an_unanswered_check_of_a_rule_that_moved_on_still_settles() {
         })
         .await
         .expect("bind rule");
-    monitor_runtime::settle_unanswered(&store, id, &operation, monitor_policy::DEADLINE_PASSED, 3000.0)
-        .await
-        .expect("a moved-on rule must not keep its old check running");
+    monitor_runtime::settle_unanswered(
+        &store,
+        id,
+        &operation,
+        monitor_policy::DEADLINE_PASSED,
+        3000.0,
+    )
+    .await
+    .expect("a moved-on rule must not keep its old check running");
     let record = MonitorsRepository::get(&store.test_reader().expect("reader"), id)
         .expect("read")
         .expect("monitor");
@@ -250,5 +256,9 @@ async fn an_unanswered_check_of_a_rule_that_moved_on_still_settles() {
     let rule = RulesRepository::get(&store.test_reader().expect("reader"), "rule")
         .expect("rule read")
         .expect("rule");
-    assert_eq!(rule.checks.get(), 9, "the old check does not finish the new one");
+    assert_eq!(
+        rule.checks.get(),
+        9,
+        "the old check does not finish the new one"
+    );
 }
