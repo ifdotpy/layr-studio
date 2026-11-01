@@ -1376,12 +1376,17 @@ mod work_views_tests {
             "releases": [{"id": "x0"}],
         });
         let item: studio_runtime_store::WorkItemRecord =
-            serde_json::from_value(raw.clone()).unwrap();
+            serde_json::from_str(&raw.to_string()).unwrap();
         let refusal = json!({"reason": "none"});
         let views = work_views(&item, &raw, refusal.clone(), &BTreeMap::new()).unwrap();
         let rows: Vec<(&str, Value)> = views
             .iter()
-            .map(|(collection, view)| (*collection, serde_json::to_value(view).unwrap()))
+            .map(|(collection, view)| {
+                (
+                    *collection,
+                    serde_json::from_str(&serde_json::to_string(view).unwrap()).unwrap(),
+                )
+            })
             .collect();
         let collections: Vec<&str> = rows.iter().map(|(collection, _)| *collection).collect();
         assert_eq!(
