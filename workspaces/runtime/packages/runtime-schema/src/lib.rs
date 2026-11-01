@@ -519,7 +519,6 @@ pub fn table_schema(table: &str) -> Option<&'static str> {
         "runtime_execution_effects" => "PersistedExecutionRecord",
         "runtime_execution_runs" => "PersistedExecutionRunRecord",
         "runtime_federation_inbox" => "PersistedFederationInbox",
-        "runtime_federation_outbox" => "PersistedFederationOutbox",
         "runtime_federation_peers" => "PersistedFederationPeer",
         "runtime_federation_rooms" => "PersistedFederationRoom",
         "runtime_federation_settings" => "PersistedFederationSettings",
@@ -531,6 +530,7 @@ pub fn table_schema(table: &str) -> Option<&'static str> {
         "runtime_requests" => "PersistedRequestRecord",
         "runtime_rooms" => "PersistedRoomRecord",
         "runtime_rules" => "PersistedRuleRecord",
+        // Shared row shape of the server request rows in runtime_outbox (project locations decode it).
         "runtime_server_inbox" | "runtime_server_outbox" => "PersistedServerDelivery",
         "runtime_tasks" => "PersistedTaskRecord",
         "runtime_tool_request_aliases" => "PersistedToolAlias",

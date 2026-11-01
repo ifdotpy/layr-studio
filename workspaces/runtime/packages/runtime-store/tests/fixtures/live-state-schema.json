@@ -546,18 +546,6 @@
         "type": "table"
       },
       {
-        "name": "runtime_access_outbound",
-        "sql": "CREATE TABLE runtime_access_outbound (\n          server TEXT NOT NULL, request_id TEXT NOT NULL, hash TEXT NOT NULL,\n          record TEXT NOT NULL, receipt_state TEXT GENERATED ALWAYS AS (json_extract(record,'$.outcome')) VIRTUAL NOT NULL CHECK(\"receipt_state\" IN ('unknown','complete','redacted')), PRIMARY KEY(server,request_id))",
-        "table": "runtime_access_outbound",
-        "type": "table"
-      },
-      {
-        "name": "runtime_access_outbound_age",
-        "sql": "CREATE INDEX runtime_access_outbound_age\n          ON runtime_access_outbound(json_extract(record,'$.completed'))\n          WHERE json_extract(record,'$.outcome')='complete'",
-        "table": "runtime_access_outbound",
-        "type": "index"
-      },
-      {
         "name": "runtime_access_settings",
         "sql": "CREATE TABLE runtime_access_settings(id INTEGER PRIMARY KEY CHECK(id=1), auto_pair INTEGER NOT NULL)",
         "table": "runtime_access_settings",
@@ -1128,18 +1116,6 @@
         "type": "table"
       },
       {
-        "name": "runtime_federation_outbox",
-        "sql": "CREATE TABLE runtime_federation_outbox (\n          id TEXT PRIMARY KEY, peer_id TEXT NOT NULL, record TEXT NOT NULL, receipt_state TEXT GENERATED ALWAYS AS (json_extract(record,'$.status')) VIRTUAL NOT NULL CHECK(\"receipt_state\" IN ('queued','delivered')), receipt_kind TEXT GENERATED ALWAYS AS (json_extract(record,'$.kind')) VIRTUAL NOT NULL CHECK(\"receipt_kind\" IN ('chat-message','room-invite','room-accept')))",
-        "table": "runtime_federation_outbox",
-        "type": "table"
-      },
-      {
-        "name": "runtime_federation_outbox_peer",
-        "sql": "CREATE INDEX runtime_federation_outbox_peer\n          ON runtime_federation_outbox(peer_id)",
-        "table": "runtime_federation_outbox",
-        "type": "index"
-      },
-      {
         "name": "runtime_federation_peers",
         "sql": "CREATE TABLE runtime_federation_peers (\n          id TEXT PRIMARY KEY, record TEXT NOT NULL)",
         "table": "runtime_federation_peers",
@@ -1506,12 +1482,6 @@
         "type": "index"
       },
       {
-        "name": "runtime_server_fetch",
-        "sql": "CREATE TABLE runtime_server_fetch (\n                    id TEXT PRIMARY KEY, server TEXT NOT NULL, signature TEXT NOT NULL,\n                    state TEXT NOT NULL, result TEXT, admission TEXT, receipt_state TEXT GENERATED ALWAYS AS (state) VIRTUAL NOT NULL CHECK(\"receipt_state\" IN ('preparing','fetching','complete')))",
-        "table": "runtime_server_fetch",
-        "type": "table"
-      },
-      {
         "name": "runtime_server_inbox",
         "sql": "CREATE TABLE runtime_server_inbox (\n                    id TEXT PRIMARY KEY, signature TEXT NOT NULL, state TEXT NOT NULL,\n                    result TEXT, created_at REAL NOT NULL DEFAULT 0, completed_at REAL NOT NULL DEFAULT 0, principal TEXT, actor TEXT, admission TEXT, receipt_state TEXT GENERATED ALWAYS AS (state) VIRTUAL NOT NULL CHECK(\"receipt_state\" IN ('queued','running','waiting','complete')))",
         "table": "runtime_server_inbox",
@@ -1527,18 +1497,6 @@
         "name": "runtime_server_links_home_parent",
         "sql": "CREATE INDEX runtime_server_links_home_parent\n                    ON runtime_server_links(json_extract(record,'$.parent'))\n                    WHERE json_extract(record,'$.side')='home'",
         "table": "runtime_server_links",
-        "type": "index"
-      },
-      {
-        "name": "runtime_server_outbox",
-        "sql": "CREATE TABLE runtime_server_outbox (\n                    id TEXT PRIMARY KEY, server TEXT NOT NULL, body TEXT NOT NULL,\n                    state TEXT NOT NULL, result TEXT, attempts INTEGER NOT NULL DEFAULT 0,\n                    next_at REAL NOT NULL DEFAULT 0, error TEXT, created_at REAL NOT NULL DEFAULT 0, completed_at REAL NOT NULL DEFAULT 0, fingerprint TEXT, admission TEXT, receipt_state TEXT GENERATED ALWAYS AS (state) VIRTUAL NOT NULL CHECK(\"receipt_state\" IN ('queued','running','waiting','complete')), receipt_kind TEXT GENERATED ALWAYS AS (json_extract(body,'$.action')) VIRTUAL NOT NULL CHECK(\"receipt_kind\" IN ('event','input','message','move_send','move_status','location_info','location_matches','stop','exec_event','projects','projects.changed','folders','git','export','chunk','exec_read','exec_input','exec_cancel','release','update.offer','update.export','update.chunk','update.release','backup.put','task','complaint','context','directory','chat_read','move_manage','move_interrupt','move_spawn','exec','exec_receipt','browser_callback','add_location','remove_location','move_validate','move_begin','device_trust')))",
-        "table": "runtime_server_outbox",
-        "type": "table"
-      },
-      {
-        "name": "runtime_server_outbox_due",
-        "sql": "CREATE INDEX runtime_server_outbox_due\n                    ON runtime_server_outbox(state,next_at)",
-        "table": "runtime_server_outbox",
         "type": "index"
       },
       {
