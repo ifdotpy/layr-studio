@@ -1568,7 +1568,10 @@ fn stream_turn_active(
     key: &StreamKey,
 ) -> Result<bool, NotificationDispatchError> {
     Ok(transaction.query_row_cached(
-        "SELECT EXISTS(SELECT 1 FROM runtime_agents WHERE id=?4 AND account_key=?1 AND id IN (SELECT chat FROM sessions WHERE thread_id=?2 AND state<>'ended') AND (?3 IS NULL OR turn_id=?3) AND deleted_at IS NULL AND (in_flight=1 OR status IN ('running','starting','approval')))",
+        &format!(
+            "SELECT EXISTS(SELECT 1 FROM runtime_agents WHERE id=?4 AND account_key=?1 AND id IN (SELECT chat FROM sessions WHERE thread_id=?2 AND state<>'ended') AND (?3 IS NULL OR turn_id=?3) AND deleted_at IS NULL AND ({} OR status IN ('running','starting','approval')))",
+            studio_runtime_store::domain::chat_busy_sql("runtime_agents.id")
+        ),
         rusqlite::params![key.account, key.thread, key.turn, key.agent_id],
         |row| row.get(0),
     ).map_err(StoreError::from)?)
@@ -4593,3 +4596,48 @@ mod tests {
 #[cfg(test)]
 #[path = "notification_dispatch/review_tests.rs"]
 mod review_tests;
+
+#[cfg(test)]
+mod busy_stream_tests {
+    use super::*;
+
+    #[test]
+    fn stream_of_a_busy_chat_is_active_without_the_agent_flag() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(studio_runtime_store::agent_columns::agent_table_sql())
+            .unwrap();
+        db.execute_batch(&studio_runtime_store::domain::tables_sql())
+            .unwrap();
+        for id in ["busy", "idle"] {
+            let record = json!({"id":id,"accountKey":"acct","status":"idle",
+                "turnId":"turn","inFlight":true});
+            db.execute(
+                "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                rusqlite::params![id, record.to_string()],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO sessions(id,chat,thread_id,account_key,state) VALUES(?1,?2,'thread','acct','ready')",
+                rusqlite::params![format!("{id}:thread"), id],
+            )
+            .unwrap();
+        }
+        db.execute(
+            "INSERT INTO turns(id,chat,state) VALUES('t1','busy','starting')",
+            [],
+        )
+        .unwrap();
+        let key = |agent: &str| StreamKey {
+            agent_id: agent.to_owned(),
+            account: "acct".to_owned(),
+            generation: 1,
+            thread: "thread".to_owned(),
+            turn: Some("turn".to_owned()),
+            item: "item".to_owned(),
+            method: "method".to_owned(),
+        };
+        let tx = db.transaction().unwrap();
+        assert!(stream_turn_active(&tx, &key("busy")).unwrap());
+        assert!(!stream_turn_active(&tx, &key("idle")).unwrap());
+    }
+}

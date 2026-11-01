@@ -199,7 +199,10 @@ pub async fn hold_unstarted(
     )
 }
 
-const RELEASE_HELD_SQL: &str = "SELECT a.id,json_extract(a.record,'$.epoch'), \
+/// Held agents that may release: the agent is not busy (no unfinished turn of its chat).
+fn release_held_sql() -> String {
+    format!(
+        "SELECT a.id,json_extract(a.record,'$.epoch'), \
                    COALESCE(json_extract(a.record,'$.accountKey'),'default'), \
                    json_extract(a.record,'$.error'), \
                    (SELECT MIN(e.created) FROM runtime_events e WHERE e.agent=a.id \
@@ -207,12 +210,15 @@ const RELEASE_HELD_SQL: &str = "SELECT a.id,json_extract(a.record,'$.epoch'), \
                  FROM runtime_agents a \
                  WHERE a.status='failed' \
                    AND EXISTS(SELECT 1 FROM chats ch WHERE ch.id=a.id AND ch.auto_wake=1) \
-                   AND COALESCE(a.in_flight,0)=0 AND a.deleted_at IS NULL \
+                   AND NOT {busy} AND a.deleted_at IS NULL \
                    AND json_extract(a.record,'$.autoWake')=1 \
                    AND COALESCE(json_extract(a.record,'$.inFlight'),0)=0 \
                    AND json_extract(a.record,'$.error') IN (SELECT value FROM json_each(?1)) \
                    AND first IS NOT NULL \
-                 ORDER BY first,a.rowid";
+                 ORDER BY first,a.rowid",
+        busy = studio_runtime_store::domain::chat_busy_sql("a.id"),
+    )
+}
 
 /// A held turn: its agent, the epoch of its pending input and its hold reason.
 struct Held {
@@ -232,7 +238,7 @@ pub async fn release_held(
     let reasons = json!(hold_reasons()).to_string();
     let held = store
         .read_async("runtime-services/account_auth_gate", move |db| {
-            let mut statement = db.prepare_cached(RELEASE_HELD_SQL)?;
+            let mut statement = db.prepare_cached(&release_held_sql())?;
             let rows = statement
                 .query_map([reasons], |row| {
                     Ok((
@@ -343,6 +349,50 @@ mod tests {
     use studio_runtime_providers::ProviderKind;
 
     #[test]
+    fn release_skips_a_held_agent_with_an_unfinished_turn() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(studio_runtime_store::agent_columns::agent_table_sql())
+            .unwrap();
+        db.execute_batch(&studio_runtime_store::domain::tables_sql())
+            .unwrap();
+        db.execute_batch(
+            "CREATE TABLE runtime_events(agent TEXT, epoch INTEGER, status TEXT, created REAL)",
+        )
+        .unwrap();
+        for id in ["busy", "idle"] {
+            let record = json!({"id":id,"epoch":1,"status":"failed","error":"held",
+                "autoWake":1,"accountKey":"default"});
+            db.execute(
+                "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                rusqlite::params![id, record.to_string()],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO chats(id,state,status,auto_wake) VALUES(?1,'idle','idle',1)",
+                [id],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO runtime_events(agent,epoch,status,created) VALUES(?1,1,'pending',1.0)",
+                [id],
+            )
+            .unwrap();
+        }
+        db.execute(
+            "INSERT INTO turns(id,chat,state) VALUES('t1','busy','starting')",
+            [],
+        )
+        .unwrap();
+        let mut query = db.prepare(&super::release_held_sql()).unwrap();
+        let ids = query
+            .query_map(["[\"held\"]"], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(ids, ["idle"]);
+    }
+
+    #[test]
     fn release_scan_does_not_parse_idle_agent_records() {
         use std::sync::{
             Arc,
@@ -379,7 +429,7 @@ mod tests {
             },
         )
         .unwrap();
-        let mut query = db.prepare(super::RELEASE_HELD_SQL).unwrap();
+        let mut query = db.prepare(&super::release_held_sql()).unwrap();
         assert!(query.query(["[]"]).unwrap().next().unwrap().is_none());
         assert_eq!(calls.load(Ordering::Relaxed), 0);
     }
