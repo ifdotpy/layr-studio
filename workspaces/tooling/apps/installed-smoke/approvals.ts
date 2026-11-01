@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import {
   RequestStatus,
-  TaskStatus,
+  MonitorState,
 } from "../../../client/apps/web/src/generated/api.ts";
 import type { components } from "../../../client/apps/web/src/generated/api.ts";
 
@@ -79,8 +79,8 @@ function record(value: unknown): value is Record<string, unknown> {
 function requestStatus(value: unknown): value is Schema["RequestStatus"] {
   return Object.values(RequestStatus).some((status) => status === value);
 }
-function monitorStatus(value: unknown): value is Schema["TaskStatus"] {
-  return Object.values(TaskStatus).some((status) => status === value);
+function monitorStatus(value: unknown): value is Schema["MonitorState"] {
+  return Object.values(MonitorState).some((status) => status === value);
 }
 
 function request(value: unknown, id: string): Request {
@@ -192,7 +192,7 @@ function pending(t: (typeof targets)[number]) {
     request.method === "monitor/approve" &&
     request.status === RequestStatus.pending &&
     monitor.agent === agent &&
-    monitor.status === TaskStatus.approval
+    monitor.status === MonitorState.approval
   );
 }
 function markerLines(file: string) {
@@ -211,7 +211,7 @@ function verify() {
   for (const t of targets) {
     const monitor = monitors.get(t.monitorId);
     const expected =
-      t.decision === "accept" ? TaskStatus.completed : TaskStatus.cancelled;
+      t.decision === "accept" ? MonitorState.completed : MonitorState.cancelled;
     if (!removed.has(t.requestId) || requests.has(t.requestId))
       throw new Error(
         `${t.decision}: approval request removal was not witnessed over SSE`,
