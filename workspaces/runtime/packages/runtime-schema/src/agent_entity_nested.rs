@@ -208,7 +208,36 @@ pub struct WorkerDefaultsDto {
     pub cyber_access_program: Field<String>,
 }
 
-pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 9] {
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExecutionSettingsDto {
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub account_key: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub cyber_access_program: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<bool>")]
+    pub daybreak_enabled: Field<bool>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub effort: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<bool>")]
+    pub fast_mode: Field<bool>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub model: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub native_effort: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<f64>")]
+    pub updated_at: Field<f64>,
+}
+
+pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 10] {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
@@ -291,6 +320,27 @@ pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 9] {
             property["default"] = default;
         }
     }
+    let mut settings = ExecutionSettingsDto::json_schema(&mut generator).to_value();
+    settings["title"] = "ExecutionSettingsDto".into();
+    for (name, title) in [
+        ("accountKey", "Accountkey"),
+        ("cyberAccessProgram", "Cyberaccessprogram"),
+        ("daybreakEnabled", "Daybreakenabled"),
+        ("effort", "Effort"),
+        ("fastMode", "Fastmode"),
+        ("model", "Model"),
+        ("nativeEffort", "Nativeeffort"),
+        ("updatedAt", "Updatedat"),
+    ] {
+        let kind = settings["properties"][name]["type"][0].clone();
+        let variants = if kind == "boolean" {
+            serde_json::json!([{"type":kind},{"type":"null"}])
+        } else {
+            serde_json::json!([{"type":"null"},{"type":kind}])
+        };
+        settings["properties"][name] =
+            serde_json::json!({"anyOf":variants,"default":null,"title":title});
+    }
     [
         ("AgentOverview", overview),
         ("AgentSource", source),
@@ -301,6 +351,7 @@ pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 9] {
         ("AgentEntityContextRepairWaitDto", repair),
         ("MovePointerDto", pointer),
         ("WorkerDefaultsDto", defaults),
+        ("ExecutionSettingsDto", settings),
     ]
 }
 
@@ -335,6 +386,18 @@ mod tests {
         ] {
             assert!(serde_json::from_value::<WorkerDefaultsDto>(invalid).is_err());
         }
+    }
+
+    #[test]
+    fn execution_settings_preserves_presence_and_rejects_unknown_fields() {
+        for value in [
+            json!({}),
+            json!({"model":null,"fastMode":false,"updatedAt":1.5}),
+        ] {
+            let settings: ExecutionSettingsDto = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(serde_json::to_value(settings).unwrap(), value);
+        }
+        assert!(serde_json::from_value::<ExecutionSettingsDto>(json!({"extra":true})).is_err());
     }
 
     #[test]
