@@ -13,11 +13,11 @@ pub enum SyncEntityPayload {
 #[schemars(rename = "EdgeEntityDto")]
 pub struct EdgeEntity {
     pub id: String,
-    #[serde(default)]
+    #[schemars(default)]
     pub kind: Option<EdgeKind>,
-    #[serde(default)]
+    #[schemars(default)]
     pub source: Option<String>,
-    #[serde(default)]
+    #[schemars(default)]
     pub target: Option<String>,
 }
 
@@ -35,10 +35,24 @@ pub(crate) fn schemas() -> Result<serde_json::Map<String, serde_json::Value>, St
         .into_generator();
     let schema = SyncEntityPayload::json_schema(&mut generator).to_value();
     let mut schemas = generator.take_definitions(true);
-    let edge = schema["oneOf"][0]
-        .as_object()
-        .ok_or("missing edge variant")?;
-    schemas.insert("SyncEdgeEntityPayload".into(), edge.clone().into());
+    let variants = schema
+        .get("oneOf")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("missing payload variants")?;
+    for variant in variants {
+        let collection = variant
+            .pointer("/properties/collection/const")
+            .and_then(serde_json::Value::as_str)
+            .ok_or("missing payload collection")?;
+        let mut chars = collection.chars();
+        let first = chars.next().ok_or("empty payload collection")?;
+        let name = format!(
+            "Sync{}{}EntityPayload",
+            first.to_ascii_uppercase(),
+            chars.as_str()
+        );
+        schemas.insert(name, variant.clone());
+    }
     Ok(schemas)
 }
 
@@ -48,23 +62,52 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn edge_serde_matches_existing_schema() {
-        for value in [
-            json!({"collection":"edge","id":"e","value":{"id":"e"}}),
-            json!({"collection":"edge","id":"e","value":{"id":"e","kind":"chat","source":null,"target":"t"}}),
-            json!({"collection":"edge","id":"e","value":{"id":"e","kind":"unknown"}}),
-            json!({"collection":"edge","id":"e","value":{"id":"e","unexpected":true}}),
-            json!({"collection":"edge","id":"e","value":{}}),
+    fn edge_previous_wire_fixtures() {
+        // Frozen cases from the pre-migration edge contract, independent of generated schemas.
+        for (value, valid) in [
+            (json!({"id":"e"}), true),
+            (
+                json!({"id":"e","kind":"chat","source":null,"target":"t"}),
+                true,
+            ),
+            (json!({"id":"e","kind":"spawn"}), true),
+            (json!({"id":"e","kind":null}), true),
+            (json!({"id":"e","kind":"unknown"}), false),
+            (json!({"id":"e","unexpected":true}), false),
+            (json!({}), false),
         ] {
+            let payload = json!({"collection":"edge","id":"e","value":value});
             assert_eq!(
-                serde_json::from_value::<SyncEntityPayload>(value.clone()).is_ok(),
-                crate::first_error("SyncEdgeEntityPayload", &value)
-                    .unwrap()
-                    .is_none(),
-                "{value}"
+                serde_json::from_value::<SyncEntityPayload>(payload.clone()).is_ok(),
+                valid,
+                "{payload}"
+            );
+            assert_eq!(
+                crate::validate_sync_entity_payload_strict("edge", "e", false, &payload).unwrap(),
+                valid,
+                "{payload}"
             );
         }
     }
+
+    #[test]
+    fn edge_serde_dispatch_is_the_live_validator() {
+        let source = include_str!("lib.rs");
+        let body = source
+            .split("pub fn validate_sync_entity_payload_strict(")
+            .nth(1)
+            .unwrap()
+            .split("fn sync_entity_envelope_matches(")
+            .next()
+            .unwrap();
+        let dispatch = "if collection == \"edge\" {";
+        let owner = "serde_json::from_value::<sync_entity_payload::SyncEntityPayload>";
+        let owns_edge = |text: &str| text.contains(dispatch) && text.contains(owner);
+        assert!(owns_edge(body));
+        // Negative control: removing this dispatch must make the witness fail.
+        assert!(!owns_edge(&body.replace(dispatch, "")));
+    }
+
     #[test]
     fn edge_strict_and_stored_validation_keep_their_policies() {
         let mut stored =
