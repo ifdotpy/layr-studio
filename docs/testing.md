@@ -353,6 +353,29 @@ tests. Nextest's `-j` sets test threads, not build jobs; choose fewer test threa
 when other work needs the capacity. Keep explicitly serial recipes at one test
 thread.
 
+On a shared Linux host with a memory-backed `/tmp`, direct and focused runs can
+use a private tmpfs scratch directory to avoid disk sync costs. Check available
+memory and tmpfs space first; other work shares that capacity. This example
+requires at least 2 GiB free before starting and removes its own fixtures:
+
+```sh
+(
+  scratch="$(mktemp -d /tmp/studio-tests.XXXXXX)"
+  trap 'chmod -R u+rwX "$scratch"; rm -r -- "$scratch"' EXIT
+  test "$(stat -f -c %T "$scratch")" = tmpfs || exit 1
+  df -h "$scratch"
+  test "$(df -Pk "$scratch" | awk 'NR == 2 {print $4}')" -ge 2097152 || exit 1
+  TMPDIR="$scratch" cargo nextest run --build-jobs 4 --test-threads 8 \
+    -p studio-runtime-services --lib
+  # For a focused repository command instead:
+  # TMPDIR="$scratch" just test studio-runtime-services <case>
+)
+```
+
+Watch free space during long runs and stop if other work needs it. This opt-in
+changes only temporary fixture placement; it does not change the gate defaults
+or SQLite durability settings.
+
 Cargo target selectors such as `--test compatibility` are routed to Cargo, for
 example `just test studio-diagnostics '' -- --test compatibility`. The server
 uses its runner's `--filter` suite selector. `just test-plan` prints the
