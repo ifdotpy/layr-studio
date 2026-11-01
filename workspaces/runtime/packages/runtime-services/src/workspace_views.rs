@@ -760,7 +760,7 @@ mod tests {
     #[test]
     fn changes_cursor_advances_to_the_last_row_and_empty_poll_preserves_it() {
         let task = serde_json::from_str(r#"{"id":"a","agent":"agent","created":1,"finished":2,"itemId":"item","turnId":"turn","kind":"command","status":"completed","type":"commandExecution","name":"command"}"#).unwrap();
-        let first = serde_json::to_value(task_feed_response(
+        let first = task_feed_response(
             vec![task],
             false,
             Some(&super::TaskFeedCursor {
@@ -768,27 +768,34 @@ mod tests {
                 time: 0.0,
             }),
             None,
-        ))
-        .unwrap();
+        );
         let cursor = super::TaskFeedCursor {
             id: "a".into(),
             time: 2.0,
         };
-        assert_eq!(first["cursor"], json!({"updated":2.0,"id":"a"}));
-        let second =
-            serde_json::to_value(task_feed_response(vec![], false, Some(&cursor), None)).unwrap();
-        assert_eq!(second["cursor"], first["cursor"]);
-        assert!(second["tasks"].as_array().expect("tasks array").is_empty());
+        let first_cursor = first.cursor.unwrap();
+        assert_eq!((first_cursor.updated, first_cursor.id.as_str()), (2.0, "a"));
+        let second = task_feed_response(vec![], false, Some(&cursor), None);
+        let second_cursor = second.cursor.unwrap();
+        assert_eq!(
+            (second_cursor.updated, second_cursor.id),
+            (first_cursor.updated, first_cursor.id)
+        );
+        assert!(second.tasks.is_empty());
     }
 
     #[test]
     fn first_page_cursor_and_history_cursor_follow_python_contract() {
         let task = serde_json::from_str(r#"{"id":"a","agent":"agent","created":2.0,"finished":5.0,"itemId":"item","turnId":"turn","kind":"command","status":"completed","type":"commandExecution","name":"command"}"#).unwrap();
-        let response =
-            serde_json::to_value(task_feed_response(vec![task], true, None, None)).unwrap();
-        assert_eq!(response["cursor"], json!({"updated":5.0,"id":"a"}));
-        assert_eq!(response["nextBefore"], json!({"created":2.0,"id":"a"}));
-        assert_eq!(response["hasMore"], true);
+        let response = task_feed_response(vec![task], true, None, None);
+        let cursor = response.cursor.unwrap();
+        assert_eq!((cursor.updated, cursor.id.as_str()), (5.0, "a"));
+        let before = response.next_before.unwrap();
+        assert_eq!(
+            (before.created.as_f64(), before.id.as_str()),
+            (Some(2.0), "a")
+        );
+        assert!(response.has_more);
     }
 
     #[cfg(unix)]
