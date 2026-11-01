@@ -70,8 +70,9 @@ fn vm_notice_chats_sql() -> String {
     format!(
         "SELECT id FROM runtime_agents WHERE deleted_at IS NULL \
          AND json_extract(record,'$.executionMode')='vm' \
-         AND (status IN ('running','starting','approval') OR {}) \
+         AND ({} IN ('running','starting','approval') OR {}) \
          ORDER BY id",
+        studio_runtime_store::domain::chat_status_sql("runtime_agents.id"),
         studio_runtime_store::domain::chat_busy_sql("runtime_agents.id")
     )
 }
