@@ -111,6 +111,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     // such as 7.0; the pull-output ingress validates them before typed decoding.
     for (name, owner) in [
         (
+            "AccountChange",
+            "studio_runtime_schema::agent_progress::AccountChange",
+        ),
+        (
+            "AccountDestination",
+            "studio_runtime_schema::account_destination::AccountDestination",
+        ),
+        (
+            "AccountTransferProgress",
+            "studio_runtime_schema::agent_progress::AccountTransferProgress",
+        ),
+        (
+            "NativeProviderError",
+            "studio_runtime_schema::provider_errors::NativeProviderError",
+        ),
+        (
             "AgentOverview",
             "studio_runtime_schema::agent_entity_nested::AgentOverview",
         ),
