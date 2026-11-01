@@ -1,10 +1,18 @@
 import { expect, it, vi } from "vitest";
 import type { StoredSend } from "../unsent/store";
 import { MessageSendStatus } from "../generated/api";
+import { ApiError } from "../api";
+
+const observed = vi.hoisted(() => ({ entries: [] as unknown[] }));
 
 vi.mock("react", () => ({
   useEffect: (effect: () => void) => effect(),
-  useState: (initial: unknown) => [initial, () => {}],
+  useState: (initial: unknown) => [
+    initial,
+    (value: unknown) => {
+      if (Array.isArray(value)) observed.entries = value;
+    },
+  ],
 }));
 
 import { createOutbox } from "./send";
@@ -33,7 +41,12 @@ it("fresh uncertain receipt blocks reconnect retry until explicit retry", async 
     removeItem() {},
     setItem() {},
   };
-  const post = vi.fn().mockRejectedValue(new TypeError("offline"));
+  const post = vi
+    .fn()
+    .mockRejectedValueOnce(new TypeError("offline"))
+    .mockRejectedValueOnce(
+      new ApiError("expired", 410, { code: "receipt_expired" }),
+    );
   let onConnection: ((status: "live") => void) | undefined;
   const outbox = createOutbox({
     api: {
@@ -61,4 +74,13 @@ it("fresh uncertain receipt blocks reconnect retry until explicit retry", async 
   await outbox.changeOutbox("one", "resume");
   expect(post).toHaveBeenCalledTimes(2);
   expect(post.mock.calls[1]?.[0]).toEqual(post.mock.calls[0]?.[0]);
+  expect(observed.entries).toMatchObject([
+    {
+      id: "one",
+      status: { source: "device", state: { kind: "receipt_expired" } },
+    },
+  ]);
+  expect(observed.entries[0]).not.toHaveProperty("receipt");
+  await outbox.changeOutbox("one", "resume");
+  expect(post).toHaveBeenCalledTimes(2);
 });

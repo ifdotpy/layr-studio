@@ -270,9 +270,10 @@ export function createOutbox(options: {
           error: errorText(error),
         };
         const latest = read(value.request.target, id);
+        const { receipt: _receipt, ...withoutReceipt } = value;
         const failed: SavedSend = {
-          ...value,
-          ...(latest?.receipt ? { receipt: latest.receipt } : {}),
+          ...withoutReceipt,
+          ...(!expired && latest?.receipt ? { receipt: latest.receipt } : {}),
           localState,
           ...(expired ? { expired: errorText(error) } : {}),
         };
