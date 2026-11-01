@@ -59,6 +59,7 @@ mod m2026_11_01_agent_capacity;
 mod m2026_11_01_agent_naming;
 mod m2026_11_01_annotation_record;
 mod m2026_11_01_approval_secrets;
+mod m2026_11_01_chat_busy_deleted_index;
 mod m2026_11_01_chat_busy_indexes;
 mod m2026_11_01_plan_record;
 mod m2026_11_01_project_context;
@@ -1237,6 +1238,7 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
+<<<<<<< head
             id: "2026-11-01-work-history-rows",
             introduced: NOVEMBER_1,
             target: MigrationTarget::Canvas,
@@ -1244,6 +1246,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| crate::work_history::migrate(c.transaction),
+||||||| base
+=======
+            id: "2026-11-01-chat-busy-deleted-index",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Deleted agent index that reads the in_flight column",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_chat_busy_deleted_index::apply(c.transaction),
+>>>>>>> origin/main
     },
 ];
 

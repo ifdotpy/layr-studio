@@ -423,7 +423,7 @@ pub fn work_detail_view(
                 !matches!(
                     field.as_str(),
                     "results" | "decisions" | "releases" | "policy"
-                )
+                ) && !crate::work_policy::PRIVATE_WORK_FIELDS.contains(&field.as_str())
             })
             .map(|(field, value)| (field.clone(), value.clone()))
             .collect(),

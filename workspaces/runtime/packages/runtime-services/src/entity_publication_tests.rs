@@ -622,6 +622,29 @@ async fn work_details_upgrade_seeds_before_first_stream_without_a_pull() {
     );
 }
 
+/// Accepted work keeps a private archive intent in the writer's shape
+/// (`intentId`, no `id`). The client detail must omit it like the work view.
+#[tokio::test]
+async fn work_detail_omits_private_effect_records() {
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    let id = "accepted-private";
+    let work = json!({"id":id,"rootId":CHAT,"title":"Accepted","status":"accepted","owner":CHAT,"dependencies":[],"created":1,"updated":1,"version":1,"results":[],"decisions":[],
+        "archiveIntent":{"status":"terminal","taskId":id,"intentId":"accepted-private:result","actor":CHAT,"actorEpoch":0,"target":CHAT,"attempts":3,"created":1.0,"nextAttemptAt":2.0}});
+    write(
+        &store,
+        "INSERT INTO runtime_work(id,record) VALUES(?1,?2)",
+        vec![id.into(), work.to_string()],
+    )
+    .await;
+    let detail = client_entity(&store, "workDetail", id)
+        .expect("accepted work publishes its detail")
+        .1;
+    for private in ["archiveIntent", "vmSubmit", "vmAccept", "resultFailures"] {
+        assert!(detail.get(private).is_none(), "{private} is private");
+    }
+}
+
 #[tokio::test]
 async fn work_detail_refusal_is_derived_on_every_publish() {
     let (_dir, store) = store().await;
