@@ -6,10 +6,15 @@ use studio_runtime_process::ProviderLaunchSpec;
 /// Maximum actor IDs loaded per startup read; unit: active VM actors.
 pub(super) const STARTUP_PAGE_ACTORS: i64 = 64;
 /// Startup reads use AgentIndexedReads' account/live-row index and rowid pages.
-pub(super) const STARTUP_CANDIDATES: &str = "SELECT rowid,id FROM runtime_agents \
+pub(super) fn startup_candidates_sql() -> String {
+    format!(
+        "SELECT rowid,id FROM runtime_agents \
     WHERE account_key=?1 AND deleted_at IS NULL AND rowid>?2 \
-    AND in_flight=1 \
-    AND EXISTS(SELECT 1 FROM chats ch WHERE ch.id=runtime_agents.id AND ch.execution_mode='vm') ORDER BY rowid LIMIT ?3";
+    AND {busy} \
+    AND EXISTS(SELECT 1 FROM chats ch WHERE ch.id=runtime_agents.id AND ch.execution_mode='vm') ORDER BY rowid LIMIT ?3",
+        busy = studio_runtime_store::domain::chat_busy_sql("runtime_agents.id"),
+    )
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Binding {
@@ -173,7 +178,7 @@ impl Worker {
                 .db("vm_reattach_candidates", move |store| async move {
                     store
                         .read_async("runtime-services/vm_reattach", move |connection| {
-                            let mut statement = connection.prepare(STARTUP_CANDIDATES)?;
+                            let mut statement = connection.prepare(&startup_candidates_sql())?;
                             let rows = statement.query_map(
                                 rusqlite::params![account, after, STARTUP_PAGE_ACTORS],
                                 |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
@@ -373,5 +378,47 @@ impl Worker {
             self.vm_credential_refresh_at = Some(now + VM_CREDENTIAL_REFRESH_INTERVAL);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod busy_candidate_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn startup_candidates_are_busy_vm_chats_only() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(studio_runtime_store::agent_columns::agent_table_sql())
+            .unwrap();
+        db.execute_batch(&studio_runtime_store::domain::tables_sql())
+            .unwrap();
+        for id in ["busy", "idle"] {
+            let record = json!({"id":id,"provider":"codex","accountKey":"acct","status":"idle","inFlight":true});
+            db.execute(
+                "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                rusqlite::params![id, record.to_string()],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO chats(id,state,status,execution_mode) VALUES(?1,'idle','idle','vm')",
+                [id],
+            )
+            .unwrap();
+        }
+        db.execute(
+            "INSERT INTO turns(id,chat,state) VALUES('t1','busy','starting')",
+            [],
+        )
+        .unwrap();
+        let mut statement = db.prepare(&startup_candidates_sql()).unwrap();
+        let ids = statement
+            .query_map(rusqlite::params!["acct", 0, STARTUP_PAGE_ACTORS], |row| {
+                row.get::<_, String>(1)
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(ids, ["busy"]);
     }
 }

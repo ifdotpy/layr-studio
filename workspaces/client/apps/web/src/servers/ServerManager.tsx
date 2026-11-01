@@ -1,3 +1,4 @@
+import { AccessClientStatus } from "../generated/api";
 import type { ConnectionHealth } from "../sync/connectionState";
 import { randomUUID } from "../uuid";
 import { ProviderKind } from "../generated/providerKind.ts";
@@ -6,6 +7,7 @@ import { localDateTime } from "../local-time";
 import { ActionButton, SettingsSection } from "../components/ui/primitives";
 import DiscoveryPanel from "./DiscoveryPanel";
 import ServerAccessSettings from "./ServerAccessSettings";
+import { setServerExcluded } from "./excludedServers";
 import type { useServerDiscovery } from "./useServerDiscovery";
 
 import { parseInvitation } from "./pairing";
@@ -262,6 +264,12 @@ export default function ServerManager({
                         disabled={busy}
                         onClick={() => {
                           setError("");
+                          try {
+                            setServerExcluded(server.id, true);
+                          } catch (failure) {
+                            setError((failure as Error).message);
+                            return;
+                          }
                           setBusy(true);
                           void serverCredentialAdapter()
                             .forget(registered)
@@ -292,7 +300,7 @@ export default function ServerManager({
                         Revoke
                       </ActionButton>
                     )}
-                    {peer?.status === "revoked" &&
+                    {peer?.status === AccessClientStatus.revoked &&
                       !peer.replacedBy &&
                       localEnabled && (
                         <ActionButton
@@ -429,6 +437,7 @@ export default function ServerManager({
                     attempt.code,
                     attempt.id,
                   );
+                  setServerExcluded(server.id, false);
                   add({ ...server, label: label.trim() || server.label });
                   setCode("");
                   setOrigin("");

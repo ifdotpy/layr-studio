@@ -30,6 +30,15 @@ pub const TURN_TABLE: &str = "turns";
 pub const SESSION_TABLE: &str = "sessions";
 /// At most one row per chat can be in a state of [`TurnState::UNFINISHED`].
 pub const ONE_UNFINISHED_TURN_INDEX: &str = "turns_one_unfinished";
+/// Chat statuses that occupy a capacity slot (a status name each). A deleted agent
+/// keeps its status, so a slot also needs a live agent row (`deleted_at IS NULL`).
+pub const CHAT_CAPACITY_STATUSES: &str = "('starting','running','waiting','paused','approval')";
+/// Chat statuses whose turn may still be running or reserved.
+pub const CHAT_ACTIVE_STATUSES: &str = "('running','starting','approval')";
+/// Partial index of [`CHAT_CAPACITY_STATUSES`] on `chats.status`.
+pub const CAPACITY_STATUS_INDEX: &str = "chats_capacity_status";
+/// Partial index of [`CHAT_ACTIVE_STATUSES`] on `chats.status`.
+pub const ACTIVE_STATUS_INDEX: &str = "chats_active_status";
 
 /// A chat is the agent row id.
 pub type ChatId = AgentId;
@@ -208,8 +217,10 @@ pub fn tables_sql() -> String {
             ON {TURN_TABLE}(attempt_connection_generation,chat) WHERE attempt IS NOT NULL;
          CREATE UNIQUE INDEX IF NOT EXISTS {ONE_UNFINISHED_TURN_INDEX}
             ON {TURN_TABLE}(chat) WHERE state IN ({unfinished});
-         CREATE INDEX IF NOT EXISTS turns_provider_turn ON {TURN_TABLE}(chat,provider_turn);",
+         CREATE INDEX IF NOT EXISTS turns_provider_turn ON {TURN_TABLE}(chat,provider_turn);
+         {status_indexes}",
         unfinished = in_list(&TurnState::UNFINISHED),
+        status_indexes = status_indexes_sql(),
     )
 }
 
@@ -679,6 +690,31 @@ pub fn chat_busy_sql(chat: &str) -> String {
     )
 }
 
+/// The chat status indexes. [`tables_sql`] includes them; the migration that
+/// drops the agent status indexes creates them on existing state.
+pub fn status_indexes_sql() -> String {
+    format!(
+        "CREATE INDEX IF NOT EXISTS {CAPACITY_STATUS_INDEX} ON {CHAT_TABLE}(status) WHERE status IN {CHAT_CAPACITY_STATUSES};
+         CREATE INDEX IF NOT EXISTS {ACTIVE_STATUS_INDEX} ON {CHAT_TABLE}(status) WHERE status IN {CHAT_ACTIVE_STATUSES};"
+    )
+}
+
+/// SQL: the status of the chat `chat` (a column expression), read from the chat
+/// row. Agent readers use this instead of the agent `status` column.
+pub fn chat_status_sql(chat: &str) -> String {
+    format!("(SELECT status FROM {CHAT_TABLE} WHERE id={chat})")
+}
+
+/// SQL: the provider turn of the unfinished turn of the chat `chat` (a column
+/// expression), NULL when the chat has none. Agent readers use this instead of
+/// the agent `turn_id` column.
+pub fn unfinished_provider_turn_sql(chat: &str) -> String {
+    format!(
+        "(SELECT provider_turn FROM {TURN_TABLE} WHERE chat={chat} AND {} LIMIT 1)",
+        unfinished_turn_sql("")
+    )
+}
+
 /// A chat is busy exactly when it has an unfinished turn.
 pub fn chat_busy(connection: &Connection, chat: &str) -> StoreResult<bool> {
     Ok(connection
@@ -880,6 +916,38 @@ mod tests {
             .unwrap();
         assert!(busy);
         assert!(!chat_busy(&db, "other").unwrap());
+    }
+
+    #[test]
+    fn chat_status_and_provider_turn_follow_the_chat_and_its_unfinished_turn() {
+        let db = crate::fresh_state::test_canvas();
+        put(
+            &db,
+            &agent(
+                "c",
+                json!({"status":"running","inFlight":true,"turnId":"p1","threadId":"th"}),
+            ),
+        );
+        let read = |sql: String, chat: &str| -> Option<String> {
+            db.query_row(&format!("SELECT {sql}"), [chat], |row| row.get(0))
+                .unwrap()
+        };
+        assert_eq!(read(chat_status_sql("?1"), "c").as_deref(), Some("running"));
+        assert_eq!(
+            read(unfinished_provider_turn_sql("?1"), "c").as_deref(),
+            Some("p1")
+        );
+        assert_eq!(read(chat_status_sql("?1"), "missing"), None);
+        put(
+            &db,
+            &agent(
+                "c",
+                json!({"status":"paused","inFlight":false,"turnId":null,"threadId":"th",
+                    "lastCompletedTurn":"p1","lastCompletedTurnStatus":"completed"}),
+            ),
+        );
+        assert_eq!(read(chat_status_sql("?1"), "c").as_deref(), Some("paused"));
+        assert_eq!(read(unfinished_provider_turn_sql("?1"), "c"), None);
     }
 
     #[test]

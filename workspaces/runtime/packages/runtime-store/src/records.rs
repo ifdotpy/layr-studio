@@ -2013,6 +2013,10 @@ impl JsonRecord for EventMetadataRecord {
 }
 
 impl WorkItemRecord {
+    /// The record as stored JSON, for the history rows that follow its arrays.
+    pub(crate) fn history_value(&self) -> Value {
+        self.0.value()
+    }
     pub fn from_value(value: Value) -> Result<Self, serde_json::Error> {
         Self::deserialize(value)
     }
@@ -3464,7 +3468,7 @@ mod tests {
     fn stored_review_boundary_work_diagnostic_uses_physical_row_id() {
         let connection = Connection::open_in_memory().expect("fixture database");
         connection
-            .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL)")
+            .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL)")
             .expect("work table");
         connection
             .execute(

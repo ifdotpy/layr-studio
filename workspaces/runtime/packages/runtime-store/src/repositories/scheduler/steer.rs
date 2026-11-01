@@ -514,28 +514,18 @@ fn steer_target(
 }
 
 impl SchedulerRepository {
-    pub fn hold_unclean_steers(tx: &Transaction<'_>) -> StoreResult<()> {
-        let mut statement =
-            tx.prepare("SELECT id FROM runtime_outbox WHERE kind=?1 AND status=?2")?;
-        let ids = statement
-            .query_map(params![OutboxKind::Steer, OutboxStatus::Pending], |row| {
-                row.get::<_, String>(0)
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        drop(statement);
-        for id in ids {
-            let mut receipt = load(tx, &id)?.ok_or_else(|| invalid_receipt(&id))?;
-            if !matches!(receipt.stage, SteerState::Reserved) {
-                return Err(invalid_receipt(&id));
-            }
-            tx.execute_cached(
-                "UPDATE runtime_events SET status='uncertain',error=?1 WHERE agent=?2 AND epoch=?3 AND status='reserved' AND id IN (SELECT value FROM json_each(?4))",
-                params![STEER_UNCONFIRMED_ERROR, receipt.agent, receipt.epoch, receipt_events(&id, &receipt)?],
-            )?;
-            receipt.stage = SteerState::Held;
-            store(tx, &id, &receipt)?;
+    /// Entity hook of the unclean-stop pass for one held steer row. The row is already unknown.
+    pub fn hold_steer(tx: &Transaction<'_>, id: &str) -> StoreResult<()> {
+        let mut receipt = load(tx, id)?.ok_or_else(|| invalid_receipt(id))?;
+        if !matches!(receipt.stage, SteerState::Reserved) {
+            return Err(invalid_receipt(id));
         }
-        Ok(())
+        tx.execute_cached(
+            "UPDATE runtime_events SET status='uncertain',error=?1 WHERE agent=?2 AND epoch=?3 AND status='reserved' AND id IN (SELECT value FROM json_each(?4))",
+            params![STEER_UNCONFIRMED_ERROR, receipt.agent, receipt.epoch, receipt_events(id, &receipt)?],
+        )?;
+        receipt.stage = SteerState::Held;
+        store(tx, id, &receipt)
     }
     /// Read-only check whether `claim_steer` could reserve input now, so a busy
     /// turn's wake does not open a write transaction while its queue is blocked.

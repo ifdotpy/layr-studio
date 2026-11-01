@@ -1350,8 +1350,11 @@ fn publish_work_history(
         };
         for index in indices {
             let entry_id = format!("{id}:{index}");
-            match crate::sync_views::work_history_view(id, record, kind, index) {
-                Some(entry) => {
+            let stored = studio_runtime_store::work_history::entry(transaction, id, kind, index)?;
+            match stored {
+                Some(value) => {
+                    let entry =
+                        crate::sync_views::work_history_entry(id, &record["rootId"], index, &value);
                     #[cfg(test)]
                     work_publication_probe::history(id, serde_json::to_vec(&entry)?.len());
                     put_projection(
@@ -4747,6 +4750,11 @@ mod work_parity_tests {
                 transaction.execute(
                     "INSERT INTO runtime_work(id,record) VALUES('w',?1)",
                     [&source],
+                )?;
+                studio_runtime_store::work_history::reconcile(
+                    transaction,
+                    "w",
+                    &serde_json::from_str::<serde_json::Value>(&source)?,
                 )?;
                 publish_entity_changes(
                     transaction,

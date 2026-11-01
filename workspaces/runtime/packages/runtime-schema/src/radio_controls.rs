@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(clippy::struct_excessive_bools)] // Independent controls are published to clients.
 pub struct RadioControls {
     pub busy: bool,
     pub input_blocked: bool,
@@ -28,7 +29,9 @@ impl RadioControls {
                 match status {
                     Status::Blocked => "Resolve the current reply before sending.",
                     Status::Stopping => "Waiting for the reply to stop.",
-                    _ => "Current reply finishes first.",
+                    Status::Idle | Status::Waiting | Status::Speaking => {
+                        "Current reply finishes first."
+                    }
                 }
                 .to_owned()
             }),

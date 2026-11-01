@@ -1,3 +1,4 @@
+import { AccessClientStatus, Reachability } from "../generated/api";
 import type { ConnectionHealth } from "../sync/connectionState";
 import { randomUUID } from "../uuid";
 import { restoreSidebarFocus } from "../components/sidebar/SidebarFrame";
@@ -854,8 +855,8 @@ function MultiServerShell({
                   (discovery.snapshot?.servers || [])
                     .filter(
                       (peer) =>
-                        peer.status === "unreachable" ||
-                        peer.reachability === "unreachable",
+                        peer.status === AccessClientStatus.unreachable ||
+                        peer.reachability === Reachability.unreachable,
                     )
                     .map((peer) => [peer.id, "offline"]),
                 ),

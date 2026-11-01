@@ -17,9 +17,12 @@ const ACTIVE_SOURCE_CLEANUP_PHASES: &str = "'planned','submitted'";
 /// agent has a turn, input, request, monitor, or operation in progress.
 fn agent_in_use(connection: &Connection) -> StoreResult<String> {
     let mut checks = vec![
-        format!("COALESCE(status,'') IN ({ACTIVE_AGENT_STATUSES})"),
+        format!(
+            "COALESCE({},'') IN ({ACTIVE_AGENT_STATUSES})",
+            crate::domain::chat_status_sql("runtime_agents.id")
+        ),
+        // The unfinished turn of the chat, which also covers the provider turn.
         crate::domain::chat_busy_sql("runtime_agents.id"),
-        "COALESCE(turn_id,'')!=''".to_owned(),
         format!(
             "COALESCE(json_array_length({}),0)>0",
             crate::agent_volatile::field_sql("runtime_agents", "activeTools")
@@ -285,7 +288,7 @@ mod tests {
                 "CREATE TABLE runtime_events(id TEXT PRIMARY KEY, agent TEXT, kind TEXT, text TEXT,
                    status TEXT, created REAL, epoch INTEGER, turn_id TEXT, error TEXT);
                  CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL, monitor_status TEXT);
-                 CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL);
+                 CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
                  CREATE TABLE runtime_account_transfers(id TEXT PRIMARY KEY, record TEXT NOT NULL);",
             )
             .expect("schema creates");
@@ -411,13 +414,29 @@ mod tests {
     }
 
     #[test]
+    fn a_stale_turn_id_without_an_unfinished_turn_releases_the_thread() {
+        let connection = database();
+        agent(
+            &connection,
+            "a",
+            json!({"status":"completed","turnId":"turn","inFlight":false}),
+        );
+        assert!(!thread_in_use(&connection), "only an unfinished turn holds");
+        agent(
+            &connection,
+            "a",
+            json!({"status":"running","turnId":"turn","inFlight":true}),
+        );
+        assert!(thread_in_use(&connection), "the unfinished turn holds");
+    }
+
+    #[test]
     fn every_in_use_condition_holds_the_thread_and_the_account() {
         let cases = [
             json!({"status":"running"}),
             json!({"status":"queued"}),
             json!({"status":"approval"}),
             json!({"inFlight":true}),
-            json!({"turnId":"turn"}),
             json!({"activeTools":[{"id":"tool"}]}),
             json!({"workspaceOperation":"merge"}),
             json!({"accountTransferId":"transfer"}),

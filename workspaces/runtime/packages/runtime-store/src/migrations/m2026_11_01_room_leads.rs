@@ -32,7 +32,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 }
             }
         }
-        room["leadIds"] = serde_json::to_value(leads)?;
+        room["leadIds"] = Value::Array(leads.into_iter().map(Value::String).collect());
         SyncDocumentsRepository::put_entity(tx, "room", &id, room, false)?;
     }
     Ok(())

@@ -14,10 +14,11 @@ the transcript subtree so token deltas do not render the composer. Attachments,
 dictation, recall, skill completion, caret placement, Enter, Tab, Shift+Enter,
 and IME composition retain their input paths.
 
-Draft edits update memory immediately and are sent by POST after the typing
-wait in [`draftSyncTiming.ts`](../../sync/draftSyncTiming.ts). Stream snapshots
-and changes restore saved drafts. Unconfirmed edits remain in memory until they
-are saved or the page closes.
+Draft edits update the screen immediately, are written to the unsent input
+buffer at once, and are sent by POST after the typing wait in
+[`draftSyncTiming.ts`](../../sync/draftSyncTiming.ts). Stream snapshots and
+changes restore saved drafts. An unconfirmed edit stays in the buffer until the
+server confirms it, so a reload keeps it.
 
 An incoming message displays as plain, wrapped text while its turn is active.
 When the turn finishes, the completed message is parsed and shown as Markdown.

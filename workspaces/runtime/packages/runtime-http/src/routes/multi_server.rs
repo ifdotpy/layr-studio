@@ -28,8 +28,6 @@ const MANAGEMENT_DEPENDENCIES: &[Dependency] = &[
     #[cfg(not(unix))]
     Dependency::new("server-credentials/platform-support"),
 ];
-const ACCESS_ACTIVITY_TIMESTAMP_FIELD: &str = "lastAccess";
-const DISCOVERY_OBSERVATION_TIMESTAMP_FIELD: &str = "lastSeen";
 
 pub(crate) fn routes() -> RouteGroup {
     RouteGroup::new(vec![
@@ -104,12 +102,12 @@ async fn snapshot(
     let result = multi_server::snapshot(&store, &identity)
         .await
         .map_err(map_service_error)?;
-    Ok(Json(super::generated_json::<
-        crate::generated::AccessSnapshot,
-    >(result)?))
+    Ok(Json(result))
 }
 
-pub(super) async fn read_snapshot(state: &HttpState) -> Result<Value, ApiError> {
+pub(super) async fn read_snapshot(
+    state: &HttpState,
+) -> Result<studio_runtime_schema::multi_server_access::AccessSnapshot, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let credentials = state.credentials.clone();
     let origin = state.public_origin.clone();
@@ -153,28 +151,23 @@ fn publish_uncertain_write_hint(notifications: &ResourceNotifications) {
 pub(super) fn notify_snapshot_change(
     notifications: &ResourceNotifications,
     request_id: &str,
-    before: &Value,
-    after: &Value,
+    before: &studio_runtime_schema::multi_server_access::AccessSnapshot,
+    after: &studio_runtime_schema::multi_server_access::AccessSnapshot,
 ) {
-    if semantic_snapshot(before) != semantic_snapshot(after) {
+    if !matches!((semantic_snapshot(before), semantic_snapshot(after)), (Ok(a), Ok(b)) if a == b) {
         publish_resource_change(notifications, request_id);
     }
 }
 
-fn semantic_snapshot(snapshot: &Value) -> Value {
+fn semantic_snapshot(
+    snapshot: &studio_runtime_schema::multi_server_access::AccessSnapshot,
+) -> Result<Vec<u8>, serde_json::Error> {
     let mut semantic = snapshot.clone();
-    for collection in ["clients", "servers"] {
-        let Some(records) = semantic.get_mut(collection).and_then(Value::as_array_mut) else {
-            continue;
-        };
-        for record in records {
-            if let Some(record) = record.as_object_mut() {
-                record.remove(ACCESS_ACTIVITY_TIMESTAMP_FIELD);
-                record.remove(DISCOVERY_OBSERVATION_TIMESTAMP_FIELD);
-            }
-        }
+    for record in semantic.clients.iter_mut().chain(&mut semantic.servers) {
+        record.last_access = None;
+        record.last_seen = studio_runtime_schema::queue_command::Field::Missing;
     }
-    semantic
+    serde_json::to_vec(&semantic)
 }
 
 async fn manage(
@@ -328,12 +321,7 @@ async fn manage(
                 return Err(map_discovery_error(error));
             }
         };
-        return Ok(
-            Json(super::generated_json::<crate::generated::AccessSnapshot>(
-                result,
-            )?)
-            .into_response(),
-        );
+        return Ok(Json(result).into_response());
     }
     if matches!(
         action,
@@ -402,12 +390,7 @@ async fn manage(
         if action != "name" {
             notify_snapshot_change(&notifications, &request_id, &before, &result);
         }
-        return Ok(
-            Json(super::generated_json::<crate::generated::AccessSnapshot>(
-                result,
-            )?)
-            .into_response(),
-        );
+        return Ok(Json(result).into_response());
     }
     Err(unavailable_for(
         "POST",
@@ -442,7 +425,7 @@ async fn accept_invite(
     >,
     request_id: &str,
     invitation: &studio_runtime_schema::multi_server_ingress::AccessInvitation,
-) -> Result<Value, ApiError> {
+) -> Result<studio_runtime_schema::multi_server_access::AccessSnapshot, ApiError> {
     let server_id = invitation.server_id.as_str();
     let origin = remote_transport::validate_federation_origin(invitation.origin.as_str())
         .map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "The invitation is invalid"))?;
@@ -1181,21 +1164,23 @@ mod tests {
 
     #[test]
     fn semantic_snapshot_ignores_activity_times_but_keeps_peer_status() {
-        let before = serde_json::json!({
-            "clients": [{"id":"peer","lastAccess":10,"reachability":"reachable"}],
-            "servers": [{"id":"peer","lastSeen":10,"reachability":"reachable"}],
-        });
-        let after = serde_json::json!({
-            "clients": [{"id":"peer","lastAccess":20,"reachability":"reachable"}],
-            "servers": [{"id":"peer","lastSeen":20,"reachability":"reachable"}],
-        });
-        assert_eq!(semantic_snapshot(&before), semantic_snapshot(&after));
-
-        let changed = serde_json::json!({
-            "clients": [{"id":"peer","lastAccess":20,"reachability":"unreachable"}],
-            "servers": [{"id":"peer","lastSeen":20,"reachability":"unreachable"}],
-        });
-        assert_ne!(semantic_snapshot(&before), semantic_snapshot(&changed));
+        use studio_runtime_schema::{
+            multi_server_access::{AccessSnapshot, Reachability},
+            queue_command::Field,
+        };
+        let before: AccessSnapshot = serde_json::from_str(r#"{"protocol":1,"identity":{"serverId":"local","label":"Local","origin":null,"publicKey":"key","tailscaleUser":null},"clients":[{"id":"peer","clientId":"peer","kind":"server","label":"Peer","created":1,"publicKey":"key","status":"paired","serverId":null,"origin":null,"tailscaleUser":null,"revoked":null,"lastAccess":10,"reachability":"reachable"}],"servers":[{"id":"peer","clientId":"peer","kind":"server","label":"Peer","created":1,"publicKey":"key","status":"paired","serverId":null,"origin":null,"tailscaleUser":null,"revoked":null,"lastAccess":null,"lastSeen":10,"reachability":"reachable"}],"invites":[],"settings":{"autoPair":true}}"#).unwrap();
+        let mut after = before.clone();
+        after.clients[0].last_access = Some(20.into());
+        after.servers[0].last_seen = Field::Value(20.into());
+        assert_eq!(
+            semantic_snapshot(&before).unwrap(),
+            semantic_snapshot(&after).unwrap()
+        );
+        after.servers[0].reachability = Field::Value(Reachability::Unreachable);
+        assert_ne!(
+            semantic_snapshot(&before).unwrap(),
+            semantic_snapshot(&after).unwrap()
+        );
     }
 
     impl studio_runtime_services::multi_server_discovery::ServerDiscoveryPort for FakeDiscovery {
@@ -1206,19 +1191,21 @@ mod tests {
             public_origin: &'a str,
         ) -> futures_util::future::BoxFuture<
             'a,
-            Result<Value, studio_runtime_services::multi_server_auth::AccessError>,
+            Result<
+                studio_runtime_schema::multi_server_access::AccessSnapshot,
+                studio_runtime_services::multi_server_auth::AccessError,
+            >,
         > {
             self.0.fetch_add(1, Ordering::SeqCst);
             Box::pin(async move {
                 assert_eq!(identity["origin"], public_origin);
-                Ok(serde_json::json!({
-                    "protocol": 1,
-                    "identity": identity,
-                    "clients": [],
-                    "servers": [],
-                    "invites": [],
-                    "settings": {"autoPair": true, "aliases": {}}
-                }))
+                Ok(studio_runtime_schema::multi_server_access::AccessSnapshot {
+                    protocol: studio_runtime_schema::multi_server_access::AccessProtocolVersion::current(),
+                    identity: <studio_runtime_schema::multi_server_access::AccessIdentity as serde::Deserialize>::deserialize(identity).unwrap(),
+                    clients: vec![], servers: vec![], invites: vec![],
+                    settings: studio_runtime_schema::multi_server_access::AccessSettings { auto_pair: true, auto_update: true, aliases: Default::default() },
+                    identity_alerts: vec![],
+                })
             })
         }
     }

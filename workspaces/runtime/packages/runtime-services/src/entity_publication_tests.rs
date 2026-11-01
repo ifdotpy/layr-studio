@@ -72,6 +72,7 @@ async fn startup_reprojects_legacy_room_once() {
                 "DELETE FROM sync_entity_meta WHERE key='migration_catalog'",
                 [],
             )?;
+            tx.execute("DELETE FROM runtime_payload_migrations WHERE name IN ('2026-11-01-room-lead-projection','2026-11-01-radio-controls-projection')", [])?;
             Ok(())
         })
         .await
@@ -105,6 +106,11 @@ async fn startup_reprojects_legacy_room_once() {
             .map_err(StoreError::from)
         })
         .unwrap();
+    store.transaction(|tx| {
+        studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "room", "late", json!({"id":"late","kind":"private","members":["lead"],"radio":{"status":"idle","active":null}}), false)?;
+        tx.execute_batch("CREATE TRIGGER room_migration_schema_change AFTER INSERT ON runtime_rooms BEGIN SELECT 1; END;")?;
+        Ok(())
+    }).await.unwrap();
     drop(store);
     let store = studio_runtime_store::RuntimeStore::open(Some(dir.path()))
         .await
@@ -120,6 +126,9 @@ async fn startup_reprojects_legacy_room_once() {
         })
         .unwrap();
     assert_eq!(after, seq);
+    let late = client_entity(&store, "room", "late").unwrap().1;
+    assert!(late.get("leadIds").is_none());
+    assert!(late["radio"].get("controls").is_none());
 }
 
 #[tokio::test]
@@ -697,6 +706,7 @@ async fn work_details_upgrade_seeds_before_first_stream_without_a_pull() {
     store.transaction(move |tx| {
         AgentRepository::put(tx,&AgentRecord::from_value(chat(json!({"taskDefaultGate":{"command":"upgrade-check","timeout_ms":1234}})))?)?;
         tx.execute("INSERT INTO runtime_work(id,record) VALUES(?1,?2)", rusqlite::params![id,json!({"id":id,"rootId":CHAT,"title":"Old assignment","status":"review","created":1,"updated":1,"version":1,"results":[{"id":"old-result","agent":CHAT,"text":"Old evidence","checks":"Checked","revision":"abc","files":[],"created":1}]}).to_string()])?;
+        reconcile_work_history(tx, id)?;
         tx.execute("DELETE FROM sync_entity_meta WHERE key=?1", [studio_runtime_store::WORK_DETAILS_SEED_MARKER])?;
         Ok(())
     }).await.expect("pre-upgrade sources without a publisher");
@@ -1432,11 +1442,35 @@ fn chat(extra: Value) -> Value {
     record
 }
 
+/// Raw SQL writes skip the record writers, so a test repeats their history rows here.
+pub(crate) fn reconcile_work_history(
+    tx: &rusqlite::Transaction<'_>,
+    id: &str,
+) -> Result<(), StoreError> {
+    use rusqlite::OptionalExtension;
+    // A statement that deleted the row has no entries left to repair.
+    let raw: Option<String> = tx
+        .query_row("SELECT record FROM runtime_work WHERE id=?1", [id], |row| {
+            row.get(0)
+        })
+        .optional()?;
+    match raw {
+        Some(raw) => {
+            studio_runtime_store::work_history::reconcile(tx, id, &serde_json::from_str(&raw)?)
+        }
+        None => Ok(()),
+    }
+}
+
 async fn write(store: &studio_runtime_store::RuntimeStore, sql: &'static str, params: Vec<String>) {
     store
         .transaction_with(move |tx| {
+            let id = params.first().cloned();
             tx.execute(sql, rusqlite::params_from_iter(params))
                 .map_err(StoreError::from)?;
+            if let Some(id) = id.filter(|_| sql.contains("runtime_work")) {
+                reconcile_work_history(tx, &id)?;
+            }
             Ok::<_, StoreError>(())
         })
         .await

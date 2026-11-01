@@ -4,6 +4,7 @@ pub use studio_runtime_schema::chat_operational_status::{
 };
 use studio_runtime_store::AgentStatus;
 
+#[allow(clippy::struct_excessive_bools)] // Independent runtime facts feed status precedence.
 pub struct ChatStatusFacts<'a> {
     pub status: Option<&'a AgentStatus>,
     pub auto_wake: Option<bool>,

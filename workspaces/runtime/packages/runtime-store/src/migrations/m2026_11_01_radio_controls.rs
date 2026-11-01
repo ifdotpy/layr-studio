@@ -4,6 +4,7 @@ use rusqlite::Transaction;
 use serde_json::Value;
 use studio_runtime_schema::{radio_controls::RadioControls, room_record::Status};
 
+#[allow(clippy::disallowed_methods)] // Preserve the stored envelope while adding the typed projection.
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     let mut query = tx.prepare("SELECT id,payload FROM sync_entities WHERE collection='room' AND deleted=0 AND json_valid(payload) AND json_type(payload,'$.value.radio')='object' AND json_type(payload,'$.value.radio.controls') IS NULL ORDER BY id")?;
     let rows = query

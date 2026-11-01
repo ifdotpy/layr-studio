@@ -1676,10 +1676,6 @@
       "fingerprint": "a0034e3d4920302af287ecb4ce6b83c0da7fe07e0374b62d0b457ae625856a49:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/workspace_views.rs",
-      "fingerprint": "ba0e4493df2553a721c1de1d70d2669deb2f37257a1aa0fc0cd6ff79c4ff892a:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/tests/account_transfer_driver.rs",
       "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
     },
@@ -2260,36 +2256,7 @@
       "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
     }
   ],
-  "rust-json-dispatch": [
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "1c4d758b9bd9fcfceae3212230a564e2b45f3f6e04aadf5a006afc54d0bc7250:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "2777bfa57ef26c386ab69cd571e66b5f4e7b3c34227432c5ebe91baac3579e11:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "8748a083474924d49a0d2a482645e17541d97a86458b2db14e292644549a7fe6:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "8748a083474924d49a0d2a482645e17541d97a86458b2db14e292644549a7fe6:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "983734895f5842d88b4927d904d74356a8451972a088767c0b78c9fb74751481:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "ed390076af1c67b8fe5d2f95e2ebb5f0375d0bc72b4c13dd82648bb2c289abf8:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/multi_server.rs",
-      "fingerprint": "ed390076af1c67b8fe5d2f95e2ebb5f0375d0bc72b4c13dd82648bb2c289abf8:1"
-    }
-  ],
+  "rust-json-dispatch": [],
   "rust-json-string-roundtrip": [],
   "rust-json-value-roundtrip": [
     {

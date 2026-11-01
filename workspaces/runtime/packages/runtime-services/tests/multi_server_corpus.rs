@@ -169,6 +169,18 @@ fn current_signed(
     now: i64,
     raw: &[u8],
 ) -> SignedRequest {
+    current_signed_for("local-server", target, client, root, nonce, now, raw)
+}
+
+fn current_signed_for(
+    server: &str,
+    target: &str,
+    client: &str,
+    root: &str,
+    nonce: &str,
+    now: i64,
+    raw: &[u8],
+) -> SignedRequest {
     use studio_runtime_services::remote_transport::{
         MultiServerSigningInput, multi_server_signing_bytes,
     };
@@ -176,7 +188,7 @@ fn current_signed(
     let bytes = multi_server_signing_bytes(MultiServerSigningInput {
         method: "POST",
         target,
-        server_id: "local-server",
+        server_id: server,
         client_id: client,
         timestamp: &timestamp,
         nonce,
@@ -186,13 +198,89 @@ fn current_signed(
     let signature = signing_identity().sign(&bytes);
     let headers = vec![
         ("X-Studio-Client".into(), client.into()),
-        ("X-Studio-Server".into(), "local-server".into()),
+        ("X-Studio-Server".into(), server.into()),
         ("X-Studio-Timestamp".into(), timestamp),
         ("X-Studio-Nonce".into(), nonce.into()),
         ("X-Studio-Request-Id".into(), root.into()),
         ("X-Studio-Signature".into(), signature),
     ];
     SignedRequest::from_headers("POST", target, &headers, raw).expect("signed request")
+}
+
+#[tokio::test]
+async fn real_invite_snapshot_pair_and_revoke() {
+    use studio_runtime_schema::multi_server_ingress::ManagementRequest;
+    use studio_runtime_services::multi_server_pairing::MultiServerBoundary;
+    use studio_runtime_services::{federation_credentials::Credentials, multi_server};
+
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(RuntimeStore::open(Some(root.path())).await.unwrap());
+    let identity = Credentials::default()
+        .identity(Arc::clone(&store), Some("https://local.fixture.ts.net"))
+        .await
+        .unwrap();
+    let request: ManagementRequest =
+        serde_json::from_str(r#"{"action":"create_invite","requestId":"real-invite"}"#).unwrap();
+    let created = multi_server::create_invite(
+        Arc::clone(&store),
+        &identity,
+        &request,
+        "local",
+        Some("owner@example.test"),
+    )
+    .await
+    .unwrap();
+    let invitation = &created.invitation;
+    let snapshot = multi_server::snapshot(&store, &identity).await.unwrap();
+    assert_eq!(snapshot.invites[0].invite_id, invitation.invite_id);
+    assert_eq!(
+        snapshot.invites[0].status,
+        studio_runtime_schema::multi_server_protocol::InviteStatus::Open
+    );
+
+    let data: SigningData = typed_data();
+    let mut body: PairBody = serde_json::from_str(&data.auth.first().unwrap().raw).unwrap();
+    let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+    body.request_id = request_id.clone();
+    body.invite_id = invitation.invite_id.clone();
+    body.token = invitation.token.clone();
+    let now = chrono::Utc::now().timestamp();
+    let signed = current_signed_for(
+        identity["serverId"].as_str().unwrap(),
+        "/api/multi-server/v1/pair",
+        &body.client_id,
+        &request_id,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        now,
+        &serde_json::to_vec(&body).unwrap(),
+    );
+    let boundary = MultiServerBoundary::new(identity.clone(), Arc::new(Owner)).unwrap();
+    assert!(
+        matches!(boundary.handle(&store, &signed, &owner(), None, now).await.unwrap(), studio_runtime_services::multi_server_pairing::AccessReply::Pair(reply) if reply.paired)
+    );
+    let snapshot = multi_server::snapshot(&store, &identity).await.unwrap();
+    assert_eq!(
+        snapshot.invites[0].status,
+        studio_runtime_schema::multi_server_protocol::InviteStatus::Used
+    );
+    assert!(
+        snapshot
+            .clients
+            .iter()
+            .any(|client| client.id.as_str() == body.client_id)
+    );
+    let revoke: ManagementRequest = serde_json::from_str(&format!(
+        r#"{{"action":"revoke","requestId":"revoke-test","clientId":{}}}"#,
+        serde_json::to_string(&body.client_id).unwrap()
+    ))
+    .unwrap();
+    let snapshot = multi_server::manage(&store, &identity, &revoke, "local")
+        .await
+        .unwrap();
+    assert_eq!(
+        snapshot.clients[0].status,
+        studio_runtime_schema::multi_server_access::AccessClientStatus::Revoked
+    );
 }
 #[tokio::test]
 async fn tailscale_discovery_uses_only_online_untagged_same_owner_candidates() {
@@ -2624,7 +2712,9 @@ async fn pairing_is_atomic_at_every_write_and_replays_after_restart() {
             .handle(&reopened, &first, &owner(), None, now)
             .await
             .expect("first apply after rollback");
-        assert!(result["paired"].as_bool().expect("pair reply"));
+        assert!(
+            matches!(&result, studio_runtime_services::multi_server_pairing::AccessReply::Pair(reply) if reply.paired)
+        );
         let status: String = reopened
             .test_reader()
             .expect("read")
@@ -2847,8 +2937,8 @@ async fn multi_server_corpus_witness() {
             .await
             .expect("access snapshot");
     assert_eq!(
-        snapshot["protocol"],
-        serde_json::json!(studio_runtime_schema::multi_server_protocol::ACCESS_PROTOCOL_VERSION)
+        u64::from(snapshot.protocol),
+        studio_runtime_schema::multi_server_protocol::ACCESS_PROTOCOL_VERSION
     );
 
     let report = studio_runtime_store::check_state_readonly(store.root())
@@ -3217,9 +3307,7 @@ async fn fractional_invitation_boundary_matches_python() {
             assert_eq!(rows(&store), before);
         } else {
             assert!(
-                result.expect("not expired")["paired"]
-                    .as_bool()
-                    .expect("reply"),
+                matches!(result.expect("not expired"), studio_runtime_services::multi_server_pairing::AccessReply::Pair(reply) if reply.paired),
                 "fractional boundary permits pairing"
             );
         }
@@ -3262,7 +3350,11 @@ async fn queried_status_crosses_service_dispatch() {
         )
         .await
         .expect("dispatch by path after checking full signed target");
-    assert_eq!(result, data["identity"]);
+    let expected = <studio_runtime_schema::multi_server_access::AccessIdentity as serde::Deserialize>::deserialize(&data["identity"]).unwrap();
+    assert_eq!(
+        result,
+        studio_runtime_services::multi_server_pairing::AccessReply::Identity(expected)
+    );
     let stored: String = store
         .test_reader()
         .expect("read")

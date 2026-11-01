@@ -9,17 +9,15 @@ use std::sync::LazyLock;
 use rusqlite::{Connection, params};
 
 use crate::StoreResult;
-use crate::domain::unfinished_turn_sql;
+use crate::domain::{
+    ACTIVE_STATUS_INDEX, CAPACITY_STATUS_INDEX, CHAT_ACTIVE_STATUSES, CHAT_CAPACITY_STATUSES,
+    unfinished_turn_sql,
+};
 
-/// Statuses that occupy a capacity slot; the unit is a status name. Deleting an
-/// agent leaves it `paused`, so a slot also requires `CAPACITY_LIVE`.
-const CAPACITY_STATUSES: &str = "('starting','running','waiting','paused','approval')";
-/// A deleted agent (tombstone) never occupies a slot. Together with
-/// `CAPACITY_STATUSES` this is the one owner of the capacity index predicate and
-/// of every slot query.
+/// A deleted agent (tombstone) never occupies a slot. Together with the chat
+/// capacity statuses ([`CHAT_CAPACITY_STATUSES`]) this is the one owner of every
+/// slot query. A deleted agent keeps its status, so the live check stays.
 const CAPACITY_LIVE: &str = "deleted_at IS NULL";
-/// Name of the covering index for the capacity counts. `_v3` indexes columns.
-pub const CAPACITY_INDEX: &str = "runtime_agent_capacity_slots_v3";
 const REMOTE_WORKER_KEY: &str = "COALESCE(remote_worker,0)";
 /// Agents by team root, in rowid order within a root.
 pub const ROOT_INDEX: &str = "runtime_agent_root_v2";
@@ -28,24 +26,19 @@ pub const LIVE_ROOT_INDEX: &str = "runtime_agent_live_root_v2";
 /// Agents by account key, live agents (`deleted_at IS NULL`) first.
 pub const ACCOUNT_INDEX: &str = "runtime_agent_account";
 /// Agents by provider thread within an account.
-/// Agents with a running or reserved turn, by team root. The index holds the
-/// status part only: a partial index cannot read `turns`, so a busy chat with
-/// another status is found through `turns` in [`reserved_turn_input`].
+/// Retired agent index on the `status` column, replaced by
+/// [`ACTIVE_STATUS_INDEX`]. The 2026-10-31 migration still drops it by this name.
 pub const ACTIVE_INDEX: &str = "runtime_agent_active";
-/// SQL predicate: the agent status may hold a running or reserved turn. One owner
-/// for [`ACTIVE_INDEX`] and the query that reads it.
-macro_rules! active_status {
-    () => {
-        "status IN ('running','starting','approval')"
-    };
-}
 /// SQL listing `(id, root_id)` of the agents that hold a running or reserved
-/// turn: an active status, an unfinished turn of the chat, or a start reservation
-/// whose input events are still reserved. It reads [`ACTIVE_INDEX`] and `turns`.
+/// turn: an active chat status, an unfinished turn of the chat, or a start
+/// reservation whose input events are still reserved. It reads
+/// [`ACTIVE_STATUS_INDEX`] and `turns`.
 pub fn reserved_turn_input() -> &'static str {
     static SQL: LazyLock<String> = LazyLock::new(|| {
         format!(
-            "SELECT id,root_id FROM runtime_agents INDEXED BY runtime_agent_active WHERE {active} \
+            "SELECT a.id,a.root_id FROM chats INDEXED BY {ACTIVE_STATUS_INDEX} \
+               JOIN runtime_agents a ON a.id=chats.id \
+               WHERE chats.status IN {CHAT_ACTIVE_STATUSES} \
              UNION SELECT a.id,a.root_id FROM turns t JOIN runtime_agents a ON a.id=t.chat \
                WHERE {unfinished} \
              UNION SELECT a.id,a.root_id FROM turns t JOIN runtime_agents a ON a.id=t.chat \
@@ -55,7 +48,6 @@ pub fn reserved_turn_input() -> &'static str {
                WHERE event.agent=a.id \
                AND event.epoch=json_extract(a.record,'$.startAttempt.epoch') \
                AND event.status IN ('reserved','dispatching','uncertain')) ORDER BY 1",
-            active = active_status!(),
             unfinished = unfinished_turn_sql("t."),
         )
     });
@@ -79,16 +71,12 @@ impl AgentIndexedReads {
     #[doc(hidden)]
     pub fn index_definitions() -> Vec<crate::OwnedRuntimeIndexDefinition> {
         [
-            (
-                CAPACITY_INDEX,
-                format!(
-                    "{REMOTE_WORKER_KEY},id) WHERE status IN {CAPACITY_STATUSES} AND {CAPACITY_LIVE}"
-                ),
-            ),
             (ROOT_INDEX, "root_id)".to_owned()),
             (ACCOUNT_INDEX, "account_key,deleted_at)".to_owned()),
-            (ACTIVE_INDEX, concat!("root_id) WHERE ", active_status!()).to_owned()),
-            (LIVE_ROOT_INDEX, "root_id,id) WHERE deleted_at IS NULL".to_owned()),
+            (
+                LIVE_ROOT_INDEX,
+                "root_id,id) WHERE deleted_at IS NULL".to_owned(),
+            ),
             (
                 WORKSPACE_OPERATION_INDEX,
                 concat!("cwd) WHERE ", holds_workspace_operation!()).to_owned(),
@@ -172,13 +160,14 @@ impl AgentIndexedReads {
 
     /// SQL counting the live (not deleted) team members that are not finished.
     /// A finished member is completed, failed, interrupted, or paused without
-    /// auto-wake.
+    /// auto-wake. The chat row holds the status and auto-wake; a missing row
+    /// counts as no status, as an absent agent status did.
     #[doc(hidden)]
     pub const ACTIVE_TEAM_MEMBERS_SQL: &'static str = "SELECT COUNT(*) FROM runtime_agents INDEXED BY runtime_agent_live_root_v2 \
+         LEFT JOIN chats ON chats.id=runtime_agents.id \
          WHERE root_id=?1 AND deleted_at IS NULL \
-         AND NOT (COALESCE(status,'') IN ('completed','failed','interrupted') \
-         OR (status IS 'paused' \
-          AND EXISTS(SELECT 1 FROM chats ch WHERE ch.id=runtime_agents.id AND ch.auto_wake IS 0)))";
+         AND NOT (COALESCE(chats.status,'') IN ('completed','failed','interrupted') \
+         OR (chats.status IS 'paused' AND chats.auto_wake IS 0))";
 
     pub fn active_team_members(connection: &Connection, root_id: &str) -> StoreResult<i64> {
         Ok(connection
@@ -218,34 +207,42 @@ impl AgentIndexedReads {
             .collect::<Result<_, _>>()?)
     }
 
+    /// Slot queries drive from the chat capacity index: the chat row holds the
+    /// status, the agent row holds the tombstone, root and remote fields.
     #[doc(hidden)]
     pub fn global_slots_sql() -> String {
         format!(
-            "SELECT COUNT(*) FROM runtime_agents WHERE id<>?1 \
-             AND status IN {CAPACITY_STATUSES} AND {CAPACITY_LIVE} AND {REMOTE_WORKER_KEY}=0"
+            "SELECT COUNT(*) FROM chats INDEXED BY {CAPACITY_STATUS_INDEX} \
+             JOIN runtime_agents a ON a.id=chats.id \
+             WHERE chats.id<>?1 AND chats.status IN {CHAT_CAPACITY_STATUSES} \
+             AND {CAPACITY_LIVE} AND {REMOTE_WORKER_KEY}=0"
         )
     }
 
     #[doc(hidden)]
     pub fn team_slots_sql() -> String {
         format!(
-            "SELECT COUNT(*) FROM runtime_agents WHERE id<>?1 AND id<>?2 \
-             AND root_id=?2 \
-             AND status IN {CAPACITY_STATUSES} AND {CAPACITY_LIVE} AND {REMOTE_WORKER_KEY}=0"
+            "SELECT COUNT(*) FROM chats INDEXED BY {CAPACITY_STATUS_INDEX} \
+             JOIN runtime_agents a ON a.id=chats.id \
+             WHERE chats.id<>?1 AND chats.id<>?2 \
+             AND a.root_id=?2 \
+             AND chats.status IN {CHAT_CAPACITY_STATUSES} AND {CAPACITY_LIVE} AND {REMOTE_WORKER_KEY}=0"
         )
     }
 
     /// SQL counting the working local agents per account key: live
     /// slot-occupying agents that are not paused. A live paused agent keeps its
     /// slot but sends no provider request, so it must not skew where new workers
-    /// are placed (intended; owner semantic). It enumerates the partial
-    /// capacity index.
+    /// are placed (intended; owner semantic). It enumerates the chat capacity
+    /// index.
     #[doc(hidden)]
     pub fn account_slots_sql() -> String {
         format!(
-            "SELECT account_key,COUNT(*) \
-             FROM runtime_agents WHERE status IN {CAPACITY_STATUSES} \
-             AND {CAPACITY_LIVE} AND status<>'paused' \
+            "SELECT a.account_key,COUNT(*) \
+             FROM chats INDEXED BY {CAPACITY_STATUS_INDEX} \
+             JOIN runtime_agents a ON a.id=chats.id \
+             WHERE chats.status IN {CHAT_CAPACITY_STATUSES} \
+             AND {CAPACITY_LIVE} AND chats.status<>'paused' \
              AND {REMOTE_WORKER_KEY}=0 GROUP BY 1"
         )
     }
@@ -294,7 +291,7 @@ fn prefix_upper(prefix: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::ONE_UNFINISHED_TURN_INDEX;
+    use crate::domain::{ACTIVE_STATUS_INDEX, CAPACITY_STATUS_INDEX, ONE_UNFINISHED_TURN_INDEX};
     use serde_json::{Value, json};
 
     /// The agents table of the column format with this module's indexes.
@@ -393,10 +390,31 @@ mod tests {
     }
 
     #[test]
-    fn reserved_turn_input_uses_the_active_index_and_the_unfinished_turn_index() {
+    fn reserved_turn_input_finds_an_active_chat_by_its_status() {
+        let connection = database();
+        insert(
+            &connection,
+            json!({"id":"running-chat","provider":"codex","rootId":"running-chat","status":"running"}),
+        );
+        insert(
+            &connection,
+            json!({"id":"paused-chat","provider":"codex","rootId":"paused-chat","status":"paused"}),
+        );
+        let rows = connection
+            .prepare(reserved_turn_input())
+            .expect("query prepares")
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("query runs")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("rows");
+        assert_eq!(rows, ["running-chat"]);
+    }
+
+    #[test]
+    fn reserved_turn_input_uses_the_chat_status_index_and_the_unfinished_turn_index() {
         let connection = database();
         let details = plan(&connection, reserved_turn_input(), &[]);
-        assert!(details.contains(ACTIVE_INDEX), "{details}");
+        assert!(details.contains(ACTIVE_STATUS_INDEX), "{details}");
         assert!(details.contains(ONE_UNFINISHED_TURN_INDEX), "{details}");
     }
 
@@ -566,17 +584,17 @@ mod tests {
             (
                 AgentIndexedReads::global_slots_sql(),
                 vec!["a"],
-                CAPACITY_INDEX,
+                CAPACITY_STATUS_INDEX,
             ),
             (
                 AgentIndexedReads::account_slots_sql(),
                 vec![],
-                CAPACITY_INDEX,
+                CAPACITY_STATUS_INDEX,
             ),
             (
                 AgentIndexedReads::team_slots_sql(),
                 vec!["a", "lead"],
-                "runtime_agent_",
+                CAPACITY_STATUS_INDEX,
             ),
         ] {
             let details = plan(&connection, &sql, &parameters);
