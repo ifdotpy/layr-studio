@@ -8441,6 +8441,30 @@
             ],
             "default": null
           },
+          "claudeOptions": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "permissionMode": {
+                    "enum": [
+                      "default",
+                      "acceptEdits",
+                      "auto",
+                      "plan",
+                      "bypassPermissions"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Claude permission mode for the worker launch preview. Other session options remain private."
+          },
           "commandProgress": {
             "default": [],
             "items": {
@@ -25110,6 +25134,27 @@
           "newDocumentState"
         ],
         "title": "DraftPushRow",
+        "type": "object"
+      },
+      "DraftSnapshot": {
+        "additionalProperties": false,
+        "description": "Bounded draft baseline at the current draft sequence.",
+        "properties": {
+          "complete": {
+            "type": "boolean"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/SyncDocument"
+            },
+            "maxItems": 512,
+            "type": "array"
+          }
+        },
+        "required": [
+          "complete",
+          "documents"
+        ],
         "type": "object"
       },
       "DraftsResource": {
@@ -42720,6 +42765,9 @@
                 "type": "null"
               }
             ]
+          },
+          "draftSnapshot": {
+            "$ref": "#/components/schemas/DraftSnapshot"
           },
           "entityChanges": {
             "anyOf": [
@@ -60990,6 +61038,13 @@
             "title": "Device",
             "type": "string"
           },
+          "endpointFingerprint": {
+            "description": "Lowercase SHA-256 of the endpoint, used to identify this browser's subscription.",
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Endpoint Fingerprint",
+            "type": "string"
+          },
           "id": {
             "maxLength": 64,
             "minLength": 1,
@@ -61000,7 +61055,8 @@
         "required": [
           "id",
           "device",
-          "created"
+          "created",
+          "endpointFingerprint"
         ],
         "title": "WebPushSubscription",
         "type": "object"
@@ -61215,6 +61271,7 @@
         "description": "One tagged owner consumed by both HTTP and agent mutation adapters.\n\n```compile_fail\nuse studio_runtime_schema::task_command::TaskCommand;\nlet command = TaskCommand::Cancel { task_id: \"task\".into(), version: None };\n// A cancellation always carries its reason.\n```\n\n```compile_fail\nuse studio_runtime_schema::task_command::Version;\nlet version = Version(-1); // Ingress validation cannot be bypassed.\n```",
         "oneOf": [
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "list",
@@ -61239,6 +61296,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "create",
@@ -61342,6 +61400,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "update",
@@ -61464,6 +61523,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "cancel",
@@ -61509,6 +61569,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "reject",
@@ -61554,6 +61615,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "claim",
@@ -61600,6 +61662,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "submit",
@@ -61662,6 +61725,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "accept",
@@ -61716,6 +61780,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "set_default_gate",

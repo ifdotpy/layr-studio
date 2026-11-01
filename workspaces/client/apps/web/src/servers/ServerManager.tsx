@@ -6,7 +6,6 @@ import { localDateTime } from "../local-time";
 import { ActionButton, SettingsSection } from "../components/ui/primitives";
 import DiscoveryPanel from "./DiscoveryPanel";
 import ServerAccessSettings from "./ServerAccessSettings";
-import { setServerExcluded } from "./automaticAccessStore";
 import type { useServerDiscovery } from "./useServerDiscovery";
 
 import { parseInvitation } from "./pairing";
@@ -25,10 +24,11 @@ import {
   readServers,
   writeServers,
   localServer,
+  setLocalServerDetails,
   serveOrigin,
   type StudioServer,
 } from "./registry";
-import { LOCAL_ALIAS_KEY, defaultServerAlias } from "./serverAliases";
+import { defaultServerAlias } from "./serverAliases";
 import ServerDetailsEditor from "./ServerDetailsEditor";
 import { Check, Copy } from "lucide-react";
 import "./server-settings.css";
@@ -262,12 +262,6 @@ export default function ServerManager({
                         disabled={busy}
                         onClick={() => {
                           setError("");
-                          try {
-                            setServerExcluded(server.id, true);
-                          } catch (failure) {
-                            setError((failure as Error).message);
-                            return;
-                          }
                           setBusy(true);
                           void serverCredentialAdapter()
                             .forget(registered)
@@ -283,16 +277,6 @@ export default function ServerManager({
                         }}
                       >
                         Remove
-                      </ActionButton>
-                    )}
-                    {!registered && peer?.paired && localEnabled && (
-                      <ActionButton
-                        actionRole="secondary"
-                        size="xs"
-                        disabled={busy || discovery.busy}
-                        onClick={() => discovery.addAgain(peer.id)}
-                      >
-                        Add to this UI
                       </ActionButton>
                     )}
                     {peer?.paired && localEnabled && (
@@ -358,7 +342,7 @@ export default function ServerManager({
                         )
                           return discovery.setAlias(server.id, alias);
                         if (server.id === "local")
-                          localStorage.setItem(LOCAL_ALIAS_KEY, alias);
+                          setLocalServerDetails({ alias });
                         writeServers(
                           readServers().map((row) =>
                             row.id === server.id ? { ...row, alias } : row,
@@ -445,7 +429,6 @@ export default function ServerManager({
                     attempt.code,
                     attempt.id,
                   );
-                  setServerExcluded(server.id, false);
                   add({ ...server, label: label.trim() || server.label });
                   setCode("");
                   setOrigin("");

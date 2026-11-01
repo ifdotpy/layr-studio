@@ -5826,6 +5826,20 @@ export interface components {
         | components["schemas"]["AgentEntityCapacityRetryDto"]
         | null
         | undefined;
+      /** @description Claude permission mode for the worker launch preview. Other session options remain private. */
+      claudeOptions?:
+        | {
+            /** @enum {string} */
+            permissionMode?:
+              | "default"
+              | "acceptEdits"
+              | "auto"
+              | "plan"
+              | "bypassPermissions"
+              | undefined;
+          }
+        | null
+        | undefined;
       /**
        * Commandprogress
        * @default []
@@ -12536,6 +12550,11 @@ export interface components {
         | null
         | undefined;
       newDocumentState: components["schemas"]["DraftDocumentInput"];
+    };
+    /** @description Bounded draft baseline at the current draft sequence. */
+    DraftSnapshot: {
+      complete: boolean;
+      documents: components["schemas"]["SyncDocument"][];
     };
     /** DraftsResource */
     DraftsResource: {
@@ -19687,6 +19706,7 @@ export interface components {
         | components["schemas"]["DraftChangeBatch"]
         | null
         | undefined;
+      draftSnapshot?: components["schemas"]["DraftSnapshot"] | undefined;
       entityChanges?:
         | components["schemas"]["EntityChangeBatch"]
         | null
@@ -26917,6 +26937,11 @@ export interface components {
       created: number;
       /** Device */
       device: string;
+      /**
+       * Endpoint Fingerprint
+       * @description Lowercase SHA-256 of the endpoint, used to identify this browser's subscription.
+       */
+      endpointFingerprint: string;
       /** Id */
       id: string;
     };

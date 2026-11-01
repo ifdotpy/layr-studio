@@ -429,10 +429,6 @@ fn pull_scope_cached_in(
     agent: &str,
     after: i64,
 ) -> Result<Option<Value>, TranscriptError> {
-    let actor = TranscriptRepository::agent(transaction, agent)?;
-    let deleted = actor
-        .as_ref()
-        .is_none_or(studio_runtime_store::AgentRecord::is_deleted);
     let revision = TranscriptRepository::revision(transaction, agent)?;
     let high = transaction.query_row(
         "SELECT coalesce(max(seq),0) FROM sync_entities WHERE collection=?1",
@@ -457,6 +453,10 @@ fn pull_scope_cached_in(
             "checkpoint": {"seq": high}
         })));
     }
+    let actor = TranscriptRepository::agent(transaction, agent)?;
+    let deleted = actor
+        .as_ref()
+        .is_none_or(studio_runtime_store::AgentRecord::is_deleted);
     let cache = transaction
         .query_row(
             "SELECT payload FROM sync_entities WHERE collection=?1 AND id='@revision' AND hash=?2 AND deleted=0",
@@ -725,7 +725,7 @@ fn search_item_in(
         .optional()
         .map_err(|_| TranscriptError::Store)?
     {
-        let room_record = studio_runtime_store::system_reads::get(connection, "runtime_rooms", &room)?
+        let room_record = studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(connection).get(&room)?
             .ok_or(TranscriptError::ChatUnavailable)?;
         if room_view(connection, directory, &room_record)?.is_none() {
             return Err(TranscriptError::ChatUnavailable);
@@ -805,14 +805,21 @@ fn search_item_in(
 fn room_view(
     connection: &Connection,
     directory: &crate::sync_entity_context::RoomDirectory,
-    room: &Value,
-) -> Result<Option<Value>, TranscriptError> {
-    if room["kind"] == "federated" && !connection.query_row(
+    room: &studio_runtime_schema::room_record::RoomRecord,
+) -> Result<Option<crate::room_projection::RoomProjection>, TranscriptError> {
+    if room.kind == studio_runtime_schema::room_record::RoomKind::Federated && !connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM runtime_federation_rooms WHERE id=?1 AND json_extract(record,'$.status')='approved' AND json_extract(record,'$.localApproved')=1 AND json_extract(record,'$.remoteApproved')=1)",
-        [room["id"].as_str()], |r| r.get::<_, bool>(0),
+        [&room.id], |r| r.get::<_, bool>(0),
     )? { return Ok(None); }
-    let context = directory.for_room(connection, room, false)?;
-    Ok(crate::sync_views::room_entity_view(room, &context))
+    let context = directory.for_room_identity(
+        connection,
+        &room.id,
+        room.kind == studio_runtime_schema::room_record::RoomKind::Federated,
+        false,
+    )?;
+    crate::room_projection::project_room(room, &context)
+        .map_err(StoreError::from)
+        .map_err(Into::into)
 }
 
 pub async fn search_work(
@@ -944,42 +951,44 @@ pub(crate) fn search_work_in_transaction(
         }
     }
     let mut readable = std::collections::BTreeSet::new();
-    for room in studio_runtime_store::system_reads::all(connection, "runtime_rooms")? {
+    for room in studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(
+        connection,
+    )
+    .list()?
+    {
         let Some(view) = room_view(connection, directory, &room)? else {
             continue;
         };
         if let Some(caller) = agent_filter {
-            let members = view["members"].as_array().cloned().unwrap_or_default();
+            let members = &view.members;
             if !members.iter().any(|id| id == caller) {
                 continue;
             }
-            if room["kind"] != "federated" {
-                if caller_root.is_none() || room["rootId"] == "all" {
+            if room.kind != studio_runtime_schema::room_record::RoomKind::Federated {
+                if caller_root.is_none() || room.root_id.as_ref().map(String::as_str) == Some("all")
+                {
                     continue;
                 }
-                let foreign = members
-                    .iter()
-                    .any(|id| !allowed.contains(id.as_str().unwrap_or_default()));
-                let direct = room["radio"]["direct"] == true
+                let foreign = members.iter().any(|id| !allowed.contains(id.as_str()));
+                let direct = view.direct_radio()
                     && members.iter().all(|id| {
                         directory.agents().iter().any(|a| {
-                            a.id.as_deref() == id.as_str()
-                                && a.shared_room_id.as_deref() == room["id"].as_str()
-                                && a.cwd.as_deref() == room["projectPath"].as_str()
+                            a.id.as_deref() == Some(id.as_str())
+                                && a.shared_room_id.as_deref() == Some(room.id.as_str())
+                                && a.cwd.as_deref()
+                                    == room.project_path.as_ref().map(String::as_str)
                         })
                     });
                 if foreign
-                    && !(room["kind"] == "private"
+                    && !(room.kind == studio_runtime_schema::room_record::RoomKind::Private
                         && members.len() == 2
-                        && (view.get("peerTeamId").is_some() || direct))
+                        && (view.peer_team_id.is_some() || direct))
                 {
                     continue;
                 }
             }
         }
-        if let Some(id) = room["id"].as_str() {
-            readable.insert(id.to_owned());
-        }
+        readable.insert(room.id);
     }
     let mut messages=connection.prepare("SELECT id,room,sender,text FROM runtime_chat_messages WHERE instr(lower(text),lower(?1))>0 ORDER BY seq DESC LIMIT 1000")?;
     for row in messages.query_map([query], |r| {
@@ -1462,6 +1471,27 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("count")
+    }
+
+    #[test]
+    fn unchanged_cached_cursor_does_not_decode_the_agent() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_agents(id TEXT,record TEXT);\
+            CREATE TABLE runtime_transcript_revisions(agent TEXT,revision INTEGER);\
+            CREATE TABLE sync_entities(collection TEXT,id TEXT,hash TEXT,deleted INTEGER,seq INTEGER,payload TEXT);\
+            CREATE TABLE sync_identity(id TEXT);\
+            INSERT INTO sync_identity VALUES('workspace');\
+            INSERT INTO runtime_agents VALUES('agent','{}');\
+            INSERT INTO runtime_transcript_revisions VALUES('agent',10);").unwrap();
+        db.execute(
+            "INSERT INTO sync_entities VALUES('transcript:agent','@revision',?1,0,10,NULL)",
+            [studio_runtime_store::sha256_hex(b"10")],
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        let unchanged = super::pull_scope_cached_in(&tx, "transcript:agent", "agent", 10);
+        assert_eq!(unchanged.unwrap().unwrap()["documents"], json!([]));
+        assert!(super::pull_scope_cached_in(&tx, "transcript:agent", "agent", 9).is_err());
     }
 
     #[tokio::test]

@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import {
   test,
+  installApiSchemaFixtureHeaders,
+  syncIdentityFixture,
   createFixtureViteServer as createServer,
 } from "../playwright.ts";
 
@@ -72,6 +74,10 @@ test("Complaint ownership", async ({ browser: testBrowser }) => {
     });
     const page = await browserContext.newPage();
     const errors: string[] = [];
+    installApiSchemaFixtureHeaders(page);
+    await page.route("**/api/sync/identity", (route) =>
+      route.fulfill({ json: syncIdentityFixture("a".repeat(32)) }),
+    );
     page.on("pageerror", (error) => errors.push((error as Error).message));
     await page.route("**/check", (route) =>
       route.fulfill({
@@ -188,6 +194,20 @@ test("Complaint ownership", async ({ browser: testBrowser }) => {
     await card("owner")
       .getByLabel("Reply", { exact: true })
       .fill("I will grant access.");
+    assert.equal(
+      await page.evaluate(() =>
+        Object.keys(localStorage).some((key) =>
+          key.startsWith("studio-reply-draft:"),
+        ),
+      ),
+      false,
+    );
+    await close("owner");
+    await open("owner");
+    assert.equal(
+      await card("owner").getByLabel("Reply", { exact: true }).inputValue(),
+      "I will grant access.",
+    );
     await card("owner")
       .getByRole("button", { name: "Send reply", exact: true })
       .click();

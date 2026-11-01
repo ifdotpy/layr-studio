@@ -5,7 +5,6 @@ use crate::event_write::truthy;
 pub use crate::sync_views::{
     AgentViewContext, ComplaintViewContext, RoomViewContext, agent_entity_view,
     complaint_entity_view, openapi_document, project_entity_view, project_persisted_record,
-    room_entity_view,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use serde_json::{Map, Value, json};
@@ -356,7 +355,14 @@ pub fn maintain_entity_projections_with_server_id(
                 "runtime_federation_rooms",
             ]
             .into_iter()
-            .map(|table| projection_records(transaction, table).map(|records| (table, records)))
+            .map(|table| {
+                let rows = if table == "runtime_rooms" {
+                    stored_record_rows(transaction, table)
+                } else {
+                    projection_records(transaction, table)
+                };
+                rows.map(|records| (table, records))
+            })
             .collect::<StoreResult<HashMap<_, _>>>()
         })?;
     source_records.insert(
@@ -442,12 +448,36 @@ pub fn maintain_entity_projections_with_server_id(
                     publish_direct(transaction, collection, id, raw, &validate_projection)?;
                     continue;
                 }
+                if collection == "room" {
+                    let Ok(room) =
+                        serde_json::from_str::<studio_runtime_schema::room_record::RoomRecord>(raw)
+                    else {
+                        continue;
+                    };
+                    if room.id != *id {
+                        continue;
+                    }
+                    let context = rooms.for_room_identity(
+                        transaction,
+                        id,
+                        room.kind == studio_runtime_schema::room_record::RoomKind::Federated,
+                        true,
+                    )?;
+                    if let Some(projected) = crate::room_projection::project_room(&room, &context)?
+                    {
+                        current_rooms.insert(id.clone());
+                        SyncDocumentsRepository::put_entity(
+                            transaction,
+                            "room",
+                            id,
+                            projected,
+                            false,
+                        )?;
+                    }
+                    continue;
+                }
                 let record = serde_json::from_str::<Value>(raw)?;
                 let projected = match collection {
-                    "room" => {
-                        let context = rooms.for_room(transaction, &record, true)?;
-                        room_entity_view(&record, &context)
-                    }
                     "complaint" => complaint_entity_view(
                         &record,
                         &ComplaintViewContext {
@@ -492,9 +522,6 @@ pub fn maintain_entity_projections_with_server_id(
                     _ => unreachable!("the loop lists every directly projected collection"),
                 };
                 if let Some(projected) = projected {
-                    if collection == "room" {
-                        current_rooms.insert(id.clone());
-                    }
                     put_projection(
                         transaction,
                         collection,
@@ -788,7 +815,6 @@ pub(crate) fn publish_summary_changes(
                 id,
             });
         }
-        let task = studio_runtime_store::projection_value(&task);
         let prior: Option<String> = transaction
             .query_row(
                 "SELECT payload FROM sync_entities WHERE collection='task' AND id=?1 AND deleted=0",
@@ -1343,32 +1369,39 @@ fn publish_rooms_of(
     validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
     let directory = crate::sync_entity_context::RoomDirectory::load_live_for_sync(transaction)?;
-    for (id, raw) in projection_records(transaction, "runtime_rooms")? {
-        let room = serde_json::from_str::<Value>(&raw)?;
-        let root = room.get("rootId").and_then(Value::as_str);
-        let affected = match room.get("kind").and_then(Value::as_str) {
-            Some("broadcast") => root.is_some_and(|root| root == "all" || roots.contains(root)),
+    for (id, raw) in stored_record_rows(transaction, "runtime_rooms")? {
+        use studio_runtime_schema::room_record::{RoomKind, RoomRecord};
+        let Ok(room) = serde_json::from_str::<RoomRecord>(&raw) else {
+            continue;
+        };
+        if room.id != id {
+            continue;
+        }
+        let root = room.root_id.as_ref().map(String::as_str);
+        let affected = match room.kind {
+            RoomKind::Broadcast => root.is_some_and(|root| root == "all" || roots.contains(root)),
             // Federated membership lives in another table; these rooms are few.
-            Some("federated") => true,
-            _ => room
-                .get("members")
-                .and_then(Value::as_array)
-                .is_some_and(|members| {
-                    members
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .any(|member| agents.contains(member))
-                }),
+            RoomKind::Federated => true,
+            RoomKind::Private => room
+                .members
+                .as_ref()
+                .is_some_and(|members| members.iter().any(|member| agents.contains(member))),
         };
         if !affected {
             continue;
         }
-        let context = directory.for_room(transaction, &room, true)?;
-        match room_entity_view(&room, &context) {
-            Some(view) => put_projection(transaction, "room", &id, view, false, validate)?,
+        let context = directory.for_room_identity(
+            transaction,
+            &room.id,
+            room.kind == RoomKind::Federated,
+            true,
+        )?;
+        match crate::room_projection::project_room(&room, &context)? {
+            Some(view) => {
+                SyncDocumentsRepository::put_entity(transaction, "room", &id, view, false)?;
+            }
             // Python retains a deleted team's broadcast view.
-            None if room.get("kind").and_then(Value::as_str) == Some("broadcast")
-                && !studio_runtime_store::ProjectsRepository::room_retired(&room) => {}
+            None if room.kind == RoomKind::Broadcast && room.project_deleted_at.is_none() => {}
             None => retire_if_live(transaction, "room", &id, validate)?,
         }
     }
@@ -1565,20 +1598,10 @@ fn checked_owned_work(
 ) -> StoreResult<Option<studio_runtime_store::WorkItemRecord>> {
     #[cfg(test)]
     work_publication_probe::owned_decode(id);
-    let Ok(value) = serde_json::from_str::<Value>(raw) else {
+    let Ok(record) = serde_json::from_str::<studio_runtime_store::WorkItemRecord>(raw) else {
         return Ok(None);
     };
-    if !valid_stored_value("runtime_work", id, &value) {
-        return Ok(None);
-    }
-    studio_runtime_store::WorkItemRecord::from_value(value)
-        .map(Some)
-        .map_err(|error| StoreError::InvalidSyncObjectField {
-            scope: "runtime_work".into(),
-            id: id.into(),
-            pointer: String::new(),
-            reason: error.to_string(),
-        })
+    Ok((record.id().as_ref() == id).then_some(record))
 }
 
 fn retire_if_live(
@@ -1631,10 +1654,9 @@ pub(crate) fn maintain_task_window(
                 id,
             });
         }
-        let record = studio_runtime_store::projection_value(&record);
-        if let Some(projected) = project_persisted_record("task", &record) {
+        if let Some(projected) = crate::sync_views::project_task_record(&record) {
             kept.insert(id.clone());
-            put_projection(transaction, "task", &id, projected, false, validate)?;
+            SyncDocumentsRepository::put_entity(transaction, "task", &id, projected, false)?;
         }
     }
     let mut statement = transaction
@@ -1678,7 +1700,7 @@ pub(crate) fn maintain_task_window(
 pub(crate) fn maintain_task_window_after_write(
     transaction: &Transaction<'_>,
     previous: Option<&Value>,
-    task: &Value,
+    task: &studio_runtime_store::TaskRecord,
     validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
     let migration_complete: bool = transaction.query_row(
@@ -1688,14 +1710,14 @@ pub(crate) fn maintain_task_window_after_write(
         |row| row.get(0),
     )?;
     let running = |value: &Value| value.get("status").and_then(Value::as_str) == Some("running");
-    let task_running = running(task);
+    let task_running = task.status() == studio_runtime_schema::task_record::TaskStatus::Running;
+    let task_id = task.id().as_ref();
+    let agent_id = task.agent();
     let previous_finished = previous.is_some_and(|previous| !running(previous));
     if migration_complete
         && !(task_running && previous_finished)
         && table_exists(transaction, "runtime_agents")?
-        && let Some(task_id) = task.get("id").and_then(Value::as_str)
-        && let Some(agent_id) = task.get("agent").and_then(Value::as_str)
-        && let Some(projected) = project_persisted_record("task", task)
+        && let Some(projected) = crate::sync_views::project_task_record(task)
         && transaction.query_row(
             "SELECT EXISTS(SELECT 1 FROM runtime_agents WHERE id=?1 \
              AND deleted_at IS NULL)",
@@ -1706,8 +1728,9 @@ pub(crate) fn maintain_task_window_after_write(
         let unmoved_finished = previous_finished
             && !task_running
             && previous.is_some_and(|previous| {
-                previous.get("agent") == task.get("agent")
-                    && previous.get("created") == task.get("created")
+                previous.get("agent").and_then(Value::as_str) == Some(agent_id)
+                    && previous.get("created").and_then(Value::as_number)
+                        == Some(task.created_number().number())
             });
         if unmoved_finished
             && !transaction.query_row(
@@ -1719,7 +1742,7 @@ pub(crate) fn maintain_task_window_after_write(
         {
             return Ok(());
         }
-        put_projection(transaction, "task", task_id, projected, false, validate)?;
+        SyncDocumentsRepository::put_entity(transaction, "task", task_id, projected, false)?;
         if !task_running {
             let evicted: Option<String> = transaction
                 .query_row(
@@ -2130,35 +2153,26 @@ fn maintain_peer_team_entities(
         .collect::<BTreeMap<_, _>>();
     let mut current = BTreeMap::<String, Value>::new();
     for (_, raw) in project_records {
-        let Ok(project) = serde_json::from_str::<Value>(raw) else {
-            continue;
-        };
-        let Some(project_path) = project
-            .get("path")
-            .and_then(Value::as_str)
-            .filter(|path| !path.trim().is_empty())
-            .and_then(studio_runtime_store::path_identity::lexical_text)
+        let Ok(studio_runtime_schema::project_record::ProjectRecord::Live(project)) =
+            serde_json::from_str(raw)
         else {
             continue;
         };
-        let Some(teams) = project.get("peerTeams").and_then(Value::as_array) else {
+        let Some(project_path) = (!project.path.trim().is_empty())
+            .then(|| studio_runtime_store::path_identity::lexical_text(&project.path))
+            .flatten()
+        else {
             continue;
         };
-        let revision = project
-            .get("peerTeamsRevision")
-            .cloned()
-            .unwrap_or(json!(0));
-        for team in teams {
-            let (Some(id), Some(name), Some(members)) = (
-                team.get("id").and_then(Value::as_str),
-                team.get("name").and_then(Value::as_str),
-                team.get("members").and_then(Value::as_array),
-            ) else {
-                continue;
-            };
+        let revision = match project.peer_teams_revision {
+            studio_runtime_schema::queue_command::Field::Missing => Some(0),
+            studio_runtime_schema::queue_command::Field::Null => None,
+            studio_runtime_schema::queue_command::Field::Value(value) => Some(value),
+        };
+        for team in &project.peer_teams {
             let mut selected = Vec::new();
-            for member in members.iter().filter_map(Value::as_str) {
-                if agents.get(member).is_some_and(|agent| {
+            for member in &team.members {
+                if agents.get(member.as_str()).is_some_and(|agent| {
                     agent
                         .get("cwd")
                         .and_then(Value::as_str)
@@ -2167,13 +2181,13 @@ fn maintain_peer_team_entities(
                         == Some(project_path.as_path())
                 }) && !selected.iter().any(|prior| prior == member)
                 {
-                    selected.push(member.to_owned());
+                    selected.push(member.clone());
                 }
             }
             if selected.len() >= 2 {
                 current.insert(
-                    id.to_owned(),
-                    json!({"id":id,"name":name,"projectPath":project_path,"members":selected,"revision":revision}),
+                    team.id.clone(),
+                    json!({"id":team.id,"name":team.name,"projectPath":project_path,"members":selected,"revision":revision}),
                 );
             }
         }
@@ -2743,6 +2757,41 @@ pub async fn push_preferences(
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    #[test]
+    fn checked_work_uses_typed_shape_and_row_identity() {
+        let raw = r#"{"id":"w","status":"ready","owner":"agent"}"#;
+        let work = super::checked_owned_work("w", raw).unwrap().unwrap();
+        assert_eq!(work.id().as_ref(), "w");
+        assert!(super::checked_owned_work("other", raw).unwrap().is_none());
+        assert!(
+            super::checked_owned_work("w", r#"{"id":"w","status":false}"#)
+                .unwrap()
+                .is_none()
+        );
+        assert!(super::checked_owned_work("w", "{").unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn peer_team_projection_preserves_revision_presence() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store.transaction_with(|tx| {
+            let agents = ["a", "b"].map(|id| (id.to_owned(), json!({"id":id,"rootId":id,"isLead":true,"cwd":"/project"}).to_string()));
+            for (revision, expected) in [(None, json!(0)), (Some(Value::Null), Value::Null), (Some(json!(3)), json!(3))] {
+                let mut project = json!({"recordKind":"live","id":"p","path":"/project","peerTeams":[{"id":"team","name":"Team","members":["a","b"]}]});
+                if let Some(revision) = revision { project["peerTeamsRevision"] = revision; }
+                maintain_peer_team_entities(tx, &agents, &[("p".into(), project.to_string())], &|_, _, _, _| true)?;
+                let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='peerTeam' AND id='team'", [], |row| row.get(0))?;
+                let value: Value = serde_json::from_str(&payload)?;
+                assert_eq!(value["value"]["revision"], expected);
+                assert_eq!(value["value"]["members"], json!(["a", "b"]));
+            }
+            Ok::<_, StoreError>(())
+        }).await.unwrap();
+    }
+
     #[test]
     fn typed_monitor_projection_keeps_existing_public_bounds() {
         let record = crate::monitor_policy::complete_test_monitor(
@@ -3528,7 +3577,9 @@ mod tests {
                 maintain_task_window_after_write(
                     transaction,
                     Some(&previous),
-                    &updated,
+                    &<studio_runtime_store::TaskRecord as serde::Deserialize>::deserialize(
+                        &updated,
+                    )?,
                     &|_, _, _, _| true,
                 )?;
                 assert!(
@@ -3567,7 +3618,7 @@ mod tests {
                 maintain_task_window_after_write(
                     transaction,
                     Some(&task),
-                    &task,
+                    &<studio_runtime_store::TaskRecord as serde::Deserialize>::deserialize(&task)?,
                     &|_, _, _, _| true,
                 )?;
                 assert!(
@@ -3644,7 +3695,7 @@ mod tests {
                         maintain_task_window_after_write(
                             transaction,
                             previous.as_ref(),
-                            &task,
+                            &<studio_runtime_store::TaskRecord as serde::Deserialize>::deserialize(&task)?,
                             &|_, _, _, _| true,
                         )?;
                         assert!(
@@ -3685,7 +3736,9 @@ mod tests {
                 maintain_task_window_after_write(
                     transaction,
                     Some(&previous),
-                    &previous,
+                    &<studio_runtime_store::TaskRecord as serde::Deserialize>::deserialize(
+                        &previous,
+                    )?,
                     &|_, _, _, _| true,
                 )?;
                 assert!(
@@ -3735,7 +3788,12 @@ mod tests {
              ON CONFLICT(id) DO UPDATE SET record=excluded.record",
             rusqlite::params![id, task.to_string()],
         )?;
-        maintain_task_window_after_write(transaction, previous.as_ref(), task, &|_, _, _, _| true)
+        maintain_task_window_after_write(
+            transaction,
+            previous.as_ref(),
+            &<studio_runtime_store::TaskRecord as serde::Deserialize>::deserialize(task)?,
+            &|_, _, _, _| true,
+        )
     }
 
     async fn task_window_store() -> (tempfile::TempDir, studio_runtime_store::RuntimeStore) {

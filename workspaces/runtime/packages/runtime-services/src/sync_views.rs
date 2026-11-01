@@ -16,6 +16,8 @@ pub(crate) const AGENT_SUMMARY_ATTENTION_FIELDS: [&str; 3] =
 /// Maximum last-answer text retained in an agent sync view. Unit: Unicode scalar values.
 pub(crate) const AGENT_SYNC_LAST_ANSWER_CHARS: usize = 4_000;
 pub(crate) const SYNC_TEXT_CHARS: usize = 12_000;
+/// Maximum items in a projected sync array. Unit: array elements.
+pub(crate) const SYNC_ARRAY_ITEMS: usize = 200;
 
 const AGENT_SHORT_STRING_OBJECTS: &[&str] = &[
     "activity",
@@ -210,7 +212,11 @@ fn project_schema_value(
         }
         Value::Array(items) => {
             let item_schema = schema.get("items").unwrap_or(&Value::Null);
-            let limit = if field == "sidebarOrder" { 10_000 } else { 200 };
+            let limit = if field == "sidebarOrder" {
+                10_000
+            } else {
+                SYNC_ARRAY_ITEMS
+            };
             Value::Array(
                 items
                     .iter()
@@ -233,6 +239,93 @@ fn project_schema_value(
             bound_sync_value(value, field, agent_short_strings)
         }
     }
+}
+
+/// Bounded public task fields, serialized directly from the stored task.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskProjection {
+    id: String,
+    agent: String,
+    created: studio_runtime_schema::task_record::NonnegativeNumber,
+    kind: studio_runtime_schema::task_record::TaskKind,
+    status: studio_runtime_schema::task_record::TaskStatus,
+    turn_id: String,
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duration_ms: Option<studio_runtime_schema::task_record::NonnegativeNumber>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exit_code: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    finished: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    interactive: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output_file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output_truncated: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    process_id: Option<studio_runtime_schema::task_record::ProcessId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    query: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tail: Option<String>,
+}
+
+pub fn project_task_record(record: &studio_runtime_store::TaskRecord) -> Option<TaskProjection> {
+    use studio_runtime_schema::task_record::ProcessId;
+    let id = record.id().as_ref();
+    if id.is_empty() {
+        return None;
+    }
+    let bounded = |text: &str, field| bound_sync_text(text, field, false);
+    let optional =
+        |value: &Option<String>, field| value.as_deref().map(|text| bounded(text, field));
+    let (tail, truncated) = record.tail.as_deref().map_or((None, false), |text| {
+        let summary = bounded(text, "tail");
+        if summary == text {
+            (Some(summary), false)
+        } else {
+            let length = summary.chars().count();
+            let suffix = text.chars().rev().take(length).collect::<String>();
+            (Some(suffix.chars().rev().collect()), true)
+        }
+    });
+    Some(TaskProjection {
+        id: bounded(id, "id"),
+        agent: bounded(record.agent(), "agent"),
+        created: record.created_number().clone(),
+        kind: record.kind(),
+        status: record.status(),
+        turn_id: bounded(record.turn_id(), "turnId"),
+        name: bounded(&record.name, "name"),
+        command: optional(&record.command, "command"),
+        cwd: optional(&record.cwd, "cwd"),
+        duration_ms: record.duration_ms.clone(),
+        error: optional(&record.error, "error"),
+        exit_code: record.exit_code,
+        finished: record.finished,
+        interactive: record.interactive(),
+        output_file: optional(&record.output_file, "outputFile"),
+        output_truncated: if truncated {
+            Some(true)
+        } else {
+            record.output_truncated
+        },
+        process_id: record.process_id().map(|pid| match pid {
+            ProcessId::Text(text) => ProcessId::Text(bounded(text, "processId")),
+            ProcessId::Signed(value) => ProcessId::Signed(*value),
+            ProcessId::Unsigned(value) => ProcessId::Unsigned(*value),
+        }),
+        query: optional(&record.query, "query"),
+        tail,
+    })
 }
 
 /// Filter a stored record through the committed renderer DTO schema.
@@ -405,7 +498,7 @@ pub(crate) fn agent_start_wait(
     ) -> Result<Option<AgentStartWait>, D::Error> {
         <AgentStartWait as serde::Deserialize>::deserialize(d).map(Some)
     }
-    let source: Source = serde_json::from_value(record.clone())?;
+    let source = <Source as serde::Deserialize>::deserialize(record)?;
     if !matches!(
         source.status,
         Some(
@@ -571,7 +664,7 @@ pub struct RoomViewContext {
     pub agents: Arc<Vec<AgentAuthorityRow>>,
     pub peer_teams: Arc<Vec<PeerTeamRow>>,
     pub active_agent_indices: Arc<HashMap<String, usize>>,
-    pub last_message: Option<Value>,
+    pub last_message: Option<studio_runtime_schema::room_record::RoomLastMessage>,
     pub federation: Option<Value>,
 }
 
@@ -712,10 +805,7 @@ pub fn room_entity_view(record: &Value, context: &RoomViewContext) -> Option<Val
         }
     }
     view.insert("members".to_owned(), json!(members));
-    view.insert(
-        "lastMessage".to_owned(),
-        context.last_message.clone().unwrap_or(Value::Null),
-    );
+    view.insert("lastMessage".to_owned(), json!(context.last_message));
     project_persisted_record("room", &Value::Object(view))
 }
 
@@ -881,6 +971,20 @@ mod projection_plan_tests {
         schema_projection_properties,
     };
     use serde_json::json;
+
+    #[test]
+    fn task_projection_matches_schema_projection() {
+        for length in [12, 2_100] {
+            let raw = json!({"id":"a:item", "agent":"a", "created":1.0, "itemId":"item", "kind":"command", "status":"running", "turnId":"turn", "type":"commandExecution", "name":"run", "tail":"雪".repeat(length), "outputTruncated":false, "command":"x".repeat(length), "sourceThreadId":"private", "interactive":true});
+            let task: studio_runtime_store::TaskRecord =
+                serde::Deserialize::deserialize(&raw).unwrap();
+            let old = project_persisted_record("task", &raw).unwrap();
+            let encoded =
+                serde_json::to_string(&super::project_task_record(&task).unwrap()).unwrap();
+            let new: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(new, old);
+        }
+    }
 
     #[test]
     fn retained_cleanup_admission_preserves_partial_legacy_fields() {

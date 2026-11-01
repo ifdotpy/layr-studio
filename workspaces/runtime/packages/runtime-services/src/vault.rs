@@ -715,12 +715,7 @@ pub fn suggested_prefix(source: &str) -> String {
 }
 
 pub fn valid_prefix(prefix: &str) -> bool {
-    let bytes = prefix.as_bytes();
-    (1..=44).contains(&bytes.len())
-        && bytes[0].is_ascii_alphanumeric()
-        && bytes
-            .iter()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    studio_runtime_schema::resource_ref::valid_vault_prefix(prefix)
 }
 
 fn project_folder(state_dir: &Path, project_id: &str) -> Result<PathBuf, VaultError> {

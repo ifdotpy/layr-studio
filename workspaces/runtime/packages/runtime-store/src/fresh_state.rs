@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use crate::{StoreError, StoreResult};
 
-const SNAPSHOT: &str = include_str!("runtime-state-schema.json");
+pub(crate) const SNAPSHOT: &str = include_str!("runtime-state-schema.json");
 const CORE_DATABASES: [&str; 2] = ["canvas.sqlite3", "analytics.sqlite3"];
 pub(crate) const TERMINAL_ERROR_REPAIR_KEY: &str = "terminalErrorRepairV1";
 /// The process supervisor's journal (`codex_process_supervisor.Journal` and
@@ -311,13 +311,16 @@ fn create_database(path: &Path, snapshot: &Value, schema_name: &str) -> StoreRes
         ))?;
     transaction.pragma_update(None, "user_version", version)?;
     if schema_name == "canvas.sqlite3" {
+        crate::schema::prepare_peer_update_settings(&transaction)?;
+        crate::schema::prepare_item_turn_scope(&transaction)?;
         crate::bootstrap::prepare_runtime_event_indexes(&transaction)?;
         crate::AgentRepository::prepare_change_journal(&transaction)?;
         crate::MonitorsRepository::prepare_indexes(&transaction)?;
         crate::migrations::seed_receipt_finish_markers(&transaction)?;
     } else {
+        crate::schema::prepare_publication_overflow_receipts(&transaction)?;
         crate::schema::ensure_analytics_limits_index(&transaction)?;
-        transaction.execute("INSERT INTO analytics_usage_revision_clock VALUES(0)", [])?;
+        prepare_analytics_revision_schema(&transaction)?;
         transaction.execute(
             "INSERT INTO analytics_meta(key,value) VALUES(?1,?2)",
             [
@@ -337,6 +340,37 @@ fn create_database(path: &Path, snapshot: &Value, schema_name: &str) -> StoreRes
     Ok(connection)
 }
 
+/// Install revision tracking from the same catalog that owns fresh databases.
+pub(crate) fn prepare_analytics_revision_schema(db: &Connection) -> StoreResult<()> {
+    let snapshot: Value = serde_json::from_str(SNAPSHOT)?;
+    let mut entries = snapshot["analytics.sqlite3"]["sqlite_master"]
+        .as_array()
+        .ok_or(StoreError::RecordContract(
+            "fresh analytics catalog is missing",
+        ))?
+        .iter()
+        .filter(|entry| {
+            entry["name"].as_str().is_some_and(|name| {
+                name.starts_with("analytics_usage_revision")
+                    || name.starts_with("analytics_cost_group_revision")
+            })
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry["create_order"].as_i64());
+    for entry in entries {
+        let sql = entry["sql"]
+            .as_str()
+            .ok_or(StoreError::RecordContract("revision schema DDL is missing"))?;
+        let sql = sql
+            .replacen("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1)
+            .replacen("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ", 1)
+            .replacen("CREATE TRIGGER ", "CREATE TRIGGER IF NOT EXISTS ", 1);
+        db.execute_batch(&sql)?;
+    }
+    db.execute("INSERT INTO analytics_usage_revision_clock SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM analytics_usage_revision_clock)", [])?;
+    Ok(())
+}
+
 /// Repository witnesses use the production catalog without files, fsyncs or writer actors.
 #[cfg(any(test, feature = "test-support"))]
 pub fn test_canvas() -> Connection {
@@ -347,6 +381,8 @@ pub fn test_canvas() -> Connection {
     let tx = connection.transaction().expect("fixture transaction");
     crate::bootstrap::prepare_sync_schema(&tx).expect("sync schema");
     crate::migrations::prepare_canvas_fixture(&tx).expect("current canvas format");
+    // Migrations drop old indexes; startup recreates the retained ones from their owners.
+    crate::bootstrap::prepare_runtime_event_indexes(&tx).expect("owned indexes");
     tx.commit().expect("fixture commits");
     connection
 }

@@ -36,10 +36,14 @@ mod m2026_10_30_text_blobs;
 mod m2026_10_30_unused_agent_columns;
 mod m2026_10_30_unused_start_action;
 mod m2026_10_30_vm_stream_owners;
+mod m2026_10_31_current_checks;
 mod m2026_10_31_native_status_error;
 mod m2026_10_31_project_record_kind;
 mod m2026_10_31_retired_start_indexes;
+mod m2026_10_31_room_record;
+mod m2026_10_31_sync_project;
 mod m2026_10_31_transfer_history_pages;
+mod m2026_10_31_work_records;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -59,6 +63,8 @@ pub use m2026_10_30_project_teams::apply as migrate_project_teams;
 pub use m2026_10_30_radio_room::apply as migrate_radio_room;
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_31_project_record_kind::apply as migrate_project_record_kind;
+#[cfg(any(test, feature = "test-support"))]
+pub use m2026_10_31_room_record::apply as migrate_room_record;
 
 use std::path::Path;
 
@@ -208,6 +214,16 @@ impl Migration for RegistryMigration {
 // Explicit dependency order: provider leaves precede strict generated columns;
 // columns precede indexes; volatile data moves before its new triggers exist.
 static CATALOG: &[&dyn Migration] = &[
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-work-records",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Legacy work records with malformed projection fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_work_records::apply(c.transaction),
+    },
     &SqlMigration {
         definition: MigrationDefinition {
             id: "2026-10-30-agent-compactions",
@@ -666,6 +682,16 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
+            id: "2026-10-31-sync-project-duplicates",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Project records with duplicate fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_sync_project::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
             id: "2026-10-31-native-status-error",
             introduced: OCTOBER_31,
             target: MigrationTarget::Canvas,
@@ -723,6 +749,89 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_10_31_project_record_kind::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-project-record-kind-repair",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Project records created without a discriminator after the first migration",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_project_record_kind::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-room-record",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Open room records with legacy fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_room_record::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-analytics-revision-schema",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Analytics,
+            supported_source: "Completed stores without analytics revision tracking",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| crate::fresh_state::prepare_analytics_revision_schema(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-peer-update-settings",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Stores with optional peer update settings",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| crate::schema::prepare_peer_update_settings(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-publication-overflow-receipts",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Analytics,
+            supported_source: "Stores with optional publication overflow receipts",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| crate::schema::prepare_publication_overflow_receipts(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-item-turn-scope",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Stores with the retired native approval index or without the item turn index",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| crate::schema::prepare_item_turn_scope(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-retired-capture-receipts",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Analytics,
+            supported_source: "Stores with retired capture receipt tables",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| {
+            c.transaction.execute_batch("DROP TABLE IF EXISTS analytics_capture_effect_receipts; DROP TABLE IF EXISTS analytics_capture_legacy_watermarks; DROP TABLE IF EXISTS analytics_capture_receipt_migrations;")?;
+            Ok(())
+        },
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-current-checks",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Completed stores with earlier agent and server outbox CHECK constraints",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_current_checks::apply(c.transaction),
     },
 ];
 

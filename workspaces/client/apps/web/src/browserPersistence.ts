@@ -1,16 +1,16 @@
+import { scopedStorage } from "./servers/storage";
+
 /** Browser databases allowed for device keys, credentials, and request fences. */
 export const browserDatabases = {
   deviceKey: "studio-device-key-v1",
   serverCredentials: "studio-server-credentials-v1",
   monitorInput: "studio-monitor-input-journal-v1",
-  outbox: "studio-thin-cache",
 } as const;
 
 export const browserStores = {
   deviceKey: "key",
   serverCredentials: "credentials",
   monitorInput: "inputs",
-  outbox: "unsent",
 } as const;
 
 export function browserIndexedDB(): IDBFactory | undefined {
@@ -18,13 +18,24 @@ export function browserIndexedDB(): IDBFactory | undefined {
 }
 
 const outboxPrefixes = {
+  messageSend: "studio-message-send:",
   nativeAction: "studio-native-action:",
+  stableRequest: "request-id:",
+  chatCreation: "codex-pending-creation:",
+  complaintResponse: "studio-message-responses:",
   projectSave: "studio-peer-convert:",
   queueChange: "studio-queue-change:",
+  removeSending: "studio-remove-sending:",
+  removedSend: "studio-removed-send:",
+  sidebarOrder: "codex-sidebar-order:",
+  agentMode: "studio-agent-mode:",
   serverAccess: "studio-server-access-pending",
   pairing: "studio-pairing-attempt-v1",
   serverManagement: "studio-server-management-v1:",
   legacyServerManagement: "studio-server-discovery-pending-v1",
+  monitorRestart: "monitor-restart:",
+  processControl: "process-control:",
+  mcpReconnect: "studio-mcp-reconnect:",
 } as const;
 export type OutboxRequestKind = keyof typeof outboxPrefixes;
 
@@ -48,6 +59,18 @@ export function outboxRequests(
   };
 }
 
+export function sessionOutboxRequests() {
+  return outboxRequests({
+    getItem: (key) => globalThis.sessionStorage.getItem(key),
+    setItem: (key, value) => globalThis.sessionStorage.setItem(key, value),
+    removeItem: (key) => globalThis.sessionStorage.removeItem(key),
+  });
+}
+
+export function scopedSessionOutbox(prefix: string): Storage {
+  return scopedStorage(() => globalThis.sessionStorage, prefix);
+}
+
 export function outboxRequestKeys(
   storage: Storage,
   kind: OutboxRequestKind,
@@ -61,13 +84,65 @@ export function outboxRequestKeys(
     .map((name) => name.slice(outboxPrefixes[kind].length));
 }
 
+/** Serialize queue identity changes across tabs using the existing lock database. */
+export function createQueueOutbox(storage: Storage, databaseName: string) {
+  return async function updateQueueRequest<T>(
+    suffix: string,
+    fallback: T,
+    update: (current: T) => T,
+  ): Promise<T> {
+    const key = outboxRequests(storage).key("queueChange", suffix);
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = browserIndexedDB()!.open(databaseName, 1);
+      request.onupgradeneeded = () =>
+        request.result.createObjectStore("writes");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction("writes", "readwrite");
+      let result: T;
+      let failure: unknown;
+      tx.objectStore("writes").get(key).onsuccess = () => {
+        try {
+          const raw = storage.getItem(key);
+          result = update(raw === null ? fallback : JSON.parse(raw));
+          if (result === null) storage.removeItem(key);
+          else storage.setItem(key, JSON.stringify(result));
+        } catch (error) {
+          failure = error;
+          tx.abort();
+        }
+      };
+      tx.oncomplete = () => {
+        db.close();
+        resolve(result!);
+      };
+      tx.onerror = tx.onabort = () => {
+        db.close();
+        reject(
+          failure ||
+            tx.error ||
+            new Error("Queue changes could not be saved on this device."),
+        );
+      };
+    });
+  };
+}
+
 /** Remove retired local copies without touching credentials or request fences. */
 export async function cleanupLegacyPersistence(
-  storage: Storage = globalThis.localStorage,
-  factory: IDBFactory | undefined = browserIndexedDB(),
+  storage: Pick<
+    Storage,
+    "length" | "key" | "removeItem"
+  > = globalThis.localStorage,
+  factory:
+    | Pick<IDBFactory, "databases" | "deleteDatabase">
+    | undefined = browserIndexedDB(),
 ) {
   const retiredKeys = [
     "codex-chat-draft:",
+    "codex-queue-edit:",
     "codex-drafts:",
     "studio-session-cost:",
     "studio-upload-cancelled:",
@@ -75,6 +150,9 @@ export async function cleanupLegacyPersistence(
     "studio-workspace-panel-width:",
     "studio-sidebar-width:",
     "studio-removed-messages:",
+    "studio-peer-conversion-dialog:",
+    "studio-routes-v1:",
+    "studio-chat-scroll:",
   ];
   const keys = Array.from({ length: storage.length }, (_, index) =>
     storage.key(index),
@@ -82,11 +160,29 @@ export async function cleanupLegacyPersistence(
   for (const key of keys) {
     if (!key) continue;
     const logical = key.replace(/^:server:[^:]+:/, "");
-    if (retiredKeys.some((prefix) => logical.startsWith(prefix)))
+    if (
+      retiredKeys.some((prefix) => logical.startsWith(prefix)) ||
+      (logical.startsWith("studio-turns:") &&
+        logical.endsWith(":window-anchor")) ||
+      logical === "studio-automatic-ui-removals-v1" ||
+      logical === "studio-automatic-ui-migration-v3" ||
+      (logical.startsWith(outboxPrefixes.sidebarOrder) &&
+        !logical.endsWith(":pending")) ||
+      (logical.startsWith(outboxPrefixes.chatCreation) &&
+        /:(?:rejected|dismissed):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          logical,
+        ) &&
+        !logical.includes(":request:"))
+    )
       storage.removeItem(key);
   }
   if (!factory) return;
-  const retiredDatabases = ["codex-studio-dictation", "codex-studio-uploads"];
+  const retiredDatabases = [
+    "codex-studio-dictation",
+    "codex-studio-uploads",
+    "studio-automatic-ui-access-v1",
+    "studio-thin-cache",
+  ];
   for (const { name } of await factory.databases()) {
     if (
       !name ||
@@ -103,4 +199,46 @@ export async function cleanupLegacyPersistence(
         reject(new Error("Close older Studio pages to remove retired data."));
     });
   }
+}
+
+export const PAIRED_SERVERS_KEY = "studio-paired-servers-v1";
+
+export type PairedServerReference = {
+  id: string;
+  origin: string;
+  credentialId: string;
+};
+
+export function readPairedServerReferences(
+  storage: Storage = globalThis.localStorage,
+): PairedServerReference[] {
+  const rows: unknown = JSON.parse(
+    storage?.getItem(PAIRED_SERVERS_KEY) || "[]",
+  );
+  if (!Array.isArray(rows))
+    throw new Error("The saved server list is invalid.");
+  return rows.map((row) => {
+    if (
+      !row ||
+      typeof row.id !== "string" ||
+      typeof row.origin !== "string" ||
+      typeof row.credentialId !== "string"
+    )
+      throw new Error("The saved server list is invalid.");
+    return { id: row.id, origin: row.origin, credentialId: row.credentialId };
+  });
+}
+
+export function writePairedServerReferences(
+  servers: readonly PairedServerReference[],
+  storage: Storage = globalThis.localStorage,
+): void {
+  storage.setItem(
+    PAIRED_SERVERS_KEY,
+    JSON.stringify(
+      servers
+        .map(({ id, origin, credentialId }) => ({ id, origin, credentialId }))
+        .sort((a, b) => a.id.localeCompare(b.id)),
+    ),
+  );
 }

@@ -67,6 +67,7 @@ describe("concurrent servers in one interface", () => {
       memory(),
     );
     const waiting = api.waitForStreamSession();
+    expect(api.getStreamSession()).toBeUndefined();
     api.receiveStreamSession({
       routes: [],
       sessionId: "one",
@@ -77,6 +78,7 @@ describe("concurrent servers in one interface", () => {
       workspaceId: "a".repeat(32),
       token: "owner",
     });
+    expect(api.getStreamSession()?.sessionId).toBe("one");
     await api.post("/api/organization", { id: "chat" });
     expect(requests[0]?.headers.get("X-Canvas-Token")).toBe("owner");
     expect(requests[0]?.headers.get("X-Canvas-Workspace")).toBe("a".repeat(32));
@@ -87,7 +89,12 @@ describe("concurrent servers in one interface", () => {
         workspaceId: "b".repeat(32),
       }),
     ).toThrow();
+    expect(api.getStreamSession()?.sessionId).toBe("one");
     expect(requests).toHaveLength(1);
+    api.clearStreamSession("older");
+    expect(api.getStreamSession()?.sessionId).toBe("one");
+    api.clearStreamSession("one");
+    expect(api.getStreamSession()).toBeUndefined();
   });
   it("versions disposable caches without changing request identity storage", () => {
     const disk = memory();
@@ -116,6 +123,16 @@ describe("concurrent servers in one interface", () => {
     );
     expect(() => api.stableRequestId("operation")).toThrow();
     expect(disk.getItem("a:request-id:operation")).toBe('{"requestId":"old"}');
+  });
+  it("refuses to create an identity if it cannot be stored", () => {
+    const disk = memory();
+    disk.setItem = () => {
+      throw new Error("storage unavailable");
+    };
+    const api = scope("a", async () => response({}), disk);
+    expect(() => api.stableRequestId("operation")).toThrow(
+      "storage unavailable",
+    );
   });
   it("retains the exact uncertain mutation after an empty successful response", async () => {
     const disk = memory();
@@ -154,16 +171,16 @@ describe("concurrent servers in one interface", () => {
     const a = scope("a", async () => response({}), disk);
     const b = scope("b", async () => response({}), disk);
     const position = { top: 120, following: false, distance: 240 };
-    a.save("studio-chat-scroll:chat", position);
-    a.save("studio-chat-scroll:chat", { ...position });
-    b.save("studio-chat-scroll:chat", position);
+    a.save("codex-desktop-opened:chat", position);
+    a.save("codex-desktop-opened:chat", { ...position });
+    b.save("codex-desktop-opened:chat", position);
     expect(write).toHaveBeenCalledTimes(2);
-    a.save("studio-chat-scroll:chat", { ...position, top: 121 });
+    a.save("codex-desktop-opened:chat", { ...position, top: 121 });
     expect(write).toHaveBeenCalledTimes(3);
-    disk.setItem("a:studio-chat-scroll:chat", cacheFixture(null));
-    a.save("studio-chat-scroll:chat", { ...position, top: 121 });
+    disk.setItem("a:codex-desktop-opened:chat", cacheFixture(null));
+    a.save("codex-desktop-opened:chat", { ...position, top: 121 });
     expect(write).toHaveBeenCalledTimes(5);
-    expect(b.saved("studio-chat-scroll:chat", null)).toEqual(position);
+    expect(b.saved("codex-desktop-opened:chat", null)).toEqual(position);
   });
 
   afterEach(() => vi.unstubAllGlobals());

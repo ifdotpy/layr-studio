@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::generated::{
-    DraftChangeBatch, EntityChangeBatch, ResourceChangeEvent, ResourceChangeEventReason,
-    ResourceRef, ResourceRevisionEntry, SubscriptionCursor, TranscriptChangeBatch,
-    TranscriptPageResponse, TranscriptStreamDelta, TranscriptSyncPage,
+    DraftChangeBatch, DraftSnapshot, EntityChangeBatch, ResourceChangeEvent,
+    ResourceChangeEventReason, ResourceRef, ResourceRevisionEntry, SubscriptionCursor,
+    TranscriptChangeBatch, TranscriptPageResponse, TranscriptStreamDelta, TranscriptSyncPage,
 };
 use axum::Json;
 use axum::body::{Body, Bytes};
@@ -32,8 +32,10 @@ use studio_runtime_schema::{SYNC_PROTOCOL_VERSION, SYNC_PROTOCOL_VERSION_TEXT};
 use studio_runtime_services::change_notifications::{
     ChangeSnapshot, MAX_SAFE_REVISION, SYNC_FRAME_MIN_INTERVAL,
 };
+#[cfg(test)]
+use studio_runtime_services::resource_notify::LiveDelta;
 use studio_runtime_services::resource_notify::{
-    LiveDelta, ResourceChanges, ResourceIdentity, ResourceKind, ResourceNotifications,
+    LiveEvent, ResourceChanges, ResourceIdentity, ResourceKind, ResourceNotifications,
     ResourceNotifyError,
 };
 #[cfg(test)]
@@ -87,12 +89,6 @@ pub(super) struct SubscribedResource {
 }
 
 impl SubscribedResource {
-    fn from_validated_value(value: Value) -> Result<Self, serde_json::Error> {
-        let key = value.to_string();
-        let resource = serde_json::from_value(value)?;
-        Ok(Self { resource, key })
-    }
-
     pub(super) fn new(resource: ResourceRef) -> Result<Self, ApiError> {
         let key = serde_json::to_string(&resource).map_err(|_| ApiError::internal())?;
         Ok(Self { resource, key })
@@ -195,6 +191,33 @@ fn authorize_resource(
             "This caller may not access this resource",
         ))
     }
+}
+
+fn progress_resource(
+    selector: studio_runtime_schema::progress_selector::ProgressSelector,
+) -> Result<ResourceRef, ApiError> {
+    use studio_runtime_schema::progress_selector::ProgressSelector;
+    use studio_runtime_schema::resource_ref::{RenameResource, RequestResource, VaultJobResource};
+    Ok(match selector {
+        ProgressSelector::Auth { request_id } => {
+            ResourceRef::AuthProgressResource(RequestResource {
+                request_id: request_id.try_into().map_err(|_| ApiError::internal())?,
+            })
+        }
+        ProgressSelector::Vault { request_id, job } => {
+            ResourceRef::VaultJobProgressResource(VaultJobResource {
+                request_id: request_id.try_into().map_err(|_| ApiError::internal())?,
+                job,
+            })
+        }
+        ProgressSelector::Rename {
+            request_id,
+            agent_id,
+        } => ResourceRef::RenameProgressResource(RenameResource {
+            request_id: request_id.try_into().map_err(|_| ApiError::internal())?,
+            agent_id: agent_id.try_into().map_err(|_| ApiError::internal())?,
+        }),
+    })
 }
 
 struct SubscriptionChange {
@@ -380,7 +403,7 @@ async fn sync_stream(
         );
     }
 
-    let resources = match parse_resources(&query, &state) {
+    let resources = match parse_resources(&query) {
         Ok(resources) => resources,
         Err(error) => return error.into_response(),
     };
@@ -402,6 +425,7 @@ async fn sync_stream(
         None => return ApiError::internal().into_response(),
     };
     let change_hub = Arc::clone(&state.sync_changes);
+    let live = state.resource_notifications.subscribe_live();
     let mut changes = change_hub.subscribe();
     changes.borrow_and_update();
     let mut initial_entity_sequence =
@@ -409,11 +433,7 @@ async fn sync_stream(
             Ok(sequence) => sequence,
             Err(error) => return error.into_response(),
         };
-    let initial_draft_sequence =
-        match read_draft_changes(Some(store.clone()), &resources, None).await {
-            Ok((sequence, _)) => sequence,
-            Err(error) => return error.into_response(),
-        };
+    let mut initial_draft_sequence = 0;
     let reconnect = headers.contains_key("last-event-id")
         || query
             .typed_value("reconnect")
@@ -469,15 +489,16 @@ async fn sync_stream(
     {
         match resource {
             ResourceRef::TranscriptResource(transcript) if entry.cursor.is_some() => {
-                transcript_sequences.insert(transcript.agent_id.clone(), entry.revision);
+                transcript_sequences
+                    .insert(transcript.agent_id.as_str().to_owned(), entry.revision);
             }
             ResourceRef::StateResource(_) if entry.cursor.is_some() => {
                 initial_entity_sequence = entry.revision
             }
+            ResourceRef::DraftsResource(_) => initial_draft_sequence = entry.revision,
             ResourceRef::AccountsResource(_)
             | ResourceRef::CostsResource(_)
             | ResourceRef::DesktopResource(_)
-            | ResourceRef::DraftsResource(_)
             | ResourceRef::LimitsResource(_)
             | ResourceRef::ModelsResource(_)
             | ResourceRef::MultiServerResource(_)
@@ -560,6 +581,38 @@ async fn sync_stream(
         initial_event,
     ));
     append_progress_frames(&state, &view, &mut initial).await;
+    if matches!(
+        principal,
+        studio_runtime_services::principal::Principal::Owner
+    ) {
+        let mut selectors = Vec::new();
+        if let Some(client) = &state.vault_job_client {
+            match super::host_secrets::retained_progress(client).await {
+                Ok(retained) => selectors.extend(retained),
+                Err(error) => return error.into_response(),
+            }
+        }
+        let cursor = state.sync_changes.snapshot();
+        if let Err(error) = append_auth_baseline(&state, &cursor, &mut initial).await {
+            return error.into_response();
+        }
+        let resources = match selectors
+            .into_iter()
+            .map(|selector| SubscribedResource::new(progress_resource(selector)?))
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(resources) => resources,
+            Err(error) => return error.into_response(),
+        };
+        let view = ResourceChanges {
+            versions: vec![cursor.revision; resources.len()],
+            cursor,
+            resources,
+            entity_reset: false,
+            overflow: false,
+        };
+        append_progress_frames(&state, &view, &mut initial).await;
+    }
     // OpenAPI owns the omitted-selector compatibility default; the HTTP witness
     // keeps this native/signed-client behavior in parity with that contract.
     let token_interest = match query
@@ -579,6 +632,7 @@ async fn sync_stream(
     }
 
     let stream_state = ResourceStream {
+        principal: Some(principal),
         http_state: Some(state.clone()),
         vault_readiness,
         subscription: Some(subscription),
@@ -597,7 +651,7 @@ async fn sync_stream(
         draft_sequence: initial_draft_sequence,
         store: Some(store),
         changes,
-        live: state.resource_notifications.subscribe_live(),
+        live,
         notifications: state.resource_notifications,
         token_rates,
         last_token_rates,
@@ -658,7 +712,7 @@ pub(super) async fn append_progress_frames(
     for (resource, revision) in view.resources.iter().zip(&view.versions) {
         let value = match &resource.resource {
             ResourceRef::AuthProgressResource(r) => {
-                super::subscriptions::auth_progress(state, &r.request_id)
+                super::subscriptions::auth_progress(state, r.request_id.as_str())
                     .await
                     .unwrap_or(Value::Null)
             }
@@ -700,21 +754,79 @@ pub(super) async fn append_progress_frames(
             | ResourceRef::ComplaintResource(_)
             | ResourceRef::TerminalOutputResource(_) => continue,
         };
-        let payload = json!({
-            "protocol": SYNC_PROTOCOL_VERSION,
-            "workspaceId": state.workspace_id,
-            "epoch": view.cursor.epoch,
-            "revision": revision,
-            "resource": resource.resource,
-            "value": value,
-        });
-        if state
-            .validators
-            .validate_component("ResourceProgressEvent", &payload)
-        {
-            frames.push_back(sse_event("resource-progress", None, payload));
+        append_progress_frame(
+            state,
+            &view.cursor,
+            *revision,
+            &resource.resource,
+            &value,
+            frames,
+        );
+    }
+}
+
+fn append_progress_frame(
+    state: &HttpState,
+    cursor: &studio_runtime_services::change_notifications::ChangeSnapshot,
+    revision: i64,
+    resource: &ResourceRef,
+    value: &Value,
+    frames: &mut VecDeque<Event>,
+) {
+    let payload = json!({
+        "protocol": SYNC_PROTOCOL_VERSION,
+        "workspaceId": state.workspace_id,
+        "epoch": cursor.epoch,
+        "revision": revision,
+        "resource": resource,
+        "value": value,
+    });
+    if state
+        .validators
+        .validate_component("ResourceProgressEvent", &payload)
+    {
+        frames.push_back(sse_event("resource-progress", None, payload));
+    }
+}
+
+async fn append_auth_baseline(
+    state: &HttpState,
+    cursor: &studio_runtime_services::change_notifications::ChangeSnapshot,
+    frames: &mut VecDeque<Event>,
+) -> Result<(), ApiError> {
+    use studio_runtime_schema::progress_selector::ProgressSelector;
+    let mut seen = std::collections::HashSet::new();
+    if let Some(driver) = state.account_driver.clone() {
+        let snapshot = studio_runtime_process::blocking_pool::spawn_blocking(
+            "runtime-http/retained-auth-progress",
+            move || driver.retained_progress(),
+        )
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())?;
+        for receipt in snapshot {
+            let id = receipt.request_id.clone();
+            let value = serde_json::to_value(receipt).map_err(|_| ApiError::internal())?;
+            let resource = progress_resource(ProgressSelector::Auth {
+                request_id: id.clone(),
+            })?;
+            seen.insert(id);
+            append_progress_frame(state, cursor, cursor.revision, &resource, &value, frames);
         }
     }
+    if let Some(login) = &state.claude_login {
+        for (id, value) in login
+            .retained_progress()
+            .await
+            .map_err(|_| ApiError::internal())?
+        {
+            if seen.insert(id.clone()) {
+                let resource = progress_resource(ProgressSelector::Auth { request_id: id })?;
+                append_progress_frame(state, cursor, cursor.revision, &resource, &value, frames);
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -840,7 +952,9 @@ async fn attach_recent_transcripts(state: &HttpState, event: &mut ResourceChange
         .resources
         .iter()
         .filter_map(|resource| match resource {
-            ResourceRef::TranscriptResource(transcript) => Some(transcript.agent_id.clone()),
+            ResourceRef::TranscriptResource(transcript) => {
+                Some(transcript.agent_id.as_str().to_owned())
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -902,10 +1016,7 @@ async fn attach_initial_entries(
     Ok(())
 }
 
-fn parse_resources(
-    query: &QueryParams,
-    state: &HttpState,
-) -> Result<Vec<SubscribedResource>, ApiError> {
+fn parse_resources(query: &QueryParams) -> Result<Vec<SubscribedResource>, ApiError> {
     let invalid = || {
         ApiError::validation(vec![
             Value::String("query".to_owned()),
@@ -919,20 +1030,14 @@ fn parse_resources(
     if raw.len() > MAX_SYNC_RESOURCE_QUERY_BYTES {
         return Err(invalid());
     }
-    let parsed: Value = serde_json::from_str(raw).map_err(|_| invalid())?;
-    let values = parsed.as_array().ok_or_else(invalid)?;
-    if values.len() > MAX_SYNC_RESOURCE_COUNT
-        || values
-            .iter()
-            .any(|resource| !state.validators.validate_component("ResourceRef", resource))
-    {
+    let values: Vec<ResourceRef> = serde_json::from_str(raw).map_err(|_| invalid())?;
+    if values.len() > MAX_SYNC_RESOURCE_COUNT {
         return Err(invalid());
     }
     let mut seen = BTreeSet::new();
     let mut resources = Vec::new();
     for value in values {
-        let resource =
-            SubscribedResource::from_validated_value(value.clone()).map_err(|_| invalid())?;
+        let resource = SubscribedResource::new(value).map_err(|_| invalid())?;
         let key = super::subscriptions::handler(&resource.resource)?.debug_key(&resource.resource);
         if seen.insert(key) {
             resources.push(resource);
@@ -963,12 +1068,65 @@ async fn read_entity_changes(
     read_entity_changes_typed(store, &typed_resources(resources), after).await
 }
 
+#[cfg(test)]
 async fn read_draft_changes(
     store: Option<Arc<RuntimeStore>>,
     resources: &[SubscribedResource],
     after: Option<i64>,
 ) -> Result<(i64, Option<DraftChangeBatch>), ApiError> {
     read_draft_changes_typed(store, &typed_resources(resources), after).await
+}
+
+pub(super) async fn draft_initial_snapshot(
+    state: HttpState,
+    resource: ResourceRef,
+) -> Result<ResourceRevisionEntry, ApiError> {
+    let store = state.store.ok_or_else(ApiError::internal)?;
+    let (revision, snapshot) = store
+        .read_async(
+            "runtime-http/routes/sync_stream/draft-baseline",
+            move |connection| {
+                let revision = SyncDocumentsRepository::draft_sequence(connection)
+                    .map_err(|_| ApiError::internal())?;
+                let mut rows = SyncDocumentsRepository::drafts_after(
+                    connection,
+                    0,
+                    SYNC_DRAFT_STREAM_MAX_DOCUMENTS + 1,
+                )
+                .map_err(|_| ApiError::internal())?;
+                let complete = rows.len() as i64 <= SYNC_DRAFT_STREAM_MAX_DOCUMENTS;
+                rows.truncate(SYNC_DRAFT_STREAM_MAX_DOCUMENTS as usize);
+                let documents = rows
+                    .into_iter()
+                    .map(super::sync_documents::draft_document)
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok::<_, ApiError>((
+                    revision,
+                    DraftSnapshot {
+                        complete,
+                        documents,
+                    },
+                ))
+            },
+        )
+        .await?;
+    Ok(ResourceRevisionEntry {
+        resource: Some(Some(resource)),
+        revision,
+        draft_snapshot: Some(snapshot),
+        reply_kind: Some(crate::generated::SubscriptionReplyKind::Snapshot),
+        cursor: None,
+        draft_changes: None,
+        entity_changes: None,
+        entity_sequence_reset: None,
+        entity_sequences: None,
+        terminal_base_offset: None,
+        transcript_changes: None,
+        transcript_snapshot: None,
+        discovery_snapshot: None,
+        voice_records: None,
+        view_snapshot: None,
+    })
 }
 
 #[cfg(test)]
@@ -1084,7 +1242,7 @@ async fn read_transcript_changes_typed(
         let ResourceRef::TranscriptResource(resource) = resource else {
             continue;
         };
-        let agent = resource.agent_id.clone();
+        let agent = resource.agent_id.as_str().to_owned();
         let scope = format!("transcript:{agent}");
         let after = if complete {
             sequences.get(&agent).copied()
@@ -1132,7 +1290,12 @@ async fn read_transcript_changes_typed(
                 .and_then(|document| {
                     serde_json::from_str::<TranscriptPageResponse>(&document.payload)
                         .ok()
-                        .map(|page| super::transcript::window_snapshot(page, resource.tail))
+                        .map(|page| {
+                            super::transcript::window_snapshot(
+                                page,
+                                resource.tail.map(|tail| tail.get()),
+                            )
+                        })
                 })
                 .map(Box::new);
             sequences.insert(agent.clone(), through);
@@ -1290,7 +1453,7 @@ fn attach_transcript_changes(
     let entries = std::mem::take(&mut event.resource_versions);
     for (resource, mut entry) in resources.into_iter().zip(entries) {
         if let ResourceRef::TranscriptResource(transcript) = &resource {
-            match updates.remove(&transcript.agent_id) {
+            match updates.remove(transcript.agent_id.as_str()) {
                 Some(TranscriptStreamUpdate::Unchanged) => continue,
                 Some(TranscriptStreamUpdate::Snapshot { revision, snapshot }) => {
                     entry.revision = revision;
@@ -1350,14 +1513,14 @@ async fn attach_transient_snapshots(
             ResourceRef::VoiceResource(resource) => {
                 let Some(store) = &state.store else { continue };
                 let after = voice_sequences
-                    .get(&resource.agent_id)
+                    .get(resource.agent_id.as_str())
                     .copied()
                     .unwrap_or_default();
                 if let Ok((cursor, payload)) =
                     studio_runtime_services::voice::stream_records(store, &resource.agent_id, after)
                         .await
                 {
-                    voice_sequences.insert(resource.agent_id.clone(), cursor);
+                    voice_sequences.insert(resource.agent_id.as_str().to_owned(), cursor);
                     entry.voice_records = payload
                         .and_then(|payload| serde_json::from_value(payload).ok())
                         .map(Some);
@@ -1397,6 +1560,7 @@ async fn attach_transient_snapshots(
 }
 
 struct ResourceStream {
+    principal: Option<studio_runtime_services::principal::Principal>,
     subscription: Option<LiveSubscription>,
     http_state: Option<HttpState>,
     vault_readiness: Option<studio_runtime_services::vault::VaultReadinessWatcher>,
@@ -1418,7 +1582,7 @@ struct ResourceStream {
     changes: tokio::sync::watch::Receiver<ChangeSnapshot>,
     notifications: Arc<ResourceNotifications>,
     /// Committed model text, in memory. A lagging stream drops frames; the durable item catches up.
-    live: tokio::sync::broadcast::Receiver<LiveDelta>,
+    live: tokio::sync::broadcast::Receiver<LiveEvent>,
     token_rates: Option<tokio::sync::watch::Receiver<Arc<TokenRates>>>,
     /// Last snapshot sent by this stream; clearing it makes the next frame a full snapshot.
     last_token_rates: Option<Arc<TokenRates>>,
@@ -1462,19 +1626,19 @@ async fn subscription_frame(state: &mut ResourceStream, update: SubscriptionChan
         state
             .resources
             .iter()
-            .any(|resource| matches!(&resource.resource, ResourceRef::TerminalOutputResource(r) if r.terminal_id == *id))
+            .any(|resource| matches!(&resource.resource, ResourceRef::TerminalOutputResource(r) if r.terminal_id.as_str() == id))
     });
     state.voice_sequences.retain(|id, _| {
         state
             .resources
             .iter()
-            .any(|resource| matches!(&resource.resource, ResourceRef::VoiceResource(r) if r.agent_id == *id))
+            .any(|resource| matches!(&resource.resource, ResourceRef::VoiceResource(r) if r.agent_id.as_str() == id))
     });
     state.transcript_sequences.retain(|id, _| {
         state
             .resources
             .iter()
-            .any(|resource| matches!(&resource.resource, ResourceRef::TranscriptResource(r) if r.agent_id == *id))
+            .any(|resource| matches!(&resource.resource, ResourceRef::TranscriptResource(r) if r.agent_id.as_str() == id))
     });
     state.initial.push_back(sse_event(
         "subscriptions",
@@ -1503,16 +1667,6 @@ async fn subscription_frame(state: &mut ResourceStream, update: SubscriptionChan
             state.entity_sequence = read_entity_sequence(state.store.clone(), &update.added)
                 .await
                 .ok()?;
-        }
-        if update
-            .added
-            .iter()
-            .any(|resource| matches!(resource.resource, ResourceRef::DraftsResource(_)))
-        {
-            state.draft_sequence = read_draft_changes(state.store.clone(), &update.added, None)
-                .await
-                .ok()?
-                .0;
         }
         let mut event = resource_changes_event(
             &state.workspace_id,
@@ -1549,13 +1703,16 @@ async fn subscription_frame(state: &mut ResourceStream, update: SubscriptionChan
             .ok()?,
         );
         for (resource, entry) in event.resources.iter().zip(&event.resource_versions) {
+            if matches!(resource, ResourceRef::DraftsResource(_)) {
+                state.draft_sequence = entry.revision;
+            }
             if matches!(resource, ResourceRef::StateResource(_)) && entry.cursor.is_some() {
                 state.entity_sequence = entry.revision;
             }
             if let ResourceRef::TranscriptResource(transcript) = resource {
                 state
                     .transcript_sequences
-                    .insert(transcript.agent_id.clone(), entry.revision);
+                    .insert(transcript.agent_id.as_str().to_owned(), entry.revision);
             }
         }
         if !state.recent_tails_sent {
@@ -1581,33 +1738,56 @@ async fn subscription_frame(state: &mut ResourceStream, update: SubscriptionChan
     Some(())
 }
 
-/// The next live text frame for a chat that this stream has open. A lagged receiver skips
-/// ahead: the durable item carries the text that was dropped.
+/// A lagged live receiver closes the stream so its client can recover its baseline.
 async fn next_live_delta(
-    live: &mut tokio::sync::broadcast::Receiver<LiveDelta>,
+    live: &mut tokio::sync::broadcast::Receiver<LiveEvent>,
     resources: &[SubscribedResource],
-) -> Event {
+) -> Option<LiveEvent> {
     use tokio::sync::broadcast::error::RecvError;
     loop {
         match live.recv().await {
-            Ok(delta)
+            Ok(LiveEvent::Delta(delta))
                 if resources.iter().any(|resource| {
-                    matches!(&resource.resource, ResourceRef::TranscriptResource(transcript) if transcript.agent_id == delta.agent_id)
+                    matches!(&resource.resource, ResourceRef::TranscriptResource(transcript) if transcript.agent_id.as_str() == delta.agent_id)
                 }) =>
             {
-                return sse_event(
-                    "live-delta",
-                    None,
-                    crate::generated::ResourceLiveDeltaEvent {
-                        agent_id: delta.agent_id,
-                        item_id: delta.item_id,
-                        offset: delta.offset as i64,
-                        text: delta.text,
-                    },
-                );
+                return Some(LiveEvent::Delta(delta));
             }
-            Ok(_) | Err(RecvError::Lagged(_)) => {}
-            Err(RecvError::Closed) => std::future::pending().await,
+            Ok(LiveEvent::Progress(selector)) => return Some(LiveEvent::Progress(selector)),
+            Ok(_) => {}
+            Err(RecvError::Lagged(_) | RecvError::Closed) => return None,
+        }
+    }
+}
+
+async fn live_frame(state: &ResourceStream, live: LiveEvent) -> Option<Event> {
+    match live {
+        LiveEvent::Delta(delta) => Some(sse_event(
+            "live-delta",
+            None,
+            crate::generated::ResourceLiveDeltaEvent {
+                agent_id: delta.agent_id,
+                item_id: delta.item_id,
+                offset: delta.offset as i64,
+                text: delta.text,
+            },
+        )),
+        LiveEvent::Progress(selector) => {
+            let (http, principal) = (state.http_state.as_ref()?, state.principal.as_ref()?);
+            let resource = progress_resource(selector).ok()?;
+            authorize_resource(principal, &resource).ok()?;
+            let resource = SubscribedResource::new(resource).ok()?;
+            let cursor = http.sync_changes.snapshot();
+            let view = ResourceChanges {
+                versions: vec![cursor.revision],
+                cursor,
+                resources: vec![resource],
+                entity_reset: false,
+                overflow: false,
+            };
+            let mut frames = VecDeque::new();
+            append_progress_frames(http, &view, &mut frames).await;
+            frames.pop_front()
         }
     }
 }
@@ -1643,7 +1823,8 @@ async fn next_frame(
                     return Some((Ok(state.initial.pop_front()?), state));
                 },
                 live = next_live_delta(&mut state.live, &state.resources) => {
-                    return Some((Ok(live), state));
+                    if let Some(frame) = live_frame(&state, live?).await { return Some((Ok(frame), state)); }
+                    continue;
                 },
                 changed = changed_not_before(Some(&mut state.changes), state.next_resources_frame_at) => {
                     if changed.is_err() { return None; }
@@ -1667,7 +1848,8 @@ async fn next_frame(
                     return Some((Ok(state.initial.pop_front()?), state));
                 },
                 live = next_live_delta(&mut state.live, &state.resources) => {
-                    return Some((Ok(live), state));
+                    if let Some(frame) = live_frame(&state, live?).await { return Some((Ok(frame), state)); }
+                    continue;
                 },
                 changed = changed_not_before(state.token_rates.as_mut(), state.next_token_frame_at) => {
                     if changed.is_err() { return None; }
@@ -1906,6 +2088,7 @@ fn resource_changes_event(
                     *revision
                 },
                 draft_changes: drafts.then(|| draft_changes.take()).flatten().map(Some),
+                draft_snapshot: None,
                 entity_changes: entity_changes.map(Some),
                 entity_sequence_reset: state.then_some(Some(view.entity_reset)),
                 entity_sequences: None,
@@ -2013,6 +2196,7 @@ fn initial_resource_sse_events(revision: i64, payload: ResourceChangeEvent) -> V
             entry.transcript_snapshot.is_some()
                 || entry.view_snapshot.is_some()
                 || entry.entity_changes.is_some()
+                || entry.draft_snapshot.is_some()
         })
     {
         return vec![resource_sse_event(revision, payload)];
@@ -2077,12 +2261,23 @@ fn resource_sse_event(revision: i64, mut payload: ResourceChangeEvent) -> Event 
             .filter_map(|entry| entry.transcript_snapshot.as_mut().and_then(Option::as_mut))
             .filter(|page| page.items.len() > 1)
             .max_by_key(|page| page.items.len());
-        let Some(page) = largest else {
-            break;
-        };
-        let keep = page.items.len().div_ceil(2);
-        let replacement = super::transcript::window_snapshot(page.clone(), Some(keep as i64));
-        *page = replacement;
+        if let Some(page) = largest {
+            let keep = page.items.len().div_ceil(2);
+            let replacement = super::transcript::window_snapshot(page.clone(), Some(keep as i64));
+            *page = replacement;
+            continue;
+        }
+        if let Some(snapshot) = payload
+            .resource_versions
+            .iter_mut()
+            .filter_map(|entry| entry.draft_snapshot.as_mut())
+            .find(|snapshot| !snapshot.documents.is_empty())
+        {
+            snapshot.documents.truncate(snapshot.documents.len() / 2);
+            snapshot.complete = false;
+            continue;
+        }
+        break;
     }
     studio_runtime_services::diagnostics::record_sync_recovery(
         studio_runtime_services::diagnostics::SyncRecoveryKind::Oversize,
@@ -2095,6 +2290,7 @@ fn resource_sse_event(revision: i64, mut payload: ResourceChangeEvent) -> Event 
         entry.transcript_changes = None;
         entry.transcript_snapshot = None;
         entry.draft_changes = None;
+        entry.draft_snapshot = None;
         entry.discovery_snapshot = None;
         entry.voice_records = None;
         entry.view_snapshot = None;
@@ -2648,7 +2844,7 @@ mod tests {
         .expect("blocking task")
         .expect("receipts");
         let (output, input) = tokio::sync::mpsc::channel(2);
-        let changes = state.sync_changes.clone();
+        let on_change = state.claude_login_change_callback();
         let login = LoginService::open(
             LoginConfig {
                 directory: directory.clone(),
@@ -2660,7 +2856,7 @@ mod tests {
             Arc::new(Launcher(tokio::sync::Mutex::new(Some(input)))),
             Arc::new(receipts),
             Arc::new(Chats),
-            Arc::new(move || changes.notify_one()),
+            on_change,
         )
         .await
         .expect("login service");
@@ -2674,6 +2870,7 @@ mod tests {
         let id = "e0166868-592a-4dca-8994-04d34a730af5";
         let url = "https://claude.com/cai/oauth/authorize?secret=transient-fixture";
         let mut changed = state.sync_changes.subscribe();
+        let mut live = state.resource_notifications.subscribe_live();
         let entity_sequence_before = store
             .read_async("test/before-progress", |connection| {
                 SyncDocumentsRepository::entity_sequence(connection)
@@ -2684,6 +2881,16 @@ mod tests {
             .start(id.into(), None, None, None)
             .await
             .expect("start once");
+        assert!(matches!(
+            live.try_recv(),
+            Ok(studio_runtime_services::resource_notify::LiveEvent::Progress(
+                studio_runtime_schema::progress_selector::ProgressSelector::Auth { request_id }
+            )) if request_id == id
+        ));
+        assert_eq!(
+            login.retained_progress().await.expect("retained progress")[0].0,
+            id
+        );
         output
             .send(LoginEvent::Output(format!("{url}\n").into_bytes()))
             .await
@@ -3233,6 +3440,242 @@ mod tests {
             assert_eq!(
                 session.get("token").and_then(Value::as_str),
                 is_owner.then_some("owner-secret")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn lagged_live_receiver_closes_stream() {
+        let changes =
+            Arc::new(studio_runtime_services::change_notifications::ChangeNotificationHub::new());
+        let notifications = Arc::new(ResourceNotifications::new(changes.clone()));
+        let tokens = TokenRateHub::new();
+        let stream = test_stream(&changes, &tokens, notifications.clone(), &[]);
+        for index in 0..=studio_runtime_services::resource_notify::LIVE_DELTA_CAPACITY {
+            notifications.publish_live(LiveDelta {
+                agent_id: "agent".into(),
+                item_id: "item".into(),
+                offset: index as u64,
+                text: "x".into(),
+            });
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), next_frame(stream))
+                .await
+                .expect("lag must terminate the stream")
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn rename_progress_reaches_stream_without_subscription() {
+        use axum::extract::ConnectInfo;
+        use axum::http::Request;
+        use tower::ServiceExt;
+
+        let root = tempfile::tempdir().expect("isolated state");
+        let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
+        store.transaction_with(|tx| {
+            let agent = studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,
+                "id":"agent", "rootId":"agent", "epoch":1, "status":"idle", "name":"Original",
+                "provider":"codex", "model":"gpt-6", "prompt":"Title fixture", "cwd":"/fixture",
+                "accountKey":"default", "isLead":false, "needsTitle":true, "manualName":false, "autoWake":false
+            }))?;
+            studio_runtime_store::AgentRepository::put(tx, &agent)
+        }).await.expect("seed agent");
+        let state = HttpState::new(
+            "token".into(),
+            "workspace".into(),
+            root.path().display().to_string(),
+            4321,
+            None,
+            Some(store),
+            None,
+        );
+        let app = crate::router(state.clone()).expect("router");
+        let response = app.clone().oneshot(Request::builder()
+            .uri(format!("/api/sync/stream?protocol={SYNC_PROTOCOL_VERSION_TEXT}&resources=%5B%5D&tokenRates=false"))
+            .header("host", "127.0.0.1:4321")
+            .extension(ConnectInfo(std::net::SocketAddr::from(([127, 0, 0, 1], 12345))))
+            .body(Body::empty()).expect("request")).await.expect("stream");
+        let mut stream = response.into_body().into_data_stream();
+        stream.next().await.expect("session").expect("bytes");
+        stream.next().await.expect("baseline").expect("bytes");
+        let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/rename")
+                    .header("host", "127.0.0.1:4321")
+                    .header("x-canvas-token", "token")
+                    .header("content-type", "application/json")
+                    .extension(ConnectInfo(std::net::SocketAddr::from((
+                        [127, 0, 0, 1],
+                        12345,
+                    ))))
+                    .body(Body::from(
+                        json!({"id":"agent","request_id":request_id}).to_string(),
+                    ))
+                    .expect("rename"),
+            )
+            .await
+            .expect("rename response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let frame = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let frame = stream.next().await.expect("stream").expect("bytes");
+                if String::from_utf8_lossy(&frame).contains("event: resource-progress") {
+                    break frame;
+                }
+            }
+        })
+        .await
+        .expect("progress without subscription");
+        assert!(String::from_utf8_lossy(&frame).contains("rename-progress"));
+        assert!(String::from_utf8_lossy(&frame).contains(&request_id));
+    }
+
+    #[tokio::test]
+    async fn auth_progress_streams_to_owner_and_recovers_completed_login() {
+        use axum::extract::ConnectInfo;
+        use axum::http::Request;
+        use studio_runtime_services::account_driver::{AccountDriver, CodexLoginRequest};
+        use studio_runtime_services::principal::{Grant, Principal};
+        use tower::ServiceExt;
+
+        let root = tempfile::tempdir().expect("isolated state");
+        let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
+        let registry = root.path().join("accounts.json");
+        tokio::fs::write(&registry, json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":{"id":"default","provider":"codex","home":"/fixture","label":"Codex","source":"fixture","status":"ready"}},"logins":{}}).to_string()).await.expect("registry");
+        let driver = Arc::new(AccountDriver::open(registry).expect("driver"));
+        let state = HttpState::new(
+            "token".into(),
+            "workspace".into(),
+            root.path().display().to_string(),
+            4321,
+            None,
+            Some(store),
+            None,
+        )
+        .with_account_driver(driver.clone());
+        let app = crate::router(state).expect("router");
+        let open = |principal| {
+            let app = app.clone();
+            async move {
+                app.oneshot(Request::builder()
+                    .uri(format!("/api/sync/stream?protocol={SYNC_PROTOCOL_VERSION_TEXT}&resources=%5B%5D&tokenRates=false"))
+                    .header("host", "127.0.0.1:4321")
+                    .extension(ConnectInfo(std::net::SocketAddr::from(([127, 0, 0, 1], 12345))))
+                    .extension(principal)
+                    .body(Body::empty()).expect("request")).await.expect("stream").into_body().into_data_stream()
+            }
+        };
+        let mut owner = open(Principal::Owner).await;
+        let mut device = open(Principal::Device {
+            id: "device".into(),
+            grant: Grant::Full,
+        })
+        .await;
+        let mut peer = open(Principal::Peer {
+            server: "peer".into(),
+        })
+        .await;
+        for stream in [&mut owner, &mut device, &mut peer] {
+            stream.next().await.expect("session").expect("bytes");
+            stream
+                .next()
+                .await
+                .expect("initial resources")
+                .expect("bytes");
+        }
+        let id = "b935b026-00ac-42df-9a1c-ce525d7a39e7";
+        let request = CodexLoginRequest {
+            login_id: id.into(),
+            account_key: None,
+            email: None,
+            label: None,
+        };
+        driver
+            .reserve_codex_login(&request, root.path(), 1.0)
+            .expect("reserve login");
+        let frame = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let frame = owner.next().await.expect("owner stream").expect("bytes");
+                if String::from_utf8_lossy(&frame).contains("auth-progress") {
+                    break frame;
+                }
+            }
+        })
+        .await
+        .expect("owner receives progress without subscription");
+        assert!(String::from_utf8_lossy(&frame).contains(id));
+        for stream in [&mut device, &mut peer] {
+            let received = tokio::time::timeout(Duration::from_millis(200), async {
+                while let Some(Ok(frame)) = stream.next().await {
+                    if String::from_utf8_lossy(&frame).contains("auth-progress") {
+                        return true;
+                    }
+                }
+                false
+            })
+            .await;
+            assert!(
+                received.is_err(),
+                "non-owner must not receive auth progress"
+            );
+        }
+        drop(owner);
+        driver
+            .finish_codex_login(id, &format!("login-{id}"), None, false, None, 2.0)
+            .expect("complete during disconnect");
+        super::super::subscriptions::TEST_BASELINE_AUTH_LOOKUPS
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        let mut reconnected = open(Principal::Owner).await;
+        let frame = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let frame = reconnected
+                    .next()
+                    .await
+                    .expect("reconnected stream")
+                    .expect("bytes");
+                if String::from_utf8_lossy(&frame).contains("auth-progress") {
+                    break frame;
+                }
+            }
+        })
+        .await
+        .expect("completed login in baseline");
+        let text = String::from_utf8_lossy(&frame);
+        assert!(text.contains(id) && text.contains("error"));
+        assert_eq!(
+            super::super::subscriptions::TEST_BASELINE_AUTH_LOOKUPS
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "baseline must not perform per-request account lookups"
+        );
+        for principal in [
+            Principal::Device {
+                id: "device".into(),
+                grant: Grant::Full,
+            },
+            Principal::Peer {
+                server: "peer".into(),
+            },
+        ] {
+            let mut stream = open(principal).await;
+            let received = tokio::time::timeout(Duration::from_millis(200), async {
+                while let Some(Ok(frame)) = stream.next().await {
+                    if String::from_utf8_lossy(&frame).contains("auth-progress") {
+                        return true;
+                    }
+                }
+                false
+            })
+            .await;
+            assert!(
+                received.is_err(),
+                "non-owner baseline excludes auth progress"
             );
         }
     }
@@ -4754,6 +5197,86 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn draft_snapshot_reports_its_limit() {
+        let root = tempfile::tempdir().expect("isolated state");
+        let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
+        store.transaction(|tx| {
+            for index in 0..=SYNC_DRAFT_STREAM_MAX_DOCUMENTS {
+                let id = format!("phone:{index}");
+                let payload = json!({"id":id,"device":"phone","session":index.to_string(),"text":"saved","updated":1}).to_string();
+                SyncDocumentsRepository::put_draft(tx, &id, &payload, false)?;
+            }
+            Ok(())
+        }).await.expect("drafts");
+        let state = HttpState::new(
+            "token".into(),
+            "workspace".into(),
+            root.path().display().to_string(),
+            4321,
+            None,
+            Some(store),
+            None,
+        );
+        let resource =
+            ResourceRef::DraftsResource(studio_runtime_schema::resource_ref::EmptyResource {});
+        let entry = draft_initial_snapshot(state, resource)
+            .await
+            .expect("snapshot");
+        let snapshot = entry.draft_snapshot.expect("baseline");
+        assert!(!snapshot.complete);
+        assert_eq!(
+            snapshot.documents.len() as i64,
+            SYNC_DRAFT_STREAM_MAX_DOCUMENTS
+        );
+        assert!(entry.revision > snapshot.documents.last().expect("draft").seq);
+    }
+
+    #[tokio::test]
+    async fn draft_stream_open_contains_stored_draft() {
+        use axum::extract::ConnectInfo;
+        use axum::http::Request;
+        use futures_util::StreamExt;
+        use tower::ServiceExt;
+        let root = tempfile::tempdir().expect("isolated state");
+        let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
+        store.transaction(|tx| {
+            SyncDocumentsRepository::put_draft(tx, "phone:chat", r#"{"id":"phone:chat","device":"phone","session":"chat","text":"saved","updated":1}"#, false)?;
+            Ok(())
+        }).await.expect("draft");
+        let state = HttpState::new(
+            "token".into(),
+            "workspace".into(),
+            root.path().display().to_string(),
+            4321,
+            None,
+            Some(store),
+            None,
+        );
+        let app = crate::router(state).expect("router");
+        for reconnect in [false, true] {
+            let request = Request::builder()
+                .uri(format!("/api/sync/stream?protocol={SYNC_PROTOCOL_VERSION_TEXT}&resources=%5B%7B%22kind%22%3A%22drafts%22%7D%5D&tokenRates=false&reconnect={reconnect}"))
+                .header("host", "127.0.0.1:4321").header("x-canvas-token", "token")
+                .extension(ConnectInfo(std::net::SocketAddr::from(([127,0,0,1],12345))))
+                .body(Body::empty()).expect("request");
+            let mut body = app
+                .clone()
+                .oneshot(request)
+                .await
+                .expect("stream")
+                .into_body()
+                .into_data_stream();
+            body.next().await.expect("session").expect("bytes");
+            let bytes = body.next().await.expect("baseline").expect("bytes");
+            let text = std::str::from_utf8(&bytes).expect("utf8");
+            assert!(
+                text.contains("phone:chat"),
+                "baseline must contain stored draft: {text}"
+            );
+        }
+    }
+
     #[tokio::test(start_paused = true)]
     async fn state_stream_delivers_draft_edits_and_tombstones_without_pull() {
         let root = tempfile::tempdir().expect("isolated state");
@@ -5409,10 +5932,18 @@ mod tests {
             .await
             .expect("baseline");
         let changed = state.claude_login_change_callback();
+        let mut live = notifications.subscribe_live();
+        changed("00000000-0000-4000-8000-000000000001");
+        assert!(matches!(
+            live.try_recv(),
+            Ok(studio_runtime_services::resource_notify::LiveEvent::Progress(
+                studio_runtime_schema::progress_selector::ProgressSelector::Auth { request_id }
+            )) if request_id == "00000000-0000-4000-8000-000000000001"
+        ));
         let mut after = initial.cursor.revision;
         for _ in 0..2 {
             // The actor publishes starting, then a provider URL, before adding an account.
-            changed();
+            changed("00000000-0000-4000-8000-000000000001");
             let progress = notifications
                 .changes_since_with_content(&resources, Some(after), |resource| {
                     fixture_resource_content(state.clone(), resource)
@@ -5534,7 +6065,9 @@ mod tests {
         let tokens = TokenRateHub::new();
         let mut changes = hub.subscribe();
         let baseline = changes.borrow_and_update().clone();
+        let notifications = Arc::new(ResourceNotifications::new(Arc::new(hub.clone())));
         let state = ResourceStream {
+            principal: None,
             http_state: None,
             vault_readiness: None,
             subscription: None,
@@ -5553,8 +6086,8 @@ mod tests {
             draft_sequence: 0,
             store: None,
             changes,
-            live: tokio::sync::broadcast::channel(1).1,
-            notifications: Arc::new(ResourceNotifications::new(Arc::new(hub.clone()))),
+            live: notifications.subscribe_live(),
+            notifications,
             token_rates: Some(tokens.subscribe()),
             last_token_rates: None,
             consecutive_token_frames: 0,
@@ -5589,6 +6122,7 @@ mod tests {
         let changes = hub.subscribe();
         let baseline = changes.borrow().clone();
         let state = ResourceStream {
+            principal: None,
             http_state: None,
             vault_readiness: None,
             subscription: None,
@@ -5607,7 +6141,7 @@ mod tests {
             draft_sequence: 0,
             store: None,
             changes,
-            live: tokio::sync::broadcast::channel(1).1,
+            live: notifications.subscribe_live(),
             notifications: notifications.clone(),
             token_rates: Some(token_hub.subscribe()),
             last_token_rates: None,
@@ -5920,6 +6454,7 @@ mod tests {
         let changes = hub.subscribe();
         let baseline = changes.borrow().clone();
         ResourceStream {
+            principal: None,
             http_state: None,
             vault_readiness: None,
             subscription: None,
@@ -6307,7 +6842,9 @@ mod tests {
         let hub = ChangeNotificationHub::new();
         let changes = hub.subscribe();
         let baseline = changes.borrow().clone();
+        let notifications = Arc::new(ResourceNotifications::new(Arc::new(hub.clone())));
         let state = ResourceStream {
+            principal: None,
             http_state: None,
             vault_readiness: None,
             subscription: None,
@@ -6326,8 +6863,8 @@ mod tests {
             draft_sequence: 0,
             store: None,
             changes,
-            live: tokio::sync::broadcast::channel(1).1,
-            notifications: Arc::new(ResourceNotifications::new(Arc::new(hub.clone()))),
+            live: notifications.subscribe_live(),
+            notifications,
             token_rates: Some(TokenRateHub::new().subscribe()),
             last_token_rates: None,
             consecutive_token_frames: 0,

@@ -61,12 +61,7 @@ import { useServerFrame } from "./servers/frameBridge";
 import { serverParentOrigin } from "./servers/environment";
 import type { ServerCommand } from "./servers/navigation";
 import ServerAccountsPanel from "./servers/ServerAccountsPanel";
-import {
-  localServer,
-  viewServer,
-  readServerAliases,
-  SERVER_REGISTRY_EVENT,
-} from "./servers/registry";
+import { localServer, viewServer, readServerAliases } from "./servers/registry";
 import {
   useServerAliases,
   DEFAULT_LOCAL_SERVER_ALIAS,
@@ -684,13 +679,6 @@ export default function App({ active = true }: { active?: boolean }) {
   const narrowTeam =
     !(teamHasSidebar ? teamFitsWithSidebar : teamFitsWithoutSidebar) ||
     !rowLayout.teamCanInline;
-  useEffect(() => {
-    if (!workspaceId) return;
-    const key = `studio-server-workspace-id:${serverViewId || "local"}`;
-    if (globalThis.localStorage.getItem(key) === workspaceId) return;
-    globalThis.localStorage.setItem(key, workspaceId);
-    window.dispatchEvent(new Event(SERVER_REGISTRY_EVENT));
-  }, [workspaceId, serverViewId]);
   const dataRef = useRef(data);
   dataRef.current = data;
   const [pendingConversationDelete, setPendingConversationDelete] =
@@ -860,16 +848,12 @@ export default function App({ active = true }: { active?: boolean }) {
     creationLock = useRef(false),
     renameRequests = useRef<Record<string, { text: string; id: string }>>({}),
     toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingSendKey = `studio-pending-sends:${data?.stateDir || ""}`;
   const [renameVersion, setRenameVersion] = useState(0);
   const persistRenames = () => {
     save(pendingRenameKey, renameRequests.current);
     setRenameVersion((version) => version + 1);
   };
   const pendingRenameKey = `studio-pending-renames:${data?.stateDir || ""}`;
-  useEffect(() => {
-    if (data?.stateDir) sends.current = saved(pendingSendKey, {});
-  }, [pendingSendKey, data?.stateDir]);
   useEffect(() => {
     if (data?.stateDir) renameRequests.current = saved(pendingRenameKey, {});
   }, [pendingRenameKey, data?.stateDir]);
@@ -887,7 +871,6 @@ export default function App({ active = true }: { active?: boolean }) {
     );
     return () => stops.forEach((stop) => stop());
   }, [pendingRenameKey, renameVersion, renameEvents]);
-  const persistSends = () => save(pendingSendKey, sends.current);
   useEffect(() => {
     if (!data?.stateDir) return;
     const load = () => {
@@ -1817,8 +1800,6 @@ export default function App({ active = true }: { active?: boolean }) {
             // Enter delivers after the current tool call; Tab after the turn.
             delivery: options?.delivery || DeliveryMoment.CurrentTurn,
           };
-        // Retain the exact request until the durable outbox owns its retry.
-        persistSends();
         request = sends.current[id];
         const entry: OutgoingMessage = {
           id: request.id,
@@ -1833,18 +1814,17 @@ export default function App({ active = true }: { active?: boolean }) {
           request,
           entry.attachments,
           async () => {
-            // Keep the draft until a durable store owns the immutable message.
+            // Keep the draft until the request is saved.
             setDrafts((old) => {
               const next = { ...old };
               if (next[draftKey]?.trim() === text) delete next[draftKey];
               if (next[id]?.trim() === text) delete next[id];
               return next;
             });
-            // The outbox now owns this immutable request. A new user submission,
+            // The saved command owns this message. A new user submission,
             // including identical text, gets its own identity.
             if (sends.current[id]?.id === entry.id) {
               delete sends.current[id];
-              persistSends();
             }
             await options?.onPersist?.();
             release();
@@ -1866,7 +1846,6 @@ export default function App({ active = true }: { active?: boolean }) {
         if (result.status === "cancelled") {
           if (sends.current[id]?.id === entry.id) {
             delete sends.current[id];
-            persistSends();
           }
           throw new ApiError(
             "This message was cancelled. Send it again to resume.",
@@ -1882,7 +1861,6 @@ export default function App({ active = true }: { active?: boolean }) {
           );
         if (sends.current[id]?.id === entry.id) {
           delete sends.current[id];
-          persistSends();
         }
         if (
           result.kind === "server" &&
@@ -1926,7 +1904,6 @@ export default function App({ active = true }: { active?: boolean }) {
           !sends.current[request.room]
         )
           sends.current[request.room] = request;
-        persistSends();
         setOutgoing((old) =>
           old[key]
             ? {
