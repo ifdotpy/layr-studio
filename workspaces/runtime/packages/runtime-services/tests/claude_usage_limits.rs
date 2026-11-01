@@ -324,7 +324,7 @@ async fn account_limits_change_updates_each_wait_by_its_model() {
             tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", [model, &agent.to_string()]).map_err(studio_runtime_store::StoreError::from)?;
             tx.execute("INSERT INTO runtime_usage_resumes(id,agent,record) VALUES(?1,?1,?2)", [model, &record.to_string()]).map_err(studio_runtime_store::StoreError::from)?;
         }
-        let raw = json!({"accountKey":"default","at":1000.0,"data":data(100.0)});
+        let raw: studio_runtime_schema::usage_limits::UsageLimitsResponse = serde_json::from_value(json!({"accountKey":"default","at":1000.0,"data":data(100.0)})).unwrap();
         assert!(stage_limits_changed_for_account(tx, "default", &raw, 1000.0)?);
         Ok::<_, studio_runtime_services::continuation::ContinuationError>(())
     }).await.expect("account telemetry");

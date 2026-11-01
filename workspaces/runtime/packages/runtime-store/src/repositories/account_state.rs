@@ -56,6 +56,105 @@ pub struct LimitsReadDiagnostic {
 /// Freshness fields stored privately between content changes. Unit: Unix seconds.
 pub const LIMITS_OBSERVATION_TIME_FIELDS: &[&str] = &["at", "readAt", "checkedAt", "processedAt"];
 
+/// Durable provider cursor and observation times; absent and null times are equivalent.
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitsStamp {
+    #[serde(
+        default,
+        deserialize_with = "studio_runtime_schema::json_object::optional_field"
+    )]
+    pub scope: Option<studio_runtime_schema::provider_call_contract::ConnectionScope>,
+    #[serde(default, deserialize_with = "lenient_cursor")]
+    pub cursor: u64,
+    #[serde(
+        default,
+        deserialize_with = "studio_runtime_schema::json_object::optional_field",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub at: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "studio_runtime_schema::json_object::optional_field",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub read_at: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "studio_runtime_schema::json_object::optional_field",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub checked_at: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "studio_runtime_schema::json_object::optional_field",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub processed_at: Option<f64>,
+}
+
+fn lenient_cursor<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
+    Ok(studio_runtime_schema::json_object::optional_field(deserializer)?.unwrap_or_default())
+}
+
+impl LimitsStamp {
+    pub fn read(raw: Option<String>) -> StoreResult<Self> {
+        Ok(raw
+            .map(|raw| serde_json::from_str::<Option<Self>>(&raw))
+            .transpose()?
+            .flatten()
+            .unwrap_or_default())
+    }
+
+    pub fn set_times(
+        &mut self,
+        response: &studio_runtime_schema::usage_limits::UsageLimitsResponse,
+    ) {
+        self.at = response.at;
+        self.read_at = response.read_at;
+        self.checked_at = response.checked_at;
+        self.processed_at = response.processed_at;
+    }
+
+    pub fn apply(&self, response: &mut studio_runtime_schema::usage_limits::UsageLimitsResponse) {
+        if self.at.is_some()
+            || self.read_at.is_some()
+            || self.checked_at.is_some()
+            || self.processed_at.is_some()
+        {
+            response.at = self.at;
+            response.read_at = self.read_at;
+            response.checked_at = self.checked_at;
+            response.processed_at = self.processed_at;
+        }
+    }
+}
+
+pub fn typed_limits_snapshot(
+    connection: &Connection,
+    account: &str,
+    stamp: &LimitsStamp,
+) -> StoreResult<Option<studio_runtime_schema::usage_limits::UsageLimitsResponse>> {
+    #[derive(serde::Deserialize)]
+    struct Entity {
+        value: Projection,
+    }
+    #[derive(serde::Deserialize)]
+    struct Projection {
+        observation: studio_runtime_schema::usage_limits::UsageLimitsResponse,
+    }
+    let raw: Option<String> = connection.query_row(
+        "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0",
+        [account], |row| row.get(0),
+    ).optional()?;
+    raw.map(|raw| {
+        let mut response = serde_json::from_str::<Entity>(&raw)?.value.observation;
+        stamp.apply(&mut response);
+        Ok(response)
+    })
+    .transpose()
+}
+
 /// Move observation times onto a decoded account snapshot without cloning provider data.
 pub fn apply_limits_observation(snapshot: &mut Value, observation: &mut Value) {
     let (Some(snapshot), Some(observation)) =
@@ -300,12 +399,12 @@ pub fn limits_observation(connection: &Connection, account: &str) -> StoreResult
 pub fn put_limits_observation(
     tx: &Transaction<'_>,
     account: &str,
-    observation: &str,
+    observation: &LimitsStamp,
 ) -> StoreResult<()> {
     ensure_account(tx, account)?;
     tx.execute(
         "UPDATE runtime_account_state SET limits_observation=?2 WHERE account=?1",
-        (account, observation),
+        (account, serde_json::to_string(observation)?),
     )?;
     Ok(())
 }
@@ -315,36 +414,10 @@ pub fn latest_limits_snapshot(
     connection: &Connection,
     account: &str,
 ) -> StoreResult<Option<Value>> {
-    let mut observation = limits_observation(connection, account)?
-        .map(|raw| serde_json::from_str::<Value>(&raw))
-        .transpose()?
-        .unwrap_or(Value::Null);
-    limits_snapshot_with_observation(connection, account, &mut observation)
-}
-
-/// Join one already-decoded observation with its account entity; each document parses once.
-pub fn limits_snapshot_with_observation(
-    connection: &Connection,
-    account: &str,
-    observation: &mut Value,
-) -> StoreResult<Option<Value>> {
-    let raw: Option<String> = connection.query_row(
-        "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0",
-        [account], |row| row.get(0),
-    ).optional()?;
-    let mut snapshot = raw
-        .map(|raw| serde_json::from_str::<Value>(&raw))
-        .transpose()?
-        .and_then(|mut envelope| {
-            envelope
-                .get_mut("value")?
-                .get_mut("observation")
-                .map(Value::take)
-        });
-    if let Some(snapshot) = &mut snapshot {
-        apply_limits_observation(snapshot, observation);
-    }
-    Ok(snapshot)
+    let stamp = LimitsStamp::read(limits_observation(connection, account)?)?;
+    typed_limits_snapshot(connection, account, &stamp)?
+        .map(|value| serde_json::to_value(value).map_err(StoreError::from))
+        .transpose()
 }
 
 /// Move persisted v3 workspace snapshots once, without changing their account identity.

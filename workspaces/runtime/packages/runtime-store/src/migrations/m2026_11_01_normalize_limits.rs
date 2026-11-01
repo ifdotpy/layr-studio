@@ -33,5 +33,18 @@ pub(super) fn apply(tx: &Transaction<'_>, now: f64) -> StoreResult<()> {
         let view = RateLimitView::read(&raw, &id, now)?;
         SyncDocumentsRepository::put_entity(tx, "rateLimit", &id, view, false)?;
     }
+    if crate::schema::table_exists(tx, "runtime_account_state")? {
+        let rows = {
+            let mut query = tx.prepare("SELECT account,limits_observation FROM runtime_account_state WHERE limits_observation IS NOT NULL")?;
+            let rows = query.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        for (account, stamp) in rows {
+            let stamp = crate::account_state::LimitsStamp::read(Some(stamp))?;
+            crate::account_state::put_limits_observation(tx, &account, &stamp)?;
+        }
+    }
     Ok(())
 }

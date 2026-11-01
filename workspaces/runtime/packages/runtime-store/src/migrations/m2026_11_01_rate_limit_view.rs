@@ -78,6 +78,25 @@ mod tests {
     use rusqlite::Connection;
 
     #[test]
+    fn migration_normalizes_legacy_null_observation_times() {
+        let mut db = crate::fresh_state::test_canvas();
+        db.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('rateLimit','a',1,'old',?1,0)", [r#"{"collection":"rateLimit","id":"a","value":{"accountKey":"a","at":null,"error":"offline"}}"#]).unwrap();
+        db.execute("INSERT INTO runtime_account_state(account,next_generation,journal_ack,recovery_required,streams,limits_observation) VALUES('a',0,0,0,'null',?1)", [r#"{"scope":null,"cursor":0,"at":null,"checkedAt":123}"#]).unwrap();
+        let tx = db.transaction().unwrap();
+        super::super::m2026_11_01_normalize_limits::apply(&tx, 100.0).unwrap();
+        let stamp = crate::account_state::limits_observation(&tx, "a")
+            .unwrap()
+            .unwrap();
+        let stamp: serde_json::Value = serde_json::from_str(&stamp).unwrap();
+        assert!(stamp.get("at").is_none());
+        assert_eq!(stamp["checkedAt"].as_f64(), Some(123.0));
+        let snapshot = crate::account_state::latest_limits_snapshot(&tx, "a")
+            .unwrap()
+            .unwrap();
+        assert!(snapshot.get("at").is_none());
+    }
+
+    #[test]
     fn later_migration_normalizes_existing_observations_without_dropping_accounts() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id)); CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE sync_generation(id INTEGER,value INTEGER); CREATE TABLE durable_rows(seq INTEGER);").unwrap();

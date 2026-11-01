@@ -282,6 +282,7 @@ pub trait AccountSessionPort: Send + Sync {
 pub const LIMITS_REQUIRED: &str = "provider-session/account-rate-limits";
 
 /// Typed account limits accepted at the provider boundary.
+#[derive(Clone, PartialEq)]
 pub struct LimitsSnapshot {
     response: studio_runtime_schema::usage_limits::UsageLimitsResponse,
 }
@@ -340,10 +341,10 @@ pub async fn limits(
     account: &str,
     cached: bool,
 ) -> Result<LimitsSnapshot, AccountSessionError> {
+    let snapshot = LimitsSnapshot::read(account, port.limits_snapshot(account)?)?;
     if !cached {
         return LimitsSnapshot::read(account, port.read_limits(account).await?);
     }
-    let snapshot = LimitsSnapshot::read(account, port.limits_snapshot(account)?)?;
     let now = timestamp()?;
     if snapshot.response.data.is_some()
         || snapshot
@@ -837,7 +838,14 @@ pub struct AccountSessionRuntime {
     home: PathBuf,
     limits: Option<Arc<crate::account_policy::AccountPolicyState>>,
     store: Option<Arc<studio_runtime_store::RuntimeStore>>,
-    refreshed_limits: Arc<std::sync::Mutex<std::collections::BTreeMap<String, Value>>>,
+    refreshed_limits: Arc<
+        std::sync::Mutex<
+            std::collections::BTreeMap<
+                String,
+                studio_runtime_schema::usage_limits::UsageLimitsResponse,
+            >,
+        >,
+    >,
     pending_limit_refreshes: Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>,
     limits_read_locks:
         Arc<std::sync::Mutex<std::collections::BTreeMap<String, Arc<tokio::sync::Mutex<()>>>>>,
@@ -878,7 +886,14 @@ pub(crate) mod limits;
 
 async fn persist_limits(
     store: Arc<studio_runtime_store::RuntimeStore>,
-    refreshed_limits: Arc<std::sync::Mutex<std::collections::BTreeMap<String, Value>>>,
+    refreshed_limits: Arc<
+        std::sync::Mutex<
+            std::collections::BTreeMap<
+                String,
+                studio_runtime_schema::usage_limits::UsageLimitsResponse,
+            >,
+        >,
+    >,
     account: String,
     value: Value,
     continuation_wake: Option<Arc<Notify>>,
@@ -1010,7 +1025,9 @@ impl AccountSessionRuntime {
         let account = account.to_owned();
         self.runtime.spawn(async move {
             let recovery = match &runtime.store {
-                Some(store) => limits::recovery_deadline(store.clone(), account.clone()).await,
+                Some(store) => {
+                    limits::recovery_deadline(store.clone(), account.clone(), attempted).await
+                }
                 None => None,
             };
             runtime.schedule_reset_with_recovery(&account, attempted, recovery);
@@ -1018,7 +1035,9 @@ impl AccountSessionRuntime {
     }
 
     fn schedule_reset_with_recovery(&self, account: &str, attempted: f64, recovery: Option<f64>) {
-        use studio_runtime_schema::usage_limits::{UsageLimitsResponse, bucket_projection};
+        use studio_runtime_schema::usage_limits::{
+            UsageLimitsResponse, bucket_projection, reset_projection,
+        };
         let Ok(now) = timestamp() else { return };
         let Ok(value) = self.limits_snapshot(account) else {
             return;
@@ -1039,6 +1058,12 @@ impl AccountSessionRuntime {
             .flat_map(|bucket| &bucket.windows)
             .filter_map(|window| window.reset)
             .chain(recovery)
+            .chain(
+                reset_projection(&observation, checked)
+                    .credits
+                    .into_iter()
+                    .filter_map(|credit| credit.expires_at),
+            )
             .filter(|reset| *reset > checked.max(attempted) && reset.is_finite())
             .reduce(f64::min);
         let Ok(mut deadlines) = self.reset_deadlines.lock() else {
@@ -1074,10 +1099,7 @@ impl AccountSessionRuntime {
                 if let Ok(mut deadlines) = runtime.reset_deadlines.lock() { deadlines.remove(&key); }
                 return;
             }
-            let _ = tokio::time::timeout(
-                Duration::from_secs(10),
-                read_limits_with_freshness(&runtime, &key, false),
-            ).await;
+            let _ = read_limits_with_freshness(&runtime, &key, false).await;
             if let Some(store) = &runtime.store {
                 let _ = limits::publish_finished(store.clone(), key.clone()).await;
             }
@@ -1109,7 +1131,10 @@ impl AccountSessionRuntime {
             self.refreshed_limits
                 .lock()
                 .map_err(|_| AccountSessionError::Persistence)?
-                .insert(account.clone(), value);
+                .insert(
+                    account.clone(),
+                    LimitsSnapshot::read(&account, value)?.response,
+                );
             self.schedule_reset(&account);
         }
         Ok(())
@@ -1579,18 +1604,19 @@ impl AccountSessionPort for AccountSessionRuntime {
         account: &'a str,
         after: f64,
     ) -> AccountSessionFuture<'a, Value> {
-        Box::pin(limits::read_for_resume(self, account, after))
+        Box::pin(async move {
+            let response = limits::read_for_resume(self, account, after).await?;
+            serde_json::to_value(response).map_err(|_| AccountSessionError::Persistence)
+        })
     }
     fn ingest_limits<'a>(&'a self, update: LimitsUpdate) -> AccountSessionFuture<'a, bool> {
         Box::pin(async move {
             if self.current_scope(&update.scope.account).as_ref() != Some(&update.scope) {
                 return Ok(false);
             }
-            LimitsSnapshot::read(
+            let normalized = LimitsSnapshot::read(
                 &update.scope.account,
-                serde_json::json!({
-                    "accountKey":update.scope.account,"at":update.observed_at,"data":update.data
-                }),
+                serde_json::json!({"accountKey":update.scope.account,"at":update.observed_at,"data":update.data}),
             )?;
             let store = self
                 .store
@@ -1602,7 +1628,16 @@ impl AccountSessionPort for AccountSessionRuntime {
                 store,
                 self.refreshed_limits.clone(),
                 update.scope.account.clone(),
-                limits::LimitsWrite::Notification(update),
+                limits::LimitsWrite::Notification {
+                    scope: update.scope,
+                    cursor: update.cursor,
+                    observed_at: update.observed_at,
+                    data: normalized
+                        .response
+                        .data
+                        .ok_or(AccountSessionError::InvalidResponse("/data".into()))?
+                        .0,
+                },
                 self.continuation_wake.clone(),
                 self.session.clone(),
             )
@@ -1627,7 +1662,7 @@ impl AccountSessionPort for AccountSessionRuntime {
             .map_err(|_| AccountSessionError::Persistence)?
             .get(account)
         {
-            return Ok(value.clone());
+            return Ok(serde_json::to_value(value).expect("typed limits serialize"));
         }
         self.limits
             .as_ref()
@@ -1987,7 +2022,7 @@ async fn read_limits_with_freshness(
     if skip_if_fresh && before.is_fresh_for_provider(timestamp()?) {
         return Ok(before.into_value());
     }
-    let before_value = before.into_value();
+    let before_value = before.response;
     let mut read_scope = None;
     let provider_read = async {
         let scope = AccountSessionPort::ensure_session(runtime, account).await?;
@@ -2035,17 +2070,15 @@ async fn read_limits_with_freshness(
     let data = match provider_read {
         Ok(data) => data,
         Err(error) => {
-            let current = runtime.limits_snapshot(account)?;
-            if current != before_value
-                && current.get("error").is_none_or(Value::is_null)
-                && current.get("data").is_some_and(Value::is_object)
+            let mut current = LimitsSnapshot::read(account, runtime.limits_snapshot(account)?)?;
+            if current.response != before_value
+                && current.response.error.is_none()
+                && current.response.data.is_some()
             {
-                return Ok(current);
+                return Ok(current.into_value());
             }
-            let mut failed = current;
-            failed["error"] = Value::String(error.to_string());
-            failed["checkedAt"] = serde_json::json!(timestamp()?);
-            let failed = LimitsSnapshot::read(account, failed)?;
+            current.response.error = Some(error.to_string());
+            current.response.checked_at = Some(timestamp()?);
             limits::persist(
                 runtime
                     .store
@@ -2057,7 +2090,7 @@ async fn read_limits_with_freshness(
                 limits::LimitsWrite::ReadFailure {
                     scope: read_scope,
                     before: before_value,
-                    value: failed,
+                    value: current,
                 },
                 runtime.continuation_wake.clone(),
                 runtime.session.clone(),
@@ -2414,7 +2447,8 @@ mod persistence_tests {
             .await
             .unwrap();
         let cache = Arc::new(Mutex::new(BTreeMap::new()));
-        let value = json!({"accountKey":"default","data":{"accountId":"fixture"},"at":1.0,"readAt":1.0,"error":null});
+        let value =
+            json!({"accountKey":"default","data":{"accountId":"fixture"},"at":1.0,"readAt":1.0});
 
         persist_limits(
             Arc::clone(&store),
@@ -2443,7 +2477,10 @@ mod persistence_tests {
             entity["value"]["projection"]["runway"]["next"]["color"],
             "gray"
         );
-        assert_eq!(cache.lock().unwrap().get("default"), Some(&value));
+        assert_eq!(
+            serde_json::to_value(cache.lock().unwrap().get("default")).unwrap(),
+            value
+        );
         let restored =
             studio_runtime_store::account_state::limits_snapshots(&store.test_reader().unwrap())
                 .unwrap();
@@ -2473,7 +2510,8 @@ mod persistence_tests {
         }).await.unwrap();
         let before = stored_workspace(&store);
         let cache = Arc::new(Mutex::new(BTreeMap::new()));
-        let value = json!({"accountKey":"default","data":{"accountId":"fixture"},"at":1.0,"readAt":1.0,"error":null});
+        let value =
+            json!({"accountKey":"default","data":{"accountId":"fixture"},"at":1.0,"readAt":1.0});
 
         assert!(matches!(
             persist_limits(
@@ -2703,6 +2741,119 @@ mod limits_runtime_tests {
             serde_json::from_str::<Value>(&raw).unwrap()["value"]["observation"]["data"]["rateLimits"]
                 ["primary"]["usedPercent"],
             100.0
+        );
+    }
+
+    #[tokio::test]
+    async fn forced_read_replaces_restored_legacy_null_timestamp() {
+        let (f, _, _) = fixture([Reply::Data(json!({"accountId":"fresh"}))], false).await;
+        f.runtime
+            .persist_limits(
+                "default",
+                &json!({"accountKey":"default","error":"offline","checkedAt":100.0}),
+            )
+            .await
+            .unwrap();
+        let store = f.runtime.store.as_ref().unwrap();
+        store.transaction(|tx| {
+            tx.execute("UPDATE runtime_account_state SET limits_observation=?1 WHERE account='default'", [r#"{"scope":null,"cursor":0,"at":null,"checkedAt":100}"#])?;
+            Ok(())
+        }).await.unwrap();
+        f.runtime.refreshed_limits.lock().unwrap().clear();
+        f.runtime.restore_reset_deadlines().await.unwrap();
+        let result = f.runtime.read_limits("default").await.unwrap();
+        assert_eq!(result["data"]["accountId"], "fresh");
+        assert!(result.get("error").is_none());
+        assert_eq!(f.provider.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn provider_timeout_publishes_a_persisted_failure_after_reset() {
+        let reset_at = super::timestamp().unwrap() + 0.05;
+        let (f, entered, _release) = fixture([Reply::Data(json!({}))], true).await;
+        let store = f.runtime.store.as_ref().unwrap().clone();
+        let changes = Arc::new(tokio::sync::Notify::new());
+        let observer = changes.clone();
+        store.add_commit_observer(move || observer.notify_one());
+        f.runtime.persist_limits("default", &json!({"accountKey":"default","at":reset_at-1.0,"readAt":reset_at-1.0,"data":{"accountId":"fixture-account","rateLimits":{"primary":{"usedPercent":100.0,"resetsAt":reset_at}},"rateLimitResetCredits":{"availableCount":1,"credits":[{"id":"credit","resetType":"codexRateLimits","status":"available","expiresAt":reset_at}]}}})).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), entered)
+            .await
+            .unwrap()
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(12), async {
+            loop {
+                let value = f.runtime.limits_snapshot("default").unwrap();
+                let payload: String = store.test_reader().unwrap().query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0)).unwrap();
+                let view: Value = serde_json::from_str(&payload).unwrap();
+                if value.get("error").and_then(Value::as_str).is_some()
+                    && view["value"]["projection"]["status"]["kind"] == "current"
+                    && view["value"]["projection"]["reset"]["credits"].as_array().is_some_and(Vec::is_empty) {
+                    break;
+                }
+                changes.notified().await;
+            }
+        })
+        .await
+        .expect("a timed-out provider read persists its failure");
+        assert_eq!(f.provider.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn credit_expiry_refreshes_and_publishes_without_a_window_reset() {
+        let expiry = super::timestamp().unwrap() + 0.25;
+        let data = json!({"accountId":"fixture-account","rateLimitResetCredits":{"availableCount":1,"credits":[{"id":"credit","resetType":"codexRateLimits","status":"available","expiresAt":expiry}]}});
+        let (f, entered, release) = fixture([Reply::Data(data.clone())], true).await;
+        let store = f.runtime.store.as_ref().unwrap().clone();
+        let changes = Arc::new(tokio::sync::Notify::new());
+        let observer = changes.clone();
+        store.add_commit_observer(move || observer.notify_one());
+        f.runtime
+            .persist_limits(
+                "default",
+                &json!({"accountKey":"default","at":expiry-1.0,"readAt":expiry-1.0,"data":data}),
+            )
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), entered)
+            .await
+            .unwrap()
+            .unwrap();
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let payload: String = store.test_reader().unwrap().query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0)).unwrap();
+                let view: Value = serde_json::from_str(&payload).unwrap();
+                if view["value"]["projection"]["status"]["kind"] == "current" && view["value"]["projection"]["reset"]["credits"].as_array().is_some_and(Vec::is_empty) { break; }
+                changes.notified().await;
+            }
+        }).await.unwrap();
+        assert_eq!(f.provider.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn checked_recovery_deadline_does_not_hide_later_agent() {
+        let (f, _, _) = fixture([], false).await;
+        let store = f.runtime.store.as_ref().unwrap().clone();
+        super::persist_limits(
+            store.clone(),
+            f.runtime.refreshed_limits.clone(),
+            "default".into(),
+            json!({"accountKey":"default","readAt":150.0,"data":{}}),
+            None,
+        )
+        .await
+        .unwrap();
+        store.transaction(|tx| {
+            let raw: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0))?;
+            let mut view: Value = serde_json::from_str::<Value>(&raw)?["value"].clone();
+            let agent = |reset| json!({"eligibility":{"accountKey":"default","agentId":"a","model":"m","provider":"codex","state":"blocked","validUntil":null,"buckets":[],"overage":"unavailable"},"recovery":{"title":"Limit","message":"Wait","action":{"kind":"none"},"timing":{"kind":"waiting","resetAt":reset}}});
+            view["projection"]["agents"] = json!({"a":agent(100.0),"b":agent(200.0)});
+            studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "rateLimit", "default", view, false)?;
+            Ok(())
+        }).await.unwrap();
+        assert_eq!(
+            super::limits::recovery_deadline(store, "default".into(), 0.0).await,
+            Some(200.0)
         );
     }
 

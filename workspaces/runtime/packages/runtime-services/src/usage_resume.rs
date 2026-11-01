@@ -1,7 +1,7 @@
 //! Durable usage/authentication continuation decisions; observations never invoke a provider.
 use crate::continuation::{
     ContinuationError, ContinuationUpdate as U, Decision, Effect, POLL_SECONDS, ProposedRecord,
-    Result, Snapshot, UsageDraft, WaitStatus, flag, now_checked, text,
+    Result, Snapshot, UsageDraft, WaitStatus, now_checked, text,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -51,22 +51,22 @@ impl LimitsObservation {
             marker: None,
         }
     }
-    pub fn from_record(mut raw: Value, marker: Option<String>) -> Result<Self> {
-        if let Some((path, _)) =
-            studio_runtime_schema::first_error("continuation/ContinuationLimitsObservation", &raw)
-                .map_err(|_| ContinuationError::Invalid("/limits/schema".into()))?
-        {
-            return Err(ContinuationError::Invalid(format!("/limits{path}")));
+    pub fn from_record(raw: impl Serialize, marker: Option<String>) -> Result<Self> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Input {
+            #[serde(default)]
+            stale: Option<bool>,
+            #[serde(flatten)]
+            response: studio_runtime_schema::usage_limits::UsageLimitsResponse,
         }
-        let stale = flag(&raw, "stale");
-        if let Some(object) = raw.as_object_mut() {
-            object.remove("stale");
-        }
-        let JsonObject(response) = serde_json::from_value(raw)
+        let encoded =
+            serde_json::to_vec(&raw).map_err(|_| ContinuationError::Invalid("/limits".into()))?;
+        let JsonObject(Input { response, stale }) = serde_json::from_slice(&encoded)
             .map_err(|_| ContinuationError::Invalid("/limits".into()))?;
         Ok(Self {
             response,
-            stale,
+            stale: stale.unwrap_or(false),
             marker,
         })
     }

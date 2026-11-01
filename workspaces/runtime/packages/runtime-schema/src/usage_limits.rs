@@ -4,7 +4,7 @@ use crate::json_object::JsonObject;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 
-#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[derive(Clone, Default, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UsageLimitsResponse {
     pub account_key: String,
@@ -31,7 +31,7 @@ pub struct UsageLimitsResponse {
     pub sync_entities_after: Option<StoredJsonInteger>,
 }
 
-#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[derive(Clone, Default, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageLimitsData {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -62,7 +62,7 @@ pub struct UsageLimitsData {
     pub claude_rate_limit: Option<ClaudeRateLimit>,
 }
 
-#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RateLimitBucket {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -95,7 +95,7 @@ pub struct RateLimitBucket {
     pub claude_rate_limit: Option<ClaudeRateLimit>,
 }
 
-#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BucketCredits {
     #[serde(
@@ -118,7 +118,7 @@ pub struct BucketCredits {
     pub balance: Option<BucketCreditBalance>,
 }
 
-#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(untagged)]
 pub enum BucketCreditBalance {
     Text(String),
@@ -126,14 +126,14 @@ pub enum BucketCreditBalance {
     Boolean(bool),
 }
 
-#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RateLimitIndividualLimit {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remaining_percent: Option<f64>,
 }
 
-#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RateLimitWindow {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -144,7 +144,7 @@ pub struct RateLimitWindow {
     pub window_duration_mins: Option<f64>,
 }
 
-#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RateLimitResetCredits {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -153,7 +153,7 @@ pub struct RateLimitResetCredits {
     pub credits: Vec<JsonObject<RateLimitResetCredit>>,
 }
 
-#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RateLimitResetCredit {
     pub id: String,
@@ -178,26 +178,26 @@ pub struct RateLimitResetCredit {
 }
 
 /// Unknown provider evidence is retained only as an unsupported decision.
-#[derive(Clone, Serialize, schemars::JsonSchema)]
+#[derive(Clone, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(untagged)]
 pub enum ClaudeRateLimit {
     Known(ClaudeRateInfo),
     Unsupported(UnsupportedRateInfo),
 }
 
-#[derive(Clone, Serialize, schemars::JsonSchema)]
+#[derive(Clone, Serialize, schemars::JsonSchema, PartialEq)]
 pub struct UnsupportedRateInfo {
     #[serde(rename = "type")]
     kind: UnsupportedRateKind,
 }
 
-#[derive(Clone, Serialize, schemars::JsonSchema)]
+#[derive(Clone, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 enum UnsupportedRateKind {
     Unsupported,
 }
 
-#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeRateInfo {
     #[serde(deserialize_with = "string_enum")]
@@ -307,7 +307,7 @@ fn present_claude_rate_limit<'de, D: Deserializer<'de>>(
     ClaudeRateLimit::deserialize(deserializer).map(Some)
 }
 
-#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct UsageLimitsSyncEntity {
     pub id: String,
@@ -317,7 +317,7 @@ pub struct UsageLimitsSyncEntity {
     pub deleted: bool,
 }
 
-#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UsageEligibility {
     pub account_key: String,
@@ -340,14 +340,14 @@ pub enum EligibilityState {
     Blocked,
 }
 
-#[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentLimitProjection {
     pub eligibility: UsageEligibility,
     pub recovery: Option<LimitRecovery>,
 }
 
-#[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LimitRecovery {
     pub title: String,
@@ -356,7 +356,7 @@ pub struct LimitRecovery {
     pub timing: RecoveryTiming,
 }
 
-#[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RecoveryAction {
     None,
@@ -378,14 +378,14 @@ pub enum RecoveryTiming {
     Unconfirmed { reset_at: f64 },
 }
 
-#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EligibilityBucket {
     pub id: String,
     pub overage_allowed: bool,
 }
 
-#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case", try_from = "String")]
 pub enum Overage {
     Allowed,
