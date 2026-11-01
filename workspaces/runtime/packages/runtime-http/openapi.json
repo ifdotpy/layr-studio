@@ -41242,6 +41242,41 @@
         "title": "QueueView",
         "type": "object"
       },
+      "RadioControls": {
+        "additionalProperties": false,
+        "properties": {
+          "busy": {
+            "type": "boolean"
+          },
+          "busyNotice": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "canPass": {
+            "type": "boolean"
+          },
+          "inputBlocked": {
+            "type": "boolean"
+          },
+          "speaking": {
+            "type": "boolean"
+          },
+          "stopping": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "busy",
+          "inputBlocked",
+          "canPass",
+          "stopping",
+          "speaking",
+          "busyNotice"
+        ],
+        "type": "object"
+      },
       "RadioStatus": {
         "enum": [
           "idle",
@@ -44535,6 +44570,12 @@
               }
             ]
           },
+          "leadIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "localMembers": {
             "anyOf": [
               {
@@ -44981,6 +45022,9 @@
               }
             ]
           },
+          "controls": {
+            "$ref": "#/components/schemas/RadioControls"
+          },
           "direct": {
             "anyOf": [
               {
@@ -45056,7 +45100,8 @@
           "speaker",
           "next",
           "active",
-          "error"
+          "error",
+          "controls"
         ],
         "title": "RoomRadio",
         "type": "object"

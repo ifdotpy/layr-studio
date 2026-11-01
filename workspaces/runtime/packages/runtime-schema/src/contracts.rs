@@ -1370,8 +1370,10 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     openapi["components"]["schemas"]["AgentEntityDto"]["properties"]["accountTransfer"] = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/AccountTransferSummaryDto"},{"type":"null"}]});
     openapi["components"]["schemas"]["Account"]["properties"]["eligibility"] =
         serde_json::json!({"$ref":"#/components/schemas/AccountEligibility"});
-    openapi["components"]["schemas"]["RoomEntityDto"]["properties"]["leadIds"] =
-        serde_json::json!({"type":"array","items":{"type":"string"}});
+    for name in ["RoomEntityDto", "RoomDetailDto"] {
+        openapi["components"]["schemas"][name]["properties"]["leadIds"] =
+            serde_json::json!({"type":"array","items":{"type":"string"}});
+    }
     for (name, schema) in crate::studio_errors::schemas()? {
         openapi["components"]["schemas"][name] = schema;
     }
@@ -1392,6 +1394,15 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     }
     for (name, schema) in crate::chat_operational_status::schemas() {
         openapi["components"]["schemas"][name] = schema;
+    }
+    openapi["components"]["schemas"]["RadioControls"] = crate::radio_controls::schema();
+    openapi["components"]["schemas"]["RoomRadio"]["properties"]["controls"] =
+        serde_json::json!({"$ref":"#/components/schemas/RadioControls"});
+    let required = openapi["components"]["schemas"]["RoomRadio"]["required"]
+        .as_array_mut()
+        .ok_or("RoomRadio required fields missing")?;
+    if !required.iter().any(|value| value == "controls") {
+        required.push(serde_json::json!("controls"));
     }
     for (name, schema) in crate::process_controls::schemas() {
         openapi["components"]["schemas"][name] = schema;

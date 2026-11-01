@@ -69,6 +69,7 @@ struct RadioActive {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RadioProjection {
+    controls: studio_runtime_schema::radio_controls::RadioControls,
     team_id: String,
     revision: SafeInteger,
     status: Status,
@@ -138,6 +139,10 @@ pub(crate) fn project_radio_room(
         })
         .transpose()?;
     let radio = RadioProjection {
+        controls: studio_runtime_schema::radio_controls::RadioControls::derive(
+            state.status,
+            state.active.is_some(),
+        ),
         team_id: state.team_id.clone(),
         revision: safe(state.revision)?,
         status: state.status,
@@ -402,6 +407,11 @@ mod tests {
             let actual = serde_json::to_string(&project_room(&record, &context).unwrap().unwrap()).unwrap();
             let mut value: Value = serde_json::from_str(&actual).unwrap();
             assert_eq!(value.as_object_mut().unwrap().remove("leadIds"), Some(json!(["a"])));
+            if let Some(radio) = value.get_mut("radio") {
+                assert_eq!(radio["controls"]["busy"], record.id == "radio:y");
+                assert_eq!(radio["controls"]["inputBlocked"], false);
+                radio.as_object_mut().unwrap().remove("controls");
+            }
             assert_eq!(value, serde_json::from_str::<Value>(expected).unwrap());
             if let Field::Value(state) = &record.radio {
                 let direct = serde_json::to_string(&

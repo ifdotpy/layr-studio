@@ -55,7 +55,7 @@ async fn startup_reprojects_legacy_room_once() {
                 tx,
                 "room",
                 "room",
-                json!({"id":"room","kind":"private","members":["lead"],"name":"Lead"}),
+                json!({"id":"room","kind":"private","members":["lead"],"name":"Lead","radio":{"teamId":"team","revision":1,"status":"blocked","speaker":null,"next":[],"active":{"agentId":"lead"},"error":null}}),
                 false,
             )?;
             tx.execute(
@@ -80,6 +80,10 @@ async fn startup_reprojects_legacy_room_once() {
     assert_eq!(
         client_entity(&store, "room", "room").unwrap().1["leadIds"],
         json!(["lead"])
+    );
+    assert_eq!(
+        client_entity(&store, "room", "room").unwrap().1["radio"]["controls"]["inputBlocked"],
+        true
     );
     let seq = store
         .test_read_transaction(|tx| {

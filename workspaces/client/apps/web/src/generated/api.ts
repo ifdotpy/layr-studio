@@ -18924,6 +18924,14 @@ export interface components {
       /** Revision */
       revision: string;
     };
+    RadioControls: {
+      busy: boolean;
+      busyNotice: string | null;
+      canPass: boolean;
+      inputBlocked: boolean;
+      speaking: boolean;
+      stopping: boolean;
+    };
     /**
      * RadioStatus
      * @enum {string}
@@ -20203,6 +20211,7 @@ export interface components {
       id: string;
       kind?: components["schemas"]["RoomKind"] | null | undefined;
       lastMessage?: components["schemas"]["RoomLastMessage"] | null | undefined;
+      leadIds?: string[] | undefined;
       /** Localmembers */
       localMembers?: string[] | null | undefined;
       /** Localparticipants */
@@ -20309,6 +20318,7 @@ export interface components {
     /** RoomRadio */
     RoomRadio: {
       active: components["schemas"]["RoomRadioActive"] | null;
+      controls: components["schemas"]["RadioControls"];
       /** Direct */
       direct?: boolean | null | undefined;
       /** Error */

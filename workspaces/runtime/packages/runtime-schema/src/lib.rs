@@ -62,6 +62,7 @@ pub mod provider_method_policy;
 pub mod provider_rate_limits;
 pub mod question_answers;
 pub mod queue_command;
+pub mod radio_controls;
 pub mod raw_json;
 pub mod raw_object;
 pub mod records;
