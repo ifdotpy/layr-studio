@@ -24,8 +24,9 @@ in memory only. The cache is never used to decide whether to send or retry a com
 A remote frontend stores one IndexedDB record per cacheable subscription, with
 its data and cursor together. It writes at most once per five seconds and when
 the page becomes hidden. The server decides locality and cacheability; local
-frontends and subscriptions without provable row ownership use snapshots. A
-corrupt or unknown record is discarded and recovered with a snapshot. A browser
+frontends and subscriptions without provable row ownership start with snapshots
+after a reload. All subscriptions may resume from an in-memory cursor after a
+stream reconnect. A corrupt or unknown record is discarded and recovered with a snapshot. A browser
 on the server machine that pairs as a remote device is treated as remote.
 
 Drafts, uploads, recordings, and unconfirmed sends share one IndexedDB input

@@ -9,6 +9,7 @@ import {
   expect,
   createFixtureViteServer,
   apiSchemaHandshakeSse,
+  apiSchemaHeaders,
 } from "../playwright.ts";
 
 const workspaceId = "b".repeat(32);
@@ -41,6 +42,8 @@ test("remote cache resumes a delta, corruption snapshots, and local policy write
             }
             if (url.pathname === "/api/sync/identity") {
               requests.push(url.pathname);
+              for (const [key, value] of Object.entries(apiSchemaHeaders()))
+                response.setHeader(key, value);
               response.setHeader("Content-Type", "application/json");
               response.end(JSON.stringify({ workspaceId }));
               return;

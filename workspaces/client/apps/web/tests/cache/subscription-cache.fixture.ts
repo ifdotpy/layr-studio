@@ -1,17 +1,19 @@
+import { syncGet } from "../../src/api";
 import { createSyncClient } from "../../src/sync/client";
 import { createResourceEvents } from "../../src/sync/resourceEvents";
 import { createEntitySequenceScope } from "../../src/sync/entitySequence";
 import { createTranscriptCache } from "../../src/sync/transcriptCache";
 import { indexedDb } from "../../src/indexedDb";
+import { createTokenRateCache } from "../../src/usage/tokenRate";
 import { subscriptionKey } from "../../src/sync/subscriptions/contracts";
 
 const workspaceId = "b".repeat(32);
 const ref = { kind: "state" } as const;
-const storage = indexedDb("cache-browser-witness", "subscriptions");
+const storage = indexedDb("cache-browser-witness", "subscriptions", 1);
 let transport: ReturnType<typeof createResourceEvents>;
 const client = createSyncClient({
   api: {
-    syncGet: async () => (await fetch("/api/sync/identity")).json(),
+    syncGet,
     syncPost: async () => {
       throw new Error("unexpected request");
     },
@@ -19,7 +21,7 @@ const client = createSyncClient({
     save: () => {},
     setWorkspace: () => {},
     isApiSchemaMismatch: () => false,
-  } as unknown as Parameters<typeof createSyncClient>[0]["api"],
+  },
   resources: {
     watchResourceChanges: (...args) => transport.watchResourceChanges(...args),
     watchResourceConnection: (...args) =>
@@ -28,6 +30,7 @@ const client = createSyncClient({
   sequences: createEntitySequenceScope(),
   transcripts: createTranscriptCache(),
   cacheStorage: storage,
+  databaseSuffix: "cache-browser-witness",
 });
 transport = createResourceEvents({
   api: {
@@ -44,13 +47,9 @@ transport = createResourceEvents({
     matchingApiSchemaResponseGeneration: () => 0,
     markApiSchemaMismatch: () => {},
     onApiSchemaMismatch: () => () => {},
-  } as unknown as Parameters<typeof createResourceEvents>[0]["api"],
+  },
   sync: client,
-  tokenRates: {
-    configureTokenRateStream: () => {},
-    receiveResourceTokenRates: () => true,
-    getWorkspaceTokenRates: () => ({ records: [] }),
-  } as unknown as Parameters<typeof createResourceEvents>[0]["tokenRates"],
+  tokenRates: createTokenRateCache(),
   onCachePolicies: client.setCachePolicies,
   onCachePoliciesReset: client.clearCachePolicies,
   openEvents: (url) => new EventSource(url),

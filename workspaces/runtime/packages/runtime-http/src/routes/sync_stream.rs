@@ -352,15 +352,6 @@ async fn sync_subscriptions(
     {
         return Err(ApiError::validation(vec![json!("body"), json!("add")]));
     }
-    since.retain(|key, _| {
-        added.iter().any(|resource| {
-            resource.key == *key
-                && matches!(
-                    super::subscriptions::cache_policy(&resource.resource, &session.locality),
-                    crate::generated::SubscriptionCachePolicy::Cache
-                )
-        })
-    });
     let cache_policies = cache_decisions(&added, &session.locality);
     session
         .sender
@@ -490,19 +481,10 @@ async fn sync_stream(
             return error.into_response();
         }
     }
-    let mut since = match parse_since(&query, &resources) {
+    let since = match parse_since(&query, &resources) {
         Ok(since) => since,
         Err(error) => return error.into_response(),
     };
-    since.retain(|key, _| {
-        resources.iter().any(|resource| {
-            resource.key == *key
-                && matches!(
-                    super::subscriptions::cache_policy(&resource.resource, &locality),
-                    crate::generated::SubscriptionCachePolicy::Cache
-                )
-        })
-    });
     let cache_policies = cache_decisions(&resources, &locality);
     let vault_readiness = match readiness_source(&state, &resources).await {
         Ok(source) => source,

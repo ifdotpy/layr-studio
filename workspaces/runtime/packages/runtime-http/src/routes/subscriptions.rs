@@ -688,12 +688,12 @@ mod tests {
     #[test]
     fn cache_policy_excludes_overlapping_terminal_detail() {
         use crate::generated::SubscriptionCachePolicy;
+        use studio_runtime_schema::resource_ref::{EmptyResource, TerminalResource};
         use studio_runtime_schema::sync_protocol::FrontendLocality;
-        let detail: ResourceRef =
-            serde_json::from_value(json!({"kind":"terminal","terminalId":"one"}))
-                .expect("detail ref");
-        let list: ResourceRef =
-            serde_json::from_value(json!({"kind":"terminals"})).expect("list ref");
+        let detail = ResourceRef::TerminalResource(TerminalResource {
+            terminal_id: "one".to_owned().try_into().expect("nonempty id"),
+        });
+        let list = ResourceRef::TerminalsResource(EmptyResource {});
         assert_eq!(
             cache_policy(&detail, &FrontendLocality::Remote),
             SubscriptionCachePolicy::NoCache
