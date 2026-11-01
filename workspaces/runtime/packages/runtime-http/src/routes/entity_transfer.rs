@@ -891,7 +891,7 @@ mod tests {
     }
     fn work_record(id: &str, root: &str, owner: &str, status: &str, results: usize) -> Value {
         json!({"id":id,"rootId":root,"owner":owner,"title":id,"status":status,"created":1,"updated":1,
-            "version":1,"dependencies":[],"results":vec![json!({"text":"r"}); results],"decisions":[],"releases":[]})
+            "version":1,"dependencies":[],"results":vec![json!({"id":"r","agent":"worker","text":"done","checks":"","revision":"r1","files":[],"created":1}); results],"decisions":[],"releases":[]})
     }
     /// Write or delete a work row the way the writer does: the child history rows follow.
     async fn put_work(store: &studio_runtime_store::RuntimeStore, id: &str, record: Option<Value>) {
@@ -1034,7 +1034,7 @@ mod tests {
         put_work(
             store,
             "w3",
-            Some(work_record("w3", "lead", "worker", "done", 0)),
+            Some(work_record("w3", "lead", "worker", "accepted", 0)),
         )
         .await;
         let (entry, _, cursor) = prepare(&state, &event(&state), resource.clone(), Some(cursor))

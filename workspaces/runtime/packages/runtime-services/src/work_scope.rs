@@ -7,13 +7,13 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use rusqlite::{Connection, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::{Value, json};
 use studio_runtime_schema::shared_values::SYNC_ENTITY_STREAM_MAX_DOCUMENTS;
 use studio_runtime_store::entity_publication::WorkHistoryKind;
 use studio_runtime_store::{
     EntityPage, EntityRow, StoreError, StoreResult, SyncDocumentsRepository, WORK_COLLECTIONS,
-    WorkItemsRepository, WorkStatus, durable_seq, work_history,
+    WorkItemRecord, WorkItemsRepository, WorkStatus, durable_seq, work_history,
 };
 
 use crate::work_write::{WorkWriteError, current_submission_refusal};
@@ -367,13 +367,18 @@ fn work_docs(
     wanted: &BTreeSet<&'static str>,
     detail_only: bool,
 ) -> StoreResult<Vec<EntityRow>> {
-    let Some(item) = WorkItemsRepository::work_record(transaction, id)? else {
+    let raw: Option<String> = transaction
+        .query_row("SELECT record FROM runtime_work WHERE id=?1", [id], |row| {
+            row.get(0)
+        })
+        .optional()?;
+    let Some(raw) = raw else {
         return Ok(Vec::new());
     };
-    let raw: String =
-        transaction.query_row("SELECT record FROM runtime_work WHERE id=?1", [id], |row| {
-            row.get(0)
-        })?;
+    // A row that does not decode has no document; the publisher rejects such records too.
+    let Ok(item) = serde_json::from_str::<WorkItemRecord>(&raw) else {
+        return Ok(Vec::new());
+    };
     let record: Value = serde_json::from_str(&raw)?;
     let mut rows = Vec::new();
     if !detail_only
@@ -386,8 +391,8 @@ fn work_docs(
         let refusal = current_submission_refusal(transaction, &record).map_err(work_error)?;
         let mut statuses: BTreeMap<String, WorkStatus> = BTreeMap::new();
         for dependency in item.dependencies() {
-            if let Some(dependency_record) =
-                WorkItemsRepository::work_record(transaction, dependency)?
+            if let Ok(Some(dependency_record)) =
+                WorkItemsRepository::work_record(transaction, dependency)
             {
                 statuses.insert(dependency.clone(), dependency_record.status());
             }
