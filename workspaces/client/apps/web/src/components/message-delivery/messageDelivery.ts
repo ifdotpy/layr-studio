@@ -5,9 +5,10 @@ import {
 import type { Message } from "../../types";
 import type { OutboxEntry, OutgoingMessage } from "../../sync/send";
 import { MessageSendStatus } from "../../generated/api";
+import { serverStatus } from "../../messageSendStatus";
+import type { DeliveryState } from "../../sync/send";
 
 const deliveryLabels: Record<MessageSendStatus, string> = {
-  buffered: "Waiting to send",
   queued: "Queued",
   sending: "Sending…",
   delivered: "Sent",
@@ -17,10 +18,22 @@ const deliveryLabels: Record<MessageSendStatus, string> = {
   stored_only: "Stored",
 };
 
+const deviceLabels: Record<
+  Extract<DeliveryState, { source: "device" }>["state"]["kind"],
+  string
+> = {
+  stored: "Stored on device",
+  in_flight: "Sending…",
+  transport_failed: "Could not contact server",
+  removed: "Removed from device",
+};
+
 export function explicitQueue(item: Message) {
   return (
-    item.deliveryStatus === MessageSendStatus.buffered ||
-    item.deliveryStatus === MessageSendStatus.queued
+    (item.deliveryStatus?.source === "device" &&
+      (item.deliveryStatus.state.kind === "stored" ||
+        item.deliveryStatus.state.kind === "in_flight")) ||
+    serverStatus(item.deliveryStatus) === MessageSendStatus.queued
   );
 }
 
@@ -68,21 +81,16 @@ export function mergeOutgoing(
   observed: ReadonlySet<string>,
 ) {
   const stored = new Map(outbox.map((entry) => [entry.id, entry]));
-  const visibleSends = new Map(
-    outbox
-      .filter(
-        (entry) =>
-          entry.displayPending === true ||
-          (entry.displayPending !== false &&
-            entry.status !== MessageSendStatus.delivered),
-      )
-      .map((entry) => [entry.id, entry as OutgoingMessage]),
-  );
+  const visibleSends = new Map(outbox.map((entry) => [entry.id, entry]));
   // The outbox owns delivery state once it stores a message. A local copy
   // shows only before that.
   for (const entry of Object.values(local)) {
     const owner = stored.get(entry.id);
-    if (!owner) visibleSends.set(entry.id, entry);
+    if (
+      !owner ||
+      (entry.status.source === "server" && owner.status.source === "device")
+    )
+      visibleSends.set(entry.id, entry);
   }
   return [...visibleSends.values()].filter((entry) => !observed.has(entry.id));
 }
@@ -111,23 +119,20 @@ export function outgoingTranscript(
           ),
         };
       updates.set(present.id, shown);
-      if (
-        (entry.status === MessageSendStatus.failed ||
-          entry.status === MessageSendStatus.uncertain) &&
-        !present.deliveryStatus
-      )
+      if (!shown.deliveryStatus || entry.status.source === "server")
         updates.set(present.id, {
           ...shown,
           deliveryStatus: entry.status,
-          deliveryError: entry.error,
+          deliveryError:
+            entry.status.source === "device" &&
+            entry.status.state.kind === "transport_failed"
+              ? entry.status.state.error
+              : entry.receipt?.error,
         });
-      // Keep the local receipt until a durable transcript record replaces it.
       if (
+        present.deliveryStatus?.source === "server" &&
         !explicitQueue(present) &&
-        present.materialized !== false &&
-        ((entry.status !== MessageSendStatus.failed &&
-          entry.status !== MessageSendStatus.uncertain) ||
-          present.deliveryStatus)
+        present.materialized !== false
       )
         observed.push(entry.id);
       continue;
@@ -135,7 +140,7 @@ export function outgoingTranscript(
     // An input outside the loaded page can replace its local card only after
     // the server confirms both delivery and the exact saved transcript input.
     if (
-      entry.status === MessageSendStatus.delivered &&
+      serverStatus(entry.status) === MessageSendStatus.delivered &&
       entry.receipt?.status === MessageSendStatus.delivered &&
       entry.receipt.materialized === true
     ) {
@@ -151,7 +156,11 @@ export function outgoingTranscript(
       assets: entry.attachments || [],
       at: entry.created / 1000,
       deliveryStatus: entry.status,
-      deliveryError: entry.error,
+      deliveryError:
+        entry.status.source === "device" &&
+        entry.status.state.kind === "transport_failed"
+          ? entry.status.state.error
+          : entry.receipt?.error,
       localDelivery: true,
       requestedDelivery: normalizeDelivery(
         entry.body.delivery ?? DeliveryMoment.CurrentTurn,
@@ -165,5 +174,10 @@ export function outgoingTranscript(
 }
 
 export function deliveryLabel(item: Message) {
-  return item.deliveryStatus ? deliveryLabels[item.deliveryStatus] : "";
+  const delivery = item.deliveryStatus;
+  return !delivery
+    ? ""
+    : delivery.source === "server"
+      ? deliveryLabels[delivery.status]
+      : deviceLabels[delivery.state.kind];
 }

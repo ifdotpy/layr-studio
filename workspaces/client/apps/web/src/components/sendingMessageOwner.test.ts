@@ -35,7 +35,7 @@ it("retains cancellation and recoverable copies on the initiating server after a
     clientMessageId: "same",
     role: "user",
     text: "private-a",
-    deliveryStatus: MessageSendStatus.sending,
+    deliveryStatus: { source: "server", status: MessageSendStatus.sending },
   };
   const read = vi.fn().mockResolvedValue({
     items: [{ id: "same", kind: "user", text: "private-a" }],

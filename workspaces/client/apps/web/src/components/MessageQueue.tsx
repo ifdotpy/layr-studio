@@ -19,7 +19,7 @@ import { copyText } from "../clipboard/clipboard";
 
 export type LocalQueueItem = Pick<
   Message,
-  "assets" | "id" | "requestedDelivery" | "text"
+  "assets" | "id" | "requestedDelivery" | "text" | "deliveryStatus"
 > & { localDelivery: true };
 export type QueueItem =
   | (QueueItemDto & { localDelivery?: false })

@@ -8,7 +8,6 @@ import {
   checkedMessageReceipts,
   receiptOutgoing,
   receiptTranscript,
-  latestMessageReceipt,
 } from "./messageReceipts.ts";
 
 import { it } from "vitest";
@@ -46,7 +45,7 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
     id: "sso",
     body: { id: "sso", room: "chat", text: "sso done" },
     created: 1,
-    status: MessageSendStatus.delivered,
+    status: { source: "server", status: MessageSendStatus.delivered },
     receipt: { id: "sso", status: "queued" },
   } satisfies OutgoingMessage;
   assert.deepEqual(
@@ -126,64 +125,49 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
     ],
   );
   assert.ok(receiptOutgoing);
-  assert.equal(
+  assert.deepEqual(
     receiptOutgoing(accepted, delivered).receipt!.status,
     "delivered",
   );
   assert.deepEqual(receiptOutgoing(accepted, delivered), {
     ...accepted,
-    status: "delivered",
+    status: { source: "server", status: "delivered" },
     receipt: delivered,
-    error: undefined,
   });
-  assert.equal(
+  assert.deepEqual(
     receiptOutgoing(
-      { ...accepted, status: MessageSendStatus.uncertain },
+      {
+        ...accepted,
+        status: { source: "server", status: MessageSendStatus.uncertain },
+      },
       delivered,
     ).status,
-    "delivered",
+    { source: "server", status: "delivered" },
     "A receipt resolves an uncertain send using the same message identity",
   );
-  assert.equal(
+  assert.deepEqual(
     receiptOutgoing(accepted, {
       id: "sso",
       status: "failed",
       error: "server rejected the message",
-    }).error,
+    }).receipt?.error,
     "server rejected the message",
   );
-  assert.equal(
+  assert.deepEqual(
     receiptOutgoing(
-      { ...accepted, status: MessageSendStatus.queued },
+      {
+        ...accepted,
+        status: { source: "server", status: MessageSendStatus.queued },
+      },
       delivered,
     ).status,
-    "delivered",
+    { source: "server", status: "delivered" },
     "A matching server receipt confirms delivery",
   );
-  assert.equal(
-    latestMessageReceipt(delivered, {
-      id: "sso",
-      status: MessageSendStatus.queued,
-    }),
-    delivered,
-  );
-  const newerDelivered: MessageReceipt = {
-    id: "sso",
-    status: MessageSendStatus.delivered,
-  };
-  assert.equal(
-    latestMessageReceipt(delivered, newerDelivered),
-    newerDelivered,
-    "A later delivery receipt replaces the earlier confirmation",
-  );
-  const firstPending: MessageReceipt = {
-    id: "sso",
-    status: MessageSendStatus.queued,
-  };
-  assert.equal(
-    latestMessageReceipt(undefined, firstPending),
-    firstPending,
-    "The first receipt is retained",
+  // Removed inference: the client no longer retains an earlier delivered status over a newer receipt.
+  assert.deepEqual(
+    receiptOutgoing(accepted, { id: "sso", status: "queued" }).status,
+    { source: "server", status: "queued" },
   );
   const pending = {
     id: "chat:sso",
@@ -198,7 +182,23 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
     new Map([["sso", delivered]]),
   )[0];
   assert.ok(shown);
-  assert.equal(shown.deliveryStatus, "delivered");
+  const removed: Message = {
+    ...pending,
+    deliveryStatus: { source: "device", state: { kind: "removed" } },
+  };
+  assert.equal(receiptTranscript([removed], "chat", new Map())[0], removed);
+  assert.deepEqual(
+    receiptTranscript(
+      [removed],
+      "chat",
+      new Map([["sso", { id: "sso", status: "cancelled" }]]),
+    )[0]?.deliveryStatus,
+    { source: "server", status: "cancelled" },
+  );
+  assert.deepEqual(shown.deliveryStatus, {
+    source: "server",
+    status: "delivered",
+  });
 
   assert.equal(
     shown.materialized,
@@ -225,7 +225,7 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
     )[0],
     {
       ...fallbackId,
-      deliveryStatus: "failed",
+      deliveryStatus: { source: "server", status: "failed" },
       deliveryError: "no",
     },
   );
@@ -242,7 +242,7 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
     )[0],
     {
       ...nonPrefixedId,
-      deliveryStatus: "queued",
+      deliveryStatus: { source: "server", status: "queued" },
       deliveryError: undefined,
     },
   );
@@ -252,7 +252,7 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
     clientMessageId: undefined,
   };
   assert.ok(receiptTranscript);
-  assert.equal(
+  assert.deepEqual(
     required(
       receiptTranscript(
         [roomPrefixWithoutDelimiter],
@@ -260,7 +260,7 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
         new Map([["chatty", { id: "chatty", status: "delivered" }]]),
       )[0],
     ).deliveryStatus,
-    "delivered",
+    { source: "server", status: "delivered" },
     "Only the exact room prefix followed by a colon is stripped",
   );
   const preferredClientId = {
@@ -269,7 +269,7 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
     clientMessageId: "sso",
   };
 
-  assert.equal(
+  assert.deepEqual(
     required(
       receiptTranscript(
         [preferredClientId],
@@ -280,7 +280,7 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
         ]),
       )[0],
     ).deliveryStatus,
-    "failed",
+    { source: "server", status: "failed" },
     "The stable client message ID takes precedence over the transcript ID",
   );
   const assistant = { ...pending, role: "assistant" } satisfies Message;
@@ -291,7 +291,7 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
   );
   const alreadyDelivered = {
     ...pending,
-    deliveryStatus: MessageSendStatus.delivered,
+    deliveryStatus: { source: "server", status: MessageSendStatus.delivered },
     deliveryError: "stale",
   } satisfies Message;
   assert.deepEqual(
@@ -302,14 +302,14 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
     )[0],
     {
       ...alreadyDelivered,
-      deliveryStatus: "delivered",
-      deliveryError: undefined,
+      deliveryStatus: { source: "server", status: "queued" },
+      deliveryError: "old",
     },
   );
   for (const status of ["uncertain", "failed", "cancelled"] as const)
-    assert.equal(
-      receiptOutgoing(accepted, { id: "sso", status }).status,
+    assert.deepEqual(receiptOutgoing(accepted, { id: "sso", status }).status, {
+      source: "server",
       status,
-    );
-  console.log("PASS exact identity, ambiguity, and monotonic delivery");
+    });
+  console.log("PASS exact identity and receipt status");
 });

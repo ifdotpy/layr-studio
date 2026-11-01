@@ -18,9 +18,11 @@ export default function OutboxControls({
   const [error, setError] = useState("");
   if (
     !entry ||
-    (entry.status !== MessageSendStatus.buffered &&
-      entry.status !== MessageSendStatus.uncertain &&
-      entry.status !== MessageSendStatus.failed)
+    !(
+      entry.status.source === "device" ||
+      entry.status.status === MessageSendStatus.uncertain ||
+      entry.status.status === MessageSendStatus.failed
+    )
   )
     return null;
   const run = async (action: "resume" | "cancel") => {
@@ -32,6 +34,7 @@ export default function OutboxControls({
       if (
         action === "cancel" ||
         (result &&
+          result.kind === "server" &&
           result.status !== MessageSendStatus.uncertain &&
           result.status !== MessageSendStatus.failed)
       )

@@ -20,7 +20,7 @@ import { MessageSendStatus } from "../generated/api";
 import type { MessageReceipt } from "./messageReceipts";
 
 export type DeliveryState =
-  | { source: "device"; state: LocalSend }
+  | { source: "device"; state: LocalSend | { kind: "removed" } }
   | { source: "server"; status: MessageSendStatus };
 type Intention = {
   body: SendMessageBody;

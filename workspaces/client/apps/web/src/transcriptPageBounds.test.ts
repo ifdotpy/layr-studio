@@ -31,7 +31,7 @@ it("treats a delivered receipt as authoritative despite a stale pending flag", (
     ...legacy,
     role: "user",
     materialized: true,
-    deliveryStatus: MessageSendStatus.queued,
+    deliveryStatus: { source: "server", status: MessageSendStatus.queued },
   };
   const delivered = receiptTranscript(
     [queued],
