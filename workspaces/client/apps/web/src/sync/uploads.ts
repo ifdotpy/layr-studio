@@ -177,7 +177,6 @@ export function createUploads(
     const stored = storedKeys.get(id);
     if (stored) await buffer.delete(stored);
     storedKeys.delete(id);
-    cancelled.add(id);
     rows.delete(id);
     contents.delete(id);
     uploadsChanged();
