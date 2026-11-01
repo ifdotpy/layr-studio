@@ -338,9 +338,12 @@ fn replay_in(
 }
 
 fn excludes_account(agent: &studio_runtime_store::AgentRecord, target: &str) -> bool {
-    agent
-        .extra
-        .get("excludedAccountKeys")
+    account_is_excluded(agent.extra.get("excludedAccountKeys"), target)
+}
+
+/// The single compatibility accessor for per-chat account exclusions.
+pub(crate) fn account_is_excluded(exclusions: Option<&Value>, target: &str) -> bool {
+    exclusions
         .and_then(Value::as_array)
         .is_some_and(|keys| keys.iter().any(|key| key.as_str() == Some(target)))
 }

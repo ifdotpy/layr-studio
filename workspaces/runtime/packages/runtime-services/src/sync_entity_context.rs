@@ -18,6 +18,46 @@ use crate::sync_views::{AgentViewContext, RoomViewContext};
 /// kept below SQLite's host-parameter limit. Unit: rows (ids) per statement.
 const LEAD_LOOKUP_CHUNK_ROWS: usize = 500;
 
+fn account_destinations(
+    transaction: &Transaction<'_>,
+) -> StoreResult<Vec<studio_runtime_schema::account_destination::AccountDestination>> {
+    #[derive(serde::Deserialize)]
+    struct Entity {
+        value: Accounts,
+    }
+    #[derive(serde::Deserialize)]
+    struct Accounts {
+        accounts: Vec<Account>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Account {
+        id: studio_runtime_schema::account_key::AccountKey,
+        eligibility: studio_runtime_schema::agent_progress::AccountEligibility,
+    }
+    if !table_exists(transaction, "sync_entities")? {
+        return Ok(Vec::new());
+    }
+    let raw: Option<String> = transaction.query_row(
+        "SELECT payload FROM sync_entities WHERE collection='accounts' AND id='current' AND deleted=0",
+        [], |row| row.get(0),
+    ).optional()?;
+    let Some(raw) = raw else {
+        return Ok(Vec::new());
+    };
+    let entity: Entity = serde_json::from_str(&raw)?;
+    Ok(entity
+        .value
+        .accounts
+        .into_iter()
+        .map(
+            |row| studio_runtime_schema::account_destination::AccountDestination {
+                account_key: row.id,
+                eligibility: row.eligibility,
+            },
+        )
+        .collect())
+}
+
 /// Work performed by one bulk projection-context pass, exposed for deterministic tests.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct AgentContextWork {
@@ -34,6 +74,7 @@ pub(crate) fn agent_view_contexts(
     work_records: &[studio_runtime_store::WorkItemRecord],
     project_server_id: Option<&str>,
 ) -> StoreResult<(HashMap<String, AgentViewContext>, AgentContextWork)> {
+    let destinations = account_destinations(transaction)?;
     let lead_ids = agents
         .iter()
         .filter_map(|(id, record)| {
@@ -197,6 +238,7 @@ pub(crate) fn agent_view_contexts(
         contexts.insert(
             id.to_owned(),
             AgentViewContext {
+                account_destinations: destinations.clone(),
                 project_server_id: project_server_id.map(str::to_owned),
                 launcher_alive: true,
                 empty_lead,
@@ -277,6 +319,7 @@ pub(crate) fn agent_view_context(
     let progress = crate::agent_progress::derive(transaction, record, &assigned)?;
     let attention = pending_attention(transaction, id, record)?;
     Ok(AgentViewContext {
+        account_destinations: account_destinations(transaction)?,
         command_progress: progress.commands,
         stall: progress.stall,
         project_server_id: project_server_id.map(str::to_owned),

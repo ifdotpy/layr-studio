@@ -62,7 +62,7 @@ pub enum AccountTransferProgress {
     },
 }
 
-pub(crate) fn account_change_schemas() -> [(&'static str, serde_json::Value); 4] {
+pub(crate) fn account_change_schemas() -> [(&'static str, serde_json::Value); 5] {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
@@ -74,6 +74,10 @@ pub(crate) fn account_change_schemas() -> [(&'static str, serde_json::Value); 4]
         (
             "AccountEligibility",
             AccountEligibility::json_schema(&mut generator).to_value(),
+        ),
+        (
+            "AccountDestination",
+            crate::account_destination::AccountDestination::json_schema(&mut generator).to_value(),
         ),
         (
             "AccountTransferAction",
