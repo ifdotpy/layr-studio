@@ -257,8 +257,9 @@ mod tests {
         let envelope: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert!(seq > 1);
         assert_eq!(
-            envelope["value"]["observation"]["data"]["rateLimits"]["primary"]["usedPercent"],
-            80
+            envelope["value"]["observation"]["data"]["rateLimits"]["primary"]["usedPercent"]
+                .as_f64(),
+            Some(80.0)
         );
         assert_eq!(
             envelope["value"]["projection"]["runway"]["validUntil"],

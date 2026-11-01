@@ -109,29 +109,71 @@ impl LimitsStamp {
     }
 }
 
+/// Decode one account's stored limits, isolating unreadable and foreign observations.
+pub fn normalized_limits_view(
+    account: &str,
+    bytes: &[u8],
+    now: f64,
+) -> (studio_runtime_schema::usage_limits::RateLimitView, bool) {
+    use studio_runtime_schema::usage_limits::{RateLimitView, UsageLimitsResponse};
+    let parsed = (|| {
+        if bytes.len() > MAX_PERSISTED_DOCUMENT_BYTES || !persisted_document_within_bounds(bytes) {
+            return None;
+        }
+        let mut entity: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+        if let Some(value) = entity.get("value")
+            && let Ok(view) = serde_json::from_value::<RateLimitView>(value.clone())
+            && view.observation.account_key == account
+        {
+            return Some(view);
+        }
+        let value = entity.get_mut("value")?;
+        let observation = if value.get("observation").is_some() {
+            &mut value["observation"]
+        } else {
+            value
+        };
+        if let Some(object) = observation.as_object_mut() {
+            object.remove("eligibility");
+        }
+        let raw =
+            serde_json::value::RawValue::from_string(serde_json::to_string(observation).ok()?)
+                .ok()?;
+        RateLimitView::read(&raw, account, now).ok()
+    })();
+    if let Some(view) = parsed {
+        return (view, false);
+    }
+    eprintln!("limits: isolated unreadable account {account}");
+    let empty = UsageLimitsResponse {
+        account_key: account.to_owned(),
+        ..Default::default()
+    };
+    let raw = serde_json::value::RawValue::from_string(
+        serde_json::to_string(&empty).expect("empty limits serialize"),
+    )
+    .expect("serialized limits are JSON");
+    (
+        RateLimitView::read(&raw, account, now).expect("empty limits are valid"),
+        true,
+    )
+}
+
 pub fn typed_limits_snapshot(
     connection: &Connection,
     account: &str,
     stamp: &LimitsStamp,
 ) -> StoreResult<Option<studio_runtime_schema::usage_limits::UsageLimitsResponse>> {
-    #[derive(serde::Deserialize)]
-    struct Entity {
-        value: Projection,
-    }
-    #[derive(serde::Deserialize)]
-    struct Projection {
-        observation: studio_runtime_schema::usage_limits::UsageLimitsResponse,
-    }
     let raw: Option<String> = connection.query_row(
         "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0",
         [account], |row| row.get(0),
     ).optional()?;
-    raw.map(|raw| {
-        let mut response = serde_json::from_str::<Entity>(&raw)?.value.observation;
+    Ok(raw.map(|raw| {
+        let (view, _) = normalized_limits_view(account, raw.as_bytes(), 0.0);
+        let mut response = view.observation;
         stamp.apply(&mut response);
-        Ok(response)
-    })
-    .transpose()
+        response
+    }))
 }
 
 #[derive(Debug, thiserror::Error)]

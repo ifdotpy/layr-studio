@@ -861,9 +861,7 @@ enum ResetDeadline {
         at: f64,
         task: tokio::task::AbortHandle,
     },
-    Checking {
-        at: f64,
-    },
+    Checking,
 }
 
 async fn spawn_account_driver<T: Send + 'static>(
@@ -1020,6 +1018,24 @@ impl AccountSessionRuntime {
         Ok(())
     }
 
+    fn typed_limits_snapshot(
+        &self,
+        account: &str,
+    ) -> Result<studio_runtime_schema::usage_limits::UsageLimitsResponse, AccountSessionError> {
+        if let Some(value) = self
+            .refreshed_limits
+            .lock()
+            .map_err(|_| AccountSessionError::Persistence)?
+            .get(account)
+        {
+            return Ok(value.clone());
+        }
+        self.limits
+            .as_ref()
+            .map(|policy| policy.typed_limits(account))
+            .ok_or(AccountSessionError::Requires(LIMITS_REQUIRED))
+    }
+
     fn schedule_reset(&self, account: &str) {
         self.schedule_reset_after(account, 0.0);
     }
@@ -1039,14 +1055,9 @@ impl AccountSessionRuntime {
     }
 
     fn schedule_reset_with_recovery(&self, account: &str, attempted: f64, recovery: Option<f64>) {
-        use studio_runtime_schema::usage_limits::{
-            UsageLimitsResponse, bucket_projection, reset_projection,
-        };
+        use studio_runtime_schema::usage_limits::{bucket_projection, reset_projection};
         let Ok(now) = timestamp() else { return };
-        let Ok(value) = self.limits_snapshot(account) else {
-            return;
-        };
-        let Ok(observation) = serde_json::from_value::<UsageLimitsResponse>(value) else {
+        let Ok(observation) = self.typed_limits_snapshot(account) else {
             return;
         };
         let checked = observation
@@ -1073,7 +1084,7 @@ impl AccountSessionRuntime {
         let Ok(mut deadlines) = self.reset_deadlines.lock() else {
             return;
         };
-        if matches!(deadlines.get(account), Some(ResetDeadline::Checking { .. })) {
+        if matches!(deadlines.get(account), Some(ResetDeadline::Checking)) {
             return;
         }
         if let Some(ResetDeadline::Scheduled { at, .. }) = deadlines.get(account)
@@ -1095,7 +1106,7 @@ impl AccountSessionRuntime {
             {
                 let Ok(mut deadlines) = runtime.reset_deadlines.lock() else { return };
                 if !matches!(deadlines.get(&key), Some(ResetDeadline::Scheduled { at: current, .. }) if *current == at) { return; }
-                deadlines.insert(key.clone(), ResetDeadline::Checking { at });
+                deadlines.insert(key.clone(), ResetDeadline::Checking);
             }
             if let Some(store) = &runtime.store
                 && limits::persist(store.clone(), runtime.refreshed_limits.clone(), key.clone(), limits::LimitsWrite::Checking { reset_at: at }, runtime.continuation_wake.clone(), runtime.session.clone()).await.is_err()
@@ -1104,6 +1115,9 @@ impl AccountSessionRuntime {
                 return;
             }
             let _ = read_limits_with_freshness(&runtime, &key, false).await;
+            if let Some(store) = &runtime.store {
+                let _ = limits::persist(store.clone(), runtime.refreshed_limits.clone(), key.clone(), limits::LimitsWrite::Finish, runtime.continuation_wake.clone(), runtime.session.clone()).await;
+            }
             if let Ok(mut deadlines) = runtime.reset_deadlines.lock() { deadlines.remove(&key); }
             runtime.schedule_reset_after(&key, at);
         });
@@ -1632,12 +1646,6 @@ impl AccountSessionPort for AccountSessionRuntime {
                         .data
                         .ok_or(AccountSessionError::InvalidResponse("/data".into()))?
                         .0,
-                    checking: self.reset_deadlines.lock().ok().and_then(
-                        |deadlines| match deadlines.get(&account) {
-                            Some(ResetDeadline::Checking { at }) => Some(*at),
-                            _ => None,
-                        },
-                    ),
                 },
                 self.continuation_wake.clone(),
                 self.session.clone(),
@@ -2545,6 +2553,8 @@ mod persistence_tests {
 mod limits_runtime_tests {
     #![allow(clippy::unwrap_used)]
 
+    use super::{LimitsSnapshot, limits};
+
     use super::{
         AccountSessionError, AccountSessionPort, AccountSessionRuntime, ConnectionScope,
         LoginRequest, ProviderRequest, ProviderResponse, RetainedAccountSession, SessionFuture,
@@ -2750,6 +2760,105 @@ mod limits_runtime_tests {
                 ["primary"]["usedPercent"],
             100.0
         );
+    }
+
+    #[tokio::test]
+    async fn notification_after_finished_read_does_not_restore_checking() {
+        let (f, _, _) = fixture([], false).await;
+        let store = f.runtime.store.as_ref().unwrap().clone();
+        f.runtime
+            .persist_limits(
+                "default",
+                &json!({"accountKey":"default","at":100.0,"data":{"accountId":"old"}}),
+            )
+            .await
+            .unwrap();
+        let before = f.runtime.refreshed_limits.lock().unwrap()["default"].clone();
+        let scope = f.provider.scope.lock().unwrap().clone();
+        limits::persist(
+            store.clone(),
+            f.runtime.refreshed_limits.clone(),
+            "default".into(),
+            limits::LimitsWrite::Checking { reset_at: 200.0 },
+            None,
+            f.runtime.session.clone(),
+        )
+        .await
+        .unwrap();
+        let mut response = before.clone();
+        response.checked_at = Some(201.0);
+        limits::persist(
+            store.clone(),
+            f.runtime.refreshed_limits.clone(),
+            "default".into(),
+            limits::LimitsWrite::ReadFailure {
+                scope: Some(scope.clone()),
+                before,
+                value: LimitsSnapshot { response },
+            },
+            None,
+            f.runtime.session.clone(),
+        )
+        .await
+        .unwrap();
+        let data = serde_json::from_value(json!({"accountId":"new"})).unwrap();
+        limits::persist(
+            store.clone(),
+            f.runtime.refreshed_limits.clone(),
+            "default".into(),
+            limits::LimitsWrite::Notification {
+                scope,
+                cursor: 1,
+                observed_at: 202.0,
+                data,
+            },
+            None,
+            f.runtime.session.clone(),
+        )
+        .await
+        .unwrap();
+        let payload: String = store
+            .test_reader()
+            .unwrap()
+            .query_row(
+                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&payload).unwrap()["value"]["projection"]["status"]["kind"],
+            "current"
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_provider_reply_finishes_the_durable_checking_state() {
+        let reset_at = super::timestamp().unwrap() + 0.1;
+        let (f, entered, release) = fixture(
+            [Reply::Data(
+                json!({"rateLimits":{"primary":{"usedPercent":"invalid"}}}),
+            )],
+            true,
+        )
+        .await;
+        let store = f.runtime.store.as_ref().unwrap().clone();
+        let changes = Arc::new(tokio::sync::Notify::new());
+        let observer = changes.clone();
+        store.add_commit_observer(move || observer.notify_one());
+        f.runtime.persist_limits("default", &json!({"accountKey":"default","at":reset_at-1.0,"readAt":reset_at-1.0,"data":{"rateLimits":{"primary":{"usedPercent":100.0,"resetsAt":reset_at}}}})).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), entered)
+            .await
+            .unwrap()
+            .unwrap();
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let payload: String = store.test_reader().unwrap().query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0)).unwrap();
+                if serde_json::from_str::<Value>(&payload).unwrap()["value"]["projection"]["status"]["kind"] == "current" { break; }
+                changes.notified().await;
+            }
+        }).await.expect("invalid replies finish checking");
     }
 
     #[tokio::test]

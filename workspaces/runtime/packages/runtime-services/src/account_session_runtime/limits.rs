@@ -11,12 +11,12 @@ pub(super) enum LimitsWrite {
     Checking {
         reset_at: f64,
     },
+    Finish,
     Notification {
         scope: ConnectionScope,
         cursor: u64,
         observed_at: f64,
         data: UsageLimitsData,
-        checking: Option<f64>,
     },
     ReadFailure {
         scope: Option<ConnectionScope>,
@@ -33,7 +33,7 @@ pub(super) enum LimitsWrite {
 impl LimitsWrite {
     fn scope(&self) -> Option<&ConnectionScope> {
         match self {
-            Self::Snapshot(_) | Self::Checking { .. } => None,
+            Self::Snapshot(_) | Self::Checking { .. } | Self::Finish => None,
             Self::Notification { scope, .. } => Some(scope),
             Self::Read { scope, .. } => Some(scope),
             Self::ReadFailure { scope, .. } => scope.as_ref(),
@@ -100,13 +100,31 @@ fn commit(
         account_state::LimitsStamp::read(account_state::limits_observation(tx, account)?)?;
     let old = account_state::typed_limits_snapshot(tx, account, &stamp)?;
     let mut stamp_changed = false;
+    let committed_view = tx.query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0", [account], |row| row.get::<_, String>(0)).optional()?.map(|payload| account_state::normalized_limits_view(account, payload.as_bytes(), now).0);
     let mut checking = None;
     let force_projection = matches!(
         &write,
-        LimitsWrite::Checking { .. } | LimitsWrite::Read { .. } | LimitsWrite::ReadFailure { .. }
+        LimitsWrite::Checking { .. }
+            | LimitsWrite::Finish
+            | LimitsWrite::Read { .. }
+            | LimitsWrite::ReadFailure { .. }
     );
     let value = match write {
         LimitsWrite::Snapshot(value) => value.response,
+        LimitsWrite::Finish => {
+            if !committed_view.as_ref().is_some_and(|view| {
+                matches!(
+                    view.projection.status,
+                    studio_runtime_schema::usage_limits::AccountLimitsStatus::Checking { .. }
+                )
+            }) {
+                return Ok((old, false));
+            }
+            let Some(value) = old.clone() else {
+                return Ok((None, false));
+            };
+            value
+        }
         LimitsWrite::Checking { reset_at } => {
             checking = Some(reset_at);
             let Some(value) = old.clone() else {
@@ -144,9 +162,15 @@ fn commit(
             cursor,
             observed_at,
             data: incoming,
-            checking: active_check,
         } => {
-            checking = active_check;
+            checking = committed_view
+                .as_ref()
+                .and_then(|view| match view.projection.status {
+                    studio_runtime_schema::usage_limits::AccountLimitsStatus::Checking {
+                        reset_at,
+                    } => Some(reset_at),
+                    _ => None,
+                });
             if stamp.scope.as_ref() == Some(&scope) && stamp.cursor >= cursor {
                 return Ok((old, false));
             }
@@ -246,11 +270,6 @@ pub(crate) fn populate_agents(
     Ok(())
 }
 
-#[derive(serde::Deserialize)]
-struct LimitsEntity {
-    value: studio_runtime_schema::usage_limits::RateLimitView,
-}
-
 pub(super) async fn recovery_deadline(
     store: Arc<studio_runtime_store::RuntimeStore>,
     account: String,
@@ -263,7 +282,7 @@ pub(super) async fn recovery_deadline(
             [&account], |row| row.get(0),
         ).optional()?;
         let Some(payload) = payload else { return Ok::<_, StoreError>(None) };
-        let LimitsEntity { value } = serde_json::from_str(&payload)?;
+        let (value, _) = account_state::normalized_limits_view(&account, payload.as_bytes(), attempted);
         let checked = value.observation.read_at.into_iter().chain(value.observation.checked_at).fold(0.0, f64::max);
         Ok(value.projection.agents.values().filter_map(|agent| {
             match &agent.recovery.as_ref()?.timing {
@@ -308,7 +327,17 @@ pub(crate) fn publish_agent_change(
         rows.collect::<Result<Vec<_>, _>>()?
     };
     for (account, payload) in rows {
-        let LimitsEntity { mut value } = serde_json::from_str(&payload)?;
+        let (mut value, unreadable) =
+            account_state::normalized_limits_view(&account, payload.as_bytes(), now);
+        if unreadable {
+            tx.execute(
+                "DELETE FROM sync_entities WHERE collection='rateLimit' AND id=?1",
+                [&account],
+            )?;
+            populate_agents(tx, &mut value, now)?;
+            SyncDocumentsRepository::put_entity(tx, "rateLimit", &account, value, false)?;
+            continue;
+        }
         let matches = agent.as_ref().is_some_and(|agent| {
             let key = if agent.account_key.is_empty() {
                 "default"
@@ -351,7 +380,14 @@ pub(crate) fn seed_agents(tx: &studio_runtime_store::Transaction<'_>) -> Result<
         rows.collect::<Result<Vec<_>, _>>()?
     };
     for (account, payload) in rows {
-        let LimitsEntity { mut value } = serde_json::from_str(&payload)?;
+        let (mut value, unreadable) =
+            account_state::normalized_limits_view(&account, payload.as_bytes(), now);
+        if unreadable {
+            tx.execute(
+                "DELETE FROM sync_entities WHERE collection='rateLimit' AND id=?1",
+                [&account],
+            )?;
+        }
         value.projection.status = studio_runtime_schema::usage_limits::AccountLimitsStatus::Current;
         populate_agents(tx, &mut value, now)?;
         SyncDocumentsRepository::put_entity(tx, "rateLimit", &account, value, false)?;

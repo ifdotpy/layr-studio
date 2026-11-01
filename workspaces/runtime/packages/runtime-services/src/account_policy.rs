@@ -513,6 +513,18 @@ impl AccountPolicyState {
         self.accounts.known_account_keys.contains(account_key)
     }
 
+    pub fn typed_limits(
+        &self,
+        account_key: &str,
+    ) -> studio_runtime_schema::usage_limits::UsageLimitsResponse {
+        self.limits.get(account_key).cloned().unwrap_or_else(|| {
+            studio_runtime_schema::usage_limits::UsageLimitsResponse {
+                account_key: account_key.to_owned(),
+                ..Default::default()
+            }
+        })
+    }
+
     pub fn limits(&self, account_key: &str) -> Value {
         self.limits
             .get(account_key)
