@@ -7,6 +7,10 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use studio_runtime_schema::project_ingress::{
+    ProjectAction, ProjectWrite, WorkerEnvironment, WorkspacePolicy,
+};
+use studio_runtime_schema::queue_command::Field;
 use studio_runtime_schema::workspace_modes::PROJECT_LAYR_NATIVE_POLICY;
 use studio_runtime_store::path_identity::CanonicalPath;
 use studio_runtime_store::{
@@ -17,12 +21,11 @@ use unicode_casefold::UnicodeCaseFold;
 use uuid::Uuid;
 
 pub(crate) mod operations;
-pub use operations::peer_team_write;
+pub use operations::{peer_team_write, reorder};
 
 /// Refusal for a worktree chat or worker in a project whose policy is native Layr.
 pub const WORKTREE_REFUSED_BY_LAYR_POLICY: &str =
     "This project allows only Layr workspaces. Use Layr instead of WT.";
-use operations::reorder;
 
 /// Match the Python cross-server UUIDv5 namespace and input encoding.
 pub fn cross_server_identity(parts: &[&str]) -> String {
@@ -52,12 +55,12 @@ pub enum ProjectsError {
 
 pub(crate) async fn prepare_path(
     store: Arc<RuntimeStore>,
-    path: Option<Value>,
+    path: Option<String>,
     require_directory: bool,
 ) -> Result<(PreparedHost, String), ProjectsError> {
     let prepared = PreparedHost::load(&store).await?;
     studio_runtime_process::blocking_pool::spawn_blocking("runtime-services/projects", move || {
-        let path = project_key(path.as_ref(), require_directory)?;
+        let path = project_key(path.as_deref(), require_directory)?;
         prepared.recheck_paths()?;
         Ok::<_, ProjectsError>((prepared, path))
     })
@@ -532,19 +535,14 @@ mod peer_location_tests {
     }
 }
 
-pub fn write_dependency(body: &Value) -> Option<&'static str> {
-    let action = body
-        .get("action")
-        .and_then(Value::as_str)
-        .unwrap_or("register");
-    if action == "register"
-        && body.get("server").is_some_and(|server| {
-            !server.is_null() && server.as_str().is_some_and(|value| !value.is_empty())
-        })
+pub fn write_dependency(body: &ProjectWrite) -> Option<&'static str> {
+    if body.action.unwrap_or(ProjectAction::Register) == ProjectAction::Register
+        && body
+            .server
+            .as_ref()
+            .is_some_and(|server| !server.as_str().is_empty())
     {
         Some("cross-server-driver/project-registration")
-    } else if matches!(action, "add_location" | "remove_location") {
-        Some("cross-server-driver/project-location-write")
     } else {
         None
     }
@@ -552,15 +550,11 @@ pub fn write_dependency(body: &Value) -> Option<&'static str> {
 
 pub async fn write(
     store: Arc<RuntimeStore>,
-    body: Value,
+    body: ProjectWrite,
     default_account: String,
     known_accounts: Vec<crate::account_policy::PublicAccount>,
 ) -> Result<Value, ProjectsError> {
-    let action = body
-        .get("action")
-        .and_then(Value::as_str)
-        .unwrap_or("register")
-        .to_owned();
+    let action = body.action.unwrap_or(ProjectAction::Register).as_str();
     if let Some(dependency) = write_dependency(&body) {
         return Err(ProjectsError::Requires(dependency));
     }
@@ -576,30 +570,21 @@ pub async fn write(
     if action == "set_account_groups" {
         return set_account_groups(store, body, default_account, known_accounts).await;
     }
-    if action == "reorder" {
-        return reorder(&store, body).await;
-    }
     if matches!(
-        action.as_str(),
+        action,
         "rename" | "add_folder" | "rename_folder" | "remove_folder"
     ) {
         return organize(store, body, default_account, known_accounts).await;
     }
-    if !matches!(
-        action.as_str(),
-        "register" | "remove" | "set_account" | "set_worker_base"
-    ) {
-        return Err(ProjectsError::Invalid("unknown project action"));
-    }
-    let path_value = body.get("path").cloned();
-    let revision = body.get("expected_revision").and_then(Value::as_u64);
-    let account = body
-        .get("account_key")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
+    let path_value = Some(body.path.as_str().to_owned());
+    let revision = body
+        .expected_revision
+        .as_ref()
+        .and_then(|value| value.as_u64());
+    let account = body.account_key.clone();
     let base = body
-        .get("base_ref")
-        .and_then(Value::as_str)
+        .base_ref
+        .as_deref()
         .map(python_strip)
         .filter(|s| !s.is_empty())
         .map(str::to_owned);
@@ -671,7 +656,11 @@ pub async fn write(
                 }
             }
             if project.is_none() {
-                let name = project_name(transaction_body.get("name"), &path)?;
+                let name = match &transaction_body.name {
+                    Field::Missing => project_name(None, &path)?,
+                    Field::Null => return Err(ProjectsError::Invalid("project name is invalid")),
+                    Field::Value(value) => project_name(Some(value), &path)?,
+                };
                 let chosen = account.clone().unwrap_or(project_account(
                     &prepared,
                     tx,
@@ -756,6 +745,7 @@ fn folder_fold(value: &str) -> String {
     value.to_lowercase()
 }
 
+// Project writes retain Value until ProjectLive preserves stored field presence.
 fn load_project(
     tx: &studio_runtime_store::Transaction<'_>,
     id: &str,
@@ -778,7 +768,7 @@ fn revision_of(project: Option<&Value>, field: &str, id: &str) -> Result<u64, Pr
     }
 }
 
-fn project_name(value: Option<&Value>, path: &str) -> Result<String, ProjectsError> {
+fn project_name(value: Option<&str>, path: &str) -> Result<String, ProjectsError> {
     let Some(value) = value else {
         return Ok(Path::new(path)
             .file_name()
@@ -787,10 +777,7 @@ fn project_name(value: Option<&Value>, path: &str) -> Result<String, ProjectsErr
             .unwrap_or(path)
             .to_owned());
     };
-    let name = value
-        .as_str()
-        .ok_or(ProjectsError::Invalid("project name is invalid"))?;
-    let name = python_strip(name);
+    let name = python_strip(value);
     if name.is_empty() || name.chars().count() > 255 {
         return Err(ProjectsError::Invalid("project name is invalid"));
     }
@@ -857,28 +844,23 @@ fn project_account(
 
 async fn set_accounts(
     store: Arc<RuntimeStore>,
-    body: Value,
+    body: ProjectWrite,
     _default_account: String,
     known_accounts: Vec<crate::account_policy::PublicAccount>,
 ) -> Result<Value, ProjectsError> {
-    let path_value = body.get("path").cloned();
-    let keys_value = body
-        .get("account_keys")
-        .and_then(Value::as_array)
+    let path_value = Some(body.path.as_str().to_owned());
+    let mut keys = body
+        .account_keys
+        .clone()
         .filter(|keys| !keys.is_empty())
         .ok_or(ProjectsError::Invalid(
             "select at least one project account",
         ))?;
-    let mut keys = keys_value
-        .iter()
-        .filter_map(Value::as_str)
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
     keys.sort();
     keys.dedup();
     let default = body
-        .get("account_key")
-        .and_then(Value::as_str)
+        .account_key
+        .as_deref()
         .ok_or(ProjectsError::Invalid("select a default project account"))?
         .to_owned();
     if !keys.iter().any(|key| key == &default) {
@@ -904,8 +886,9 @@ async fn set_accounts(
         ));
     }
     let expected = body
-        .get("expected_revision")
-        .and_then(Value::as_u64)
+        .expected_revision
+        .as_ref()
+        .and_then(|revision| revision.as_u64())
         .ok_or(ProjectsError::Invalid(
             "project account revision is invalid",
         ))?;
@@ -947,25 +930,24 @@ async fn set_accounts(
 
 async fn set_worker_environment(
     store: Arc<RuntimeStore>,
-    body: Value,
+    body: ProjectWrite,
     default_account: String,
     known_accounts: Vec<crate::account_policy::PublicAccount>,
 ) -> Result<Value, ProjectsError> {
-    let environment = body
-        .get("environment")
-        .and_then(Value::as_str)
-        .filter(|environment| matches!(*environment, "host" | "linux"))
-        .map(str::to_owned)
-        .ok_or(ProjectsError::Invalid("worker environment is invalid"))?;
-    if environment == "linux" {
-        return Err(ProjectsError::BadRequest(
-            "Choose a layr chat to run agents in the VM",
-        ));
-    }
-    let path_value = body.get("path").cloned();
+    let environment = match body.environment {
+        Some(WorkerEnvironment::Host) => "host",
+        Some(WorkerEnvironment::Linux) => {
+            return Err(ProjectsError::BadRequest(
+                "Choose a layr chat to run agents in the VM",
+            ));
+        }
+        None => return Err(ProjectsError::Invalid("worker environment is invalid")),
+    };
+    let path_value = Some(body.path.as_str().to_owned());
     let expected = body
-        .get("expected_revision")
-        .and_then(Value::as_u64)
+        .expected_revision
+        .as_ref()
+        .and_then(|revision| revision.as_u64())
         .ok_or(ProjectsError::Invalid(
             "worker environment revision is invalid",
         ))?;
@@ -1016,19 +998,20 @@ async fn set_worker_environment(
 /// The revision guards concurrent saves, as for the other project settings.
 async fn set_workspace_policy(
     store: Arc<RuntimeStore>,
-    body: Value,
+    body: ProjectWrite,
     default_account: String,
     known_accounts: Vec<crate::account_policy::PublicAccount>,
 ) -> Result<Value, ProjectsError> {
-    let policy = match body.get("workspace_policy") {
-        Some(Value::Null) => None,
-        Some(Value::String(policy)) if policy == PROJECT_LAYR_NATIVE_POLICY => Some(policy.clone()),
-        _ => return Err(ProjectsError::Invalid("workspace policy is invalid")),
+    let policy = match body.workspace_policy {
+        Field::Null => None,
+        Field::Value(WorkspacePolicy::LayrNative) => Some(PROJECT_LAYR_NATIVE_POLICY.to_owned()),
+        Field::Missing => return Err(ProjectsError::Invalid("workspace policy is invalid")),
     };
-    let path_value = body.get("path").cloned();
+    let path_value = Some(body.path.as_str().to_owned());
     let expected = body
-        .get("expected_revision")
-        .and_then(Value::as_u64)
+        .expected_revision
+        .as_ref()
+        .and_then(|revision| revision.as_u64())
         .ok_or(ProjectsError::Invalid(
             "workspace policy revision is invalid",
         ))?;
@@ -1114,7 +1097,7 @@ fn canonical_directory(path: &str) -> PathBuf {
 /// so the default order applies. The order never limits the accounts of the project.
 async fn set_account_groups(
     store: Arc<RuntimeStore>,
-    body: Value,
+    body: ProjectWrite,
     default_account: String,
     known_accounts: Vec<crate::account_policy::PublicAccount>,
 ) -> Result<Value, ProjectsError> {
@@ -1122,18 +1105,18 @@ async fn set_account_groups(
         PROJECT_GROUPS_FIELD, PROJECT_GROUPS_REVISION_FIELD, validate_groups,
     };
     let groups = body
-        .get("account_groups")
-        .and_then(Value::as_array)
+        .account_groups
+        .clone()
         .ok_or(ProjectsError::Invalid("account order is invalid"))?
-        .iter()
-        .map(|value| value.as_str().map(str::to_owned))
-        .collect::<Option<Vec<_>>>()
-        .ok_or(ProjectsError::Invalid("account order is invalid"))?;
+        .into_iter()
+        .map(|group| group.into_string())
+        .collect::<Vec<_>>();
     validate_groups(&groups).map_err(ProjectsError::Invalid)?;
-    let path_value = body.get("path").cloned();
+    let path_value = Some(body.path.as_str().to_owned());
     let expected = body
-        .get("expected_revision")
-        .and_then(Value::as_u64)
+        .expected_revision
+        .as_ref()
+        .and_then(|revision| revision.as_u64())
         .ok_or(ProjectsError::Invalid("account order revision is invalid"))?;
     let (prepared, path) = prepare_path(store.clone(), path_value, true).await?;
     store
@@ -1187,19 +1170,16 @@ async fn set_account_groups(
 
 async fn organize(
     store: Arc<RuntimeStore>,
-    body: Value,
+    body: ProjectWrite,
     default_account: String,
     accounts: Vec<crate::account_policy::PublicAccount>,
 ) -> Result<Value, ProjectsError> {
-    let action = body
-        .get("action")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let path_value = body.get("path").cloned();
+    let action = body.action.map(ProjectAction::as_str).unwrap_or_default();
+    let path_value = Some(body.path.as_str().to_owned());
     let expected = body
-        .get("expected_revision")
-        .and_then(Value::as_u64)
+        .expected_revision
+        .as_ref()
+        .and_then(|revision| revision.as_u64())
         .ok_or(ProjectsError::Invalid(
             "supply the current project revision",
         ))?;
@@ -1207,7 +1187,8 @@ async fn organize(
         None
     } else {
         let value = body
-            .get("name")
+            .name
+            .value()
             .ok_or(ProjectsError::Invalid("name is required"))?;
         Some(project_name(Some(value), "")?)
     };
@@ -1215,8 +1196,8 @@ async fn organize(
         None
     } else {
         let raw = body
-            .get("folder_id")
-            .and_then(Value::as_str)
+            .folder_id
+            .as_deref()
             .ok_or(ProjectsError::Invalid("supply a folder ID"))?;
         Some(
             Uuid::parse_str(raw)
@@ -1224,10 +1205,7 @@ async fn organize(
                 .to_string(),
         )
     };
-    let parent_id = body
-        .get("parent_id")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
+    let parent_id = body.parent_id.clone();
     let (prepared, path) = prepare_path(store.clone(), path_value, false).await?;
     store.transaction_with(move |tx| {
         prepared.recheck(tx)?;
@@ -1254,7 +1232,7 @@ async fn organize(
         if action == "rename_folder" && folder.is_some_and(|i| folders[i].get("name").and_then(Value::as_str) == name.as_deref()) { return Ok(project); }
         if action == "remove_folder" && folder.is_none() { return Ok(project); }
         if expected != revision { return Err(ProjectsError::Conflict("Project changed. Reload it before saving")); }
-        match action.as_str() {
+        match action {
             "rename" => project["name"] = json!(name),
             "add_folder" | "rename_folder" => {
                 let id = folder_id.as_deref().ok_or(ProjectsError::Invalid("supply a folder ID"))?;
@@ -1297,12 +1275,10 @@ async fn organize(
 }
 
 pub(crate) fn project_key(
-    value: Option<&Value>,
+    value: Option<&str>,
     require_directory: bool,
 ) -> Result<String, ProjectsError> {
-    let value = value
-        .and_then(Value::as_str)
-        .ok_or(ProjectsError::Invalid("project path is required"))?;
+    let value = value.ok_or(ProjectsError::Invalid("project path is required"))?;
     let validated = python_strip(value);
     if validated.starts_with("project:") {
         let parsed = Uuid::parse_str(validated.strip_prefix("project:").unwrap_or_default())
@@ -1366,10 +1342,10 @@ mod compatibility_tests {
         let resolved_home = studio_runtime_store::path_identity::resolve(home.path())
             .expect("resolved temporary home");
         assert_eq!(
-            super::project_key(Some(&serde_json::json!(requested)), false).expect("project path"),
+            super::project_key(requested.to_str(), false).expect("project path"),
             resolved_home.join("profile").to_string_lossy()
         );
-        assert!(super::project_key(Some(&serde_json::json!(requested)), true).is_err());
+        assert!(super::project_key(requested.to_str(), true).is_err());
     }
 }
 
@@ -1411,7 +1387,8 @@ mod account_order_tests {
         );
         let project = write(
             Arc::clone(&store),
-            json!({"action":"register","path":path}),
+            serde::Deserialize::deserialize(json!({"action":"register","path":path}))
+                .expect("project request"),
             "default".to_owned(),
             Vec::new(),
         )
@@ -1450,8 +1427,11 @@ mod account_order_tests {
             async move {
                 write(
                     store,
-                    json!({"action":"set_account_groups","path":path,
+                    serde::Deserialize::deserialize(
+                        json!({"action":"set_account_groups","path":path,
                         "account_groups":groups,"expected_revision":revision}),
+                    )
+                    .map_err(|_| ProjectsError::Invalid("account order is invalid"))?,
                     "default".to_owned(),
                     Vec::new(),
                 )

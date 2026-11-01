@@ -306,9 +306,8 @@ mod tests {
     async fn reconnect_seq_cursor_delivers_exact_changes_and_empty_live_intervals_are_suppressed() {
         let (_directory, state) = fixture().await;
         let store = state.store.as_ref().expect("store");
-        let resource = ResourceRef::StateResource(crate::generated::StateResource {
-            kind: crate::generated::StateResourceKind::State,
-        });
+        let resource =
+            ResourceRef::StateResource(studio_runtime_schema::resource_ref::EmptyResource {});
         let (_, _, baseline) = prepare(&state, &event(&state), resource.clone(), None)
             .await
             .expect("baseline");

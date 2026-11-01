@@ -271,66 +271,72 @@ pub(super) fn authorize_room(
         directory.projects(),
         AuthorizationRecords::default(),
     )?;
-    authorize_room_with(tx, snapshot, id, &mut authority, &directory)
-}
-fn authorize_room_with(
-    tx: &Transaction<'_>,
-    snapshot: &CallbackSnapshot,
-    id: &str,
-    authority: &mut AuthorizationSnapshot,
-    directory: &crate::sync_entity_context::RoomDirectory,
-) -> Result<(), CallbackError> {
     if id.starts_with("feed:") {
         return Err(CallbackError::Invalid(
             "The combined feed is available only in the user interface",
         ));
     }
-    let room = records::get(tx, "runtime_rooms", id)?
-        .ok_or(CallbackError::Invalid("Unknown agent chat"))?;
-    let view = crate::sync_views::room_entity_view(&room, &directory.for_room(tx, &room, false)?)
-        .ok_or(CallbackError::Invalid("Chat room is no longer visible"))?;
-    if !view["members"]
-        .as_array()
-        .is_some_and(|members| members.iter().any(|id| id == &snapshot.context().agent))
+    let room =
+        studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(tx)
+            .get(&id.to_owned())?
+            .ok_or(CallbackError::Invalid("Unknown agent chat"))?;
+    authorize_room_with(tx, snapshot, &room, &mut authority, &directory)
+}
+fn authorize_room_with(
+    tx: &Transaction<'_>,
+    snapshot: &CallbackSnapshot,
+    room: &studio_runtime_schema::room_record::RoomRecord,
+    authority: &mut AuthorizationSnapshot,
+    directory: &crate::sync_entity_context::RoomDirectory,
+) -> Result<(), CallbackError> {
+    use studio_runtime_schema::room_record::RoomKind;
+    let view = crate::room_projection::project_room(
+        room,
+        &directory.for_room_identity(tx, &room.id, room.kind == RoomKind::Federated, false)?,
+    )?
+    .ok_or(CallbackError::Invalid("Chat room is no longer visible"))?;
+    if !view
+        .members
+        .iter()
+        .any(|id| id == &snapshot.context().agent)
     {
         return Err(CallbackError::Invalid("Chat room is no longer visible"));
     }
-    let sender = if room["kind"] == "private" {
-        room["members"]
-            .as_array()
+    let sender = if room.kind == RoomKind::Private {
+        room.members
+            .as_ref()
             .and_then(|members| {
                 members
                     .iter()
-                    .filter_map(Value::as_str)
+                    .map(String::as_str)
                     .find(|id| *id != snapshot.context().agent)
             })
             .ok_or(CallbackError::Invalid("Invalid private room membership"))?
     } else {
         &snapshot.context().agent
     };
-    let root = match room["kind"].as_str() {
-        Some("broadcast") => Some(room["rootId"].as_str().unwrap_or_default()),
-        Some("private") => None,
-        _ => {
+    let root = match room.kind {
+        RoomKind::Broadcast => Some(
+            room.root_id
+                .as_ref()
+                .map(String::as_str)
+                .unwrap_or_default(),
+        ),
+        RoomKind::Private => None,
+        RoomKind::Federated => {
             return Err(CallbackError::Invalid(
                 "Communication is limited to your team or user-grouped peer chat",
             ));
         }
     };
-    let members = room["members"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
+    let members = room.members.as_deref().unwrap_or_default();
     authorize(
         authority,
         &snapshot.context().agent,
         sender,
-        text(&room, "id")?,
+        &room.id,
         root,
-        &members,
+        members,
     )
 }
 pub(super) fn send(
@@ -520,12 +526,18 @@ fn send_as_actor(
                 .ok_or(CallbackError::Invalid("Recipient conversation was deleted"))?,
         ]
     };
+    use studio_runtime_schema::room_record::{RoomKind, RoomRecord};
     let mut room = if target == "broadcast" {
-        json!({"id":format!("broadcast:{}",text(actor,"rootId")?),"kind":"broadcast","rootId":actor["rootId"]})
+        let root = text(actor, "rootId")?;
+        let mut room = RoomRecord::new(format!("broadcast:{root}"), RoomKind::Broadcast);
+        room.root_id = studio_runtime_schema::queue_command::Field::Value(root.to_owned());
+        room
     } else {
         let mut ids = vec![who, target];
         ids.sort();
-        json!({"id":format!("private:{}:{}",ids[0],ids[1]),"kind":"private","members":ids})
+        let mut room = RoomRecord::new(format!("private:{}:{}", ids[0], ids[1]), RoomKind::Private);
+        room.members = Some(ids.into_iter().map(str::to_owned).collect());
+        room
     };
     let directory = crate::sync_entity_context::RoomDirectory::resolve(agents, projects)?;
     let broadcast = target == "broadcast";
@@ -546,7 +558,7 @@ fn send_as_actor(
             &mut authority,
             recipient_id,
             who,
-            text(&room, "id")?,
+            &room.id,
             broadcast.then(|| text(actor, "rootId")).transpose()?,
             &members,
         ) {
@@ -588,7 +600,7 @@ fn send_as_actor(
         return Err(CallbackError::Stored(location));
     }
     let recipients = admitted;
-    let room_id = text(&room, "id")?.to_owned();
+    let room_id = room.id.clone();
     let signature = event_write::request_signature(args);
     let now_ms = chrono::Utc::now().timestamp_millis();
     if !broadcast
@@ -607,31 +619,35 @@ fn send_as_actor(
         }
         event_write::CallerAdmission::Fresh(admitted) => admitted,
     };
-    if let Some(mut previous) = records::get(tx, "runtime_rooms", &room_id)? {
-        if studio_runtime_store::ProjectsRepository::room_retired(&previous) {
+    if let Some(mut previous) = studio_runtime_store::Table::<RoomRecord>::new(tx).get(&room_id)? {
+        if previous.project_deleted_at.is_some() {
             return Err(CallbackError::Invalid(
                 "This project chat was permanently deleted",
             ));
         }
-        let fields = room
-            .as_object()
-            .ok_or(CallbackError::Invalid("Invalid room"))?;
-        for (key, value) in fields {
-            previous[key] = value.clone();
+        previous.kind = room.kind;
+        if room.root_id.is_some() {
+            previous.root_id = room.root_id;
+        }
+        if room.members.is_some() {
+            previous.members = room.members;
         }
         room = previous;
     }
-    room["updated"] = json!(now);
-    room["userHidden"] = json!(false);
-    records::validate("runtime_rooms", &room_id, room.clone())?;
-    tx.execute("INSERT INTO runtime_rooms(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![room_id,room.to_string()])?;
+    room.updated = serde_json::Number::from_f64(now).map_or(
+        studio_runtime_schema::queue_command::Field::Null,
+        studio_runtime_schema::queue_command::Field::Value,
+    );
+    room.user_hidden = studio_runtime_schema::queue_command::Field::Value(false);
+    studio_runtime_store::Table::new(tx).put(&room)?;
     // Python projects the room immediately after writing runtime_rooms, before
     // it enqueues recipient events. Keep the shared global sync sequence in
     // that order; the room is projected again below after the chat message
     // supplies its new lastMessage.
-    if let Some(view) =
-        crate::sync_views::room_entity_view(&room, &directory.for_room(tx, &room, true)?)
-    {
+    if let Some(view) = crate::room_projection::project_room(
+        &room,
+        &directory.for_room_identity(tx, &room.id, false, true)?,
+    )? {
         SyncDocumentsRepository::put_entity(tx, "room", &room_id, view, false)?;
     }
     let mut deliveries: BTreeMap<String, RecipientDelivery> = BTreeMap::new();
@@ -691,8 +707,11 @@ fn send_as_actor(
         );
     }
     tx.execute("INSERT INTO runtime_chat_messages(id,room,sender,text,created,deliveries) VALUES(?1,?2,?3,?4,?5,?6)",params![id,room_id,who,message,now,json!(deliveries).to_string()])?;
-    let view = crate::sync_views::room_entity_view(&room, &directory.for_room(tx, &room, true)?)
-        .ok_or_else(|| CallbackError::Stored(room_id.clone()))?;
+    let view = crate::room_projection::project_room(
+        &room,
+        &directory.for_room_identity(tx, &room.id, false, true)?,
+    )?
+    .ok_or_else(|| CallbackError::Stored(room_id.clone()))?;
     SyncDocumentsRepository::put_entity(tx, "room", &room_id, view, false)?;
     let result = ChatSendReply {
         id: id.to_owned(),
@@ -869,46 +888,38 @@ pub(super) fn peers(
     }
     agents.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
     let mut rooms = Vec::new();
-    for room in records::all(tx, "runtime_rooms")? {
-        let visible =
-            match authorize_room_with(tx, snapshot, text(&room, "id")?, &mut authority, &directory)
-            {
-                Ok(()) => true,
-                Err(CallbackError::Invalid(_)) => false,
-                // As for agents, a room that the gate cannot check is not visible.
-                Err(CallbackError::Stored(location)) => {
-                    crate::diagnostics::log_stderr(format_args!(
-                        "Room {} is not visible to {}: invalid stored authority at {location}",
-                        text(&room, "id")?,
-                        snapshot.context().agent
-                    ));
-                    false
-                }
-                Err(error) => return Err(error),
-            };
+    for room in
+        studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(tx)
+            .list()?
+    {
+        let visible = match authorize_room_with(tx, snapshot, &room, &mut authority, &directory) {
+            Ok(()) => true,
+            Err(CallbackError::Invalid(_)) => false,
+            // As for agents, a room that the gate cannot check is not visible.
+            Err(CallbackError::Stored(location)) => {
+                crate::diagnostics::log_stderr(format_args!(
+                    "Room {} is not visible to {}: invalid stored authority at {location}",
+                    room.id,
+                    snapshot.context().agent
+                ));
+                false
+            }
+            Err(error) => return Err(error),
+        };
         if visible {
-            let Some(room) =
-                crate::sync_views::room_entity_view(&room, &directory.for_room(tx, &room, false)?)
+            let Some(room) = crate::room_projection::project_room(
+                &room,
+                &directory.for_room_identity(
+                    tx,
+                    &room.id,
+                    room.kind == studio_runtime_schema::room_record::RoomKind::Federated,
+                    false,
+                )?,
+            )?
             else {
                 continue;
             };
-            rooms.push(Value::Object(
-                [
-                    "id",
-                    "kind",
-                    "members",
-                    "rootId",
-                    "peerTeamId",
-                    "peerTeamName",
-                    "federated",
-                    "peerId",
-                    "peerLabel",
-                    "localMembers",
-                ]
-                .into_iter()
-                .map(|key| (key.into(), room[key].clone()))
-                .collect(),
-            ));
+            rooms.push(json!({"id":room.id,"kind":room.kind,"members":room.members,"rootId":room.root_id.as_ref(),"peerTeamId":room.peer_team_id.as_ref(),"peerTeamName":room.peer_team_name.as_ref(),"federated":null,"peerId":null,"peerLabel":room.peer_label.as_ref(),"localMembers":room.local_members.as_ref()}));
         }
     }
     rooms.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));

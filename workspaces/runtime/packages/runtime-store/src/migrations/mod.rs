@@ -40,6 +40,8 @@ mod m2026_10_31_current_checks;
 mod m2026_10_31_native_status_error;
 mod m2026_10_31_project_record_kind;
 mod m2026_10_31_retired_start_indexes;
+mod m2026_10_31_room_record;
+mod m2026_10_31_sync_project;
 mod m2026_10_31_transfer_history_pages;
 mod m2026_10_31_work_records;
 
@@ -61,6 +63,8 @@ pub use m2026_10_30_project_teams::apply as migrate_project_teams;
 pub use m2026_10_30_radio_room::apply as migrate_radio_room;
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_31_project_record_kind::apply as migrate_project_record_kind;
+#[cfg(any(test, feature = "test-support"))]
+pub use m2026_10_31_room_record::apply as migrate_room_record;
 
 use std::path::Path;
 
@@ -678,6 +682,16 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
+            id: "2026-10-31-sync-project-duplicates",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Project records with duplicate fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_sync_project::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
             id: "2026-10-31-native-status-error",
             introduced: OCTOBER_31,
             target: MigrationTarget::Canvas,
@@ -745,6 +759,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_10_31_project_record_kind::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-room-record",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Open room records with legacy fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_room_record::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {
