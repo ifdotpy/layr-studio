@@ -64,10 +64,7 @@ impl SchedulerRepository {
             .set_start_attempt_turn_id(Some(turn))
             .map_err(|_| invalid_agent(&identity.agent_id))?;
         agent.start_outcome_hold = None;
-        agent.extra.insert(
-            "error".into(),
-            crate::projection_value(&Option::<String>::None),
-        );
+        agent.error = studio_runtime_schema::queue_command::Field::Null;
         publish_agent(transaction, &agent)?;
         Ok(true)
     }
@@ -119,10 +116,7 @@ impl SchedulerRepository {
             agent.status = AgentStatus::Interrupted;
             agent.in_flight = Some(false);
             agent.auto_wake = Some(false);
-            agent.extra.insert(
-                "error".into(),
-                crate::projection_value(&Self::UNCLEAN_START_HOLD),
-            );
+            agent.set_error_receipt(json!(Self::UNCLEAN_START_HOLD))?;
             publish_agent(transaction, &agent)?;
             held += 1;
         }
@@ -728,12 +722,9 @@ impl SchedulerRepository {
                 receipt.response_error = Some(error.to_owned());
             }
             if let Some(error) = error {
-                agent.extra.insert(
-                    "error".into(),
-                    json!(format!(
-                        "Stop requested; interrupt acknowledgement unavailable: {error}"
-                    )),
-                );
+                agent.set_error_receipt(json!(format!(
+                    "Stop requested; interrupt acknowledgement unavailable: {error}"
+                )))?;
             }
             publish_agent(tx, &agent)?;
         }
@@ -2153,10 +2144,7 @@ pub(super) fn apply_start_error(
     require_membership(changed, count, &identity.agent_id)?;
     if let Some(status) = decision.visible {
         agent.status = status;
-        agent.extra.insert(
-            "error".into(),
-            json!(if unknown { WAITING_START } else { message }),
-        );
+        agent.set_error_receipt(json!(if unknown { WAITING_START } else { message }))?;
         if unknown {
             agent
                 .start_attempt
@@ -2553,14 +2541,11 @@ pub(super) fn disconnect_agent(
             .as_ref()
             .is_none_or(|h| !h.is_account_settlement())
     {
-        agent.extra.insert(
-            "error".into(),
-            json!(if restart {
-                BACKEND_RESTARTED_TURN_ERROR
-            } else {
-                PROVIDER_DISCONNECTED_TURN_ERROR
-            }),
-        );
+        agent.set_error_receipt(json!(if restart {
+            BACKEND_RESTARTED_TURN_ERROR
+        } else {
+            PROVIDER_DISCONNECTED_TURN_ERROR
+        }))?;
     }
     agent.in_flight = Some(false);
     crate::domain::mark_sessions_lost(transaction, &agent.id.0)?;

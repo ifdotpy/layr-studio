@@ -1130,10 +1130,52 @@ impl JsonRecord for AgentRecord {
         encode_open_record(self, row_id)
     }
 
+    fn check_write_value(&self, value: &Value) -> StoreResult<()> {
+        #[cfg(any(test, debug_assertions))]
+        self.check_extra_round_trip(&serde_json::to_string(value)?)?;
+        #[cfg(not(any(test, debug_assertions)))]
+        let _ = value;
+        Ok(())
+    }
+
     fn decode_stored(connection: &Connection, row_id: &str, encoded: &str) -> StoreResult<Self> {
         let mut agent = parse_agent_record(row_id, encoded)?;
         crate::agent_volatile::merge_agent(connection, row_id, &mut agent)?;
         Ok(agent)
+    }
+}
+
+impl AgentRecord {
+    #[cfg(any(test, debug_assertions))]
+    fn check_extra_round_trip(&self, encoded: &str) -> StoreResult<()> {
+        let mut deserializer = serde_json::Deserializer::from_str(encoded);
+        let decoded: Self =
+            serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
+                let key = error.path().to_string();
+                if self.extra.contains_key(&key) {
+                    invalid_agent_field(
+                        &self.id.0,
+                        &format!("/{key}"),
+                        "extra_field_collision",
+                        None,
+                    )
+                } else {
+                    crate::StoreError::from(error.into_inner())
+                }
+            })?;
+        if let Some(key) = self
+            .extra
+            .keys()
+            .find(|key| !decoded.extra.contains_key(*key))
+        {
+            return Err(invalid_agent_field(
+                &self.id.0,
+                &format!("/{key}"),
+                "extra_field_collision",
+                None,
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -2168,6 +2210,10 @@ pub trait JsonRecord: Serialize + DeserializeOwned {
 
     fn record_key(&self) -> Option<&Self::Id>;
 
+    fn check_write_value(&self, _value: &Value) -> StoreResult<()> {
+        Ok(())
+    }
+
     fn encode_stored(&self, _connection: &Connection, row_id: &str) -> StoreResult<String>
     where
         Self: Sized,
@@ -2758,6 +2804,15 @@ fn checked_value<R: JsonRecord>(record: &R, row_id: &str) -> StoreResult<Value> 
     #[cfg(test)]
     validation_counts::CHECKS.with(|count| count.set(count.get() + 1));
     let value = record.serialize(serde_json::value::Serializer)?;
+    record.check_write_value(&value)?;
+    checked_serialized_value(record, row_id, value)
+}
+
+fn checked_serialized_value<R: JsonRecord>(
+    record: &R,
+    row_id: &str,
+    value: Value,
+) -> StoreResult<Value> {
     let invalid = || crate::StoreError::InvalidStoredObject {
         table: R::TABLE,
         id: row_id.to_owned(),
@@ -2884,6 +2939,47 @@ pub(crate) fn decode_json_record<T: DeserializeOwned>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn agent_write_rejects_extra_keys_owned_by_named_fields() {
+        for (key, value) in [
+            ("error", serde_json::json!(null)),
+            ("error", serde_json::json!(42)),
+            ("maxAgents", serde_json::json!(null)),
+            ("manualName", serde_json::json!(null)),
+            ("id", serde_json::json!(null)),
+        ] {
+            let mut agent = super::AgentRecord::from_value(serde_json::json!({
+                "id":"agent", "rootId":"agent", "epoch":1, "status":"idle",
+                "accountKey":"default", "compactions":0
+            }))
+            .unwrap();
+            agent.extra.insert(key.into(), value);
+            assert!(
+                matches!(super::checked_value(&agent, "agent"), Err(crate::StoreError::InvalidSyncObjectField { pointer, reason, .. }) if pointer == format!("/{key}") && reason.contains("extra_field_collision")),
+                "{key}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "manual timing on a disposable copied record"]
+    fn copied_agent_extra_guard_timing() {
+        use super::JsonRecord;
+        let raw =
+            std::fs::read_to_string(std::env::var("STUDIO_AGENT_TIMING_RECORD").unwrap()).unwrap();
+        let agent: super::AgentRecord = serde_json::from_str(&raw).unwrap();
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        let encoded = agent.encode_stored(&db, &agent.id.0).unwrap();
+        let start = std::time::Instant::now();
+        for _ in 0..30 {
+            agent.check_extra_round_trip(&encoded).unwrap();
+        }
+        println!(
+            "bytes={} guard_mean_ms={:.3}",
+            encoded.len(),
+            start.elapsed().as_secs_f64() * 1000.0 / 30.0
+        );
+    }
     #[test]
     fn agent_record_requires_materialized_account() {
         let old = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle"}"#;

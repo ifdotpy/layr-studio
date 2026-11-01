@@ -645,7 +645,10 @@ impl ProposedAgent {
         if let Some(agent) = &mut self.identity {
             agent.set_status(studio_runtime_store::AgentStatus::Queued);
         }
-        self.set_extra("error", Value::Null);
+        self.evidence["error"] = Value::Null;
+        if let Some(agent) = &mut self.identity {
+            agent.error = studio_runtime_schema::queue_command::Field::Null;
+        }
     }
     pub(crate) fn failed(&mut self, reason: &str) {
         self.evidence["status"] = json!("failed");
@@ -656,7 +659,12 @@ impl ProposedAgent {
         if let Some(agent) = &mut self.identity {
             agent.in_flight = Some(false);
         }
-        self.set_extra("error", json!(reason));
+        self.evidence["error"] = json!(reason);
+        if let Some(agent) = &mut self.identity {
+            agent.error = studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_schema::provider_errors::AgentError::Message(reason.to_owned()),
+            );
+        }
     }
 }
 

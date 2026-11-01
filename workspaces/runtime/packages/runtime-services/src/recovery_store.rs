@@ -245,7 +245,6 @@ impl RecoveryStore {
                             RecoveryReceipt::Applied(json!({"status":"held","at":current.at}))
                         }
                         StartAbsenceDecision::Waiting => {
-                            updated["startRecoveryCheck"] = json!({"at":current.at,"attemptId":attempt["id"],"state":"waiting","reason":"start-outcome-unconfirmed","completeHistory":complete_history,"idleTwice":idle_twice,"quiet":current.quiet,"journalDrained":current.journal_drained});
                             RecoveryReceipt::Unknown(json!({"status":"unconfirmed"}))
                         }
                     }

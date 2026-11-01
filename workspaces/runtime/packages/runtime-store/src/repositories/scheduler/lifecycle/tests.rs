@@ -141,6 +141,27 @@ fn with<T>(connection: &mut Connection, change: impl FnOnce(&Transaction<'_>) ->
 }
 
 #[test]
+fn quarantined_input_publishes_typed_agent_error() {
+    let mut connection = database();
+    put(&connection, json!({"status":"idle"}));
+    connection.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('agent',?1,1,'h',?2,0)", params![AGENT, json!({"collection":"agent","id":AGENT,"value":{"id":AGENT}}).to_string()]).unwrap();
+    with(&mut connection, |tx| {
+        SchedulerRepository::quarantine_pending_events(
+            tx,
+            AGENT,
+            0,
+            &Default::default(),
+            "invalid",
+        )
+        .expect("quarantine publishes");
+    });
+    assert_eq!(
+        stored(&connection)["error"],
+        "Queued input could not be delivered: invalid"
+    );
+}
+
+#[test]
 fn authentication_repair_requires_the_exact_stored_error() {
     let mut connection = database();
     put(

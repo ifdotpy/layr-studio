@@ -1742,7 +1742,6 @@ async fn scenario_restart_after_submitted_before_written_recovers_unknown_withou
         .frame(json!({"method":"test/barrier","params":{}}))
         .await;
     peer.acknowledged(barrier).await;
-    let mut recovery_changes = state.bridge.agent_changes();
     let history = peer.write("thread/turns/list").await;
     peer.reply(&history, json!({"data":[]})).await;
     for _ in 0..2 {
@@ -1753,19 +1752,7 @@ async fn scenario_restart_after_submitted_before_written_recovers_unknown_withou
         )
         .await;
     }
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        loop {
-            if state.record().await["startRecoveryCheck"]["reason"] == "start-outcome-unconfirmed" {
-                break;
-            }
-            recovery_changes
-                .changed()
-                .await
-                .expect("recovery agent changes");
-        }
-    })
-    .await
-    .expect("history absence remains inconclusive while start is unresolved");
+    worker_barrier(&worker).await;
     assert_eq!(state.event_status("input").await, "uncertain");
     assert!(
         peer.writes.try_recv().is_err(),

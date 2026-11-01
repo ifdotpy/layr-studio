@@ -365,6 +365,7 @@ async fn python_constructor_and_rust_startup_match_requests_monitors_events_and_
     // Adapt the frozen Python result to the accepted permission and token migrations.
     for agent in python["agents"].as_array_mut().unwrap() {
         let fields = agent.as_object_mut().unwrap();
+        fields.remove("workspaceBackend");
         if fields.remove("yoloMode") == Some(json!(true)) {
             fields.insert("permissionMode".into(), json!("bypassPermissions"));
         }
@@ -373,6 +374,7 @@ async fn python_constructor_and_rust_startup_match_requests_monitors_events_and_
     for projection in python["sync_entities"].as_array_mut().unwrap() {
         if projection["collection"] == "agent" {
             let fields = projection["payload"]["value"].as_object_mut().unwrap();
+            fields.remove("workspaceBackend");
             if fields.remove("yoloMode") == Some(json!(true)) {
                 fields.insert("permissionMode".into(), json!("bypassPermissions"));
             }

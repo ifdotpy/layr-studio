@@ -59,10 +59,10 @@ async fn leave_stale_receipt(state: &State, shape: Shape, thread: &str, stale: V
         row.start_attempt.take();
         if shape == Shape::Interrupted {
             row.status = studio_runtime_store::AgentStatus::Interrupted;
-            row.extra.insert(
-                "error".into(),
-                json!(studio_runtime_store::PROVIDER_DISCONNECTED_TURN_ERROR),
-            );
+            row.set_error_receipt(json!(
+                studio_runtime_store::PROVIDER_DISCONNECTED_TURN_ERROR
+            ))
+            .expect("typed fixture error");
             row.start_attempt =
                 Some(serde::Deserialize::deserialize(stale).expect("typed fixture"));
         }

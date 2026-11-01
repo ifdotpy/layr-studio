@@ -2238,10 +2238,7 @@ async fn seed_restart_turn(state: &State) {
                     agent.turn_epoch = Some(epoch);
                     agent.auto_wake = Some(false);
                     agent.in_flight = Some(false);
-                    agent.extra.insert(
-                        "error".into(),
-                        json!(studio_runtime_store::BACKEND_RESTARTED_TURN_ERROR),
-                    );
+                    agent.set_error_receipt(json!(studio_runtime_store::BACKEND_RESTARTED_TURN_ERROR)).expect("typed fixture error");
                     agent.disconnect_recovery = Some(Box::new(serde::Deserialize::deserialize(disconnect).expect("typed fixture")));
                     agent.restart_recovery = Some(Box::new(serde::Deserialize::deserialize(marker).expect("typed fixture")));
                     agent.start_attempt.take();

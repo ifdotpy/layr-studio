@@ -1547,10 +1547,9 @@ impl SchedulerRepository {
         if let Some(mut record) = load_agent(tx, agent)?
             && record.epoch == epoch
         {
-            record.extra.insert(
-                "error".into(),
-                json!(format!("Queued input could not be delivered: {reason}")),
-            );
+            record.set_error_receipt(json!(format!(
+                "Queued input could not be delivered: {reason}"
+            )))?;
             publish_agent(tx, &record)?;
             EventWriteRepository::set_agent_sync_lifecycle(
                 tx,

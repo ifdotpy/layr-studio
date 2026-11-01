@@ -614,9 +614,9 @@ fn capacity_snapshot(
             }
         });
     let root_max_agents = root
-        .extra
-        .get("maxAgents")
-        .and_then(Value::as_i64)
+        .max_agents
+        .value()
+        .map(studio_runtime_schema::AgentCounter::as_i64)
         .unwrap_or(DEFAULT_MAX_TEAM_AGENTS);
     let mut queued = Vec::new();
     for agent in team
@@ -1544,6 +1544,7 @@ mod tests {
                 .any(|rule| rule.purpose == crate::disk_space::StoragePurpose::Workspace)
         }));
         assert_eq!(first["capacity"]["teamLimit"], 2);
+        assert_eq!(first["capacity"]["maxAgents"], 8);
         assert_eq!(first["capacity"]["teamActive"], 1);
         assert_eq!(
             first["capacity"]["queued"][0]["reasons"],

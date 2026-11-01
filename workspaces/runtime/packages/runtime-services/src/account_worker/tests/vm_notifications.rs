@@ -87,10 +87,8 @@ async fn fixture(provider: &'static str) -> (State, String) {
                     record.workspace_mode =
                         Some(studio_runtime_schema::records::WorkspaceMode::Layr);
                     record.cwd = Some("/home/studio/project".into());
-                    for (key, value) in [("layrReady", json!(true)), ("provider", json!(provider))]
-                    {
-                        record.extra.insert(key.into(), value);
-                    }
+                    record.layr_ready = Some(true);
+                    record.provider = serde::Deserialize::deserialize(json!(provider)).unwrap();
                     AgentRepository::put(tx, &record)?;
                     record.id = AgentId::from(sibling_id.as_str());
                     record.root_id = record.id.clone();
