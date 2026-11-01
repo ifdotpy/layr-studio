@@ -453,7 +453,7 @@ mod tests {
         connection
             .execute_batch("CREATE TABLE runtime_plans(id TEXT PRIMARY KEY,record TEXT NOT NULL)")
             .expect("table");
-        let value = json!({"id":"agent", "rootId":"root", "text":"plan", "version":1, "updated":null, "future":{"nested":[1,2]}});
+        let value = json!({"id":"agent", "rootId":"root", "text":"plan", "version":1, "updated":null, "steps":[{"nested":[1,2]}]});
         connection
             .execute(
                 "INSERT INTO runtime_plans VALUES (?1,?2)",
