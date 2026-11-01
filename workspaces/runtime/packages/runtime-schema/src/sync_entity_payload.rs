@@ -185,7 +185,11 @@ mod tests {
             ("extra", json!(true), false),
         ] {
             let mut row = base.clone();
-            row[field] = value;
+            drop(
+                row.as_object_mut()
+                    .expect("fixture object")
+                    .insert(field.to_owned(), value),
+            );
             cases.push((row, valid));
         }
         let mut missing = base;
