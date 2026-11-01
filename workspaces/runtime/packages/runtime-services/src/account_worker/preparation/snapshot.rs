@@ -1019,15 +1019,11 @@ fn catalog_definitions<'a>(
 /// The thread role of an agent record: its saved role, else the role of a
 /// lead, a native review child, or a worker.
 fn role(record: &Value) -> Result<thread::Role, WorkerError> {
-    Ok(optional(record, "role")?.unwrap_or(
-        if studio_runtime_store::truthy(record.get("nativeReview")) {
-            thread::Role::Reviewer
-        } else if flag(record, "isLead")? {
-            thread::Role::Orchestrator
-        } else {
-            thread::Role::Implementer
-        },
-    ))
+    let native_review = studio_runtime_store::truthy(record.get("nativeReview"));
+    Ok(optional(record, "role")?.unwrap_or(thread::Role::inferred(
+        native_review,
+        !native_review && flag(record, "isLead")?,
+    )))
 }
 
 fn federation_enabled(tx: &Transaction<'_>) -> Result<bool, WorkerError> {
