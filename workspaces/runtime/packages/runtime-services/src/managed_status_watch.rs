@@ -564,7 +564,11 @@ fn worker_defaults(root: &AgentRecord) -> Value {
             json!(DEFAULT_DELEGATION_DEPTH),
         ),
     ]);
-    if let Some(supplied) = root.extra.get("workerDefaults").and_then(Value::as_object) {
+    let supplied = root
+        .worker_defaults
+        .value()
+        .and_then(|value| serde_json::to_value(value).ok());
+    if let Some(supplied) = supplied.as_ref().and_then(Value::as_object) {
         defaults.extend(supplied.clone());
     }
     Value::Object(defaults)

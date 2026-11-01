@@ -569,6 +569,13 @@ pub struct AgentRecord {
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
     pub prepare_attempt: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub worker_defaults: studio_runtime_schema::queue_command::Field<
+        StoredTransferValue<studio_runtime_schema::agent_entity_nested::WorkerDefaultsDto>,
+    >,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_mode: Option<AgentExecutionMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -639,7 +646,7 @@ pub enum NativeFailureHold {
     Unreadable(Value),
 }
 
-/// A recognized transfer value or an unchanged historical JSON value.
+/// Normalize transfer values on decode while retaining historical JSON on disk.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum StoredTransferValue<T> {
@@ -1015,6 +1022,7 @@ impl AgentRecord {
             usage_resume_enabled: None,
             native_failure_hold: Default::default(),
             prepare_attempt: Default::default(),
+            worker_defaults: Default::default(),
             execution_mode: None,
             turn_epoch: None,
             account_key: crate::cost_aggregate::DEFAULT_ACCOUNT.to_owned(),
@@ -3482,6 +3490,45 @@ mod tests {
         let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
             "epoch":2, "status":"idle", "accountKey":"default", "prepareAttempt":"attempt"}));
         assert!(!record.extra.contains_key("prepareAttempt"));
+    }
+
+    #[test]
+    fn worker_defaults_are_not_an_extension() {
+        let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+            "epoch":2, "status":"idle", "accountKey":"default",
+            "workerDefaults":{"model":"m","effort":null,"fastMode":false}}));
+        assert!(!record.extra.contains_key("workerDefaults"));
+    }
+
+    #[test]
+    fn worker_defaults_distinguish_known_and_legacy_values() {
+        for (value, known) in [
+            (json!({"model":"m","effort":null,"fastMode":false}), true),
+            (json!({"model":"legacy"}), false),
+            (
+                json!({"model":"m","effort":null,"fastMode":false,"future":42}),
+                false,
+            ),
+            (json!(false), false),
+        ] {
+            let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+                "epoch":2, "status":"idle", "accountKey":"default", "workerDefaults":value}));
+            assert_eq!(
+                matches!(
+                    record.worker_defaults.value(),
+                    Some(super::StoredTransferValue::Known(_))
+                ),
+                known
+            );
+            assert_eq!(record.value().get("workerDefaults"), Some(&value));
+            if let Some(super::StoredTransferValue::Known(defaults)) =
+                record.worker_defaults.value()
+            {
+                let transfer: crate::transfer_record::TransferWorkerDefaults =
+                    defaults.clone().into();
+                assert_eq!(serde_json::to_value(transfer).unwrap(), value);
+            }
+        }
     }
 
     #[test]
