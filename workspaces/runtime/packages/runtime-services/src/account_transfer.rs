@@ -215,7 +215,7 @@ pub struct Ticket {
 struct TransferIdentity {
     id: String,
     lead_id: String,
-    target_account_key: String,
+    target_account_key: studio_runtime_schema::account_key::AccountKey,
     status: TransferStatus,
 }
 #[derive(Deserialize, Serialize, PartialEq, Eq)]
@@ -230,7 +230,7 @@ pub(crate) enum TransferStatus {
 #[serde(rename_all = "camelCase")]
 struct SummaryProgress {
     id: String,
-    target_account_key: String,
+    target_account_key: studio_runtime_schema::account_key::AccountKey,
     status: TransferStatus,
     #[serde(default)]
     waiting: Option<String>,
@@ -680,7 +680,7 @@ impl Snapshot {
         let enrolled = enroll(
             value,
             &self.identity.id,
-            &self.identity.target_account_key,
+            self.identity.target_account_key.as_str(),
             target_provider,
             agent == self.identity.lead_id,
         )?;
@@ -1367,7 +1367,7 @@ impl Snapshot {
             .ok_or(TransferError::Refused("Unknown transfer member"))?;
         let m = &self.operation["members"][&ticket.agent];
         if self.identity.id != ticket.operation
-            || self.identity.target_account_key != ticket.account
+            || self.identity.target_account_key.as_str() != ticket.account
             || a["epoch"].as_i64() != Some(ticket.epoch)
             || studio_runtime_store::truthy(a.get("deletedAt"))
             || a.get("accountKey")

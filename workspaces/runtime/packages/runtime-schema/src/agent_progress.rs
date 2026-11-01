@@ -37,28 +37,28 @@ pub enum AccountTransferProgress {
     None,
     Waiting {
         id: String,
-        target_account_key: String,
+        target_account_key: crate::account_key::AccountKey,
         reason: String,
         actions: Vec<AccountTransferAction>,
     },
     Moving {
         id: String,
-        target_account_key: String,
+        target_account_key: crate::account_key::AccountKey,
         actions: Vec<AccountTransferAction>,
     },
     Blocked {
         id: String,
-        target_account_key: String,
+        target_account_key: crate::account_key::AccountKey,
         reason: String,
         actions: Vec<AccountTransferAction>,
     },
     Completed {
         id: String,
-        target_account_key: String,
+        target_account_key: crate::account_key::AccountKey,
     },
     Cancelled {
         id: String,
-        target_account_key: String,
+        target_account_key: crate::account_key::AccountKey,
     },
 }
 
@@ -297,6 +297,11 @@ pub(crate) fn check_schema_parity(openapi: &serde_json::Value) -> Result<(), Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn transfer_progress_rejects_invalid_account_key() {
+        let json = r#"{"kind":"completed","id":"t","targetAccountKey":""}"#;
+        assert!(serde_json::from_str::<AccountTransferProgress>(json).is_err());
+    }
     #[test]
     fn agent_progress_openapi_fragments_derive_from_serde_owners() {
         fn fragment<T: schemars::JsonSchema>() -> serde_json::Value {

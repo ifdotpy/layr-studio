@@ -76,7 +76,7 @@ enum SavedScope {
 #[serde(rename_all = "camelCase")]
 struct SavedRequestIdentity {
     lead_id: String,
-    target_account_key: String,
+    target_account_key: studio_runtime_schema::account_key::AccountKey,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     scope: Field<SavedScope>,
 }
@@ -87,7 +87,7 @@ struct SavedRequestIdentity {
 struct SavedTransferResponse {
     id: String,
     lead_id: String,
-    target_account_key: String,
+    target_account_key: studio_runtime_schema::account_key::AccountKey,
     status: crate::account_transfer::TransferStatus,
     created: f64,
     scope: SavedScope,
