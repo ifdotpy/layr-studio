@@ -577,16 +577,21 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
     let mut view = record.as_object()?.clone();
     view.insert(
         studio_runtime_schema::agent_progress::START_WAIT_FIELD.into(),
-        serde_json::to_value(agent_start_wait(record).ok()?).ok()?,
+        serde::Serialize::serialize(
+            &(agent_start_wait(record).ok()?),
+            serde_json::value::Serializer,
+        )
+        .ok()?,
     );
 
     view.insert(
         "commandProgress".to_owned(),
-        serde_json::to_value(&context.command_progress).ok()?,
+        serde::Serialize::serialize(&(&context.command_progress), serde_json::value::Serializer)
+            .ok()?,
     );
     view.insert(
         "stall".to_owned(),
-        serde_json::to_value(&context.stall).ok()?,
+        serde::Serialize::serialize(&(&context.stall), serde_json::value::Serializer).ok()?,
     );
     let remote_server = record
         .pointer("/remoteWorker/server")
@@ -709,7 +714,10 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
     }
     if truthy(record.get("isLead")) {
         if let Some(counts) = &context.team_counts {
-            view.insert("teamCounts".to_owned(), serde_json::to_value(counts).ok()?);
+            view.insert(
+                "teamCounts".to_owned(),
+                serde::Serialize::serialize(&(counts), serde_json::value::Serializer).ok()?,
+            );
         }
         view.remove("overview");
         view.insert("empty".to_owned(), Value::Bool(context.empty_lead));

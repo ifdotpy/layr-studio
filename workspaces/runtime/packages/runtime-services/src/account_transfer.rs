@@ -395,8 +395,8 @@ impl Snapshot {
         raw_len: usize,
         agents: impl IntoIterator<Item = Result<(String, String), TransferError>>,
     ) -> Result<Self, TransferError> {
-        let operation =
-            serde_json::to_value(&record).map_err(|_| invalid("account transfer", "/"))?;
+        let operation = serde::Serialize::serialize(&(&record), serde_json::value::Serializer)
+            .map_err(|_| invalid("account transfer", "/"))?;
         validate(
             "PersistedAccountTransferRecord",
             "account transfer",
@@ -850,16 +850,18 @@ impl Snapshot {
         let source = json!({"epoch":a.get("epoch"), "accountKey":a.get("accountKey"),
             "threadId":a.get("threadId"), "cwd":a.get("cwd")});
         member.source = Field::Value(
-            serde_json::from_value(source).map_err(|_| invalid("transfer agent", "/source"))?,
+            serde::Deserialize::deserialize(source)
+                .map_err(|_| invalid("transfer agent", "/source"))?,
         );
         member.settings = Field::Value(
-            serde_json::from_value(settings_snapshot(a))
+            serde::Deserialize::deserialize(settings_snapshot(a))
                 .map_err(|_| invalid("transfer agent", "/settings"))?,
         );
-        member.pending_settings =
-            serde_json::from_value(a.get("pendingSettings").cloned().unwrap_or(Value::Null))
-                .map_err(|_| invalid("transfer agent", "/pendingSettings"))?;
-        member.pending_settings_account_key = serde_json::from_value(
+        member.pending_settings = serde::Deserialize::deserialize(
+            a.get("pendingSettings").cloned().unwrap_or(Value::Null),
+        )
+        .map_err(|_| invalid("transfer agent", "/pendingSettings"))?;
+        member.pending_settings_account_key = serde::Deserialize::deserialize(
             a.get("pendingSettingsAccountKey")
                 .cloned()
                 .unwrap_or(Value::Null),
@@ -1222,10 +1224,10 @@ impl Snapshot {
             .members
             .get(agent)
             .ok_or(TransferError::Refused("Unknown transfer member"))?;
-        let settings = serde_json::from_value(settings_snapshot(current))
+        let settings = serde::Deserialize::deserialize(settings_snapshot(current))
             .map_err(|_| invalid("transfer agent", "/settings"))?;
         let pending: Option<studio_runtime_store::transfer_record::TransferSettings> =
-            serde_json::from_value(
+            serde::Deserialize::deserialize(
                 current
                     .get("pendingSettings")
                     .cloned()
@@ -1233,7 +1235,7 @@ impl Snapshot {
             )
             .map_err(|_| invalid("transfer agent", "/pendingSettings"))?;
         let pending_account: Option<studio_runtime_schema::account_key::AccountKey> =
-            serde_json::from_value(
+            serde::Deserialize::deserialize(
                 current
                     .get("pendingSettingsAccountKey")
                     .cloned()
@@ -1254,11 +1256,11 @@ impl Snapshot {
             .get_mut(agent)
             .ok_or(TransferError::Refused("Unknown transfer member"))?;
         member.target_settings = Field::Value(
-            serde_json::from_value(target_settings)
+            serde::Deserialize::deserialize(target_settings)
                 .map_err(|_| invalid("account transfer", "/members/targetSettings"))?,
         );
         if let Some(history) = portable_history {
-            member.portable_history = serde_json::from_value(history)
+            member.portable_history = serde::Deserialize::deserialize(history)
                 .map_err(|_| invalid("account transfer", "/members/portableHistory"))?;
         }
         Ok(self.decision(op, self.agents.clone(), vec![]))
@@ -1435,8 +1437,9 @@ impl Snapshot {
         a["threadId"] = json!(target_thread);
         a["turnId"] = Value::Null;
         a["executionSettingsAccountKey"] = json!(self.operation.target_account_key);
-        let settings = serde_json::to_value(target_settings)
-            .map_err(|_| invalid("account transfer", "/members/targetSettings"))?;
+        let settings =
+            serde::Serialize::serialize(&(target_settings), serde_json::value::Serializer)
+                .map_err(|_| invalid("account transfer", "/members/targetSettings"))?;
         for (key, value) in settings
             .as_object()
             .ok_or(TransferError::Requires(SETTINGS_REQUIRED))?
@@ -1444,8 +1447,11 @@ impl Snapshot {
             a[key] = value.clone();
         }
         if !member.portable_history.is_missing() {
-            a["portableHistory"] = serde_json::to_value(&member.portable_history)
-                .map_err(|_| invalid("account transfer", "/members/portableHistory"))?;
+            a["portableHistory"] = serde::Serialize::serialize(
+                &(&member.portable_history),
+                serde_json::value::Serializer,
+            )
+            .map_err(|_| invalid("account transfer", "/members/portableHistory"))?;
         }
         remove(
             a,
@@ -1692,7 +1698,7 @@ fn extra_field<T: serde::de::DeserializeOwned>(
     use studio_runtime_schema::queue_command::Field;
     match agent.extra.get(key) {
         None => Ok(Field::Missing),
-        Some(value) => serde_json::from_value(value.clone())
+        Some(value) => serde::Deserialize::deserialize(value.clone())
             .map_err(|_| invalid("transfer agent", format!("/{key}"))),
     }
 }
@@ -2109,7 +2115,7 @@ impl Decision {
         let agents = agents
             .into_iter()
             .map(|(id, agent)| {
-                serde_json::to_value(agent)
+                serde::Serialize::serialize(&(agent), serde_json::value::Serializer)
                     .map(|value| (id, value))
                     .map_err(|_| invalid("transfer agent", "/"))
             })
@@ -2156,13 +2162,16 @@ impl Decision {
         {
             return Ok(());
         }
-        lead["accountTransfer"] = serde_json::to_value(summary_record(operation)?)
-            .map_err(|_| invalid("account transfer", "/summary"))?;
+        lead["accountTransfer"] = serde::Serialize::serialize(
+            &(summary_record(operation)?),
+            serde_json::value::Serializer,
+        )
+        .map_err(|_| invalid("account transfer", "/summary"))?;
         Ok(())
     }
     pub fn encoded(&self) -> Result<String, TransferError> {
-        let value =
-            serde_json::to_value(&self.operation).map_err(|_| invalid("account transfer", "/"))?;
+        let value = serde::Serialize::serialize(&(&self.operation), serde_json::value::Serializer)
+            .map_err(|_| invalid("account transfer", "/"))?;
         validate("PersistedAccountTransferRecord", "account transfer", &value)?;
         let encoded =
             serde_json::to_string(&self.operation).map_err(|_| invalid("account transfer", "/"))?;
@@ -2395,7 +2404,10 @@ fn validate_source_for_submission(
         .ok_or_else(|| invalid("account transfer", "/members/source"))?;
     fn matches_field<T: Serialize>(saved: &Field<T>, current: Option<&Value>) -> bool {
         saved.is_missing()
-            || serde_json::to_value(saved).ok().as_ref() == Some(current.unwrap_or(&Value::Null))
+            || serde::Serialize::serialize(&(saved), serde_json::value::Serializer)
+                .ok()
+                .as_ref()
+                == Some(current.unwrap_or(&Value::Null))
     }
     if (source.epoch.is_missing()
         && source.account_key.is_missing()
@@ -2405,12 +2417,20 @@ fn validate_source_for_submission(
         || !matches_field(&source.account_key, agent.get("accountKey"))
         || !matches_field(&source.thread_id, agent.get("threadId"))
         || !matches_field(&source.cwd, agent.get("cwd"))
-        || serde_json::to_value(&member.settings).ok().as_ref() != Some(&settings_snapshot(agent))
-        || serde_json::to_value(&member.pending_settings).ok().as_ref()
-            != Some(agent.get("pendingSettings").unwrap_or(&Value::Null))
-        || serde_json::to_value(&member.pending_settings_account_key)
+        || serde::Serialize::serialize(&(&member.settings), serde_json::value::Serializer)
             .ok()
             .as_ref()
+            != Some(&settings_snapshot(agent))
+        || serde::Serialize::serialize(&(&member.pending_settings), serde_json::value::Serializer)
+            .ok()
+            .as_ref()
+            != Some(agent.get("pendingSettings").unwrap_or(&Value::Null))
+        || serde::Serialize::serialize(
+            &(&member.pending_settings_account_key),
+            serde_json::value::Serializer,
+        )
+        .ok()
+        .as_ref()
             != Some(
                 agent
                     .get("pendingSettingsAccountKey")
@@ -2566,7 +2586,7 @@ mod provider_receipt_tests {
             params: Value,
         ) -> Result<Decision, TransferError> {
             use studio_runtime_store::transfer_record::TransferMethod;
-            let scope = serde_json::from_value(scope).map_err(|_| {
+            let scope = serde::Deserialize::deserialize(scope).map_err(|_| {
                 TransferError::Refused("The transfer is not ready for provider submission")
             })?;
             let method = match method {
@@ -2599,8 +2619,8 @@ mod provider_receipt_tests {
             let intent = ProviderIntent {
                 operation: operation.into(),
                 account: Field::Value(account.to_owned().try_into().map_err(|_| refusal())?),
-                scope: serde_json::from_value(scope).map_err(|_| refusal())?,
-                method: serde_json::from_value(Value::String(method.into()))
+                scope: serde::Deserialize::deserialize(scope).map_err(|_| refusal())?,
+                method: serde::Deserialize::deserialize(Value::String(method.into()))
                     .map_err(|_| refusal())?,
                 params: serde_json::value::to_raw_value(&params)
                     .map_err(|_| invalid("provider payload", "/"))?,
@@ -2793,7 +2813,8 @@ mod provider_receipt_tests {
         )
         .unwrap();
         let progress = progress_view(Some(&summary), snapshot.can_cancel());
-        let encoded = serde_json::to_value(progress).unwrap();
+        let encoded =
+            serde::Serialize::serialize(&(progress), serde_json::value::Serializer).unwrap();
         assert!(!matches!(
             encoded["actions"].as_str(),
             Some("cancel" | "retry_cancel")
@@ -2846,15 +2867,16 @@ mod provider_receipt_tests {
             Phase::Ready
         );
         assert_eq!(
-            serde_json::to_value(
-                &recorded
+            serde::Serialize::serialize(
+                &(&recorded
                     .operation
                     .members
                     .get("agent")
                     .unwrap()
                     .provider_receipts
                     .value()
-                    .unwrap()[0]
+                    .unwrap()[0]),
+                serde_json::value::Serializer
             )
             .unwrap(),
             json!({"operation":"transfer:agent:thread-start", "scope":{"account":"target","connection":"connection-1","generation":1},
@@ -2910,7 +2932,9 @@ mod provider_receipt_tests {
             ("/source/threadId", json!("other-thread")),
             ("/source/cwd", json!("/other-workspace")),
         ] {
-            let mut operation = serde_json::to_value(&ready.operation).unwrap();
+            let mut operation =
+                serde::Serialize::serialize(&(&ready.operation), serde_json::value::Serializer)
+                    .unwrap();
             *operation["members"]["agent"]
                 .pointer_mut(path)
                 .expect("fixture field") = invalid;
@@ -3167,8 +3191,8 @@ mod provider_receipt_tests {
                 .changed
         );
         assert_eq!(
-            serde_json::to_value(
-                &recorded
+            serde::Serialize::serialize(
+                &(&recorded
                     .operation
                     .members
                     .get("agent")
@@ -3176,7 +3200,8 @@ mod provider_receipt_tests {
                     .provider_read_receipts
                     .value()
                     .unwrap()[op_id]
-                    .result
+                    .result),
+                serde_json::value::Serializer
             )
             .unwrap(),
             response

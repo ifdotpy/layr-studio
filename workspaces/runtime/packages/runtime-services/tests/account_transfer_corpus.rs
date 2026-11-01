@@ -9,8 +9,8 @@ fn before_start(value: &Value) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-fn payload(value: Value) -> Box<serde_json::value::RawValue> {
-    serde_json::value::to_raw_value(&value).expect("provider payload")
+fn payload(value: &Value) -> Box<serde_json::value::RawValue> {
+    serde_json::value::to_raw_value(value).expect("provider payload")
 }
 
 fn fixture() -> (Value, Value, Ticket) {
@@ -88,7 +88,7 @@ fn exact_native_receipt_survives_restart_without_resubmission() {
         .submit(
             &ticket,
             studio_runtime_store::transfer_record::TransferMethod::Fork,
-            &payload(json!({"threadId":"source"})),
+            &payload(&json!({"threadId":"source"})),
         )
         .expect("reserve");
     submitted
@@ -117,7 +117,7 @@ fn exact_native_receipt_survives_restart_without_resubmission() {
             .submit(
                 &ticket,
                 studio_runtime_store::transfer_record::TransferMethod::Fork,
-                &payload(json!({}))
+                &payload(&json!({}))
             )
             .is_err()
     );
@@ -125,11 +125,11 @@ fn exact_native_receipt_survives_restart_without_resubmission() {
     foreign.connection = "c2".into();
     assert!(
         restored
-            .typed_receive(&foreign, Some(payload(json!({"thread":{"id":"fork"}}))))
+            .typed_receive(&foreign, Some(payload(&json!({"thread":{"id":"fork"}}))))
             .is_err()
     );
     let received = restored
-        .typed_receive(&ticket, Some(payload(json!({"thread":{"id":"fork"}}))))
+        .typed_receive(&ticket, Some(payload(&json!({"thread":{"id":"fork"}}))))
         .expect("late exact receipt");
     assert_eq!(
         received
@@ -143,7 +143,7 @@ fn exact_native_receipt_survives_restart_without_resubmission() {
     let saved = snapshot_record(&received.operation, &agent);
     assert!(
         !saved
-            .typed_receive(&ticket, Some(payload(json!({"thread":{"id":"fork"}}))))
+            .typed_receive(&ticket, Some(payload(&json!({"thread":{"id":"fork"}}))))
             .expect("replay")
             .changed
     );
@@ -151,7 +151,7 @@ fn exact_native_receipt_survives_restart_without_resubmission() {
         saved
             .typed_receive(
                 &ticket,
-                Some(payload(json!({"thread":{"id":"different-fork"}})))
+                Some(payload(&json!({"thread":{"id":"different-fork"}})))
             )
             .is_err()
     );
@@ -160,7 +160,7 @@ fn exact_native_receipt_survives_restart_without_resubmission() {
     newer["epoch"] = json!(4);
     assert!(
         snapshot_record(&restarted.operation, &newer)
-            .typed_receive(&ticket, Some(payload(json!({"thread":{"id":"fork"}}))))
+            .typed_receive(&ticket, Some(payload(&json!({"thread":{"id":"fork"}}))))
             .is_err()
     );
 }
@@ -359,13 +359,17 @@ fn retry_only_resets_blocked_members() {
         .decide(Transition::Action(Action::Retry))
         .expect("retry");
         assert_eq!(
-            serde_json::to_value(result.operation.members.get("a").expect("valid fixture"))
-                .expect("valid fixture"),
+            serde::Serialize::serialize(
+                &(result.operation.members.get("a").expect("valid fixture")),
+                serde_json::value::Serializer
+            )
+            .expect("valid fixture"),
             ready
         );
         let blocked = result.operation.members.get("b").expect("valid fixture");
         assert_eq!(
-            serde_json::to_value(blocked.phase).expect("valid fixture"),
+            serde::Serialize::serialize(&(blocked.phase), serde_json::value::Serializer)
+                .expect("valid fixture"),
             phase
         );
         assert!(matches!(

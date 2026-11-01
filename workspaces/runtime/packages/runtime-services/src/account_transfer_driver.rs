@@ -453,7 +453,7 @@ pub async fn reserve(
                 &ticket.request,
                 scope,
                 &method,
-                params,
+                &params,
             )?;
             admit_mutation(&snapshot, &mut decision, &ticket.agent)?;
             persist(tx, decision, now)?;
@@ -492,8 +492,11 @@ fn persist_request(
     request_id: Option<&str>,
 ) -> Result<Value, TransferError> {
     if !decision.changed {
-        return serde_json::to_value(decision.typed_public_view())
-            .map_err(|_| TransferError::Refused("Invalid transfer response"));
+        return serde::Serialize::serialize(
+            &(decision.typed_public_view()),
+            serde_json::value::Serializer,
+        )
+        .map_err(|_| TransferError::Refused("Invalid transfer response"));
     }
     let operation = &decision.operation;
     let agents = decision.agent_records()?;
@@ -580,8 +583,11 @@ fn persist_request(
         )
         .map_err(|_| TransferError::Refused("Cannot enqueue transfer continuation"))?;
     }
-    serde_json::to_value(decision.typed_public_view())
-        .map_err(|_| TransferError::Refused("Invalid transfer response"))
+    serde::Serialize::serialize(
+        &(decision.typed_public_view()),
+        serde_json::value::Serializer,
+    )
+    .map_err(|_| TransferError::Refused("Invalid transfer response"))
 }
 
 /// Asynchronous effect port, implemented by the account worker's bounded native
@@ -612,7 +618,7 @@ pub async fn send_once(
     params: Value,
     now: f64,
 ) -> Result<DispatchOutcome, TransferError> {
-    let scope_value = serde_json::to_value(&scope)
+    let scope_value = serde::Serialize::serialize(&(&scope), serde_json::value::Serializer)
         .map_err(|_| TransferError::Refused("Invalid provider scope"))?;
     reserve(store, ticket, method, params.clone(), scope_value, now).await?;
     let dispatch = transport.send(ticket, &scope, method, &params).await?;
@@ -683,7 +689,7 @@ pub async fn provider_intent(
                 &provider_operation,
                 intent.scope,
                 &method,
-                intent.params,
+                &intent.params,
             )?;
             admit_mutation(&snapshot, &mut decision, &agent)?;
             persist(tx, decision, now)?;
@@ -698,16 +704,16 @@ fn typed_intent(
     operation: &str,
     scope: Value,
     method: &str,
-    params: Value,
+    params: &Value,
 ) -> Result<Decision, TransferError> {
     snapshot.typed_provider_intent(
         agent,
         operation,
-        serde_json::from_value(scope)
+        serde::Deserialize::deserialize(scope)
             .map_err(|_| TransferError::Refused("Invalid provider scope"))?,
-        serde_json::from_value(Value::String(method.into()))
+        serde::Deserialize::deserialize(Value::String(method.into()))
             .map_err(|_| TransferError::Refused("Invalid provider method"))?,
-        &serde_json::value::to_raw_value(&params)
+        &serde_json::value::to_raw_value(params)
             .map_err(|_| TransferError::Refused("Invalid provider payload"))?,
     )
 }
@@ -819,9 +825,9 @@ pub(crate) async fn provider_read_intent(
                         .try_into()
                         .map_err(|_| TransferError::Refused("Invalid provider account"))?,
                 ),
-                scope: serde_json::from_value(intent.scope.clone())
+                scope: serde::Deserialize::deserialize(intent.scope.clone())
                     .map_err(|_| TransferError::Refused("Invalid provider scope"))?,
-                method: serde_json::from_value(Value::String(method.clone()))
+                method: serde::Deserialize::deserialize(Value::String(method.clone()))
                     .map_err(|_| TransferError::Refused("Invalid provider method"))?,
                 params: serde_json::value::to_raw_value(&intent.params)
                     .map_err(|_| TransferError::Refused("Invalid provider parameters"))?,
@@ -894,7 +900,8 @@ fn inline_reply(
         }
     };
     let lost = |_| TransferError::Refused("The saved provider reply is unavailable");
-    let reference = serde_json::to_value(reference).map_err(lost)?;
+    let reference =
+        serde::Serialize::serialize(&(reference), serde_json::value::Serializer).map_err(lost)?;
     let bytes = crate::payload_blobs::load_blob(root, &reference)
         .map_err(|_| TransferError::Refused("The saved provider reply is unavailable"))?;
     let value = serde_json::from_slice(&bytes).map_err(lost)?;
@@ -1364,14 +1371,14 @@ mod request_tests {
         .expect("blob");
         let receipt = json!({"operation":"read", "scope":{"account":"source","connection":"c","generation":1}, "certainty":"written"});
         let saved = json!({"certainty":"written", "receipt":receipt, "result":{"kind":"reply","valueBlob":{"sha256":sha256,"size":bytes.len()}}});
-        let saved = serde_json::from_value(saved).expect("receipt");
+        let saved = serde::Deserialize::deserialize(saved).expect("receipt");
         let restored = inline_reply(root.path(), saved).expect("restored");
         assert_eq!(
-            serde_json::to_value(restored).unwrap()["result"],
+            serde::Serialize::serialize(&(restored), serde_json::value::Serializer).unwrap()["result"],
             json!({"kind":"reply","value":body})
         );
         let lost = json!({"certainty":"written", "receipt":receipt, "result":{"kind":"reply","valueBlob":{"sha256":"0".repeat(64),"size":1}}});
-        assert!(inline_reply(root.path(), serde_json::from_value(lost).unwrap()).is_err());
+        assert!(inline_reply(root.path(), serde::Deserialize::deserialize(lost).unwrap()).is_err());
     }
 
     #[test]
@@ -1996,19 +2003,20 @@ mod provider_admission_tests {
         let first = snapshot(false, None);
         let mut decision = first.decide(Command::Restart).expect("decision");
         admit_mutation(&first, &mut decision, "agent").expect("new obligation");
-        let saved = serde_json::to_value(
-            decision
+        let saved = serde::Serialize::serialize(
+            &(decision
                 .operation
                 .members
                 .get("agent")
                 .unwrap()
                 .provider_admission
                 .value()
-                .unwrap(),
+                .unwrap()),
+            serde_json::value::Serializer,
         )
         .unwrap();
         let admission: ProviderAdmission =
-            serde_json::from_value(saved.clone()).expect("admission");
+            serde::Deserialize::deserialize(saved.clone()).expect("admission");
         assert!(admission.admitted_request.value().is_none());
         studio_runtime_schema::persistence::RequestIdentity::new(
             "test",
@@ -2021,15 +2029,16 @@ mod provider_admission_tests {
         let mut decision = retry.decide(Command::Restart).expect("retry decision");
         admit_mutation(&retry, &mut decision, "agent").expect("saved identity");
         assert_eq!(
-            serde_json::to_value(
-                decision
+            serde::Serialize::serialize(
+                &(decision
                     .operation
                     .members
                     .get("agent")
                     .unwrap()
                     .provider_admission
                     .value()
-                    .unwrap()
+                    .unwrap()),
+                serde_json::value::Serializer
             )
             .unwrap(),
             saved

@@ -21,10 +21,6 @@
       "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:4"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_executor.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/account_worker/callback.rs",
       "fingerprint": "ee40c0b3955a00b1c72314f8bfd405afb2ecae120f0e813e627e6b94304b9cea:0"
     },
@@ -1008,30 +1004,6 @@
   "generated-types": [],
   "needless_pass_by_value": [
     {
-      "file": "workspaces/client/apps/native/src-tauri/src/close.rs",
-      "fingerprint": "0e4757b7a55d66e1341b370db5be78b0126724637b5dfc31af03ddb8163e3f1b:0"
-    },
-    {
-      "file": "workspaces/client/apps/native/src-tauri/src/close.rs",
-      "fingerprint": "0e4757b7a55d66e1341b370db5be78b0126724637b5dfc31af03ddb8163e3f1b:1"
-    },
-    {
-      "file": "workspaces/client/apps/native/src-tauri/src/close.rs",
-      "fingerprint": "2a8b2e34f9db4438c2842fc4e37afae65a4089ecc3af5656f47352a6bafe76c0:0"
-    },
-    {
-      "file": "workspaces/client/apps/native/src-tauri/src/close.rs",
-      "fingerprint": "2a8b2e34f9db4438c2842fc4e37afae65a4089ecc3af5656f47352a6bafe76c0:1"
-    },
-    {
-      "file": "workspaces/client/apps/native/src-tauri/src/frame_assets.rs",
-      "fingerprint": "97b00ca952c31638c3c1d319bd3aa76b6574d3800b64bfac9c6f55d7846d6d5c:0"
-    },
-    {
-      "file": "workspaces/client/apps/native/src-tauri/src/frame_assets.rs",
-      "fingerprint": "9afbfcac6becdaff65098a1cef50b115bd37d574e03ef4d1f8bcbc6dbec275ce:0"
-    },
-    {
       "file": "workspaces/client/packages/client-core/src/backend.rs",
       "fingerprint": "05ed782712b957e83aaf934a7100767448f72978163367db2cfb46544d921dad:0"
     },
@@ -1270,22 +1242,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
       "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:2"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:3"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:4"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/account_worker/preparation/snapshot.rs",

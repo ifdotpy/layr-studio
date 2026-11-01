@@ -918,10 +918,10 @@ mod tests {
         let scope = serde_json::json!({"account":"source","connection":"conn","generation":1});
         let receipt = serde_json::json!({"operation":"read","scope":scope,"certainty":"written"});
         let conflict = serde_json::json!({"certainty":"unknown","receipt":receipt});
-        assert!(serde_json::from_value::<ProviderReadReceipt>(conflict).is_err());
+        assert!(<ProviderReadReceipt as serde::Deserialize>::deserialize(conflict).is_err());
         let both =
             serde_json::json!({"kind":"reply","value":{},"valueBlob":{"sha256":"hash","size":2}});
-        assert!(serde_json::from_value::<ProviderResult>(both).is_err());
+        assert!(<ProviderResult as serde::Deserialize>::deserialize(both).is_err());
     }
     use super::*;
 
@@ -930,7 +930,7 @@ mod tests {
         let source: TransferSource =
             serde_json::from_str(r#"{"accountKey":null,"epoch":null,"cwd":null}"#).unwrap();
         assert_eq!(
-            serde_json::to_value(source).unwrap(),
+            serde::Serialize::serialize(&(source), serde_json::value::Serializer).unwrap(),
             serde_json::json!({"accountKey":null,"epoch":null,"cwd":null})
         );
     }

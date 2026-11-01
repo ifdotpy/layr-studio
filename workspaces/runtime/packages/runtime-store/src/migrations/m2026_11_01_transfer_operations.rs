@@ -43,7 +43,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         });
         let reason = match result {
             Ok(record) => {
-                let value = serde_json::to_value(record)?;
+                let value = serde::Serialize::serialize(&(record), serde_json::value::Serializer)?;
                 if studio_runtime_schema::validate("PersistedAccountTransferRecord", &value)
                     .map_err(StoreError::SchemaValidation)?
                 {

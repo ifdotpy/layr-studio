@@ -166,7 +166,7 @@ fn patches(
         "runtime_account_transfers" => {
             // Held operations cannot dispatch and retain their original payload.
             if matches!(
-                serde_json::from_value::<super::m2026_11_01_transfer_operations::StoredTransferHold>(
+                <super::m2026_11_01_transfer_operations::StoredTransferHold as serde::Deserialize>::deserialize(
                     value.clone()
                 ),
                 Ok(super::m2026_11_01_transfer_operations::StoredTransferHold::Unreadable { .. })
