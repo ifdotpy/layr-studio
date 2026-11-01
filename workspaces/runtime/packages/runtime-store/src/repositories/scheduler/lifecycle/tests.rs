@@ -318,7 +318,10 @@ fn terminal_error_records_keep_unknown_extensions_and_only_known_policy_blocks()
         }));
         let agent = stored(&connection);
         assert_eq!(agent["error"]["message"], "Provider refusal");
-        assert!(agent["error"].get("vendorExtension").is_none());
+        assert_eq!(
+            agent["error"].get("vendorExtension"),
+            error.get("vendorExtension")
+        );
         assert_eq!(agent.get("nativeThreadBlock").is_some(), blocked);
         if blocked {
             assert_eq!(agent["nativeThreadBlock"]["error"], error);
