@@ -1696,8 +1696,8 @@ fn extra_field<T: serde::de::DeserializeOwned>(
     key: &str,
 ) -> Result<studio_runtime_schema::queue_command::Field<T>, TransferError> {
     use studio_runtime_schema::queue_command::Field;
-    let record =
-        serde_json::to_value(agent).map_err(|_| invalid("transfer agent", format!("/{key}")))?;
+    let record = serde::Serialize::serialize(agent, serde_json::value::Serializer)
+        .map_err(|_| invalid("transfer agent", format!("/{key}")))?;
     match record.get(key) {
         None => Ok(Field::Missing),
         Some(value) => serde::Deserialize::deserialize(value.clone())
