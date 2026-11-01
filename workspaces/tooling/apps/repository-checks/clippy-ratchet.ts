@@ -137,6 +137,22 @@ export function collect(output: string): Record<string, Violation[]> {
   return result.finish();
 }
 
+const nativePath = "workspaces/client/apps/native/src-tauri/";
+
+export function scopedBaseline(
+  baseline: Record<string, Violation[]>,
+  excludeNative: boolean,
+): Record<string, Violation[]> {
+  return Object.fromEntries(
+    Object.entries(baseline).map(([rule, entries]) => [
+      rule,
+      excludeNative
+        ? entries.filter((entry) => !entry.file.startsWith(nativePath))
+        : entries,
+    ]),
+  );
+}
+
 export async function run(
   shrink = false,
   excludeNative = false,
@@ -202,14 +218,17 @@ export async function run(
           (entry) => `${entry.file}\0${entry.fingerprint}`,
         ),
       );
-      baseline[rule] = (baseline[rule] ?? []).filter((entry) =>
-        actual.has(`${entry.file}\0${entry.fingerprint}`),
+      baseline[rule] = (baseline[rule] ?? []).filter(
+        (entry) =>
+          (excludeNative && entry.file.startsWith(nativePath)) ||
+          actual.has(`${entry.file}\0${entry.fingerprint}`),
       );
     }
     writeFileSync(RATCHET_BASELINE, `${JSON.stringify(baseline, null, 2)}\n`);
   }
+  const checkedBaseline = scopedBaseline(baseline, excludeNative);
   const errors = lints.flatMap((rule) =>
-    checkRatchet(rule, found[rule] ?? [], baseline),
+    checkRatchet(rule, found[rule] ?? [], checkedBaseline),
   );
   errors.forEach((error) => console.error(error));
   return errors.length ? 1 : 0;
