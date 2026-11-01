@@ -174,7 +174,7 @@ nice -n 10 just test-comprehensive
 ```
 
 Both gates create a private scratch directory on tmpfs under `/tmp`, export it
-as `TMPDIR` to their test processes, and remove it on exit. They require 20 GiB
+as `TMPDIR` to their test processes, and remove it on exit. They require 2 GiB
 free before starting and fail if the scratch filesystem is not tmpfs. Set
 `TMPDIR` to another existing tmpfs directory to choose the parent for one run,
 for example `TMPDIR=/tmp/my-scratch nice -n 10 just test-fast`. Cargo target and

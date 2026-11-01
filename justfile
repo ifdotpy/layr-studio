@@ -88,8 +88,8 @@ test-comprehensive:
 _test-gate gate:
     #!/usr/bin/env bash
     set -euo pipefail
-    # Provisional free space requirement in KiB, including the fixture's 15 GiB check.
-    required_kib=20971520
+    # Provisional gate scratch free space requirement, in KiB.
+    required_kib=2097152
     scratch="$(mktemp -d "${TMPDIR:-/tmp}/studio-gate.XXXXXX")"
     trap 'chmod -R u+rwX "$scratch"; rm -rf -- "$scratch"' EXIT
     trap 'exit 130' INT
