@@ -433,6 +433,11 @@ pub struct AgentRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
+    pub checkpoint_history_head: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
     pub excluded_account_keys: studio_runtime_schema::queue_command::Field<Vec<String>>,
     #[serde(
         default,
@@ -891,6 +896,7 @@ impl AgentRecord {
             effort: Default::default(),
             native_effort: Default::default(),
             project_folder: Default::default(),
+            checkpoint_history_head: Default::default(),
             excluded_account_keys: Default::default(),
             role: Default::default(),
             provider: Default::default(),
@@ -2914,6 +2920,7 @@ mod tests {
             "effort",
             "nativeEffort",
             "projectFolder",
+            "checkpointHistoryHead",
             "lastCompletedTurn",
             "hostProjectPath",
             "lastCompletedTurnStatus",

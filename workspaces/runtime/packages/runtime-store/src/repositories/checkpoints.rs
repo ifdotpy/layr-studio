@@ -188,9 +188,9 @@ impl CheckpointsRepository {
             return Ok(None);
         };
         let parent_checkpoint = agent
-            .extra
-            .get("checkpointHistoryHead")
-            .and_then(Value::as_str)
+            .checkpoint_history_head
+            .value()
+            .map(String::as_str)
             .map(|id| read_object(connection, "runtime_checkpoints", id))
             .transpose()?
             .flatten();

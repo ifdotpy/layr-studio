@@ -299,12 +299,7 @@ async fn capture_before_restore_inner(
     .await
     .map_err(|_| CheckpointsError::Worker)??;
     let (commit, reference) = commit_stage;
-    let parent_id = snapshot
-        .agent
-        .extra
-        .get("checkpointHistoryHead")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
+    let parent_id = snapshot.agent.checkpoint_history_head.value().cloned();
     let parent_boundary = snapshot
         .parent_checkpoint
         .as_ref()
@@ -522,12 +517,7 @@ async fn capture_reserved(
                 let reference =
                     format!("refs/codex-agents/checkpoints/{git_agent_id}/{git_checkpoint_id}");
                 git(&cwd, &["update-ref", &reference, &commit], &[], None, 0)?;
-                let parent_id = snapshot
-                    .agent
-                    .extra
-                    .get("checkpointHistoryHead")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned);
+                let parent_id = snapshot.agent.checkpoint_history_head.value().cloned();
                 let parent_boundary = snapshot
                     .parent_checkpoint
                     .as_ref()
