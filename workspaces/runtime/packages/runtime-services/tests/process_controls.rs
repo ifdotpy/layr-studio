@@ -31,7 +31,7 @@ async fn leaf_listing_does_not_decode_unrelated_agents() {
                 &rows,
                 &process_controls::Connections::default(),
             )?;
-            assert_eq!(result["processes"], json!([]));
+            assert!(result.processes.is_empty());
             Ok::<_, process_controls::Error>(())
         })
         .await
@@ -58,17 +58,42 @@ fn python_process_identities_and_capabilities_match() {
         if case["source"] == "monitor" {
             continue;
         }
-        let mut actual = process_controls::project(
-            case["source"].as_str().unwrap(),
-            &case["raw"],
-            &case["owner"],
-            case["connection"].as_str(),
-        );
+        let claude = case["source"] == "claude_task";
+        let mut input = case["raw"].clone();
+        input["kind"] = json!(if claude { "tool" } else { "command" });
+        input["type"] = json!(if claude {
+            "dynamicToolCall"
+        } else {
+            "commandExecution"
+        });
+        input["name"] = json!("");
+        let typed: studio_runtime_store::TaskRecord = serde_json::from_value(input).unwrap();
+        let source = if claude {
+            studio_runtime_schema::process_controls::ProcessSourceKind::ClaudeTask
+        } else {
+            studio_runtime_schema::process_controls::ProcessSourceKind::CodexTask
+        };
+        let actual =
+            process_controls::project(source, &typed, &case["owner"], case["connection"].as_str());
+        let mut actual = serde_json::to_value(actual.view).unwrap();
+        actual.as_object_mut().unwrap().remove("display");
+        let mut expected = case["expected"].clone();
+        for field in [
+            "_raw",
+            "_sourceAccountKey",
+            "_sourceConnectionId",
+            "_sourceThreadId",
+            "_sourceEpoch",
+        ] {
+            expected.as_object_mut().unwrap().remove(field);
+        }
+        let output = expected.as_object_mut().unwrap().remove("output").unwrap();
+        expected["tail"] = output;
         // These additive renderer fields have no legacy Python projection.
         for field in ["outputWakeBudget", "outputPatterns", "outputFile"] {
             actual.as_object_mut().unwrap().remove(field);
         }
-        assert_eq!(actual, case["expected"], "{}", case["source"]);
+        assert_eq!(actual, expected, "{}", case["source"]);
     }
 }
 #[test]

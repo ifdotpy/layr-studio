@@ -1,3 +1,4 @@
+import { BackgroundTaskLabel, ProcessSourceKind } from "../generated/api";
 import {
   TaskStatus as GeneratedApiTaskStatus,
   TaskKind as GeneratedApiTaskKind,
@@ -14,7 +15,7 @@ import {
   type PropsWithChildren,
   type ComponentProps,
 } from "react";
-import { componentSnapshot } from "./componentTestFixtures";
+import { backgroundDisplay, componentSnapshot } from "./componentTestFixtures";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ReactElement, ReactNode } from "react";
 const h = vi.hoisted(() => ({
@@ -183,12 +184,24 @@ const commandProcess = () =>
     agent: "lead",
     created: 2,
     status: "running" as const,
-    source: "codex_task",
+    source: ProcessSourceKind.codex_task,
     key: "command-key",
     generation: "generation",
     accountKey: "default",
     epoch: 1,
-    output: "Streamed command output",
+    tail: "Streamed command output",
+    bytes: 23,
+    cancelRequested: false,
+    stdinClosed: false,
+    stdinCloseRequested: false,
+    outputTruncated: false,
+    outputPatterns: [],
+    display: backgroundDisplay({
+      kindLabel: "backgroundCommand",
+      title: "command",
+      canStop: true,
+      canInput: true,
+    }),
     capabilities: {
       readOutput: true,
       sendInput: true,
@@ -224,7 +237,7 @@ it("an open process panel and its selected detail need only two distinct resourc
   ]);
   expect(h.get).not.toHaveBeenCalled();
 });
-it("process rows use streamed task-only records and authoritative process output without duplicates", () => {
+it("process and task sections retain server order and their separate output", () => {
   h.nullRefs = 100;
   const props = processProps();
   props.data.runtime.tasks = [
@@ -234,6 +247,11 @@ it("process rows use streamed task-only records and authoritative process output
       created: 1,
       status: GeneratedApiTaskStatus.running,
       kind: GeneratedApiTaskKind.tool,
+      display: backgroundDisplay({
+        kind: "tool",
+        kindLabel: "tool",
+        inBackgroundList: false,
+      }),
     },
   ];
   const process = commandProcess();
@@ -243,8 +261,10 @@ it("process rows use streamed task-only records and authoritative process output
   h.data.set("tasks", [
     {
       ...process,
+      stdinCloseRequested: undefined,
       kind: GeneratedApiTaskKind.command,
       tail: "Older task output",
+      display: backgroundDisplay(),
     },
     {
       id: "tool",
@@ -253,6 +273,12 @@ it("process rows use streamed task-only records and authoritative process output
       status: GeneratedApiTaskStatus.running,
       kind: GeneratedApiTaskKind.tool,
       name: "webSearch",
+      display: backgroundDisplay({
+        kind: "tool",
+        kindLabel: "tool",
+        title: "Web search",
+        inBackgroundList: false,
+      }),
     },
     {
       id: "claude",
@@ -260,8 +286,11 @@ it("process rows use streamed task-only records and authoritative process output
       created: 1,
       status: GeneratedApiTaskStatus.running,
       kind: GeneratedApiTaskKind.tool,
-      // @ts-expect-error TaskEntityDto omits legacy itemId metadata; the renderer still tolerates it.
-      itemId: "task:background",
+      display: backgroundDisplay({
+        kind: "backgroundTask",
+        kindLabel: "tool",
+        title: "Background task",
+      }),
     },
   ] satisfies ResourceData<Extract<ResourceRef, { kind: "tasks" }>>);
   const read = () => BackgroundTasks(props);
@@ -272,6 +301,7 @@ it("process rows use streamed task-only records and authoritative process output
   );
   expect(rows.map((node) => node.props.task.id).sort()).toEqual([
     "claude",
+    "command",
     "command",
     "tool",
   ]);
@@ -298,9 +328,15 @@ it("process rows use streamed task-only records and authoritative process output
     processes: [
       {
         ...process,
-        output: "Updated output",
+        tail: "Updated output",
         error: "Streamed error",
         cancelRequested: true,
+        display: {
+          ...process.display,
+          label: BackgroundTaskLabel.waitingForExit,
+          canStop: false,
+          canInput: false,
+        },
       },
     ],
   } satisfies ResourceData<Extract<ResourceRef, { kind: "processes" }>>);
@@ -406,12 +442,20 @@ it("work changes consume the stream without GET /api/work", () => {
     id: "lead",
     taskDefaultGate: null,
   } satisfies ResourceData<Extract<ResourceRef, { kind: "agentDetail" }>>);
-  // Work fixture omits created, updated and version, which this rendering does not read.
   const task = {
     id: "work",
     rootId: "lead",
     title: "Before",
+    created: 1,
+    updated: 1,
+    version: 1,
     status: GeneratedApiWorkStatus.running,
+    policy: {
+      blockedBy: [],
+      displayStatus: GeneratedApiWorkStatus.running,
+      acceptAvailable: false,
+      gateOverrideRequired: false,
+    },
   } as ResourceData<Extract<ResourceRef, { kind: "work" }>>["items"][number];
   h.data.set("work", { items: [task], tasks: [] } satisfies ResourceData<
     Extract<ResourceRef, { kind: "work" }>

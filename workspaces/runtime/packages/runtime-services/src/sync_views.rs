@@ -245,6 +245,7 @@ fn project_schema_value(
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskProjection {
+    display: studio_runtime_schema::process_controls::BackgroundTaskDisplay,
     id: String,
     agent: String,
     created: studio_runtime_schema::task_record::NonnegativeNumber,
@@ -298,6 +299,7 @@ pub fn project_task_record(record: &studio_runtime_store::TaskRecord) -> Option<
         }
     });
     Some(TaskProjection {
+        display: crate::process_controls::task_record_display(record),
         id: bounded(id, "id"),
         agent: bounded(record.agent(), "agent"),
         created: record.created_number().clone(),
@@ -933,7 +935,8 @@ mod projection_plan_tests {
             let old = project_persisted_record("task", &raw).unwrap();
             let encoded =
                 serde_json::to_string(&super::project_task_record(&task).unwrap()).unwrap();
-            let new: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            let mut new: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            new.as_object_mut().unwrap().remove("display");
             assert_eq!(new, old);
         }
     }

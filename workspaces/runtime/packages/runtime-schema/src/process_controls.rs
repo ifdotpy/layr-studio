@@ -6,6 +6,172 @@ use serde_json::Value;
 #[cfg(test)]
 use serde_json::json;
 
+/// Renderer classification for an existing task or process.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BackgroundTaskKind {
+    Monitor,
+    Command,
+    Tool,
+    BackgroundTask,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BackgroundTaskIndicator {
+    Answer,
+    Error,
+    Working,
+    Unread,
+    Paused,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BackgroundTaskKindLabel {
+    Monitor,
+    Command,
+    BackgroundCommand,
+    Tool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BackgroundTaskLabel {
+    Running,
+    Starting,
+    Pending,
+    Stopping,
+    Approval,
+    Completed,
+    Failed,
+    Cancelled,
+    Interrupted,
+    Lost,
+    WaitingForExit,
+    Unknown,
+}
+
+/// The server's presentation and action decisions for a task row.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BackgroundTaskDisplay {
+    pub kind: BackgroundTaskKind,
+    pub kind_label: BackgroundTaskKindLabel,
+    pub title: String,
+    pub active: bool,
+    pub indicator: BackgroundTaskIndicator,
+    pub label: BackgroundTaskLabel,
+    pub in_background_list: bool,
+    pub can_stop: bool,
+    pub can_approve: bool,
+    pub can_input: bool,
+    pub can_resize: bool,
+    pub can_read_output: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessSourceKind {
+    Monitor,
+    CodexTask,
+    ClaudeTask,
+}
+impl ProcessSourceKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Monitor => "monitor",
+            Self::CodexTask => "codex_task",
+            Self::ClaudeTask => "claude_task",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProcessCapabilities {
+    pub read_output: bool,
+    pub send_input: bool,
+    pub resize: bool,
+    pub stop: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProcessWakeBudget {
+    pub paused: bool,
+    pub tokens: f64,
+    pub total_suppressed_matches: u64,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ProcessStatus {
+    #[schemars(schema_with = "task_record_status_schema")]
+    Task(crate::task_record::TaskStatus),
+    #[schemars(schema_with = "monitor_status_schema")]
+    Monitor(crate::studio_errors::MonitorStatus),
+}
+fn task_record_status_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({"$ref":"#/components/schemas/TaskRecordStatus"})
+}
+fn monitor_status_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({"$ref":"#/components/schemas/MonitorState"})
+}
+
+/// Complete public process view; private native proof stays on the service record.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProcessView {
+    pub id: String,
+    pub key: String,
+    pub generation: String,
+    pub agent: String,
+    pub account_key: String,
+    #[schemars(range(min = 0, max = crate::shared_values::MAX_SAFE_INTEGER))]
+    pub epoch: u64,
+    pub source: ProcessSourceKind,
+    pub status: ProcessStatus,
+    pub cancel_requested: bool,
+    pub created: f64,
+    pub name: String,
+    pub command: Option<String>,
+    pub cwd: Option<String>,
+    pub log: Option<String>,
+    pub tail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finished: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process_id: Option<crate::task_record::ProcessId>,
+    #[serde(rename = "timeout_ms", skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<i64>,
+    pub error: Option<String>,
+    pub stdin_error: Option<String>,
+    pub stdin_closed: bool,
+    pub stdin_close_requested: bool,
+    #[schemars(range(min = 0, max = crate::shared_values::MAX_SAFE_INTEGER))]
+    pub bytes: u64,
+    pub output_truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_file: Option<String>,
+    pub output_patterns: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_wake_budget: Option<ProcessWakeBudget>,
+    pub capabilities: ProcessCapabilities,
+    pub display: BackgroundTaskDisplay,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProcessListing {
+    pub response_target: Option<ProcessResponseTarget>,
+    pub processes: Vec<ProcessView>,
+}
+
 // JSON Schema integer ingress accepts integral decimal spellings. The retained
 // transport value, rather than this numeric projection, remains identity evidence.
 fn epoch<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
@@ -60,7 +226,7 @@ pub struct ProcessIdentity {
     pub epoch: u64,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProcessResponseTarget {
     pub agent: MonitorText<1, ACTION_ID_MAX_CODEPOINTS>,
@@ -349,6 +515,9 @@ fn schema_generator() -> schemars::SchemaGenerator {
 
 pub(crate) fn schemas() -> Vec<(String, Value)> {
     let mut generator = schema_generator();
+    generator.subschema_for::<BackgroundTaskDisplay>();
+    generator.subschema_for::<ProcessView>();
+    generator.subschema_for::<ProcessListing>();
     generator.subschema_for::<ProcessControlRequest>();
     generator.subschema_for::<ProcessActionResult>();
     generator.subschema_for::<ProcessReceipt>();
@@ -357,6 +526,48 @@ pub(crate) fn schemas() -> Vec<(String, Value)> {
         .iter()
         .map(|(name, schema)| (name.clone(), schema.clone()))
         .collect()
+}
+
+/// Connect the typed presentation owner to the existing SSE entities.
+pub(crate) fn apply_background_views(document: &mut Value) {
+    let schemas = &mut document["components"]["schemas"];
+    schemas["TaskRecordStatus"] = schemars::schema_for!(crate::task_record::TaskStatus).to_value();
+    schemas["TaskRecordKind"] = schemars::schema_for!(crate::task_record::TaskKind).to_value();
+    for (name, status) in [
+        ("TaskEntityDto", "TaskRecordStatus"),
+        ("MonitorEntityDto", "MonitorState"),
+    ] {
+        let fields = &mut schemas[name]["properties"];
+        fields["agent"] = serde_json::json!({"type":"string"});
+        fields["created"] = serde_json::json!({"type":"number"});
+        fields["status"] = serde_json::json!({"$ref":format!("#/components/schemas/{status}")});
+        fields["display"] =
+            serde_json::json!({"$ref":"#/components/schemas/BackgroundTaskDisplay"});
+        let required = schemas[name]["required"]
+            .as_array_mut()
+            .expect("entity required fields");
+        for field in ["agent", "created", "status", "display"] {
+            let field = Value::String(field.into());
+            if !required.contains(&field) {
+                required.push(field);
+            }
+        }
+    }
+    schemas["TaskEntityDto"]["properties"]["kind"] =
+        serde_json::json!({"$ref":"#/components/schemas/TaskRecordKind"});
+    schemas["MonitorEntityDto"]["properties"]["outputFile"] =
+        serde_json::json!({"type":["string","null"]});
+    let required = schemas["TaskEntityDto"]["required"]
+        .as_array_mut()
+        .expect("task required fields");
+    if !required.contains(&Value::String("kind".into())) {
+        required.push(Value::String("kind".into()));
+    }
+    schemas["ManagedProcessRecord"] =
+        serde_json::json!({"$ref":"#/components/schemas/ProcessView"});
+    schemas["ProcessList"] = serde_json::json!({"$ref":"#/components/schemas/ProcessListing"});
+    schemas["TaskRecordView"] = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/TaskEntityDto"},{"$ref":"#/components/schemas/MonitorEntityDto"}]});
+    schemas["BackgroundTaskView"] = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/ProcessView"},{"$ref":"#/components/schemas/TaskRecordView"}]});
 }
 
 #[cfg(test)]
@@ -538,6 +749,11 @@ pub(crate) fn check_schema_parity(openapi: &Value) -> Result<(), String> {
                 "{name} must match runtime-schema/src/process_controls.rs"
             ));
         }
+    }
+    let mut expected = openapi.clone();
+    apply_background_views(&mut expected);
+    if expected != *openapi {
+        return Err("Background task view contract differs from its Rust owner".into());
     }
     Ok(())
 }

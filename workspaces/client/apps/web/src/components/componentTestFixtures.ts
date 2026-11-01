@@ -1,6 +1,34 @@
+import {
+  BackgroundTaskIndicator,
+  BackgroundTaskKind,
+  BackgroundTaskKindLabel,
+  BackgroundTaskLabel,
+  TaskRecordKind,
+} from "../generated/api";
 import assert from "node:assert/strict";
 import type { Agent, Message, Snapshot } from "../types";
 import type { Attachment } from "./ComposerAttachments";
+import type { components } from "../generated/api";
+
+export function backgroundDisplay(
+  overrides: Partial<components["schemas"]["BackgroundTaskDisplay"]> = {},
+): components["schemas"]["BackgroundTaskDisplay"] {
+  return {
+    kind: BackgroundTaskKind.command,
+    kindLabel: BackgroundTaskKindLabel.command,
+    title: "Command",
+    active: true,
+    indicator: BackgroundTaskIndicator.working,
+    label: BackgroundTaskLabel.running,
+    inBackgroundList: true,
+    canStop: false,
+    canApprove: false,
+    canInput: false,
+    canResize: false,
+    canReadOutput: true,
+    ...overrides,
+  };
+}
 
 export function required<T>(value: T | undefined | null): T {
   assert.ok(value != null, "Expected fixture result to exist");
@@ -33,7 +61,6 @@ export function componentSnapshot(
       studioErrors: [],
       agents: threads,
       rooms: [],
-      tasks: [],
       monitors: [],
       complaints: [],
       requests: [],
@@ -43,6 +70,18 @@ export function componentSnapshot(
       events: [],
       work: [],
       ...(runtime as Partial<Snapshot["runtime"]>),
+      tasks: (runtime.tasks ?? []).map((task) => ({
+        ...task,
+        display:
+          task.display ??
+          backgroundDisplay({
+            kind:
+              task.kind === TaskRecordKind.command ||
+              (task.kind == null && !!task.command)
+                ? "command"
+                : "tool",
+          }),
+      })) as Snapshot["runtime"]["tasks"],
     },
   };
 }

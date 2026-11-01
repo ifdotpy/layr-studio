@@ -1,23 +1,12 @@
-import { TaskStatus as GeneratedApiTaskStatus } from "../../generated/api.ts";
+import { BackgroundTaskIndicator } from "../../generated/api";
 import { describe, expect, it } from "vitest";
 import type { Agent } from "../../types";
-import type { DisplayBackgroundTask } from "../backgroundTaskModel";
 import {
-  backgroundProcessGroups,
-  monitorTask,
+  backgroundTaskState,
   responseOwnerIdentityKey,
   responseStopIdentity,
   responseStopDisabled,
 } from "./BackgroundTasks";
-
-describe("background process groups", () => {
-  it("renders Claude background tasks in the task list", () => {
-    expect(backgroundProcessGroups).toContainEqual([
-      "backgroundTask",
-      "Background tasks",
-    ]);
-  });
-});
 
 describe("response stop identity", () => {
   it("changes when the owner moves from idle to active or starts a new turn", () => {
@@ -57,91 +46,32 @@ describe("response stop identity", () => {
   });
 });
 
-describe("monitorTask", () => {
-  it("narrows a complete API monitor while preserving its task details", () => {
-    expect(
-      monitorTask({
-        id: "monitor-1",
-        agent: "agent-1",
-        created: 123,
-        status: GeneratedApiTaskStatus.running,
-        command: "npm run check",
-        cancelRequested: false,
-      }),
-    ).toMatchObject({
-      id: "monitor-1",
-      agent: "agent-1",
-      created: 123,
-      kind: "monitor",
-      status: "running",
-      command: "npm run check",
-      cancelRequested: false,
-    });
-  });
-
-  it("omits monitors whose nullable identity fields cannot form a task row", () => {
-    expect(
-      monitorTask({
-        id: "monitor-2",
-        agent: null,
-        created: 123,
-        status: GeneratedApiTaskStatus.running,
-      }),
-    ).toBeNull();
-    expect(
-      monitorTask({
-        id: "monitor-3",
-        agent: "agent-1",
-        created: null,
-        status: GeneratedApiTaskStatus.running,
-      }),
-    ).toBeNull();
-  });
-});
-
-describe("monitor wake budget", () => {
-  it("preserves paused output wakes without changing running state", () => {
-    const task = monitorTask({
-      id: "budget",
-      agent: "owner",
-      created: 1,
-      status: GeneratedApiTaskStatus.running,
-      outputPatterns: ["ready"],
-      outputWakeBudget: {
-        totalSuppressedMatches: 1250,
-        paused: true,
-        tokens: 0.5,
-      },
-    });
-    expect(task?.status).toBe("running");
-    expect(task?.outputWakeBudget).toEqual({
-      totalSuppressedMatches: 1250,
-      paused: true,
-      tokens: 0.5,
-    });
-    expect(task?.outputPatterns).toEqual(["ready"]);
-  });
-});
-
 describe("dispatch strip states", () => {
-  it("prioritizes approvals and keeps the existing command projection", async () => {
-    const { backgroundTaskState } = await import("./BackgroundTasks");
-    const task = {
-      id: "monitor",
-      agent: "worker",
+  it("uses the indicator published by the server", () => {
+    const display = {
       kind: "monitor",
-      created: 1,
-      command: "pnpm test",
-      status: "approval",
-    } satisfies DisplayBackgroundTask;
-    expect(backgroundTaskState(task)).toBe("answer");
-    expect(backgroundTaskState({ ...task, status: "running" })).toBe("working");
-    expect(backgroundTaskState({ ...task, status: "lost" })).toBe("error");
-    expect(backgroundTaskState({ ...task, status: "completed" })).toBe(
-      "unread",
-    );
-    expect(backgroundTaskState({ ...task, status: "cancelled" })).toBe(
-      "paused",
-    );
+      kindLabel: "monitor",
+      title: "Command",
+      active: true,
+      indicator: "answer",
+      label: "approval",
+      inBackgroundList: true,
+      canStop: false,
+      canApprove: true,
+      canInput: false,
+      canResize: false,
+      canReadOutput: true,
+    } as const;
+    expect(backgroundTaskState({ display })).toBe("answer");
+    expect(
+      backgroundTaskState({
+        display: { ...display, indicator: BackgroundTaskIndicator.working },
+      }),
+    ).toBe("working");
+    expect(
+      backgroundTaskState({
+        display: { ...display, indicator: BackgroundTaskIndicator.error },
+      }),
+    ).toBe("error");
   });
 });

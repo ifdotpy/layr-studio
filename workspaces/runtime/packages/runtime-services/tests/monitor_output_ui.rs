@@ -21,14 +21,15 @@ fn monitor_budget_and_task_file_survive_renderer_projections() {
         .unwrap();
         assert_eq!(task["outputFile"], "logs/out.txt");
     }
+    let task: studio_runtime_store::TaskRecord = serde_json::from_str(r#"{"id":"task","agent":"owner","created":1,"itemId":"task:abc","kind":"tool","status":"running","turnId":"turn","type":"dynamicToolCall","name":"job","outputFile":"logs/out.txt"}"#).unwrap();
     let process = process_controls::project(
-        "claude_task",
-        &json!({"id":"task","outputFile":"logs/out.txt"}),
-        &json!({"id":"owner"}),
+        studio_runtime_schema::process_controls::ProcessSourceKind::ClaudeTask,
+        &task,
+        &json!({"id":"owner","epoch":1}),
         None,
     );
-    assert_eq!(process["outputFile"], "logs/out.txt");
-    assert_eq!(process["capabilities"]["readOutput"], true);
+    assert_eq!(process.view.output_file.as_deref(), Some("logs/out.txt"));
+    assert!(process.view.capabilities.read_output);
 }
 
 fn file_fixture(root: &std::path::Path, path: &str) -> (Value, Value) {

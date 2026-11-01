@@ -109,6 +109,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             "studio_runtime_schema::model_catalog::ProviderModel",
         ),
         (
+            "ProcessListing",
+            "studio_runtime_schema::process_controls::ProcessListing",
+        ),
+        (
             "WorkBody",
             "studio_runtime_schema::task_command::TaskCommand",
         ),

@@ -1403,6 +1403,8 @@ pub(crate) fn seed_work_details(transaction: &Transaction<'_>) -> StoreResult<()
         server.as_deref(),
         &|_, _, _, _| true,
     )?;
+    maintain_task_window(transaction, &|_, _, _, _| true)?;
+    maintain_monitor_window(transaction, &|_, _, _, _| true)?;
     transaction.execute("INSERT INTO sync_entity_meta(key,value) VALUES(?1,'1') ON CONFLICT(key) DO UPDATE SET value='1'", [WORK_DETAILS_SEED_MARKER])?;
     Ok(())
 }
@@ -1860,6 +1862,7 @@ pub(crate) fn maintain_task_window_after_write(
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MonitorProjection {
+    display: studio_runtime_schema::process_controls::BackgroundTaskDisplay,
     pub agent: String,
     bytes: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1914,6 +1917,7 @@ pub fn project_monitor_record(
     }
     let bound = |text: &str, field: &str| crate::sync_views::bound_sync_text(text, field, false);
     Ok(MonitorProjection {
+        display: crate::process_controls::monitor_record_display(record),
         agent: bound(&record.agent, "agent"),
         bytes: record.bytes.get(),
         cancel_requested: record.cancel_requested,
@@ -2959,7 +2963,9 @@ mod tests {
         let typed: studio_runtime_store::MonitorRecord = serde_json::from_str(&raw).unwrap();
         let old = crate::sync_views::project_persisted_record("monitor", &record).unwrap();
         let new = super::project_monitor_record(&typed).unwrap();
-        assert_eq!(serde_json::to_string(&new).unwrap(), old.to_string());
+        let mut encoded = serde_json::to_value(&new).unwrap();
+        encoded.as_object_mut().unwrap().remove("display");
+        assert_eq!(encoded, old);
         assert_eq!(new.command, old["command"]);
         assert_eq!(new.tail, old["tail"]);
         assert_eq!(new.error.as_deref(), old["error"].as_str());

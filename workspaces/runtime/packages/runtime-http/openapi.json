@@ -16142,6 +16142,119 @@
         "title": "BackgroundShellPolicySettings",
         "type": "object"
       },
+      "BackgroundTaskDisplay": {
+        "additionalProperties": false,
+        "description": "The server's presentation and action decisions for a task row.",
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "canApprove": {
+            "type": "boolean"
+          },
+          "canInput": {
+            "type": "boolean"
+          },
+          "canReadOutput": {
+            "type": "boolean"
+          },
+          "canResize": {
+            "type": "boolean"
+          },
+          "canStop": {
+            "type": "boolean"
+          },
+          "inBackgroundList": {
+            "type": "boolean"
+          },
+          "indicator": {
+            "$ref": "#/components/schemas/BackgroundTaskIndicator"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/BackgroundTaskKind"
+          },
+          "kindLabel": {
+            "$ref": "#/components/schemas/BackgroundTaskKindLabel"
+          },
+          "label": {
+            "$ref": "#/components/schemas/BackgroundTaskLabel"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "kindLabel",
+          "title",
+          "active",
+          "indicator",
+          "label",
+          "inBackgroundList",
+          "canStop",
+          "canApprove",
+          "canInput",
+          "canResize",
+          "canReadOutput"
+        ],
+        "type": "object"
+      },
+      "BackgroundTaskIndicator": {
+        "enum": [
+          "answer",
+          "error",
+          "working",
+          "unread",
+          "paused"
+        ],
+        "type": "string"
+      },
+      "BackgroundTaskKind": {
+        "description": "Renderer classification for an existing task or process.",
+        "enum": [
+          "monitor",
+          "command",
+          "tool",
+          "backgroundTask"
+        ],
+        "type": "string"
+      },
+      "BackgroundTaskKindLabel": {
+        "enum": [
+          "monitor",
+          "command",
+          "backgroundCommand",
+          "tool"
+        ],
+        "type": "string"
+      },
+      "BackgroundTaskLabel": {
+        "enum": [
+          "running",
+          "starting",
+          "pending",
+          "stopping",
+          "approval",
+          "completed",
+          "failed",
+          "cancelled",
+          "interrupted",
+          "lost",
+          "waitingForExit",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "BackgroundTaskView": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/ProcessView"
+          },
+          {
+            "$ref": "#/components/schemas/TaskRecordView"
+          }
+        ]
+      },
       "BlockingPoolGroupMetrics": {
         "additionalProperties": false,
         "properties": {
@@ -29485,199 +29598,7 @@
         "type": "object"
       },
       "ManagedProcessRecord": {
-        "additionalProperties": false,
-        "properties": {
-          "accountKey": {
-            "title": "Accountkey",
-            "type": "string"
-          },
-          "agent": {
-            "title": "Agent",
-            "type": "string"
-          },
-          "bytes": {
-            "default": 0,
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "title": "Bytes",
-            "type": "integer"
-          },
-          "cancelRequested": {
-            "default": false,
-            "title": "Cancelrequested",
-            "type": "boolean"
-          },
-          "capabilities": {
-            "$ref": "#/components/schemas/ProcessCapabilities"
-          },
-          "command": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Command"
-          },
-          "created": {
-            "title": "Created",
-            "type": "number"
-          },
-          "cwd": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Cwd"
-          },
-          "epoch": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "title": "Epoch",
-            "type": "integer"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Error"
-          },
-          "generation": {
-            "title": "Generation",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "log": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Log"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "output": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Output"
-          },
-          "outputFile": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "outputPatterns": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "outputTruncated": {
-            "default": false,
-            "title": "Outputtruncated",
-            "type": "boolean"
-          },
-          "outputWakeBudget": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/MonitorOutputWakeBudget"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "source": {
-            "enum": [
-              "monitor",
-              "codex_task",
-              "claude_task"
-            ],
-            "title": "Source",
-            "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "stdinCloseRequested": {
-            "default": false,
-            "title": "Stdincloserequested",
-            "type": "boolean"
-          },
-          "stdinClosed": {
-            "default": false,
-            "title": "Stdinclosed",
-            "type": "boolean"
-          },
-          "stdinError": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Stdinerror"
-          }
-        },
-        "required": [
-          "id",
-          "key",
-          "generation",
-          "agent",
-          "accountKey",
-          "epoch",
-          "source",
-          "status",
-          "created",
-          "name",
-          "capabilities"
-        ],
-        "title": "ManagedProcessRecord",
-        "type": "object"
+        "$ref": "#/components/schemas/ProcessView"
       },
       "McpReconnectRequest": {
         "additionalProperties": false,
@@ -30400,16 +30321,7 @@
         "additionalProperties": false,
         "properties": {
           "agent": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Agent"
+            "type": "string"
           },
           "bytes": {
             "anyOf": [
@@ -30450,16 +30362,7 @@
             "title": "Command"
           },
           "created": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "default": null,
-            "title": "Created"
+            "type": "number"
           },
           "cwd": {
             "anyOf": [
@@ -30472,6 +30375,9 @@
             ],
             "default": null,
             "title": "Cwd"
+          },
+          "display": {
+            "$ref": "#/components/schemas/BackgroundTaskDisplay"
           },
           "durationMs": {
             "anyOf": [
@@ -30565,6 +30471,12 @@
             "default": null,
             "title": "Name"
           },
+          "outputFile": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "outputPatterns": {
             "items": {
               "type": "string"
@@ -30618,15 +30530,7 @@
             "title": "Ruleid"
           },
           "status": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/TaskStatus"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
+            "$ref": "#/components/schemas/MonitorState"
           },
           "stdinCloseRequested": {
             "anyOf": [
@@ -30692,7 +30596,11 @@
           }
         },
         "required": [
-          "id"
+          "id",
+          "agent",
+          "created",
+          "status",
+          "display"
         ],
         "title": "MonitorEntityDto",
         "type": "object"
@@ -35862,19 +35770,15 @@
         "additionalProperties": false,
         "properties": {
           "readOutput": {
-            "title": "Readoutput",
             "type": "boolean"
           },
           "resize": {
-            "title": "Resize",
             "type": "boolean"
           },
           "sendInput": {
-            "title": "Sendinput",
             "type": "boolean"
           },
           "stop": {
-            "title": "Stop",
             "type": "boolean"
           }
         },
@@ -35884,7 +35788,6 @@
           "resize",
           "stop"
         ],
-        "title": "ProcessCapabilities",
         "type": "object"
       },
       "ProcessControlRequest": {
@@ -36255,6 +36158,23 @@
         "type": "object",
         "unevaluatedProperties": true
       },
+      "ProcessId": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "format": "int64",
+            "type": "integer"
+          },
+          {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        ],
+        "description": "Numeric IDs remain numeric because process-control identities depend on their original shape."
+      },
       "ProcessIdentity": {
         "additionalProperties": false,
         "properties": {
@@ -36339,13 +36259,15 @@
         "type": "object"
       },
       "ProcessList": {
+        "$ref": "#/components/schemas/ProcessListing"
+      },
+      "ProcessListing": {
         "additionalProperties": false,
         "properties": {
           "processes": {
             "items": {
-              "$ref": "#/components/schemas/ManagedProcessRecord"
+              "$ref": "#/components/schemas/ProcessView"
             },
-            "title": "Processes",
             "type": "array"
           },
           "responseTarget": {
@@ -36356,14 +36278,12 @@
               {
                 "type": "null"
               }
-            ],
-            "default": null
+            ]
           }
         },
         "required": [
           "processes"
         ],
-        "title": "ProcessList",
         "type": "object"
       },
       "ProcessReceipt": {
@@ -36469,6 +36389,24 @@
         ],
         "type": "object"
       },
+      "ProcessSourceKind": {
+        "enum": [
+          "monitor",
+          "codex_task",
+          "claude_task"
+        ],
+        "type": "string"
+      },
+      "ProcessStatus": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/TaskRecordStatus"
+          },
+          {
+            "$ref": "#/components/schemas/MonitorState"
+          }
+        ]
+      },
       "ProcessTree": {
         "additionalProperties": false,
         "properties": {
@@ -36507,6 +36445,208 @@
           "totalRssMiB"
         ],
         "title": "ProcessTree",
+        "type": "object"
+      },
+      "ProcessView": {
+        "additionalProperties": false,
+        "description": "Complete public process view; private native proof stays on the service record.",
+        "properties": {
+          "accountKey": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "bytes": {
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cancelRequested": {
+            "type": "boolean"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/ProcessCapabilities"
+          },
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created": {
+            "format": "double",
+            "type": "number"
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "display": {
+            "$ref": "#/components/schemas/BackgroundTaskDisplay"
+          },
+          "durationMs": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "epoch": {
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "exitCode": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "finished": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "generation": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "log": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "outputFile": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outputPatterns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "outputTruncated": {
+            "type": "boolean"
+          },
+          "outputWakeBudget": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProcessWakeBudget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "processId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProcessId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "$ref": "#/components/schemas/ProcessSourceKind"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProcessStatus"
+          },
+          "stdinCloseRequested": {
+            "type": "boolean"
+          },
+          "stdinClosed": {
+            "type": "boolean"
+          },
+          "stdinError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tail": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "generation",
+          "agent",
+          "accountKey",
+          "epoch",
+          "source",
+          "status",
+          "cancelRequested",
+          "created",
+          "name",
+          "tail",
+          "stdinClosed",
+          "stdinCloseRequested",
+          "bytes",
+          "outputTruncated",
+          "outputPatterns",
+          "capabilities",
+          "display"
+        ],
+        "type": "object"
+      },
+      "ProcessWakeBudget": {
+        "additionalProperties": false,
+        "properties": {
+          "paused": {
+            "type": "boolean"
+          },
+          "tokens": {
+            "format": "double",
+            "type": "number"
+          },
+          "totalSuppressedMatches": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "paused",
+          "tokens",
+          "totalSuppressedMatches"
+        ],
         "type": "object"
       },
       "ProcessesResource": {
@@ -53834,15 +53974,7 @@
         "additionalProperties": false,
         "properties": {
           "agent": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Agent"
+            "type": "string"
           },
           "bytes": {
             "anyOf": [
@@ -53880,15 +54012,7 @@
             "title": "Command"
           },
           "created": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "Created"
+            "type": "number"
           },
           "cwd": {
             "anyOf": [
@@ -53900,6 +54024,9 @@
               }
             ],
             "title": "Cwd"
+          },
+          "display": {
+            "$ref": "#/components/schemas/BackgroundTaskDisplay"
           },
           "durationMs": {
             "anyOf": [
@@ -53969,14 +54096,7 @@
             "title": "Interactive"
           },
           "kind": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/TaskKind"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/TaskRecordKind"
           },
           "log": {
             "anyOf": [
@@ -54044,14 +54164,7 @@
             "title": "Query"
           },
           "status": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/TaskStatus"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/TaskRecordStatus"
           },
           "stdinCloseRequested": {
             "anyOf": [
@@ -54124,7 +54237,12 @@
           }
         },
         "required": [
-          "id"
+          "id",
+          "agent",
+          "created",
+          "status",
+          "display",
+          "kind"
         ],
         "title": "TaskEntityDto",
         "type": "object"
@@ -54272,6 +54390,41 @@
           "truncated"
         ],
         "type": "object"
+      },
+      "TaskRecordKind": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "enum": [
+          "command",
+          "tool"
+        ],
+        "title": "TaskKind",
+        "type": "string"
+      },
+      "TaskRecordStatus": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "enum": [
+          "starting",
+          "approval",
+          "pending",
+          "unknown",
+          "running",
+          "completed",
+          "failed",
+          "interrupted",
+          "lost"
+        ],
+        "title": "TaskStatus",
+        "type": "string"
+      },
+      "TaskRecordView": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/TaskEntityDto"
+          },
+          {
+            "$ref": "#/components/schemas/MonitorEntityDto"
+          }
+        ]
       },
       "TaskResource": {
         "additionalProperties": false,

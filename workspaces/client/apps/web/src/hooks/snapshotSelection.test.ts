@@ -2,6 +2,7 @@ import { AgentSource, AgentStatus } from "../generated/api";
 import { describe, expect, it } from "vitest";
 import { createChatSnapshotSelector } from "./snapshotSelection";
 import type { Agent, Snapshot } from "../types";
+import { backgroundDisplay } from "../components/componentTestFixtures";
 
 function fixture(): Snapshot {
   const threads: Agent[] = [
@@ -96,6 +97,8 @@ describe("chat snapshot selection", () => {
       id: "monitor",
       agent: "worker",
       status: "running" as const,
+      created: 1,
+      display: backgroundDisplay({ kind: "monitor", kindLabel: "monitor" }),
     };
     const next = select(
       {

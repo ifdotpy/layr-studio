@@ -1,14 +1,34 @@
+import {
+  BackgroundTaskIndicator,
+  BackgroundTaskKind,
+  BackgroundTaskKindLabel,
+  BackgroundTaskLabel,
+  MonitorState,
+} from "../../generated/api";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
 import { BackgroundTaskStrip } from "./BackgroundTasks";
-import type { DisplayBackgroundTask } from "../backgroundTaskModel";
-const task: DisplayBackgroundTask = {
+import type { components } from "../../generated/api";
+const task: components["schemas"]["MonitorEntityDto"] = {
   id: "monitor",
   agent: "worker",
-  kind: "monitor",
   created: 1700000000,
-  status: "running",
+  status: MonitorState.running,
   command: "pnpm --filter codex-agents-web run typecheck:fast",
+  display: {
+    kind: BackgroundTaskKind.monitor,
+    kindLabel: BackgroundTaskKindLabel.monitor,
+    title: "pnpm --filter codex-agents-web run typecheck:fast",
+    active: true,
+    indicator: BackgroundTaskIndicator.working,
+    label: BackgroundTaskLabel.running,
+    inBackgroundList: true,
+    canStop: false,
+    canApprove: false,
+    canInput: false,
+    canResize: false,
+    canReadOutput: true,
+  },
 };
 const meta = {
   title: "Agents/Background activity",
@@ -40,11 +60,46 @@ export const Monitor: Story = {
   },
 };
 export const Approval: Story = {
-  args: { task: { ...task, status: "approval" } },
+  args: {
+    task: {
+      ...task,
+      status: "approval",
+      display: {
+        ...task.display,
+        label: BackgroundTaskLabel.approval,
+        indicator: BackgroundTaskIndicator.answer,
+        canApprove: true,
+      },
+    },
+  },
 };
 export const Tool: Story = {
-  args: { task: { ...task, kind: "tool", command: null, name: "webSearch" } },
+  args: {
+    task: {
+      ...task,
+      kind: "tool",
+      command: null,
+      name: "webSearch",
+      display: {
+        ...task.display,
+        kind: BackgroundTaskKind.tool,
+        kindLabel: BackgroundTaskKindLabel.tool,
+        title: "Web search",
+      },
+    },
+  },
 };
 export const UnknownOutcome: Story = {
-  args: { task: { ...task, status: "lost" } },
+  args: {
+    task: {
+      ...task,
+      status: "lost",
+      display: {
+        ...task.display,
+        active: false,
+        indicator: BackgroundTaskIndicator.error,
+        label: BackgroundTaskLabel.lost,
+      },
+    },
+  },
 };

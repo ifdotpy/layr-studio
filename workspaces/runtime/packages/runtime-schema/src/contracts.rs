@@ -1279,6 +1279,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     for (name, schema) in crate::process_controls::schemas() {
         openapi["components"]["schemas"][name] = schema;
     }
+    crate::process_controls::apply_background_views(&mut openapi);
     openapi["components"]["schemas"]["AnswerBody"]["properties"]["decision"] =
         crate::question_answers::answer_body_decision();
     for (name, schema) in crate::question_answers::schemas() {

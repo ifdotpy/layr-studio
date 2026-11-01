@@ -1,4 +1,5 @@
 import type { ConnectionActivity, ConnectionHealth } from "./connectionState";
+import { backgroundDisplay } from "../components/componentTestFixtures";
 import {
   SubscriptionReplyKind,
   AgentStatus,
@@ -554,6 +555,7 @@ it.each([false, true])(
         kind: TaskKind.command,
         status: TaskStatus.running,
         created: 1,
+        display: backgroundDisplay(),
       },
     });
     await f.client.persistResourceEntityChanges(

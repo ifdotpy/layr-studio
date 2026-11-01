@@ -1,58 +1,11 @@
-import { TaskKind as GeneratedApiTaskKind } from "../generated/api.ts";
-import type { Snapshot } from "../types";
-import type { BackgroundTask, Monitor, WorkspaceTask } from "../types";
+import { BackgroundTaskKind } from "../generated/api";
 import type { components } from "../generated/api";
+import type { Snapshot } from "../types";
 
-type Task = BackgroundTask | WorkspaceTask;
-export type RendererTaskKind =
-  | components["schemas"]["TaskKind"]
-  | "backgroundTask";
-type DisplayTask<T extends Task | Monitor> = Omit<
-  T,
-  "agent" | "created" | "kind" | "status"
-> &
-  Pick<BackgroundTask, "tail"> & {
-    [Field in "agent" | "created" | "status"]: NonNullable<T[Field]>;
-  } & {
-    kind: RendererTaskKind;
-  };
-export type DisplayLegacyTask =
-  | DisplayTask<BackgroundTask>
-  | DisplayTask<WorkspaceTask>
-  | DisplayTask<Monitor>;
-export type DisplayProcessTask =
-  components["schemas"]["ManagedProcessRecord"] & {
-    kind: RendererTaskKind;
-    tail: string;
-    interactive: components["schemas"]["ProcessCapabilities"]["sendInput"];
-  };
-export type DisplayBackgroundTask = DisplayLegacyTask | DisplayProcessTask;
-
-function processTaskKind(
-  source: DisplayProcessTask["source"],
-): RendererTaskKind {
-  switch (source) {
-    case "monitor":
-      return "monitor";
-    case "codex_task":
-      return "command";
-    case "claude_task":
-      return "backgroundTask";
-    default:
-      return source satisfies never;
-  }
-}
-
-export function displayProcess(
-  process: components["schemas"]["ManagedProcessRecord"],
-): DisplayProcessTask {
-  return {
-    ...process,
-    kind: processTaskKind(process.source),
-    tail: process.output || "",
-    interactive: process.capabilities.sendInput,
-  };
-}
+export type RendererTaskKind = components["schemas"]["BackgroundTaskKind"];
+export type DisplayLegacyTask = components["schemas"]["TaskRecordView"];
+export type DisplayProcessTask = components["schemas"]["ProcessView"];
+export type DisplayBackgroundTask = components["schemas"]["BackgroundTaskView"];
 
 export function processIdentity(
   task: DisplayProcessTask,
@@ -66,65 +19,16 @@ export function processIdentity(
   };
 }
 
-export const activeTask = (task: Pick<DisplayBackgroundTask, "status">) =>
-  ["running", "starting", "approval", "pending", "stopping"].includes(
-    task.status,
-  );
+export const activeTask = (task: Pick<DisplayBackgroundTask, "display">) =>
+  task.display.active;
 
-export function isCommandTask(task: Pick<BackgroundTask, "kind" | "command">) {
-  return (
-    task.kind === GeneratedApiTaskKind.command ||
-    (task.kind == null && !!task.command)
-  );
-}
+export const isCommandTask = (task: Pick<DisplayLegacyTask, "display">) =>
+  task.display.kind === BackgroundTaskKind.command;
 
-export function projectTaskForRenderer<T extends Task | Monitor>(
-  task: T,
-  source?: "task" | "monitor",
-): DisplayTask<T> | null;
-export function projectTaskForRenderer(
-  task: Task | Monitor,
-  source: "task" | "monitor" = "task",
-): DisplayLegacyTask | null {
-  const kind =
-    source === "monitor" ? "monitor" : isCommandTask(task) ? "command" : "tool";
-  const claudeTask =
-    "kind" in task &&
-    task.kind === GeneratedApiTaskKind.tool &&
-    "itemId" in task &&
-    typeof task.itemId === "string" &&
-    task.itemId.startsWith("task:");
-  if (task.agent == null || task.created == null || task.status == null)
-    return null;
-  const rendererKind: RendererTaskKind =
-    source === "task" && claudeTask ? "backgroundTask" : kind;
-  const row = {
-    ...task,
-    agent: task.agent,
-    created: task.created,
-    accountKey:
-      "accountKey" in task && typeof task.accountKey === "string"
-        ? task.accountKey
-        : undefined,
-    kind: rendererKind,
-    status: task.status,
-  };
-  return row;
-}
-
-export function backgroundTasks(
-  data: Snapshot | null,
-): (DisplayTask<BackgroundTask> | DisplayTask<Monitor>)[] {
+export function backgroundTasks(data: Snapshot | null): DisplayLegacyTask[] {
   if (!data) return [];
   return [
-    ...data.runtime.monitors
-      .map((monitor) => projectTaskForRenderer(monitor, "monitor"))
-      .filter((task): task is DisplayLegacyTask => task !== null),
-    ...data.runtime.tasks
-      .map((task) => projectTaskForRenderer(task, "task"))
-      .filter(
-        (task): task is DisplayLegacyTask =>
-          task?.kind === "command" || task?.kind === "backgroundTask",
-      ),
+    ...data.runtime.monitors.filter((task) => task.display.inBackgroundList),
+    ...data.runtime.tasks.filter((task) => task.display.inBackgroundList),
   ];
 }

@@ -33,7 +33,7 @@ vi.mock("react", async (original) => ({
     ];
   },
 }));
-import { monitorTask, ProcessInput } from "./BackgroundTasks";
+import { ProcessInput } from "./BackgroundTasks";
 
 function memoryStorage(): Storage {
   const rows = new Map<string, string>();
@@ -128,13 +128,27 @@ function fixture() {
       beginActivity: () => () => {},
     });
   hooks.api = open();
-  const task = monitorTask({
+  const task = {
     id: "monitor-one",
     agent: "owner",
     created: 1,
     status: GeneratedApiTaskStatus.running,
     interactive: true,
-  })!;
+    display: {
+      kind: "monitor",
+      kindLabel: "monitor",
+      title: "Command",
+      active: true,
+      indicator: "working",
+      label: "running",
+      inBackgroundList: true,
+      canStop: true,
+      canApprove: false,
+      canInput: true,
+      canResize: true,
+      canReadOutput: true,
+    },
+  } as const;
   const owner = { id: "owner", accountKey: "target", epoch: 3 } as Agent;
   const actions: Promise<boolean>[] = [];
   const render = () => {
