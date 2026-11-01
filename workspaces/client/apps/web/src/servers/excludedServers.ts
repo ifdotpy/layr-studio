@@ -3,7 +3,7 @@
 const removalKey = "studio-automatic-ui-removals-v1";
 
 export function excludedServers(
-  storage = globalThis.localStorage,
+  storage: Pick<Storage, "getItem" | "setItem"> = globalThis.localStorage,
 ): Set<string> {
   const value: unknown = JSON.parse(storage.getItem(removalKey) || "[]");
   if (!Array.isArray(value) || value.some((id) => typeof id !== "string"))
@@ -14,7 +14,7 @@ export function excludedServers(
 export function setServerExcluded(
   serverId: string,
   excluded: boolean,
-  storage = globalThis.localStorage,
+  storage: Pick<Storage, "getItem" | "setItem"> = globalThis.localStorage,
 ) {
   const ids = excludedServers(storage);
   if (excluded) ids.add(serverId);

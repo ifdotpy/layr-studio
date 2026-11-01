@@ -10,7 +10,7 @@ function memory(initial?: string) {
     setItem: (key: string, value: string) => {
       values.set(key, value);
     },
-  } as unknown as Storage;
+  };
 }
 
 it("keeps a removed server out until it is added again", () => {
