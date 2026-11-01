@@ -353,6 +353,17 @@ pub struct TransferSettings {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DestinationSettings {
+    #[serde(flatten)]
+    pub settings: TransferSettings,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub pending_settings: Field<TransferSettings>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub pending_settings_account_key: Field<AccountKey>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HistorySource {
     pub agent_id: String,
     pub account_key: AccountKey,
@@ -444,7 +455,7 @@ pub struct TransferMember {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub settings: Field<TransferSettings>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub target_settings: Field<TransferSettings>,
+    pub target_settings: Field<DestinationSettings>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub pending_settings: Field<TransferSettings>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -913,6 +924,19 @@ pub struct LazySourceState {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn destination_settings_preserve_pending_and_reject_unknown_fields() {
+        let value = serde_json::json!({"model":"model", "pendingSettings":{"model":"queued"}, "pendingSettingsAccountKey":"account"});
+        let settings: super::DestinationSettings = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(settings).unwrap(), value);
+        assert!(
+            serde_json::from_value::<super::DestinationSettings>(
+                serde_json::json!({"unexpected":true})
+            )
+            .is_err()
+        );
+    }
+
     #[test]
     fn read_receipt_rejects_conflicting_certainty_and_result_shapes() {
         let scope = serde_json::json!({"account":"source","connection":"conn","generation":1});

@@ -1594,6 +1594,55 @@ mod destination_settings_tests {
     use super::*;
 
     #[test]
+    fn provider_change_settings_can_be_prepared() {
+        let operation = json!({"id":"transfer","leadId":"agent","targetAccountKey":"target",
+            "status":"pending","created":1.0,"scope":"team",
+            "members":{"agent":{"phase":"lazy","sourceAccountKey":"source","lazy":true}}});
+        let agent = json!({"compactions":0,"provider":"codex","id":"agent","rootId":"agent",
+            "epoch":7,"status":"idle","accountKey":"target","accountTransferId":"transfer",
+            "lazyAccountTransfer":{"id":"transfer"},"model":"source-model"});
+        let snapshot = crate::account_transfer::Snapshot::read(
+            &operation.to_string(),
+            [("agent".into(), agent.to_string())],
+        )
+        .unwrap();
+        let decision = snapshot.begin_read("agent").unwrap();
+        let reading = crate::account_transfer::Snapshot::read(
+            &decision.encoded().unwrap(),
+            decision
+                .agents
+                .into_iter()
+                .map(|(id, agent)| (id, agent.to_string())),
+        )
+        .unwrap();
+        let catalog = CatalogObservation {
+            identity: CatalogIdentity {
+                account_key: "target".into(),
+                home: "/tmp/target".into(),
+                provider: ProviderKind::Claude,
+                generation: 1,
+            },
+            expires_at: Instant::now() + Duration::from_secs(30),
+            models: vec![ModelCapabilities {
+                model: "destination".into(),
+                resolved_model: None,
+                is_default: true,
+                hidden: false,
+                access_programs: None,
+                supported_efforts: vec!["medium".into()],
+                default_effort: Some("medium".into()),
+                priority: false,
+            }],
+        };
+        let settings =
+            destination_settings(&agent, ProviderKind::Codex, ProviderKind::Claude, &catalog)
+                .unwrap();
+        reading
+            .prepared_member("agent", settings, None)
+            .expect("provider change settings are accepted");
+    }
+
+    #[test]
     fn missing_default_and_fallback_model_refuses_instead_of_selecting_first() {
         let catalog = CatalogObservation {
             identity: CatalogIdentity {
