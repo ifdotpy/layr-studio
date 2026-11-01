@@ -5,7 +5,7 @@ use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
-/// The observable state of one message send, including its device buffer.
+/// The observable server state of one message send.
 #[derive(
     Clone,
     Copy,
@@ -20,8 +20,6 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum MessageSendStatus {
-    /// The device buffers the command before acknowledgement (workspaces/client/apps/web/src/sync/send.ts:329).
-    Buffered,
     /// The server queues the input (workspaces/runtime/packages/runtime-services/src/coordination.rs:423).
     Queued,
     /// The scheduler dispatches the input (workspaces/runtime/packages/runtime-store/src/repositories/scheduler/lifecycle.rs:1037).
@@ -113,6 +111,11 @@ pub fn serialize_recipient_deliveries<S: serde::Serializer>(
 
 #[cfg(test)]
 mod message_send_status_tests {
+    #[test]
+    fn device_only_buffered_status_is_not_a_server_status() {
+        assert!(serde_json::from_str::<super::MessageSendStatus>("\"buffered\"").is_err());
+    }
+
     #[test]
     fn unknown_message_send_status_is_rejected() {
         assert!(serde_json::from_str::<super::MessageSendStatus>("\"future-status\"").is_err());
