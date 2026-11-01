@@ -23,7 +23,14 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         let explicit = old_explicit
             .as_ref()
             .and_then(|raw| serde_json::from_str::<bool>(raw.get()).ok())
-            .unwrap_or(false);
+            .unwrap_or_else(|| {
+                old_explicit.is_none()
+                    && old_max
+                        .as_ref()
+                        .and_then(|raw| serde_json::from_str::<i64>(raw.get()).ok())
+                        .unwrap_or(studio_runtime_schema::agent_limits::DEFAULT_MAX_TEAM_AGENTS)
+                        != studio_runtime_schema::agent_limits::DEFAULT_MAX_TEAM_AGENTS
+            });
         let kind = if explicit { "explicit" } else { "automatic" };
         let limit = max.map_or(
             serde_json::json!(studio_runtime_schema::agent_limits::DEFAULT_MAX_TEAM_AGENTS),
@@ -62,6 +69,24 @@ mod tests {
                 r#"{"id":"automatic","maxAgents":70,"maxAgentsExplicit":false}"#,
                 "automatic",
                 70,
+            ),
+            (
+                "inferred-explicit",
+                r#"{"id":"inferred-explicit","maxAgents":8}"#,
+                "explicit",
+                8,
+            ),
+            (
+                "inferred-default",
+                r#"{"id":"inferred-default","maxAgents":64}"#,
+                "automatic",
+                64,
+            ),
+            (
+                "null-flag",
+                r#"{"id":"null-flag","maxAgents":8,"maxAgentsExplicit":null}"#,
+                "automatic",
+                8,
             ),
             (
                 "explicit",

@@ -3354,6 +3354,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn migrated_legacy_explicit_cap_survives_concurrency_increase() {
+        let directory = tempfile::tempdir().expect("state");
+        let store = RuntimeStore::open(Some(directory.path()))
+            .await
+            .expect("store");
+        store.transaction_with(|tx| {
+            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('lead',?1)", [
+                r#"{"id":"lead","rootId":"lead","epoch":0,"status":"idle","accountKey":"default","provider":"codex","compactions":0,"isLead":true,"concurrency":1,"maxAgents":8,"subagentConcurrencyVersion":2,"agentModeRevision":0}"#,
+            ])?;
+            studio_runtime_store::migrations::normalize_agent_fixtures(tx)?;
+            Ok::<_, StoreError>(())
+        }).await.expect("migrate legacy agent");
+        let context = Context {
+            store: std::sync::Arc::new(store),
+            accounts: None,
+            driver: None,
+            catalog: None,
+            managed_creation_environment: None,
+            validate: std::sync::Arc::new(|_, _| true),
+        };
+        configure(
+            &context,
+            Configuration {
+                id: "lead".into(),
+                concurrency: Some(20),
+                max_agents: None,
+                expected_mode_revision: Some(0),
+                request_id: Some(studio_runtime_schema::persistence::RequestIdentity::issue_root()),
+            },
+        )
+        .await
+        .expect("increase concurrency");
+        let agent = AgentRepository::get(
+            &context.store.test_reader().expect("reader"),
+            &"lead".into(),
+        )
+        .expect("read")
+        .expect("lead");
+        assert!(matches!(
+            agent.capacity,
+            studio_runtime_store::AgentCapacity::Explicit { .. }
+        ));
+        assert_eq!(agent.capacity.max(), 8);
+    }
+
+    #[tokio::test]
     async fn concurrency_request_replays_original_revision_and_rejects_expired_identity() {
         let directory = tempfile::tempdir().expect("state");
         let store = RuntimeStore::open(Some(directory.path()))
