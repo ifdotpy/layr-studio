@@ -48,6 +48,24 @@ mod tests {
     use std::sync::Arc;
 
     #[tokio::test]
+    async fn fresh_store_keeps_transcript_copies() {
+        let root = tempfile::tempdir().expect("state");
+        let store = Arc::new(
+            studio_runtime_store::RuntimeStore::open(Some(root.path()))
+                .await
+                .expect("store"),
+        );
+        assert!(
+            !store
+                .read_async("test", |db| {
+                    studio_runtime_store::durable_seq::transcript_copies_retired(db)
+                })
+                .await
+                .expect("fresh flag")
+        );
+    }
+
+    #[tokio::test]
     async fn copy_check_does_not_admit_a_writer_or_retire_copies() {
         let root = tempfile::tempdir().expect("state");
         let store = Arc::new(
@@ -55,16 +73,6 @@ mod tests {
                 .await
                 .expect("store"),
         );
-        store
-            .transaction(|tx| {
-                tx.execute(
-                    "DELETE FROM sync_entity_meta WHERE key='transcript_copies'",
-                    [],
-                )?;
-                Ok(())
-            })
-            .await
-            .expect("keep copies");
         let before = store.writer_admissions();
         let (_sender, receiver) = tokio::sync::watch::channel(false);
         super::run(Arc::clone(&store), receiver).await;

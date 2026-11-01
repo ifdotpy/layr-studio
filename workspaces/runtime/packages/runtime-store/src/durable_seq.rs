@@ -684,8 +684,7 @@ mod tests {
     #[test]
     fn retiring_the_copies_needs_every_item_in_the_owner_and_never_deletes_rows() {
         let mut db = canvas();
-        // A fresh state has no copies, so the migration retired them.
-        assert!(transcript_copies_retired(&db).expect("flag"));
+        assert!(!transcript_copies_retired(&db).expect("flag"));
         db.execute_batch(
             "DELETE FROM sync_entity_meta WHERE key='transcript_copies';
              INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES
