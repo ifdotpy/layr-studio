@@ -952,6 +952,7 @@ fn assert_conversation_detail_sources(snapshot: &Value) {
     }
 }
 
+// 074c93e7d added policy to workDetail; the fixture includes its expected value.
 // Work partitions postdate the frozen oracle too. Compare their complete live
 // set with source records instead of letting added projections alter that oracle.
 fn assert_work_detail_sources(case: &Value, snapshot: &Value) {
