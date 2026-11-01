@@ -949,7 +949,7 @@ pub(crate) fn put_checked_task_record(
     tx: &Transaction<'_>,
     task: &studio_runtime_store::TaskRecord,
 ) -> Result<(), NotificationDispatchError> {
-    kinds::put_checked_task(tx, task, &studio_runtime_store::projection_value(task))
+    kinds::put_checked_task(tx, task)
 }
 
 /// Shared completion formatter for recovery; its caller owns the recovery receipt.
@@ -997,7 +997,7 @@ pub fn recover_task_in_transaction(
             true,
             at,
         )? {
-            kinds::put_checked_task(tx, &task, &studio_runtime_store::projection_value(&task))?;
+            kinds::put_checked_task(tx, &task)?;
             kinds::write_historical_item(
                 tx,
                 agent["id"]
@@ -1352,7 +1352,6 @@ fn validate_agent_write_fields(
             .and_then(Value::as_str)
             .is_none_or(str::is_empty)
         || agent.get("status").and_then(Value::as_str).is_none()
-        || agent.get("events").and_then(Value::as_u64).is_none()
     {
         return Err(stored("runtime_agents", agent_id));
     }
@@ -1569,7 +1568,7 @@ fn stream_turn_active(
     key: &StreamKey,
 ) -> Result<bool, NotificationDispatchError> {
     Ok(transaction.query_row_cached(
-        "SELECT EXISTS(SELECT 1 FROM runtime_agents WHERE id=?4 AND account_key=?1 AND thread_id=?2 AND (?3 IS NULL OR turn_id=?3) AND deleted_at IS NULL AND (in_flight=1 OR status IN ('running','starting','approval')))",
+        "SELECT EXISTS(SELECT 1 FROM runtime_agents WHERE id=?4 AND account_key=?1 AND id IN (SELECT chat FROM sessions WHERE thread_id=?2 AND state<>'ended') AND (?3 IS NULL OR turn_id=?3) AND deleted_at IS NULL AND (in_flight=1 OR status IN ('running','starting','approval')))",
         rusqlite::params![key.account, key.thread, key.turn, key.agent_id],
         |row| row.get(0),
     ).map_err(StoreError::from)?)
@@ -2627,6 +2626,15 @@ mod tests {
             )
             .expect("notification dispatch agent");
         connection
+            .execute_batch(&studio_runtime_store::domain::tables_sql())
+            .expect("domain tables create");
+        connection
+            .execute(
+                "INSERT INTO sessions(id,chat,thread_id,account_key,state) VALUES('agent:thread','agent','thread','default','ready')",
+                [],
+            )
+            .expect("notification dispatch session");
+        connection
             .execute_batch(studio_runtime_store::agent_volatile::agent_volatile_table_sql())
             .expect("volatile agent table creates");
         connection
@@ -3547,6 +3555,35 @@ mod tests {
             1234.5,
         );
         assert!(result.is_ok(), "{result:?}");
+    }
+
+    /// A new agent has no event counter yet; its first notification counts from zero.
+    #[test]
+    fn agent_without_event_counter_accepts_first_notification() {
+        let mut connection = database();
+        connection
+            .execute(
+                "UPDATE runtime_agents SET record=json_remove(record,'$.events') WHERE id='agent'",
+                [],
+            )
+            .expect("event counter removed");
+        let transaction = connection.transaction().expect("transaction begins");
+        let delta = json!({"method":"item/agentMessage/delta","params":{"threadId":"thread","turnId":"turn","itemId":"answer","delta":"hello"}});
+        assert_eq!(
+            dispatch(
+                &transaction,
+                &mut NotificationStreamBuffer::default(),
+                1,
+                &delta,
+                10.0
+            )
+            .expect("delta writes"),
+            DispatchOutcome::Written
+        );
+        let agent = NotificationDispatchRepository::agent_record(&transaction, "agent")
+            .expect("agent reads")
+            .expect("agent exists");
+        assert_eq!(agent["events"], 1);
     }
 
     #[test]

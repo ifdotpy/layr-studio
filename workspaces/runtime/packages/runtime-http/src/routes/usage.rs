@@ -1,6 +1,6 @@
 //! Local cost snapshots and persisted usage controls.
 
-use super::extractors::{ApiJson, QueryParams};
+use super::extractors::{ApiJson, TypedQuery};
 use super::manifest::{OperationStatus, RouteGroup, get, post};
 use axum::Json;
 use axum::extract::State;
@@ -39,13 +39,18 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CostsQuery {
+    account_key: Option<String>,
+}
 async fn costs(
     State(state): State<HttpState>,
-    params: QueryParams,
+    TypedQuery(params): TypedQuery<CostsQuery>,
 ) -> Result<Json<crate::generated::AccountCostResponse>, ApiError> {
     let account_key = params
-        .typed_value("account_key")
-        .and_then(Value::as_str)
+        .account_key
+        .as_deref()
         .filter(|value| !value.is_empty())
         .unwrap_or("default")
         .to_owned();
@@ -64,19 +69,16 @@ async fn costs(
         .map_err(|_| ApiError::internal())?
         .as_secs_f64();
     let state_dir = std::path::PathBuf::from(&state.state_dir);
-    let mut result = studio_runtime_process::blocking_pool::spawn_blocking(
+    let result = studio_runtime_process::blocking_pool::spawn_blocking(
         "runtime-http/routes/usage",
         move || usage::account_cost_snapshot(&state_dir, &account_key, &account, now),
     )
     .await
     .map_err(|_| ApiError::internal())?
     .map_err(cost_error)?;
-    if let Some(fields) = result.as_object_mut() {
-        fields.remove("_refreshDue");
-    }
-    Ok(Json(super::generated_json::<
-        crate::generated::AccountCostResponse,
-    >(result)?))
+    let snapshot: crate::bounded_entities::CostSnapshot<crate::generated::AccountCostResponse> =
+        super::generated_json(result)?;
+    Ok(Json(snapshot.public))
 }
 
 async fn cost_interest(
@@ -121,7 +123,7 @@ async fn cost_interest(
 
 async fn reset_limits(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Value>,
+    ApiJson(body): ApiJson<studio_runtime_schema::limit_reset_request::ResetRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let session = state
@@ -628,5 +630,20 @@ inventory::submit! {
             "turn-driver/capacity-retry",
             "turn-driver/usage-resume",
         ],
+    }
+}
+
+#[cfg(test)]
+mod typed_query_contract_tests {
+    use super::*;
+    #[test]
+    fn costsquery_decodes_and_rejects_invalid() {
+        fn decode(query: &str) -> bool {
+            let uri: axum::http::Uri = format!("/?{query}").parse().unwrap();
+            axum::extract::Query::<CostsQuery>::try_from_uri(&uri).is_ok()
+        }
+        assert!(decode("account_key=x"));
+        assert!(!decode("extra=x"));
+        assert!(!decode("extra=x"));
     }
 }

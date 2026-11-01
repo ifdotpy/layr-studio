@@ -20,7 +20,7 @@ use tokio::time::Instant;
 
 use crate::error::ApiError;
 use crate::router::HttpState;
-use crate::routes::extractors::{ApiJson, QueryParams};
+use crate::routes::extractors::{ApiJson, TypedQuery};
 use crate::routes::manifest::{OperationStatus, RouteGroup, get, post};
 
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -50,13 +50,32 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
+/// Maximum finder agent ID length in Unicode code points.
+const FINDER_AGENT_MAX_CHARS: usize = 200;
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FinderQuery {
+    agent: studio_runtime_schema::bounded_text::BoundedText<1, FINDER_AGENT_MAX_CHARS>,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SkillsQuery {
+    agent: Option<String>,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CapabilitiesQuery {
+    agent: Option<String>,
+    #[serde(rename = "serversCursor")]
+    servers_cursor: Option<studio_runtime_schema::bounded_text::BoundedText<1, { usize::MAX }>>,
+    fresh: Option<bool>,
+}
 async fn finder_view(
     State(state): State<HttpState>,
-    params: QueryParams,
+    TypedQuery(params): TypedQuery<FinderQuery>,
 ) -> Result<Json<crate::generated::FinderViewApiAgentsFinderViewGetResponse>, ApiError> {
-    let agent_id = params
-        .nonempty_str("agent")
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Supply an agent ID"))?;
+    let agent_id = params.agent.as_str();
     let store = state.store.as_ref().ok_or_else(ApiError::internal)?;
     let store = std::sync::Arc::clone(store);
     let agent_id = agent_id.to_owned();
@@ -117,9 +136,9 @@ async fn account_provider_exchange(
 
 async fn skills(
     State(state): State<HttpState>,
-    params: QueryParams,
+    TypedQuery(params): TypedQuery<SkillsQuery>,
 ) -> Result<Json<crate::generated::SkillsResponse>, ApiError> {
-    let agent_id = required_agent(&params)?;
+    let agent_id = required_agent(params.agent.as_deref())?;
     let record = read_agent(&state, agent_id).await?;
     ensure_live_agent(&record)?;
     let cwd = record.cwd.as_deref().ok_or_else(invalid_stored_agent)?;
@@ -151,9 +170,9 @@ async fn skills(
 
 async fn capabilities(
     State(state): State<HttpState>,
-    params: QueryParams,
+    TypedQuery(params): TypedQuery<CapabilitiesQuery>,
 ) -> Result<Json<crate::generated::CapabilitiesResponse>, ApiError> {
-    let agent_id = required_agent(&params)?;
+    let agent_id = required_agent(params.agent.as_deref())?;
     let record = read_agent(&state, agent_id).await?;
     ensure_live_agent(&record)?;
     let agent = record.value();
@@ -165,9 +184,11 @@ async fn capabilities(
         .get("cwd")
         .and_then(Value::as_str)
         .ok_or_else(invalid_stored_agent)?;
-    let cursor = params.nonempty_str("serversCursor").map(str::to_owned);
-    let fresh =
-        cursor.is_some() || params.typed_value("fresh").and_then(Value::as_bool) == Some(true);
+    let cursor = params
+        .servers_cursor
+        .as_ref()
+        .map(|value| value.as_str().to_owned());
+    let fresh = cursor.is_some() || params.fresh == Some(true);
     if !fresh && let Some(cached) = state.capabilities_cache.get(agent_id, Instant::now()) {
         return Ok(Json(super::generated_json::<
             crate::generated::CapabilitiesResponse,
@@ -716,7 +737,7 @@ pub(super) fn native_command_error(
 
 async fn sync_notify(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Value>,
+    ApiJson(body): ApiJson<studio_runtime_schema::resource_notification::ResourceNotifyRequest>,
 ) -> Result<Json<crate::generated::ResourceNotifyAck>, ApiError> {
     super::sync_stream::notify_resources(state, body).await
 }
@@ -746,9 +767,9 @@ fn invalid_stored_task() -> ApiError {
     ApiError::invalid_stored("runtime_tasks", "<task>")
 }
 
-fn required_agent(params: &QueryParams) -> Result<&str, ApiError> {
-    params
-        .nonempty_str("agent")
+fn required_agent(agent: Option<&str>) -> Result<&str, ApiError> {
+    agent
+        .filter(|value| !value.is_empty())
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Select an agent"))
 }
 
@@ -1119,5 +1140,102 @@ mod native_command_tests {
             .query_row("SELECT count(*) FROM runtime_events", [], |row| row.get(0))
             .expect("event count");
         assert_eq!(events, 0, "replay never enqueues a new native input");
+    }
+}
+
+#[cfg(test)]
+mod resource_notify_ingress_tests {
+    use axum::{
+        body::Body,
+        extract::ConnectInfo,
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn notification_http_ingress_keeps_replay_and_conflict() {
+        let root = tempfile::tempdir().unwrap();
+        let state = crate::router::HttpState::new(
+            "token".into(),
+            "workspace".into(),
+            root.path().to_string_lossy().into_owned(),
+            12345,
+            None,
+            None,
+            None,
+        );
+        let app = crate::router::router(state).unwrap();
+        for (body, expected) in [
+            (
+                r#"{"requestId":"one","resources":[{"kind":"accounts"}]}"#,
+                StatusCode::OK,
+            ),
+            (
+                r#"{"requestId":"one","resources":[{"kind":"accounts"}]}"#,
+                StatusCode::OK,
+            ),
+            (
+                r#"{"requestId":"one","resources":[{"kind":"models"}]}"#,
+                StatusCode::CONFLICT,
+            ),
+        ] {
+            let request = Request::builder()
+                .method("POST")
+                .uri("/api/sync/notify")
+                .header("host", "127.0.0.1:12345")
+                .header("content-type", "application/json")
+                .header("x-canvas-token", "token")
+                .header("x-canvas-workspace", "workspace")
+                .header(
+                    crate::schema::API_SCHEMA_HASH_HEADER,
+                    crate::schema::api_schema_hash(),
+                )
+                .extension(ConnectInfo(std::net::SocketAddr::from((
+                    [127, 0, 0, 1],
+                    54321,
+                ))))
+                .body(Body::from(body))
+                .unwrap();
+            assert_eq!(
+                app.clone().oneshot(request).await.unwrap().status(),
+                expected
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod typed_query_contract_tests {
+    use super::*;
+    #[test]
+    fn finderquery_decodes_and_rejects_invalid() {
+        fn decode(query: &str) -> bool {
+            let uri: axum::http::Uri = format!("/?{query}").parse().unwrap();
+            axum::extract::Query::<FinderQuery>::try_from_uri(&uri).is_ok()
+        }
+        assert!(decode("agent=x"));
+        assert!(!decode("agent="));
+        assert!(!decode(&format!("agent={}", "x".repeat(201))));
+        assert!(!decode("extra=x"));
+    }
+    #[test]
+    fn skillsquery_decodes_and_rejects_invalid() {
+        fn decode(query: &str) -> bool {
+            let uri: axum::http::Uri = format!("/?{query}").parse().unwrap();
+            axum::extract::Query::<SkillsQuery>::try_from_uri(&uri).is_ok()
+        }
+        assert!(decode("agent=x"));
+        assert!(!decode("extra=x"));
+        assert!(!decode("extra=x"));
+    }
+    #[test]
+    fn capabilitiesquery_decodes_and_rejects_invalid() {
+        fn decode(query: &str) -> bool {
+            let uri: axum::http::Uri = format!("/?{query}").parse().unwrap();
+            axum::extract::Query::<CapabilitiesQuery>::try_from_uri(&uri).is_ok()
+        }
+        assert!(decode("agent=x&fresh=true"));
+        assert!(!decode("serversCursor="));
+        assert!(!decode("extra=x"));
     }
 }

@@ -1035,15 +1035,13 @@ impl MonitorRuntime {
         Ok(result)
     }
 
-    pub async fn cancel_process(&self, process: Value, now: f64) -> Result<Value, MonitorError> {
-        let id = process["_raw"]["id"]
-            .as_str()
-            .ok_or(MonitorError::Refused("Unknown command watch"))?
-            .to_owned();
-        let owner = process["agent"]
-            .as_str()
-            .ok_or(MonitorError::Refused("Unknown agent"))?
-            .to_owned();
+    pub async fn cancel_process(
+        &self,
+        process: crate::process_controls::ProcessRecord,
+        now: f64,
+    ) -> Result<Value, MonitorError> {
+        let id = process.view.id.clone();
+        let owner = process.view.agent.clone();
         let result = monitor_driver::cancel_checked(
             &self.store,
             self.port.as_ref(),

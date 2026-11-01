@@ -95,10 +95,15 @@ impl crate::managed_host_tools::SendPort for ProductionPorts {
                 snapshot.context().agent.as_str(),
                 request_id,
                 studio_runtime_schema::command::Command::Send {
-                    target: target.to_owned(),
+                    target: target
+                        .to_owned()
+                        .try_into()
+                        .map_err(|_| crate::managed_host_tools::Error::Invalid("Invalid target"))?,
                     body: studio_runtime_schema::command::SendBody {
-                        text: text.to_owned(),
-                        assets: Vec::new(),
+                        text: text.to_owned().try_into().map_err(|_| {
+                            crate::managed_host_tools::Error::Invalid("Invalid message text")
+                        })?,
+                        assets: Default::default(),
                         delivery: Some(
                             studio_runtime_schema::delivery::DeliveryMoment::for_event(
                                 "followup",
@@ -111,7 +116,8 @@ impl crate::managed_host_tools::SendPort for ProductionPorts {
                         ),
                     },
                 },
-            );
+            )
+            .map_err(followup_error)?;
             let principal = crate::principal::Principal::Agent {
                 id: snapshot.context().agent.as_str().to_owned(),
                 epoch: self.context.epoch,

@@ -82,7 +82,6 @@ fn prefix_inputs(agent: &Value) -> Value {
         agent["profileInstructions"],
         agent["developerInstructions"],
         agent["permissionMode"],
-        agent["yoloMode"],
         agent["pendingSettings"],
         agent["capabilityProfile"],
         agent["dynamicTools"]

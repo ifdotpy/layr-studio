@@ -1,4 +1,5 @@
 import type { ConnectionActivity, ConnectionHealth } from "./connectionState";
+import { backgroundDisplay } from "../components/componentTestFixtures";
 import {
   SubscriptionReplyKind,
   AgentStatus,
@@ -554,6 +555,7 @@ it.each([false, true])(
         kind: TaskKind.command,
         status: TaskStatus.running,
         created: 1,
+        display: backgroundDisplay(),
       },
     });
     await f.client.persistResourceEntityChanges(
@@ -684,6 +686,12 @@ it.each([false, true])(
                   updated: 1,
                   version: 1,
                   status: snapshot && seq === 5 ? "ready" : "review",
+                  policy: {
+                    blockedBy: [],
+                    displayStatus: snapshot && seq === 5 ? "ready" : "review",
+                    acceptAvailable: false,
+                    gateOverrideRequired: false,
+                  },
                 },
               },
             ],
@@ -1044,6 +1052,12 @@ it.each(["burst", "inline removal", "staged removal"])(
                   updated: 1,
                   version: 1,
                   status: WorkStatus.ready,
+                  policy: {
+                    blockedBy: [],
+                    displayStatus: WorkStatus.ready,
+                    acceptAvailable: false,
+                    gateOverrideRequired: false,
+                  },
                 },
               },
             ],

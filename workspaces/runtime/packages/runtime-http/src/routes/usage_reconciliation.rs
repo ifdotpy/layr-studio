@@ -1,9 +1,8 @@
 //! Explicit, read-only usage evidence comparison for one current or archived agent.
 
 use axum::{Json, extract::State, http::StatusCode};
-use serde_json::Value;
 
-use super::extractors::QueryParams;
+use super::extractors::TypedQuery;
 use super::manifest::{OperationStatus, RouteGroup, get};
 use crate::{error::ApiError, router::HttpState};
 
@@ -15,15 +14,19 @@ pub(crate) fn routes() -> RouteGroup {
     )])
 }
 
+/// Maximum reconciliation agent ID length in Unicode code points.
+const RECONCILE_AGENT_MAX_CHARS: usize = 100;
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReconcileQuery {
+    agent: studio_runtime_schema::bounded_text::BoundedText<1, RECONCILE_AGENT_MAX_CHARS>,
+}
 async fn reconcile(
     State(state): State<HttpState>,
-    params: QueryParams,
+    TypedQuery(params): TypedQuery<ReconcileQuery>,
 ) -> Result<Json<crate::generated::UsageReconciliationResponse>, ApiError> {
-    let agent = params
-        .typed_value("agent")
-        .and_then(Value::as_str)
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Agent is required"))?
-        .to_owned();
+    let agent = params.agent.as_str().to_owned();
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let policy = state
         .account_policy
@@ -71,7 +74,7 @@ inventory::submit! {
 mod tests {
     use super::*;
     use axum::{body::Body, extract::ConnectInfo, http::Request};
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::{
         net::{Ipv4Addr, SocketAddr},
         sync::Arc,
@@ -289,5 +292,21 @@ mod tests {
             assert_eq!(value["counts"]["responses"], 5);
             assert_eq!(value["responses"][0]["evidenceTokens"]["output"], 10);
         }
+    }
+}
+
+#[cfg(test)]
+mod typed_query_contract_tests {
+    use super::*;
+    #[test]
+    fn reconcilequery_decodes_and_rejects_invalid() {
+        fn decode(query: &str) -> bool {
+            let uri: axum::http::Uri = format!("/?{query}").parse().unwrap();
+            axum::extract::Query::<ReconcileQuery>::try_from_uri(&uri).is_ok()
+        }
+        assert!(decode("agent=x"));
+        assert!(!decode("agent="));
+        assert!(!decode(&format!("agent={}", "x".repeat(101))));
+        assert!(!decode("extra=x"));
     }
 }

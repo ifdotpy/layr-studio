@@ -1,0 +1,8 @@
+{
+  "writes": [
+    {"table": "runtime_agents", "record": {"id": "lead", "rootId": "lead", "parentId": null, "epoch": 4, "status": "paused", "compactions": 0, "name": "Lead", "isLead": true, "autoWake": false, "inFlight": false, "created": 1.0, "error": "Stopped by user"}}
+  ],
+  "cancel_pending": ["lead"],
+  "effects": [],
+  "result": {"stopped": ["lead"]}
+}

@@ -14,8 +14,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Clippy does not merge parent configs: runtime/clippy.toml owns the shared policy.
     let shared_clippy = manifest_dir.join("../../clippy.toml");
     let http_clippy = manifest_dir.join("clippy.toml");
-    println!("cargo:rerun-if-changed={}", shared_clippy.display());
-    println!("cargo:rerun-if-changed={}", http_clippy.display());
+    // Relative paths: absolute ones differ in every layr line and force a rebuild.
+    println!("cargo:rerun-if-changed=../../clippy.toml");
+    println!("cargo:rerun-if-changed=clippy.toml");
     let shared = fs::read_to_string(shared_clippy)?;
     let http = fs::read_to_string(http_clippy)?;
     let inherited = http
@@ -33,12 +34,71 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
     let spec_path = manifest_dir.join("openapi.json");
     let output_dir = PathBuf::from(env::var("OUT_DIR")?).join("generated");
-    println!("cargo:rerun-if-changed={}", spec_path.display());
+    println!("cargo:rerun-if-changed=openapi.json");
     println!("cargo:rerun-if-changed=build.rs");
 
     let document: serde_json::Value = serde_json::from_slice(&fs::read(&spec_path)?)?;
     let mut analyzer = SchemaAnalyzer::new(document)?;
     let mut analysis = analyzer.analyze()?;
+    analysis
+        .schemas
+        .get_mut("ResourceRef")
+        .ok_or("missing resource identity schema")?
+        .schema_type = SchemaType::Primitive {
+        rust_type: "studio_runtime_schema::resource_ref::ResourceRef".to_owned(),
+        serde_with: None,
+    };
+    // The resource union owns these payloads; progress events still use their
+    // separately generated resource schemas until those events are migrated.
+    for name in [
+        "AccountsResource",
+        "CostsResource",
+        "DesktopResource",
+        "DraftsResource",
+        "LimitsResource",
+        "ModelsResource",
+        "MultiServerResource",
+        "QueueResource",
+        "ReceiptsResource",
+        "RoomResource",
+        "SessionCostResource",
+        "StateResource",
+        "TaskResource",
+        "TasksResource",
+        "TerminalResource",
+        "TerminalsResource",
+        "TranscriptResource",
+        "TranscriptsResource",
+        "VoiceResource",
+        "WorkspaceResource",
+        "AgentDetailResource",
+        "MonitorsResource",
+        "ProcessesResource",
+        "WorkResource",
+        "ComplaintResource",
+        "TerminalOutputResource",
+    ] {
+        analysis
+            .schemas
+            .remove(name)
+            .ok_or("missing resource payload schema")?;
+        drop(analysis.schemas.remove(&format!("{name}Kind")));
+    }
+    analysis
+        .schemas
+        .get_mut("ResetRequest")
+        .ok_or("missing reset request schema")?
+        .schema_type = SchemaType::Primitive {
+        rust_type: "studio_runtime_schema::limit_reset_request::ResetRequest".to_owned(),
+        serde_with: None,
+    };
+    // Draft ingress has a single bounded Rust owner in routes/sync_documents.
+    for name in ["DraftPushRequest", "DraftPushRow", "DraftDocumentInput"] {
+        analysis
+            .schemas
+            .remove(name)
+            .ok_or("missing draft ingress schema")?;
+    }
     // The OpenAPI leaves own integer bounds. Preserve JSON number spellings
     // such as 7.0; the pull-output ingress validates them before typed decoding.
     for (name, owner) in [
@@ -48,6 +108,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         (
             "ProviderModel",
             "studio_runtime_schema::model_catalog::ProviderModel",
+        ),
+        (
+            "ProcessListing",
+            "studio_runtime_schema::process_controls::ProcessListing",
         ),
         (
             "WorkBody",
@@ -149,6 +213,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             )
     });
     // Claude settings deserialize through their validated tagged command owner.
+    // The session route owns its strict request union directly.
+    analysis
+        .schemas
+        .remove("ClaudeSessionApiClaudeSessionPostRequest");
     for (name, owner) in [
         (
             "ClaudeSessionSettingsRequest",
@@ -233,6 +301,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     // unevaluatedProperties:false closes the complete schema after its oneOf.
     *additional_properties = ObjectAdditionalProperties::Denied;
     properties.insert("value".to_owned(), value_property);
+    // The generator already emits strict serde for closed untagged branches.
+    // Apply that same rule to every explicitly closed object at this boundary.
+    for (name, schema) in &analysis.schemas {
+        if matches!(&schema.schema_type, SchemaType::Object { additional_properties, variant: None, .. } if additional_properties.denies_unknown_keys())
+        {
+            analysis.untagged_union_branches.insert(name.clone());
+        }
+    }
     let config = GeneratorConfig {
         spec_path: spec_path.clone(),
         output_dir: output_dir.clone(),
@@ -257,8 +333,22 @@ fn main() -> Result<(), Box<dyn Error>> {
             .and_then(|stem| stem.to_str())
             .ok_or("generated module has an invalid filename")?;
         modules.push(module.to_owned());
-        module_lines.push(format!("#[path = {:?}] pub mod {module};", path));
-        fs::write(path, file.content)?;
+        // `include!` rejects inner attributes: hoist `#![x]` to `#[x]` on the module and
+        // drop the `//!` header. The path stays relative to OUT_DIR, not an absolute path.
+        let mut attributes = String::new();
+        let mut body = String::new();
+        for line in file.content.lines() {
+            if let Some(attribute) = line.strip_prefix("#![") {
+                attributes.push_str(&format!("#[{attribute} "));
+            } else if !line.starts_with("//!") {
+                body.push_str(line);
+                body.push('\n');
+            }
+        }
+        module_lines.push(format!(
+            "{attributes}pub mod {module} {{ include!(concat!(env!(\"OUT_DIR\"), \"/generated/{module}.rs\")); }}"
+        ));
+        fs::write(path, body)?;
     }
     if modules.iter().any(|module| module == "types") {
         module_lines.push("pub use types::*;".to_owned());

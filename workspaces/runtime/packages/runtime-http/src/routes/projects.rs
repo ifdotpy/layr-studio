@@ -1,6 +1,6 @@
 //! HTTP adapters for projects, locations and peer teams.
 
-use super::extractors::{ApiJson, QueryParams};
+use super::extractors::{ApiJson, TypedQuery};
 use super::manifest::{OperationStatus, RouteGroup, get, post};
 use axum::Json;
 use axum::extract::State;
@@ -11,6 +11,10 @@ use std::path::Path;
 use std::sync::Arc;
 use studio_runtime_schema::json_compat::python_json_compact as canonical_json;
 use studio_runtime_schema::model_catalog::ModelCatalog;
+use studio_runtime_schema::peer_team_ingress::{
+    PeerTeamRequest, RadioCreate, RadioManage, TeamMutation,
+};
+use studio_runtime_schema::project_ingress::ProjectRequest;
 use studio_runtime_services::agents_create::CreateError;
 use studio_runtime_services::host_worker_create::{
     AccountIdentity, CreationCatalog, ExecutionSettings,
@@ -30,19 +34,6 @@ use studio_runtime_services::project_locations::{LocationOutcome, LocationResult
 enum LocationAdmission {
     Replay(LocationResult),
     Pending(AdmittedRequest, String),
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProjectAliasesPatch<'a> {
-    project_aliases: &'a [studio_runtime_schema::project_record::ProjectAlias],
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProjectLocationsPatch<'a> {
-    locations: &'a [studio_runtime_schema::project_record::ProjectLocation],
-    locations_revision: u64,
 }
 
 #[derive(serde::Serialize)]
@@ -192,21 +183,13 @@ impl CreationCatalog for RadioCreationAdapter {
 impl studio_runtime_services::radio_runtime::RadioCreation for RadioCreationAdapter {
     fn prepare(
         &mut self,
-        body: &Value,
+        body: &RadioCreate,
         path: &Path,
         ids: [studio_runtime_store::AgentId; 2],
     ) -> Result<[studio_runtime_store::AgentRecord; 2], ProjectsError> {
-        let participants = body
-            .get("participants")
-            .and_then(Value::as_array)
-            .ok_or(ProjectsError::Invalid("participants"))?;
         let identities = (0..2)
             .map(|index| {
-                let key = participants
-                    .get(index)
-                    .and_then(|p| p.get("account_key"))
-                    .and_then(Value::as_str)
-                    .ok_or(ProjectsError::Invalid("account_key"))?;
+                let key = body.participants[index].account_key.as_str();
                 let row = self
                     .rows
                     .iter()
@@ -258,15 +241,14 @@ impl studio_runtime_services::radio_runtime::RadioCreation for RadioCreationAdap
 /// so blocking preparation never waits on a future.
 async fn radio_model_lists(
     service: &studio_runtime_services::model_catalog::ModelCatalogService,
-    body: &Value,
+    body: &RadioCreate,
     rows: &[studio_runtime_services::account_policy::PublicAccount],
 ) -> std::collections::BTreeMap<String, ModelCatalog> {
     let mut lists = std::collections::BTreeMap::new();
-    let participants = body.get("participants").and_then(Value::as_array);
-    for key in participants
-        .into_iter()
-        .flatten()
-        .filter_map(|participant| participant.get("account_key").and_then(Value::as_str))
+    for key in body
+        .participants
+        .iter()
+        .map(|participant| participant.account_key.as_str())
     {
         let Some(row) = rows.iter().find(|row| {
             row.id.as_str() == Some(key)
@@ -425,9 +407,14 @@ async fn list_projects(
 
 async fn write_project(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Value>,
+    ApiJson(body): ApiJson<ProjectRequest>,
 ) -> Result<Response, ApiError> {
-    if state.store.is_none() && projects::write_dependency(&body).is_some() {
+    let dependency = match &body {
+        ProjectRequest::Project(body) => projects::write_dependency(body),
+        ProjectRequest::Location(_) => Some("cross-server-driver/project-location-write"),
+        ProjectRequest::Sidebar(_) => None,
+    };
+    if state.store.is_none() && dependency.is_some() {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "The server is not paired or is revoked",
@@ -452,7 +439,7 @@ async fn write_project(
         .as_str()
         .ok_or_else(ApiError::internal)?
         .to_owned();
-    if projects::write_dependency(&body).is_some() {
+    if dependency.is_some() {
         let credentials = Arc::clone(&state.credentials);
         let origin = state.public_origin.clone();
         let identity = credentials
@@ -469,25 +456,15 @@ async fn write_project(
             .and_then(Value::as_str)
             .ok_or_else(ApiError::internal)?
             .to_owned();
-        let requested_server = body
-            .get("server")
-            .and_then(Value::as_str)
-            .unwrap_or("local");
-        let is_registration = body
-            .get("action")
-            .and_then(Value::as_str)
-            .unwrap_or("register")
-            == "register";
+        let requested_server = body.server().unwrap_or("local");
+        let is_registration = body.action() == "register";
         if is_registration && (requested_server == "local" || requested_server == local) {
             let value =
                 local_project_registration(store.clone(), body, default, known, local.clone())
                     .await?;
             return Ok(Json(ProjectWriteResponse::RemoteRegistration(value)).into_response());
         }
-        let action = body
-            .get("action")
-            .and_then(Value::as_str)
-            .unwrap_or("register");
+        let action = body.action();
         // Project locations use the durable orchestration receipt path for a
         // local destination too. The driver executes local envelopes through
         // the same receiver used by paired servers, matching Python's
@@ -503,11 +480,7 @@ async fn write_project(
             })?;
             let now = studio_runtime_services::event_write::unix_time()
                 .map_err(|_| ApiError::internal())? as i64;
-            let is_registration = body
-                .get("action")
-                .and_then(Value::as_str)
-                .unwrap_or("register")
-                == "register";
+            let is_registration = body.action() == "register";
             let value =
                 remote_project_write(store.clone(), body, default, known, driver, now).await?;
             let response = if is_registration {
@@ -518,43 +491,47 @@ async fn write_project(
             return Ok(Json(response).into_response());
         }
     }
-    let mut body = body;
-    if body.get("server").is_some() {
-        body["server"] = Value::Null;
-    }
-    let is_remove = body.get("action").and_then(Value::as_str) == Some("remove");
-    let is_sidebar = body.get("action").and_then(Value::as_str) == Some("reorder");
-    let value = projects::write(store.clone(), body, default, known)
-        .await
-        .map_err(projects_error)?;
-    let value = if is_remove {
-        super::generated_json::<crate::generated::ProjectRemovalResponse>(value)
-            .map(ProjectWriteResponse::Removal)?
-    } else if is_sidebar {
-        super::generated_json::<crate::generated::SidebarOrderResponse>(value)
-            .map(ProjectWriteResponse::Sidebar)?
-    } else {
-        super::generated_json::<crate::generated::ProjectMutationRecord>(value)
-            .map(|value| ProjectWriteResponse::Mutation(Box::new(value)))?
+    let value = match body {
+        ProjectRequest::Project(mut body) => {
+            body.server = None;
+            let is_remove =
+                body.action == Some(studio_runtime_schema::project_ingress::ProjectAction::Remove);
+            let value = projects::write(store.clone(), body, default, known)
+                .await
+                .map_err(projects_error)?;
+            if is_remove {
+                super::generated_json::<crate::generated::ProjectRemovalResponse>(value)
+                    .map(ProjectWriteResponse::Removal)?
+            } else {
+                super::generated_json::<crate::generated::ProjectMutationRecord>(value)
+                    .map(|value| ProjectWriteResponse::Mutation(Box::new(value)))?
+            }
+        }
+        ProjectRequest::Sidebar(body) => {
+            let value = projects::reorder(&store, body)
+                .await
+                .map_err(projects_error)?;
+            super::generated_json::<crate::generated::SidebarOrderResponse>(value)
+                .map(ProjectWriteResponse::Sidebar)?
+        }
+        ProjectRequest::Location(_) => return Err(ApiError::internal()),
     };
     Ok(Json(value).into_response())
 }
 
 async fn local_project_registration(
     store: Arc<studio_runtime_store::RuntimeStore>,
-    body: Value,
+    body: ProjectRequest,
     default_account: String,
     known_accounts: Vec<studio_runtime_services::account_policy::PublicAccount>,
     local_server: String,
 ) -> Result<LocationResult, ApiError> {
     let path = body
-        .get("path")
-        .and_then(Value::as_str)
+        .path()
         .filter(|value| !value.is_empty() && value.len() <= 4096)
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "A location path is required"))?;
     let name = body
-        .get("name")
-        .and_then(Value::as_str)
+        .name()
         .filter(|value| !value.trim().is_empty() && value.chars().count() <= 255)
         .unwrap_or_else(|| {
             Path::new(path)
@@ -563,8 +540,7 @@ async fn local_project_registration(
                 .unwrap_or("Project")
         });
     let request_id = body
-        .get("request_id")
-        .and_then(Value::as_str)
+        .request_id()
         .filter(|value| !value.is_empty() && value.len() <= 128)
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "A request ID is required"))?;
     let project_id = format!(
@@ -619,7 +595,11 @@ async fn local_project_registration(
     };
     let registered = projects::write(
         store.clone(),
-        json!({"action":"register","path":path,"name":name}),
+        studio_runtime_schema::project_ingress::ProjectWrite::register(
+            path.to_owned(),
+            Some(name.to_owned()),
+        )
+        .map_err(|_| ApiError::internal())?,
         default_account,
         known_accounts,
     )
@@ -672,53 +652,55 @@ async fn local_project_registration(
                     &physical_id_for_write,
                 )?
             {
-                physical.project_aliases.retain(|alias| {
+                let mut aliases = physical
+                    .project_aliases
+                    .value()
+                    .cloned()
+                    .unwrap_or_default();
+                aliases.retain(|alias| {
                     alias.server_id != local_server_for_write
                         || alias.project_id != project_id_for_write
                 });
-                physical.project_aliases.push(
-                    studio_runtime_schema::project_record::ProjectAlias {
-                        server_id: local_server_for_write.clone(),
-                        project_id: project_id_for_write.clone(),
-                        name: name_for_write,
-                    },
-                );
-                studio_runtime_store::ProjectsRepository::patch_project(
-                    tx,
-                    &physical_id_for_write,
-                    &ProjectAliasesPatch {
-                        project_aliases: &physical.project_aliases,
-                    },
-                )?;
+                aliases.push(studio_runtime_schema::project_record::ProjectAlias {
+                    server_id: local_server_for_write.clone(),
+                    project_id: project_id_for_write.clone(),
+                    name: name_for_write,
+                });
+                physical.project_aliases =
+                    studio_runtime_schema::queue_command::Field::Value(aliases);
+                studio_runtime_store::ProjectsRepository::put_live(tx, &physical)?;
             }
             let mut logical =
                 studio_runtime_store::ProjectsRepository::get_record(tx, &project_id_for_write)?
                     .ok_or_else(|| {
                         ApiError::new(StatusCode::BAD_REQUEST, "The project is unavailable")
                     })?;
-            if !logical
-                .locations
+            let mut locations = logical.locations.value().cloned().unwrap_or_default();
+            if !locations
                 .iter()
                 .any(|location| location.server_id == local_server_for_write)
             {
-                logical
-                    .locations
-                    .push(studio_runtime_schema::project_record::ProjectLocation {
-                        server_id: local_server_for_write,
-                        path: canonical_for_write,
-                        project_id: physical_id_for_write,
-                        git_origin: git_origin_for_write,
-                        requested_path: None,
-                    });
+                locations.push(studio_runtime_schema::project_record::ProjectLocation {
+                    server_id: local_server_for_write,
+                    path: canonical_for_write,
+                    project_id: physical_id_for_write,
+                    git_origin: git_origin_for_write.map_or(
+                        studio_runtime_schema::queue_command::Field::Missing,
+                        studio_runtime_schema::queue_command::Field::Value,
+                    ),
+                    requested_path: studio_runtime_schema::queue_command::Field::Missing,
+                });
             }
-            studio_runtime_store::ProjectsRepository::patch_project(
-                tx,
-                &project_id_for_write,
-                &ProjectLocationsPatch {
-                    locations: &logical.locations,
-                    locations_revision: logical.locations_revision.unwrap_or(0).saturating_add(1),
-                },
-            )?;
+            logical.locations = studio_runtime_schema::queue_command::Field::Value(locations);
+            logical.locations_revision = studio_runtime_schema::queue_command::Field::Value(
+                logical
+                    .locations_revision
+                    .value()
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_add(1),
+            );
+            studio_runtime_store::ProjectsRepository::put_live(tx, &logical)?;
             studio_runtime_store::ProjectsRepository::patch_project(
                 tx,
                 &project_id_for_write,
@@ -753,20 +735,20 @@ enum ProjectWriteResponse {
 
 async fn remote_project_write(
     store: Arc<studio_runtime_store::RuntimeStore>,
-    body: Value,
+    body: ProjectRequest,
     default_account: String,
     known_accounts: Vec<studio_runtime_services::account_policy::PublicAccount>,
     driver: Arc<studio_runtime_services::multi_server_orchestration::OrchestrationDriver>,
     now: i64,
 ) -> Result<LocationResult, ApiError> {
+    use studio_runtime_schema::queue_command::Field;
     use studio_runtime_services::multi_server_orchestration::ExchangeOutcome;
-    let action = body
-        .get("action")
-        .and_then(Value::as_str)
-        .unwrap_or("register");
+    use studio_runtime_services::project_locations::{
+        LocationAction, LocationPayload, LocationWire,
+    };
+    let action = body.action();
     let request_id = body
-        .get("request_id")
-        .and_then(Value::as_str)
+        .request_id()
         .filter(|value| !value.is_empty() && value.len() <= 128)
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "A request ID is required"))?;
     let local_store = store.clone();
@@ -783,8 +765,7 @@ async fn remote_project_write(
         )
     })?;
     let requested_server = body
-        .get("server")
-        .and_then(Value::as_str)
+        .server()
         .filter(|value| !value.is_empty())
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "A paired server is required"))?;
     let server = if requested_server == "local" {
@@ -824,13 +805,11 @@ async fn remote_project_write(
         == "register"
     {
         let path = body
-            .get("path")
-            .and_then(Value::as_str)
+            .path()
             .filter(|value| !value.is_empty() && value.len() <= 4096)
             .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "A location path is required"))?;
         let name = body
-            .get("name")
-            .and_then(Value::as_str)
+            .name()
             .filter(|value| !value.trim().is_empty() && value.chars().count() <= 255)
             .unwrap_or_else(|| {
                 Path::new(path)
@@ -844,22 +823,33 @@ async fn remote_project_write(
         );
         let op = request_id.to_owned();
         let registration = json!({"server":server,"path":path,"name":name});
-        let signature_data =
-            json!({"action":"add_location","project":id,"server":server,"path":path});
-        let payload = json!({"project":id,"name":name,"path":path,"request":signature_data});
+        let signature_data = LocationWire {
+            action: LocationAction::AddLocation,
+            project: id.clone(),
+            server: server.to_owned(),
+            path: Some(path.to_owned()),
+        };
+        let payload = LocationPayload {
+            project: id.clone(),
+            name: Field::Value(name.to_owned()),
+            path: Field::Value(path.to_owned()),
+            request: Field::Value(signature_data.clone()),
+            signature: Field::Missing,
+            result_id: Field::Missing,
+            location: Field::Missing,
+            admission: Field::Missing,
+        };
         (id, op, signature_data, payload, Some(registration))
     } else if matches!(action, "add_location" | "remove_location") {
         let project = body
-            .get("project")
-            .or_else(|| body.get("path"))
-            .and_then(Value::as_str)
+            .project()
+            .or_else(|| body.path())
             .filter(|value| !value.is_empty())
             .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Select an existing project"))?;
         let operation = request_id.to_owned();
         let path = if action == "add_location" {
             Some(
-                body.get("path")
-                    .and_then(Value::as_str)
+                body.path()
                     .filter(|value| !value.is_empty() && value.len() <= 4096)
                     .ok_or_else(|| {
                         ApiError::new(StatusCode::BAD_REQUEST, "A location path is required")
@@ -868,9 +858,19 @@ async fn remote_project_write(
         } else {
             None
         };
-        let signature_data = json!({"action":action,"project":project,"server":server,"path":path});
-        let signature =
-            studio_runtime_store::sha256_hex(canonical_json(&signature_data).as_bytes());
+        let signature_data = LocationWire {
+            action: if action == "add_location" {
+                LocationAction::AddLocation
+            } else {
+                LocationAction::RemoveLocation
+            },
+            project: project.to_owned(),
+            server: server.to_owned(),
+            path: path.map(str::to_owned),
+        };
+        let signature = studio_runtime_store::sha256_hex(
+            &serde_json::to_vec(&signature_data).map_err(|_| ApiError::internal())?,
+        );
         let early_store = store.clone();
         let early_root = request_id.to_owned();
         let early_project = project.to_owned();
@@ -915,7 +915,11 @@ async fn remote_project_write(
                 Ok::<_, ApiError>((record, admission))
             })
             .await?;
-        let locations = &record.locations;
+        let locations = record
+            .locations
+            .value()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         let existing = locations.iter().find(|row| row.server_id == server);
         if action == "remove_location" && locations.len() <= 1 {
             return Err(ApiError::new(
@@ -924,11 +928,22 @@ async fn remote_project_write(
             ));
         }
 
-        let mut payload = json!({"project":project,"name":record.name,"path":path,
-            "request":signature_data,"signature":studio_runtime_store::sha256_hex(
-                canonical_json(&signature_data).as_bytes()),
-            "location":existing});
-        payload[studio_runtime_services::project_locations::LOCATION_ADMISSION_FIELD] = admission;
+        let payload = LocationPayload {
+            project: project.to_owned(),
+            name: record
+                .name
+                .value()
+                .cloned()
+                .map_or(Field::Null, Field::Value),
+            path: path.map_or(Field::Null, |value| Field::Value(value.to_owned())),
+            request: Field::Value(signature_data.clone()),
+            signature: Field::Missing,
+            result_id: Field::Missing,
+            location: existing
+                .cloned()
+                .map_or(Field::Null, |value| Field::Value(value.into())),
+            admission: Field::Value(admission),
+        };
         (project.to_owned(), operation, signature_data, payload, None)
     } else {
         return Err(ApiError::new(
@@ -936,8 +951,10 @@ async fn remote_project_write(
             "Unknown project action",
         ));
     };
-    let signature = studio_runtime_store::sha256_hex(canonical_json(&signature_data).as_bytes());
-    payload["signature"] = json!(signature);
+    let signature = studio_runtime_store::sha256_hex(
+        &serde_json::to_vec(&signature_data).map_err(|_| ApiError::internal())?,
+    );
+    payload.signature = Field::Value(signature.clone());
     let admission_store = store.clone();
     let raw_key = projects::cross_server_identity(&["project-location", "ui", request_id]);
     let root = request_id.to_owned();
@@ -993,7 +1010,7 @@ async fn remote_project_write(
         let registration_for_write = registration.clone();
         let registration_operation = operation_id.clone();
         let registration_request = request.clone();
-        let admission=store.transaction_with(move |tx| -> Result<Value, ProjectsError> {
+        let admission=store.transaction_with(move |tx| -> Result<_, ProjectsError> {
             if studio_runtime_store::ProjectsRepository::get(tx, &project_for_registration)?.is_none() {
                 let name = registration_for_write["name"].as_str().unwrap_or("Project");
                 let project = json!({"id":project_for_registration,"path":project_for_registration,"name":name,"created":now,
@@ -1009,7 +1026,7 @@ async fn remote_project_write(
         })
         .await
         .map_err(projects_error)?;
-        payload[studio_runtime_services::project_locations::LOCATION_ADMISSION_FIELD] = admission;
+        payload.admission = Field::Value(admission);
     }
     let pending_project = project_id.clone();
     let pending_operation = operation_id.clone();
@@ -1025,14 +1042,14 @@ async fn remote_project_write(
         })
         .await
         .map_err(ApiError::stored)?;
-    payload["resultId"] = json!(request.id());
-    let action_for_exchange = if action == "register" {
-        "add_location".to_owned()
+    payload.result_id = Field::Value(request.id().to_owned());
+    let command = if matches!(action, "register" | "add_location") {
+        studio_runtime_services::orchestration_wire::OrchestrationCommand::AddLocation(payload)
     } else {
-        action.to_owned()
+        studio_runtime_services::orchestration_wire::OrchestrationCommand::RemoveLocation(payload)
     };
     let outcome = driver
-        .exchange(server, &action_for_exchange, &payload, &operation_id, now)
+        .exchange(server, command, &operation_id, now)
         .await
         .map_err(|error| {
             ApiError::new(
@@ -1097,21 +1114,41 @@ fn location_reply(result: LocationResult) -> Result<LocationResult, ApiError> {
     Ok(result)
 }
 
+/// Maximum project and path query length in Unicode code points.
+const LOCATION_PATH_MAX_CHARS: usize = 4096;
+/// Maximum server and request ID query length in Unicode code points.
+const LOCATION_ID_MAX_CHARS: usize = 128;
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum LocationAction {
+    Info,
+    Matches,
+}
+#[derive(Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LocationQuery {
+    project: studio_runtime_schema::bounded_text::BoundedText<1, LOCATION_PATH_MAX_CHARS>,
+    server: studio_runtime_schema::bounded_text::BoundedText<1, LOCATION_ID_MAX_CHARS>,
+    action: Option<LocationAction>,
+    path: Option<studio_runtime_schema::bounded_text::BoundedText<0, LOCATION_PATH_MAX_CHARS>>,
+    #[serde(rename = "request_id")]
+    _request_id: Option<studio_runtime_schema::bounded_text::BoundedText<1, LOCATION_ID_MAX_CHARS>>,
+}
+
 async fn project_locations(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<LocationQuery>,
 ) -> Result<Json<crate::generated::ProjectLocationQueryResponse>, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
-    let query = Value::Object((*query.into_typed()).clone());
     let remote_request = remote_location_request(&store, &query).await?;
-    if let Some((server, action, payload)) = remote_request {
+    if let Some((server, command)) = remote_request {
         let driver = state.orchestration_driver.ok_or_else(ApiError::internal)?;
         let request_id = studio_runtime_services::remote_transport::new_nonce()
             .map_err(|_| ApiError::internal())?;
         let now = studio_runtime_services::event_write::unix_time()
             .map_err(|_| ApiError::internal())? as i64;
         let outcome = driver
-            .exchange(&server, &action, &payload, &request_id, now)
+            .exchange(&server, command, &request_id, now)
             .await
             .map_err(|error| {
                 ApiError::new(
@@ -1144,19 +1181,16 @@ async fn project_locations(
         .map_err(ApiError::json);
     }
     let query = projects::LocationQuery {
-        project: query
-            .get("project")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        server: query
-            .get("server")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        action: query
-            .get("action")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        path: query.get("path").and_then(Value::as_str).map(str::to_owned),
+        project: Some(query.project.as_str().to_owned()),
+        server: Some(query.server.as_str().to_owned()),
+        action: query.action.map(|action| {
+            match action {
+                LocationAction::Info => "info",
+                LocationAction::Matches => "matches",
+            }
+            .to_owned()
+        }),
+        path: query.path.map(|path| path.as_str().to_owned()),
     };
     let value = projects::location_query(&store, query)
         .await
@@ -1181,12 +1215,15 @@ async fn project_locations(
 
 async fn remote_location_request(
     store: &studio_runtime_store::RuntimeStore,
-    query: &Value,
-) -> Result<Option<(String, String, Value)>, ApiError> {
-    let requested = query
-        .get("server")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+    query: &LocationQuery,
+) -> Result<
+    Option<(
+        String,
+        studio_runtime_services::orchestration_wire::OrchestrationCommand,
+    )>,
+    ApiError,
+> {
+    let requested = query.server.as_str();
     let local = store.local_server_id().map_err(ApiError::stored)?;
     let server = if requested == "local" {
         local.as_deref().unwrap_or_default()
@@ -1196,11 +1233,7 @@ async fn remote_location_request(
     if server.is_empty() || local.as_deref() == Some(server) {
         return Ok(None);
     }
-    let project_id = query
-        .get("project")
-        .and_then(Value::as_str)
-        .filter(|id| !id.is_empty())
-        .map(str::to_owned);
+    let project_id = query.project.as_str().to_owned();
     let read_server = server.to_owned();
     let project = store
         .read_async("runtime-http/routes/projects/prepare-remote-location", move |db| {
@@ -1217,9 +1250,6 @@ async fn remote_location_request(
                     "The server is not paired or is revoked",
                 ));
             }
-            let project_id = project_id.ok_or_else(|| {
-                ApiError::new(StatusCode::BAD_REQUEST, "Select an existing project")
-            })?;
             studio_runtime_store::ProjectsRepository::get_record(db, &project_id)?
                 .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Select an existing project"))
         })
@@ -1237,15 +1267,28 @@ async fn remote_location_request(
 /// The peer request for a remote project location; may inspect the local
 /// checkout's Git origin, so it runs on a blocking thread.
 fn remote_location_action(
-    query: &Value,
+    query: &LocationQuery,
     project: &studio_runtime_schema::project_record::ProjectLive,
     server: String,
-) -> Result<(String, String, Value), ApiError> {
-    let action = if query.get("action").and_then(Value::as_str) == Some("matches") {
+) -> Result<
+    (
+        String,
+        studio_runtime_services::orchestration_wire::OrchestrationCommand,
+    ),
+    ApiError,
+> {
+    use studio_runtime_schema::queue_command::Field;
+    use studio_runtime_services::orchestration_wire::OrchestrationCommand;
+    use studio_runtime_services::orchestration_worker::{
+        LocationInfoPayload, LocationMatchesPayload,
+    };
+    let action = if matches!(query.action, Some(LocationAction::Matches)) {
         let origin = project
             .locations
-            .iter()
-            .find_map(|row| row.git_origin.clone())
+            .value()
+            .into_iter()
+            .flatten()
+            .find_map(|row| row.git_origin.value().cloned())
             .or_else(|| {
                 (!project.path.starts_with("project:"))
                     .then_some(project.path.as_str())
@@ -1257,19 +1300,23 @@ fn remote_location_action(
             .ok_or_else(|| {
                 ApiError::new(StatusCode::BAD_REQUEST, "The project has no Git origin")
             })?;
-        (
-            "location_matches".to_owned(),
-            json!({"origin":origin,"cwd":query.get("path")}),
-        )
+        let cwd = query
+            .path
+            .as_ref()
+            .map_or(Field::Null, |path| Field::Value(path.as_str().to_owned()));
+        OrchestrationCommand::LocationMatches(LocationMatchesPayload { origin, cwd })
     } else {
         let path = query
-            .get("path")
-            .and_then(Value::as_str)
+            .path
+            .as_ref()
+            .map(|path| path.as_str())
             .filter(|path| !path.is_empty())
             .or_else(|| {
                 project
                     .locations
-                    .iter()
+                    .value()
+                    .into_iter()
+                    .flatten()
                     .find(|row| row.server_id == server)
                     .map(|row| row.path.as_str())
             })
@@ -1279,14 +1326,16 @@ fn remote_location_action(
                     "This server has no folder for the project",
                 )
             })?;
-        ("location_info".to_owned(), json!({"cwd":path}))
+        OrchestrationCommand::LocationInfo(LocationInfoPayload {
+            cwd: path.to_owned(),
+        })
     };
-    Ok((server, action.0, action.1))
+    Ok((server, action))
 }
 
 async fn peer_teams(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Value>,
+    ApiJson(body): ApiJson<PeerTeamRequest>,
 ) -> Result<Json<PeerTeamWriteResponse>, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let account_policy = state
@@ -1300,46 +1349,78 @@ async fn peer_teams(
         .as_str()
         .ok_or_else(ApiError::internal)?
         .to_owned();
-    if body.get("action").and_then(Value::as_str) == Some("radio")
-        && body.get("radio_action").and_then(Value::as_str) == Some("create")
-    {
-        let rows = state
-            .account_driver
-            .as_ref()
-            .ok_or_else(ApiError::internal)?
-            .snapshot()
-            .map_err(|_| ApiError::internal())?
-            .accounts;
-        let model_lists = radio_model_lists(&state.model_catalog, &body, &rows).await;
-        let creation = RadioCreationAdapter {
-            model_lists,
-            rows,
-            identities: None,
-        };
-        let value = studio_runtime_services::radio_runtime::create_with(
-            store.clone(),
-            &body,
-            Box::new(creation),
-        )
+    match body {
+        PeerTeamRequest::RadioCreate(body) => {
+            let rows = state
+                .account_driver
+                .as_ref()
+                .ok_or_else(ApiError::internal)?
+                .snapshot()
+                .map_err(|_| ApiError::internal())?
+                .accounts;
+            let model_lists = radio_model_lists(&state.model_catalog, &body, &rows).await;
+            let creation = RadioCreationAdapter {
+                model_lists,
+                rows,
+                identities: None,
+            };
+            let value = studio_runtime_services::radio_runtime::create_with(
+                store,
+                &body,
+                Box::new(creation),
+            )
+            .await
+            .map_err(projects_error)?;
+            state.event_wake.notify_one();
+            Ok(Json(PeerTeamWriteResponse::Radio(value)))
+        }
+        PeerTeamRequest::RadioOpen(body) => {
+            radio_manage(&state, store, RadioManage::Open(body)).await
+        }
+        PeerTeamRequest::RadioSend(body) => {
+            radio_manage(&state, store, RadioManage::Send(body)).await
+        }
+        PeerTeamRequest::RadioPass(body) => {
+            radio_manage(&state, store, RadioManage::Pass(body)).await
+        }
+        PeerTeamRequest::RadioStop(body) => {
+            radio_manage(&state, store, RadioManage::Stop(body)).await
+        }
+        PeerTeamRequest::Convert(body) => {
+            let reply = studio_runtime_services::peer_conversion::convert(store, &body)
+                .await
+                .map_err(projects_error)?;
+            Ok(Json(PeerTeamWriteResponse::Conversion(reply)))
+        }
+        PeerTeamRequest::Save(body) => {
+            peer_team_mutation(store, TeamMutation::Save(body), default_account, known).await
+        }
+        PeerTeamRequest::Delete(body) => {
+            peer_team_mutation(store, TeamMutation::Delete(body), default_account, known).await
+        }
+        PeerTeamRequest::Move(body) => {
+            peer_team_mutation(store, TeamMutation::Move(body), default_account, known).await
+        }
+    }
+}
+async fn radio_manage(
+    state: &HttpState,
+    store: Arc<studio_runtime_store::RuntimeStore>,
+    body: RadioManage,
+) -> Result<Json<PeerTeamWriteResponse>, ApiError> {
+    let result = studio_runtime_services::radio_runtime::manage(store, &body)
         .await
         .map_err(projects_error)?;
-        state.event_wake.notify_one();
-        return Ok(Json(PeerTeamWriteResponse::Radio(value)));
-    }
-    if body.get("action").and_then(Value::as_str) == Some("radio") {
-        let result = studio_runtime_services::radio_runtime::manage(store, &body)
-            .await
-            .map_err(projects_error)?;
-        state.event_wake.notify_one();
-        return Ok(Json(PeerTeamWriteResponse::Radio(result)));
-    }
-    if body.get("action").and_then(Value::as_str) == Some("convert") {
-        let reply = studio_runtime_services::peer_conversion::convert(store, &body)
-            .await
-            .map_err(projects_error)?;
-        return Ok(Json(PeerTeamWriteResponse::Conversion(reply)));
-    }
-    let value = projects::peer_team_write(store.clone(), body, default_account, known)
+    state.event_wake.notify_one();
+    Ok(Json(PeerTeamWriteResponse::Radio(result)))
+}
+async fn peer_team_mutation(
+    store: Arc<studio_runtime_store::RuntimeStore>,
+    body: TeamMutation,
+    default_account: String,
+    known: Vec<studio_runtime_services::account_policy::PublicAccount>,
+) -> Result<Json<PeerTeamWriteResponse>, ApiError> {
+    let value = projects::peer_team_write(store, body, default_account, known)
         .await
         .map_err(projects_error)?;
     let result = super::generated_json::<crate::generated::PeerProjectResponse>(value)
@@ -1389,19 +1470,105 @@ inventory::submit! {
 #[allow(clippy::disallowed_methods)]
 mod local_registration_tests {
     #[test]
+    fn project_body_matches_committed_schema_examples() {
+        let document = crate::schema::openapi_document();
+        let schema = json!({
+            "$ref": "#/paths/~1api~1projects/post/requestBody/content/application~1json/schema",
+            "paths": document["paths"], "components": document["components"]
+        });
+        let validator = jsonschema::validator_for(&schema).expect("project schema");
+        for body in [
+            json!({"path":"/project"}),
+            json!({"action":"set_workspace_policy","path":"/project","workspace_policy":null,"expected_revision":1}),
+            json!({"action":"add_location","project":"p","server":"s","request_id":"r","path":"/project"}),
+            json!({"action":"reorder","request_id":"r","expected_revision":1,"groups":{"a":["p"]}}),
+            json!({"path":"/project","account_groups":["INVALID"]}),
+            json!({"path":"/project","extra":true}),
+            json!({"action":"remove","path":""}),
+            json!({"action":"reorder","request_id":"r","expected_revision":-1,"groups":{}}),
+        ] {
+            let valid = validator.is_valid(&body);
+            let decoded = serde_json::from_value::<super::ProjectRequest>(body.clone()).is_ok();
+            assert_eq!(decoded, valid, "{body}");
+        }
+    }
+
+    #[test]
+    fn peer_team_body_matches_committed_schema_examples() {
+        let document = crate::schema::openapi_document();
+        let schema = json!({"$ref":"#/paths/~1api~1peer-teams/post/requestBody/content/application~1json/schema", "paths":document["paths"], "components":document["components"]});
+        let validator = jsonschema::validator_for(&schema).expect("peer team schema");
+        let create = json!({"action":"radio","radio_action":"create","path":"/p","request_id":"r","name":"Pair","participants":[{"account_key":"a","model":"m"},{"account_key":"b","model":"m"}]});
+        let send = json!({"action":"radio","radio_action":"send","path":"p","team_id":"t","request_id":"r","expected_revision":1,"text":"hello"});
+        let mut bad_participant = create.clone();
+        bad_participant["participants"][0] = json!(["a", "m"]);
+        let mut bad_rounds = send.clone();
+        bad_rounds["rounds"] = json!(3);
+        for body in [
+            json!({"action":"save","path":"p","expected_revision":0,"request_id":"r","name":"team","members":["a","b"]}),
+            json!({"action":"delete","path":"p","expected_revision":0,"request_id":"r","team_id":"t"}),
+            json!({"action":"move","path":"p","expected_revision":0,"request_id":"r","member":"a","team_id":null}),
+            json!({"action":"convert","path":"p","expected_revision":0,"request_id":"r","member":"a","target":"b"}),
+            create,
+            send,
+            json!({"action":"radio","radio_action":"open","path":"p","team_id":"t","request_id":"r"}),
+            json!({"action":"radio","radio_action":"pass","path":"p","team_id":"t","request_id":"r","expected_revision":1,"target":"a"}),
+            json!({"action":"radio","radio_action":"stop","path":"p","team_id":"t","request_id":"r","expected_revision":1}),
+            bad_participant,
+            bad_rounds,
+            json!({"action":"move","path":"p","expected_revision":0,"request_id":"r","member":"a","extra":true}),
+        ] {
+            let valid = validator.is_valid(&body);
+            let decoded = serde_json::from_value::<super::PeerTeamRequest>(body.clone()).is_ok();
+            assert_eq!(decoded, valid, "{body}");
+        }
+    }
+
+    #[test]
     fn remote_location_uses_typed_project_location() {
         let project = serde_json::from_str::<studio_runtime_schema::project_record::ProjectLive>(
             r#"{"id":"project","path":"project:id","peerTeams":[],"locations":[{"serverId":"server","path":"/folder","projectId":"id","gitOrigin":"origin"}]}"#,
         ).unwrap();
-        let (_, action, payload) =
-            super::remote_location_action(&json!({}), &project, "server".into()).unwrap();
-        assert_eq!(action, "location_info");
-        assert_eq!(payload, json!({"cwd":"/folder"}));
-        let (_, action, payload) =
-            super::remote_location_action(&json!({"action":"matches"}), &project, "server".into())
-                .unwrap();
-        assert_eq!(action, "location_matches");
-        assert_eq!(payload, json!({"origin":"origin","cwd":null}));
+        let (_, command) = super::remote_location_action(
+            &axum::extract::Query::<super::LocationQuery>::try_from_uri(
+                &"/?project=project&server=server".parse().unwrap(),
+            )
+            .unwrap()
+            .0,
+            &project,
+            "server".into(),
+        )
+        .unwrap();
+        let studio_runtime_services::orchestration_wire::OrchestrationCommand::LocationInfo(
+            payload,
+        ) = command
+        else {
+            panic!("location info")
+        };
+        assert_eq!(payload.cwd, "/folder");
+        let (_, command) = super::remote_location_action(
+            &axum::extract::Query::<super::LocationQuery>::try_from_uri(
+                &"/?project=project&server=server&action=matches"
+                    .parse()
+                    .unwrap(),
+            )
+            .unwrap()
+            .0,
+            &project,
+            "server".into(),
+        )
+        .unwrap();
+        let studio_runtime_services::orchestration_wire::OrchestrationCommand::LocationMatches(
+            payload,
+        ) = command
+        else {
+            panic!("location matches")
+        };
+        assert_eq!(payload.origin, "origin");
+        assert!(matches!(
+            payload.cwd,
+            studio_runtime_schema::queue_command::Field::Null
+        ));
     }
 
     #[test]
@@ -1434,7 +1601,7 @@ mod local_registration_tests {
         let project = studio_runtime_store::ProjectsRepository::get_record(&db, "project")
             .unwrap()
             .unwrap();
-        let location = &project.locations[0];
+        let location = &project.locations.value().unwrap()[0];
         assert_eq!(location.server_id, "server");
     }
 
@@ -1586,13 +1753,27 @@ mod local_registration_tests {
         let (status, updated) = post_project(&app, &json!({"action":"set_account", "path":project, "account_key":account["id"], "expected_revision":registered["accountRevision"]})).await;
         assert_eq!(status, axum::http::StatusCode::OK, "{updated}");
         assert_eq!(updated["accountKey"], account["id"]);
+
+        let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+        let peer = json!({"action":"delete", "path":project, "expected_revision":0,
+            "request_id":request_id, "team_id":"a8b5b7aa-6459-4023-b148-0ad5a4f0ba56"});
+        let (status, first) = post(&app, "/api/peer-teams", &peer).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{first}");
+        assert_eq!(first["peerTeamsRevision"], 1);
+        let (status, replay) = post(&app, "/api/peer-teams", &peer).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{replay}");
+        assert_eq!(replay, first);
+        let mut changed = peer;
+        changed["team_id"] = json!("27272727-2727-4272-8272-272727272727");
+        let (status, _) = post(&app, "/api/peer-teams", &changed).await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT);
     }
 
     impl PairedTransport for ProjectPeer {
         fn exchange<'a>(
             &'a self,
             server: &'a str,
-            envelope: &'a serde_json::Value,
+            envelope: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
             _timeout: std::time::Duration,
         ) -> futures_util::future::BoxFuture<
             'a,
@@ -1601,25 +1782,30 @@ mod local_registration_tests {
             Box::pin(async move {
                 assert_eq!(server, "peer");
                 self.0.fetch_add(1, Ordering::SeqCst);
-                let payload = &envelope["payload"];
-                let path = payload["path"].as_str().expect("remote path");
-                Ok(serde_json::from_str(
-                    &json!({
-                        "requestId": envelope["requestId"],
-                        "outcome": "applied",
-                        "value": {
-                            "serverId": "peer",
-                            "path": path,
-                            "canonicalPath": path,
-                            "projectId": path,
-                            "gitOrigin": null,
-                            "homeProjectId": payload["project"],
-                            "requestId": envelope["requestId"]
-                        }
-                    })
-                    .to_string(),
-                )
-                .expect("fixture reply"))
+                let studio_runtime_services::orchestration_wire::OrchestrationCommand::AddLocation(
+                    payload,
+                ) = &envelope.command
+                else {
+                    panic!("add location")
+                };
+                let path = payload.path.value().expect("remote path");
+                let value = studio_runtime_services::project_locations::LocationValue {
+                    server_id: "peer".into(),
+                    path: Some(path.clone()),
+                    canonical_path: Some(path.clone()),
+                    project_id: Some(path.clone()),
+                    git_origin: Some(studio_runtime_services::project_locations::Nullable::Null),
+                    home_project_id: Some(payload.project.clone()),
+                    request_id: Some(envelope.request_id.clone()),
+                    removed: None,
+                };
+                Ok(studio_runtime_store::multi_server_delivery::RemoteReply {
+                    request_id: envelope.request_id.clone(),
+                    outcome: studio_runtime_schema::persistence::RemoteOutcome::Applied,
+                    value: Some(serde_json::value::to_raw_value(&value).expect("fixture reply")),
+                    error: None,
+                    waiting_for: None,
+                })
             })
         }
     }
@@ -1634,7 +1820,7 @@ mod local_registration_tests {
         fn execute<'a>(
             &'a self,
             _principal: &'a str,
-            _envelope: &'a serde_json::Value,
+            _envelope: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
         ) -> futures_util::future::BoxFuture<'a, Result<ExchangeOutcome, AccessError>> {
             Box::pin(async {
                 unreachable!("outbound project registration does not execute local effects")
@@ -1869,5 +2055,27 @@ mod local_registration_tests {
         assert_eq!(status, axum::http::StatusCode::OK, "{cleared}");
         assert!(cleared["workspacePolicy"].is_null());
         assert_eq!(cleared["workspacePolicyRevision"], 2);
+    }
+}
+
+#[cfg(test)]
+mod typed_query_tests {
+    use axum::extract::Query;
+    use serde::de::DeserializeOwned;
+
+    fn accepts<T: DeserializeOwned>(query: &str) -> bool {
+        let uri = format!("/?{query}").parse().unwrap();
+        Query::<T>::try_from_uri(&uri).is_ok()
+    }
+
+    #[test]
+    fn query_contracts() {
+        assert!(accepts::<super::LocationQuery>(
+            "project=p&server=s&action=matches"
+        ));
+        assert!(!accepts::<super::LocationQuery>("project=&server=s"));
+        assert!(!accepts::<super::LocationQuery>(
+            "project=p&server=s&action=matches&unknown=x"
+        ));
     }
 }

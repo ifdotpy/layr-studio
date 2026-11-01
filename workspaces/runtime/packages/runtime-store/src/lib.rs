@@ -29,6 +29,7 @@ pub const SUMMARY_ENTITIES_SEED_MARKER: &str = "summary_entities_v1";
 pub const CONVERSATION_DETAILS_SEED_MARKER: &str = "conversation_details_v1";
 /// Durable marker proving scoped task review records and team defaults were seeded. Unit: metadata key.
 pub const WORK_DETAILS_SEED_MARKER: &str = "work_details_v1";
+pub mod approvals;
 mod multi_server_state_check;
 mod path;
 pub mod path_identity;
@@ -37,6 +38,7 @@ pub mod receipt_schema;
 pub use studio_runtime_schema::raw_object;
 mod records;
 mod repositories;
+mod room_record;
 pub use repositories::multi_server_delivery;
 pub use repositories::process_actions::{
     ProcessActionKind, ProcessActionPhase, ProcessActionRecord,
@@ -223,19 +225,17 @@ pub enum ObservedTable {
     Work,
     Monitors,
     Rules,
-    ServerOutbox,
     ServerLinks,
     FederationSettings,
     FederationIdentity,
     FederationPeers,
     FederationInvites,
     FederationRooms,
-    FederationOutbox,
     RuntimeOutbox,
     ErrorIncidents,
     AccountTransfers,
     OrchestrationSettings,
-    RuntimeRequests,
+    Approvals,
     RuntimeToolRequests,
     AnalyticsProjection,
     AccountState,
@@ -327,19 +327,17 @@ impl ObservedTable {
             Self::Work => "runtime_work",
             Self::Monitors => "runtime_monitors",
             Self::Rules => "runtime_rules",
-            Self::ServerOutbox => "runtime_server_outbox",
             Self::ServerLinks => "runtime_server_links",
             Self::FederationSettings => "runtime_federation_settings",
             Self::FederationIdentity => "runtime_federation_identity",
             Self::FederationPeers => "runtime_federation_peers",
             Self::FederationInvites => "runtime_federation_invites",
             Self::FederationRooms => "runtime_federation_rooms",
-            Self::FederationOutbox => "runtime_federation_outbox",
             Self::RuntimeOutbox => "runtime_outbox",
             Self::ErrorIncidents => "runtime_error_incidents",
             Self::AccountTransfers => "runtime_account_transfers",
             Self::OrchestrationSettings => "runtime_orchestration_settings",
-            Self::RuntimeRequests => "runtime_requests",
+            Self::Approvals => "approvals",
             Self::RuntimeToolRequests => "runtime_tool_requests",
             Self::AnalyticsProjection => "runtime_analytics_projection",
             Self::AccountState => "runtime_account_state",
@@ -359,19 +357,17 @@ impl ObservedTable {
             Self::Work => 1 << 6,
             Self::Monitors => 1 << 7,
             Self::Rules => 1 << 8,
-            Self::ServerOutbox => 1 << 9,
             Self::ServerLinks => 1 << 10,
             Self::FederationSettings => 1 << 11,
             Self::FederationIdentity => 1 << 12,
             Self::FederationPeers => 1 << 13,
             Self::FederationInvites => 1 << 14,
             Self::FederationRooms => 1 << 15,
-            Self::FederationOutbox => 1 << 16,
             Self::RuntimeOutbox => 1 << 17,
             Self::ErrorIncidents => 1 << 18,
             Self::AccountTransfers => 1 << 22,
             Self::OrchestrationSettings => 1 << 23,
-            Self::RuntimeRequests => 1 << 24,
+            Self::Approvals => 1 << 24,
             Self::RuntimeToolRequests => 1 << 25,
             Self::AnalyticsProjection => 1 << 26,
             Self::AccountState => 1 << 27,
@@ -384,7 +380,7 @@ impl ObservedTable {
     }
 }
 
-const OBSERVED_TABLES: [ObservedTable; 27] = [
+const OBSERVED_TABLES: [ObservedTable; 25] = [
     ObservedTable::AccessClients,
     ObservedTable::UsageResumes,
     ObservedTable::Agents,
@@ -395,19 +391,17 @@ const OBSERVED_TABLES: [ObservedTable; 27] = [
     ObservedTable::Work,
     ObservedTable::Monitors,
     ObservedTable::Rules,
-    ObservedTable::ServerOutbox,
     ObservedTable::ServerLinks,
     ObservedTable::FederationSettings,
     ObservedTable::FederationIdentity,
     ObservedTable::FederationPeers,
     ObservedTable::FederationInvites,
     ObservedTable::FederationRooms,
-    ObservedTable::FederationOutbox,
     ObservedTable::RuntimeOutbox,
     ObservedTable::ErrorIncidents,
     ObservedTable::AccountTransfers,
     ObservedTable::OrchestrationSettings,
-    ObservedTable::RuntimeRequests,
+    ObservedTable::Approvals,
     ObservedTable::RuntimeToolRequests,
     ObservedTable::AnalyticsProjection,
     ObservedTable::AccountState,
@@ -3549,19 +3543,17 @@ mod commit_notification_tests {
                 ("runtime_work", 0),
                 ("runtime_monitors", 0),
                 ("runtime_rules", 0),
-                ("runtime_server_outbox", 0),
                 ("runtime_server_links", 0),
                 ("runtime_federation_settings", 0),
                 ("runtime_federation_identity", 0),
                 ("runtime_federation_peers", 0),
                 ("runtime_federation_invites", 0),
                 ("runtime_federation_rooms", 0),
-                ("runtime_federation_outbox", 0),
                 ("runtime_outbox", 1),
                 ("runtime_error_incidents", 0),
                 ("runtime_account_transfers", 0),
                 ("runtime_orchestration_settings", 0),
-                ("runtime_requests", 0),
+                ("approvals", 0),
                 ("runtime_tool_requests", 0),
                 ("runtime_analytics_projection", 0),
                 ("runtime_account_state", 0),
@@ -3592,8 +3584,8 @@ mod commit_notification_tests {
                     ObservedTable::OrchestrationSettings.change_bit()
                 ),
                 (
-                    ObservedTable::RuntimeRequests.name(),
-                    ObservedTable::RuntimeRequests.change_bit()
+                    ObservedTable::Approvals.name(),
+                    ObservedTable::Approvals.change_bit()
                 ),
                 (
                     ObservedTable::RuntimeToolRequests.name(),
@@ -3603,7 +3595,7 @@ mod commit_notification_tests {
             [
                 ("runtime_account_transfers", 1 << 22),
                 ("runtime_orchestration_settings", 1 << 23),
-                ("runtime_requests", 1 << 24),
+                ("approvals", 1 << 24),
                 ("runtime_tool_requests", 1 << 25),
             ],
             "idle-unload observer owners keep their exact table and change-mask contracts"

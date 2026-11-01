@@ -4882,7 +4882,7 @@
         "status": "ready",
         "agent": "agent",
         "kind": "work",
-        "text": "{\n  \"id\": \"work\",\n  \"rootId\": \"agent\",\n  \"title\": \"needle work\",\n  \"status\": \"ready\"\n}"
+        "text": "{\n  \"id\": \"work\",\n  \"rootId\": \"agent\",\n  \"status\": \"ready\",\n  \"title\": \"needle work\"\n}"
       },
       "agent": {
         "id": "agent",

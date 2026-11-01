@@ -6,8 +6,11 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashSet};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::process_controls::{
-    ProcessActionResult, ProcessActionStatus, ProcessControlRequest, ProcessEntry, ProcessOutcome,
-    ProcessReceipt, ProcessResponseTarget,
+    BackgroundTaskAction, BackgroundTaskDisplay, BackgroundTaskIndicator, BackgroundTaskKind,
+    BackgroundTaskKindLabel, BackgroundTaskLabel, BackgroundTaskView, ProcessActionResult,
+    ProcessActionStatus, ProcessControlRequest, ProcessEntry, ProcessListing, ProcessOutcome,
+    ProcessReceipt, ProcessResponseTarget, ProcessSourceKind, ProcessStatus, ProcessStdinState,
+    ProcessView, ProcessWakeBudget, TaskProjection,
 };
 use studio_runtime_store::{
     ProcessActionKind, ProcessActionPhase, ProcessActionRecord, StoreError, Transaction,
@@ -15,6 +18,121 @@ use studio_runtime_store::{
 
 use crate::account_session_runtime::ConnectionScope;
 use crate::event_write::{CallerAdmission, RequestKey, begin_request};
+
+/// Public view plus native identity evidence, retained together until dispatch.
+#[derive(Clone, Debug)]
+pub struct ProcessRecord {
+    pub view: ProcessView,
+    pub source_account: Option<String>,
+    pub source_connection: Option<String>,
+    pub source_thread: Option<String>,
+    pub source_generation: Option<u64>,
+    pub monitor_status: Option<studio_runtime_schema::studio_errors::MonitorStatus>,
+    pub reattached_connection: Option<String>,
+    pub item_id: Option<String>,
+    pub process_id: Option<studio_runtime_schema::task_record::ProcessId>,
+}
+
+fn display(
+    kind: BackgroundTaskKind,
+    kind_label: BackgroundTaskKindLabel,
+    title: String,
+    status: ProcessStatus,
+    cancelling: bool,
+    in_background_list: bool,
+    controls: (Vec<BackgroundTaskAction>, Option<ProcessStdinState>),
+) -> BackgroundTaskDisplay {
+    let (mut actions, stdin_state) = controls;
+    use BackgroundTaskIndicator as Indicator;
+    use BackgroundTaskLabel as Label;
+    use studio_runtime_schema::studio_errors::MonitorStatus as Monitor;
+    use studio_runtime_schema::task_record::TaskStatus as Task;
+    let status_label = match status {
+        ProcessStatus::Task(Task::Starting) | ProcessStatus::Monitor(Monitor::Starting) => {
+            Label::Starting
+        }
+        ProcessStatus::Task(Task::Approval) | ProcessStatus::Monitor(Monitor::Approval) => {
+            Label::Approval
+        }
+        ProcessStatus::Task(Task::Running) | ProcessStatus::Monitor(Monitor::Running) => {
+            Label::Running
+        }
+        ProcessStatus::Task(Task::Completed) | ProcessStatus::Monitor(Monitor::Completed) => {
+            Label::Completed
+        }
+        ProcessStatus::Task(Task::Failed) | ProcessStatus::Monitor(Monitor::Failed) => {
+            Label::Failed
+        }
+        ProcessStatus::Task(Task::Lost) | ProcessStatus::Monitor(Monitor::Lost) => Label::Lost,
+        ProcessStatus::Task(Task::Pending) => Label::Pending,
+        ProcessStatus::Task(Task::Unknown) => Label::Unknown,
+        ProcessStatus::Task(Task::Interrupted) => Label::Interrupted,
+        ProcessStatus::Monitor(Monitor::Cancelled) => Label::Cancelled,
+    };
+    let active = matches!(
+        status_label,
+        Label::Starting | Label::Approval | Label::Running | Label::Pending
+    );
+    let indicator = match status_label {
+        Label::Approval => Indicator::Answer,
+        Label::Failed | Label::Lost => Indicator::Error,
+        Label::Completed => Indicator::Unread,
+        Label::Starting | Label::Running | Label::Pending => Indicator::Working,
+        Label::Stopping
+        | Label::Cancelled
+        | Label::Interrupted
+        | Label::WaitingForExit
+        | Label::Unknown => Indicator::Paused,
+    };
+    let label = if active && cancelling {
+        Label::WaitingForExit
+    } else {
+        status_label
+    };
+    actions.retain(|action| match action {
+        BackgroundTaskAction::Stop => active && !cancelling,
+        BackgroundTaskAction::Input => {
+            !cancelling
+                && matches!(status_label, Label::Running)
+                && stdin_state == Some(ProcessStdinState::Open)
+        }
+        BackgroundTaskAction::Resize => !cancelling && matches!(status_label, Label::Running),
+        BackgroundTaskAction::Approve | BackgroundTaskAction::ReadOutput => true,
+    });
+    if matches!(status_label, Label::Approval) {
+        actions.push(BackgroundTaskAction::Approve);
+    }
+    BackgroundTaskDisplay {
+        kind,
+        kind_label,
+        title,
+        active,
+        indicator,
+        label,
+        in_background_list,
+        actions,
+        stdin_state,
+    }
+}
+
+fn task_title(command: Option<&str>, query: Option<&str>, name: Option<&str>) -> String {
+    if let Some(value) = command
+        .filter(|value| !value.is_empty())
+        .or(query.filter(|value| !value.is_empty()))
+    {
+        return value.to_owned();
+    }
+    match name.filter(|value| !value.is_empty()) {
+        Some("commandExecution") => "Command".into(),
+        Some("webSearch") => "Web search".into(),
+        Some("mcpToolCall") => "Connected tool".into(),
+        Some("dynamicToolCall") => "Tool call".into(),
+        Some("contextCompaction") => "Context compaction".into(),
+        Some("fileChange") => "File changes".into(),
+        Some(value) => value.replace('_', " "),
+        None => "Tool call".into(),
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -173,7 +291,7 @@ pub fn project_monitor(
     owner: &Value,
     owner_connection: Option<&str>,
     source: Option<&ConnectionScope>,
-) -> Result<Value, Error> {
+) -> Result<ProcessRecord, Error> {
     let proven = match (retained_monitor_scope(tx, raw, owner)?, source) {
         (Some(original), Some(live))
             if live.account == original.account
@@ -201,7 +319,7 @@ fn project_monitor_bound(
     owner: &Value,
     connection: Option<&str>,
     generation: Option<u64>,
-) -> Value {
+) -> ProcessRecord {
     use studio_runtime_schema::studio_errors::MonitorStatus;
     let agent = monitor.agent.as_str();
     let account = text(owner, "accountKey", "default");
@@ -251,10 +369,6 @@ fn project_monitor_bound(
         && (generation.is_some()
             || (source_thread.is_some_and(|v| !v.is_empty())
                 && source_thread == owner["threadId"].as_str()));
-    let can_input = same
-        && owner["autoWake"] == true
-        && monitor.interactive
-        && monitor.status == MonitorStatus::Running;
     let output = monitor.tail.as_str();
     let bytes = monitor.bytes.get() as u64;
     let command = monitor.command.as_str();
@@ -263,26 +377,76 @@ fn project_monitor_bound(
     } else {
         command
     };
-    let mut result = json!({"id":monitor.id,"key":URL_SAFE_NO_PAD.encode(json!(["monitor",agent,monitor.id]).to_string()),
-        "generation":digest(&json!(["monitor",agent,native])),"agent":agent,"accountKey":account,"epoch":owner["epoch"],
-        "source":"monitor","status":monitor.status,"cancelRequested":monitor.cancel_requested == Some(true),
-        "created":monitor.created.seconds(),"name":name,"command":command,"cwd":monitor.cwd,"log":monitor.log,
-        "output":output,"error":monitor.error.as_ref().map(|v| v.as_str()),"stdinError":monitor.stdin_error,
-        "stdinClosed":monitor.stdin_closed == Some(true),"stdinCloseRequested":false,
-        "bytes":bytes,"outputTruncated":monitor.output_truncated.unwrap_or(bytes > output.len() as u64),
-        "capabilities":{"readOutput":true,"sendInput":can_input,"resize":can_input,"stop":same || (pending && owner["epoch"].as_i64() == Some(epoch) && source_account == Some(account))},
-        "_raw":{"id":monitor.id,"status":monitor.status,"reattachedConnectionId":monitor.reattached_connection_id},
-        "_sourceAccountKey":source_account,"_sourceConnectionId":source_connection,"_sourceThreadId":source_thread,"_sourceEpoch":epoch});
-    if let Some(generation) = generation {
-        result["_sourceGeneration"] = json!(generation);
+    let mut actions = vec![BackgroundTaskAction::ReadOutput];
+    actions.extend(crate::monitor_policy::input_actions(
+        monitor,
+        same && owner["autoWake"] == true,
+    ));
+    if same
+        || (pending && owner["epoch"].as_i64() == Some(epoch) && source_account == Some(account))
+    {
+        actions.push(BackgroundTaskAction::Stop);
     }
-    if let Some(budget) = &monitor.output_wake_budget {
-        result["outputWakeBudget"] = json!({"totalSuppressedMatches":budget.total_suppressed_matches,"paused":budget.paused,"tokens":budget.tokens});
+    let cancelled = monitor.cancel_requested == Some(true);
+    let status = ProcessStatus::Monitor(monitor.status);
+    let view = ProcessView {
+        id: monitor.id.clone(),
+        key: URL_SAFE_NO_PAD.encode(json!(["monitor", agent, monitor.id]).to_string()),
+        generation: digest(&json!(["monitor", agent, native])),
+        agent: agent.to_owned(),
+        account_key: account.to_owned(),
+        epoch: owner["epoch"].as_u64().expect("checked owner epoch"),
+        source: ProcessSourceKind::Monitor,
+        status,
+        cancel_requested: cancelled,
+        created: monitor.created.seconds(),
+        name: name.to_owned(),
+        command: Some(command.to_owned()),
+        cwd: Some(monitor.cwd.clone()),
+        log: Some(monitor.log.clone()),
+        tail: output.to_owned(),
+        duration_ms: None,
+        finished: None,
+        exit_code: None,
+        process_id: None,
+        timeout_ms: None,
+        error: monitor.error.as_ref().map(|v| v.as_str().to_owned()),
+        stdin_error: monitor.stdin_error.clone(),
+        bytes,
+        output_truncated: monitor
+            .output_truncated
+            .unwrap_or(bytes > output.len() as u64),
+        output_file: None,
+        output_patterns: monitor.output_patterns.clone().unwrap_or_default(),
+        output_wake_budget: monitor
+            .output_wake_budget
+            .as_ref()
+            .map(|budget| ProcessWakeBudget {
+                total_suppressed_matches: budget.total_suppressed_matches,
+                paused: budget.paused,
+                tokens: budget.tokens,
+            }),
+        display: display(
+            BackgroundTaskKind::Monitor,
+            BackgroundTaskKindLabel::Monitor,
+            task_title(Some(command), None, Some(name)),
+            status,
+            cancelled,
+            true,
+            (actions, monitor_stdin_state(monitor)),
+        ),
+    };
+    ProcessRecord {
+        view,
+        source_account: source_account.map(str::to_owned),
+        source_connection: source_connection.map(str::to_owned),
+        source_thread: source_thread.map(str::to_owned),
+        source_generation: generation,
+        monitor_status: Some(monitor.status),
+        reattached_connection: monitor.reattached_connection_id.clone(),
+        item_id: None,
+        process_id: None,
     }
-    if let Some(patterns) = &monitor.output_patterns {
-        result["outputPatterns"] = json!(patterns);
-    }
-    result
 }
 
 fn raw(connection: &Connection, table: &str, id: &str) -> Result<Option<Value>, Error> {
@@ -402,9 +566,6 @@ fn text<'a>(value: &'a Value, key: &str, default: &'a str) -> &'a str {
         .filter(|v| !v.is_empty())
         .unwrap_or(default)
 }
-fn string(value: &Value, key: &str) -> Value {
-    value[key].as_str().map_or(Value::Null, |v| json!(v))
-}
 pub fn digest(value: &Value) -> String {
     studio_runtime_store::sha256_hex(value.to_string().as_bytes())
 }
@@ -412,19 +573,27 @@ fn request_digest(request: &ProcessControlRequest) -> Result<String, Error> {
     let bytes = serde_json::to_vec(request).map_err(StoreError::from)?;
     Ok(studio_runtime_store::sha256_hex(&bytes))
 }
-pub fn project(source: &str, raw: &Value, owner: &Value, connection: Option<&str>) -> Value {
-    let agent = text(raw, "agent", text(owner, "id", ""));
+pub fn project(
+    source: ProcessSourceKind,
+    raw: &studio_runtime_store::TaskRecord,
+    owner: &Value,
+    connection: Option<&str>,
+) -> ProcessRecord {
+    let agent = raw.agent();
     let account = text(owner, "accountKey", "default");
-    let source_account = string(raw, "sourceAccountKey");
-    let source_connection = string(raw, "sourceConnectionId");
-    let source_thread = string(raw, "sourceThreadId");
-    let epoch = raw["ownerEpoch"].clone();
-    let claude = source == "claude_task";
-    let item = text(raw, "itemId", "");
+    let source_account = raw.source_account_key.as_deref();
+    let source_connection = raw.source_connection_id.as_deref();
+    let source_thread = raw.source_thread_id.as_deref();
+    let epoch = raw.owner_epoch;
+    let claude = source == ProcessSourceKind::ClaudeTask;
+    let item = raw.item_id();
     let opaque = if claude {
         item.strip_prefix("task:").unwrap_or(item)
     } else {
-        text(raw, "processId", item)
+        raw.process_id()
+            .and_then(|id| id.text())
+            .filter(|id| !id.is_empty())
+            .unwrap_or(item)
     };
     let native = if claude {
         json!([
@@ -433,7 +602,7 @@ pub fn project(source: &str, raw: &Value, owner: &Value, connection: Option<&str
             source_account,
             source_connection,
             source_thread,
-            raw["turnId"]
+            raw.turn_id()
         ])
     } else {
         json!([
@@ -443,192 +612,186 @@ pub fn project(source: &str, raw: &Value, owner: &Value, connection: Option<&str
             source_account,
             source_connection,
             source_thread,
-            raw["turnId"]
+            raw.turn_id()
         ])
     };
-    let same = source_account == account
-        && epoch == owner["epoch"]
+    let same = source_account == Some(account)
+        && epoch == owner["epoch"].as_i64()
         && connection.is_some_and(|c| !c.is_empty())
-        && source_connection.as_str() == connection
-        && source_thread.as_str().is_some_and(|v| !v.is_empty())
-        && source_thread == owner["threadId"];
+        && source_connection == connection
+        && source_thread.is_some_and(|thread| !thread.is_empty())
+        && source_thread == owner["threadId"].as_str();
     let can_input = same
         && owner["autoWake"] == true
         && !claude
-        && raw["processId"].as_str().is_some_and(|v| !v.is_empty());
-    let output = if claude { "" } else { text(raw, "tail", "") };
-    let bytes = raw["bytes"].as_u64().unwrap_or(output.len() as u64);
+        && raw
+            .process_id()
+            .and_then(|id| id.text())
+            .is_some_and(|id| !id.is_empty());
+    let output = if claude {
+        ""
+    } else {
+        raw.tail.as_deref().filter(|s| !s.is_empty()).unwrap_or("")
+    };
+    let bytes = output.len() as u64;
     let default_name = if claude {
         "Claude background task"
     } else {
         "Background command"
     };
     let name = if claude {
-        text(raw, "name", text(raw, "command", default_name))
+        Some(raw.name.as_str())
+            .filter(|s| !s.is_empty())
+            .or(raw.command.as_deref().filter(|s| !s.is_empty()))
     } else {
-        text(raw, "command", text(raw, "name", default_name))
-    };
-    let mut result = json!({"id":text(raw,"id",opaque),"key":URL_SAFE_NO_PAD.encode(json!([source,agent,opaque]).to_string()),
-        "generation":digest(&json!([source,agent,native])),"agent":agent,"accountKey":account,"epoch":owner["epoch"],
-        "source":source,"status":text(raw,"status","unknown"),"cancelRequested":raw["cancelRequested"]==true,
-        "created":raw["created"].as_f64().unwrap_or(0.0),"name":name,"command":string(raw,"command"),"cwd":string(raw,"cwd"),"log":string(raw,"log"),
-        "output":output,"error":string(raw,"error"),"stdinError":string(raw,"stdinError"),"stdinClosed":raw["stdinClosed"]==true,
-        "stdinCloseRequested":raw["stdinCloseRequested"]==true,"bytes":bytes,"outputTruncated":raw["outputTruncated"].as_bool().unwrap_or(bytes>output.len() as u64),
-        "capabilities":{"readOutput":!claude,"sendInput":can_input,"resize":false,"stop":same},
-        "_raw":raw,"_sourceAccountKey":source_account,"_sourceConnectionId":source_connection,"_sourceThreadId":source_thread,"_sourceEpoch":epoch});
-    if claude && raw["outputFile"].is_string() {
-        result["outputFile"] = raw["outputFile"].clone();
-        result["capabilities"]["readOutput"] = json!(true);
+        raw.command
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .or(Some(raw.name.as_str()).filter(|s| !s.is_empty()))
     }
-    result
+    .unwrap_or(default_name);
+    let mut actions = Vec::new();
+    if !claude || raw.output_file.is_some() {
+        actions.push(BackgroundTaskAction::ReadOutput);
+    }
+    if can_input {
+        actions.push(BackgroundTaskAction::Input);
+    }
+    if same {
+        actions.push(BackgroundTaskAction::Stop);
+    }
+    let status = ProcessStatus::Task(raw.status());
+    let view = ProcessView {
+        id: raw.id().as_ref().to_owned(),
+        key: URL_SAFE_NO_PAD.encode(json!([source.as_str(), agent, opaque]).to_string()),
+        generation: digest(&json!([source.as_str(), agent, native])),
+        agent: agent.to_owned(),
+        account_key: account.to_owned(),
+        epoch: owner["epoch"].as_u64().expect("checked owner epoch"),
+        source,
+        status,
+        cancel_requested: false,
+        created: raw.created(),
+        name: name.into(),
+        command: raw.command.clone(),
+        cwd: raw.cwd.clone(),
+        log: None,
+        tail: output.into(),
+        duration_ms: None,
+        finished: None,
+        exit_code: None,
+        process_id: None,
+        timeout_ms: None,
+        error: raw.error.clone(),
+        stdin_error: None,
+        bytes,
+        output_truncated: raw.output_truncated.unwrap_or(false),
+        output_file: if claude {
+            raw.output_file.clone()
+        } else {
+            None
+        },
+        output_patterns: Vec::new(),
+        output_wake_budget: None,
+        display: display(
+            if claude {
+                BackgroundTaskKind::BackgroundTask
+            } else {
+                BackgroundTaskKind::Command
+            },
+            if claude {
+                BackgroundTaskKindLabel::Tool
+            } else {
+                BackgroundTaskKindLabel::BackgroundCommand
+            },
+            task_title(raw.command.as_deref(), raw.query.as_deref(), Some(name)),
+            status,
+            false,
+            true,
+            (
+                actions,
+                (!claude && raw.process_id().is_some()).then_some(ProcessStdinState::Open),
+            ),
+        ),
+    };
+    ProcessRecord {
+        view,
+        source_account: source_account.map(str::to_owned),
+        source_connection: source_connection.map(str::to_owned),
+        source_thread: source_thread.map(str::to_owned),
+        source_generation: None,
+        monitor_status: None,
+        reattached_connection: None,
+        item_id: Some(item.to_owned()),
+        process_id: raw.process_id().cloned(),
+    }
 }
 
-#[cfg(test)]
-fn legacy_project_bound(
-    source: &str,
-    raw: &Value,
-    owner: &Value,
-    connection: Option<&str>,
-    retained_generation: Option<u64>,
-) -> Value {
-    let agent = text(raw, "agent", text(owner, "id", ""));
-    let account = text(owner, "accountKey", "default");
-    let mut source_account = string(raw, "sourceAccountKey");
-    let mut source_connection = string(raw, "sourceConnectionId");
-    let mut source_thread = string(raw, "sourceThreadId");
-    let epoch;
-    let opaque;
-    let pending =
-        source == "monitor" && matches!(raw["status"].as_str(), Some("starting" | "approval"));
-    let is_monitor = source == "monitor";
-    let is_claude = source == "claude_task";
-    let native = if is_monitor {
-        epoch = raw["epoch"].clone();
-        let operation = &raw["operation"];
-        source_account = operation
-            .get("accountKey")
-            .filter(|v| v.is_string() && **v != "")
-            .cloned()
-            .unwrap_or(if pending { json!(account) } else { Value::Null });
-        source_connection = string(operation, "connectionId");
-        source_thread = string(operation, "threadId");
-        if retained_generation.is_some() {
-            source_connection = json!(connection);
-        } else if raw["status"] == "running"
-            && connection.is_some()
-            && raw["reattachedConnectionId"].as_str() == connection
-        {
-            source_connection = json!(connection);
-            source_thread = owner["threadId"].clone();
-        }
-        if retained_generation.is_none()
-            && source_thread.as_str().is_none_or(str::is_empty)
-            && operation["connectionId"].as_str() == connection
-        {
-            source_thread = owner["threadId"].clone();
-        }
-        opaque = text(raw, "id", "").to_owned();
-        let mut identity = json!([
-            raw["id"],
-            epoch,
-            source_account,
-            source_connection,
-            source_thread
-        ]);
-        if let Some(generation) = retained_generation {
-            identity
-                .as_array_mut()
-                .expect("monitor identity")
-                .push(json!(generation));
-        }
-        identity
+pub fn task_record_display(task: &studio_runtime_store::TaskRecord) -> BackgroundTaskDisplay {
+    use studio_runtime_schema::task_record::TaskKind;
+    let kind = if task.kind() == TaskKind::Command {
+        BackgroundTaskKind::Command
+    } else if task.item_id().starts_with("task:") {
+        BackgroundTaskKind::BackgroundTask
     } else {
-        epoch = raw["ownerEpoch"].clone();
-        let item = text(raw, "itemId", "");
-        opaque = if is_claude {
-            item.strip_prefix("task:").unwrap_or(item).to_owned()
-        } else {
-            text(raw, "processId", item).to_owned()
-        };
-        if is_claude {
-            json!([
-                opaque,
-                epoch,
-                source_account,
-                source_connection,
-                source_thread,
-                raw["turnId"]
-            ])
-        } else {
-            json!([
-                opaque,
-                item,
-                epoch,
-                source_account,
-                source_connection,
-                source_thread,
-                raw["turnId"]
-            ])
-        }
+        BackgroundTaskKind::Tool
     };
-    let same = (retained_generation.is_some() || source_account == account)
-        && epoch == owner["epoch"]
-        && connection.is_some_and(|c| !c.is_empty())
-        && source_connection.as_str() == connection
-        && (retained_generation.is_some()
-            || (source_thread.as_str().is_some_and(|v| !v.is_empty())
-                && source_thread == owner["threadId"]));
-    let can_input = same
-        && owner["autoWake"] == true
-        && if is_monitor {
-            raw["interactive"] == true && raw["status"] == "running"
+    let in_background_list = matches!(
+        kind,
+        BackgroundTaskKind::Command | BackgroundTaskKind::BackgroundTask
+    );
+    let actions = vec![BackgroundTaskAction::ReadOutput];
+    display(
+        kind,
+        if kind == BackgroundTaskKind::Command {
+            BackgroundTaskKindLabel::Command
         } else {
-            !is_claude && raw["processId"].as_str().is_some_and(|v| !v.is_empty())
-        };
-    let output = if is_claude { "" } else { text(raw, "tail", "") };
-    let bytes = raw["bytes"].as_u64().unwrap_or(output.len() as u64);
-    let default_name = if is_monitor {
-        "Command monitor"
-    } else if is_claude {
-        "Claude background task"
-    } else {
-        "Background command"
-    };
-    let name = if is_claude {
-        text(raw, "name", text(raw, "command", default_name))
-    } else {
-        text(raw, "command", text(raw, "name", default_name))
-    };
-    let mut result = json!({"id":text(raw,"id",&opaque),"key":URL_SAFE_NO_PAD.encode(json!([source,agent,opaque]).to_string()),
-        "generation":digest(&json!([source,agent,native])),"agent":agent,"accountKey":account,"epoch":owner["epoch"],
-        "source":source,"status":text(raw,"status","unknown"),"cancelRequested":raw["cancelRequested"]==true,
-        "created":raw["created"].as_f64().unwrap_or(0.0),"name":name,"command":string(raw,"command"),"cwd":string(raw,"cwd"),"log":string(raw,"log"),
-        "output":output,"error":string(raw,"error"),"stdinError":string(raw,"stdinError"),"stdinClosed":raw["stdinClosed"]==true,
-        "stdinCloseRequested":raw["stdinCloseRequested"]==true,"bytes":bytes,"outputTruncated":raw["outputTruncated"].as_bool().unwrap_or(bytes>output.len() as u64),
-        "capabilities":{"readOutput":!is_claude,"sendInput":can_input,"resize":is_monitor&&can_input,"stop":same||(pending&&epoch==owner["epoch"]&&source_account==account)},
-        "_raw":raw,"_sourceAccountKey":source_account,"_sourceConnectionId":source_connection,"_sourceThreadId":source_thread,"_sourceEpoch":epoch});
-    if let Some(generation) = retained_generation {
-        result["_sourceGeneration"] = json!(generation);
-    }
-    if is_monitor {
-        if let Some(budget) = raw.get("outputWakeBudget") {
-            result["outputWakeBudget"] = json!({"totalSuppressedMatches":budget["totalSuppressedMatches"],"paused":budget["paused"],"tokens":budget["tokens"]});
-        }
-        if let Some(patterns) = raw.get("outputPatterns") {
-            result["outputPatterns"] = patterns.clone();
-        }
-    }
-    if is_claude && raw["outputFile"].is_string() {
-        result["outputFile"] = raw["outputFile"].clone();
-        result["capabilities"]["readOutput"] = json!(true);
-    }
-    result
+            BackgroundTaskKindLabel::Tool
+        },
+        task_title(
+            task.command.as_deref(),
+            task.query.as_deref(),
+            Some(&task.name),
+        ),
+        ProcessStatus::Task(task.status()),
+        false,
+        in_background_list,
+        (actions, None),
+    )
 }
+
+fn monitor_stdin_state(monitor: &studio_runtime_store::MonitorRecord) -> Option<ProcessStdinState> {
+    if !monitor.interactive {
+        None
+    } else if monitor.stdin_closed == Some(true) {
+        Some(ProcessStdinState::Closed)
+    } else if monitor.stdin_close_requested.is_some() {
+        Some(ProcessStdinState::CloseRequested)
+    } else {
+        Some(ProcessStdinState::Open)
+    }
+}
+
+pub fn monitor_record_display(
+    monitor: &studio_runtime_store::MonitorRecord,
+) -> BackgroundTaskDisplay {
+    let actions = vec![BackgroundTaskAction::ReadOutput];
+    display(
+        BackgroundTaskKind::Monitor,
+        BackgroundTaskKindLabel::Monitor,
+        task_title(Some(monitor.command.as_str()), None, None),
+        ProcessStatus::Monitor(monitor.status),
+        monitor.cancel_requested == Some(true),
+        true,
+        (actions, monitor_stdin_state(monitor)),
+    )
+}
+
 pub fn processes(
     connection: &Transaction<'_>,
     rows: &[(&Value, ProcessSource)],
     connections: &Connections,
-) -> Result<Vec<Value>, Error> {
+) -> Result<Vec<ProcessRecord>, Error> {
     let mut output = Vec::new();
     for (owner, row) in rows {
         let owner_connection = connections.get(text(owner, "id", "")).map(String::as_str);
@@ -655,7 +818,7 @@ pub fn processes(
                 let source = if raw.kind() == studio_runtime_schema::task_record::TaskKind::Command
                     && raw.process_id().is_some_and(|id| id.truthy())
                 {
-                    "codex_task"
+                    ProcessSourceKind::CodexTask
                 } else if provider == ProviderKind::Claude.key()
                     && raw.kind() == studio_runtime_schema::task_record::TaskKind::Tool
                     && raw
@@ -663,79 +826,132 @@ pub fn processes(
                         .strip_prefix("task:")
                         .is_some_and(|v| !v.is_empty())
                 {
-                    "claude_task"
+                    ProcessSourceKind::ClaudeTask
                 } else {
                     continue;
                 };
-                let mut raw = studio_runtime_store::projection_value(raw);
-                raw["sourceProvider"] = json!(provider);
-                output.push(project(source, &raw, owner, owner_connection));
+                output.push(project(source, raw, owner, owner_connection));
             }
         }
     }
     output.sort_by(|a, b| {
-        b["created"]
-            .as_f64()
-            .partial_cmp(&a["created"].as_f64())
+        b.view
+            .created
+            .partial_cmp(&a.view.created)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| text(a, "key", "").cmp(text(b, "key", "")))
+            .then_with(|| a.view.key.cmp(&b.view.key))
     });
     Ok(output)
 }
-pub fn response_target(owner: &Value, connection: Option<&str>) -> Value {
-    if owner["inFlight"] == true
-        && connection.is_some()
-        && !text(owner, "threadId", "").is_empty()
-        && !text(owner, "turnId", "").is_empty()
-    {
-        response_identity(owner, connection.unwrap_or_default())
+pub fn response_target(owner: &Value, connection: Option<&str>) -> Option<ProcessResponseTarget> {
+    if owner["inFlight"] == true {
+        response_identity(owner, connection?)
     } else {
-        Value::Null
+        None
     }
 }
-fn stop_target(owner: &Value, connections: &Connections) -> Value {
+fn stop_target(owner: &Value, connections: &Connections) -> Option<ProcessResponseTarget> {
     let id = text(owner, "id", "");
-    let active = response_target(owner, connections.get(id).map(String::as_str));
-    if !active.is_null() {
-        return active;
-    }
-    match (connections.responses.get(id), connections.scopes.get(id)) {
-        (Some(proof), Some(scope)) if proof.matches(owner, scope) => {
-            response_identity(owner, &scope.connection)
+    response_target(owner, connections.get(id).map(String::as_str)).or_else(|| {
+        match (connections.responses.get(id), connections.scopes.get(id)) {
+            (Some(proof), Some(scope)) if proof.matches(owner, scope) => {
+                response_identity(owner, &scope.connection)
+            }
+            _ => None,
         }
-        _ => Value::Null,
-    }
+    })
 }
-fn response_identity(owner: &Value, connection: &str) -> Value {
-    json!({"agent":owner["id"],"accountKey":text(owner,"accountKey","default"),"epoch":owner["epoch"],"connectionId":connection,"threadId":owner["threadId"],"turnId":owner["turnId"]})
+fn response_identity(owner: &Value, connection: &str) -> Option<ProcessResponseTarget> {
+    Some(ProcessResponseTarget {
+        agent: owner["id"].as_str()?.to_owned().try_into().ok()?,
+        account_key: text(owner, "accountKey", "default")
+            .to_owned()
+            .try_into()
+            .ok()?,
+        epoch: owner["epoch"].as_u64()?,
+        connection_id: connection.to_owned().try_into().ok()?,
+        thread_id: owner["threadId"].as_str()?.to_owned().try_into().ok()?,
+        turn_id: owner["turnId"].as_str()?.to_owned().try_into().ok()?,
+    })
 }
+
 pub fn listing(
     connection: &Transaction<'_>,
     owners: &[Value],
     rows: &[(&Value, ProcessSource)],
     connections: &Connections,
-) -> Result<Value, Error> {
-    let mut processes = processes(connection, rows, connections)?;
-    for p in &mut processes {
-        p.as_object_mut()
-            .expect("process object")
-            .retain(|k, _| !k.starts_with('_'));
+) -> Result<ProcessListing, Error> {
+    let processes: Vec<_> = processes(connection, rows, connections)?
+        .into_iter()
+        .map(|process| process.view)
+        .collect();
+    #[derive(serde::Deserialize)]
+    struct TaskEntity {
+        value: TaskProjection,
     }
-    Ok(json!({"responseTarget":stop_target(&owners[0],connections),"processes":processes}))
-}
-pub fn matches(process: &Value, identity: &Value) -> bool {
-    ["key", "generation", "agent", "accountKey", "epoch"]
+    let owner_ids: HashSet<_> = owners
         .iter()
-        .all(|k| process[k] == identity[k])
+        .filter_map(|owner| owner["id"].as_str())
+        .collect();
+    let mut statement = connection
+        .prepare("SELECT payload FROM sync_entities WHERE collection='task' AND deleted=0")
+        .map_err(StoreError::from)?;
+    let entities = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(StoreError::from)?;
+    let mut tasks = Vec::new();
+    for entity in entities {
+        let entity: TaskEntity =
+            serde_json::from_str(&entity.map_err(StoreError::from)?).map_err(StoreError::from)?;
+        if owner_ids.contains(entity.value.agent.as_str()) && entity.value.display.active {
+            tasks.push(entity.value);
+        }
+    }
+    let activities = background_activities(&processes, &tasks);
+    Ok(ProcessListing {
+        response_target: stop_target(&owners[0], connections),
+        processes,
+        activities,
+    })
 }
-fn response_matches(expected: &Value, target: &ProcessResponseTarget) -> bool {
-    expected.as_object().is_some_and(|object| object.len() == 6)
-        && expected["agent"] == target.agent.as_str()
-        && expected["accountKey"] == target.account_key.as_str()
-        && expected["epoch"].as_u64() == Some(target.epoch)
-        && expected["connectionId"] == target.connection_id.as_str()
-        && expected["threadId"] == target.thread_id.as_str()
-        && expected["turnId"] == target.turn_id.as_str()
+fn background_activities(
+    processes: &[ProcessView],
+    tasks: &[TaskProjection],
+) -> Vec<BackgroundTaskView> {
+    let process_ids: HashSet<_> = processes
+        .iter()
+        .filter(|row| row.display.active)
+        .map(|row| (row.agent.as_str(), row.id.as_str()))
+        .collect();
+    let mut activities: Vec<_> = processes
+        .iter()
+        .filter(|row| row.display.active)
+        .cloned()
+        .map(BackgroundTaskView::Process)
+        .collect();
+    activities.extend(
+        tasks
+            .iter()
+            .filter(|row| {
+                row.display.active && !process_ids.contains(&(row.agent.as_str(), row.id.as_str()))
+            })
+            .cloned()
+            .map(BackgroundTaskView::Task),
+    );
+    activities
+}
+pub fn matches(process: &ProcessRecord, identity: &ProcessRecord) -> bool {
+    process.view.key == identity.view.key
+        && process.view.generation == identity.view.generation
+        && process.view.agent == identity.view.agent
+        && process.view.account_key == identity.view.account_key
+        && process.view.epoch == identity.view.epoch
+}
+fn response_matches(
+    expected: &Option<ProcessResponseTarget>,
+    target: &ProcessResponseTarget,
+) -> bool {
+    expected.as_ref() == Some(target)
 }
 pub fn validate_response(
     owner: &Value,
@@ -761,7 +977,7 @@ pub enum Claim {
     Replay(ProcessActionResult),
     New {
         record: Box<ProcessActionRecord>,
-        targets: Vec<Value>,
+        targets: Vec<ProcessRecord>,
         result: ProcessActionResult,
     },
 }
@@ -832,11 +1048,11 @@ pub fn claim(
         let mut seen = HashSet::new();
         for identity in selected {
             let found = processes.iter().find(|p| {
-                text(p, "key", "") == identity.key.as_str()
-                    && text(p, "generation", "") == identity.generation.as_str()
-                    && text(p, "agent", "") == identity.agent.as_str()
-                    && text(p, "accountKey", "") == identity.account_key.as_str()
-                    && p["epoch"].as_u64() == Some(identity.epoch)
+                p.view.key == identity.key.as_str()
+                    && p.view.generation == identity.generation.as_str()
+                    && p.view.agent == identity.agent.as_str()
+                    && p.view.account_key == identity.account_key.as_str()
+                    && p.view.epoch == identity.epoch
             });
             let error = if !seen.insert(identity.key.as_str()) {
                 Some("A process identity was repeated")
@@ -844,7 +1060,9 @@ pub fn claim(
                 Some("Worker processes are outside this stop scope")
             } else if found.is_none() {
                 Some("This process changed or finished. Refresh the process list")
-            } else if found.is_some_and(|p| p["capabilities"]["stop"] != true) {
+            } else if found
+                .is_some_and(|p| !p.view.display.actions.contains(&BackgroundTaskAction::Stop))
+            {
                 Some("The process owner changed. Refresh the process list")
             } else {
                 None
@@ -862,10 +1080,10 @@ pub fn claim(
                 });
             } else if let Some(process) = found {
                 entries.push(ProcessEntry {
-                    key: text(process, "key", "").to_owned(),
-                    agent: text(process, "agent", "").to_owned(),
-                    source: Some(text(process, "source", "").to_owned()),
-                    generation: Some(text(process, "generation", "").to_owned()),
+                    key: process.view.key.clone(),
+                    agent: process.view.agent.clone(),
+                    source: Some(process.view.source.as_str().to_owned()),
+                    generation: Some(process.view.generation.clone()),
                     outcome: ProcessOutcome::Pending,
                     extra: Default::default(),
                 });
@@ -981,7 +1199,14 @@ pub fn save(tx: &Transaction<'_>, record: &ProcessActionRecord) -> Result<(), Er
     .map_err(StoreError::from)?;
     Ok(())
 }
-pub fn receipt(connection: &Connection, query: &Value) -> Result<ProcessReceipt, Error> {
+pub struct ReceiptIdentity {
+    pub request_id: String,
+    pub agent: String,
+    pub account_key: String,
+    pub epoch: i64,
+}
+
+pub fn receipt(connection: &Connection, query: &ReceiptIdentity) -> Result<ProcessReceipt, Error> {
     let exists:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_process_actions')",[],|r|r.get(0)).map_err(StoreError::from)?;
     if !exists {
         return input_receipt(connection, query);
@@ -989,7 +1214,7 @@ pub fn receipt(connection: &Connection, query: &Value) -> Result<ProcessReceipt,
     let record: Option<String> = connection
         .query_row(
             "SELECT record FROM runtime_process_actions WHERE id=?",
-            [text(query, "requestId", "")],
+            [&query.request_id],
             |row| row.get(0),
         )
         .optional()
@@ -1000,15 +1225,18 @@ pub fn receipt(connection: &Connection, query: &Value) -> Result<ProcessReceipt,
         .transpose()
         .map_err(StoreError::from)?;
     if let Some(record) = record
-        && record.scope_agent == query["agent"]
-        && record.scope_account_key == query["accountKey"]
-        && query["epoch"].as_f64() == record.scope_epoch.as_f64()
+        && record.scope_agent == query.agent
+        && record.scope_account_key == query.account_key
+        && Some(query.epoch as f64) == record.scope_epoch.as_f64()
     {
         return Ok(ProcessReceipt::found(record.result));
     }
     input_receipt(connection, query)
 }
-fn input_receipt(connection: &Connection, query: &Value) -> Result<ProcessReceipt, Error> {
+fn input_receipt(
+    connection: &Connection,
+    query: &ReceiptIdentity,
+) -> Result<ProcessReceipt, Error> {
     crate::monitor_http_input::read(connection, query).map_err(|error| match error {
         crate::monitor_policy::MonitorError::Expired => Error::Expired,
         crate::monitor_policy::MonitorError::Store(error) => Error::Store(error),
@@ -1038,10 +1266,108 @@ mod claim_identity_tests {
     use studio_runtime_store::request_results::RequestResults;
 
     #[test]
+    fn activity_snapshot_prefers_process_then_restores_task_after_exit() {
+        let raw = r#"{"id":"command","agent":"owner","created":1,"itemId":"item","turnId":"turn","kind":"command","status":"running","type":"commandExecution","name":"commandExecution","processId":"pid"}"#;
+        let task: studio_runtime_store::TaskRecord = serde_json::from_str(raw).unwrap();
+        let owner = json!({"id":"owner","epoch":1,"accountKey":"default","threadId":"thread","autoWake":true});
+        let process = project(
+            ProcessSourceKind::CodexTask,
+            &task,
+            &owner,
+            Some("connection"),
+        )
+        .view;
+        let task = crate::sync_views::project_task_record(&task).unwrap();
+        let before = background_activities(&[], std::slice::from_ref(&task));
+        let running =
+            background_activities(std::slice::from_ref(&process), std::slice::from_ref(&task));
+        let after = background_activities(&[], std::slice::from_ref(&task));
+        assert_eq!(before.len(), 1);
+        assert!(matches!(&before[0], BackgroundTaskView::Task(_)));
+        assert_eq!(running.len(), 1);
+        assert!(matches!(&running[0], BackgroundTaskView::Process(_)));
+        assert_eq!(after.len(), 1);
+        assert!(matches!(&after[0], BackgroundTaskView::Task(_)));
+    }
+
+    #[test]
+    fn monitor_actions_match_input_admission_for_pending_and_closed_stdin() {
+        let owner = json!({"id":"owner","rootId":"owner","compactions":0,"epoch":1,"accountKey":"default","threadId":"thread","autoWake":true,"provider":"codex","status":"idle","cwd":std::env::temp_dir()});
+        let fixture = format!(
+            r#"{{"id":"watch","agent":"owner","epoch":1,"status":"running","requestId":"request","created":1,"activityAt":1,"activityGeneration":0,"bytes":0,"command":"cat","cwd":{},"interactive":true,"livenessCommand":"","log":{},"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit","operation":{{"agent":"owner","epoch":1,"accountKey":"default","connectionId":"connection","threadId":"thread"}}}}"#,
+            serde_json::to_string(&std::env::temp_dir()).unwrap(),
+            serde_json::to_string(&std::env::temp_dir().join("watch.log")).unwrap()
+        );
+        let record: studio_runtime_store::MonitorRecord = serde_json::from_str(&fixture).unwrap();
+        for state in ["open", "closed", "pending"] {
+            let mut record = record.clone();
+            if state == "closed" {
+                record.stdin_closed = Some(true);
+            }
+            if state == "pending" {
+                record.input_attempt = Some(serde_json::from_str(r#"{"id":"old","agent":"owner","epoch":1,"accountKey":"default","connectionId":"connection","threadId":"thread","method":"command/exec/write","params":{"processId":"watch","deltaBase64":"YQ==","closeStdin":false},"status":"submitted","created":1}"#).unwrap());
+            }
+            let snapshot =
+                crate::monitor_policy::MonitorSnapshot::checked_stored(&record, owner.clone())
+                    .unwrap();
+            let operation = snapshot.operation().unwrap();
+            let projected = project_monitor_bound(&record, &owner, Some("connection"), None);
+            for (action, resize) in [
+                (BackgroundTaskAction::Input, false),
+                (BackgroundTaskAction::Resize, true),
+            ] {
+                let input = crate::monitor_policy::Input {
+                    text: "x".into(),
+                    rows: resize.then_some(24),
+                    cols: resize.then_some(80),
+                    close_stdin: false,
+                };
+                let admitted =
+                    crate::monitor_policy::begin_input(&snapshot, operation, "new", &input, 2.0)
+                        .is_ok();
+                assert_eq!(
+                    projected.view.display.actions.contains(&action),
+                    admitted,
+                    "{state}: {action:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn task_record_projection_publishes_background_display_policy() {
+        let raw = json!({"id":"a:task:1","agent":"a","created":1,"itemId":"task:1","kind":"tool","status":"running","turnId":"turn","type":"dynamicToolCall","name":"job"});
+        let task: studio_runtime_store::TaskRecord = serde::Deserialize::deserialize(&raw).unwrap();
+        let display = task_record_display(&task);
+        assert_eq!(display.kind, BackgroundTaskKind::BackgroundTask);
+        assert!(display.active);
+        assert!(display.in_background_list);
+        assert_eq!(display.stdin_state, None);
+        assert!(!display.actions.contains(&BackgroundTaskAction::Input));
+        assert!(
+            !serde_json::to_string(&display)
+                .unwrap()
+                .contains("stdinState")
+        );
+    }
+
+    #[test]
+    fn process_projection_publishes_display_policy() {
+        let owner = json!({"id":"owner","epoch":1,"accountKey":"default","threadId":"thread","autoWake":true});
+        let raw = json!({"id":"task","agent":"owner","ownerEpoch":1,"itemId":"task:123","status":"running","created":1,"kind":"tool","turnId":"turn","type":"dynamicToolCall","name":"job"});
+        let task: studio_runtime_store::TaskRecord = serde::Deserialize::deserialize(&raw).unwrap();
+        let projected = project(ProcessSourceKind::ClaudeTask, &task, &owner, None);
+        assert_eq!(
+            projected.view.display.kind,
+            BackgroundTaskKind::BackgroundTask
+        );
+        assert!(projected.view.display.active);
+    }
+
+    #[test]
     fn typed_monitor_process_projection_preserves_identity_and_capabilities() {
         let owner = json!({"id":"owner","epoch":1,"accountKey":"default","threadId":"thread","autoWake":true});
         for status in ["starting", "running"] {
-            let raw = json!({"id":"watch","agent":"owner","epoch":1,"status":status,"requestId":"request","created":1,"activityAt":1,"activityGeneration":0,"bytes":12,"command":"printf x","cwd":std::env::temp_dir(),"interactive":true,"livenessCommand":"","log":std::env::temp_dir().join("watch.log"),"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"x","timeout_ms":3600000,"wakeOn":"exit","operation":{"agent":"owner","epoch":1,"accountKey":"default","connectionId":"connection","threadId":"thread"}});
             let fixture = format!(
                 r#"{{"id":"watch","agent":"owner","epoch":1,"status":"{status}","requestId":"request","created":1,"activityAt":1,"activityGeneration":0,"bytes":12,"command":"printf x","cwd":{},"interactive":true,"livenessCommand":"","log":{},"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"x","timeout_ms":3600000,"wakeOn":"exit","operation":{{"agent":"owner","epoch":1,"accountKey":"default","connectionId":"connection","threadId":"thread"}}}}"#,
                 serde_json::to_string(&std::env::temp_dir()).unwrap(),
@@ -1049,12 +1375,18 @@ mod claim_identity_tests {
             );
             let record: studio_runtime_store::MonitorRecord =
                 serde_json::from_str(&fixture).unwrap();
-            let mut expected =
-                legacy_project_bound("monitor", &raw, &owner, Some("connection"), None);
-            let mut actual = project_monitor_bound(&record, &owner, Some("connection"), None);
-            expected.as_object_mut().unwrap().remove("_raw");
-            actual.as_object_mut().unwrap().remove("_raw");
-            assert_eq!(actual, expected);
+            let projected = project_monitor_bound(&record, &owner, Some("connection"), None);
+            assert_eq!(projected.source_connection.as_deref(), Some("connection"));
+            assert_eq!(projected.view.id, "watch");
+            assert_eq!(projected.view.tail, "x");
+            assert_eq!(projected.view.bytes, 12);
+            assert!(
+                projected
+                    .view
+                    .display
+                    .actions
+                    .contains(&BackgroundTaskAction::ReadOutput)
+            );
         }
     }
 
@@ -1179,16 +1511,14 @@ mod claim_identity_tests {
 fn typed_task_keeps_numeric_process_identity_projection() {
     let raw = r#"{"id":"a:i","agent":"a","created":1,"itemId":"i","turnId":"turn","kind":"command","status":"running","type":"commandExecution","name":"commandExecution","processId":42}"#;
     let typed: studio_runtime_store::TaskRecord = serde_json::from_str(raw).expect("task fixture");
-    let old = serde_json::json!({"id":"a:i","agent":"a","created":1,"itemId":"i","turnId":"turn","kind":"command","status":"running","type":"commandExecution","name":"commandExecution","processId":42});
     let owner = serde_json::json!({"id":"a","epoch":1,"accountKey":"default","threadId":"thread","autoWake":true});
-    let before = project("codex_task", &old, &owner, Some("connection"));
     let after = project(
-        "codex_task",
-        &studio_runtime_store::projection_value(&typed),
+        ProcessSourceKind::CodexTask,
+        &typed,
         &owner,
         Some("connection"),
     );
-    assert_eq!(before["key"], after["key"]);
-    assert_eq!(before["generation"], after["generation"]);
-    assert_eq!(before["canInput"], after["canInput"]);
+    assert_eq!(after.process_id, typed.process_id().cloned());
+    assert_eq!(after.item_id.as_deref(), Some("i"));
+    assert_eq!(after.view.source, ProcessSourceKind::CodexTask);
 }

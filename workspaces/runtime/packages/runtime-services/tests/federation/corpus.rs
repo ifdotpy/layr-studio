@@ -375,8 +375,12 @@ async fn callback_remote_message_uses_the_existing_federation_outbox() {
         "action":"message",
         "payload":{"link":"callback-link","worker":"lead","epoch":0,"parentEpoch":0,"args":args}
     });
+    let typed = |value: &Value| {
+        <crate::orchestration_wire::OrchestrationRequest as serde::Deserialize>::deserialize(value)
+            .expect("remote fixture")
+    };
     let queued = effects
-        .execute("peer-server", &envelope)
+        .execute("peer-server", &typed(&envelope))
         .await
         .expect("moved worker callback uses the federation service");
     let ExchangeOutcome::Applied(queued) = queued else {
@@ -387,7 +391,7 @@ async fn callback_remote_message_uses_the_existing_federation_outbox() {
     assert_eq!(rows(&store, "runtime_federation_outbox").len(), 1);
 
     let replay = effects
-        .execute("peer-server", &envelope)
+        .execute("peer-server", &typed(&envelope))
         .await
         .expect("stable remote callback replays its receipt");
     assert_eq!(replay, ExchangeOutcome::Applied(queued.clone()));
@@ -395,7 +399,12 @@ async fn callback_remote_message_uses_the_existing_federation_outbox() {
 
     let mut changed = envelope.clone();
     changed["payload"]["args"]["text"] = json!("changed");
-    assert!(effects.execute("peer-server", &changed).await.is_err());
+    assert!(
+        effects
+            .execute("peer-server", &typed(&changed))
+            .await
+            .is_err()
+    );
     assert_eq!(rows(&store, "runtime_federation_outbox").len(), 1);
 }
 

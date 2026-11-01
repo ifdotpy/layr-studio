@@ -2,7 +2,6 @@
 //! The account worker must serialize this port with stop and validate its connection
 //! ticket immediately before I/O. Unknown submissions are retained, never repeated.
 
-use serde::Deserialize;
 use serde_json::{Value, json};
 use std::hash::{Hash, Hasher};
 use studio_runtime_store::RuntimeStore;
@@ -289,7 +288,7 @@ pub async fn cancel_checked(
     id: &str,
     owner: Option<&str>,
     now: f64,
-    expected: Option<Value>,
+    expected: Option<crate::process_controls::ProcessRecord>,
 ) -> Result<Value, MonitorError> {
     let _sequence = native_sequence(store, id)?;
     let id_for_reservation = id.to_owned();
@@ -300,16 +299,10 @@ pub async fn cancel_checked(
                 let (snapshot, owner) = monitor_runtime::snapshot(tx, &id_for_reservation)?;
                 let owner =
                     serde_json::to_value(owner).map_err(studio_runtime_store::StoreError::from)?;
-                let source = expected["_sourceGeneration"].as_u64().map(|generation| {
+                let source = expected.source_generation.map(|generation| {
                     crate::account_session_runtime::ConnectionScope {
-                        account: expected["_sourceAccountKey"]
-                            .as_str()
-                            .unwrap_or_default()
-                            .to_owned(),
-                        connection: expected["_sourceConnectionId"]
-                            .as_str()
-                            .unwrap_or_default()
-                            .to_owned(),
+                        account: expected.source_account.clone().unwrap_or_default(),
+                        connection: expected.source_connection.clone().unwrap_or_default(),
                         generation,
                     }
                 });
@@ -317,7 +310,7 @@ pub async fn cancel_checked(
                     tx,
                     snapshot.record(),
                     &owner,
-                    expected["_sourceConnectionId"].as_str(),
+                    expected.source_connection.as_deref(),
                     source.as_ref(),
                 )
                 .map_err(|error| match error {
@@ -328,14 +321,12 @@ pub async fn cancel_checked(
                     }
                 })?;
                 if !crate::process_controls::matches(&process, expected)
-                    || process["capabilities"]["stop"] != true
-                    || studio_runtime_schema::studio_errors::MonitorStatus::deserialize(
-                        &expected["_raw"]["status"],
+                    || !process.view.display.actions.contains(
+                        &studio_runtime_schema::process_controls::BackgroundTaskAction::Stop,
                     )
-                    .ok()
-                        != Some(snapshot.record().status)
+                    || expected.monitor_status != Some(snapshot.record().status)
                     || snapshot.record().reattached_connection_id.as_deref()
-                        != expected["_raw"]["reattachedConnectionId"].as_str()
+                        != expected.reattached_connection.as_deref()
                 {
                     return Err(MonitorError::Refused(
                         "The process owner changed. Refresh the process list",

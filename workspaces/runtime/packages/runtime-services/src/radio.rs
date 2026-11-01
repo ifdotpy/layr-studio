@@ -409,7 +409,14 @@ impl RadioAuthorizationSnapshot {
                 continue;
             }
             let mut teams = Vec::new();
-            for (index, team) in row.peer_teams.into_iter().enumerate() {
+            for (index, team) in row
+                .peer_teams
+                .value()
+                .into_iter()
+                .flatten()
+                .cloned()
+                .enumerate()
+            {
                 if team.id.is_empty()
                     || team.name.is_empty()
                     || team.members.iter().any(String::is_empty)

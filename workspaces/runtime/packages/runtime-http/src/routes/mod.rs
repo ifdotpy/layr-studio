@@ -52,6 +52,8 @@ mod sync_delta;
 mod sync_documents;
 mod sync_stream;
 pub(crate) use sync_stream::SyncSessions;
+#[cfg(test)]
+pub(crate) use sync_stream::SyncStreamQuery;
 mod system_reads;
 mod terminals;
 mod tool_requests;

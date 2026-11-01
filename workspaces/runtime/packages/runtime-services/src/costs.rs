@@ -409,8 +409,12 @@ fn session_cost_on_reader(
     if has_claude_history && !has_account_profiles {
         return Err(CostsError::AccountProfilesRequired);
     }
-    let mut local_claude = read_local_claude_usage(state_root, &members, accounts)?;
-    let adjustments = RECEIPT_CACHES.with_borrow_mut(|caches| {
+    let local_claude = read_local_claude_usage(state_root, &members, accounts)?;
+    let loaded = crate::pricing::load_pricing(state_root)
+        .ok_or(CostsError::Dependency("costs/pricing-refresh"))?;
+    let catalog = loaded.catalog.as_ref().ok_or(CostsError::InvalidPricing)?;
+    let mut totals = group_prices_incremental(&tx, &root, &loaded, &providers_by_account)?;
+    RECEIPT_CACHES.with_borrow_mut(|caches| {
         let receipts = local_claude
             .iter()
             .map(|row| {
@@ -432,8 +436,22 @@ fn session_cost_on_reader(
             caches.entry(root.clone()).or_default(),
         )?;
         drop(receipts);
+        for (before, after) in adjustments {
+            if let Some(price) = before
+                .as_ref()
+                .and_then(|group| price_group(group, catalog, &providers_by_account, None))
+            {
+                totals.apply(&price, false);
+            }
+            if let Some(price) = after
+                .as_ref()
+                .and_then(|group| price_group(group, catalog, &providers_by_account, None))
+            {
+                totals.apply(&price, true);
+            }
+        }
         let mut accepted = partition.accepted.iter().peekable();
-        local_claude.retain(|row| {
+        for row in local_claude {
             let key = (
                 row.account_key.as_str(),
                 row.thread_id.as_str(),
@@ -444,44 +462,25 @@ fn session_cost_on_reader(
             }) {
                 accepted.next();
             }
-            accepted.peek().is_some_and(|(account, thread, id)| {
+            if accepted.peek().is_some_and(|(account, thread, id)| {
                 (account.as_str(), thread.as_str(), id.as_str()) == key
-            })
-        });
-        Ok::<_, CostsError>(adjustments)
+            }) {
+                let group = CostGroup {
+                    model: Some(row.usage.model),
+                    account_key: String::new(),
+                    tokens: row.usage.tokens,
+                    input_uncached: row.usage.tokens.input_tokens.is_some(),
+                    count: 1,
+                };
+                if let Some(price) =
+                    price_group(&group, catalog, &providers_by_account, Some("anthropic"))
+                {
+                    totals.apply(&price, true);
+                }
+            }
+        }
+        Ok::<_, CostsError>(())
     })?;
-    let loaded = crate::pricing::load_pricing(state_root)
-        .ok_or(CostsError::Dependency("costs/pricing-refresh"))?;
-    let catalog = loaded.catalog.as_ref().ok_or(CostsError::InvalidPricing)?;
-
-    let mut totals = group_prices_incremental(&tx, &root, &loaded, &providers_by_account)?;
-    for (before, after) in adjustments {
-        if let Some(price) = before
-            .as_ref()
-            .and_then(|group| price_group(group, catalog, &providers_by_account, None))
-        {
-            totals.apply(&price, false);
-        }
-        if let Some(price) = after
-            .as_ref()
-            .and_then(|group| price_group(group, catalog, &providers_by_account, None))
-        {
-            totals.apply(&price, true);
-        }
-    }
-    for row in local_claude {
-        let group = CostGroup {
-            model: Some(row.usage.model),
-            account_key: String::new(),
-            tokens: row.usage.tokens,
-            input_uncached: row.usage.tokens.input_tokens.is_some(),
-            count: 1,
-        };
-        if let Some(price) = price_group(&group, catalog, &providers_by_account, Some("anthropic"))
-        {
-            totals.apply(&price, true);
-        }
-    }
     let summary = totals.summary();
     tx.commit()?;
     if !summary.total.is_finite() {
@@ -1793,11 +1792,14 @@ fn parse_session_native_ids(reader: impl Read) -> Result<Vec<String>, ()> {
     Ok(ids.into_iter().collect())
 }
 
-/// Just the line kind: Claude writes many kinds of line and only assistant responses matter.
+/// Claude journal variants outside assistant responses have unrelated shapes.
 #[derive(Deserialize)]
-struct LogLineKind<'a> {
-    #[serde(rename = "type", borrow)]
-    kind: Option<&'a str>,
+#[serde(tag = "type")]
+enum LogLine {
+    #[serde(rename = "assistant")]
+    Assistant(AssistantLine),
+    #[serde(other)]
+    Other,
 }
 
 /// An assistant line of a Claude session log (a format Claude owns, not Studio).
@@ -1880,19 +1882,13 @@ fn parse_claude_log_reader_limited(
             incomplete = true;
             CLAUDE_LOG_LINES_SKIPPED.fetch_add(1, Ordering::Relaxed);
         };
-        match serde_json::from_slice::<LogLineKind>(&line) {
-            Ok(LogLineKind {
-                kind: Some("assistant"),
-            }) => {}
-            Ok(_) => continue,
+        let row = match serde_json::from_slice::<LogLine>(&line) {
+            Ok(LogLine::Assistant(row)) => row,
+            Ok(LogLine::Other) => continue,
             Err(_) => {
                 skipped();
                 continue;
             }
-        }
-        let Ok(row) = serde_json::from_slice::<AssistantLine>(&line) else {
-            skipped();
-            continue;
         };
         let Some(message) = row.message else {
             continue;
@@ -3191,7 +3187,7 @@ mod tests {
         fs::write(
             project.join("thread.jsonl"),
             format!(
-                "{good}\nnot json\n{wrong_type}\n{}\n",
+                "{good}\nnot json\n{wrong_type}\n{}\n{{}}\n",
                 json!({"type":"summary","message":"free text"})
             ),
         )
@@ -3210,10 +3206,10 @@ mod tests {
         let before = super::claude_log_lines_skipped();
         let rows = read_local_claude_usage(&state, &members, &accounts).expect("usage");
         assert_eq!(rows.len(), 1);
-        assert_eq!(super::claude_log_lines_skipped() - before, 2);
+        assert_eq!(super::claude_log_lines_skipped() - before, 3);
         // Parsed once per file version: a second read does not count them again.
         read_local_claude_usage(&state, &members, &accounts).expect("usage again");
-        assert_eq!(super::claude_log_lines_skipped() - before, 2);
+        assert_eq!(super::claude_log_lines_skipped() - before, 3);
 
         fs::write(
             state.join("account-servers/acct/sessions/thread.json"),

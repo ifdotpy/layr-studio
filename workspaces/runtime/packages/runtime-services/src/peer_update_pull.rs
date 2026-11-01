@@ -520,8 +520,16 @@ impl Puller {
         let (action, payload, timeout) = request(active.effect, &active.entry.record)
             .ok_or_else(|| Step::Failed("Invalid update step".to_owned()))?;
         let key = &active.entry.request_id;
-        let envelope =
-            json!({"requestId": key, "operation": [], "action": action, "payload": payload});
+        let kind = action
+            .parse()
+            .map_err(|_| Step::Failed("Invalid update step".to_owned()))?;
+        let command = crate::orchestration_wire::OrchestrationCommand::remaining(kind, payload)
+            .ok_or_else(|| Step::Failed("Invalid update step".to_owned()))?;
+        let envelope = crate::orchestration_wire::OrchestrationRequest {
+            request_id: key.clone(),
+            operation: Vec::new(),
+            command,
+        };
         let receipt = self
             .transport
             .exchange(&active.entry.target, &envelope, timeout)
@@ -1141,18 +1149,15 @@ mod tests {
         fn exchange<'a>(
             &'a self,
             _server: &'a str,
-            envelope: &'a Value,
+            envelope: &'a crate::orchestration_wire::OrchestrationRequest,
             _timeout: Duration,
         ) -> BoxFuture<
             'a,
             Result<studio_runtime_store::multi_server_delivery::RemoteReply, AccessError>,
         > {
             Box::pin(async move {
-                let action = envelope["action"].as_str().unwrap_or_default().to_owned();
-                let key = envelope["requestId"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_owned();
+                let action = envelope.command.kind().as_str().to_owned();
+                let key = envelope.request_id.clone();
                 self.actions.lock().unwrap().push(action.clone());
                 let away = crate::multi_server_auth::refused(503, "away", "The server is away");
                 if action == "update.chunk"
@@ -1183,7 +1188,12 @@ mod tests {
                 if action == "update.chunk"
                     && receipt.outcome == studio_runtime_schema::persistence::RemoteOutcome::Applied
                 {
-                    let offset = envelope["payload"]["offset"].as_u64().unwrap();
+                    let crate::orchestration_wire::OrchestrationCommand::UpdateChunk(payload) =
+                        &envelope.command
+                    else {
+                        panic!("update chunk")
+                    };
+                    let offset = payload["offset"].as_u64().unwrap();
                     self.offsets.lock().unwrap().push(offset);
                 }
                 if action == "update.chunk"

@@ -205,16 +205,12 @@ fn map_signed_error(
 
 async fn manage(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Value>,
+    ApiJson(body): ApiJson<studio_runtime_schema::federation_ingress::FederationRequest>,
 ) -> Result<Json<Value>, ApiError> {
+    use studio_runtime_schema::federation_ingress::FederationRequest;
     let origin = state.public_origin.clone();
-    let action = body
-        .get("action")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    match action.as_str() {
-        "create_invite" => {
+    match &body {
+        FederationRequest::CreateInvite { .. } => {
             let store = state.store.clone().ok_or_else(ApiError::internal)?;
             let whoami = state.tailscale_whoami.clone();
             let observed = match (origin.as_ref(), whoami) {
@@ -231,7 +227,7 @@ async fn manage(
             .map_err(map_service_error)?;
             Ok(Json(result))
         }
-        "status" => {
+        FederationRequest::Status {} => {
             let store = state.store.clone().ok_or_else(ApiError::internal)?;
             let snapshot = federation::snapshot(&store)
                 .await
@@ -241,10 +237,18 @@ async fn manage(
                 serde_json::to_value(snapshot).map_err(|_| ApiError::internal())?,
             ))
         }
-        "set_enabled" | "approve_peer" | "revoke_peer" | "room_options" | "create_room"
-        | "approve_room" | "accept_peer" => {
+        FederationRequest::SetEnabled { .. }
+        | FederationRequest::ApprovePeer { .. }
+        | FederationRequest::RevokePeer { .. }
+        | FederationRequest::RoomOptions { .. }
+        | FederationRequest::CreateRoom { .. }
+        | FederationRequest::ApproveRoom { .. }
+        | FederationRequest::AcceptPeer { .. } => {
             let store = state.store.clone().ok_or_else(ApiError::internal)?;
-            let queue_signal = matches!(action.as_str(), "create_room" | "approve_room");
+            let queue_signal = matches!(
+                body,
+                FederationRequest::CreateRoom { .. } | FederationRequest::ApproveRoom { .. }
+            );
             let wake = state.event_wake.clone();
             let result = federation::manage_with_origin(store, &body, origin.as_deref())
                 .await
@@ -252,18 +256,11 @@ async fn manage(
             if queue_signal {
                 wake.notify_one();
             }
-            if action == "create_invite" {
-                return Ok(Json(result));
-            }
             let snapshot = super::generated_json::<crate::generated::FederationSnapshot>(result)?;
             Ok(Json(
                 serde_json::to_value(snapshot).map_err(|_| ApiError::internal())?,
             ))
         }
-        _ => Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "Unknown federation action",
-        )),
     }
 }
 
@@ -290,5 +287,88 @@ inventory::submit! {
         name: "federation",
         routes: Some(routes),
         dependencies: &[],
+    }
+}
+
+#[cfg(test)]
+mod ingress_tests {
+    use axum::{
+        body::Body,
+        extract::ConnectInfo,
+        http::{Request, StatusCode},
+    };
+    use std::sync::Arc;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn typed_management_request_reaches_store() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            studio_runtime_store::RuntimeStore::open(Some(root.path()))
+                .await
+                .unwrap(),
+        );
+        let state = crate::router::HttpState::new(
+            "token".into(),
+            "workspace".into(),
+            root.path().to_string_lossy().into_owned(),
+            12345,
+            None,
+            Some(store.clone()),
+            None,
+        );
+        let app = crate::router::router(state).unwrap();
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/federation")
+            .header("host", "127.0.0.1:12345")
+            .header("content-type", "application/json")
+            .header("x-canvas-token", "token")
+            .header("x-canvas-workspace", "workspace")
+            .header(
+                crate::schema::API_SCHEMA_HASH_HEADER,
+                crate::schema::api_schema_hash(),
+            )
+            .extension(ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                54321,
+            ))))
+            .body(Body::from(r#"{"action":"set_enabled","enabled":true}"#))
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let snapshot = studio_runtime_services::federation::snapshot(&store)
+            .await
+            .unwrap();
+        assert_eq!(snapshot["enabled"], true);
+        store.transaction(|tx| {
+            tx.execute("INSERT INTO runtime_federation_rooms(id,record) VALUES(?1,?2)", rusqlite::params!["room", serde_json::json!({"id":"room", "peerId":"peer", "peerLabel":"Peer", "name":"Room", "status":"pending", "localMembers":[], "remoteMembers":[], "shareNames":false, "shareStatus":false, "created":1}).to_string()])?;
+            Ok(())
+        }).await.unwrap();
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/federation")
+            .header("host", "127.0.0.1:12345")
+            .header("content-type", "application/json")
+            .header("x-canvas-token", "token")
+            .header("x-canvas-workspace", "workspace")
+            .header(
+                crate::schema::API_SCHEMA_HASH_HEADER,
+                crate::schema::api_schema_hash(),
+            )
+            .extension(ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                54321,
+            ))))
+            .body(Body::from(
+                r#"{"action":"room_options","room_id":"room","disclosure":{"shareNames":true}}"#,
+            ))
+            .unwrap();
+        assert_eq!(app.oneshot(request).await.unwrap().status(), StatusCode::OK);
+        let snapshot = studio_runtime_services::federation::snapshot(&store)
+            .await
+            .unwrap();
+        assert_eq!(snapshot["rooms"][0]["shareNames"], true);
+        assert_eq!(snapshot["rooms"][0]["shareStatus"], false);
     }
 }

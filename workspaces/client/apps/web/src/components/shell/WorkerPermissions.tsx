@@ -10,11 +10,9 @@ export function inheritedClaudeMode(lead: Agent): ClaudePermissionMode | null {
   if (!isProviderKind(lead.provider)) return null;
   switch (lead.provider) {
     case ProviderKind.Codex:
-      return lead.yoloMode !== false ? "bypassPermissions" : "default";
+      return lead.permissionMode ?? "bypassPermissions";
     case ProviderKind.Claude: {
-      const mode = lead.claudeOptions?.permissionMode;
-      if (mode === undefined)
-        return lead.yoloMode === true ? "bypassPermissions" : "default";
+      const mode = lead.permissionMode ?? "default";
       return CLAUDE_PERMISSION_MODES.find((item) => item === mode) ?? null;
     }
   }
@@ -50,12 +48,17 @@ export function WorkerPermissions({
   switch (provider) {
     case ProviderKind.Codex: {
       const sandbox =
-        lead.yoloMode !== false
+        lead.permissionMode == null ||
+        lead.permissionMode === "bypassPermissions"
           ? "danger-full-access"
           : reviewer
             ? "read-only"
             : "workspace-write";
-      const approval = lead.yoloMode !== false ? "never" : "on-request";
+      const approval =
+        lead.permissionMode == null ||
+        lead.permissionMode === "bypassPermissions"
+          ? "never"
+          : "on-request";
       return (
         <p className="workspace-muted">
           Codex sandbox: {sandbox}. Approval policy: {approval}. These settings

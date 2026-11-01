@@ -65,14 +65,28 @@ fn pages_redaction_and_request_checks_match_python() {
         }
     }
     for case in oracle["validate"].as_array().unwrap() {
-        let result = crate::multi_server_tools::validate_exec(
-            &case["payload"],
-            case["foreign"].as_bool().unwrap(),
-        );
-        match (&result, case.get("value")) {
-            (Ok(value), Some(expected)) => assert_eq!(value, expected, "{case}"),
-            (Err(message), None) => assert_eq!(json!(message), case["error"], "{case}"),
-            _ => panic!("{case}: {result:?}"),
+        let mut input = case["payload"].clone();
+        input["actor"] = json!("fixture");
+        let parsed =
+            <crate::orchestration_exec::ExecRequest as serde::Deserialize>::deserialize(&input);
+        match parsed {
+            Ok(mut request) => {
+                let result = crate::multi_server_tools::validate_exec(
+                    &request,
+                    case["foreign"].as_bool().unwrap(),
+                );
+                match (result, case.get("value")) {
+                    (Ok(()), Some(expected)) => {
+                        request.normalize_defaults();
+                        let mut actual = json!(request);
+                        actual.as_object_mut().unwrap().remove("actor");
+                        assert_eq!(&actual, expected, "{case}");
+                    }
+                    (Err(message), None) => assert_eq!(json!(message), case["error"], "{case}"),
+                    (result, _) => panic!("{case}: {result:?}"),
+                }
+            }
+            Err(_) => assert!(case.get("value").is_none(), "{case}"),
         }
     }
 }
@@ -292,6 +306,9 @@ async fn synchronous_start_reads_one_snapshot_after_job_completion() {
         "actor": "actor", "cwd": root.path(), "timeout": SYNC_SECONDS,
         "command": ["/bin/sh", "-c", "printf stdout; printf stderr >&2"]
     });
+    let payload =
+        <crate::orchestration_exec::ExecRequest as serde::Deserialize>::deserialize(payload)
+            .unwrap();
     tokio::time::pause();
     let start = runner.start("principal", "local", &payload, "waited-command");
     tokio::pin!(start);
@@ -370,6 +387,9 @@ async fn synchronous_start_wait_timeout_detaches_the_job_without_reading_output(
         "actor": "actor", "cwd": root.path(), "timeout": SYNC_SECONDS,
         "command": ["/bin/sh", "-c", "printf retained"]
     });
+    let payload =
+        <crate::orchestration_exec::ExecRequest as serde::Deserialize>::deserialize(payload)
+            .unwrap();
     tokio::time::pause();
     let start = runner.start("principal", "local", &payload, "wait-timeout");
     tokio::pin!(start);
@@ -400,7 +420,12 @@ async fn synchronous_start_wait_timeout_detaches_the_job_without_reading_output(
     let result = runner
         .read(
             "principal",
-            &json!({"actor": "actor", "handle": "wait-timeout"}),
+            &crate::orchestration_exec::ReadRequest {
+                actor: "actor".into(),
+                handle: "wait-timeout".into(),
+                stdout_offset: None,
+                stderr_offset: None,
+            },
         )
         .await
         .unwrap();
@@ -417,6 +442,9 @@ async fn synchronous_start_lost_response_keeps_the_job_and_rejects_reexecution()
         "actor": "actor", "cwd": root.path(), "timeout": SYNC_SECONDS,
         "command": ["/bin/sh", "-c", "printf retained"]
     });
+    let payload =
+        <crate::orchestration_exec::ExecRequest as serde::Deserialize>::deserialize(payload)
+            .unwrap();
     tokio::time::pause();
     {
         let start = runner.start("principal", "local", &payload, "lost-response");
@@ -441,7 +469,12 @@ async fn synchronous_start_lost_response_keeps_the_job_and_rejects_reexecution()
     let result = runner
         .read(
             "principal",
-            &json!({"actor": "actor", "handle": "lost-response"}),
+            &crate::orchestration_exec::ReadRequest {
+                actor: "actor".into(),
+                handle: "lost-response".into(),
+                stdout_offset: None,
+                stderr_offset: None,
+            },
         )
         .await
         .unwrap();
@@ -464,6 +497,9 @@ async fn synchronous_start_explicit_cancel_still_stops_the_job() {
         "actor": "actor", "cwd": root.path(), "timeout": SYNC_SECONDS,
         "command": ["/bin/sh", "-c", "read input"]
     });
+    let payload =
+        <crate::orchestration_exec::ExecRequest as serde::Deserialize>::deserialize(payload)
+            .unwrap();
     tokio::time::pause();
     let (result, cancelled) = with_clock_frozen(async {
         tokio::join!(
@@ -476,8 +512,12 @@ async fn synchronous_start_explicit_cancel_still_stops_the_job() {
                 runner
                     .control(
                         "principal",
-                        "exec_cancel",
-                        &json!({"actor": "actor", "handle": "cancel-waited"}),
+                        &crate::orchestration_exec::ControlRequest::Cancel(
+                            crate::orchestration_exec::CancelRequest {
+                                actor: "actor".into(),
+                                handle: "cancel-waited".into(),
+                            },
+                        ),
                         "cancel-request",
                     )
                     .await

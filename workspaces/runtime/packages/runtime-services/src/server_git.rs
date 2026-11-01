@@ -12,6 +12,8 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use base64::Engine;
+use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -27,6 +29,94 @@ pub const MAX_BUNDLE: u64 = 256 * 1024 * 1024;
 pub const CHUNK: usize = 128 * 1024;
 /// Folder under the state directory that holds exported bundles.
 pub const EXPORT_FOLDER: &str = "server-exports";
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GitReadRequest {
+    pub cwd: String,
+    pub argv: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ExportRequest {
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub cwd: studio_runtime_schema::queue_command::Field<String>,
+    pub branch: String,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub known: studio_runtime_schema::queue_command::Field<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChunkRequest {
+    pub export: String,
+    pub offset: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReleaseRequest {
+    pub export: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ExportReply {
+    pub already_have: Option<String>,
+    pub export: Option<String>,
+    pub bytes: u64,
+    pub sha256: Option<String>,
+    pub branch: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ChunkReply {
+    pub offset: u64,
+    pub next_offset: u64,
+    pub data: String,
+    pub sha256: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(untagged)]
+pub(crate) enum GitReply {
+    Read {
+        #[serde(rename = "exitCode")]
+        exit_code: i32,
+        output: String,
+        truncated: bool,
+    },
+    Chunk {
+        offset: u64,
+        #[serde(rename = "nextOffset")]
+        next_offset: u64,
+        data: String,
+        sha256: String,
+    },
+    Released {
+        released: String,
+    },
+    Already {
+        #[serde(rename = "alreadyHave")]
+        already_have: String,
+        bytes: u64,
+        branch: String,
+    },
+    Exported {
+        export: String,
+        bytes: u64,
+        sha256: String,
+        branch: String,
+    },
+}
 
 /// Repository values that only describe data (Python `GIT_DATA_KEYS`).
 const GIT_DATA_KEYS: &[&str] = &[
@@ -621,39 +711,44 @@ fn export_path(root: &Path, export: &str) -> Result<PathBuf, GitError> {
         .join(format!("{}.bundle", id.hyphenated())))
 }
 
-fn text<'a>(payload: &'a Value, key: &str) -> Option<&'a str> {
-    payload.get(key).and_then(Value::as_str)
+#[derive(Clone, Debug)]
+pub(crate) enum GitOperation {
+    Read(GitReadRequest),
+    Export(ExportRequest),
+    Chunk(ChunkRequest),
+    Release(ReleaseRequest),
 }
 
-/// The receive side of the Git channel actions: Python `_git_action` for
-/// `git`, `export`, `chunk` and `release`. `root` is the state directory.
-pub fn receive(root: &Path, action: &str, payload: &Value, key: &str) -> Result<Value, GitError> {
-    match action {
-        "release" => {
-            let export = text(payload, "export").ok_or_else(|| refused("Supply an export"))?;
-            let path = export_path(root, export)?;
+/// Execute a typed paired-server Git request.
+pub(crate) fn receive(
+    root: &Path,
+    operation: &GitOperation,
+    key: &str,
+) -> Result<GitReply, GitError> {
+    match operation {
+        GitOperation::Release(payload) => {
+            let path = export_path(root, &payload.export)?;
             match std::fs::remove_file(&path) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(failed(error.to_string())),
             }
-            return Ok(json!({"released": export}));
+            Ok(GitReply::Released {
+                released: payload.export.clone(),
+            })
         }
-        "chunk" => {
-            let export = text(payload, "export").ok_or_else(|| refused("Supply an export"))?;
-            let path = export_path(root, export)?;
+        GitOperation::Chunk(payload) => {
+            let path = export_path(root, &payload.export)?;
             if !path.is_file() {
                 return Err(refused("The Git bundle has expired or was released"));
             }
             let size = std::fs::metadata(&path)
                 .map_err(|error| failed(error.to_string()))?
                 .len();
-            let offset = payload
-                .get("offset")
-                .filter(|value| value.is_u64() || value.is_i64())
-                .and_then(Value::as_i64)
-                .filter(|offset| *offset >= 0 && (*offset as u64) < size)
-                .ok_or_else(|| refused("Invalid bundle offset"))? as u64;
+            let offset = payload.offset;
+            if offset >= size || offset > i64::MAX as u64 {
+                return Err(refused("Invalid bundle offset"));
+            }
             use std::io::{Seek, SeekFrom};
             let mut file = std::fs::File::open(&path).map_err(|error| failed(error.to_string()))?;
             file.seek(SeekFrom::Start(offset))
@@ -662,52 +757,59 @@ pub fn receive(root: &Path, action: &str, payload: &Value, key: &str) -> Result<
             file.take(CHUNK as u64)
                 .read_to_end(&mut data)
                 .map_err(|error| failed(error.to_string()))?;
-            return Ok(json!({
-                "offset": offset,
-                "nextOffset": offset + data.len() as u64,
-                "data": base64::engine::general_purpose::STANDARD.encode(&data),
-                "sha256": data_encoding::HEXLOWER.encode(&Sha256::digest(&data)),
-            }));
+            Ok(GitReply::Chunk {
+                offset,
+                next_offset: offset + data.len() as u64,
+                data: base64::engine::general_purpose::STANDARD.encode(&data),
+                sha256: data_encoding::HEXLOWER.encode(&Sha256::digest(&data)),
+            })
         }
-        _ => {}
+        GitOperation::Export(payload) => {
+            let directory =
+                checked_directory(payload.cwd.value().map(String::as_str).unwrap_or_default())?;
+            export(root, &directory, payload, key)
+        }
+        GitOperation::Read(payload) => {
+            let directory = checked_directory(&payload.cwd)?;
+            let argv = &payload.argv;
+            if argv.is_empty()
+                || argv.len() > 8
+                || argv.iter().any(|arg| arg.chars().count() > 1024)
+            {
+                return Err(refused("Supply a bounded Git argument list"));
+            }
+            let argv: Vec<&str> = argv.iter().map(String::as_str).collect();
+            if !allowed_read(&argv) {
+                return Err(refused("Unsupported read-only Git command"));
+            }
+            let mut arguments: Vec<&str> = Vec::with_capacity(argv.len() + 3);
+            if matches!(argv[0], "log" | "show") {
+                arguments.push(argv[0]);
+                arguments.extend(["--no-show-signature", "--no-ext-diff", "--no-textconv"]);
+                arguments.extend(&argv[1..]);
+            } else if argv[0] == "status" {
+                arguments.extend(&argv);
+                arguments.extend(["--no-renames", "--ignore-submodules=all"]);
+            } else {
+                arguments.extend(&argv);
+            }
+            let (raw, code, truncated) =
+                bounded_command(&git_command(&directory, &arguments, false)?)?;
+            Ok(GitReply::Read {
+                exit_code: code,
+                output: String::from_utf8_lossy(&raw).into_owned(),
+                truncated,
+            })
+        }
     }
-    let directory = PathBuf::from(text(payload, "cwd").unwrap_or_default());
+}
+
+fn checked_directory(cwd: &str) -> Result<PathBuf, GitError> {
+    let directory = PathBuf::from(cwd);
     if !directory.is_absolute() || !directory.is_dir() {
         return Err(refused("Supply an existing absolute repository folder"));
     }
-    if action == "export" {
-        return export(root, &directory, payload, key);
-    }
-    let argv = payload
-        .get("argv")
-        .and_then(Value::as_array)
-        .filter(|argv| !argv.is_empty() && argv.len() <= 8)
-        .and_then(|argv| {
-            argv.iter()
-                .map(|value| value.as_str().filter(|value| value.chars().count() <= 1024))
-                .collect::<Option<Vec<&str>>>()
-        })
-        .ok_or_else(|| refused("Supply a bounded Git argument list"))?;
-    if !allowed_read(&argv) {
-        return Err(refused("Unsupported read-only Git command"));
-    }
-    let mut arguments: Vec<&str> = Vec::with_capacity(argv.len() + 3);
-    if matches!(argv[0], "log" | "show") {
-        arguments.push(argv[0]);
-        arguments.extend(["--no-show-signature", "--no-ext-diff", "--no-textconv"]);
-        arguments.extend(&argv[1..]);
-    } else if argv[0] == "status" {
-        arguments.extend(&argv);
-        arguments.extend(["--no-renames", "--ignore-submodules=all"]);
-    } else {
-        arguments.extend(&argv);
-    }
-    let (raw, code, truncated) = bounded_command(&git_command(&directory, &arguments, false)?)?;
-    Ok(json!({
-        "exitCode": code,
-        "output": String::from_utf8_lossy(&raw),
-        "truncated": truncated,
-    }))
+    Ok(directory)
 }
 
 /// The complete read-only command forms (Python `_git_action`).
@@ -732,22 +834,29 @@ fn allowed_read(argv: &[&str]) -> bool {
     fixed.contains(&argv)
 }
 
-fn export(root: &Path, directory: &Path, payload: &Value, key: &str) -> Result<Value, GitError> {
-    let branch = text(payload, "branch")
-        .filter(|branch| !branch.starts_with('-'))
-        .ok_or_else(|| refused("Supply a worker branch"))?;
+fn export(
+    root: &Path,
+    directory: &Path,
+    payload: &ExportRequest,
+    key: &str,
+) -> Result<GitReply, GitError> {
+    let branch = payload.branch.as_str();
+    if branch.starts_with('-') {
+        return Err(refused("Supply a worker branch"));
+    }
     if git_read(directory, &["check-ref-format", "--branch", branch])?.1 != 0 {
         return Err(refused("Invalid worker branch"));
     }
-    let known = match payload.get("known") {
-        None => Vec::new(),
-        Some(Value::Array(values)) if values.len() <= 16 => values
-            .iter()
-            .map(|value| value.as_str().filter(|commit| commit_hash(commit)))
-            .collect::<Option<Vec<&str>>>()
-            .ok_or_else(|| refused("Supply at most 16 complete commit hashes"))?,
-        Some(_) => return Err(refused("Supply at most 16 complete commit hashes")),
+    let known = match &payload.known {
+        studio_runtime_schema::queue_command::Field::Missing => &[][..],
+        studio_runtime_schema::queue_command::Field::Value(known) => known.as_slice(),
+        studio_runtime_schema::queue_command::Field::Null => {
+            return Err(refused("Supply at most 16 complete commit hashes"));
+        }
     };
+    if known.len() > 16 || known.iter().any(|commit| !commit_hash(commit)) {
+        return Err(refused("Supply at most 16 complete commit hashes"));
+    }
     let mut exclusions = Vec::new();
     for commit in known {
         let object = format!("{commit}^{{commit}}");
@@ -763,7 +872,11 @@ fn export(root: &Path, directory: &Path, payload: &Value, key: &str) -> Result<V
     }
     for commit in &exclusions {
         if git_read(directory, &["merge-base", "--is-ancestor", &tip, commit])?.1 == 0 {
-            return Ok(json!({"alreadyHave": tip, "bytes": 0, "branch": branch}));
+            return Ok(GitReply::Already {
+                already_have: tip,
+                bytes: 0,
+                branch: branch.to_owned(),
+            });
         }
     }
     let export_id = identity(&[key, "bundle"]);
@@ -785,12 +898,12 @@ fn export(root: &Path, directory: &Path, payload: &Value, key: &str) -> Result<V
     let bytes = std::fs::metadata(&path)
         .map_err(|error| failed(error.to_string()))?
         .len();
-    Ok(json!({
-        "export": export_id,
-        "bytes": bytes,
-        "sha256": file_digest(&path)?,
-        "branch": branch,
-    }))
+    Ok(GitReply::Exported {
+        export: export_id,
+        bytes,
+        sha256: file_digest(&path)?,
+        branch: branch.to_owned(),
+    })
 }
 
 #[cfg(test)]
@@ -798,6 +911,41 @@ fn export(root: &Path, directory: &Path, payload: &Value, key: &str) -> Result<V
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+
+    fn receive(root: &Path, action: &str, payload: &Value, key: &str) -> Result<Value, GitError> {
+        let operation = match action {
+            "git" => GitOperation::Read(GitReadRequest::deserialize(payload).unwrap()),
+            "export" => GitOperation::Export(ExportRequest::deserialize(payload).unwrap()),
+            "chunk" => GitOperation::Chunk(ChunkRequest::deserialize(payload).unwrap()),
+            "release" => GitOperation::Release(ReleaseRequest::deserialize(payload).unwrap()),
+            _ => panic!("unknown fixture action"),
+        };
+        super::receive(root, &operation, key).map(|reply| match reply {
+            GitReply::Read {
+                exit_code,
+                output,
+                truncated,
+            } => json!({"exitCode":exit_code,"output":output,"truncated":truncated}),
+            GitReply::Chunk {
+                offset,
+                next_offset,
+                data,
+                sha256,
+            } => json!({"offset":offset,"nextOffset":next_offset,"data":data,"sha256":sha256}),
+            GitReply::Released { released } => json!({"released":released}),
+            GitReply::Already {
+                already_have,
+                bytes,
+                branch,
+            } => json!({"alreadyHave":already_have,"bytes":bytes,"branch":branch}),
+            GitReply::Exported {
+                export,
+                bytes,
+                sha256,
+                branch,
+            } => json!({"export":export,"bytes":bytes,"sha256":sha256,"branch":branch}),
+        })
+    }
 
     fn git(directory: &Path, arguments: &[&str]) {
         let status = Command::new("git")

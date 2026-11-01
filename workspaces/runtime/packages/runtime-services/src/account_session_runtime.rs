@@ -2239,13 +2239,12 @@ mod persistence_tests {
                     json!({"stateDir":"fixture"}),
                     false,
                 )?;
-                SyncDocumentsRepository::put_entity(
-                    tx,
-                    "rateLimit",
-                    "other",
-                    json!({"accountKey":"other","at":1.0,"data":{"accountId":"other"}}),
-                    false,
+                let raw = serde_json::value::RawValue::from_string(
+                    json!({"accountKey":"other","at":1.0,"data":{"accountId":"other"}}).to_string(),
                 )?;
+                let view =
+                    studio_runtime_schema::usage_limits::RateLimitView::read(&raw, "other", 1.0)?;
+                SyncDocumentsRepository::put_entity(tx, "rateLimit", "other", view, false)?;
                 Ok(())
             })
             .await
@@ -2274,7 +2273,12 @@ mod persistence_tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(serde_json::from_str::<Value>(&raw).unwrap()["value"], value);
+        let entity: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(entity["value"]["observation"], value);
+        assert_eq!(
+            entity["value"]["projection"]["runway"]["next"]["color"],
+            "gray"
+        );
         assert_eq!(cache.lock().unwrap().get("default"), Some(&value));
         let restored =
             studio_runtime_store::account_state::limits_snapshots(&store.test_reader().unwrap())
@@ -2532,8 +2536,8 @@ mod limits_runtime_tests {
             )
             .unwrap();
         assert_eq!(
-            serde_json::from_str::<Value>(&raw).unwrap()["value"]["data"]["rateLimits"]["primary"]
-                ["usedPercent"],
+            serde_json::from_str::<Value>(&raw).unwrap()["value"]["observation"]["data"]["rateLimits"]
+                ["primary"]["usedPercent"],
             100.0
         );
     }
@@ -2583,10 +2587,12 @@ mod limits_runtime_tests {
             100
         );
         assert!(wake.notified().now_or_never().is_some());
-        assert!(!f.runtime.ingest_limits(event).await.unwrap());
+        assert!(!f.runtime.ingest_limits(event.clone()).await.unwrap());
         assert!(wake.notified().now_or_never().is_none());
-        assert!(!f.runtime.ingest_limits(update(&f, 3, 100)).await.unwrap());
-        assert!(wake.notified().now_or_never().is_none());
+        let mut newer = update(&f, 3, 100);
+        newer.observed_at = event.observed_at + 1.0;
+        assert!(f.runtime.ingest_limits(newer).await.unwrap());
+        assert!(wake.notified().now_or_never().is_some());
         let store = f.runtime.store.as_ref().unwrap();
         let raw: String = store
             .test_reader()
@@ -2598,14 +2604,14 @@ mod limits_runtime_tests {
             )
             .unwrap();
         assert_eq!(
-            serde_json::from_str::<Value>(&raw).unwrap()["value"]["data"]["rateLimits"]["primary"]
-                ["usedPercent"],
+            serde_json::from_str::<Value>(&raw).unwrap()["value"]["observation"]["data"]["rateLimits"]
+                ["primary"]["usedPercent"],
             100
         );
     }
 
     #[tokio::test]
-    async fn timestamp_only_limits_keep_sync_sequence_and_refresh_observation() {
+    async fn timestamp_only_limits_publish_and_refresh_observation() {
         let (f, _, _) = fixture([], false).await;
         let first = update(&f, 1, 50);
         let mut repeated = first.clone();
@@ -2617,15 +2623,27 @@ mod limits_runtime_tests {
             &store.test_reader().unwrap(),
         )
         .unwrap();
-        assert!(!f.runtime.ingest_limits(repeated.clone()).await.unwrap());
+        assert!(f.runtime.ingest_limits(repeated.clone()).await.unwrap());
         let after = studio_runtime_store::SyncDocumentsRepository::entity_sequence(
             &store.test_reader().unwrap(),
         )
         .unwrap();
-        assert_eq!(
-            after, before,
-            "timestamp-only observations must not publish sync changes"
+        assert!(
+            after > before,
+            "timestamp-only observations must publish sync changes"
         );
+        let raw: String = store
+            .test_reader()
+            .unwrap()
+            .query_row(
+                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let envelope: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(envelope["value"]["observation"]["at"], repeated.observed_at);
+        assert!(envelope["value"]["projection"]["runway"]["computedAt"].is_number());
         assert_eq!(
             f.runtime.limits_snapshot("default").unwrap()["at"],
             repeated.observed_at

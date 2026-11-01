@@ -1,5 +1,11 @@
 pub(super) mod support;
 
+fn paired_request(
+    value: &serde_json::Value,
+) -> studio_runtime_services::orchestration_wire::OrchestrationRequest {
+    <studio_runtime_services::orchestration_wire::OrchestrationRequest as serde::Deserialize>::deserialize(value).expect("paired fixture")
+}
+
 /// The `send` command of `POST /api/commands`; the command id is the message id.
 fn send_command(id: &str, room: &str, text: &str, assets: &serde_json::Value) -> String {
     serde_json::json!({
@@ -171,7 +177,7 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
         fn exchange<'a>(
             &'a self,
             _: &'a str,
-            _: &'a serde_json::Value,
+            _: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
             _: std::time::Duration,
         ) -> futures_util::future::BoxFuture<
             'a,
@@ -196,7 +202,7 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
         fn execute<'a>(
             &'a self,
             _: &'a str,
-            _: &'a serde_json::Value,
+            _: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
         ) -> futures_util::future::BoxFuture<'a, Result<ExchangeOutcome, AccessError>> {
             Box::pin(async {
                 Err(refused(
@@ -401,12 +407,12 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
         Arc::new(effects),
     );
     let delivered = driver
-        .receive("source-server", &envelope, 100)
+        .receive("source-server", &paired_request(&envelope), 100)
         .await
         .expect("paired input applies to the home parent");
     assert!(matches!(delivered, ExchangeOutcome::Applied(_)));
     let replay = driver
-        .receive("source-server", &envelope, 101)
+        .receive("source-server", &paired_request(&envelope), 101)
         .await
         .expect("paired input receipt replays");
     assert_eq!(replay, delivered);
@@ -435,7 +441,7 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
         Ok::<_, studio_runtime_store::StoreError>(())
     }).await.expect("simulate response loss after committed input effect");
     let recovered = driver
-        .receive("source-server", &envelope, 102)
+        .receive("source-server", &paired_request(&envelope), 102)
         .await
         .expect("running input receipt safely replays its exact effect");
     let (ExchangeOutcome::Applied(first_receipt), ExchangeOutcome::Applied(recovered_receipt)) =
@@ -484,14 +490,14 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
     );
     assert_eq!(
         uncertain_driver
-            .receive("source-server", &uncertain_envelope, 103)
+            .receive("source-server", &paired_request(&uncertain_envelope), 103)
             .await
             .expect("first uncertain input"),
         ExchangeOutcome::Unknown
     );
     assert_eq!(
         driver
-            .receive("source-server", &uncertain_envelope, 104)
+            .receive("source-server", &paired_request(&uncertain_envelope), 104)
             .await
             .expect("uncertain retry remains unknown"),
         ExchangeOutcome::Unknown
@@ -538,7 +544,7 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
         serde_json::from_str(&raw).expect("Unicode paired envelope");
     assert_eq!(unicode_envelope["payload"]["text"], unicode_text);
     let unicode_delivery = driver
-        .receive("source-server", &unicode_envelope, 104)
+        .receive("source-server", &paired_request(&unicode_envelope), 104)
         .await
         .expect("10,000 Unicode characters pass paired validation");
     assert!(matches!(unicode_delivery, ExchangeOutcome::Applied(_)));
@@ -564,7 +570,7 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
     changed_content["payload"]["text"] = serde_json::json!("Changed paired content");
     assert_eq!(
         driver
-            .receive("source-server", &changed_content, 103)
+            .receive("source-server", &paired_request(&changed_content), 103)
             .await
             .expect_err("same identity cannot change content")
             .status(),
@@ -574,14 +580,14 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
     followup["requestId"] = serde_json::json!(uuid::Uuid::now_v7().to_string());
     followup["payload"]["kind"] = serde_json::json!("followup");
     let refused_followup = driver
-        .receive("source-server", &followup, 105)
+        .receive("source-server", &paired_request(&followup), 105)
         .await
         .expect("model-authored followup is a definite refusal");
     assert!(matches!(refused_followup, ExchangeOutcome::NotApplied(_)));
     let effects = RuntimeOrchestrationEffects::new(receiver_store.clone());
     assert_eq!(
         effects
-            .execute("attacker-server", &envelope)
+            .execute("attacker-server", &paired_request(&envelope))
             .await
             .expect_err("wrong paired principal is refused")
             .status(),
@@ -592,7 +598,7 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
     wrong_link["payload"]["link"] = serde_json::json!("missing-link");
     assert_eq!(
         effects
-            .execute("source-server", &wrong_link)
+            .execute("source-server", &paired_request(&wrong_link))
             .await
             .expect_err("unknown link is refused")
             .status(),
@@ -603,7 +609,7 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
     wrong_epoch["payload"]["parentEpoch"] = serde_json::json!(1);
     assert_eq!(
         effects
-            .execute("source-server", &wrong_epoch)
+            .execute("source-server", &paired_request(&wrong_epoch))
             .await
             .expect_err("wrong link epoch is refused")
             .status(),
@@ -630,7 +636,7 @@ async fn http_queues_remote_anchor_message_as_paired_event_intent() {
         Ok::<_, studio_runtime_store::StoreError>(())
     }).await.expect("simulate link epoch change after effect and before inbox completion");
     let epoch_changed_retry = driver
-        .receive("source-server", &envelope, 106)
+        .receive("source-server", &paired_request(&envelope), 106)
         .await
         .expect("a committed-effect retry stays uncertain after link epoch change");
     assert_eq!(epoch_changed_retry, ExchangeOutcome::Unknown);

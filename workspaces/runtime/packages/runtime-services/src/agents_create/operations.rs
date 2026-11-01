@@ -965,8 +965,12 @@ async fn create(
     let yolo = request.yolo.unwrap_or_else(|| {
         previous
             .as_ref()
-            .and_then(|record| record.get("yoloMode"))
-            .and_then(Value::as_bool)
+            .and_then(|record| record.get("permissionMode"))
+            .and_then(Value::as_str)
+            .map(|mode| {
+                mode == studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
+                    .as_str()
+            })
             .unwrap_or(true)
     });
     let concurrency = request.concurrency.unwrap_or(DEFAULT_SUBAGENT_CONCURRENCY);
@@ -1044,6 +1048,9 @@ async fn create(
         created,
         draft.then_some(signature.clone()),
     );
+    if let Some(mode) = request.intent.permission_mode {
+        record["permissionMode"] = json!(mode);
+    }
     if !draft && role == "orchestrator" {
         record["maxAgentsExplicit"] = json!(request.max_agents.is_some());
     }
@@ -1145,7 +1152,13 @@ async fn create(
             reused["hostProjectPath"] = json!(cwd);
             reused["accountKey"] = json!(account);
             reused["executionSettingsAccountKey"] = json!(account);
-            reused["yoloMode"] = json!(yolo);
+            if let Some(mode) = request.intent.permission_mode.or_else(|| {
+                request.yolo.map(
+                    studio_runtime_schema::claude_permissions::PermissionMode::from_full_access,
+                )
+            }) {
+                reused["permissionMode"] = json!(mode);
+            }
             if request.intent.model.value().is_some() {
                 reused["model"] = json!(settings.model);
                 reused["effort"] = json!(settings.effort);
@@ -1372,7 +1385,9 @@ async fn create_child(
         .unwrap_or("default");
     let parent_project_id = parent.get("projectId").cloned();
     let parent_project_server_id = parent.get("projectServerId").cloned();
-    let root_yolo = root.get("yoloMode").cloned().unwrap_or(json!(true));
+    let root_permission = root.get("permissionMode").cloned().unwrap_or(json!(
+        studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
+    ));
     let root_max_agents = root
         .get("maxAgents")
         .cloned()
@@ -1438,7 +1453,7 @@ async fn create_child(
         record["profileInstructions"] = json!(profile.instructions);
     }
     record["provider"] = json!(provider);
-    record["yoloMode"] = root_yolo;
+    record["permissionMode"] = root_permission;
     record["maxAgents"] = root_max_agents;
     let created = record
         .get("created")
@@ -1696,9 +1711,6 @@ pub async fn configure(
             if current != limit {
                 root["concurrency"] = json!(limit);
                 root["agentModeRevision"] = json!(revision + 1);
-                root["agentModeChangedAt"] =
-                    json!(crate::event_write::unix_time().map_err(|_| MutationError::Internal)?);
-                root["agentModeChangedBy"] = json!("user");
             }
             if root.get("maxAgentsExplicit").and_then(Value::as_bool) != Some(true) {
                 root["maxAgents"] = json!(prior_max.max(limit + TEAM_AGENT_HEADROOM));
@@ -2171,14 +2183,12 @@ pub async fn conversation(
                 MutationAdmission::Replay(reply) => return Ok(reply.agent),
                 MutationAdmission::Fresh(admitted) => admitted,
             };
-            let before = SyncDocumentsRepository::entity_sequence(tx)?;
             let resolved = settings.as_ref().ok_or(OperationError::Internal)?;
             target["pendingSettings"] = json!({"model":resolved.model,"effort":resolved.effort,
                 "nativeEffort":resolved.native_effort,"fastMode":resolved.fast_mode,
                 "daybreakEnabled":resolved.daybreak_enabled,"cyberAccessProgram":resolved.cyber_access_program});
             target["pendingSettingsAccountKey"] = json!(account);
             save_agent(tx, &target, &validate)?;
-            let target = crate::sync_documents::with_entity_delta(tx, before, target)?;
             crate::event_write::settle_request(tx, &admitted, Some(&request.id), &SettingsReply {agent:target.clone()}).map_err(MutationError::from)?;
             Ok(target)
         }).await;
@@ -2228,7 +2238,6 @@ pub async fn conversation(
             },
             None => None,
         };
-        let before = SyncDocumentsRepository::entity_sequence(tx)?;
         if (execution_requested || request.cwd.is_some())
             && (truthy(target.get("inFlight"))
                 || matches!(
@@ -2258,7 +2267,9 @@ pub async fn conversation(
             if target.get("isLead").and_then(Value::as_bool) != Some(true) {
                 return Err(MutationError::LeadRequired.into());
             }
-            target["yoloMode"] = json!(yolo);
+            target["permissionMode"] = json!(
+                studio_runtime_schema::claude_permissions::PermissionMode::from_full_access(yolo)
+            );
         }
         if request.cwd.is_some() {
             if target
@@ -2308,7 +2319,6 @@ pub async fn conversation(
         if let Some(yolo) = request.yolo_mode {
             update_team_yolo(tx, &request.id, yolo, &validate)?;
         }
-        let projection = crate::sync_documents::with_entity_delta(tx, before, projection)?;
         if let Some(admitted) = permission_admission {
             crate::event_write::settle_request(
                 tx,
@@ -2368,7 +2378,9 @@ fn update_team_yolo(
         if id == root_id {
             continue;
         }
-        record["yoloMode"] = json!(yolo);
+        record["permissionMode"] = json!(
+            studio_runtime_schema::claude_permissions::PermissionMode::from_full_access(yolo)
+        );
         save_agent(tx, &record, validate)?;
     }
     Ok(())
@@ -3081,7 +3093,7 @@ pub(crate) fn build_agent_record(
     let mut record = merge_records([
         json!({
           "id":id,"threadId":null,"accountKey":account,"executionSettingsAccountKey":account,
-          "provider":provider.key(),"yoloMode":yolo,"name":name,"prompt":prompt,"cwd":cwd,
+          "provider":provider.key(),"permissionMode":studio_runtime_schema::claude_permissions::PermissionMode::from_full_access(yolo),"name":name,"prompt":prompt,"cwd":cwd,
           "role":role,"isLead":is_lead,"needsTitle":draft,"parentId":null,"rootId":id,
           "model":crate::provider_adapter::default_model(provider),"effort":"medium",
           "fastMode":false,"daybreakEnabled":false,"cyberAccessProgram":"standard",
@@ -3127,22 +3139,31 @@ async fn mutate(
     context: &Context<'_>,
     operation: impl FnOnce(&Transaction<'_>) -> Result<Value, OperationError> + Send + 'static,
 ) -> Result<Value, OperationError> {
-    context
-        .store
-        .transaction_with_error(move |tx| {
-            let before = SyncDocumentsRepository::entity_sequence(tx)?;
-            let result = operation(tx)?;
-            Ok(crate::sync_documents::with_entity_delta(
-                tx, before, result,
-            )?)
-        })
-        .await
+    context.store.transaction_with_error(operation).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::host_worker_create::CreationCatalog as _;
+
+    #[tokio::test]
+    async fn team_permission_toggle_updates_every_provider() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        store.transaction_with_error(|tx| -> Result<(), OperationError> {
+            for (id, provider, mode) in [("root", "codex", "default"), ("codex", "codex", "default"), ("claude", "claude", "plan")] {
+                let record = json!({"id":id,"rootId":"root","epoch":1,"status":"idle","accountKey":"default","compactions":0,"provider":provider,"permissionMode":mode});
+                AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(record).unwrap())?;
+            }
+            update_team_yolo(tx, "root", true, &|_, _| true)?;
+            for id in ["codex", "claude"] {
+                let agent = AgentRepository::get(tx, &studio_runtime_store::AgentId::from(id))?.unwrap();
+                assert_eq!(agent.permission_mode, Some(studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions));
+            }
+            Ok(())
+        }).await.unwrap();
+    }
 
     #[tokio::test]
     async fn profile_admission_refuses_a_malformed_stored_profile() {
@@ -3231,7 +3252,7 @@ mod tests {
                     &AgentRecord::from_value(json!({"compactions":0,
                         "provider":"codex", "id":"lead", "rootId":"lead", "epoch":0,
                         "status":"idle", "autoWake":true, "isLead":true, "accountKey":"default",
-                        "cwd":cwd, "model":"first", "yoloMode":true,
+                        "cwd":cwd, "model":"first", "permissionMode":"bypassPermissions",
                     }))
                     .expect("record"),
                 )?;
@@ -3332,7 +3353,10 @@ mod tests {
         let live = AgentRepository::get(&store.test_reader().expect("reader"), &"lead".into())
             .expect("read")
             .expect("lead");
-        assert_eq!(live.extra.get("yoloMode"), Some(&json!(true)));
+        assert_eq!(
+            live.permission_mode,
+            Some(studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions)
+        );
         assert_eq!(live.extra["pendingSettings"]["model"], "later");
     }
 

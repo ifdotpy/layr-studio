@@ -113,7 +113,8 @@ impl Actor {
             root_id: record.root_id.0.clone(),
             parent_id: record.parent_id.as_deref().map(str::to_owned),
             is_lead: record.is_lead == Some(true),
-            reviewer: record.extra.get("role").and_then(Value::as_str) == Some("reviewer"),
+            reviewer: record.role.value().copied()
+                == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer),
             provider: record
                 .extra
                 .get("provider")

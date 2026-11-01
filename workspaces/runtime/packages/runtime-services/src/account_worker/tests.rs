@@ -350,7 +350,7 @@ async fn seed_fixture_store(root: &std::path::Path, store: RuntimeStore) -> Runt
         "worktree":false,"workspaceMode":"shared","nativeEffort":null,"effort":"medium","events":0
     });
     record.as_object_mut().unwrap().extend(json!({
-        "executionSettingsAccountKey":"default","provider":"codex","yoloMode":true,
+        "executionSettingsAccountKey":"default","provider":"codex","permissionMode":"bypassPermissions",
         "prompt":"temporary","role":"orchestrator","isLead":true,"needsTitle":false,
         "parentId":null,"fastMode":false,"daybreakEnabled":false,"maxAgents":8,"tokenBudget":null,
         "turnId":null,"inFlight":false,"turnEpoch":0,"usageResumeEnabled":true,"tokensUsed":0,
@@ -2980,8 +2980,8 @@ async fn scenario_loaded_thread_follow_up_starts_the_turn_directly(
         .run(move |s| async move {
             scheduler::lifecycle_transaction_with(s.as_ref(), move |tx| {
                 let mut row = AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
-                row.extra
-                    .insert("profileInstructions".into(), json!("changed profile"));
+                row.profile_instructions =
+                    studio_runtime_schema::queue_command::Field::Value("changed profile".into());
                 AgentRepository::put(tx, &row)?;
                 Ok(())
             })
@@ -4843,7 +4843,9 @@ async fn vm_actor_turn_with_host_mcp(child: bool) {
                         record.root_id = parent.id.clone();
                         record.parent_id = Some(parent.id.0);
                         record.is_lead = Some(false);
-                        record.extra.insert("role".into(), json!("implementer"));
+                        record.role = studio_runtime_schema::queue_command::Field::Value(
+                            studio_runtime_schema::creation_intent::AgentRole::Implementer,
+                        );
                     }
                     record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
                     record.extra.insert("layrReady".into(), json!(true));

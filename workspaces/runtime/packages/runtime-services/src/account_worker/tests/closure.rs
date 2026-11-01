@@ -1003,7 +1003,7 @@ async fn a_lead_prepared_with_the_old_progress_file_resumes_its_thread() {
                 .transaction_with(move |tx| {
                     let mut row =
                         AgentRepository::get(tx, &AgentId::from(record_id.as_str()))?.unwrap();
-                    row.extra.insert("yoloMode".into(), json!(false));
+                    row.permission_mode = Some(studio_runtime_schema::claude_permissions::PermissionMode::Default);
                     row.extra
                         .insert("nativeRoleGuidance".into(), json!(old_role));
                     let versions =

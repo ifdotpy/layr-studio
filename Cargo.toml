@@ -85,6 +85,7 @@ tokio-rusqlite = "=0.8.0"
 sysinfo = { version = "=0.39.6", default-features = false, features = ["system"] }
 sha2 = "=0.11.1"
 strum = { version = "=0.28.0", default-features = false, features = ["derive"] }
+unicode-general-category = "=1.1.0"
 thiserror = "=2.0.21"
 zstd-safe = { version = "=8.0.0", default-features = false, features = ["std", "zdict_builder"] }
 
@@ -96,6 +97,7 @@ tokio = { version = "=1.54.1", features = ["fs", "io-util", "macros", "net", "pr
 tokio-util = { version = "=0.7.20", default-features = false }
 tower = { version = "=0.5.3", features = ["util"] }
 tower-http = { version = "=0.7.1", default-features = false }
+regex = "=1.13.1"
 ring = "=0.17.14"
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pki-types = { version = "=1.15.1", features = ["std"] }

@@ -7,6 +7,7 @@ pub mod agent_progress;
 pub mod annotation_command;
 pub mod annotation_record;
 pub mod api_schema;
+pub mod approvals;
 pub mod bounded_integer;
 pub mod bounded_text;
 pub mod checkpoint_record;
@@ -24,20 +25,29 @@ pub mod creation_intent;
 pub mod delivery;
 pub mod desktop;
 pub mod event_metadata;
+pub mod federation_ingress;
 pub mod federation_limits;
+pub mod http_bounded_ingress;
+pub mod http_ingress;
 pub mod idle_compaction;
 pub mod json_compat;
 pub mod json_object;
 pub mod layr_evidence;
+pub mod limit_reset_request;
 pub mod model_catalog;
 pub mod monitor_record;
+pub mod multi_server_access;
+pub mod multi_server_ingress;
 pub mod multi_server_protocol;
 pub mod notification_text;
+pub mod peer_team_ingress;
 pub mod persistence;
 pub mod plan_record;
 pub mod pricing;
 pub mod process_controls;
 pub mod progress_selector;
+pub mod project_ingress;
+pub mod project_projection;
 pub mod project_record;
 pub mod provider_call_contract;
 pub mod provider_diagnostics;
@@ -53,7 +63,11 @@ pub mod raw_json;
 pub mod raw_object;
 pub mod records;
 pub mod recovery_record;
+pub mod request_projection;
 pub mod request_record;
+pub mod resource_notification;
+pub mod resource_ref;
+pub mod room_record;
 pub mod rule_record;
 pub mod shared_values;
 pub mod shell_policy;
@@ -68,6 +82,7 @@ pub mod supervisor_contract;
 pub mod task_command;
 pub mod task_record;
 pub mod task_results;
+pub mod terminal_ingress;
 pub mod terminal_record;
 pub mod transcript_asset;
 pub mod transcript_record;
@@ -800,7 +815,6 @@ fn prepare_schemas() -> SchemaResult<CompiledSchemas> {
         "ModelChoices",
         "ProjectEntityDto",
         "ProjectMutationRecord",
-        "RequestEntityDto",
         "ResourceRef",
         "SubscriptionAdd",
         "SubscriptionCursor",
@@ -831,7 +845,6 @@ fn prepare_schemas() -> SchemaResult<CompiledSchemas> {
         "AutoPairRequest",
         "DevicePairRequest",
         "AgentRecordResponse",
-        "AgentRequest",
         "AppearancePreferences",
         "AnnotationReceipt",
         "CheckpointSummary",
@@ -850,8 +863,6 @@ fn prepare_schemas() -> SchemaResult<CompiledSchemas> {
         "PullRequest",
         "PullResult",
         "RenameServer",
-        "QuestionEntry",
-        "QuestionHistory",
         "QueueItem",
         "RequestRecordResponse",
         "RuleRecordResponse",
@@ -1559,7 +1570,7 @@ mod tests {
             "collection":"task",
             "id":"task-1",
             "legacyEnvelopeField":true,
-            "value":{"id":"task-1","legacyField":true}
+            "value":{"id":"task-1","agent":"agent-1","created":1,"kind":"command","status":"running","turnId":"turn-1","name":"command","display":{"kind":"command","kindLabel":"command","title":"command","active":true,"indicator":"working","label":"running","inBackgroundList":true,"actions":[]},"legacyField":true}
         });
         assert_eq!(
             normalize_sync_entity_payload("task", "task-1", false, &mut valid_task)
@@ -1571,7 +1582,7 @@ mod tests {
             json!({
                 "collection":"task",
                 "id":"task-1",
-                "value":{"id":"task-1"}
+                "value":{"id":"task-1","agent":"agent-1","created":1,"kind":"command","status":"running","turnId":"turn-1","name":"command","display":{"kind":"command","kindLabel":"command","title":"command","active":true,"indicator":"working","label":"running","inBackgroundList":true,"actions":[]}}
             })
         );
 

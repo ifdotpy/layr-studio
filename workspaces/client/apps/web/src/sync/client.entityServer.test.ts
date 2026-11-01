@@ -1,4 +1,5 @@
 import { EventHistory } from "./eventHistory.testHelper";
+import { backgroundDisplay } from "../components/componentTestFixtures";
 import {
   SubscriptionReplyKind,
   AgentSource,
@@ -418,6 +419,7 @@ it("revives moved rows after inline and staged local eviction in either scope or
           kind: "command" as const,
           status: "running" as const,
           created: 1,
+          display: backgroundDisplay(),
         },
       });
       const deliver = async (

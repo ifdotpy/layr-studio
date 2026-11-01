@@ -8,6 +8,7 @@ use axum::http::{HeaderMap, StatusCode};
 use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use studio_runtime_schema::http_bounded_ingress as bounds;
 use studio_runtime_services::questions_write::{
     self, ComplaintResponseWrite, ComplaintWriteReply, QuestionsWriteError,
 };
@@ -218,6 +219,7 @@ fn async_question_error(error: QuestionsWriteError) -> ApiError {
         }
         E::InvalidStoredObject { object, id } => ApiError::invalid_stored(object, &id),
         E::Store(error) => ApiError::stored(error),
+        E::Approval(error) => ApiError::stored(error.into()),
         E::Json(_) | E::Clock => ApiError::internal(),
         E::Coordination(error) => match error {
             studio_runtime_services::coordination::CoordinationError::RequestResult(error) => {
@@ -336,9 +338,23 @@ fn callback_error(error: studio_runtime_services::provider_callbacks::CallbackEr
         }
     }
 }
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeferBody {
+    id: String,
+    deferred: bool,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeleteBody {
+    id: String,
+    #[serde(rename = "deferred")]
+    _deferred: Option<bool>,
+}
+
 async fn defer_question(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<crate::generated::QuestionDeferBody>,
+    ApiJson(body): ApiJson<DeferBody>,
 ) -> Result<Json<crate::generated::MutationReceipt>, ApiError> {
     let id = body.id;
     let deferred = body.deferred;
@@ -354,10 +370,23 @@ async fn defer_question(
 
 async fn delete_question(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<crate::generated::QuestionBody>,
+    ApiJson(body): ApiJson<DeleteBody>,
 ) -> Result<Json<crate::generated::MutationReceipt>, ApiError> {
     let id = body.id;
-    let result = if let Some(runtime) = state.callback_runtime.clone() {
+    // An agent question is a typed approval; a provider card goes through the callback runtime.
+    let agent_id = id.clone();
+    let agent_question = match state.store.clone() {
+        Some(store) => store
+            .transaction_with_error(move |transaction| {
+                questions_write::delete_agent_question(transaction, &agent_id)
+            })
+            .await
+            .map_err(api_error)?,
+        None => None,
+    };
+    let result = if let Some(result) = agent_question {
+        result
+    } else if let Some(runtime) = state.callback_runtime.clone() {
         runtime
             .delete_question(&id, callback_clock().map_err(|_| ApiError::internal())?)
             .await
@@ -375,6 +404,39 @@ async fn delete_question(
     Ok(Json(super::generated_json::<
         crate::generated::MutationReceipt,
     >(result)?))
+}
+
+type ComplaintField<T> = studio_runtime_schema::queue_command::Field<T>;
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct ComplaintBody {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_complaint_action"
+    )]
+    action: Option<crate::generated::ComplaintBodyAction>,
+    #[serde(default, skip_serializing_if = "ComplaintField::is_missing")]
+    complaint_id: ComplaintField<String>,
+    id: studio_runtime_schema::bounded_text::BoundedText<1, { bounds::COMPLAINT_ID_MAX_CHARS }>,
+    #[serde(default, skip_serializing_if = "ComplaintField::is_missing")]
+    lead: ComplaintField<String>,
+    #[serde(default, skip_serializing_if = "ComplaintField::is_missing")]
+    status: ComplaintField<studio_runtime_schema::complaints::ComplaintResponseStatus>,
+    text: studio_runtime_schema::bounded_text::BoundedText<1, { bounds::COMPLAINT_TEXT_MAX_CHARS }>,
+    #[serde(default, skip_serializing_if = "ComplaintField::is_missing")]
+    version: ComplaintField<
+        studio_runtime_schema::bounded_integer::BoundedInteger<
+            0,
+            { studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64 },
+        >,
+    >,
+}
+fn present_complaint_action<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<crate::generated::ComplaintBodyAction>, D::Error> {
+    <crate::generated::ComplaintBodyAction as serde::Deserialize>::deserialize(deserializer)
+        .map(Some)
 }
 
 /// The generated wire DTO retains absent/null fields for receipt signatures.
@@ -398,27 +460,28 @@ enum ComplaintCommand {
 #[derive(serde::Serialize)]
 struct ComplaintSignature<'a> {
     #[serde(flatten)]
-    body: &'a crate::generated::ComplaintBody,
+    body: &'a ComplaintBody,
     operation: &'static str,
 }
 
-impl TryFrom<crate::generated::ComplaintBody> for ComplaintCommand {
+impl TryFrom<ComplaintBody> for ComplaintCommand {
     type Error = ApiError;
 
-    fn try_from(body: crate::generated::ComplaintBody) -> Result<Self, Self::Error> {
+    fn try_from(body: ComplaintBody) -> Result<Self, Self::Error> {
         use crate::generated::ComplaintBodyAction;
 
         match body.action.as_ref().unwrap_or(&ComplaintBodyAction::Submit) {
             ComplaintBodyAction::Submit => {
                 let lead = body
                     .lead
-                    .flatten()
+                    .value()
+                    .cloned()
                     .filter(|lead| !lead.trim().is_empty())
                     .ok_or_else(|| ApiError::validation(vec![Value::String("body.lead".into())]))?;
                 Ok(Self::Submit {
                     lead,
-                    id: body.id,
-                    text: body.text,
+                    id: body.id.as_str().to_owned(),
+                    text: body.text.as_str().to_owned(),
                 })
             }
             ComplaintBodyAction::Respond => {
@@ -432,18 +495,18 @@ impl TryFrom<crate::generated::ComplaintBody> for ComplaintCommand {
                     .map_err(|_| ApiError::internal())?;
                 let signature = studio_runtime_store::sha256_hex(encoded.as_bytes());
                 let (Some(complaint_id), Some(status), Some(version)) = (
-                    body.complaint_id.flatten(),
-                    body.status.flatten(),
-                    body.version.flatten(),
+                    body.complaint_id.value().cloned(),
+                    body.status.value().copied(),
+                    body.version.value().copied(),
                 ) else {
                     return Err(ApiError::validation(vec![Value::String("body".into())]));
                 };
                 Ok(Self::Respond {
                     complaint_id,
-                    id: body.id,
-                    text: body.text,
+                    id: body.id.as_str().to_owned(),
+                    text: body.text.as_str().to_owned(),
                     status,
-                    version,
+                    version: version.get(),
                     signature,
                 })
             }
@@ -453,7 +516,7 @@ impl TryFrom<crate::generated::ComplaintBody> for ComplaintCommand {
 
 async fn complaints(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<crate::generated::ComplaintBody>,
+    ApiJson(body): ApiJson<ComplaintBody>,
 ) -> Result<Json<crate::generated::ComplaintRecordResponse>, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let command = ComplaintCommand::try_from(body)?;
@@ -549,7 +612,11 @@ fn complaint_response(
         author: record.author.ok_or_else(ApiError::internal)?,
         lead_id: record.lead_id.ok_or_else(ApiError::internal)?,
         text: record.text.ok_or_else(ApiError::internal)?,
-        created: record.created.ok_or_else(ApiError::internal)?,
+        created: record
+            .created
+            .as_ref()
+            .and_then(|value| value.seconds())
+            .ok_or_else(ApiError::internal)?,
         status,
         recipient: Some(
             match record.recipient {
@@ -559,8 +626,8 @@ fn complaint_response(
             .to_owned(),
         ),
         version: record.version,
-        updated: record.updated,
-        read_at: Some(record.read_at),
+        updated: record.updated.as_ref().and_then(|value| value.seconds()),
+        read_at: Some(record.read_at.as_ref().and_then(|value| value.seconds())),
         responses: Some(responses),
         source_type: record.source_type.map(|value| {
             match value {
@@ -597,6 +664,7 @@ fn api_error(error: QuestionsWriteError) -> ApiError {
             ApiError::invalid_stored(object, &id)
         }
         QuestionsWriteError::Store(error) => ApiError::stored(error),
+        QuestionsWriteError::Approval(error) => ApiError::stored(error.into()),
         QuestionsWriteError::Event(error) => super::work_items::write_error(error),
         QuestionsWriteError::Json(_) | QuestionsWriteError::Clock => ApiError::internal(),
         QuestionsWriteError::Coordination(_) | QuestionsWriteError::Projects(_) => {
@@ -615,5 +683,25 @@ inventory::submit! {
             "question-answer/monitor-approval",
             "cross-server/remote-events",
         ],
+    }
+}
+
+#[cfg(test)]
+mod strict_question_tests {
+    #[test]
+    fn question_requests_are_closed() {
+        assert!(serde_json::from_str::<super::ComplaintBody>(r#"{"id":"i","text":"t"}"#).is_ok());
+        assert!(serde_json::from_str::<super::ComplaintBody>(r#"{"id":"i","text":""}"#).is_err());
+        assert!(
+            serde_json::from_str::<super::ComplaintBody>(r#"{"id":"i","text":"t","extra":1}"#)
+                .is_err()
+        );
+        assert!(serde_json::from_str::<super::DeferBody>(r#"{"id":"a","deferred":true}"#).is_ok());
+        assert!(
+            serde_json::from_str::<super::DeferBody>(r#"{"id":"a","deferred":true,"extra":1}"#)
+                .is_err()
+        );
+        assert!(serde_json::from_str::<super::DeleteBody>(r#"{"id":"a","deferred":null}"#).is_ok());
+        assert!(serde_json::from_str::<super::DeleteBody>(r#"{"id":"a","extra":1}"#).is_err());
     }
 }

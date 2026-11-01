@@ -59,8 +59,10 @@ function fixture() {
 const inlineViews = [
   {
     ref: { kind: "processes", agentId: "lead" },
-    snapshot: { processes: { processes: [] as never[] } },
-    value: { processes: [] },
+    snapshot: {
+      processes: { processes: [] as never[], activities: [] as never[] },
+    },
+    value: { processes: [], activities: [] },
   },
   {
     ref: { kind: "complaint", complaintId: "message" },
