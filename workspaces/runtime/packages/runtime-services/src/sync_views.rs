@@ -984,6 +984,19 @@ mod projection_plan_tests {
     }
 
     #[test]
+    fn removed_compaction_flag_changes_agent_projection() {
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"compactionsObservedOnly":false}"#;
+        let record = serde_json::from_str(raw).unwrap();
+        let projected =
+            super::agent_entity_view(&record, &super::AgentViewContext::default()).unwrap();
+        assert!(projected.get("compactionsObservedOnly").is_none());
+        assert_eq!(
+            studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
+            "331e9f9d3338dd940d71775993842096c0457bcbcc1dfac427e79f0d7f826e20"
+        );
+    }
+
+    #[test]
     fn naming_states_preserve_agent_projection_hash() {
         let mut views = Vec::new();
         for manual in ["", ",\"manualName\":true", ",\"manualName\":false"] {

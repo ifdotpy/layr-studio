@@ -4857,11 +4857,6 @@ export interface components {
        */
       compactions?: number | undefined;
       /**
-       * Compactionsobservedonly
-       * @default null
-       */
-      compactionsObservedOnly?: boolean | undefined;
-      /**
        * Complaintmisses
        * @default null
        */
@@ -24857,11 +24852,6 @@ export interface components {
        * @default null
        */
       compactions?: number | null | undefined;
-      /**
-       * Compactionsobservedonly
-       * @default null
-       */
-      compactionsObservedOnly?: boolean | null | undefined;
       /** @default null */
       contextUsage?:
         | components["schemas"]["TranscriptContextUsage"]

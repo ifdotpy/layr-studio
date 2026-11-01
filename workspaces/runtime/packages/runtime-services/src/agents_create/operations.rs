@@ -3099,7 +3099,7 @@ pub(crate) fn build_agent_record(
           "fastMode":false,"daybreakEnabled":false,"cyberAccessProgram":"standard",
           "maxAgents":max_agents,"status":status,"autoWake":true,
           "epoch":0,"turnId":null,"inFlight":false,"turnEpoch":0,"usageResumeEnabled":true,
-          "compactions":0,"compactionsObservedOnly":false,"contextUsage":null,
+          "compactions":0,"contextUsage":null,
           "events":0,"created":created,"error":null,"profileId":null,"profileInstructions":""
         }),
         json!({

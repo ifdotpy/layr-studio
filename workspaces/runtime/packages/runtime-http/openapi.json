@@ -7142,11 +7142,6 @@
             "title": "Compactions",
             "type": "integer"
           },
-          "compactionsObservedOnly": {
-            "default": null,
-            "title": "Compactionsobservedonly",
-            "type": "boolean"
-          },
           "complaintMisses": {
             "default": null,
             "maximum": 9007199254740991,
@@ -56384,18 +56379,6 @@
             ],
             "default": null,
             "title": "Compactions"
-          },
-          "compactionsObservedOnly": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Compactionsobservedonly"
           },
           "contextUsage": {
             "anyOf": [
