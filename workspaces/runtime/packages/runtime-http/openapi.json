@@ -29356,13 +29356,13 @@
             "maximum": 9007199254740991,
             "minimum": 0,
             "title": "Created",
-            "type": "integer"
+            "type": "number"
           },
           "expires": {
             "maximum": 9007199254740991,
             "minimum": 0,
             "title": "Expires",
-            "type": "integer"
+            "type": "number"
           },
           "inviteId": {
             "title": "Inviteid",

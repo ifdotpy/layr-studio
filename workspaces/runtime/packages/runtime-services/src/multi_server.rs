@@ -74,9 +74,9 @@ fn snapshot_in_transaction(
         .map(|r| {
             let (id, raw) = r?;
             let v = decode_invite(&id, &raw)?;
-            let expires = v.expires.as_i64()
+            let expires = v.expires.as_f64()
                 .ok_or_else(|| invalid("runtime_access_invites", &id, "expires"))?;
-            let created = v.created.value().and_then(serde_json::Number::as_i64)
+            let created = v.created.value().and_then(serde_json::Number::as_f64)
                 .ok_or_else(|| invalid("runtime_access_invites", &id, "created"))?;
             Ok(json!({"inviteId":v.invite_id(),"expires":expires,"created":created,"status":v.status.as_str()}))
         })
@@ -839,6 +839,42 @@ mod tests {
             super::invite_fingerprint(&missing_body).unwrap(),
             super::invite_fingerprint(&null_body).unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn snapshot_accepts_invitation_fractional_timestamps() {
+        let root = tempfile::tempdir().expect("isolated multi-server state");
+        let store = Arc::new(RuntimeStore::open(Some(root.path())).await.unwrap());
+        let identity = Credentials::default()
+            .identity(Arc::clone(&store), Some("https://studio.example.ts.net"))
+            .await
+            .unwrap();
+        let invite = create_invite(
+            Arc::clone(&store),
+            &identity,
+            &json!({"action":"create_invite","requestId":"snapshot-invite"}),
+            "local",
+            Some("owner@example.test"),
+        )
+        .await
+        .unwrap();
+        store
+            .transaction_with(|tx| {
+                tx.execute(
+                    "UPDATE runtime_access_invites SET record=json_set(record,'$.expires',1234.5)",
+                    [],
+                )?;
+                Ok::<_, studio_runtime_store::StoreError>(())
+            })
+            .await
+            .unwrap();
+        let snapshot = super::snapshot(&store, &identity).await.unwrap();
+        assert_eq!(
+            snapshot["invites"][0]["inviteId"],
+            invite["invitation"]["inviteId"]
+        );
+        assert!(snapshot["invites"][0]["created"].as_f64().unwrap() > 0.0);
+        assert_eq!(snapshot["invites"][0]["expires"], 1234.5);
     }
 
     #[tokio::test]
