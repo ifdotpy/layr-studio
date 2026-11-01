@@ -9,7 +9,7 @@ use studio_runtime_schema::shared_values::{
     SYNC_ENTITY_STREAM_MAX_DOCUMENTS, SYNC_STREAM_EVENT_MAX_BYTES,
 };
 use studio_runtime_schema::sync_protocol::{SubscriptionEntityScope, subscription_entity_scopes};
-use studio_runtime_store::{EntityPage, SyncDocumentsRepository};
+use studio_runtime_store::EntityPage;
 
 /// OpenAPI owns collections; typed selectors keep payload probing out of delivery.
 pub(super) fn selection(
@@ -131,7 +131,9 @@ inventory::submit! {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore, StoreError};
+    use studio_runtime_store::{
+        AgentRecord, AgentRepository, RuntimeStore, StoreError, SyncDocumentsRepository,
+    };
 
     #[test]
     fn typed_entity_selectors_match_every_openapi_scope() {

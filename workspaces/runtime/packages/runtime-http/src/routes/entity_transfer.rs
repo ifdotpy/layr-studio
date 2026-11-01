@@ -895,18 +895,19 @@ mod tests {
     }
     /// Write or delete a work row the way the writer does: the child history rows follow.
     async fn put_work(store: &studio_runtime_store::RuntimeStore, id: &str, record: Option<Value>) {
+        let id = id.to_owned();
         store
-            .transaction(|tx| {
+            .transaction(move |tx| {
                 match record {
                     Some(record) => {
                         tx.execute(
                             "INSERT INTO runtime_work(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",
                             rusqlite::params![id, record.to_string()],
                         )?;
-                        studio_runtime_store::work_history::reconcile(tx, id, &record)?;
+                        studio_runtime_store::work_history::reconcile(tx, &id, &record)?;
                     }
                     None => {
-                        tx.execute("DELETE FROM runtime_work WHERE id=?1", [id])?;
+                        tx.execute("DELETE FROM runtime_work WHERE id=?1", [&id])?;
                     }
                 }
                 Ok(())
@@ -914,7 +915,7 @@ mod tests {
             .await
             .expect("work write");
     }
-    fn documents(entry: Option<ResourceRevisionEntry>) -> Vec<crate::generated::SyncEntity> {
+    fn docs_of(entry: Option<ResourceRevisionEntry>) -> Vec<crate::generated::SyncEntity> {
         entry
             .expect("inline delta")
             .entity_changes
@@ -957,7 +958,7 @@ mod tests {
         )
         .await
         .expect("work change");
-        let documents = documents(entry);
+        let documents = docs_of(entry);
         let detail = find(&documents, "workDetail", "w1").expect("work detail");
         assert_eq!(detail.op, crate::generated::SyncEntityOp::Upsert);
         assert!(find(&documents, "workResult", "w1:1").is_some());
@@ -972,7 +973,7 @@ mod tests {
         let (entry, _, cursor) = prepare(&state, &event(&state), resource.clone(), Some(cursor))
             .await
             .expect("shorter history");
-        let documents = documents(entry);
+        let documents = docs_of(entry);
         assert_eq!(
             find(&documents, "workResult", "w1:1")
                 .expect("removed entry")
@@ -986,7 +987,7 @@ mod tests {
             .await
             .expect("work delete");
         assert_eq!(
-            find(&documents(entry), "workDetail", "w1")
+            find(&docs_of(entry), "workDetail", "w1")
                 .expect("deleted detail")
                 .op,
             crate::generated::SyncEntityOp::Delete
@@ -1015,7 +1016,7 @@ mod tests {
         let (entry, _, cursor) = prepare(&state, &event(&state), resource.clone(), Some(cursor))
             .await
             .expect("owner execution fan-out");
-        assert!(find(&documents(entry), "workDetail", "w2").is_some());
+        assert!(find(&docs_of(entry), "workDetail", "w2").is_some());
 
         // A status change of a dependency refreshes the detail of its dependent.
         let mut dependent = work_record("w4", "lead", "worker", "review", 0);
@@ -1039,7 +1040,7 @@ mod tests {
         let (entry, _, cursor) = prepare(&state, &event(&state), resource.clone(), Some(cursor))
             .await
             .expect("dependency change");
-        assert!(find(&documents(entry), "workDetail", "w4").is_some());
+        assert!(find(&docs_of(entry), "workDetail", "w4").is_some());
 
         // A cursor below the durable floor gets a snapshot, not a delta.
         store
