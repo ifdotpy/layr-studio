@@ -29,6 +29,39 @@ const fakeStep = (
   ...extra,
 });
 
+test("gate starts sccache before switching to disposable scratch", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "studio-gate-sccache-"));
+  try {
+    const bin = path.join(directory, "bin");
+    mkdirSync(bin);
+    const capture = path.join(directory, "sccache-env");
+    writeFileSync(path.join(bin, "node"), "#!/bin/sh\necho 4\n", {
+      mode: 0o755,
+    });
+    writeFileSync(
+      path.join(bin, "sccache"),
+      '#!/bin/sh\nprintf "%s\\n%s\\n%s\\n" "$TMPDIR" "$SCCACHE_IDLE_TIMEOUT" "$*" > "$CAPTURE"\n',
+      { mode: 0o755 },
+    );
+    const result = spawnSync("just", ["_test-gate", "test-fast"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: bin + path.delimiter + process.env.PATH,
+        TMPDIR: directory,
+        CAPTURE: capture,
+      },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(
+      readFileSync(capture, "utf8"),
+      `${directory}\n0\n--start-server\n`,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("WASM preparation installs the matching generator when absent", () => {
   const directory = mkdtempSync(path.join(tmpdir(), "studio-wasm-install-"));
   try {

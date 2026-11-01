@@ -103,6 +103,8 @@ _test-gate gate:
     else
       echo "Gate scratch $scratch is not memory-backed" >&2
     fi
+    # Start with a lasting temp directory; an existing server retains its own temp directory and idle timeout.
+    SCCACHE_IDLE_TIMEOUT=0 sccache --start-server || true
     export TMPDIR="$scratch"
     echo "Gate scratch: $TMPDIR"
     node {{quote(facade)}} {{quote(gate)}}
