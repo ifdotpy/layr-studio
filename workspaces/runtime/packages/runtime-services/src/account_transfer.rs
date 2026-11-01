@@ -736,7 +736,10 @@ impl Snapshot {
                             m.error = Field::Value("The saved transfer source is incomplete; its original state was retained".into());
                             let original = serde_json::to_value(&lazy)
                                 .map_err(|_| invalid("transfer agent", "/lazyAccountTransfer"))?;
-                            archive_unreadable_source(a, original);
+                            append_history(
+                                a,
+                                studio_runtime_store::StoredTransferObject::Unreadable(original),
+                            );
                         }
                         a.lazy_account_transfer = Field::Missing;
                     }
@@ -1511,28 +1514,22 @@ impl Snapshot {
                 .clone()
                 .map(studio_runtime_store::StoredTransferValue::Known),
             &mut a.updated_at,
-            false,
         );
         restore_optional(&settings.model, &mut a.model, false);
         restore_optional(&settings.fast_mode, &mut a.fast_mode, false);
         restore_optional(&settings.daybreak_enabled, &mut a.daybreak_enabled, false);
         restore_optional(&settings.permission_mode, &mut a.permission_mode, false);
-        restore_field(&settings.provider, &mut a.provider, false);
-        restore_field(&settings.effort, &mut a.effort, false);
-        restore_field(&settings.native_effort, &mut a.native_effort, false);
-        restore_field(&settings.role, &mut a.role, false);
-        restore_field(
-            &settings.profile_instructions,
-            &mut a.profile_instructions,
-            false,
-        );
+        restore_field(&settings.provider, &mut a.provider);
+        restore_field(&settings.effort, &mut a.effort);
+        restore_field(&settings.native_effort, &mut a.native_effort);
+        restore_field(&settings.role, &mut a.role);
+        restore_field(&settings.profile_instructions, &mut a.profile_instructions);
         restore_field(
             &settings
                 .cyber_access_program
                 .clone()
                 .map(studio_runtime_store::StoredTransferValue::Known),
             &mut a.cyber_access_program,
-            false,
         );
         restore_field(
             &settings
@@ -1540,7 +1537,6 @@ impl Snapshot {
                 .clone()
                 .map(studio_runtime_store::StoredWorkerDefaults::Known),
             &mut a.worker_defaults,
-            false,
         );
         restore_field(
             &settings
@@ -1548,16 +1544,14 @@ impl Snapshot {
                 .clone()
                 .map(studio_runtime_store::StoredTransferObject::Known),
             &mut a.claude_options,
-            false,
         );
-        restore_field(&settings.portable_history, &mut a.portable_history, false);
+        restore_field(&settings.portable_history, &mut a.portable_history);
         restore_field(
             &settings
                 .yolo_mode
                 .clone()
                 .map(studio_runtime_store::StoredTransferValue::Known),
             &mut a.yolo_mode,
-            false,
         );
         restore_field(
             &target_settings
@@ -1565,7 +1559,6 @@ impl Snapshot {
                 .clone()
                 .map(studio_runtime_store::StoredTransferValue::Known),
             &mut a.pending_settings_account_key,
-            false,
         );
         restore_field(
             &target_settings
@@ -1573,7 +1566,6 @@ impl Snapshot {
                 .clone()
                 .map(studio_runtime_store::StoredTransferObject::Known),
             &mut a.pending_settings,
-            false,
         );
         if !member.portable_history.is_missing() {
             a.portable_history = member.portable_history.clone();
@@ -1583,7 +1575,7 @@ impl Snapshot {
         a.error = Field::Missing;
         a.clear_native_failure_hold();
         a.prepare_attempt = Field::Missing;
-        use studio_runtime_store::{StoredTransferObject, StoredTransferValue};
+        use studio_runtime_store::StoredTransferObject;
         let mut history = studio_runtime_store::transfer_record::TransferAccountHistoryEntry::new(
             member.source_account_key.clone(),
         );
@@ -1607,19 +1599,7 @@ impl Snapshot {
             .map_or(Field::Null, Field::Value);
         history.target_thread_id = Field::Value(target_thread.to_owned());
         history.result = Field::Value(result);
-        match &mut a.account_history {
-            Field::Value(StoredTransferValue::Known(rows)) => {
-                rows.push(StoredTransferObject::Known(history))
-            }
-            Field::Missing | Field::Null => {
-                a.account_history = Field::Value(StoredTransferValue::Known(vec![
-                    StoredTransferObject::Known(history),
-                ]))
-            }
-            Field::Value(StoredTransferValue::Unreadable(_)) => {
-                return Err(invalid("transfer agent", "/accountHistory"));
-            }
-        }
+        append_history(a, StoredTransferObject::Known(history));
         let mut op = self.operation.clone();
         let member = op
             .members
@@ -1835,10 +1815,14 @@ impl Snapshot {
 /// wake of its next turn, before that turn's input is claimed.
 pub const WAITING_FOR_NEXT_TURN: &str = "Moves when its next turn starts";
 
-fn archive_unreadable_source(agent: &mut studio_runtime_store::AgentRecord, original: Value) {
+fn append_history(
+    agent: &mut studio_runtime_store::AgentRecord,
+    saved: studio_runtime_store::StoredTransferObject<
+        studio_runtime_store::transfer_record::TransferAccountHistoryEntry,
+    >,
+) {
     use studio_runtime_schema::queue_command::Field;
     use studio_runtime_store::{StoredTransferObject, StoredTransferValue};
-    let saved = StoredTransferObject::Unreadable(original);
     match &mut agent.account_history {
         Field::Value(StoredTransferValue::Known(rows)) => rows.push(saved),
         Field::Value(StoredTransferValue::Unreadable(value)) => {
@@ -1870,9 +1854,8 @@ fn restore_optional<T: Clone>(
 fn restore_field<T: Clone>(
     saved: &studio_runtime_schema::queue_command::Field<T>,
     current: &mut studio_runtime_schema::queue_command::Field<T>,
-    exact: bool,
 ) {
-    if !saved.is_missing() || exact {
+    if !saved.is_missing() {
         *current = saved.clone();
     }
 }
@@ -2485,17 +2468,20 @@ fn public_view_record(
         finish_history: op.finish_history.clone(),
     }
 }
+fn null_if_missing<T: Clone>(
+    field: &studio_runtime_schema::queue_command::Field<T>,
+) -> studio_runtime_schema::queue_command::Field<T> {
+    if field.is_missing() {
+        studio_runtime_schema::queue_command::Field::Null
+    } else {
+        field.clone()
+    }
+}
 fn summary_record(
     op: &studio_runtime_store::transfer_record::TransferRecord,
 ) -> Result<studio_runtime_store::transfer_record::AgentTransferSummary, TransferError> {
     use studio_runtime_schema::queue_command::Field;
     use studio_runtime_store::transfer_record::{AgentTransferSummary, TransferNotice};
-    fn null_if_missing<T: Clone>(field: &Field<T>) -> Field<T> {
-        match field {
-            Field::Missing | Field::Null => Field::Null,
-            Field::Value(value) => Field::Value(value.clone()),
-        }
-    }
     fn notices(values: Vec<TransferNotice>, provider: bool) -> Vec<TransferNotice> {
         values
             .into_iter()
@@ -2572,13 +2558,6 @@ fn settings_snapshot(
 ) -> Result<studio_runtime_store::transfer_record::TransferSettings, TransferError> {
     use studio_runtime_schema::queue_command::Field;
     use studio_runtime_store::transfer_record::TransferSettings;
-    fn null_if_missing<T: Clone>(field: &Field<T>) -> Field<T> {
-        if field.is_missing() {
-            Field::Null
-        } else {
-            field.clone()
-        }
-    }
     Ok(TransferSettings {
         account_key: None,
         updated_at: Field::Missing,
@@ -3351,6 +3330,22 @@ mod provider_receipt_tests {
                 .expect("test fixture operation succeeds"),
         );
         let ready = after(submitted.provider_receipt("agent", "transfer:agent:thread-start", &test_dispatch(json!({"operation":"transfer:agent:thread-start", "scope":{"account":"target","connection":"connection-1","generation":1}, "certainty":"written", "ticket":{"id":11}}), Some(json!({"thread":{"id":"target-thread"}})), RequestCertainty::Written)).expect("test fixture operation succeeds"));
+        for original in [json!("legacy"), json!({"legacy":true})] {
+            let mut varied = Snapshot {
+                operation: ready.operation.clone(),
+                agents: ready.agents.clone(),
+            };
+            varied.agents.get_mut("agent").unwrap().account_history =
+                studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_store::StoredTransferValue::Unreadable(original.clone()),
+                );
+            let adopted = varied
+                .adopt_receipt("agent")
+                .expect("legacy history is preserved");
+            let history = adopted.agents["agent"].value()["accountHistory"].clone();
+            assert_eq!(history[0], original);
+            assert_eq!(history[1]["targetThreadId"], "target-thread");
+        }
         for account in [None, Some(Value::Null), Some(json!("alternate"))] {
             let mut settings = json!({"model":"model-b", "updatedAt":123.0});
             if let Some(account) = account {

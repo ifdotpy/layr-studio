@@ -456,6 +456,11 @@ async fn vm_existing_auth_recovery_copy_failure_keeps_exact_input_reserved() {
     auth_recovery_turn(true).await;
 }
 
+#[tokio::test]
+async fn vm_auth_recovery_reads_typed_continuation_and_hold() {
+    auth_recovery_turn(false).await;
+}
+
 async fn auth_recovery_turn(refuse: bool) {
     let (state, guest) = existing_actor(false).await;
     let resolver = Arc::new(AuthRecoveryCredentials {
@@ -550,6 +555,23 @@ async fn auth_recovery_turn(refuse: bool) {
         .await
         .unwrap();
     let resumed = state.record().await;
+    let actor = state.agent.clone();
+    state
+        .bridge
+        .store
+        .read_async("test/typed-auth-recovery", move |db| {
+            let row = AgentRepository::get(db, &AgentId::from(actor.as_str()))?.unwrap();
+            assert!(!row.extra.contains_key("usageResume"));
+            assert!(!row.extra.contains_key("nativeFailureHold"));
+            assert_eq!(
+                row.usage_resume_value().unwrap().unwrap()["status"],
+                "started"
+            );
+            assert!(!row.native_failure_held());
+            Ok::<_, WorkerError>(())
+        })
+        .await
+        .unwrap();
     assert_eq!(resumed["usageResume"]["cause"], "auth");
     assert_eq!(resumed["usageResume"]["status"], "started");
     assert_eq!(resumed["authResumeAttempt"], 1);
