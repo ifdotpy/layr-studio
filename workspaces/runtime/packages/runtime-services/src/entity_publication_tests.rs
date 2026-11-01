@@ -11,6 +11,30 @@ use studio_runtime_store::{AgentRecord, AgentRepository, StoreError};
 const CHAT: &str = "published-chat";
 
 #[tokio::test]
+async fn legacy_blocked_summary_offers_cancel_when_operation_allows_it() {
+    let (_dir, store) = store().await;
+    let op = json!({"id":"move","leadId":CHAT,"targetAccountKey":"target",
+        "status":"pending","created":1.0,"members":{"published-chat":{
+            "phase":"blocked","sourceAccountKey":"default","lazy":true,
+            "error":"History unavailable"}}});
+    store
+        .transaction(move |tx| {
+            studio_runtime_store::AccountTransferRepository::put(tx, "move", &op.to_string())
+        })
+        .await
+        .unwrap();
+    seed_chat(
+        &store,
+        chat(json!({"accountTransferId":"move","accountTransfer":{
+        "id":"move","targetAccountKey":"target","status":"pending","movingNow":0,
+        "canRetry":true,"blocked":[{"id":CHAT,"reason":"History unavailable"}]}})),
+    )
+    .await;
+    let view = chat_view(&store, CHAT);
+    assert_eq!(view["accountTransferProgress"]["actions"], "retry_cancel");
+}
+
+#[tokio::test]
 async fn work_metadata_skips_history_and_explicit_publication_is_not_repeated() {
     use crate::sync_policy::{self, work_publication_probe};
     let (_dir, store) = store().await;
