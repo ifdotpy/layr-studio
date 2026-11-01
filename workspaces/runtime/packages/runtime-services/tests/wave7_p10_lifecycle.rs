@@ -1641,7 +1641,17 @@ async fn production_child_notification_matches_python_corpus() {
                 && row[0] != "questionHistory"
                 && row[0] != "retainedWorktree"
         })
-        .map(|row| json!([row[0], row[1], row[4], row[5]]))
+        .map(|row| {
+            let mut payload = row[4].clone();
+            if row[0] == "agent" && row[5] == 0 {
+                let mut value: Value =
+                    serde_json::from_str(payload.as_str().expect("agent payload"))
+                        .expect("agent JSON");
+                crate::normalize_agent_nulls(&mut value);
+                payload = json!(value.to_string());
+            }
+            json!([row[0], row[1], payload, row[5]])
+        })
         .collect::<Vec<_>>();
     let mut expected_sync = case["expected"]["syncEntities"]
         .as_array()

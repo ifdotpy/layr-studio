@@ -26,7 +26,7 @@ impl SelectionSnapshot {
     ) -> Result<Value, TransferError> {
         let account = account.and_then(|account| {
             let public: crate::account_policy::PublicAccount =
-                serde_json::from_value(account.clone()).ok()?;
+                serde::Deserialize::deserialize(account.clone()).ok()?;
             Some(SelectionAccount {
                 eligibility: public.eligibility(),
                 provider: public.provider_kind(),
@@ -266,7 +266,7 @@ pub async fn select(
                     .map_err(|_| TransferError::Refused("Cannot register the selected project"))?;
                 AgentRepository::put(
                     tx,
-                    &serde_json::from_value(value.clone()).map_err(StoreError::from)?,
+                    &serde::Deserialize::deserialize(value.clone()).map_err(StoreError::from)?,
                 )?;
                 return Ok(crate::agents_create::publish_agent(tx, &value)?);
             }

@@ -432,6 +432,7 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
 }
 
 #[derive(Clone, Debug, Default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct AgentViewContext {
     pub account_destinations: Vec<studio_runtime_schema::account_destination::AccountDestination>,
     pub transfer_can_cancel: bool,

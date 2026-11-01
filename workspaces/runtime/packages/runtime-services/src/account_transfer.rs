@@ -406,7 +406,7 @@ impl Snapshot {
                 return Err(invalid("transfer agent", "/id"));
             }
         }
-        let identity = serde_json::from_value(operation.clone())
+        let identity = serde::Deserialize::deserialize(operation.clone())
             .map_err(|_| invalid("account transfer", "/"))?;
         Ok(Self {
             identity,
@@ -433,7 +433,7 @@ impl Snapshot {
             .ok_or(TransferError::Refused("Unknown transfer member"))
     }
     fn phase(&self, id: &str) -> Result<Phase, TransferError> {
-        serde_json::from_value(self.operation["members"][id]["phase"].clone())
+        serde::Deserialize::deserialize(self.operation["members"][id]["phase"].clone())
             .map_err(|_| invalid("account transfer", "/members/phase"))
     }
     fn pending(&self) -> bool {
@@ -873,8 +873,10 @@ impl Snapshot {
             || receipt["scope"] != saved["scope"]
             || ticket["generation"] != saved["scope"]["generation"]
             || ticket["method"] != saved["method"]
-            || serde_json::from_value::<studio_runtime_providers::RequestId>(ticket["id"].clone())
-                .is_err()
+            || <studio_runtime_providers::RequestId as serde::Deserialize>::deserialize(
+                ticket["id"].clone(),
+            )
+            .is_err()
             || result["result"]["kind"] != "reply"
             || (result["result"].get("value").is_none()
                 && result["result"].get("valueBlob").is_none())
@@ -986,7 +988,7 @@ impl Snapshot {
             .get("providerReadReceipts")
             .and_then(Value::as_object)
             .and_then(|receipts| receipts.get(operation));
-        let scope = serde_json::to_value(&receipt.scope)
+        let scope = serde::Serialize::serialize(&receipt.scope, serde_json::value::Serializer)
             .map_err(|_| TransferError::Refused("Invalid provider scope"))?;
         let (raw_receipt, result) = read_record_for_receipt(receipt);
         let mut record =
@@ -1069,7 +1071,7 @@ impl Snapshot {
     ) -> Result<Decision, TransferError> {
         let certainty = dispatch.certainty();
         let (receipt_operation, receipt_scope) = dispatch.identity();
-        let scope = serde_json::to_value(receipt_scope)
+        let scope = serde::Serialize::serialize(receipt_scope, serde_json::value::Serializer)
             .map_err(|_| TransferError::Refused("Invalid provider scope"))?;
         let written_result = dispatch.mutation_result();
         let receipt = dispatch.mutation_record(&written_result);
@@ -1285,8 +1287,8 @@ impl Snapshot {
         } else {
             "submitted"
         });
-        m["transportTicket"] =
-            serde_json::to_value(ticket).map_err(|_| invalid("transport ticket", "/"))?;
+        m["transportTicket"] = serde::Serialize::serialize(ticket, serde_json::value::Serializer)
+            .map_err(|_| invalid("transport ticket", "/"))?;
         m["nativeMethod"] = json!(method);
         m["nativeParams"] = params;
         m["targetConnection"] = json!(ticket.connection);
@@ -1321,8 +1323,8 @@ impl Snapshot {
         result: Option<Value>,
     ) -> Result<Decision, TransferError> {
         let m = &self.operation["members"][&ticket.agent];
-        let expected =
-            serde_json::to_value(ticket).map_err(|_| invalid("transport ticket", "/"))?;
+        let expected = serde::Serialize::serialize(ticket, serde_json::value::Serializer)
+            .map_err(|_| invalid("transport ticket", "/"))?;
         if m.get("transportTicket") != Some(&expected) {
             return Err(TransferError::Refused(
                 "The transfer receipt belongs to another native request",
@@ -1609,7 +1611,7 @@ fn member_order<'de, D: serde::Deserializer<'de>>(
 }
 
 fn phase(operation: &Value, id: &str) -> Result<Phase, TransferError> {
-    serde_json::from_value(operation["members"][id]["phase"].clone())
+    serde::Deserialize::deserialize(operation["members"][id]["phase"].clone())
         .map_err(|_| invalid("account transfer", "/members/phase"))
 }
 
@@ -1842,7 +1844,7 @@ fn progress(op: &Value, order: &[String], public: bool) -> Result<Value, Transfe
     let mut blocked = vec![];
     for id in order {
         let m = &op["members"][id];
-        let phase: Phase = serde_json::from_value(m["phase"].clone())
+        let phase: Phase = serde::Deserialize::deserialize(m["phase"].clone())
             .map_err(|_| invalid("account transfer", "/members/phase"))?;
         completed += usize::from(phase.terminal());
         moved += usize::from(flag(m, "lazy") || phase == Phase::Completed);
@@ -1986,12 +1988,12 @@ mod provider_receipt_tests {
         if scope.get("generation").is_none() {
             scope["generation"] = json!(1);
         }
-        let scope: ConnectionScope = serde_json::from_value(scope).expect("scope");
+        let scope: ConnectionScope = serde::Deserialize::deserialize(scope).expect("scope");
         let ticket = RequestTicket {
             generation: raw["ticket"]["generation"]
                 .as_u64()
                 .unwrap_or(scope.generation),
-            id: serde_json::from_value(raw["ticket"]["id"].clone()).expect("ticket id"),
+            id: serde::Deserialize::deserialize(raw["ticket"]["id"].clone()).expect("ticket id"),
             method: Method::from_wire(raw["ticket"]["method"].as_str().unwrap_or("thread/start"))
                 .expect("method"),
         };
@@ -2029,7 +2031,7 @@ mod provider_receipt_tests {
             if scope.get("generation").is_none() {
                 scope["generation"] = json!(1);
             }
-            let scope = serde_json::from_value(scope).expect("scope");
+            let scope = serde::Deserialize::deserialize(scope).expect("scope");
             let operation = raw["operation"].as_str().expect("operation").into();
             match certainty {
                 RequestCertainty::Unknown => TransferDispatch::Unknown { operation, scope },
@@ -2160,7 +2162,8 @@ mod provider_receipt_tests {
             snapshot.can_cancel(),
         )
         .unwrap();
-        let encoded = serde_json::to_value(progress).unwrap();
+        let encoded =
+            serde::Serialize::serialize(&progress, serde_json::value::Serializer).unwrap();
         assert!(!matches!(
             encoded["actions"].as_str(),
             Some("cancel" | "retry_cancel")

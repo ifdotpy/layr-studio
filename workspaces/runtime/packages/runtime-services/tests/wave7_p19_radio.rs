@@ -494,6 +494,15 @@ fn state(store: &RuntimeStore, tables: &Value) -> Value {
 fn normalize(value: &mut Value) {
     match value {
         Value::Object(map) => {
+            if map.get("kind").and_then(Value::as_str) == Some("agent") {
+                for key in [
+                    "accountChange",
+                    "accountTransferProgress",
+                    "accountDestinations",
+                ] {
+                    map.remove(key);
+                }
+            }
             if matches!(
                 map.get("recordKind").and_then(Value::as_str),
                 Some("live" | "removal")

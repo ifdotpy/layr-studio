@@ -1112,10 +1112,6 @@
       "fingerprint": "1597ef76e1f7800da7e0b498334ebf0b27f53e8cbaa7fc8f54c77640f9d7093e:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-http/src/bounded_entities.rs",
-      "fingerprint": "855d91779dc5c231c360eb45c9ea353e2af201462997d9e8adab4f9be8a844f2:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-http/src/error.rs",
       "fingerprint": "312911564fb4a1d9dd6e1e8a6c33cf1ce2caa3faa28eed0984f1e532a0fe6db9:0"
     },
@@ -2667,10 +2663,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-services/src/safety_buffering.rs",
       "fingerprint": "5dac839a508a4f83f7d210dcf218af488d0774c847c2ed31c35508b144159cc8:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/sync_views.rs",
-      "fingerprint": "e8a70eff58fdafdd2899f6c830f5aee7ec31d22734aa5e88f369fad59a4eabc3:0"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/thread_prepare.rs",
