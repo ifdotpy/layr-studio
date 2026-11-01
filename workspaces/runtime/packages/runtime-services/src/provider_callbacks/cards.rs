@@ -4,7 +4,6 @@
 //! and the answer. The outbox holds the provider reply. The state moves with
 //! the delivery of that reply and never by inference.
 use super::{model::*, storage};
-<<<<<<< head
 use rusqlite::{Connection, Transaction};
 use serde_json::{Map, Value, json};
 use studio_runtime_providers::{ProviderKind, RequestId, ResponseBody};
@@ -15,25 +14,6 @@ use studio_runtime_schema::approvals::{
 };
 use studio_runtime_schema::persistence::ExecutionEffectKind;
 use studio_runtime_store::{RuntimeStore, approvals, system_reads as records};
-||||||| base
-use rusqlite::Transaction;
-use serde_json::{Value, json};
-use studio_runtime_providers::ProviderKind;
-use studio_runtime_providers::{RequestId, ResponseBody};
-use studio_runtime_schema::persistence::RequestCardStatus;
-use studio_runtime_schema::question_answers::QuestionDecision;
-use studio_runtime_store::{
-    QuestionsWriteRepository, RequestRecord, RuntimeStore, Table, system_reads as records,
-};
-=======
-use rusqlite::Transaction;
-use serde_json::{Value, json};
-use studio_runtime_providers::ProviderKind;
-use studio_runtime_providers::{RequestId, ResponseBody};
-use studio_runtime_schema::persistence::RequestCardStatus;
-use studio_runtime_schema::question_answers::QuestionDecision;
-use studio_runtime_store::{RequestRecord, RuntimeStore, Table, system_reads as records};
->>>>>>> origin/main
 
 /// The native provider requests that wait for the user as a request card. The
 /// web client renders each of them (`components/questions/Requests.tsx`).
@@ -535,147 +515,6 @@ pub(super) fn immediate(
     Ok(None)
 }
 
-<<<<<<< head
-||||||| base
-/// Tool approvals share the same answer conversion as explicit user answers.
-/// Questions and elicitation always continue to require an answer from the user.
-fn full_access_answer(method: &str, params: &Value) -> Result<Option<Value>, CallbackError> {
-    if !matches!(
-        method,
-        "item/commandExecution/requestApproval"
-            | "item/fileChange/requestApproval"
-            | "item/permissions/requestApproval"
-    ) {
-        return Ok(None);
-    }
-    answer_value(
-        method,
-        params,
-        &json!({"decision":QuestionDecision::Accept}),
-    )
-    .map(|(result, _)| Some(result))
-}
-
-// Replay debt: old outbox receipts retain their historical Value classifier and bytes.
-pub(super) fn save_historical(tx: &Transaction<'_>, card: &Value) -> Result<(), CallbackError> {
-    let id = card["id"]
-        .as_str()
-        .ok_or(CallbackError::Invalid("Invalid callback card identity"))?;
-    if ["agent", "connectionId", "method", "status"]
-        .into_iter()
-        .any(|key| {
-            card.get(key)
-                .is_some_and(|value| !value.is_null() && !value.is_string())
-        })
-    {
-        return Err(CallbackError::Stored(format!("runtime_requests/{id}")));
-    }
-    QuestionsWriteRepository::put_request(tx, id, &card.to_string())?;
-    let actor = card["agent"]
-        .as_str()
-        .map(|id| records::get(tx, "runtime_agents", id))
-        .transpose()?
-        .flatten();
-    if let Some(actor) = actor {
-        crate::tool_requests::reconcile_effect(
-            tx,
-            studio_runtime_schema::persistence::ExecutionEffectKind::Requests,
-            card,
-            &actor,
-        )?;
-    }
-    let deleted = status(card)? != RequestCardStatus::Pending;
-    let value = if deleted {
-        json!({})
-    } else {
-        crate::sync_views::project_persisted_record("request", card)
-            .ok_or_else(|| CallbackError::Stored(format!("runtime_requests/{id}")))?
-    };
-    studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "request", id, value, deleted)?;
-    Ok(())
-}
-
-pub(super) fn save(tx: &Transaction<'_>, card: &RequestRecord) -> Result<(), CallbackError> {
-    let id = card.id.as_str();
-    Table::<RequestRecord>::new(tx).put(card)?;
-    if let Some(actor) = records::get(tx, "runtime_agents", &card.agent)? {
-        crate::tool_requests::reconcile_request_effect(tx, card, &actor)?;
-    }
-    let deleted = card.status != RequestCardStatus::Pending;
-    let value = if deleted {
-        json!({})
-    } else {
-        crate::sync_views::project_persisted_record("request", &json!(card))
-            .ok_or_else(|| CallbackError::Stored(format!("runtime_requests/{id}")))?
-    };
-    studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "request", id, value, deleted)?;
-    Ok(())
-}
-=======
-/// Tool approvals share the same answer conversion as explicit user answers.
-/// Questions and elicitation always continue to require an answer from the user.
-fn full_access_answer(method: &str, params: &Value) -> Result<Option<Value>, CallbackError> {
-    if !matches!(
-        method,
-        "item/commandExecution/requestApproval"
-            | "item/fileChange/requestApproval"
-            | "item/permissions/requestApproval"
-    ) {
-        return Ok(None);
-    }
-    answer_value(
-        method,
-        params,
-        &json!({"decision":QuestionDecision::Accept}),
-    )
-    .map(|(result, _)| Some(result))
-}
-
-// Replay debt: old outbox receipts retain their historical Value classifier and bytes.
-pub(super) fn save_historical(tx: &Transaction<'_>, card: &Value) -> Result<(), CallbackError> {
-    let id = card["id"]
-        .as_str()
-        .ok_or(CallbackError::Invalid("Invalid callback card identity"))?;
-    let record = <RequestRecord as serde::Deserialize>::deserialize(card)
-        .map_err(|_| CallbackError::Stored(format!("runtime_requests/{id}")))?;
-    Table::<RequestRecord>::new(tx).put(&record)?;
-    let actor = card["agent"]
-        .as_str()
-        .map(|id| records::get(tx, "runtime_agents", id))
-        .transpose()?
-        .flatten();
-    if let Some(actor) = actor {
-        crate::tool_requests::reconcile_effect(
-            tx,
-            studio_runtime_schema::persistence::ExecutionEffectKind::Requests,
-            card,
-            &actor,
-        )?;
-    }
-    let deleted = status(card)? != RequestCardStatus::Pending;
-    if deleted {
-        studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "request", id, (), true)?;
-    } else {
-        let value = crate::request_projection::project_request_record(&record)
-            .map_err(|_| CallbackError::Stored(format!("runtime_requests/{id}")))?;
-        studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "request", id, value, false)?;
-    }
-    Ok(())
-}
-
-pub(super) fn save(tx: &Transaction<'_>, card: &RequestRecord) -> Result<(), CallbackError> {
-    let id = card.id.as_str();
-    let value = crate::request_projection::project_request_record(card)
-        .map_err(|_| CallbackError::Invalid("Invalid provider request payload"))?;
-    Table::<RequestRecord>::new(tx).put(card)?;
-    if let Some(actor) = records::get(tx, "runtime_agents", &card.agent)? {
-        crate::tool_requests::reconcile_request_effect(tx, card, &actor)?;
-    }
-    let deleted = card.status != RequestCardStatus::Pending;
-    studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "request", id, value, deleted)?;
-    Ok(())
-}
->>>>>>> origin/main
 pub(super) fn admit(
     tx: &Transaction<'_>,
     context: &CallbackContext,

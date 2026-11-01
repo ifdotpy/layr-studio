@@ -119,33 +119,9 @@ fn recover_requests(tx: &Transaction<'_>, now: f64) -> Result<usize, MonitorErro
         tx.execute_batch("SAVEPOINT startup_request_recovery_row")
             .map_err(studio_runtime_store::StoreError::from)?;
         let apply = (|| {
-<<<<<<< head
             studio_runtime_store::approvals::put(tx, &row)
                 .map_err(studio_runtime_store::StoreError::from)?;
             crate::approval_sync::publish(tx, &row)?;
-||||||| base
-            Table::<RequestRecord>::new(tx).put(&request)?;
-            let view = crate::sync_views::project_persisted_record("request", &json!(request))
-                .ok_or(MonitorError::Refused("Invalid request projection"))?;
-            SyncDocumentsRepository::put_entity(
-                tx,
-                "request",
-                request.id(),
-                view,
-                request.status != Status::Pending,
-            )?;
-=======
-            Table::<RequestRecord>::new(tx).put(&request)?;
-            let view = crate::request_projection::project_request_record(&request)
-                .map_err(|_| MonitorError::Refused("Invalid request projection"))?;
-            SyncDocumentsRepository::put_entity(
-                tx,
-                "request",
-                request.id(),
-                view,
-                request.status != Status::Pending,
-            )?;
->>>>>>> origin/main
             Ok::<(), MonitorError>(())
         })();
         if let Err(error) = apply {
@@ -1596,35 +1572,7 @@ pub fn create_in_transaction(
             studio_runtime_schema::approvals::Timestamp(now),
         )
         .map_err(studio_runtime_store::StoreError::from)?;
-<<<<<<< head
         crate::approval_sync::publish(tx, &approval)?;
-||||||| base
-        let approval = studio_runtime_store::RequestRecord::new(
-            format!("monitor-approval:{id}"),
-            actor_id.to_owned(),
-            studio_runtime_schema::request_record::RequestMethod::MonitorApprove,
-            studio_runtime_schema::persistence::RequestCardStatus::Pending,
-            now,
-            params,
-        );
-        Table::new(tx).put(&approval)?;
-        let view = crate::sync_views::project_persisted_record("request", &json!(approval))
-            .ok_or_else(|| invalid(id, "request"))?;
-        SyncDocumentsRepository::put_entity(tx, "request", approval.id(), view, false)?;
-=======
-        let approval = studio_runtime_store::RequestRecord::new(
-            format!("monitor-approval:{id}"),
-            actor_id.to_owned(),
-            studio_runtime_schema::request_record::RequestMethod::MonitorApprove,
-            studio_runtime_schema::persistence::RequestCardStatus::Pending,
-            now,
-            params,
-        );
-        Table::new(tx).put(&approval)?;
-        let view = crate::request_projection::project_request_record(&approval)
-            .map_err(|_| invalid(id, "request"))?;
-        SyncDocumentsRepository::put_entity(tx, "request", approval.id(), view, false)?;
->>>>>>> origin/main
     }
     let after = MonitorSnapshot::checked_stored(&record, actor_value)?;
     crate::sync_policy::publish_monitor_change(tx, None, &after)?;

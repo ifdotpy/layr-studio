@@ -875,32 +875,8 @@ mod tests {
                         .to_string(),
                     ],
                 )
-<<<<<<< head
                 .map(drop)
                 .map_err(studio_runtime_store::StoreError::from)
-||||||| base
-                .map_err(studio_runtime_store::StoreError::from)?;
-                let raw = studio_runtime_store::QuestionsWriteRepository::request(tx, &shown_id)?
-                    .expect("seeded card");
-                let record: Value = serde_json::from_str(&raw).expect("card JSON");
-                let view = crate::sync_views::project_persisted_record("request", &record)
-                    .expect("card view");
-                studio_runtime_store::SyncDocumentsRepository::put_entity(
-                    tx, "request", &shown_id, view, false,
-                )?;
-                Ok::<_, studio_runtime_store::StoreError>(())
-=======
-                .map_err(studio_runtime_store::StoreError::from)?;
-                let raw = studio_runtime_store::QuestionsWriteRepository::request(tx, &shown_id)?
-                    .expect("seeded card");
-                let record: studio_runtime_store::RequestRecord = serde_json::from_str(&raw).expect("card JSON");
-                let view = crate::request_projection::project_request_record(&record)
-                    .expect("card view");
-                studio_runtime_store::SyncDocumentsRepository::put_entity(
-                    tx, "request", &shown_id, view, false,
-                )?;
-                Ok::<_, studio_runtime_store::StoreError>(())
->>>>>>> origin/main
             })
             .await
             .expect("the chat is seeded");
