@@ -92,6 +92,51 @@ it("sends another message while an earlier request remains uncertain and retries
   expect(post.mock.calls[2]?.[0]).toEqual(post.mock.calls[0]?.[0]);
 });
 
+it("keeps an uncertain server receipt retryable with the exact command", async () => {
+  const storage = new MemoryStorage();
+  const buffer = new MemoryBuffer();
+  const post = vi.fn(async (request) => ({
+    status: "applied" as const,
+    ref_kind: "message",
+    ref_id: request.id,
+    rev: 1,
+    seq: 1,
+    rows: [
+      {
+        collection: "messageReceipt" as const,
+        id: request.id,
+        seq: 1,
+        payload: {
+          id: request.id,
+          status:
+            post.mock.calls.length === 1
+              ? MessageSendStatus.uncertain
+              : MessageSendStatus.delivered,
+        },
+      },
+    ],
+  }));
+  const outbox = createOutbox({
+    api: {
+      command: createCommandClient(storage, post),
+      getStreamSession: () => ({ workspaceId: "workspace" }),
+    } as never,
+    storage,
+    buffer,
+    watchResourceConnection: () => () => {},
+  });
+  await outbox.durableSend({ id: "uncertain", room: "chat", text: "hello" });
+  await outbox.reconcileOutboxReceipts(
+    "chat",
+    [{ id: "uncertain", status: MessageSendStatus.uncertain }],
+    "workspace",
+  );
+  expect(buffer.values.size).toBe(1);
+  await outbox.changeOutbox("uncertain", "resume");
+  expect(post).toHaveBeenCalledTimes(2);
+  expect(post.mock.calls[1]?.[0]).toEqual(post.mock.calls[0]?.[0]);
+});
+
 it("continues sending when storage fails", async () => {
   const storage = new MemoryStorage();
   const buffer = new MemoryBuffer();

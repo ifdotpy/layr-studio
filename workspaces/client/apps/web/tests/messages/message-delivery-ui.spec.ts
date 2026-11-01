@@ -869,6 +869,18 @@ for (const attachmentCase of [false, true])
           const stale = await start(staleText);
           await accept(stale, "queued");
           await row(staleText).waitFor();
+          const staleBase = required(history.get(a.id)).items;
+          await publish(a.id, [
+            ...staleBase,
+            {
+              id: `${a.id}:${stale.body.id}`,
+              clientMessageId: stale.body.id,
+              role: "user",
+              text: staleText,
+              deliveryStatus: "queued",
+              materialized: false,
+            },
+          ]);
           await page.reload();
           await page.locator(`[data-chat="${a.id}"]`).click();
           await page.locator(`[data-message="${a.id}-history-35"]`).waitFor();
@@ -883,7 +895,7 @@ for (const attachmentCase of [false, true])
           );
           assert.equal(await row(staleText).count(), 1);
           await publish(a.id, [
-            ...required(history.get(a.id)).items,
+            ...staleBase,
             {
               id: `${a.id}:${stale.body.id}`,
               clientMessageId: stale.body.id,
@@ -961,6 +973,8 @@ for (const attachmentCase of [false, true])
             `${mode}: uncertain response returns control before dismissal`,
           );
           await page.waitForTimeout(350);
+          const dismissalDraft = `${mode} draft retained during dismissal`;
+          await input.fill(dismissalDraft);
           const mutationsBeforeRemoval = mutations.length;
           const remove = row(dismissedText).getByRole("button", {
             name: "Remove message",
@@ -975,7 +989,7 @@ for (const attachmentCase of [false, true])
           await row(dismissedText).waitFor({ state: "hidden" });
           assert.equal(
             await input.inputValue(),
-            dismissedText,
+            dismissalDraft,
             `${mode}: dismissal preserves the draft`,
           );
           await page.locator(`[data-chat="${b.id}"]`).click();
@@ -1014,16 +1028,17 @@ for (const attachmentCase of [false, true])
           await page.locator(`[data-message="${distinctEcho.id}"]`).waitFor();
           assert.equal(
             await page.locator(`[data-message="${dismissedEcho.id}"]`).count(),
-            0,
-            `${mode}: late delivery cannot restore a dismissed receipt`,
+            1,
+            `${mode}: a later server record remains visible`,
           );
           assert.equal(
             await row(dismissedText).count(),
-            1,
-            `${mode}: a different identity with identical text remains visible`,
+            2,
+            `${mode}: both server identities with identical text remain visible`,
           );
           assert.equal(
-            await row(dismissedText)
+            await page
+              .locator(`[data-message="${distinctEcho.id}"]`)
               .getByRole("button", { name: "Remove message", exact: true })
               .count(),
             0,
@@ -1054,26 +1069,17 @@ for (const attachmentCase of [false, true])
             deliveryStatus: status,
           }));
           await publish(a.id, [...serverBase, ...removable, ...retained]);
-          for (const message of removable) {
+          for (const message of [...removable, ...retained]) {
             const item = page.locator(`[data-message="${message.id}"]`);
             await item.waitFor();
-            const remove = item.getByRole("button", {
-              name: "Remove message",
-              exact: true,
-            });
-            await remove.focus();
-            await page.keyboard.press("Enter");
-            await item.waitFor({ state: "hidden" });
-          }
-          for (const message of retained)
             assert.equal(
-              await page
-                .locator(`[data-message="${message.id}"]`)
+              await item
                 .getByRole("button", { name: "Remove message", exact: true })
                 .count(),
               0,
-              `${mode}: ${message.deliveryStatus} messages do not expose dismissal`,
+              `${mode}: server-owned ${message.deliveryStatus} has no device removal`,
             );
+          }
           await publish(a.id, [
             ...serverBase,
             ...removable.map(
@@ -1093,8 +1099,8 @@ for (const attachmentCase of [false, true])
           for (const message of [...removable, dismissedEcho])
             assert.equal(
               await page.locator(`[data-message="${message.id}"]`).count(),
-              0,
-              `${mode}: delivered receipt ${message.id} remains dismissed after reload`,
+              1,
+              `${mode}: server message ${message.id} remains visible after reload`,
             );
           assert.equal(
             await page.locator(`[data-message="${distinctEcho.id}"]`).count(),
@@ -1122,7 +1128,7 @@ for (const attachmentCase of [false, true])
             await page
               .locator(`[data-message="${otherChatReceipt.id}"]`)
               .count(),
-            0,
+            1,
           );
           assert.deepEqual(
             mutations

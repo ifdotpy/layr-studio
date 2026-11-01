@@ -217,7 +217,12 @@ export function createOutbox(options: {
           return { ...receipt, kind: "server" };
         }
         notifyPersisted();
-        void remove(value.body.room, id).catch(reportUnsentFailure);
+        if (receipt.status === MessageSendStatus.uncertain) {
+          if (read(value.body.room, id))
+            await write({ ...value, localState: { kind: "stored" } });
+        } else {
+          void remove(value.body.room, id).catch(reportUnsentFailure);
+        }
         return {
           ...receipt,
           kind: "server",
@@ -331,7 +336,11 @@ export function createOutbox(options: {
     if (signal?.aborted) return;
     for (const receipt of receipts) {
       const value = read(room, receipt.id);
-      if (value?.workspaceId === workspaceId) await remove(room, receipt.id);
+      if (
+        value?.workspaceId === workspaceId &&
+        receipt.status !== MessageSendStatus.uncertain
+      )
+        await remove(room, receipt.id);
     }
   }
   async function editOutboxDisplay(id: string, text: string) {

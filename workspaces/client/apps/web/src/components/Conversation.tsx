@@ -1317,9 +1317,11 @@ export default function Conversation(p: {
     }));
     input.current?.focus({ preventScroll: true });
   });
-  const removeMessage = useMessageAction((m: Message) => {
+  const removeMessage = useMessageAction(async (m: Message) => {
     try {
-      removed.remove(m);
+      if (!m.clientMessageId) return;
+      await changeOutbox(m.clientMessageId, "cancel");
+      p.onObserved?.([m.clientMessageId]);
       p.notify("Message removed from this device. Delivery was not cancelled.");
     } catch (error) {
       p.notify(`Could not remove this message: ${errorText(error)}`);
@@ -1379,6 +1381,7 @@ export default function Conversation(p: {
               {deliveryLabel(m)}
             </span>
             {m.role === "user" &&
+              m.localDelivery &&
               (serverStatus(m.deliveryStatus) === MessageSendStatus.uncertain ||
                 serverStatus(m.deliveryStatus) === MessageSendStatus.failed ||
                 serverStatus(m.deliveryStatus) ===
