@@ -115,6 +115,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             "studio_runtime_schema::agent_entity_nested::WorkerDefaultsDto",
         ),
         (
+            "RemoteParentLinkDto",
+            "studio_runtime_schema::agent_entity_remote::RemoteParentLinkDto",
+        ),
+        (
+            "RemoteWorkerLinkDto",
+            "studio_runtime_schema::agent_entity_remote::RemoteWorkerLinkDto",
+        ),
+        (
+            "ReviewDefaultsDto",
+            "studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto",
+        ),
+        (
             "AgentNativeStatusValue",
             "studio_runtime_schema::agent_entity_nested::AgentNativeStatusValue",
         ),
