@@ -1,9 +1,13 @@
 /** Small IndexedDB adapter; each caller owns its database, store, and values. */
-export function indexedDb(databaseName: string, storeName: string) {
+export function indexedDb(
+  databaseName: string,
+  storeName: string,
+  version: number,
+) {
   let database: Promise<IDBDatabase> | undefined;
   function open() {
     return (database ??= new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(databaseName, 1);
+      const request = indexedDB.open(databaseName, version);
       request.onupgradeneeded = () =>
         request.result.createObjectStore(storeName);
       request.onsuccess = () => resolve(request.result);
@@ -22,7 +26,7 @@ export function indexedDb(databaseName: string, storeName: string) {
       tx.onabort = tx.onerror = () => reject(tx.error);
     });
   }
-  async function remove(key: string) {
+  async function remove(key: IDBValidKey) {
     const db = await open();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(storeName, "readwrite");
@@ -71,5 +75,48 @@ export function indexedDb(databaseName: string, storeName: string) {
       tx.onabort = tx.onerror = () => reject(tx.error);
     });
   }
-  return { get, put, delete: remove, entries, update };
+  async function putMany(values: [string, unknown][]) {
+    const db = await open();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(storeName, "readwrite");
+      const store = tx.objectStore(storeName);
+      for (const [key, value] of values) store.put(value, key);
+      tx.oncomplete = () => resolve();
+      tx.onabort = tx.onerror = () => reject(tx.error);
+    });
+  }
+  async function scan<T>(
+    inspect: (values: [IDBValidKey, unknown][]) => {
+      value: T;
+      remove: IDBValidKey[];
+    },
+  ): Promise<T> {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, "readwrite");
+      const store = tx.objectStore(storeName);
+      const values: [IDBValidKey, unknown][] = [];
+      let result: T;
+      const request = store.openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (cursor) {
+          values.push([cursor.key, cursor.value]);
+          cursor.continue();
+          return;
+        }
+        try {
+          const inspected = inspect(values);
+          result = inspected.value;
+          for (const key of inspected.remove) store.delete(key);
+        } catch (error) {
+          tx.abort();
+          reject(error);
+        }
+      };
+      tx.oncomplete = () => resolve(result);
+      tx.onabort = tx.onerror = () => reject(tx.error);
+    });
+  }
+  return { get, put, putMany, scan, delete: remove, entries, update };
 }

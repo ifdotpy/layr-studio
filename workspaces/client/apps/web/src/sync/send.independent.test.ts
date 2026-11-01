@@ -2,6 +2,7 @@ import { MessageSendStatus } from "../generated/api.ts";
 import { afterEach, expect, it, vi } from "vitest";
 import { createCommandClient } from "../commands";
 import { createOutbox, matchesMessageDelivery } from "./send";
+import type { StoredSend } from "../unsent/store.ts";
 
 class MemoryStorage implements Storage {
   private values = new Map<string, string>();
@@ -26,20 +27,20 @@ class MemoryStorage implements Storage {
 }
 
 class MemoryBuffer {
-  values = new Map<string, string | Blob>();
-  async put(key: string, value: string | Blob) {
+  values = new Map<string, StoredSend>();
+  async put(key: string, value: StoredSend) {
     this.values.set(key, value);
   }
-  async putIfExists(key: string, value: string) {
+  async putIfExists(key: string, value: StoredSend) {
     if (this.values.has(key)) this.values.set(key, value);
   }
-  async deleteIfEqual(key: string, value: string) {
+  async deleteIfEqual(key: string, value: StoredSend) {
     if (this.values.get(key) === value) this.values.delete(key);
   }
   async delete(key: string) {
     this.values.delete(key);
   }
-  async loadAll(): Promise<[string, string | Blob][]> {
+  async loadAll(): Promise<[string, StoredSend][]> {
     return [...this.values];
   }
 }
@@ -241,7 +242,7 @@ it("does not send a stored message to a different workspace", async () => {
   expect(storage.length).toBe(1);
 });
 
-it("allows a damaged saved message to be discarded without sending it", async () => {
+it("does not migrate legacy saved messages", async () => {
   const storage = new MemoryStorage();
   const buffer = new MemoryBuffer();
   storage.setItem(
@@ -259,10 +260,10 @@ it("allows a damaged saved message to be discarded without sending it", async ()
     watchResourceConnection: () => () => {},
   });
   await expect(outbox.changeOutbox("damaged", "resume")).rejects.toThrow(
-    "cannot be retried",
+    "no longer on this device",
   );
-  await outbox.changeOutbox("damaged", "cancel");
-  expect(storage.length).toBe(0);
+  expect(buffer.values.size).toBe(0);
+  expect(storage.length).toBe(1);
   expect(post).not.toHaveBeenCalled();
 });
 
@@ -303,7 +304,7 @@ it("accepts a command reply whose receipt projection precedes the flat receipt",
   expect(storage.length).toBe(1);
 });
 
-it("keeps an applied message uncertain when the response omits its receipt", async () => {
+it("removes a confirmed command even when its response omits the receipt", async () => {
   const storage = new MemoryStorage();
   const buffer = new MemoryBuffer();
   const post = vi.fn(async (request) => ({
@@ -328,12 +329,8 @@ it("keeps an applied message uncertain when the response omits its receipt", asy
     room: "chat",
     text: "hello",
   });
-  expect(result).toMatchObject({
-    kind: "local",
-    id: "one",
-    status: MessageSendStatus.uncertain,
-  });
-  expect(storage.length).toBe(1);
+  expect(result).toMatchObject({ kind: "confirmed", id: "one" });
+  await vi.waitFor(() => expect(buffer.values.size).toBe(0));
 });
 
 it("coalesces a reconnect with a send whose persistence callback is still running", async () => {
@@ -399,15 +396,15 @@ it("keeps a remote outcome-unknown error uncertain instead of treating it as a r
 
 it("restores an uncertain command after reload and removes it on confirmation", async () => {
   const storage = new MemoryStorage();
-  const records = new Map<string, string>();
+  const records = new Map<string, StoredSend>();
   const buffer = {
-    putIfExists: async (key: string, value: string) => {
+    putIfExists: async (key: string, value: StoredSend) => {
       if (records.has(key)) records.set(key, value);
     },
-    deleteIfEqual: async (key: string, value: string) => {
+    deleteIfEqual: async (key: string, value: StoredSend) => {
       if (records.get(key) === value) records.delete(key);
     },
-    put: async (key: string, value: string) => {
+    put: async (key: string, value: StoredSend) => {
       records.set(key, value);
     },
     delete: async (key: string) => {
@@ -444,43 +441,6 @@ it("restores an uncertain command after reload and removes it on confirmation", 
   await createOutbox(options).changeOutbox("saved", "resume");
   expect(records.size).toBe(0);
   expect(post.mock.calls[1]?.[0]).toEqual(post.mock.calls[0]?.[0]);
-});
-
-it("resumes a legacy paused buffer with the original command identity", async () => {
-  const storage = new MemoryStorage();
-  const buffer = new MemoryBuffer();
-  const post = vi.fn(async (request) => ({
-    rows: [
-      {
-        collection: "messageReceipt",
-        payload: { id: request.id, status: "delivered" },
-      },
-    ],
-  }));
-  const command = createCommandClient(storage, post as never);
-  const request = command.make("send", "chat", { text: "hello" }, "saved");
-  await buffer.put(
-    JSON.stringify(["chat", "saved"]),
-    JSON.stringify({
-      body: { id: "saved", room: "chat", text: "hello" },
-      request,
-      workspaceId: "workspace",
-      status: "paused",
-      created: 1,
-    }),
-  );
-  const outbox = createOutbox({
-    api: {
-      command,
-      getStreamSession: () => ({ workspaceId: "workspace" }),
-    } as never,
-    storage,
-    buffer,
-    watchResourceConnection: () => () => {},
-  });
-  await outbox.changeOutbox("saved", "resume");
-  expect(post).toHaveBeenCalledWith(request, expect.anything());
-  expect(buffer.values.size).toBe(0);
 });
 
 it("dispatches immediately when the buffer write never finishes", async () => {

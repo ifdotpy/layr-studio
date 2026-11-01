@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useServerServices } from "../servers/ServerServicesContext.tsx";
 import { serverViewId } from "../servers/environment.ts";
-import { reportUnsentFailure, unsentStore } from "./store.ts";
+import { reportUnsentFailure, unsentStore, type TextFeature } from "./store.ts";
 
 /** Keep a text edit on this device until its caller clears it. */
-export function useUnsentText(feature: string, id: string) {
+export function useUnsentText(feature: TextFeature, id: string) {
   const server = useServerServices()?.owner.id ?? serverViewId ?? "local";
   const identity = JSON.stringify([server, feature, id]);
   const [value, setValue] = useState<string | null>(null);

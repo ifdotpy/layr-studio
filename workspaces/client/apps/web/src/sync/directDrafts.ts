@@ -19,9 +19,9 @@ export function createDirectDrafts(options: {
   post: (rows: PushRow[]) => Promise<Document[]>;
   changed: () => void;
   buffer?: {
-    put: (key: string, value: string) => Promise<void>;
+    put: (key: string, value: Document) => Promise<void>;
     delete: (key: string) => Promise<void>;
-    loadAll: () => Promise<[string, string | Blob][]>;
+    loadAll: () => Promise<[string, Document][]>;
   };
 }) {
   const masters = new Map<string, Document>();
@@ -76,8 +76,7 @@ export function createDirectDrafts(options: {
             if (local) {
               const resolved = await resolveDraftConflict(master, local);
               pending.set(local.id, resolved);
-              if (options.buffer)
-                await options.buffer.put(local.id, JSON.stringify(resolved));
+              if (options.buffer) await options.buffer.put(local.id, resolved);
             }
           } else {
             const existing = masters.get(document.id);
@@ -124,7 +123,7 @@ export function createDirectDrafts(options: {
       if (options.buffer) {
         const write = (
           writes.get(row.id)?.catch(() => {}) ?? Promise.resolve()
-        ).then(() => options.buffer!.put(row.id, JSON.stringify(row)));
+        ).then(() => options.buffer!.put(row.id, row));
         writes.set(row.id, write);
         void write.then(
           () => {
@@ -139,21 +138,7 @@ export function createDirectDrafts(options: {
     },
     async restore() {
       for (const [id, value] of (await options.buffer?.loadAll()) ?? []) {
-        if (typeof value !== "string" || pending.has(id)) continue;
-        const row: unknown = JSON.parse(value);
-        if (
-          row &&
-          typeof row === "object" &&
-          "id" in row &&
-          row.id === id &&
-          "payload" in row &&
-          typeof row.payload === "string" &&
-          "seq" in row &&
-          typeof row.seq === "number" &&
-          "_deleted" in row &&
-          typeof row._deleted === "boolean"
-        )
-          pending.set(id, row as Document);
+        if (!pending.has(id)) pending.set(id, value);
       }
       options.changed();
     },

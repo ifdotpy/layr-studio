@@ -1,6 +1,4 @@
-import { unsentStore } from "../unsent/store.ts";
-import { ApiError } from "../api.ts";
-import { serverMutationResponseIsUncertain } from "../servers/mutationIdentity.ts";
+import { uploadStore } from "../unsent/store.ts";
 import { randomUUID } from "../uuid";
 import { serverStorageName } from "../servers/environment";
 import { syncGet, syncPost, refreshSession, type GetResult } from "../api";
@@ -26,7 +24,7 @@ export type PendingUpload = {
 export const UPLOAD_DATABASE_NAME = "codex-studio-uploads";
 export type UploadOptions = {
   databaseName: string;
-  buffer?: Pick<ReturnType<typeof unsentStore>, "put" | "delete" | "loadAll">;
+  buffer?: Pick<ReturnType<typeof uploadStore>, "put" | "delete" | "loadAll">;
   syncGet: (
     path: "/api/sync/identity",
   ) => Promise<Pick<GetResult<"/api/sync/identity">, "workspaceId">>;
@@ -89,27 +87,15 @@ export function createUploads(
   const rows = new Map<string, PendingUpload>();
   const contents = new Map<string, ArrayBuffer>();
   const storedKeys = new Map<string, string>();
-  const buffer = options.buffer ?? unsentStore(databaseName, "upload");
+  const buffer = options.buffer ?? uploadStore(databaseName);
   let loading: Promise<void> | undefined;
   const ready = () =>
     (loading ??= (async () => {
       for (const [key, value] of await buffer.loadAll()) {
-        if (!(value instanceof Blob)) continue;
-        try {
-          const row: PendingUpload = JSON.parse(key);
-          if (
-            typeof row.id !== "string" ||
-            typeof row.workspace !== "string" ||
-            typeof row.stateDir !== "string" ||
-            typeof row.agent !== "string"
-          )
-            continue;
-          rows.set(row.id, row);
-          contents.set(row.id, await value.arrayBuffer());
-          storedKeys.set(row.id, key);
-        } catch {
-          /* Ignore a damaged upload. */
-        }
+        const { bytes, ...row } = value;
+        rows.set(row.id, row);
+        contents.set(row.id, await bytes.arrayBuffer());
+        storedKeys.set(row.id, key);
       }
     })());
   async function queueUploads(
@@ -150,8 +136,11 @@ export function createUploads(
         })),
       );
     for (const { bytes, ...row } of queued) {
-      const key = JSON.stringify(row);
-      await buffer.put(key, new Blob([bytes], { type: row.mime }));
+      const key = row.id;
+      await buffer.put(key, {
+        ...row,
+        bytes: new Blob([bytes], { type: row.mime }),
+      });
       storedKeys.set(row.id, key);
       rows.set(row.id, row);
       contents.set(row.id, bytes);
@@ -233,29 +222,11 @@ export function createUploads(
         };
         reader.readAsDataURL(new Blob([bytes], { type: row.mime }));
       });
-      let response: Awaited<ReturnType<typeof syncPost>>;
-      try {
-        response = await syncPost(
-          "/api/assets",
-          {
-            agent: row.agent,
-            name: row.name,
-            base64,
-            id: row.id,
-          },
-          { workspaceId: row.workspace, sessionToken: session.token },
-        );
-      } catch (error) {
-        if (
-          error instanceof ApiError &&
-          !serverMutationResponseIsUncertain(error.status, error.response)
-        ) {
-          const stored = storedKeys.get(row.id);
-          if (stored) await buffer.delete(stored);
-          storedKeys.delete(row.id);
-        }
-        throw error;
-      }
+      const response = await syncPost(
+        "/api/assets",
+        { agent: row.agent, name: row.name, base64, id: row.id },
+        { workspaceId: row.workspace, sessionToken: session.token },
+      );
       const asset: Attachment = response;
       if (asset.id !== row.id)
         throw new Error("The upload response does not match the saved file.");

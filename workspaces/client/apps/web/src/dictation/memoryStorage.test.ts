@@ -1,16 +1,26 @@
 import { expect, it } from "vitest";
 import { createRecordingStorage, type Recording } from "./storage";
+import type { RecordingValue } from "../unsent/store.ts";
 
 it("restores recordings and undo after reload and rejects late transcription", async () => {
-  const records = new Map<string, string | Blob>();
+  const records = new Map<string, RecordingValue>();
   const buffer = {
-    put: async (key: string, value: string | Blob) => {
+    put: async (key: string, value: RecordingValue) => {
       records.set(key, value);
+    },
+    putChunk: async (
+      recordId: string,
+      record: RecordingValue,
+      chunkId: string,
+      chunk: RecordingValue,
+    ) => {
+      records.set(recordId, record);
+      records.set(chunkId, chunk);
     },
     delete: async (key: string) => {
       records.delete(key);
     },
-    loadAll: async (): Promise<[string, string | Blob][]> => [...records],
+    loadAll: async (): Promise<[string, RecordingValue][]> => [...records],
   };
   const storage = createRecordingStorage("test", buffer);
   const row: Recording = {

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import {
-  migrateMessageSends,
   reportUnsentFailure,
-  unsentStore,
+  sendStore,
+  type StoredSend,
 } from "../unsent/store";
 import { serverViewId } from "../servers/environment";
 import { serverLocalStorage } from "../servers/storage";
@@ -22,19 +22,20 @@ import type { MessageReceipt } from "./messageReceipts";
 type SendCommand = Extract<CommandRequest, { kind: "send" }>;
 type Intention = {
   body: SendMessageBody;
-  status: MessageSendStatus;
+  status: MessageSendStatus | "buffered";
   attempted?: boolean;
   error?: string | undefined;
   receipt?: MessageDelivery | undefined;
   created: number;
   displayPending?: boolean;
   attachments?: Attachment[] | undefined;
-  displayText?: string;
+  displayText?: string | undefined;
 };
 export type OutboxEntry = Intention & { id: string };
 export type OutgoingMessage = OutboxEntry;
 type SavedSend = Intention & { request: SendCommand; workspaceId: string };
 type SendResult =
+  | { kind: "confirmed"; id: string }
   | (MessageDelivery & { kind: "server" })
   | {
       kind: "local";
@@ -59,24 +60,29 @@ export function matchesMessageDelivery(value: unknown, id: string) {
 export function createOutbox(options: {
   api: Pick<import("../api").ServerApi, "command" | "getStreamSession">;
   storage: Storage;
-  buffer?: ReturnType<typeof unsentStore>;
+  buffer?: ReturnType<typeof sendStore>;
   serverId?: string;
   watchResourceConnection: typeof watchResourceConnection;
 }) {
   const { command } = options.api;
   const buffer =
-    options.buffer ??
-    unsentStore(options.serverId ?? serverViewId ?? "local", "message");
-  const saved = new Map<string, string>();
+    options.buffer ?? sendStore(options.serverId ?? serverViewId ?? "local");
+  const saved = new Map<string, SavedSend>();
   const removed = new Set<string>();
   const initialWrites = new Map<string, Promise<void>>();
   let initialization: Promise<void> | undefined;
   const ready = () =>
     (initialization ??= (async () => {
-      await migrateMessageSends(options.storage, buffer);
-      for (const [id, value] of await buffer.loadAll())
-        if (typeof value === "string" && !saved.has(id) && !removed.has(id))
-          saved.set(id, value);
+      for (const [id, value] of await buffer.loadAll()) {
+        if (!saved.has(id) && !removed.has(id)) {
+          const body = {
+            id: value.request.id,
+            room: value.request.target,
+            ...value.request.body,
+          };
+          saved.set(id, { ...value, body, status: "buffered" });
+        }
+      }
     })().catch((error: unknown) => {
       initialization = undefined;
       throw error;
@@ -86,88 +92,30 @@ export function createOutbox(options: {
   const key = (room: string, id: string) => JSON.stringify([room, id]);
   const publish = () => listeners.forEach((listener) => listener());
   function list(): OutboxEntry[] {
-    return [...saved.keys()]
-      .flatMap((suffix) => {
-        let identity: unknown;
-        try {
-          identity = JSON.parse(suffix);
-        } catch {
-          return [];
-        }
-        if (
-          !Array.isArray(identity) ||
-          identity.length !== 2 ||
-          !identity.every((value) => typeof value === "string")
-        )
-          return [];
-        const [room, id] = identity as [string, string];
-        const value = read(room, id);
-        return [
-          value
-            ? { ...value, id }
-            : {
-                id,
-                body: { id, room, text: "Saved message could not be read." },
-                status: MessageSendStatus.failed,
-                error:
-                  "This saved message cannot be read. Discard it to remove it.",
-                created: 0,
-                displayPending: true,
-              },
-        ];
-      })
+    return [...saved.values()]
+      .map((value) => ({ ...value, id: value.request.id }))
       .sort((a, b) => a.created - b.created);
   }
   function read(room: string, id: string): SavedSend | undefined {
-    const raw = saved.get(key(room, id));
-    if (!raw) return;
-    try {
-      const row: unknown = JSON.parse(raw);
-      if (!row || typeof row !== "object") return;
-      const value = row as SavedSend;
-      // Older saved commands used queued or paused for the device buffer.
-      if (
-        value.status === MessageSendStatus.queued ||
-        ("status" in row && row.status === "paused")
-      )
-        value.status = MessageSendStatus.buffered;
-      if (
-        value.body?.id !== id ||
-        value.body.room !== room ||
-        typeof value.body.text !== "string" ||
-        value.request?.id !== id ||
-        value.request.kind !== "send" ||
-        value.request.target !== room ||
-        typeof value.request.client !== "string" ||
-        !Number.isSafeInteger(value.request.number) ||
-        typeof value.workspaceId !== "string" ||
-        typeof value.created !== "number" ||
-        (value.status !== MessageSendStatus.buffered &&
-          value.status !== MessageSendStatus.uncertain &&
-          value.status !== MessageSendStatus.failed)
-      )
-        return;
-      const expected = {
-        text: value.body.text,
-        ...(value.body.assets ? { assets: value.body.assets } : {}),
-        ...(value.body.delivery ? { delivery: value.body.delivery } : {}),
-      };
-      if (JSON.stringify(value.request.body) !== JSON.stringify(expected))
-        return;
-      return value;
-    } catch {
-      return;
-    }
+    return saved.get(key(room, id));
   }
   function write(value: SavedSend, initial = false) {
     const id = key(value.body.room, value.body.id);
-    const text = JSON.stringify(value);
-    saved.set(id, text);
+    const record: StoredSend = {
+      request: value.request,
+      workspaceId: value.workspaceId,
+      created: value.created,
+      attachments: value.attachments ?? [],
+      ...(value.displayText === undefined
+        ? {}
+        : { displayText: value.displayText }),
+    };
+    saved.set(id, value);
     publish();
     const pending = initial
-      ? buffer.put(id, text)
+      ? buffer.put(id, record)
       : (initialWrites.get(id) ?? Promise.resolve()).then(() =>
-          buffer.putIfExists(id, text),
+          buffer.putIfExists(id, record),
         );
     if (initial) {
       initialWrites.set(id, pending);
@@ -247,6 +195,16 @@ export function createOutbox(options: {
           workspaceId: value.workspaceId,
         });
         const receipt = messageReceipt(response);
+        if (
+          !receipt &&
+          response.status === "applied" &&
+          response.ref_kind === "message" &&
+          response.ref_id === id
+        ) {
+          notifyPersisted();
+          void remove(value.body.room, id).catch(reportUnsentFailure);
+          return { kind: "confirmed", id };
+        }
         if (!receipt || !matchesMessageDelivery(receipt, id))
           throw new Error("The delivery response does not match this message.");
         if (
@@ -326,7 +284,7 @@ export function createOutbox(options: {
         body,
         request,
         workspaceId,
-        status: MessageSendStatus.buffered,
+        status: "buffered",
         attempted: false,
         created: Date.now(),
         displayPending: true,
@@ -404,7 +362,7 @@ export function createOutbox(options: {
             const value = read(entry.body.room, entry.id);
             if (
               value &&
-              (value.status === MessageSendStatus.buffered ||
+              (value.status === "buffered" ||
                 value.status === MessageSendStatus.uncertain)
             )
               void send(value).catch((failure) => setError(errorText(failure)));

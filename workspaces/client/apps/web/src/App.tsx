@@ -1715,31 +1715,42 @@ export default function App({ active = true }: { active?: boolean }) {
             release();
           },
         );
-        setOutgoing((old) => ({
-          ...old,
-          [entry.id]: {
-            ...entry,
-            status: result.status,
-            ...(result.kind === "server" ? { receipt: result } : {}),
-            error: result.error || undefined,
-          },
-        }));
-        if (result.status === MessageSendStatus.cancelled) {
-          if (sends.current[id]?.id === entry.id) {
-            delete sends.current[id];
+        if (result.kind === "confirmed") {
+          setOutgoing((old) => {
+            const next = { ...old };
+            delete next[entry.id];
+            return next;
+          });
+        } else {
+          setOutgoing((old) => ({
+            ...old,
+            [entry.id]: {
+              ...entry,
+              status: result.status,
+              ...(result.kind === "server" ? { receipt: result } : {}),
+              error: result.error || undefined,
+            },
+          }));
+          if (result.status === MessageSendStatus.cancelled) {
+            if (sends.current[id]?.id === entry.id) {
+              delete sends.current[id];
+            }
+            throw new ApiError(
+              "This message was cancelled. Send it again to resume.",
+              400,
+            );
           }
-          throw new ApiError(
-            "This message was cancelled. Send it again to resume.",
-            400,
-          );
+          if (result.status === MessageSendStatus.failed)
+            throw new ApiError(
+              result.error || "The message was not sent.",
+              400,
+            );
+          if (result.status === MessageSendStatus.uncertain)
+            throw new Error(
+              result.error ||
+                "Delivery is uncertain. Inspect the conversation before sending again.",
+            );
         }
-        if (result.status === MessageSendStatus.failed)
-          throw new ApiError(result.error || "The message was not sent.", 400);
-        if (result.status === MessageSendStatus.uncertain)
-          throw new Error(
-            result.error ||
-              "Delivery is uncertain. Inspect the conversation before sending again.",
-          );
         if (sends.current[id]?.id === entry.id) {
           delete sends.current[id];
         }

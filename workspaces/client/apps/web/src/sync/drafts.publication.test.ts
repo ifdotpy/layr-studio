@@ -20,7 +20,7 @@ vi.mock("../api.ts", () => ({
 }));
 vi.mock("../unsent/store.ts", () => ({
   UNSENT_FAILURE_EVENT: "studio-unsent-input-failure",
-  unsentStore: () => ({
+  draftStore: () => ({
     put: async () => {},
     delete: async () => {},
     loadAll: async () => [],

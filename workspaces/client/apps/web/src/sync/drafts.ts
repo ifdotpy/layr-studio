@@ -5,7 +5,7 @@ import {
   useState,
   type SetStateAction,
 } from "react";
-import { UNSENT_FAILURE_EVENT, unsentStore } from "../unsent/store.ts";
+import { UNSENT_FAILURE_EVENT, draftStore } from "../unsent/store.ts";
 import { serverViewId } from "../servers/environment.ts";
 import { syncPost } from "../api.ts";
 import { randomUUID } from "../uuid.ts";
@@ -119,10 +119,7 @@ export function createBrowserDrafts(options: {
       store.current = createDirectDrafts({
         post: (rows) => options.api.syncPost("/api/sync/drafts", { rows }),
         changed: reconcile,
-        buffer: unsentStore(
-          options.serverId ?? serverViewId ?? "local",
-          "draft",
-        ),
+        buffer: draftStore(options.serverId ?? serverViewId ?? "local"),
       });
     const flush = () => {
       clearTimeout(quiet.current);
