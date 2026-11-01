@@ -136,6 +136,7 @@ pub mod native_review_turn;
 pub mod native_runtime;
 pub mod notification_dispatch;
 pub mod notification_runtime_effects;
+pub mod orchestration_exec;
 pub mod orchestration_wire;
 pub mod orchestration_worker;
 pub mod organization_effects;

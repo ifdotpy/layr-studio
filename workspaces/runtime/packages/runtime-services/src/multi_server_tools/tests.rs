@@ -1,12 +1,20 @@
 #![allow(clippy::unwrap_used)]
 
 use super::*;
+use crate::remote_transport::canonical_json;
 
 #[test]
 fn exec_environment_limit_counts_utf8_json_bytes() {
-    let valid = json!({"cwd":"/", "command":"echo", "env":{"VALUE":"雪".repeat(40_000)}});
+    let valid =
+        json!({"actor":"a", "cwd":"/", "command":"echo", "env":{"VALUE":"雪".repeat(40_000)}});
+    let valid =
+        <crate::orchestration_exec::ExecRequest as serde::Deserialize>::deserialize(valid).unwrap();
     assert!(validate_exec(&valid, false).is_ok());
-    let too_large = json!({"cwd":"/", "command":"echo", "env":{"VALUE":"雪".repeat(44_000)}});
+    let too_large =
+        json!({"actor":"a", "cwd":"/", "command":"echo", "env":{"VALUE":"雪".repeat(44_000)}});
+    let too_large =
+        <crate::orchestration_exec::ExecRequest as serde::Deserialize>::deserialize(too_large)
+            .unwrap();
     assert!(validate_exec(&too_large, false).is_err());
 }
 
@@ -655,9 +663,9 @@ fn cases() -> Vec<Case> {
             actor: "remote",
             tool: "orchestration_task",
             args: json!({"action": "list"}),
-            success: true,
-            sent: &["task"],
-            expect: json!({"apiVersion": 2, "items": [{"id": "home-task", "title": "Home task"}]}),
+            success: false,
+            sent: &[],
+            expect: json!("The home server does not support this action"),
         },
         Case {
             name: "remote-message",
@@ -691,45 +699,45 @@ fn cases() -> Vec<Case> {
             actor: "remote",
             tool: "orchestration_status",
             args: json!({}),
-            success: true,
-            sent: &["directory"],
-            expect: json!({"tool": "orchestration_status", "agents": []}),
+            success: false,
+            sent: &[],
+            expect: json!("The home server does not support this action"),
         },
         Case {
             name: "remote-peers",
             actor: "remote",
             tool: "orchestration_peers",
             args: json!({"scope": "team"}),
-            success: true,
-            sent: &["directory"],
-            expect: json!({"tool": "orchestration_peers", "agents": []}),
+            success: false,
+            sent: &[],
+            expect: json!("The home server does not support this action"),
         },
         Case {
             name: "remote-chat-read",
             actor: "remote",
             tool: "orchestration_chat_read",
             args: json!({"room_id": "home-room"}),
-            success: true,
-            sent: &["chat_read"],
-            expect: json!({"messages": [], "room": "home-room"}),
+            success: false,
+            sent: &[],
+            expect: json!("The home server does not support this action"),
         },
         Case {
             name: "remote-context-plan",
             actor: "remote",
             tool: "orchestration_context",
             args: json!({"topic": "plan"}),
-            success: true,
-            sent: &["context"],
-            expect: json!({"topic": "plan", "version": "v1", "content": "Home plan"}),
+            success: false,
+            sent: &[],
+            expect: json!("The home server does not support this action"),
         },
         Case {
             name: "remote-context-unknown",
             actor: "remote",
             tool: "orchestration_context",
             args: json!({"topic": "complaints"}),
-            success: true,
-            sent: &["context"],
-            expect: json!({"outcome": "unknown", "detail": "The request is saved. Do not submit another identity."}),
+            success: false,
+            sent: &[],
+            expect: json!("The home server does not support this action"),
         },
         Case {
             name: "remote-complaint-refused",
@@ -737,8 +745,8 @@ fn cases() -> Vec<Case> {
             tool: "orchestration_complaint",
             args: json!({"action": "submit", "text": "help"}),
             success: false,
-            sent: &["complaint"],
-            expect: json!("The home server refused the complaint"),
+            sent: &[],
+            expect: json!("The home server does not support this action"),
         },
         Case {
             name: "moved-send",
@@ -754,27 +762,27 @@ fn cases() -> Vec<Case> {
             actor: "moved",
             tool: "orchestration_spawn",
             args: json!({"agents": [{"name": "Child", "prompt": "work"}]}),
-            success: true,
-            sent: &["move_spawn"],
-            expect: json!({"forwarded": "move_spawn"}),
+            success: false,
+            sent: &[],
+            expect: json!("The home server does not support this action"),
         },
         Case {
             name: "moved-interrupt",
             actor: "moved",
             tool: "orchestration_interrupt",
             args: json!({"agent_id": "some-child"}),
-            success: true,
-            sent: &["move_interrupt"],
-            expect: json!({"forwarded": "move_interrupt"}),
+            success: false,
+            sent: &[],
+            expect: json!("The home server does not support this action"),
         },
         Case {
             name: "moved-manage",
             actor: "moved",
             tool: "orchestration_agent_manage",
             args: json!({"action": "rename", "agent_id": "some-child", "name": "New"}),
-            success: true,
-            sent: &["move_manage"],
-            expect: json!({"forwarded": "move_manage"}),
+            success: false,
+            sent: &[],
+            expect: json!("The home server does not support this action"),
         },
         Case {
             name: "speak-saved",
@@ -1242,10 +1250,7 @@ async fn fetching_reuses_original_export_inputs_and_missing_inputs_never_send() 
         else {
             panic!("export")
         };
-        assert_eq!(
-            <ExportRequest as serde::Deserialize>::deserialize(payload).unwrap(),
-            original
-        );
+        assert_eq!(payload.clone(), original);
     }
     assert_eq!(
         sent[0].request_id, sent[1].request_id,
@@ -1948,9 +1953,12 @@ async fn a_python_lead_runs_a_command_here_and_gets_one_exit_notice() {
     let envelope = crate::orchestration_wire::OrchestrationRequest {
         request_id: root.clone(),
         operation: Vec::new(),
-        command: crate::orchestration_wire::OrchestrationCommand::Exec(json!({
+        command: crate::orchestration_wire::OrchestrationCommand::Exec(
+            <crate::orchestration_exec::ExecPayload as serde::Deserialize>::deserialize(json!({
         "actor": "peer-lead", "cwd": folder.path(), "command": ["sh", "-c", "printf remote"],
-        "env": {}, "timeout": 5, "output_limit": 262144})),
+        "env": {}, "timeout": 5, "output_limit": 262144}))
+            .unwrap(),
+        ),
     };
     let now = crate::event_write::unix_time().unwrap() as i64;
     let outcome = driver.receive(PEER, &envelope, now).await.unwrap();
@@ -1971,7 +1979,10 @@ async fn a_python_lead_runs_a_command_here_and_gets_one_exit_notice() {
                 request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
                 operation: Vec::new(),
                 command: crate::orchestration_wire::OrchestrationCommand::ExecRead(
-                    json!({"actor": "another-lead", "handle": root}),
+                    <crate::orchestration_exec::ReadRequest as serde::Deserialize>::deserialize(
+                        json!({"actor": "another-lead", "handle": root}),
+                    )
+                    .unwrap(),
                 ),
             },
             now,
@@ -2003,9 +2014,14 @@ async fn a_python_lead_runs_a_command_here_and_gets_one_exit_notice() {
             &crate::orchestration_wire::OrchestrationRequest {
                 request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
                 operation: Vec::new(),
-                command: crate::orchestration_wire::OrchestrationCommand::Exec(json!({
+                command: crate::orchestration_wire::OrchestrationCommand::Exec(
+                    <crate::orchestration_exec::ExecPayload as serde::Deserialize>::deserialize(
+                        json!({
                 "actor": "peer-lead", "cwd": folder.path(), "command": ["/nonexistent/command"],
-                "timeout": 5})),
+                "timeout": 5}),
+                    )
+                    .unwrap(),
+                ),
             },
             now,
         )

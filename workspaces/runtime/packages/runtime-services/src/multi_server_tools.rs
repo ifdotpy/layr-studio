@@ -30,8 +30,9 @@ use crate::managed_host_tools::{Actor, DispatchedOperation, Error, OperationResu
 use crate::multi_server_auth::AccessError;
 use crate::multi_server_orchestration::{ExchangeOutcome, OrchestrationDriver};
 use crate::multi_server_transport_limits::MAX_REQUEST_BYTES;
-use crate::remote_transport::canonical_json;
-use crate::server_git::{self, CHUNK, MAX_BUNDLE, commit_hash, git_command, git_read, git_run};
+use crate::server_git::{
+    self, CHUNK, ExportRequest, MAX_BUNDLE, commit_hash, git_command, git_read, git_run,
+};
 
 /// Seconds that `git bundle verify` may run (Python `_fetch`).
 const BUNDLE_VERIFY_SECONDS: u64 = 30;
@@ -86,19 +87,12 @@ impl ServerTools {
         &self,
         server: &str,
         operation: &[String],
-        action: &str,
-        payload: &Value,
+        command: crate::orchestration_wire::OrchestrationCommand,
         key: &str,
-    ) -> Result<Value, Step> {
+    ) -> Result<ExchangeOutcome, Step> {
         let now = crate::event_write::unix_time()
             .map_err(|_| Step::Refused("The system clock is unavailable".into()))?
             as i64;
-        let kind = action
-            .parse()
-            .map_err(|_| Step::Refused("Invalid cross-server action".into()))?;
-        let command =
-            crate::orchestration_wire::OrchestrationCommand::remaining(kind, payload.clone())
-                .ok_or_else(|| Step::Refused("Invalid cross-server action".into()))?;
         self.driver
             .exchange_operation(
                 server,
@@ -110,7 +104,6 @@ impl ServerTools {
                 now,
             )
             .await
-            .map(|outcome| receipt(&outcome, key))
             .map_err(|error| match error {
                 AccessError::Store(error) => Step::Store(error),
                 AccessError::Sqlite(error) => Step::Store(error.into()),
@@ -179,13 +172,6 @@ struct FetchReply {
     commit: String,
     bytes: u64,
     destination: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-struct ExportRequest {
-    cwd: Option<String>,
-    branch: String,
-    known: Vec<String>,
 }
 
 /// The record of a local Git fetch in the shared outbox (effect `server_fetch`).
@@ -425,11 +411,22 @@ impl ServerTools {
         command: crate::orchestration_wire::OrchestrationCommand,
         key: &str,
     ) -> Result<Value, Step> {
+        self.deliver_exchange(server, command, key)
+            .await
+            .map(|outcome| receipt(&outcome, key))
+    }
+
+    async fn deliver_exchange(
+        &self,
+        server: &str,
+        command: crate::orchestration_wire::OrchestrationCommand,
+        key: &str,
+    ) -> Result<ExchangeOutcome, Step> {
         let now = crate::event_write::unix_time()
             .map_err(|_| Step::Refused("The system clock is unavailable".into()))?
             as i64;
         match self.driver.exchange(server, command, key, now).await {
-            Ok(outcome) => Ok(receipt(&outcome, key)),
+            Ok(outcome) => Ok(outcome),
             Err(AccessError::Refused {
                 code: "request_conflict" | "request_size" | "invalid_request" | "client_revoked",
                 message,
@@ -440,7 +437,7 @@ impl ServerTools {
                 }
                 refuse(message)
             }
-            Err(_) => Ok(json!({"requestId":key,"outcome":"unknown"})),
+            Err(_) => Ok(ExchangeOutcome::Unknown),
         }
     }
 
@@ -505,6 +502,20 @@ impl ServerTools {
             };
             crate::orchestration_wire::OrchestrationCommand::Folders(
                 crate::orchestration_worker::FoldersPayload { cwd },
+            )
+        } else if action == "git" {
+            let cwd = payload
+                .remove("cwd")
+                .and_then(|value| value.as_str().map(str::to_owned))
+                .ok_or_else(|| {
+                    Step::Refused("Supply an existing absolute repository folder".into())
+                })?;
+            let argv: Vec<String> = <Vec<String> as serde::Deserialize>::deserialize(
+                payload.remove("argv").unwrap_or(Value::Null),
+            )
+            .map_err(|_| Step::Refused("Supply a bounded Git argument list".into()))?;
+            crate::orchestration_wire::OrchestrationCommand::Git(
+                crate::server_git::GitReadRequest { cwd, argv },
             )
         } else {
             let kind = action
@@ -875,21 +886,50 @@ impl ServerTools {
             }
         }
         payload.insert("actor".to_owned(), json!(actor.record().id.0));
-        let mut payload = Value::Object(payload);
-        if action == "exec" {
-            payload = validate_exec(&payload, server != local).map_err(Step::Refused)?;
-        }
+        use crate::orchestration_exec::{CancelRequest, ExecRequest, InputRequest, ReadRequest};
+        use crate::orchestration_wire::OrchestrationCommand;
+        let payload = Value::Object(payload);
+        let invalid = |_| Step::Refused("Invalid command request".into());
+        let (command, handle) = match action {
+            "exec" => {
+                let request = ExecRequest::deserialize(payload).map_err(invalid)?;
+                validate_exec(&request, server != local).map_err(Step::Refused)?;
+                (
+                    OrchestrationCommand::Exec(crate::orchestration_exec::ExecPayload::Start(
+                        request,
+                    )),
+                    None,
+                )
+            }
+            "exec_read" => {
+                let request = ReadRequest::deserialize(payload).map_err(invalid)?;
+                let handle = Some(request.handle.clone());
+                (OrchestrationCommand::ExecRead(request), handle)
+            }
+            "exec_input" => {
+                let request = InputRequest::deserialize(payload).map_err(invalid)?;
+                let handle = Some(request.handle.clone());
+                (OrchestrationCommand::ExecInput(request), handle)
+            }
+            "exec_cancel" => {
+                let request = CancelRequest::deserialize(payload).map_err(invalid)?;
+                let handle = Some(request.handle.clone());
+                (OrchestrationCommand::ExecCancel(request), handle)
+            }
+            _ => return refuse("Invalid command action"),
+        };
         let key = key.to_owned();
-        let encoded = canonical_json(
-            &json!({"requestId": key,"operation":[], "action": action, "payload": payload}),
-        )
+        let encoded = serde_json::to_vec(&crate::orchestration_wire::OrchestrationRequest {
+            request_id: key.clone(),
+            operation: Vec::new(),
+            command: command.clone(),
+        })
         .map_err(|_| Step::Refused("Invalid cross-server request".into()))?;
         if encoded.len() > MAX_REQUEST_BYTES {
             return refuse("The encoded command request exceeds 256 KiB");
         }
         let actor_id = actor.record().id.0.clone();
         let epoch = actor.record().epoch;
-        let handle = payload.get("handle").cloned();
         let server_for_check = server.clone();
         let action_for_check = action.to_owned();
         self.store
@@ -899,13 +939,13 @@ impl ServerTools {
                     return refuse("Only the active lead can use server commands");
                 }
                 if action_for_check != "exec" {
-                    let Some(handle) = handle.as_ref().filter(|handle| handle.is_string()) else {
+                    let Some(handle) = handle.as_ref() else {
                         return refuse("Supply a command handle");
                     };
                     let owned = crate::multi_server_orchestration::exec_handle_owned(
                         tx,
                         &server_for_check,
-                        &json!(actor_id),
+                        &actor_id,
                         handle,
                     )
                     .map_err(|error| match error {
@@ -921,11 +961,6 @@ impl ServerTools {
                 Ok(())
             })
             .await?;
-        let kind = action
-            .parse()
-            .map_err(|_| Step::Refused("Invalid cross-server action".into()))?;
-        let command = crate::orchestration_wire::OrchestrationCommand::remaining(kind, payload)
-            .ok_or_else(|| Step::Refused("Invalid cross-server action".into()))?;
         self.deliver(&server, command, &key).await
     }
 
@@ -1045,10 +1080,9 @@ impl ServerTools {
             Err(previous) => return Ok(previous),
             Ok(preparation) => preparation,
         };
-        let export = serde_json::to_vec(preparation.export()).map_err(StoreError::from)?;
-        let export = serde_json::from_slice(&export).map_err(StoreError::from)?;
-        let receipt = self
-            .deliver(
+        let export = preparation.export().clone();
+        let outcome = self
+            .deliver_exchange(
                 server,
                 crate::orchestration_wire::OrchestrationCommand::Export(export),
                 &export_key,
@@ -1059,15 +1093,18 @@ impl ServerTools {
                 json!({"requestId":key,"outcome":"unknown","detail":"The local Git fetch has no final receipt. Inspect FETCH_HEAD; do not repeat it."}),
             );
         }
-        if receipt["outcome"] != "applied" {
-            return Ok(receipt);
+        let ExchangeOutcome::Applied(reply) = outcome else {
+            return Ok(receipt(&outcome, key));
+        };
+        let metadata: crate::server_git::ExportReply = serde_json::from_str(reply.value.get())
+            .map_err(|_| Step::Refused("Invalid remote bundle metadata".into()))?;
+        if metadata.branch != branch {
+            return refuse("Invalid remote bundle branch");
         }
-        let metadata = receipt["value"].clone();
         let already = metadata
-            .get("alreadyHave")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned);
+            .already_have
+            .clone()
+            .filter(|value| !value.is_empty());
         if let Some(already) = &already {
             let destination = destination.clone();
             let already = already.clone();
@@ -1084,13 +1121,9 @@ impl ServerTools {
                 return refuse("The advertised commit is absent from the local repository");
             }
         }
-        let bytes = metadata
-            .get("bytes")
-            .filter(|value| value.is_u64())
-            .and_then(Value::as_u64);
-        let bytes = match bytes {
-            Some(0) if already.is_some() => 0,
-            Some(bytes) if bytes > 0 && bytes <= MAX_BUNDLE => bytes,
+        let bytes = match metadata.bytes {
+            0 if already.is_some() => 0,
+            bytes if bytes > 0 && bytes <= MAX_BUNDLE => bytes,
             _ => return refuse("Invalid remote bundle size"),
         };
         let folder = tempfile::Builder::new()
@@ -1114,26 +1147,37 @@ impl ServerTools {
                 .deliver_operation(
                     server,
                     &[offset.to_string()],
-                    "chunk",
-                    &json!({"export": metadata["export"], "offset": offset}),
+                    crate::orchestration_wire::OrchestrationCommand::Chunk(
+                        crate::server_git::ChunkRequest {
+                            export: metadata
+                                .export
+                                .as_deref()
+                                .ok_or_else(|| {
+                                    Step::Refused("Invalid remote bundle export".into())
+                                })?
+                                .to_owned(),
+                            offset,
+                        },
+                    ),
                     &chunk_key,
                 )
                 .await?;
-            if chunk_receipt["outcome"] != "applied" {
-                return Ok(chunk_receipt);
-            }
-            let chunk = &chunk_receipt["value"];
-            let data = chunk["data"]
-                .as_str()
-                .and_then(|data| base64::engine::general_purpose::STANDARD.decode(data).ok())
+            let ExchangeOutcome::Applied(reply) = chunk_receipt else {
+                return Ok(receipt(&chunk_receipt, &chunk_key));
+            };
+            let chunk: crate::server_git::ChunkReply = serde_json::from_str(reply.value.get())
+                .map_err(|_| Step::Refused("Invalid remote bundle chunk".into()))?;
+            let data = base64::engine::general_purpose::STANDARD
+                .decode(&chunk.data)
+                .ok()
                 .unwrap_or_default();
             let length = data.len() as u64;
             if data.is_empty()
                 || data.len() > CHUNK
-                || chunk["offset"].as_u64() != Some(offset)
-                || chunk["nextOffset"].as_u64() != Some(offset + length)
+                || chunk.offset != offset
+                || chunk.next_offset != offset + length
                 || offset + length > bytes
-                || data_encoding::HEXLOWER.encode(&Sha256::digest(&data)) != field(chunk, "sha256")
+                || data_encoding::HEXLOWER.encode(&Sha256::digest(&data)) != chunk.sha256
             {
                 return refuse("Invalid remote bundle chunk");
             }
@@ -1145,7 +1189,8 @@ impl ServerTools {
         data_file.sync_all().map_err(io)?;
         drop(data_file);
         if already.is_none()
-            && data_encoding::HEXLOWER.encode(&digest.finalize()) != field(&metadata, "sha256")
+            && Some(data_encoding::HEXLOWER.encode(&digest.finalize()).as_str())
+                != metadata.sha256.as_deref()
         {
             return refuse("The remote bundle checksum differs");
         }
@@ -1249,9 +1294,17 @@ impl ServerTools {
         let release_key = key.to_owned();
         let key_owned = key.to_owned();
         let server_owned = server.to_owned();
-        let release = already
-            .is_none()
-            .then(|| json!({"export": metadata["export"]}));
+        let release = if already.is_none() {
+            Some(crate::server_git::ReleaseRequest {
+                export: metadata
+                    .export
+                    .as_deref()
+                    .ok_or_else(|| Step::Refused("Invalid remote bundle export".into()))?
+                    .to_owned(),
+            })
+        } else {
+            None
+        };
         let release_for_write = release.clone();
         let release_key_for_write = release_key.clone();
         let now = crate::event_write::unix_time().unwrap_or_default() as i64;
@@ -1427,10 +1480,9 @@ pub(crate) fn worker_route(
         return None;
     }
     let moved = studio_runtime_store::truthy(actor.extra.get("movedFrom"));
-    let forward = |action: &'static str| Some(Ok((action, args.clone())));
     match tool {
         "orchestration_agent_manage" if moved && args.get("action") != Some(&json!("park")) => {
-            forward("move_manage")
+            Some(Err("The home server does not support this action"))
         }
         "orchestration_context"
             if matches!(
@@ -1438,15 +1490,17 @@ pub(crate) fn worker_route(
                 Some("plan" | "complaints")
             ) =>
         {
-            forward("context")
+            Some(Err("The home server does not support this action"))
         }
-        "orchestration_task" => forward("task"),
-        "orchestration_complaint" => forward("complaint"),
-        "orchestration_interrupt" if moved => forward("move_interrupt"),
-        "orchestration_spawn" if moved => forward("move_spawn"),
-        "orchestration_send" if moved => forward("move_send"),
+        "orchestration_task" | "orchestration_complaint" => {
+            Some(Err("The home server does not support this action"))
+        }
+        "orchestration_interrupt" | "orchestration_spawn" if moved => {
+            Some(Err("The home server does not support this action"))
+        }
+        "orchestration_send" if moved => Some(Ok(("move_send", args.clone()))),
         "orchestration_status" | "orchestration_peers" => {
-            Some(Ok(("directory", json!({"tool": tool, "arguments": args}))))
+            Some(Err("The home server does not support this action"))
         }
         "orchestration_chat_read" => {
             let room = args
@@ -1454,7 +1508,7 @@ pub(crate) fn worker_route(
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             (!room.starts_with("remote:") && !room.starts_with("federated:"))
-                .then(|| Ok(("chat_read", args.clone())))
+                .then_some(Err("The home server does not support this action"))
         }
         "orchestration_message" => {
             let target = args.get("target").and_then(Value::as_str)?;
@@ -1584,80 +1638,49 @@ async fn blocking<T: Send + 'static>(
 
 /// Python `codex_server_exec.validate`.
 pub(crate) fn validate_exec(
-    payload: &Value,
+    payload: &crate::orchestration_exec::ExecRequest,
     allow_foreign_windows_path: bool,
-) -> Result<Value, String> {
-    let cwd = payload
-        .get("cwd")
-        .and_then(Value::as_str)
-        .filter(|cwd| !cwd.contains('\0'));
-    let Some(cwd) = cwd else {
-        return Err("Supply an absolute cwd on the selected server".into());
-    };
-    let native_absolute = Path::new(cwd).is_absolute();
-    let foreign_absolute = allow_foreign_windows_path && windows_absolute(cwd);
-    if !(native_absolute || foreign_absolute) {
+) -> Result<(), String> {
+    use crate::orchestration_exec::CommandInput;
+    let cwd = &payload.cwd;
+    if cwd.contains('\0')
+        || !(Path::new(cwd).is_absolute() || (allow_foreign_windows_path && windows_absolute(cwd)))
+    {
         return Err("Supply an absolute cwd on the selected server".into());
     }
-    if cwd.split('/').any(|part| part == "..") || cwd.split(['/', '\\']).any(|part| part == "..") {
+    if cwd.split(['/', '\\']).any(|part| part == "..") {
         return Err("The cwd must not contain parent traversal".into());
     }
-    let command = payload.get("command");
-    match command {
-        Some(Value::String(command)) => {
-            if command.is_empty() || command.contains('\0') || command.len() > 128 * 1024 {
-                return Err("Supply a command of 1 to 128 KiB without NUL".into());
-            }
-        }
-        Some(Value::Array(argv))
+    match &payload.command {
+        CommandInput::Shell(command)
+            if !command.is_empty() && !command.contains('\0') && command.len() <= 128 * 1024 => {}
+        CommandInput::Argv(argv)
             if (1..=256).contains(&argv.len())
-                && argv
-                    .iter()
-                    .all(|value| value.as_str().is_some_and(|value| !value.contains('\0')))
-                && argv[0].as_str().is_some_and(|first| !first.is_empty())
-                && argv
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::len)
-                    .sum::<usize>()
-                    <= 128 * 1024 => {}
-        _ => return Err("Supply command argv of 1 to 256 strings, at most 128 KiB".into()),
+                && !argv[0].is_empty()
+                && argv.iter().all(|value| !value.contains('\0'))
+                && argv.iter().map(String::len).sum::<usize>() <= 128 * 1024 => {}
+        CommandInput::Shell(_) => return Err("Supply a command of 1 to 128 KiB without NUL".into()),
+        CommandInput::Argv(_) => {
+            return Err("Supply command argv of 1 to 256 strings, at most 128 KiB".into());
+        }
     }
-    let environment = payload.get("env").cloned().unwrap_or_else(|| json!({}));
-    let valid_environment = environment.as_object().is_some_and(|object| {
-        object.iter().all(|(key, value)| {
-            valid_environment_name(key) && value.as_str().is_some_and(|value| !value.contains('\0'))
-        })
-    }) && environment.to_string().len() <= 128 * 1024;
-    if !valid_environment {
+    if payload
+        .env
+        .iter()
+        .any(|(key, value)| !valid_environment_name(key) || value.contains('\0'))
+        || serde_json::to_vec(&payload.env).map_or(true, |bytes| bytes.len() > 128 * 1024)
+    {
         return Err(
             "Supply env additions with valid names and string values, at most 128 KiB".into(),
         );
     }
-    let timeout = payload.get("timeout").cloned().unwrap_or(json!(120));
-    let limit = payload
-        .get("output_limit")
-        .cloned()
-        .unwrap_or(json!(256 * 1024));
-    if !timeout
-        .as_i64()
-        .is_some_and(|value| (1..=1800).contains(&value))
-    {
+    if !(1..=1800).contains(&payload.timeout) {
         return Err("Supply timeout seconds from 1 to 1800".into());
     }
-    if !limit
-        .as_i64()
-        .is_some_and(|value| (2..=4 * 1024 * 1024).contains(&value))
-    {
+    if !(2..=4 * 1024 * 1024).contains(&payload.output_limit) {
         return Err("Supply output_limit bytes from 2 to 4194304".into());
     }
-    let mut value = payload.clone();
-    value["cwd"] = json!(cwd);
-    value["command"] = command.cloned().unwrap_or(Value::Null);
-    value["env"] = environment;
-    value["timeout"] = timeout;
-    value["output_limit"] = limit;
-    Ok(value)
+    Ok(())
 }
 
 /// Python `re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key)`.

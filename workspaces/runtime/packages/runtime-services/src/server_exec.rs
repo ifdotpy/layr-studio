@@ -590,53 +590,34 @@ impl ServerExec {
         self: &Arc<Self>,
         principal: &str,
         local_server: &str,
-        payload: &Value,
+        payload: &crate::orchestration_exec::ExecRequest,
         key: &str,
     ) -> Result<Value, ExecError> {
         self.prune_hourly().await;
-        let p =
-            crate::multi_server_tools::validate_exec(payload, false).map_err(ExecError::Refused)?;
-        let actor = p
-            .get("actor")
-            .and_then(Value::as_str)
-            .filter(|actor| !actor.is_empty() && actor.chars().count() <= 200)
-            .map(str::to_owned);
-        let Some(actor) = actor else {
+        crate::multi_server_tools::validate_exec(payload, false).map_err(ExecError::Refused)?;
+        let actor = payload.actor.clone();
+        if actor.is_empty() || actor.chars().count() > 200 {
             return refused("Supply the lead actor identity");
-        };
-        let cwd = p["cwd"].as_str().unwrap_or_default().to_owned();
+        }
+        let cwd = payload.cwd.clone();
         if !Path::new(&cwd).is_dir() {
             return refused("The cwd is not an existing folder on this server");
         }
-        let environment: Vec<(String, String)> = p["env"]
-            .as_object()
-            .map(|object| {
-                object
-                    .iter()
-                    .map(|(key, value)| {
-                        (key.clone(), value.as_str().unwrap_or_default().to_owned())
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let argv: Vec<String> = match &p["command"] {
-            Value::String(command) => crate::shell_command::monitor_command(
-                command,
-                &json!({"shell_environment_policy": {"set": p["env"]}}),
-                false,
-            )
-            .map_err(ExecError::Refused)?,
-            Value::Array(argv) => argv
-                .iter()
-                .map(|value| value.as_str().unwrap_or_default().to_owned())
-                .collect(),
-            Value::Null | Value::Bool(_) | Value::Number(_) | Value::Object(_) => {
-                return refused("Supply command argv of 1 to 256 strings, at most 128 KiB");
+        let environment: Vec<(String, String)> = payload
+            .env
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        let argv: Vec<String> = match &payload.command {
+            crate::orchestration_exec::CommandInput::Shell(command) => {
+                crate::shell_command::exec_command(command, &payload.env)
+                    .map_err(ExecError::Refused)?
             }
+            crate::orchestration_exec::CommandInput::Argv(argv) => argv.clone(),
         };
         let started_at = now();
-        let timeout = p["timeout"].as_u64().unwrap_or(120);
-        let output_limit = p["output_limit"].as_u64().unwrap_or(256 * 1024) as usize;
+        let timeout = payload.timeout;
+        let output_limit = payload.output_limit as usize;
         let record = json!({
             "handle": key, "serverId": local_server, "status": "starting",
             "startedAt": started_at, "finishedAt": null, "exitCode": null, "signal": null,
@@ -644,7 +625,8 @@ impl ServerExec {
             "outputExpiresAt": started_at + OUTPUT_SECONDS,
         });
         let marker = new_marker()?;
-        let config = json!({"payload": p, "argv": argv, "record": record, "markerSecret": marker});
+        let config =
+            json!({"payload": payload, "argv": argv, "record": record, "markerSecret": marker});
         let (sender, receiver) = tokio::sync::mpsc::channel(MAX_INPUTS as usize);
         {
             let mut active = self
@@ -729,20 +711,28 @@ impl ServerExec {
             )
         {
             return self
-                .read(principal, &json!({"actor": actor, "handle": key}))
+                .read(
+                    principal,
+                    &crate::orchestration_exec::ReadRequest {
+                        actor,
+                        handle: key.to_owned(),
+                        stdout_offset: 0,
+                        stderr_offset: 0,
+                    },
+                )
                 .await;
         }
         Ok(record)
     }
 
     /// Python `ServerExec.read`.
-    pub async fn read(&self, principal: &str, p: &Value) -> Result<Value, ExecError> {
-        let (Some(key), Some(actor)) = (
-            p.get("handle").and_then(Value::as_str),
-            p.get("actor").and_then(Value::as_str),
-        ) else {
-            return refused("Supply a command handle and actor");
-        };
+    pub async fn read(
+        &self,
+        principal: &str,
+        p: &crate::orchestration_exec::ReadRequest,
+    ) -> Result<Value, ExecError> {
+        let key = p.handle.as_str();
+        let actor = p.actor.as_str();
         let mut record = self.record(principal, actor, key).await?;
         let started = record["startedAt"].as_f64().unwrap_or_default();
         let expires = record["outputExpiresAt"]
@@ -768,13 +758,13 @@ impl ServerExec {
             studio_runtime_store::truthy(snapshot["record"].get("finishedAt"))
         });
         for name in ["stdout", "stderr"] {
-            let offset = match p.get(format!("{name}_offset")) {
-                None => 0,
-                Some(value) => match value.as_u64() {
-                    Some(offset) if value.is_u64() => offset as usize,
-                    _ => return refused("Supply nonnegative output byte offsets"),
-                },
+            let raw_offset = if name == "stdout" {
+                p.stdout_offset
+            } else {
+                p.stderr_offset
             };
+            let offset = usize::try_from(raw_offset)
+                .map_err(|_| ExecError::Refused("Supply nonnegative output byte offsets".into()))?;
             let buffer =
                 Buffer::from_snapshot(snapshot.as_ref().and_then(|snapshot| snapshot.get(name)));
             if offset > buffer.total {
@@ -795,36 +785,31 @@ impl ServerExec {
     pub async fn control(
         &self,
         principal: &str,
-        action: &str,
-        p: &Value,
+        request: &crate::orchestration_exec::ControlRequest,
         request_id: &str,
     ) -> Result<Value, ExecError> {
-        let (Some(key), Some(actor)) = (
-            p.get("handle").and_then(Value::as_str),
-            p.get("actor").and_then(Value::as_str),
-        ) else {
-            return refused("Supply a command handle and actor");
+        use crate::orchestration_exec::ControlRequest;
+        let (key, actor, control, is_input) = match request {
+            ControlRequest::Input(p) => {
+                let input = p.input.as_deref().or_else(|| p.close_stdin.then_some(""));
+                let Some(input) = input.filter(|input| input.len() <= MAX_INPUT_BYTES) else {
+                    return refused("Supply input text of at most 64 KiB");
+                };
+                (
+                    p.handle.as_str(),
+                    p.actor.as_str(),
+                    Control::Input {
+                        data: input.as_bytes().to_vec(),
+                        close: p.close_stdin,
+                    },
+                    true,
+                )
+            }
+            ControlRequest::Cancel(p) => {
+                (p.handle.as_str(), p.actor.as_str(), Control::Cancel, false)
+            }
         };
         let record = self.record(principal, actor, key).await?;
-        let mut control = Control::Cancel;
-        if action == "exec_input" {
-            let input = match p.get("input") {
-                None if p.get("close_stdin") == Some(&Value::Bool(true)) => Some(""),
-                value => value.and_then(Value::as_str),
-            };
-            let Some(input) = input.filter(|input| input.len() <= MAX_INPUT_BYTES) else {
-                return refused("Supply input text of at most 64 KiB");
-            };
-            let close = match p.get("close_stdin") {
-                None => false,
-                Some(Value::Bool(close)) => *close,
-                Some(_) => return refused("Supply a Boolean close_stdin value"),
-            };
-            control = Control::Input {
-                data: input.as_bytes().to_vec(),
-                close,
-            };
-        }
         let sender = self
             .active
             .lock()
@@ -834,7 +819,7 @@ impl ServerExec {
         let Some(sender) = sender else {
             return Ok(json!({"handle": key, "status": record["status"], "accepted": false}));
         };
-        if action == "exec_input" {
+        if is_input {
             let (key_owned, request) = (key.to_owned(), request_id.to_owned());
             self.store
                 .transaction_with(move |tx| -> Result<(), ExecError> {

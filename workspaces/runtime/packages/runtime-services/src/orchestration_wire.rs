@@ -63,7 +63,6 @@ pub enum OrchestrationCommand {
         #[serde(deserialize_with = "studio_runtime_schema::http_ingress::deserialize_object")]
         WorkerCall<MoveSend>,
     ),
-    MoveStatus(Value),
     LocationInfo(
         #[serde(deserialize_with = "studio_runtime_schema::http_ingress::deserialize_object")]
         LocationInfoPayload,
@@ -76,7 +75,10 @@ pub enum OrchestrationCommand {
         #[serde(deserialize_with = "studio_runtime_schema::http_ingress::deserialize_object")]
         StopPayload,
     ),
-    ExecEvent(Value),
+    ExecEvent(
+        #[serde(deserialize_with = "studio_runtime_schema::http_ingress::deserialize_object")]
+        crate::orchestration_exec::ExecEvent,
+    ),
     Projects(Value),
     #[serde(rename = "projects.changed")]
     ProjectsChanged(Value),
@@ -84,13 +86,34 @@ pub enum OrchestrationCommand {
         #[serde(deserialize_with = "studio_runtime_schema::http_ingress::deserialize_object")]
         FoldersPayload,
     ),
-    Git(Value),
-    Export(Value),
-    Chunk(Value),
-    ExecRead(Value),
-    ExecInput(Value),
-    ExecCancel(Value),
-    Release(Value),
+    Git(
+        #[serde(deserialize_with = "studio_runtime_schema::http_ingress::deserialize_object")]
+        crate::server_git::GitReadRequest,
+    ),
+    Export(
+        #[serde(deserialize_with = "studio_runtime_schema::http_ingress::deserialize_object")]
+        crate::server_git::ExportRequest,
+    ),
+    Chunk(
+        #[serde(deserialize_with = "studio_runtime_schema::http_ingress::deserialize_object")]
+        crate::server_git::ChunkRequest,
+    ),
+    ExecRead(
+        #[serde(deserialize_with = "studio_runtime_schema::http_ingress::deserialize_object")]
+        crate::orchestration_exec::ReadRequest,
+    ),
+    ExecInput(
+        #[serde(deserialize_with = "studio_runtime_schema::http_ingress::deserialize_object")]
+        crate::orchestration_exec::InputRequest,
+    ),
+    ExecCancel(
+        #[serde(deserialize_with = "studio_runtime_schema::http_ingress::deserialize_object")]
+        crate::orchestration_exec::CancelRequest,
+    ),
+    Release(
+        #[serde(deserialize_with = "studio_runtime_schema::http_ingress::deserialize_object")]
+        crate::server_git::ReleaseRequest,
+    ),
     #[serde(rename = "update.offer")]
     UpdateOffer(Value),
     #[serde(rename = "update.export")]
@@ -101,16 +124,14 @@ pub enum OrchestrationCommand {
     UpdateRelease(Value),
     #[serde(rename = "backup.put")]
     BackupPut(Value),
-    Task(Value),
-    Complaint(Value),
-    Context(Value),
-    Directory(Value),
-    ChatRead(Value),
-    MoveManage(Value),
-    MoveInterrupt(Value),
-    MoveSpawn(Value),
-    Exec(Value),
-    ExecReceipt(Value),
+    Exec(
+        #[serde(deserialize_with = "studio_runtime_schema::http_ingress::deserialize_object")]
+        crate::orchestration_exec::ExecPayload,
+    ),
+    ExecReceipt(
+        #[serde(deserialize_with = "studio_runtime_schema::http_ingress::deserialize_object")]
+        crate::orchestration_exec::ReceiptRequest,
+    ),
     BrowserCallback(Value),
     AddLocation(
         #[serde(deserialize_with = "studio_runtime_schema::http_ingress::deserialize_object")]
@@ -126,34 +147,40 @@ pub enum OrchestrationCommand {
 }
 
 impl OrchestrationCommand {
+    pub(crate) fn actor(&self) -> Option<&str> {
+        if let Self::ExecEvent(value) = self {
+            return Some(&value.actor);
+        }
+        if let Self::Exec(value) = self {
+            return match value {
+                crate::orchestration_exec::ExecPayload::Start(value) => Some(&value.actor),
+                crate::orchestration_exec::ExecPayload::Compacted(value) => {
+                    value.actor.value().map(String::as_str)
+                }
+            };
+        }
+        if let Self::ExecRead(value) = self {
+            return Some(&value.actor);
+        }
+        if let Self::ExecInput(value) = self {
+            return Some(&value.actor);
+        }
+        if let Self::ExecCancel(value) = self {
+            return Some(&value.actor);
+        }
+        self.remaining_payload()
+            .and_then(|value| value.get("actor"))
+            .and_then(Value::as_str)
+    }
     pub(crate) fn remaining(kind: ServerOperationKind, payload: Value) -> Option<Self> {
         match kind {
-            ServerOperationKind::MoveStatus => Some(Self::MoveStatus(payload)),
-            ServerOperationKind::ExecEvent => Some(Self::ExecEvent(payload)),
             ServerOperationKind::Projects => Some(Self::Projects(payload)),
             ServerOperationKind::ProjectsChanged => Some(Self::ProjectsChanged(payload)),
-            ServerOperationKind::Git => Some(Self::Git(payload)),
-            ServerOperationKind::Export => Some(Self::Export(payload)),
-            ServerOperationKind::Chunk => Some(Self::Chunk(payload)),
-            ServerOperationKind::ExecRead => Some(Self::ExecRead(payload)),
-            ServerOperationKind::ExecInput => Some(Self::ExecInput(payload)),
-            ServerOperationKind::ExecCancel => Some(Self::ExecCancel(payload)),
-            ServerOperationKind::Release => Some(Self::Release(payload)),
             ServerOperationKind::UpdateOffer => Some(Self::UpdateOffer(payload)),
             ServerOperationKind::UpdateExport => Some(Self::UpdateExport(payload)),
             ServerOperationKind::UpdateChunk => Some(Self::UpdateChunk(payload)),
             ServerOperationKind::UpdateRelease => Some(Self::UpdateRelease(payload)),
             ServerOperationKind::BackupPut => Some(Self::BackupPut(payload)),
-            ServerOperationKind::Task => Some(Self::Task(payload)),
-            ServerOperationKind::Complaint => Some(Self::Complaint(payload)),
-            ServerOperationKind::Context => Some(Self::Context(payload)),
-            ServerOperationKind::Directory => Some(Self::Directory(payload)),
-            ServerOperationKind::ChatRead => Some(Self::ChatRead(payload)),
-            ServerOperationKind::MoveManage => Some(Self::MoveManage(payload)),
-            ServerOperationKind::MoveInterrupt => Some(Self::MoveInterrupt(payload)),
-            ServerOperationKind::MoveSpawn => Some(Self::MoveSpawn(payload)),
-            ServerOperationKind::Exec => Some(Self::Exec(payload)),
-            ServerOperationKind::ExecReceipt => Some(Self::ExecReceipt(payload)),
             ServerOperationKind::BrowserCallback => Some(Self::BrowserCallback(payload)),
             ServerOperationKind::MoveValidate => Some(Self::MoveValidate(payload)),
             ServerOperationKind::MoveBegin => Some(Self::MoveBegin(payload)),
@@ -167,7 +194,17 @@ impl OrchestrationCommand {
             | ServerOperationKind::Stop
             | ServerOperationKind::Folders
             | ServerOperationKind::AddLocation
-            | ServerOperationKind::RemoveLocation => None,
+            | ServerOperationKind::RemoveLocation
+            | ServerOperationKind::Git
+            | ServerOperationKind::Export
+            | ServerOperationKind::Chunk
+            | ServerOperationKind::Release
+            | ServerOperationKind::Exec
+            | ServerOperationKind::ExecRead
+            | ServerOperationKind::ExecInput
+            | ServerOperationKind::ExecCancel
+            | ServerOperationKind::ExecReceipt
+            | ServerOperationKind::ExecEvent => None,
         }
     }
 
@@ -177,7 +214,6 @@ impl OrchestrationCommand {
             Self::Input(_) => ServerOperationKind::Input,
             Self::Message(_) => ServerOperationKind::Message,
             Self::MoveSend(_) => ServerOperationKind::MoveSend,
-            Self::MoveStatus(_) => ServerOperationKind::MoveStatus,
             Self::LocationInfo(_) => ServerOperationKind::LocationInfo,
             Self::LocationMatches(_) => ServerOperationKind::LocationMatches,
             Self::Stop(_) => ServerOperationKind::Stop,
@@ -197,14 +233,6 @@ impl OrchestrationCommand {
             Self::UpdateChunk(_) => ServerOperationKind::UpdateChunk,
             Self::UpdateRelease(_) => ServerOperationKind::UpdateRelease,
             Self::BackupPut(_) => ServerOperationKind::BackupPut,
-            Self::Task(_) => ServerOperationKind::Task,
-            Self::Complaint(_) => ServerOperationKind::Complaint,
-            Self::Context(_) => ServerOperationKind::Context,
-            Self::Directory(_) => ServerOperationKind::Directory,
-            Self::ChatRead(_) => ServerOperationKind::ChatRead,
-            Self::MoveManage(_) => ServerOperationKind::MoveManage,
-            Self::MoveInterrupt(_) => ServerOperationKind::MoveInterrupt,
-            Self::MoveSpawn(_) => ServerOperationKind::MoveSpawn,
             Self::Exec(_) => ServerOperationKind::Exec,
             Self::ExecReceipt(_) => ServerOperationKind::ExecReceipt,
             Self::BrowserCallback(_) => ServerOperationKind::BrowserCallback,
@@ -219,32 +247,13 @@ impl OrchestrationCommand {
     /// Only operations not yet migrated in this series retain dynamic payloads.
     pub(crate) fn remaining_payload(&self) -> Option<&Value> {
         match self {
-            Self::MoveStatus(value) => Some(value),
-            Self::ExecEvent(value) => Some(value),
             Self::Projects(value) => Some(value),
             Self::ProjectsChanged(value) => Some(value),
-            Self::Git(value) => Some(value),
-            Self::Export(value) => Some(value),
-            Self::Chunk(value) => Some(value),
-            Self::ExecRead(value) => Some(value),
-            Self::ExecInput(value) => Some(value),
-            Self::ExecCancel(value) => Some(value),
-            Self::Release(value) => Some(value),
             Self::UpdateOffer(value) => Some(value),
             Self::UpdateExport(value) => Some(value),
             Self::UpdateChunk(value) => Some(value),
             Self::UpdateRelease(value) => Some(value),
             Self::BackupPut(value) => Some(value),
-            Self::Task(value) => Some(value),
-            Self::Complaint(value) => Some(value),
-            Self::Context(value) => Some(value),
-            Self::Directory(value) => Some(value),
-            Self::ChatRead(value) => Some(value),
-            Self::MoveManage(value) => Some(value),
-            Self::MoveInterrupt(value) => Some(value),
-            Self::MoveSpawn(value) => Some(value),
-            Self::Exec(value) => Some(value),
-            Self::ExecReceipt(value) => Some(value),
             Self::BrowserCallback(value) => Some(value),
             Self::MoveValidate(value) => Some(value),
             Self::MoveBegin(value) => Some(value),
@@ -258,7 +267,17 @@ impl OrchestrationCommand {
             | Self::Stop(_)
             | Self::Folders(_)
             | Self::AddLocation(_)
-            | Self::RemoveLocation(_) => None,
+            | Self::RemoveLocation(_)
+            | Self::Git(_)
+            | Self::Export(_)
+            | Self::Chunk(_)
+            | Self::Release(_)
+            | Self::Exec(_)
+            | Self::ExecRead(_)
+            | Self::ExecInput(_)
+            | Self::ExecCancel(_)
+            | Self::ExecReceipt(_)
+            | Self::ExecEvent(_) => None,
         }
     }
 }
@@ -295,6 +314,16 @@ mod tests {
     fn action_tags_match_the_shared_operation_owner() {
         for action in studio_runtime_schema::persistence::ServerOperationKind::VARIANTS {
             let payload = match *action {
+                "exec" => r#"{"actor":"a","cwd":"/p","command":["true"]}"#,
+                "exec_read" | "exec_input" | "exec_cancel" => r#"{"actor":"a","handle":"h"}"#,
+                "exec_event" => {
+                    r#"{"actor":"a","handle":"h","record":{"handle":"h","status":"completed"}}"#
+                }
+                "exec_receipt" => r#"{"actor":"a","handle":"h","digest":"d"}"#,
+                "git" => r#"{"cwd":"/p","argv":["status","--porcelain=v1"]}"#,
+                "export" => r#"{"cwd":"/p","branch":"main","known":[]}"#,
+                "chunk" => r#"{"export":"x","offset":0}"#,
+                "release" => r#"{"export":"x"}"#,
                 "add_location" | "remove_location" => {
                     r#"{"project":"p","request":{"action":"add_location","path":"/p","project":"p","server":"s"}}"#
                 }

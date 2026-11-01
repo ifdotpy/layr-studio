@@ -1661,6 +1661,35 @@ fn exec_driver(
 }
 
 #[tokio::test]
+async fn compact_exec_is_rejected_before_any_incoming_claim() {
+    let (_root, store) = store().await;
+    let wire = ExecWire::new(None);
+    let driver = exec_driver(&store, wire);
+    let request = serde_json::from_str::<studio_runtime_services::orchestration_wire::OrchestrationRequest>(
+        r#"{"requestId":"compact","operation":[],"action":"exec","payload":{"actor":"lead","receiptDigest":"old"}}"#,
+    ).unwrap();
+    let error = driver
+        .receive("peer-server", &request, chrono::Utc::now().timestamp())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        studio_runtime_services::multi_server_auth::AccessError::Refused {
+            code: "invalid_request",
+            ..
+        }
+    ));
+    let count: i64 = store
+        .test_reader()
+        .unwrap()
+        .query_row("SELECT count(*) FROM runtime_server_inbox", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
 async fn python_exec_receipt_row_probes_once_and_settles_from_the_reply() {
     use studio_runtime_store::multi_server_delivery::{RemoteReply, SavedRemoteReply};
     use studio_runtime_store::request_results::ResultEnvelope;
@@ -1816,7 +1845,7 @@ async fn rust_exec_attempt_writes_the_python_receipt_form_and_never_resends() {
         .exchange(
             "peer-server",
             studio_runtime_services::orchestration_wire::OrchestrationCommand::Exec(
-                payload.clone(),
+                <studio_runtime_services::orchestration_exec::ExecPayload as serde::Deserialize>::deserialize(&payload).unwrap(),
             ),
             &root,
             now,
@@ -1849,7 +1878,7 @@ async fn rust_exec_attempt_writes_the_python_receipt_form_and_never_resends() {
         .exchange(
             "peer-server",
             studio_runtime_services::orchestration_wire::OrchestrationCommand::Exec(
-                payload.clone(),
+                <studio_runtime_services::orchestration_exec::ExecPayload as serde::Deserialize>::deserialize(&payload).unwrap(),
             ),
             &root,
             now + 5,
@@ -1903,7 +1932,7 @@ async fn rust_exec_attempt_writes_the_python_receipt_form_and_never_resends() {
         .exchange(
             "peer-server",
             studio_runtime_services::orchestration_wire::OrchestrationCommand::Exec(
-                changed.clone(),
+                <studio_runtime_services::orchestration_exec::ExecPayload as serde::Deserialize>::deserialize(&changed).unwrap(),
             ),
             &root,
             now + 6,
