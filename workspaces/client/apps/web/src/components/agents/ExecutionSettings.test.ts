@@ -606,3 +606,32 @@ test.each([
     expect(fixture.children).toEqual(fixture.originalChildren);
   },
 );
+
+for (const provider of ["claude", "future"] as const) {
+  test(`the lead settings gate model and reasoning by the ${provider} chat provider`, () => {
+    renderToStaticMarkup(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(ExecutionSettings, {
+          presentation: "panel",
+          initialRole: "orchestrator",
+          agent: {
+            id: "capability-gate",
+            name: "Lead",
+            isLead: true,
+            // "future" is not a known provider on purpose: it checks the unknown-provider path.
+            provider: provider as never,
+            source: AgentSource.managed,
+            model: "gpt-6-astra",
+            status: AgentStatus.idle,
+          },
+          catalog: { models: [], loading: false, error: "", retry: () => {} },
+          refresh: async () => {},
+        }),
+      ),
+    );
+    // The picker receives the chat's provider; AgentSetupPicker.test.ts covers hiding.
+    expect(choices.pickers.at(-1)?.capabilityProvider).toBe(provider);
+  });
+}
