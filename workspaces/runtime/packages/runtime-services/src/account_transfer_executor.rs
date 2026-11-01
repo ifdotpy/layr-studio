@@ -252,6 +252,34 @@ struct ProviderReadCall {
     deadline: Duration,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SourcePage {
+    data: Vec<serde::de::IgnoredAny>,
+    next_cursor: Option<serde::de::IgnoredAny>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum HistoryCursor {
+    Text(String),
+    Other(serde::de::IgnoredAny),
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HistoryPage {
+    #[serde(rename = "data")]
+    _data: Vec<serde::de::IgnoredAny>,
+    next_cursor: Option<HistoryCursor>,
+}
+
+fn source_page_empty(value: &Value, invalid: &'static str) -> Result<bool, TransferError> {
+    let page: SourcePage =
+        serde::Deserialize::deserialize(value).map_err(|_| TransferError::Refused(invalid))?;
+    Ok(page.data.is_empty() && page.next_cursor.is_none())
+}
+
 #[cfg(test)]
 mod reconnect_read_tests {
     use super::*;
@@ -605,8 +633,7 @@ async fn session_reply(
             agent: context.agent,
             operation: &call.operation,
             account: context.account,
-            scope: serde_json::to_value(&scope)
-                .map_err(|_| TransferError::Refused("Invalid provider scope"))?,
+            scope: scope.clone(),
             method: method_name,
             params: call.params.clone(),
         },
@@ -1143,12 +1170,7 @@ impl TransferExecutor for AccountTransferExecutor {
                     },
                 )
                 .await?;
-                if !queue["data"].is_array() {
-                    return Err(TransferError::Refused("Invalid source native queue page"));
-                }
-                if !queue["data"].as_array().is_some_and(Vec::is_empty)
-                    || !queue.get("nextCursor").is_none_or(Value::is_null)
-                {
+                if !source_page_empty(&queue, "Invalid source native queue page")? {
                     return Err(TransferError::Refused(
                         "Source native thread has queued input; saved input remains queued",
                     ));
@@ -1167,14 +1189,7 @@ impl TransferExecutor for AccountTransferExecutor {
                         },
                     )
                     .await?;
-                    if !background["data"].is_array() {
-                        return Err(TransferError::Refused(
-                            "Invalid source background command page",
-                        ));
-                    }
-                    if !background["data"].as_array().is_some_and(Vec::is_empty)
-                        || !background.get("nextCursor").is_none_or(Value::is_null)
-                    {
+                    if !source_page_empty(&background, "Invalid source background command page")? {
                         return Err(TransferError::Refused(
                             "Source native thread has background commands; saved input remains queued",
                         ));
@@ -1200,12 +1215,7 @@ impl TransferExecutor for AccountTransferExecutor {
                     },
                 )
                 .await?;
-                if !queue["data"].is_array() {
-                    return Err(TransferError::Refused("Invalid source native queue page"));
-                }
-                if !queue["data"].as_array().is_some_and(Vec::is_empty)
-                    || !queue.get("nextCursor").is_none_or(Value::is_null)
-                {
+                if !source_page_empty(&queue, "Invalid source native queue page")? {
                     return Err(TransferError::Refused(
                         "Source native thread has queued input; saved input remains queued",
                     ));
@@ -1255,18 +1265,17 @@ impl TransferExecutor for AccountTransferExecutor {
                         },
                     )
                     .await?;
-                    if !page_value["data"].is_array() {
-                        return Err(TransferError::Refused("Invalid source history page"));
-                    }
+                    let decoded: HistoryPage = serde::Deserialize::deserialize(&page_value)
+                        .map_err(|_| TransferError::Refused("Invalid source history page"))?;
                     records.push(
                         json!({"kind":"native_turn_page","request":params,"page":page_value}),
                     );
-                    match page_value.get("nextCursor") {
-                        None | Some(Value::Null) => break,
-                        Some(Value::String(value))
+                    match decoded.next_cursor {
+                        None => break,
+                        Some(HistoryCursor::Text(value))
                             if !value.is_empty() && cursors.insert(value.clone()) =>
                         {
-                            cursor = Some(value.clone())
+                            cursor = Some(value)
                         }
                         _ => {
                             return Err(TransferError::Refused(

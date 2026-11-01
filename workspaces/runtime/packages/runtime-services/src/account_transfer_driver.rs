@@ -251,6 +251,21 @@ fn excludes_account(agent: &studio_runtime_store::AgentRecord, target: &str) -> 
         .is_some_and(|keys| keys.iter().any(|key| key == target))
 }
 
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum ResumeString<'a> {
+    Text(&'a str),
+    Other(serde::de::IgnoredAny),
+}
+
+#[derive(serde::Deserialize)]
+struct ResumeIdentity<'a> {
+    #[serde(borrow)]
+    id: Option<ResumeString<'a>>,
+    #[serde(borrow)]
+    status: Option<ResumeString<'a>>,
+}
+
 /// The single compatibility accessor for per-chat account exclusions.
 pub(crate) fn account_is_excluded(exclusions: Option<&Value>, target: &str) -> bool {
     exclusions
@@ -441,7 +456,7 @@ pub async fn reserve(
     ticket: &Ticket,
     method: &str,
     params: Value,
-    scope: Value,
+    scope: crate::account_session_runtime::ConnectionScope,
     now: f64,
 ) -> Result<(), TransferError> {
     let ticket = ticket.clone();
@@ -531,18 +546,16 @@ fn persist_request(
         if let Some(prior) = &prior
             && prior.account_key != agent.account_key
             && let Some(resume) = prior.extra.get("usageResume")
-            && matches!(
-                resume.get("status").and_then(Value::as_str),
-                Some("scheduled" | "started")
-            )
+            && let Ok(ResumeIdentity {
+                id: resume_id,
+                status: Some(ResumeString::Text("scheduled" | "started")),
+            }) = serde::Deserialize::deserialize(resume)
         {
-            let resume_id =
-                resume
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .ok_or(TransferError::Refused(
-                        "Invalid account transfer resume identity",
-                    ))?;
+            let Some(ResumeString::Text(resume_id)) = resume_id else {
+                return Err(TransferError::Refused(
+                    "Invalid account transfer resume identity",
+                ));
+            };
             let cancelled = studio_runtime_store::cancel_usage_resume(
                 tx,
                 id,
@@ -621,9 +634,7 @@ pub async fn send_once(
     params: Value,
     now: f64,
 ) -> Result<DispatchOutcome, TransferError> {
-    let scope_value = serde::Serialize::serialize(&(&scope), serde_json::value::Serializer)
-        .map_err(|_| TransferError::Refused("Invalid provider scope"))?;
-    reserve(store, ticket, method, params.clone(), scope_value, now).await?;
+    reserve(store, ticket, method, params.clone(), scope.clone(), now).await?;
     let dispatch = transport.send(ticket, &scope, method, &params).await?;
     let known = dispatch.has_thread();
     provider_receipt(
@@ -669,7 +680,7 @@ pub struct ProviderIntent<'a> {
     pub operation: &'a str,
     pub agent: &'a str,
     pub provider_operation: &'a str,
-    pub scope: Value,
+    pub scope: crate::account_session_runtime::ConnectionScope,
     pub method: &'a str,
     pub params: Value,
 }
@@ -705,17 +716,18 @@ fn typed_intent(
     snapshot: &Snapshot,
     agent: &str,
     operation: &str,
-    scope: Value,
+    scope: crate::account_session_runtime::ConnectionScope,
     method: &str,
     params: &Value,
 ) -> Result<Decision, TransferError> {
     snapshot.typed_provider_intent(
         agent,
         operation,
-        serde::Deserialize::deserialize(scope)
-            .map_err(|_| TransferError::Refused("Invalid provider scope"))?,
-        serde::Deserialize::deserialize(Value::String(method.into()))
-            .map_err(|_| TransferError::Refused("Invalid provider method"))?,
+        scope,
+        serde::Deserialize::deserialize(
+            serde::de::value::StrDeserializer::<serde::de::value::Error>::new(method),
+        )
+        .map_err(|_| TransferError::Refused("Invalid provider method"))?,
         &serde_json::value::to_raw_value(params)
             .map_err(|_| TransferError::Refused("Invalid provider payload"))?,
     )
@@ -726,7 +738,7 @@ pub(crate) struct ProviderReadIntent<'a> {
     pub agent: &'a str,
     pub operation: &'a str,
     pub account: &'a str,
-    pub scope: Value,
+    pub scope: crate::account_session_runtime::ConnectionScope,
     pub method: &'a str,
     pub params: Value,
 }
@@ -828,10 +840,11 @@ pub(crate) async fn provider_read_intent(
                         .try_into()
                         .map_err(|_| TransferError::Refused("Invalid provider account"))?,
                 ),
-                scope: serde::Deserialize::deserialize(intent.scope.clone())
-                    .map_err(|_| TransferError::Refused("Invalid provider scope"))?,
-                method: serde::Deserialize::deserialize(Value::String(method.clone()))
-                    .map_err(|_| TransferError::Refused("Invalid provider method"))?,
+                scope: intent.scope.clone(),
+                method: serde::Deserialize::deserialize(serde::de::value::StrDeserializer::<
+                    serde::de::value::Error,
+                >::new(&method))
+                .map_err(|_| TransferError::Refused("Invalid provider method"))?,
                 params: serde_json::value::to_raw_value(&intent.params)
                     .map_err(|_| TransferError::Refused("Invalid provider parameters"))?,
             };
