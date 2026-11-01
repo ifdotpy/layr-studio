@@ -1618,7 +1618,10 @@ mod destination_settings_tests {
         let catalog = CatalogObservation {
             identity: CatalogIdentity {
                 account_key: "target".into(),
-                home: "/tmp/target".into(),
+                home: std::env::temp_dir()
+                    .join("target")
+                    .to_string_lossy()
+                    .into_owned(),
                 provider: ProviderKind::Claude,
                 generation: 1,
             },
