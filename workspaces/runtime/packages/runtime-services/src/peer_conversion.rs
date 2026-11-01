@@ -132,9 +132,9 @@ pub async fn convert(
             agent["rootId"]=json!(target); agent["updated"]=json!(now);
             let object=agent.as_object_mut().ok_or(ProjectsError::Invalid("stored agent invalid"))?;
             object.remove("concurrency");
-            if let Some(v)=dst.get("maxAgents") {object.insert("maxAgents".to_owned(),v.clone());}
+            object.insert("capacity".to_owned(),json!({"kind":"automatic","max":crate::agents_create::capacity_max(dst)}));
             if original["id"]==source {
-                for field in ["subagentConcurrencyVersion","maxAgentsExplicit","agentMode","agentModeRevision","agentModeSupported","projectFolder","pinned"] {object.remove(field);}
+                for field in ["subagentConcurrencyVersion","agentMode","agentModeRevision","agentModeSupported","projectFolder","pinned"] {object.remove(field);}
                 agent["isLead"]=json!(false); agent["parentId"]=json!(target); agent["role"]=json!("implementer"); agent["status"]=json!("paused"); agent["autoWake"]=json!(false); agent["worktree"]=json!(false);
                 agent["epoch"]=json!(original["epoch"].as_u64().unwrap_or(0).checked_add(1).ok_or(ProjectsError::Invalid("agent epoch exhausted"))?);
                 agent["convertedFromLead"]=json!({"requestId":request_id.clone(),"by":"user","at":now,"oldRootId":source,"rootId":target});

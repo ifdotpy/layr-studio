@@ -3887,6 +3887,46 @@
         "title": "AgentArchiveRecordResponse",
         "type": "object"
       },
+      "AgentCapacity": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "automatic"
+              },
+              "max": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "kind",
+              "max"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "explicit"
+              },
+              "max": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "kind",
+              "max"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "AgentCommandProgress": {
         "additionalProperties": false,
         "description": "A managed command currently starting or running for this agent.",
@@ -4005,6 +4045,9 @@
               }
             ],
             "title": "Cansend"
+          },
+          "capacity": {
+            "$ref": "#/components/schemas/AgentCapacity"
           },
           "commandProgress": {
             "default": [],
@@ -5060,6 +5103,9 @@
               }
             ],
             "title": "Cansend"
+          },
+          "capacity": {
+            "$ref": "#/components/schemas/AgentCapacity"
           },
           "capacityRetry": {
             "anyOf": [
@@ -7061,6 +7107,9 @@
             "$ref": "#/components/schemas/ParkReceiptRecordResponse",
             "default": null
           },
+          "capacity": {
+            "$ref": "#/components/schemas/AgentCapacity"
+          },
           "capacityRetry": {
             "$ref": "#/components/schemas/CapacityRetryRecordResponse",
             "default": null
@@ -7511,18 +7560,6 @@
           "manualName": {
             "default": null,
             "title": "Manualname",
-            "type": "boolean"
-          },
-          "maxAgents": {
-            "default": null,
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "title": "Maxagents",
-            "type": "integer"
-          },
-          "maxAgentsExplicit": {
-            "default": null,
-            "title": "Maxagentsexplicit",
             "type": "boolean"
           },
           "model": {

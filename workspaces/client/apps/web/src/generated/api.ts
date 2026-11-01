@@ -3833,6 +3833,17 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    AgentCapacity:
+      | {
+          /** @constant */
+          kind: "automatic";
+          max: number;
+        }
+      | {
+          /** @constant */
+          kind: "explicit";
+          max: number;
+        };
     /** @description A managed command currently starting or running for this agent. */
     AgentCommandProgress: {
       lastOutputLine: string;
@@ -3868,6 +3879,7 @@ export interface components {
       agentModeSupported?: boolean | null | undefined;
       /** Cansend */
       canSend?: boolean | null | undefined;
+      capacity?: components["schemas"]["AgentCapacity"] | undefined;
       /**
        * Commandprogress
        * @default []
@@ -4150,6 +4162,7 @@ export interface components {
       autoWake?: boolean | null | undefined;
       /** Cansend */
       canSend?: boolean | null | undefined;
+      capacity?: components["schemas"]["AgentCapacity"] | undefined;
       capacityRetry?:
         | components["schemas"]["AgentEntityCapacityRetryDto"]
         | null
@@ -4814,6 +4827,7 @@ export interface components {
       cancelledPark?:
         | components["schemas"]["ParkReceiptRecordResponse"]
         | undefined;
+      capacity?: components["schemas"]["AgentCapacity"] | undefined;
       /** @default null */
       capacityRetry?:
         | components["schemas"]["CapacityRetryRecordResponse"]
@@ -5174,16 +5188,6 @@ export interface components {
        * @default null
        */
       manualName?: boolean | undefined;
-      /**
-       * Maxagents
-       * @default null
-       */
-      maxAgents?: number | undefined;
-      /**
-       * Maxagentsexplicit
-       * @default null
-       */
-      maxAgentsExplicit?: boolean | undefined;
       /**
        * Model
        * @default null

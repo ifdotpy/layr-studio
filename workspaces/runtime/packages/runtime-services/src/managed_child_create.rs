@@ -16,7 +16,6 @@ use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore, 
 use thiserror::Error;
 
 use crate::managed_host_tools::MAX_SPAWN_BATCH_AGENTS;
-use studio_runtime_schema::agent_limits::DEFAULT_MAX_TEAM_AGENTS;
 const MAX_NAME_CHARS: usize = 100;
 const MAX_PROMPT_CHARS: usize = 32_000;
 /// Python's Linux VM review state save timeout, in seconds.
@@ -809,10 +808,11 @@ pub(crate) async fn spawn_agents(
         record["permissionMode"] = root_value.get("permissionMode").cloned().unwrap_or(json!(
             studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
         ));
-        record["maxAgents"] = root_value
-            .get("maxAgents")
-            .cloned()
-            .unwrap_or(json!(DEFAULT_MAX_TEAM_AGENTS));
+        crate::agents_create::set_capacity(
+            &mut record,
+            crate::agents_create::capacity_max(&root_value),
+            false,
+        );
         drafts.push(Draft {
             typed: draft,
             record,
@@ -839,7 +839,7 @@ pub(crate) async fn spawn_agents(
             .ok_or(crate::managed_host_tools::Error::Stale)?.value();
         event_write::assert_delegation(&current_root)
             .map_err(|_| crate::managed_host_tools::Error::Invalid("Delegation is disabled"))?;
-        let max = current_root.max_agents.as_ref().and_then(|value| value.as_number().as_i64()).unwrap_or(DEFAULT_MAX_TEAM_AGENTS);
+        let max = current_root.capacity.max();
         let existing = drafts.iter().map(|draft| AgentRepository::get(tx, &AgentId::from(draft.id.as_str())))
             .collect::<Result<Vec<_>, _>>()?;
         let new_count = existing.iter().filter(|item| item.is_none()).count() as i64;
@@ -1516,10 +1516,11 @@ pub(crate) async fn request_review(
     record["workspaceInGit"] = json!(false);
     record["workerBaseRef"] = Value::Null;
     record["workerBaseCommit"] = Value::Null;
-    record["maxAgents"] = root_value
-        .get("maxAgents")
-        .cloned()
-        .unwrap_or(json!(DEFAULT_MAX_TEAM_AGENTS));
+    crate::agents_create::set_capacity(
+        &mut record,
+        crate::agents_create::capacity_max(&root_value),
+        false,
+    );
     let review = ReviewDraft {
         typed: prepared,
         record,
@@ -1532,10 +1533,7 @@ pub(crate) async fn request_review(
         .transaction_with_error(move |tx| -> Result<Value, crate::managed_host_tools::Error> {
             recheck_actor(tx, &actor_record)?;
             if AgentRepository::get(tx, &AgentId::from(child_id.as_str()))?.is_none() {
-                let maximum = root_value
-                    .get("maxAgents")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(64);
+                let maximum = crate::agents_create::capacity_max(&root_value);
                 if active_agents(tx, &actor_record.root_id.0)? >= maximum {
                     return Err(crate::managed_host_tools::Error::Invalid(
                         "Team active agent limit reached; free a finished agent before creating a review",

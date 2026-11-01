@@ -1052,7 +1052,7 @@ async fn create(
         record["permissionMode"] = json!(mode);
     }
     if !draft && role == "orchestrator" {
-        record["maxAgentsExplicit"] = json!(request.max_agents.is_some());
+        super::set_capacity(&mut record, max_agents, request.max_agents.is_some());
     }
     if role == "orchestrator" {
         record["workerDefaults"] = worker_defaults.unwrap_or_else(|| {
@@ -1388,10 +1388,7 @@ async fn create_child(
     let root_permission = root.get("permissionMode").cloned().unwrap_or(json!(
         studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
     ));
-    let root_max_agents = root
-        .get("maxAgents")
-        .cloned()
-        .unwrap_or(json!(DEFAULT_MAX_TEAM_AGENTS));
+    let root_max_agents = super::capacity_max(&root);
     let prepare_cwd = cwd.to_owned();
     let prepare_host_cwd = host_cwd.to_owned();
     let prepare_parent_cwd = parent_cwd.to_owned();
@@ -1454,7 +1451,7 @@ async fn create_child(
     }
     record["provider"] = json!(provider);
     record["permissionMode"] = root_permission;
-    record["maxAgents"] = root_max_agents;
+    super::set_capacity(&mut record, root_max_agents, false);
     let created = record
         .get("created")
         .and_then(Value::as_f64)
@@ -1704,19 +1701,16 @@ pub async fn configure(
             if current_revision != revision {
                 return Err(MutationError::Stale.into());
             }
-            let prior_max = root
-                .get("maxAgents")
-                .and_then(Value::as_i64)
-                .unwrap_or(DEFAULT_MAX_TEAM_AGENTS);
+            let prior_max = super::capacity_max(&root);
             if current != limit {
                 root["concurrency"] = json!(limit);
                 root["agentModeRevision"] = json!(revision + 1);
             }
-            if root.get("maxAgentsExplicit").and_then(Value::as_bool) != Some(true) {
-                root["maxAgents"] = json!(prior_max.max(limit + TEAM_AGENT_HEADROOM));
+            if root.pointer("/capacity/kind").and_then(Value::as_str) != Some("explicit") {
+                super::set_capacity(&mut root, prior_max.max(limit + TEAM_AGENT_HEADROOM), false);
             }
             mode_fields(&mut root);
-            let changed = current != limit || root["maxAgents"].as_i64() != Some(prior_max);
+            let changed = current != limit || super::capacity_max(&root) != prior_max;
             if changed {
                 save_agent(tx, &root, &validate)?;
             }
@@ -1733,7 +1727,7 @@ pub async fn configure(
                 } else {
                     revision + 1
                 },
-                max_agents: root["maxAgents"].as_i64().ok_or(OperationError::Internal)?,
+                max_agents: super::capacity_max(&root),
                 sync: MutationSync::read(tx, before)?,
             };
             crate::event_write::settle_request(tx, &admitted, Some(&request.id), &result)
@@ -3097,7 +3091,7 @@ pub(crate) fn build_agent_record(
           "role":role,"isLead":is_lead,"needsTitle":draft,"parentId":null,"rootId":id,
           "model":crate::provider_adapter::default_model(provider),"effort":"medium",
           "fastMode":false,"daybreakEnabled":false,"cyberAccessProgram":"standard",
-          "maxAgents":max_agents,"status":status,"autoWake":true,
+          "capacity":{"kind":"automatic","max":max_agents},"status":status,"autoWake":true,
           "epoch":0,"turnId":null,"inFlight":false,"turnEpoch":0,"usageResumeEnabled":true,
           "compactions":0,"contextUsage":null,
           "events":0,"created":created,"error":null,"profileId":null,"profileInstructions":""
@@ -3114,7 +3108,6 @@ pub(crate) fn build_agent_record(
         record["concurrency"] = json!(concurrency);
     }
     if is_lead {
-        record["maxAgentsExplicit"] = json!(false);
         record["workerDefaults"] = json!({"model":"gpt-6-luna","effort":"high","fastMode":false,"daybreakEnabled":false,"delegationDepth":1});
         record["reviewDefaults"] = json!({"model":null,"effort":null});
     }

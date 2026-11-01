@@ -395,6 +395,36 @@ impl<'de> Deserialize<'de> for AgentNaming {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AgentCapacity {
+    Automatic {
+        max: studio_runtime_schema::AgentCounter,
+    },
+    Explicit {
+        max: studio_runtime_schema::AgentCounter,
+    },
+}
+
+impl Default for AgentCapacity {
+    fn default() -> Self {
+        Self::Automatic {
+            max: serde_json::from_value(serde_json::json!(
+                studio_runtime_schema::agent_limits::DEFAULT_MAX_TEAM_AGENTS
+            ))
+            .expect("default team limit is valid"),
+        }
+    }
+}
+
+impl AgentCapacity {
+    pub fn max(&self) -> i64 {
+        match self {
+            Self::Automatic { max } | Self::Explicit { max } => max.as_i64(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRecord {
     pub id: AgentId,
@@ -442,14 +472,8 @@ pub struct AgentRecord {
     pub daybreak_enabled: Option<bool>,
     #[serde(flatten)]
     pub naming: AgentNaming,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_agents_explicit: Option<bool>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub max_agents:
-        studio_runtime_schema::queue_command::Field<studio_runtime_schema::AgentCounter>,
+    #[serde(default)]
+    pub capacity: AgentCapacity,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_mode_supported: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -969,8 +993,7 @@ impl AgentRecord {
             fast_mode: None,
             daybreak_enabled: None,
             naming: AgentNaming::default(),
-            max_agents_explicit: None,
-            max_agents: Default::default(),
+            capacity: AgentCapacity::default(),
             agent_mode_supported: None,
             layr_ready: None,
             image_workspace: Default::default(),
@@ -2944,7 +2967,7 @@ mod tests {
         for (key, value) in [
             ("error", serde_json::json!(null)),
             ("error", serde_json::json!(42)),
-            ("maxAgents", serde_json::json!(null)),
+            ("capacity", serde_json::json!(null)),
             ("manualName", serde_json::json!(null)),
             ("id", serde_json::json!(null)),
         ] {
@@ -3017,7 +3040,7 @@ mod tests {
         );
         assert_eq!(agent.clone().into_value(), agent.value());
 
-        let current = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"vmLaunch":{"identity":{"agentId":"agent","epoch":1,"handle":"handle","requestId":"request","launchFingerprint":"digest"},"signature":"signature","status":"submitted"},"credentialCopy":{"agentId":"agent","epoch":1,"accountKey":"account","provider":"codex","relativePath":"path","digest":"digest","requestId":"request","signature":"signature","status":"submitted"},"vmAuthBootstrap":{"agentId":"agent","epoch":1,"requestId":"request","rootRequestId":"root","admittedRequest":{"id":"token","signature":"signature","created":1},"fingerprint":"digest","state":"submitted"},"nativeRelease":{"scope":{"account":"account","connection":"connection","generation":2},"admittedRequest":{"id":"token","signature":"signature","created":1},"id":"release"}}"#;
+        let current = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{"kind":"automatic","max":64},"vmLaunch":{"identity":{"agentId":"agent","epoch":1,"handle":"handle","requestId":"request","launchFingerprint":"digest"},"signature":"signature","status":"submitted"},"credentialCopy":{"agentId":"agent","epoch":1,"accountKey":"account","provider":"codex","relativePath":"path","digest":"digest","requestId":"request","signature":"signature","status":"submitted"},"vmAuthBootstrap":{"agentId":"agent","epoch":1,"requestId":"request","rootRequestId":"root","admittedRequest":{"id":"token","signature":"signature","created":1},"fingerprint":"digest","state":"submitted"},"nativeRelease":{"scope":{"account":"account","connection":"connection","generation":2},"admittedRequest":{"id":"token","signature":"signature","created":1},"id":"release"}}"#;
         let agent: AgentRecord = serde_json::from_str(current).expect("current effect fields");
         let encoded = serde_json::to_string(&agent).expect("serialize current agent");
         assert_eq!(
@@ -3070,7 +3093,6 @@ mod tests {
             "daybreakEnabled",
             "needsTitle",
             "manualName",
-            "maxAgentsExplicit",
             "agentModeSupported",
             "layrReady",
         ] {
@@ -3219,25 +3241,25 @@ mod tests {
     }
 
     #[test]
-    fn agent_max_agents_is_a_nonnegative_safe_integer() {
+    fn agent_capacity_max_is_a_nonnegative_safe_integer() {
         for value in ["-1", "1.5", "9007199254740992", "\"1\""] {
             let raw = format!(
-                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"maxAgents":{value}}}"#
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{{"kind":"automatic","max":{value}}}}}"#
             );
             assert!(
                 serde_json::from_str::<AgentRecord>(&raw).is_err(),
                 "{value}"
             );
         }
-        for value in ["null", "1", "1.0"] {
+        for value in ["1", "1.0"] {
             let raw = format!(
-                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"maxAgents":{value}}}"#
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{{"kind":"automatic","max":{value}}}}}"#
             );
             let agent: AgentRecord = serde_json::from_str(&raw).unwrap();
             assert!(
                 serde_json::to_string(&agent)
                     .unwrap()
-                    .contains(&format!("\"maxAgents\":{value}"))
+                    .contains(&format!("\"max\":{value}"))
             );
         }
     }
@@ -3377,6 +3399,7 @@ mod tests {
             projected,
             json!({"compactions":0,
                 "id":"agent-1", "provider":"codex", "rootId":"root-1", "epoch":3, "status":"running", "accountKey":"default",
+                "capacity":{"kind":"automatic","max":64},
                 "futureField":[{"nested":"retained"}]
             })
         );
@@ -3423,6 +3446,7 @@ mod tests {
         let connection = database();
         let value = json!({"compactions":0,
             "id":"agent", "rootId":"agent", "epoch":2, "status":"idle",
+            "capacity":{"kind":"automatic","max":64},
             "inFlight":true, "autoWake":false, "executionMode":"native", "turnEpoch":2,
             "accountKey":"account", "threadId":"thread", "turnId":"turn", "future":42
         });
@@ -3453,6 +3477,7 @@ mod tests {
     fn agent_round_trip_keeps_unknown_json_fields_and_number_kinds() {
         let value = json!({"compactions":0,
             "id":"agent-1", "provider":"codex", "rootId":"agent-1", "epoch":2, "status":"idle", "accountKey":"default",
+            "capacity":{"kind":"automatic","max":64},
             "futureObject":{"number":1.5,"flag":true}, "futureInteger":9007199254740993_i64
         });
         let record = agent(value.clone());
@@ -3473,7 +3498,7 @@ mod tests {
             json!({"startOutcomeHold":{"stage":"recovery","epoch":2,"reason":"pending"}}),
             json!({"titleJob":{"requestId":"r","agentId":"agent","rootRequestId":"root","admittedRequest":{"id":"r","signature":"s","created":1},"status":"pending","future":true}}),
         ] {
-            let mut value = json!({"compactions":0,"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default"});
+            let mut value = json!({"compactions":0,"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","capacity":{"kind":"automatic","max":64}});
             value
                 .as_object_mut()
                 .unwrap()
@@ -3584,7 +3609,7 @@ mod tests {
 
     #[test]
     fn unknown_agent_status_and_fields_survive_carrier_rewrite() {
-        let value = json!({"compactions":0,"id":"agent-1","provider":"codex","rootId":"agent-1","epoch":4,"accountKey":"default",
+        let value = json!({"compactions":0,"id":"agent-1","provider":"codex","rootId":"agent-1","epoch":4,"accountKey":"default","capacity":{"kind":"automatic","max":64},
             "status":"future-agent-state","future":{"enabled":true,"count":9007199254740993_i64}});
         let record = agent(value.clone());
         assert_eq!(

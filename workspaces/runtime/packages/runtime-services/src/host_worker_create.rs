@@ -302,7 +302,6 @@ pub fn prepare_work_item(
     draft["autoWake"] = json!(true);
     if let Some(object) = draft.as_object_mut() {
         object.remove("concurrency");
-        object.remove("maxAgentsExplicit");
     }
     draft["workspaceInGit"] = json!(
         body.get("_workspaceInGit")
@@ -495,11 +494,7 @@ fn recheck_parent_epoch(
     {
         return Err(CreateError::IdentityChanged);
     }
-    let max_agents = root
-        .max_agents
-        .value()
-        .map(studio_runtime_schema::AgentCounter::as_i64)
-        .unwrap_or(DEFAULT_MAX_TEAM_AGENTS);
+    let max_agents = root.capacity.max();
     let active = studio_runtime_store::AgentIndexedReads::active_team_members(
         transaction,
         &draft.root_id.0,
@@ -728,7 +723,7 @@ mod tests {
         fixture
             .database
             .execute(
-                "UPDATE runtime_agents SET record=json_set(record,'$.maxAgents',0) WHERE id=?1",
+                "UPDATE runtime_agents SET record=json_set(record,'$.capacity.max',0) WHERE id=?1",
                 [&fixture.parent_id.0],
             )
             .unwrap();
@@ -738,7 +733,7 @@ mod tests {
             Err(CreateError::InvalidCreation("team active agent limit"))
         ));
         tx.execute(
-            "UPDATE runtime_agents SET record=json_set(record,'$.maxAgents',70) WHERE id=?1",
+            "UPDATE runtime_agents SET record=json_set(record,'$.capacity.max',70) WHERE id=?1",
             [&fixture.parent_id.0],
         )
         .unwrap();
@@ -769,20 +764,15 @@ mod tests {
             recheck_parent_epoch(&tx, &fixture.draft, 0).is_ok(),
             "configured limit above default admits the worker"
         );
-        for expression in [
-            "json_remove(record,'$.maxAgents')",
-            "json_set(record,'$.maxAgents',null)",
-        ] {
-            tx.execute(
-                &format!("UPDATE runtime_agents SET record={expression} WHERE id=?1"),
-                [&fixture.parent_id.0],
-            )
-            .unwrap();
-            assert!(matches!(
-                recheck_parent_epoch(&tx, &fixture.draft, 0),
-                Err(CreateError::InvalidCreation("team active agent limit"))
-            ));
-        }
+        tx.execute(
+            "UPDATE runtime_agents SET record=json_remove(record,'$.capacity') WHERE id=?1",
+            [&fixture.parent_id.0],
+        )
+        .unwrap();
+        assert!(matches!(
+            recheck_parent_epoch(&tx, &fixture.draft, 0),
+            Err(CreateError::InvalidCreation("team active agent limit"))
+        ));
     }
 
     fn worker_draft_fixture_with_options(
@@ -830,7 +820,7 @@ mod tests {
             None,
         );
         parent["autoWake"] = json!(true);
-        parent["maxAgents"] = json!(DEFAULT_MAX_TEAM_AGENTS);
+        crate::agents_create::set_capacity(&mut parent, DEFAULT_MAX_TEAM_AGENTS, false);
         database
             .execute(
                 "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",

@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use studio_runtime_schema::agent_limits::{
-    DEFAULT_GLOBAL_CONCURRENCY, DEFAULT_MAX_TEAM_AGENTS, DEFAULT_SUBAGENT_CONCURRENCY,
-    MAX_SUBAGENT_CONCURRENCY, MIN_GLOBAL_CONCURRENCY, MIN_SUBAGENT_CONCURRENCY,
+    DEFAULT_GLOBAL_CONCURRENCY, DEFAULT_SUBAGENT_CONCURRENCY, MAX_SUBAGENT_CONCURRENCY,
+    MIN_GLOBAL_CONCURRENCY, MIN_SUBAGENT_CONCURRENCY,
 };
 use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind, RequestIdentity};
 use studio_runtime_store::outbox::{Outbox, OutboxError, OutboxRow};
@@ -613,11 +613,7 @@ fn capacity_snapshot(
                 DEFAULT_SUBAGENT_CONCURRENCY
             }
         });
-    let root_max_agents = root
-        .max_agents
-        .value()
-        .map(studio_runtime_schema::AgentCounter::as_i64)
-        .unwrap_or(DEFAULT_MAX_TEAM_AGENTS);
+    let root_max_agents = root.capacity.max();
     let mut queued = Vec::new();
     for agent in team
         .iter()
@@ -1500,7 +1496,7 @@ mod tests {
                     json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
                         "id":"lead","rootId":"lead","epoch":3,"status":"running",
                         "isLead":true,"autoWake":true,"cwd":cwd,
-                        "concurrency":2,"maxAgents":8,
+                        "concurrency":2,"capacity":{"kind":"automatic","max":8},
                         "workerDefaults":{"model":"gpt-fixture","effort":"high","fastMode":false}
                     }),
                     json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"queued","rootId":"lead","epoch":4,"status":"queued","autoWake":false,"cwd":cwd}),

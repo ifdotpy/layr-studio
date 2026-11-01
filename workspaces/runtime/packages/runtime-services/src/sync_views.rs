@@ -1012,7 +1012,17 @@ mod projection_plan_tests {
     }
 
     #[test]
-    fn naming_states_preserve_agent_projection_hash() {
+    fn agent_projection_uses_canonical_capacity() {
+        let record = serde_json::json!({"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{"kind":"explicit","max":80}});
+        let projected =
+            super::agent_entity_view(&record, &super::AgentViewContext::default()).unwrap();
+        assert_eq!(projected["capacity"], record["capacity"]);
+        assert!(projected.get("maxAgents").is_none());
+        assert!(projected.get("maxAgentsExplicit").is_none());
+    }
+
+    #[test]
+    fn naming_states_project_with_canonical_capacity() {
         let mut views = Vec::new();
         for manual in ["", ",\"manualName\":true", ",\"manualName\":false"] {
             for title in ["", ",\"needsTitle\":true", ",\"needsTitle\":false"] {
@@ -1028,19 +1038,19 @@ mod projection_plan_tests {
         }
         assert_eq!(
             studio_runtime_store::sha256_hex(&serde_json::to_vec(&views).unwrap()),
-            "cbd2809a85f03688db947643c553aa18779648d68e7da748acc7ced527bf4882"
+            "c473f5fcc225364f3589280823ce7c331476e6c4ca74e20078d54a32c363d7c2"
         );
     }
 
     #[test]
-    fn chat_organization_flags_preserve_agent_projection_hash() {
+    fn chat_organization_flags_project_with_canonical_capacity() {
         let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"archived":true,"pinned":true}"#;
         let agent: studio_runtime_store::AgentRecord = serde_json::from_str(raw).unwrap();
         let projected =
             super::agent_entity_view(&agent.value(), &super::AgentViewContext::default()).unwrap();
         assert_eq!(
             studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
-            "dac0d278dab7d28319ef6df742ffdb9bb431c95b23750a2e0e4e48a598fd848c"
+            "9e3a41a0e2306280189ca22d69b54df40fd0fd51a8fdc93a1f42216e45cb90f2"
         );
     }
 

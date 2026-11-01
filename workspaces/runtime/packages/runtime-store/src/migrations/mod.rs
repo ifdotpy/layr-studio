@@ -54,6 +54,7 @@ mod m2026_10_31_transfer_history_pages;
 mod m2026_10_31_work_projection;
 mod m2026_10_31_work_records;
 mod m2026_11_01_account_projection;
+mod m2026_11_01_agent_capacity;
 mod m2026_11_01_annotation_record;
 mod m2026_11_01_approval_secrets;
 mod m2026_11_01_plan_record;
@@ -925,6 +926,16 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
+            id: "2026-11-01-agent-batch-56-capacity",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with legacy team capacity fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_agent_capacity::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
             id: "2026-10-31-transfer-history-pages",
             introduced: OCTOBER_31,
             target: MigrationTarget::Canvas,
@@ -1260,6 +1271,19 @@ fn catalog_fingerprint(catalog: &[&dyn Migration], target: MigrationTarget) -> S
             .join("\0")
             .as_bytes(),
     )
+}
+
+/// Prepare a real parent-catalog marker for upgrade tests.
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_apply_catalog_before_capacity(path: &std::path::Path) -> StoreResult<()> {
+    let mut db = Connection::open(path)?;
+    crate::schema::register_python_trigger_functions(&db)?;
+    let parent: Vec<_> = CATALOG
+        .iter()
+        .copied()
+        .filter(|step| step.definition().id != "2026-11-01-agent-batch-56-capacity")
+        .collect();
+    apply_target_catalog(&mut db, MigrationTarget::Canvas, &parent)
 }
 
 fn apply_target_catalog(

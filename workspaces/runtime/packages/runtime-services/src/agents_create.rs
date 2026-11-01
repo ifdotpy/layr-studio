@@ -192,15 +192,21 @@ pub fn mode_fields(record: &mut Value) {
     if record.get("agentModeRevision").is_none() {
         record["agentModeRevision"] = json!(0);
     }
-    if record.get("maxAgentsExplicit").is_none() {
-        record["maxAgentsExplicit"] = json!(
-            record
-                .get("maxAgents")
-                .and_then(Value::as_i64)
-                .unwrap_or(64)
-                != 64
-        );
-    }
+}
+
+pub(crate) fn capacity_max(record: &Value) -> i64 {
+    record
+        .pointer("/capacity/max")
+        .and_then(|value| {
+            serde_json::from_value::<studio_runtime_schema::AgentCounter>(value.clone()).ok()
+        })
+        .map(|value| value.as_i64())
+        .unwrap_or(studio_runtime_schema::agent_limits::DEFAULT_MAX_TEAM_AGENTS)
+}
+
+pub(crate) fn set_capacity(record: &mut Value, max: i64, explicit: bool) {
+    record["capacity"] =
+        json!({"kind": if explicit { "explicit" } else { "automatic" }, "max": max});
 }
 
 /// Use the shared canonical renderer builder for every agent publication.
@@ -644,8 +650,7 @@ fn configure_limits(
         return Err(SettingsError::LeadRequired);
     }
     mode_fields(&mut root_value);
-    let team_max_agents =
-        max_agents.or_else(|| root_value.get("maxAgents").and_then(Value::as_i64));
+    let team_max_agents = max_agents.unwrap_or_else(|| capacity_max(&root_value));
     let mut statement = transaction
         .prepare("SELECT id,record FROM runtime_agents")
         .map_err(StoreError::from)?;
@@ -672,10 +677,8 @@ fn configure_limits(
         if agent_id == id {
             record = root_value.clone();
             if let Some(max_agents) = max_agents {
-                record["maxAgents"] = json!(max_agents);
-                if record.get("isLead").and_then(Value::as_bool) == Some(true) {
-                    record["maxAgentsExplicit"] = json!(true);
-                }
+                let explicit = record.get("isLead").and_then(Value::as_bool) == Some(true);
+                set_capacity(&mut record, max_agents, explicit);
             }
         } else {
             record
@@ -685,9 +688,7 @@ fn configure_limits(
                     id: agent_id.clone(),
                 })?
                 .remove("concurrency");
-            if let Some(max_agents) = team_max_agents {
-                record["maxAgents"] = json!(max_agents);
-            }
+            set_capacity(&mut record, team_max_agents, false);
         }
         save_agent(transaction, &record, &validate)?;
         if agent_id == id {
@@ -699,7 +700,7 @@ fn configure_limits(
         "concurrency": root_value.get("concurrency").cloned().unwrap_or(json!(0)),
         "agentMode": if root_value.get("concurrency").and_then(Value::as_i64).unwrap_or(0) == 0 { "single" } else { "multi" },
         "agentModeRevision": root_value.get("agentModeRevision").cloned().unwrap_or(json!(0)),
-        "maxAgents": root_value.get("maxAgents").cloned().unwrap_or(Value::Null),
+        "maxAgents": capacity_max(&root_value),
     }))
 }
 
