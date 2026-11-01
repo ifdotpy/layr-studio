@@ -13,6 +13,20 @@ pub enum Field<T> {
     Value(T),
 }
 
+impl<T: JsonSchema> JsonSchema for Field<T> {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        <Option<T> as JsonSchema>::schema_name()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        <Option<T> as JsonSchema>::json_schema(generator)
+    }
+}
+
 impl<T> Default for Field<T> {
     fn default() -> Self {
         Self::Missing
