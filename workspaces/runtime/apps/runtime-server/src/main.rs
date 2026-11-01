@@ -2276,6 +2276,22 @@ mod exit_logging_tests {
         allowed: bool,
         newer_rejection: Option<Arc<studio_runtime_store::RuntimeStore>>,
     }
+    fn put_tick_limits(
+        tx: &studio_runtime_store::Transaction<'_>,
+        observation: serde_json::Value,
+    ) -> studio_runtime_store::StoreResult<()> {
+        let raw = serde_json::value::RawValue::from_string(observation.to_string())?;
+        let view =
+            studio_runtime_schema::usage_limits::RateLimitView::read(&raw, "default", 1000.0)?;
+        studio_runtime_store::SyncDocumentsRepository::put_entity(
+            tx,
+            "rateLimit",
+            "default",
+            view,
+            false,
+        )?;
+        Ok(())
+    }
     impl studio_runtime_services::account_session_runtime::AccountSessionPort for TickLimits {
         fn read_limits<'a>(
             &'a self,
@@ -2291,7 +2307,7 @@ mod exit_logging_tests {
                 }
                 if let Some(store) = &self.newer_rejection {
                     store.transaction_with(|tx| {
-                        studio_runtime_store::SyncDocumentsRepository::put_entity(tx,"rateLimit","default",serde_json::json!({"accountKey":"default","at":1001.0,"data":{"rateLimits":{"primary":{"usedPercent":100.0,"resetsAt":2000.0}}}}),false)
+                        put_tick_limits(tx,serde_json::json!({"accountKey":"default","at":1001.0,"data":{"rateLimits":{"primary":{"usedPercent":100.0,"resetsAt":2000.0}}}}))
                     }).await.expect("rate-limit fixture writes");
                 }
                 Ok(
@@ -2318,7 +2334,7 @@ mod exit_logging_tests {
                     tx.execute("INSERT INTO runtime_usage_resumes(id,agent,record) VALUES (?1,?1,?2)",[id,&resume.to_string()])?;
                 }
                 // A recent cache entry cannot replace the provider read at the due time.
-                studio_runtime_store::SyncDocumentsRepository::put_entity(tx,"rateLimit","default",serde_json::json!({"accountKey":"default","at":999.0,"data":{"rateLimits":{"primary":{"usedPercent":0.0}}}}),false)?;
+                put_tick_limits(tx,serde_json::json!({"accountKey":"default","at":999.0,"data":{"rateLimits":{"primary":{"usedPercent":0.0}}}}))?;
                 Ok::<_,studio_runtime_store::StoreError>(())
             }).await.expect("usage resume fixture writes");
             let port = TickLimits {
