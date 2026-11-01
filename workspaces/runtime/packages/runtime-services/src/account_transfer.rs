@@ -326,6 +326,7 @@ pub fn progress_view(
 /// Validated snapshot with original member insertion order retained for the UI.
 pub struct Snapshot {
     operation: studio_runtime_store::transfer_record::TransferRecord,
+    // AgentRecord null/absence parity is deferred to work-1793525911262374144-79.
     agents: BTreeMap<String, Value>,
 }
 #[derive(Clone)]
