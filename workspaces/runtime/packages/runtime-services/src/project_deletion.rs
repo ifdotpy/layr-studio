@@ -534,26 +534,36 @@ fn retire_rooms(
     drop(stmt);
     let mut retired = BTreeSet::new();
     for (id, raw) in rows {
-        let mut room: Value = serde_json::from_str(&raw).map_err(StoreError::from)?;
+        let mut room: studio_runtime_schema::room_record::RoomRecord =
+            serde_json::from_str(&raw).map_err(StoreError::from)?;
+        if room.id != id {
+            return Err(StoreError::InvalidStoredRecord {
+                object: "runtime_rooms",
+                id,
+            }
+            .into());
+        }
         let bound = room
-            .get("projectId")
-            .and_then(Value::as_str)
+            .project_id
+            .as_deref()
             .is_some_and(|id| projects.contains(id))
             || room
-                .get("projectPath")
-                .and_then(Value::as_str)
+                .project_path
+                .as_ref()
+                .map(String::as_str)
                 .is_some_and(|p| projects.contains(p) || paths.contains(p));
-        let broadcast = room.get("kind").and_then(Value::as_str) == Some("broadcast")
+        let broadcast = room.kind == studio_runtime_schema::room_record::RoomKind::Broadcast
             && room
-                .get("rootId")
-                .and_then(Value::as_str)
+                .root_id
+                .as_ref()
+                .map(String::as_str)
                 .is_some_and(|root| root != "all" && agents.contains(root));
         if bound || broadcast {
-            room[ProjectsRepository::ROOM_RETIRED_FIELD] = json!(now);
-            tx.execute(
-                "UPDATE runtime_rooms SET record=?2 WHERE id=?1",
-                rusqlite::params![id, room.to_string()],
-            )?;
+            room.project_deleted_at = Some(
+                serde_json::Number::from_f64(now)
+                    .ok_or(StoreError::RecordContract("invalid project deletion time"))?,
+            );
+            studio_runtime_store::Table::new(tx).put(&room)?;
             SyncDocumentsRepository::put_entity(tx, "room", &id, json!({}), true)?;
             retired.insert(id);
         }

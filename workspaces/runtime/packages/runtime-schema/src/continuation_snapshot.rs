@@ -42,12 +42,27 @@ impl<'de, const MIN: usize, const MAX: usize> Deserialize<'de> for BoundedString
             .ok_or_else(|| D::Error::custom("string length out of range"))
     }
 }
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
 pub struct BoundedVec<T, const MAX: usize>(Vec<T>);
 impl<T, const MAX: usize> BoundedVec<T, MAX> {
     pub fn as_slice(&self) -> &[T] {
         &self.0
+    }
+}
+impl<T, const MAX: usize> Default for BoundedVec<T, MAX> {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
+impl<T, const MAX: usize> TryFrom<Vec<T>> for BoundedVec<T, MAX> {
+    type Error = &'static str;
+    fn try_from(value: Vec<T>) -> Result<Self, Self::Error> {
+        if value.len() <= MAX {
+            Ok(Self(value))
+        } else {
+            Err("too many items")
+        }
     }
 }
 impl<T: schemars::JsonSchema, const MAX: usize> schemars::JsonSchema for BoundedVec<T, MAX> {
