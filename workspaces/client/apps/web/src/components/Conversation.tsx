@@ -13,7 +13,11 @@ import {
   resolveLayoutLength,
 } from "../layout/deriveWorkspaceLayout";
 import { layoutQueries } from "../layout/layout-contract.generated";
-import { MAX_TURN_ATTACHMENTS } from "../generated/sharedValues";
+import {
+  MAX_TURN_ATTACHMENTS,
+  MAX_DRAFT_TEXT_CODEPOINTS,
+  MAX_MANAGED_MESSAGE_CODEPOINTS,
+} from "../generated/sharedValues";
 import { DeliveryMoment } from "../generated/deliveryMoment";
 import { useSendingMessageRemoval } from "./useSendingMessageRemoval";
 import {
@@ -272,6 +276,7 @@ export default function Conversation(p: {
   draftConflicts?: DraftVersion[];
   dismissDraft?: (version: DraftVersion) => void;
   send: (options?: {
+    asTextFile?: boolean;
     assets?: string[];
     attachments?: Attachment[];
     onPersist?: () => void | Promise<void>;
@@ -887,9 +892,10 @@ export default function Conversation(p: {
   };
   const submit = async (
     delivery: DeliveryMoment = DeliveryMoment.CurrentTurn,
+    asTextFile = false,
   ) => {
     const draft = p.getDraft(p.id || "new");
-    const draftTooLong = draft.length > 12000;
+    const draftTooLong = Array.from(draft).length > MAX_DRAFT_TEXT_CODEPOINTS;
     const modelCommand = /^\/model(?:\s|$)/i.test(draft.trim());
     const exactModelCommand = /^\/model$/i.test(draft.trim());
     if (modelCommand) {
@@ -931,6 +937,7 @@ export default function Conversation(p: {
     const sent = new Set(assets.map((asset) => asset.id));
     try {
       await p.send({
+        ...(asTextFile ? { asTextFile: true } : {}),
         delivery,
         assets: assets.map((asset) => asset.id),
         attachments: assets.map(({ preview: _preview, ...asset }) => asset),
@@ -963,38 +970,6 @@ export default function Conversation(p: {
       // The send owner restores the draft and renders its delivery error.
     } finally {
       release();
-    }
-  };
-  const attachDraft = async () => {
-    if (
-      !p.id ||
-      !managed ||
-      threadBlock ||
-      p.sending ||
-      uploadLock.current ||
-      assets.length >= MAX_TURN_ATTACHMENTS
-    )
-      return;
-    const id = p.id;
-    const text = p.getDraft(p.id || "new");
-    uploadLock.current = true;
-    setUploading(true);
-    try {
-      uploadRecovery.include(
-        await queueUploads(
-          p.data.stateDir,
-          id,
-          [new File([text], "message.txt", { type: "text/plain" })],
-          p.syncWorkspaceId || "",
-        ),
-      );
-      uploadRecovery.retry();
-      p.setDraft((current) => (current === text ? "" : current), id);
-    } catch (error) {
-      p.notify(errorText(error));
-    } finally {
-      uploadLock.current = false;
-      setUploading(false);
     }
   };
   const editMessage = useMessageAction(async (message: Message) => {
@@ -2002,7 +1977,10 @@ export default function Conversation(p: {
             }}
           >
             {(draft) => {
-              const draftTooLong = draft.length > 12000;
+              const draftTooLong =
+                Array.from(draft).length > MAX_DRAFT_TEXT_CODEPOINTS;
+              const willAttachText =
+                Array.from(draft).length > MAX_MANAGED_MESSAGE_CODEPOINTS;
               const modelCommand = /^\/model(?:\s|$)/i.test(draft.trim());
               const exactModelCommand = /^\/model$/i.test(draft.trim());
               const queueControl = (className: string) =>
@@ -2085,6 +2063,14 @@ export default function Conversation(p: {
                     modelCommand={modelCommand}
                     hasAttachments={!!assets.length}
                     onChange={(value) => {
+                      if (
+                        Array.from(value).length > MAX_DRAFT_TEXT_CODEPOINTS
+                      ) {
+                        p.notify(
+                          `Drafts can contain at most ${MAX_DRAFT_TEXT_CODEPOINTS.toLocaleString()} characters. Previous text was kept.`,
+                        );
+                        return;
+                      }
                       promptRecall.reset();
                       p.setDraft(value);
                     }}
@@ -2117,15 +2103,16 @@ export default function Conversation(p: {
                       /model · Choose model and reasoning
                     </Button>
                   )}
-                  {draftTooLong && (
+                  {willAttachText && (
                     <div
                       id="draft-length-error"
                       className="draft-length-error"
                       role="alert"
                     >
                       <span>
-                        {draft.length.toLocaleString()} characters. The message
-                        limit is 12,000. Your full draft is preserved.
+                        {draftTooLong
+                          ? "Draft exceeds the size limit."
+                          : "This text will be sent as a file."}
                       </span>
                       {managed && (
                         <Button
@@ -2136,9 +2123,12 @@ export default function Conversation(p: {
                             !canSend ||
                             p.sending ||
                             uploading ||
+                            draftTooLong ||
                             assets.length >= MAX_TURN_ATTACHMENTS
                           }
-                          onClick={() => void attachDraft()}
+                          onClick={() =>
+                            void submit(DeliveryMoment.CurrentTurn, true)
+                          }
                         >
                           Attach text as a file
                         </Button>

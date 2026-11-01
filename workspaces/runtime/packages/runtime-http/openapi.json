@@ -21784,6 +21784,10 @@
       "CommandSendBody": {
         "additionalProperties": false,
         "properties": {
+          "asTextFile": {
+            "default": false,
+            "type": "boolean"
+          },
           "assets": {
             "default": [],
             "items": {
@@ -21796,7 +21800,7 @@
             "$ref": "#/components/schemas/DeliveryMomentInput"
           },
           "text": {
-            "maxLength": 32000,
+            "maxLength": 100000,
             "type": "string"
           }
         },
@@ -42744,7 +42748,7 @@
             "$ref": "#/components/schemas/SubscriptionCursor"
           },
           "data": {
-            "maxLength": 262144,
+            "maxLength": 1048576,
             "type": "string"
           },
           "epoch": {

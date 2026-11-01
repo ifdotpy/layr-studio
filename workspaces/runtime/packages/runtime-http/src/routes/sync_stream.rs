@@ -5619,7 +5619,7 @@ mod tests {
                 let count = if scenario == "documents" { 513 } else { 1 };
                 for index in 0..count {
                     let id = format!("agent-{index}");
-                    let name = if scenario == "bytes" { "é".repeat(262144) } else { "Agent".into() };
+                    let name = if scenario == "bytes" { "é".repeat(SYNC_STREAM_EVENT_MAX_BYTES / 2) } else { "Agent".into() };
                     SyncDocumentsRepository::put_entity(tx, "agentSummary", &id, json!({"id":id,"name":name,"status":"idle","source":"managed"}), false)?;
                 }
                 if scenario == "pruned" {
@@ -6626,7 +6626,7 @@ mod tests {
     async fn event_document(event: Result<Event, Infallible>) -> Value {
         let body = axum::body::to_bytes(
             Sse::new(stream::iter([event])).into_response().into_body(),
-            262144,
+            SYNC_STREAM_EVENT_MAX_BYTES,
         )
         .await
         .expect("frame");
@@ -7087,7 +7087,7 @@ mod tests {
                 Sse::new(stream::iter([Ok::<_, Infallible>(event)]))
                     .into_response()
                     .into_body(),
-                262144,
+                SYNC_STREAM_EVENT_MAX_BYTES,
             )
             .await
             .expect("frame")

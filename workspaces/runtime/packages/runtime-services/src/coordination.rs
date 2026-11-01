@@ -825,9 +825,9 @@ pub fn post_message(
         ));
     };
     let text = input.text.trim();
-    if !(1..=12_000).contains(&text.chars().count()) {
+    if text.is_empty() || !message_text_within_limit(text) {
         return Err(CoordinationError::InvalidRequest(
-            "Use a message with 1 to 12000 characters.",
+            "Use a message within the allowed character limit.",
         ));
     }
     let members = group.members.clone();

@@ -6,6 +6,7 @@
 //! two short transactions: `begin` (permission, id, replay) and `finish` (reference and
 //! watermark).
 
+use base64::Engine;
 use std::sync::Arc;
 
 use axum::http::StatusCode;
@@ -96,12 +97,51 @@ async fn command(
             match begin(&state, &principal, &request, now_ms).await? {
                 Start::Replay(reference) => reference,
                 Start::Fresh(begun) => {
+                    let mut assets = body.assets.as_slice().to_vec();
+                    let as_file = body.as_text_file
+                        || body.text.as_str().chars().count()
+                            > studio_runtime_schema::shared_values::MAX_MANAGED_MESSAGE_CODEPOINTS;
+                    let text = if as_file {
+                        if assets.len() >= studio_runtime_schema::command::COMMAND_SEND_MAX_ASSETS {
+                            return Err(ApiError::new(
+                                StatusCode::BAD_REQUEST,
+                                "Too many attachments",
+                            ));
+                        }
+                        let asset_id = uuid::Uuid::new_v5(
+                            &uuid::Uuid::NAMESPACE_OID,
+                            format!("text-file:{}", request.id.as_str()).as_bytes(),
+                        )
+                        .to_string();
+                        // Asset storage commits before the message: a crash here can leave one
+                        // unreferenced asset, and the same command retries the same asset id.
+                        studio_runtime_services::payload_store::upload(
+                            &store,
+                            target.as_str(),
+                            "message.txt",
+                            Some(&asset_id),
+                            &base64::engine::general_purpose::STANDARD
+                                .encode(body.text.as_str().as_bytes()),
+                        )
+                        .await
+                        .map_err(|error| {
+                            if matches!(error, studio_runtime_services::payload_store::PayloadStoreError::UnknownAgent) {
+                                ApiError::new(StatusCode::BAD_REQUEST, "Sending as a file is available only in managed chats")
+                            } else {
+                                super::workspace_files::map_payload_store_error(error)
+                            }
+                        })?;
+                        assets.push(asset_id);
+                        String::new()
+                    } else {
+                        body.text.as_str().to_owned()
+                    };
                     // The command id is the message id: the message row is the receipt.
                     let message = crate::generated::ManagedMessageBody {
                         id: request.id.as_str().to_owned(),
                         room: target.as_str().to_owned(),
-                        text: body.text.as_str().to_owned(),
-                        assets: Some(body.assets.as_slice().to_vec()),
+                        text,
+                        assets: Some(assets),
                         delivery: body.delivery,
                     };
                     let Json(receipt) = super::messages::send_message(state.clone(), message)
@@ -314,7 +354,7 @@ mod tests {
         assert_eq!(
             document.pointer("/components/schemas/CommandSendBody/properties/text/maxLength"),
             Some(&json!(
-                studio_runtime_schema::shared_values::MAX_MANAGED_MESSAGE_CODEPOINTS
+                studio_runtime_schema::shared_values::MAX_DRAFT_TEXT_CODEPOINTS
             ))
         );
         let registry = studio_runtime_schema::registry_for_document(document)
@@ -356,6 +396,15 @@ mod tests {
             let typed = serde_json::from_str::<CommandRequest>(&case.to_string()).is_ok();
             assert_eq!(typed, schema, "{case}");
         }
+    }
+
+    #[test]
+    fn unflagged_send_serializes_without_changing_fingerprint() {
+        let request: studio_runtime_schema::command::CommandRequest = serde_json::from_str(r#"{"id":"0192f3a0-0000-7000-8000-000000000001","client":"web-1","number":1,"kind":"send","target":"workspace","body":{"text":"hello"}}"#).expect("request");
+        assert_eq!(
+            serde_json::to_string(&request.command).expect("serialize"),
+            r#"{"kind":"send","target":"workspace","body":{"text":"hello","assets":[]}}"#
+        );
     }
 
     #[tokio::test]
@@ -410,6 +459,88 @@ mod tests {
         let (status, response) = post(&app, None, json!({"id":id,"client":"web-1","number":1,"kind":"send","target":"workspace","body":{"text":"hello"}})).await;
         assert_eq!(status, 200, "{response}");
         assert_eq!(response["ref_id"], id);
+    }
+
+    #[tokio::test]
+    async fn group_text_file_send_is_refused_clearly() {
+        let (app, store, _directory) = app_with_queue().await;
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO groups(id,name,members) VALUES('group','Group','[]')",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("group");
+        let (status, response) = post(&app, None, json!({"id":RequestIdentity::issue_root(),"client":"web-1","number":1,"kind":"send","target":"group","body":{"text":"hello","asTextFile":true}})).await;
+        assert_eq!(status, 400);
+        assert_eq!(
+            response["error"],
+            "Sending as a file is available only in managed chats"
+        );
+    }
+
+    #[tokio::test]
+    async fn text_file_send_and_long_paste_are_idempotent() {
+        for (number, flagged) in [(1, true), (2, false)] {
+            let (app, store, _directory) = app_with_queue().await;
+            let id = RequestIdentity::issue_root();
+            let text = if flagged {
+                "short text".to_owned()
+            } else {
+                "x".repeat(studio_runtime_schema::shared_values::MAX_MANAGED_MESSAGE_CODEPOINTS + 1)
+            };
+            let mut body = json!({"text":text});
+            if flagged {
+                body["asTextFile"] = json!(true);
+            }
+            let request = json!({"id":id,"client":"web-1","number":number,"kind":"send","target":"workspace","body":body});
+            let (status, first) = post(&app, None, request.clone()).await;
+            assert_eq!(status, 200, "{first}");
+            let (status, second) = post(&app, None, request).await;
+            assert_eq!(status, 200, "{second}");
+            assert_eq!(first["ref_id"], second["ref_id"]);
+            let id = id.to_string();
+            let (counts, path, stored_assets) = store
+                .transaction(move |tx| {
+                    let path: String = tx.query_row(
+                        "SELECT json_extract(record,'$.path') FROM runtime_assets",
+                        [],
+                        |r| r.get(0),
+                    )?;
+                    let stored_assets: String = tx.query_row(
+                        "SELECT record FROM runtime_event_meta WHERE id=?1",
+                        [&id],
+                        |r| r.get(0),
+                    )?;
+                    Ok((
+                        (
+                            tx.query_row("SELECT count(*) FROM runtime_assets", [], |r| {
+                                r.get::<_, i64>(0)
+                            })?,
+                            tx.query_row(
+                                "SELECT count(*) FROM runtime_events WHERE id=?1",
+                                [&id],
+                                |r| r.get::<_, i64>(0),
+                            )?,
+                        ),
+                        path,
+                        stored_assets,
+                    ))
+                })
+                .await
+                .expect("counts");
+            assert_eq!(counts, (1, 1));
+            assert_eq!(
+                tokio::fs::read_to_string(path)
+                    .await
+                    .expect("asset content"),
+                text
+            );
+            assert!(stored_assets.contains("assets"));
+        }
     }
 
     #[tokio::test]

@@ -67,6 +67,7 @@ import {
   DEFAULT_LOCAL_SERVER_ALIAS,
 } from "./servers/serverAliases";
 import { serverLocalStorage as localStorage } from "./servers/storage";
+import { MAX_MANAGED_MESSAGE_CODEPOINTS } from "./generated/sharedValues";
 import SearchOverlay from "./components/shell/SearchOverlay";
 import { SettingsRow } from "./components/ui/primitives";
 import { modalSizes } from "./theme";
@@ -1596,6 +1597,7 @@ export default function App({ active = true }: { active?: boolean }) {
     }
   };
   const send = async (options?: {
+    asTextFile?: boolean;
     assets?: string[];
     attachments?: Attachment[];
     onPersist?: () => void | Promise<void>;
@@ -1603,7 +1605,12 @@ export default function App({ active = true }: { active?: boolean }) {
   }) => {
     if (schemaMismatch || isApiSchemaMismatch()) return;
     const draftKey = opened || "new",
-      text = getDraft(draftKey).trim();
+      draft = getDraft(draftKey),
+      text =
+        options?.asTextFile ||
+        Array.from(draft).length > MAX_MANAGED_MESSAGE_CODEPOINTS
+          ? draft
+          : draft.trim();
     if ((!text && !options?.assets?.length) || sendingLock.current) return;
     const attempt = Symbol();
     sendingLock.current = attempt;
@@ -1675,13 +1682,15 @@ export default function App({ active = true }: { active?: boolean }) {
           JSON.stringify(sends.current[id]?.assets || []) !==
             JSON.stringify(options?.assets || []) ||
           sends.current[id]?.delivery !==
-            (options?.delivery || DeliveryMoment.CurrentTurn)
+            (options?.delivery || DeliveryMoment.CurrentTurn) ||
+          !!sends.current[id]?.asTextFile !== !!options?.asTextFile
         )
           sends.current[id] = {
             id: randomUUID(),
             room: id,
             text,
             assets: options?.assets || [],
+            ...(options?.asTextFile ? { asTextFile: true } : {}),
             // Enter delivers after the current tool call; Tab after the turn.
             delivery: options?.delivery || DeliveryMoment.CurrentTurn,
           };
@@ -1702,8 +1711,8 @@ export default function App({ active = true }: { active?: boolean }) {
             // Keep the draft until the request is saved.
             setDrafts((old) => {
               const next = { ...old };
-              if (next[draftKey]?.trim() === text) delete next[draftKey];
-              if (next[id]?.trim() === text) delete next[id];
+              if (next[draftKey] === draft) delete next[draftKey];
+              if (next[id] === draft) delete next[id];
               return next;
             });
             // The saved command owns this message. A new user submission,

@@ -14,7 +14,9 @@ export type CommandKind = CommandRequest["kind"];
 type Variant<K extends CommandKind> = Extract<CommandRequest, { kind: K }>;
 
 /** The message that the outbox stores and the `send` command creates. */
-export type SendMessageBody = components["schemas"]["ManagedMessageBody"];
+export type SendMessageBody = components["schemas"]["ManagedMessageBody"] & {
+  asTextFile?: boolean | undefined;
+};
 /** The delivery receipt of a message, as `GET /api/messages/receipts` returns it. */
 export type MessageDelivery =
   components["schemas"]["studio_api__work__models__MessageReceipt"];

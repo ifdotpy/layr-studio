@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Largest draft text, measured in Unicode code points.
-pub const MAX_DRAFT_TEXT_CODEPOINTS: usize = 2_000_000;
+pub const MAX_DRAFT_TEXT_CODEPOINTS: usize = 100_000;
 /// Largest stored branch identity, measured in UTF-8 bytes.
 pub const MAX_DRAFT_ID_BYTES: usize = 300;
 

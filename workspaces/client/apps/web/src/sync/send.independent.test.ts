@@ -26,6 +26,41 @@ class MemoryStorage implements Storage {
 
 afterEach(() => vi.unstubAllGlobals());
 
+it("retries a file send with the original flag and request identity after reload", async () => {
+  vi.stubGlobal("navigator", { onLine: true });
+  const storage = new MemoryStorage();
+  const post = vi
+    .fn()
+    .mockRejectedValueOnce(new TypeError("offline"))
+    .mockImplementation(async (request) => ({
+      rows: [
+        {
+          collection: "messageReceipt",
+          payload: { id: request.id, status: "delivered" },
+        },
+      ],
+    }));
+  const make = () =>
+    createOutbox({
+      api: {
+        command: createCommandClient(storage, post),
+        getStreamSession: () => ({ workspaceId: "workspace" }),
+      } as never,
+      storage,
+      watchResourceConnection: () => () => {},
+    });
+  await make().durableSend({
+    id: "message",
+    room: "chat",
+    text: "whole text",
+    asTextFile: true,
+  });
+  await make().changeOutbox("message", "resume");
+  expect(post).toHaveBeenCalledTimes(2);
+  expect(post.mock.calls[1]?.[0]).toEqual(post.mock.calls[0]?.[0]);
+  expect(post.mock.calls[1]?.[0].body.asTextFile).toBe(true);
+});
+
 it("sends another message while an earlier request remains uncertain and retries the exact command", async () => {
   vi.stubGlobal("navigator", { onLine: true });
   const storage = new MemoryStorage();

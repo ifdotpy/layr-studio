@@ -10932,6 +10932,8 @@ export interface components {
     CommandSendBody: {
       /** @default [] */
       assets?: string[] | undefined;
+      /** @default false */
+      asTextFile?: boolean | undefined;
       delivery?: components["schemas"]["DeliveryMomentInput"] | undefined;
       text: string;
     };
