@@ -17,9 +17,12 @@ const ACTIVE_SOURCE_CLEANUP_PHASES: &str = "'planned','submitted'";
 /// agent has a turn, input, request, monitor, or operation in progress.
 fn agent_in_use(connection: &Connection) -> StoreResult<String> {
     let mut checks = vec![
-        format!("COALESCE(status,'') IN ({ACTIVE_AGENT_STATUSES})"),
+        format!(
+            "COALESCE({},'') IN ({ACTIVE_AGENT_STATUSES})",
+            crate::domain::chat_status_sql("runtime_agents.id")
+        ),
+        // The unfinished turn of the chat, which also covers the provider turn.
         crate::domain::chat_busy_sql("runtime_agents.id"),
-        "COALESCE(turn_id,'')!=''".to_owned(),
         format!(
             "COALESCE(json_array_length({}),0)>0",
             crate::agent_volatile::field_sql("runtime_agents", "activeTools")
@@ -411,13 +414,29 @@ mod tests {
     }
 
     #[test]
+    fn a_stale_turn_id_without_an_unfinished_turn_releases_the_thread() {
+        let connection = database();
+        agent(
+            &connection,
+            "a",
+            json!({"status":"completed","turnId":"turn","inFlight":false}),
+        );
+        assert!(!thread_in_use(&connection), "only an unfinished turn holds");
+        agent(
+            &connection,
+            "a",
+            json!({"status":"running","turnId":"turn","inFlight":true}),
+        );
+        assert!(thread_in_use(&connection), "the unfinished turn holds");
+    }
+
+    #[test]
     fn every_in_use_condition_holds_the_thread_and_the_account() {
         let cases = [
             json!({"status":"running"}),
             json!({"status":"queued"}),
             json!({"status":"approval"}),
             json!({"inFlight":true}),
-            json!({"turnId":"turn"}),
             json!({"activeTools":[{"id":"tool"}]}),
             json!({"workspaceOperation":"merge"}),
             json!({"accountTransferId":"transfer"}),
