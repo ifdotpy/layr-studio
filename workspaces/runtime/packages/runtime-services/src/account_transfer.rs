@@ -1727,8 +1727,11 @@ pub fn typed_enroll(
         .clone()
         .try_into()
         .map_err(|_| TransferError::Refused("Invalid source account"))?;
-    let provider = studio_runtime_schema::ProviderKind::of_field(agent.extra.get("provider"))
-        .map_err(|_| TransferError::Refused("Unknown agent provider"))?;
+    let provider = agent
+        .provider
+        .value()
+        .copied()
+        .ok_or(TransferError::Refused("Unknown agent provider"))?;
     let source_thread = agent.thread_id.clone().map_or(Field::Null, Field::Value);
     let mut member = TransferMember::new(Phase::Waiting, source.clone());
     member.source_thread_id = source_thread.clone();
