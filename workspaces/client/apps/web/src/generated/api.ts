@@ -2811,6 +2811,7 @@ export interface components {
        * @default null
        */
       duplicateOf?: null | string | undefined;
+      eligibility?: components["schemas"]["AccountEligibility"] | undefined;
       /**
        * Email
        * @default null
@@ -2854,6 +2855,21 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /** @description Account changes available to this chat. */
+    AccountChange:
+      | {
+          /** @constant */
+          kind: "select";
+        }
+      | {
+          /** @constant */
+          kind: "transfer";
+        }
+      | {
+          /** @constant */
+          kind: "unavailable";
+          reason: string;
+        };
     /** AccountCostData */
     AccountCostData: {
       /**
@@ -2992,6 +3008,17 @@ export interface components {
      * @description The legacy discover operation accepts an empty JSON object or no body.
      */
     AccountDiscoverRequest: Record<string, never>;
+    /** @description Whether an account can be selected for a new turn. */
+    AccountEligibility:
+      | {
+          /** @constant */
+          kind: "available";
+        }
+      | {
+          /** @constant */
+          kind: "unavailable";
+          reason: string;
+        };
     /**
      * AccountGroupRequest
      * @description Set one account's group, or clear it with null. Repeating a request sets the same value.
@@ -3306,6 +3333,8 @@ export interface components {
       | "error"
       | "changed"
       | "duplicate";
+    /** @enum {string} */
+    AccountTransferAction: "retry" | "cancel";
     /** AccountTransferBlockedDto */
     AccountTransferBlockedDto: {
       /** Id */
@@ -3409,6 +3438,46 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    AccountTransferProgress:
+      | {
+          /** @constant */
+          kind: "none";
+        }
+      | {
+          actions: components["schemas"]["AccountTransferAction"][];
+          id: string;
+          /** @constant */
+          kind: "waiting";
+          reason: string;
+          targetAccountKey: string;
+        }
+      | {
+          actions: components["schemas"]["AccountTransferAction"][];
+          id: string;
+          /** @constant */
+          kind: "moving";
+          targetAccountKey: string;
+        }
+      | {
+          actions: components["schemas"]["AccountTransferAction"][];
+          id: string;
+          /** @constant */
+          kind: "blocked";
+          reason: string;
+          targetAccountKey: string;
+        }
+      | {
+          id: string;
+          /** @constant */
+          kind: "completed";
+          targetAccountKey: string;
+        }
+      | {
+          id: string;
+          /** @constant */
+          kind: "cancelled";
+          targetAccountKey: string;
+        };
     /**
      * AccountTransferScope
      * @enum {string}
@@ -3772,12 +3841,16 @@ export interface components {
      * @description Open chat fields. Merge with the current agentSummary by id; summaries own shared list fields.
      */
     AgentDetailEntityDto: {
+      accountChange?: components["schemas"]["AccountChange"] | undefined;
       accountTransfer?:
         | components["schemas"]["AccountTransferSummaryDto"]
         | null
         | undefined;
       /** Accounttransferid */
       accountTransferId?: null | string | undefined;
+      accountTransferProgress?:
+        | components["schemas"]["AccountTransferProgress"]
+        | undefined;
       activity?: components["schemas"]["AgentActivity"] | null | undefined;
       agentMode?: components["schemas"]["AgentMode"] | null | undefined;
       /** Agentmoderevision */
@@ -4043,6 +4116,7 @@ export interface components {
     };
     /** AgentEntityDto */
     AgentEntityDto: {
+      accountChange?: components["schemas"]["AccountChange"] | undefined;
       /** Accountkey */
       accountKey?: null | string | undefined;
       accountTransfer?:
@@ -4051,6 +4125,9 @@ export interface components {
         | undefined;
       /** Accounttransferid */
       accountTransferId?: null | string | undefined;
+      accountTransferProgress?:
+        | components["schemas"]["AccountTransferProgress"]
+        | undefined;
       activity?: components["schemas"]["AgentActivity"] | null | undefined;
       agentMode?: components["schemas"]["AgentMode"] | null | undefined;
       /** Agentmoderevision */
@@ -6301,8 +6378,12 @@ export interface components {
      * @description Chat list identity, ordering, operational attention and durable read state. OpenAPI owns the exact summary field set; runtime projections filter through this schema.
      */
     AgentSummaryEntityDto: {
+      accountChange?: components["schemas"]["AccountChange"] | undefined;
       /** Accountkey */
       accountKey?: null | string | undefined;
+      accountTransferProgress?:
+        | components["schemas"]["AccountTransferProgress"]
+        | undefined;
       /** Archived */
       archived?: boolean | null | undefined;
       /** Autowake */
@@ -38640,6 +38721,12 @@ export const AccountStatus = {
   duplicate: "duplicate",
 } as const;
 export type AccountStatus = components["schemas"]["AccountStatus"];
+export const AccountTransferAction = {
+  retry: "retry",
+  cancel: "cancel",
+} as const;
+export type AccountTransferAction =
+  components["schemas"]["AccountTransferAction"];
 export const AccountTransferScope = {
   team: "team",
   subagents: "subagents",

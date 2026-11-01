@@ -226,6 +226,90 @@ enum TransferStatus {
     Cancelled,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SummaryProgress {
+    id: String,
+    target_account_key: String,
+    status: TransferStatus,
+    #[serde(default)]
+    waiting: Option<String>,
+    #[serde(default)]
+    blocked: Vec<SummaryBlock>,
+    #[serde(default)]
+    can_retry: bool,
+    #[serde(default)]
+    moving_now: u64,
+}
+
+#[derive(Deserialize)]
+struct SummaryBlock {
+    reason: Option<String>,
+}
+
+/// Project the legacy saved summary into the closed renderer progress contract.
+pub fn progress_view(
+    summary: Option<&Value>,
+) -> Result<studio_runtime_schema::agent_progress::AccountTransferProgress, TransferError> {
+    use studio_runtime_schema::agent_progress::{
+        AccountTransferAction as Action, AccountTransferProgress as Progress,
+    };
+    let Some(summary) = summary.filter(|value| !value.is_null()) else {
+        return Ok(Progress::None);
+    };
+    let summary: SummaryProgress = SummaryProgress::deserialize(summary)
+        .map_err(|_| invalid("account transfer summary", "/"))?;
+    let SummaryProgress {
+        id,
+        target_account_key,
+        status,
+        waiting,
+        blocked,
+        can_retry,
+        moving_now,
+    } = summary;
+    Ok(match status {
+        TransferStatus::Completed => Progress::Completed {
+            id,
+            target_account_key,
+        },
+        TransferStatus::Cancelled => Progress::Cancelled {
+            id,
+            target_account_key,
+        },
+        TransferStatus::Pending => {
+            let mut actions = Vec::new();
+            if can_retry {
+                actions.push(Action::Retry);
+            }
+            if moving_now == 0 {
+                actions.push(Action::Cancel);
+            }
+            if let Some(block) = blocked.into_iter().next() {
+                Progress::Blocked {
+                    id,
+                    target_account_key,
+                    reason: block.reason.or(waiting).unwrap_or_default(),
+                    actions,
+                }
+            } else if moving_now > 0 {
+                Progress::Moving {
+                    id,
+                    target_account_key,
+                    actions,
+                }
+            } else {
+                Progress::Waiting {
+                    id,
+                    target_account_key,
+                    reason: waiting.unwrap_or_default(),
+                    actions,
+                }
+            }
+        }
+    })
+}
+
 /// Validated snapshot with original member insertion order retained for the UI.
 pub struct Snapshot {
     identity: TransferIdentity,

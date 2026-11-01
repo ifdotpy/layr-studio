@@ -1393,6 +1393,9 @@
             "default": null,
             "title": "Duplicateof"
           },
+          "eligibility": {
+            "$ref": "#/components/schemas/AccountEligibility"
+          },
           "email": {
             "anyOf": [
               {
@@ -1492,6 +1495,54 @@
         ],
         "title": "Account",
         "type": "object"
+      },
+      "AccountChange": {
+        "description": "Account changes available to this chat.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "select",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "transfer",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "unavailable",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "reason"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "AccountCostData": {
         "additionalProperties": false,
@@ -1918,6 +1969,41 @@
         "properties": {},
         "title": "AccountDiscoverRequest",
         "type": "object"
+      },
+      "AccountEligibility": {
+        "description": "Whether an account can be selected for a new turn.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "available",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "unavailable",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "reason"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "AccountGroupRequest": {
         "additionalProperties": false,
@@ -2456,6 +2542,13 @@
         "title": "AccountStatus",
         "type": "string"
       },
+      "AccountTransferAction": {
+        "enum": [
+          "retry",
+          "cancel"
+        ],
+        "type": "string"
+      },
       "AccountTransferBlockedDto": {
         "additionalProperties": false,
         "properties": {
@@ -2712,6 +2805,157 @@
         ],
         "title": "AccountTransferLeftOnSourceRecordResponse",
         "type": "object"
+      },
+      "AccountTransferProgress": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "none",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "actions": {
+                "items": {
+                  "$ref": "#/components/schemas/AccountTransferAction"
+                },
+                "type": "array"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "waiting",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "targetAccountKey": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "targetAccountKey",
+              "reason",
+              "actions"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "actions": {
+                "items": {
+                  "$ref": "#/components/schemas/AccountTransferAction"
+                },
+                "type": "array"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "moving",
+                "type": "string"
+              },
+              "targetAccountKey": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "targetAccountKey",
+              "actions"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "actions": {
+                "items": {
+                  "$ref": "#/components/schemas/AccountTransferAction"
+                },
+                "type": "array"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "blocked",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "targetAccountKey": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "targetAccountKey",
+              "reason",
+              "actions"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "completed",
+                "type": "string"
+              },
+              "targetAccountKey": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "targetAccountKey"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "cancelled",
+                "type": "string"
+              },
+              "targetAccountKey": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "targetAccountKey"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "AccountTransferScope": {
         "enum": [
@@ -3646,6 +3890,9 @@
         "additionalProperties": false,
         "description": "Open chat fields. Merge with the current agentSummary by id; summaries own shared list fields.",
         "properties": {
+          "accountChange": {
+            "$ref": "#/components/schemas/AccountChange"
+          },
           "accountTransfer": {
             "anyOf": [
               {
@@ -3666,6 +3913,9 @@
               }
             ],
             "title": "Accounttransferid"
+          },
+          "accountTransferProgress": {
+            "$ref": "#/components/schemas/AccountTransferProgress"
           },
           "activity": {
             "anyOf": [
@@ -4671,6 +4921,9 @@
       "AgentEntityDto": {
         "additionalProperties": false,
         "properties": {
+          "accountChange": {
+            "$ref": "#/components/schemas/AccountChange"
+          },
           "accountKey": {
             "anyOf": [
               {
@@ -4702,6 +4955,9 @@
               }
             ],
             "title": "Accounttransferid"
+          },
+          "accountTransferProgress": {
+            "$ref": "#/components/schemas/AccountTransferProgress"
           },
           "activity": {
             "anyOf": [
@@ -9644,6 +9900,9 @@
         "additionalProperties": false,
         "description": "Chat list identity, ordering, operational attention and durable read state. OpenAPI owns the exact summary field set; runtime projections filter through this schema.",
         "properties": {
+          "accountChange": {
+            "$ref": "#/components/schemas/AccountChange"
+          },
           "accountKey": {
             "anyOf": [
               {
@@ -9654,6 +9913,9 @@
               }
             ],
             "title": "Accountkey"
+          },
+          "accountTransferProgress": {
+            "$ref": "#/components/schemas/AccountTransferProgress"
           },
           "archived": {
             "anyOf": [
