@@ -984,30 +984,6 @@
   "generated-types": [],
   "needless_pass_by_value": [
     {
-      "file": "workspaces/client/apps/native/src-tauri/src/close.rs",
-      "fingerprint": "0e4757b7a55d66e1341b370db5be78b0126724637b5dfc31af03ddb8163e3f1b:0"
-    },
-    {
-      "file": "workspaces/client/apps/native/src-tauri/src/close.rs",
-      "fingerprint": "0e4757b7a55d66e1341b370db5be78b0126724637b5dfc31af03ddb8163e3f1b:1"
-    },
-    {
-      "file": "workspaces/client/apps/native/src-tauri/src/close.rs",
-      "fingerprint": "2a8b2e34f9db4438c2842fc4e37afae65a4089ecc3af5656f47352a6bafe76c0:0"
-    },
-    {
-      "file": "workspaces/client/apps/native/src-tauri/src/close.rs",
-      "fingerprint": "2a8b2e34f9db4438c2842fc4e37afae65a4089ecc3af5656f47352a6bafe76c0:1"
-    },
-    {
-      "file": "workspaces/client/apps/native/src-tauri/src/frame_assets.rs",
-      "fingerprint": "97b00ca952c31638c3c1d319bd3aa76b6574d3800b64bfac9c6f55d7846d6d5c:0"
-    },
-    {
-      "file": "workspaces/client/apps/native/src-tauri/src/frame_assets.rs",
-      "fingerprint": "9afbfcac6becdaff65098a1cef50b115bd37d574e03ef4d1f8bcbc6dbec275ce:0"
-    },
-    {
       "file": "workspaces/client/packages/client-core/src/backend.rs",
       "fingerprint": "05ed782712b957e83aaf934a7100767448f72978163367db2cfb46544d921dad:0"
     },
