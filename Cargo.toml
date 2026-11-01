@@ -105,6 +105,14 @@ rustls-pki-types = { version = "=1.15.1", features = ["std"] }
 spki = { version = "=0.8.1", features = ["std"] }
 ureq = { version = "=3.5.0", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
 
+# Live set for `layr retest sweep` (docs/retest.md, "Live set"). The `sweep` list must equal
+# RUST_WORKSPACE_BUILD_ARGS in workspaces/tooling/apps/repository-checks/gate-config.ts (test:
+# tests/layr-sweep-parity.test.ts). The env is the gate's: CARGO_INCREMENTAL=0 (studio-ops
+# layr-test-fast.sh and main-warm.sh). It changes the unit hashes.
+[workspace.metadata.layr-retest]
+env = { CARGO_INCREMENTAL = "0" }
+sweep = [["build", "--workspace", "--exclude", "studio-native-client", "--tests", "--bins", "--examples", "--locked"]]
+
 # The server hashes its own executable at startup, a file of up to a gigabyte in
 # a debug build; unoptimized hashing delayed readiness by about 20 seconds.
 # Debug info level for local builds and tests. Full debuginfo made each
