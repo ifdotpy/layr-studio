@@ -1,0 +1,16 @@
+[package]
+name = "studio-request-signing"
+version.workspace = true
+edition.workspace = true
+description = "Owner of the multi-server request signature: canonical bytes, header names, Ed25519 sign and verify"
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+studio-runtime-schema = { path = "../runtime-schema" }
+base64 = { workspace = true }
+ring = { workspace = true }
+sha2 = { workspace = true }
+
+[lints]
+workspace = true

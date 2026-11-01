@@ -5253,6 +5253,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "studio-client-domain",
+ "studio-request-signing",
  "studio-runtime-schema",
  "tempfile",
  "tokio",
@@ -5357,6 +5358,16 @@ dependencies = [
  "studio-test-deps",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "studio-request-signing"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "ring",
+ "sha2 0.11.1",
+ "studio-runtime-schema",
 ]
 
 [[package]]
@@ -5533,6 +5544,7 @@ dependencies = [
  "spki",
  "strum",
  "studio-operations",
+ "studio-request-signing",
  "studio-runtime-process",
  "studio-runtime-providers",
  "studio-runtime-schema",

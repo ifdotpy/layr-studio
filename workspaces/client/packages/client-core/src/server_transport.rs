@@ -11,6 +11,7 @@ use std::{
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use studio_request_signing::header;
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 
 // Maximum concurrent signed requests and response bodies per native client.
@@ -295,12 +296,12 @@ impl RemoteClient {
             }
         }
         request = request
-            .header("x-studio-client", credential.field("clientId")?)
-            .header("x-studio-server", credential.field("serverId")?)
-            .header("x-studio-timestamp", timestamp)
-            .header("x-studio-nonce", nonce)
-            .header("x-studio-request-id", request_id)
-            .header("x-studio-signature", signature);
+            .header(header::CLIENT, credential.field("clientId")?)
+            .header(header::SERVER, credential.field("serverId")?)
+            .header(header::TIMESTAMP, timestamp)
+            .header(header::NONCE, nonce)
+            .header(header::REQUEST_ID, request_id)
+            .header(header::SIGNATURE, signature);
         if method == "POST" {
             request = request.body(body);
         }
