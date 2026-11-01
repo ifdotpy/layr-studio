@@ -123,6 +123,26 @@ fn main() -> Result<(), Box<dyn Error>> {
             "studio_runtime_schema::agent_entity_nested::WorkspaceCleanupSummaryDto",
         ),
         (
+            "AgentNativeRelease",
+            "studio_runtime_schema::agent_entity_nested_extra::AgentNativeRelease",
+        ),
+        (
+            "NativeReleasePhase",
+            "studio_runtime_schema::persistence::NativeReleasePhase",
+        ),
+        (
+            "ContextUsageDto",
+            "studio_runtime_schema::agent_entity_nested_extra::ContextUsageDto",
+        ),
+        (
+            "ReadStateDto",
+            "studio_runtime_schema::agent_entity_nested_extra::ReadStateDto",
+        ),
+        (
+            "AgentRole",
+            "studio_runtime_schema::agent_entity_nested_extra::AgentRole",
+        ),
+        (
             "AccountTransferSummaryDto",
             "studio_runtime_schema::agent_entity_transfer::AccountTransferSummaryDto",
         ),

@@ -11,8 +11,69 @@ fn nullable<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     Option::<T>::deserialize(d)
 }
 
-fn nullable_counter(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    schemars::json_schema!({"anyOf":[{"type":"integer","minimum":0,"maximum":crate::shared_values::MAX_SAFE_INTEGER},{"type":"null"}]})
+pub(crate) fn normalize_nullable_counter(
+    schema: &mut serde_json::Value,
+    name: &str,
+    label: &str,
+    default: bool,
+) -> Result<(), String> {
+    use crate::agent_entity_nested::{object, property, title};
+    let prop = property(schema, name)?;
+    let mut value = prop.clone();
+    let value_object = object(&mut value)?;
+    let kind = value_object
+        .get_mut("type")
+        .ok_or_else(|| format!("{name} has no type"))?;
+    if *kind != serde_json::json!(["integer", "null"]) {
+        return Err(format!("{name} must be a nullable integer"));
+    }
+    *kind = "integer".into();
+    *prop = serde_json::json!({"anyOf":[value,{"type":"null"}]});
+    if default {
+        object(prop)?.insert("default".into(), serde_json::Value::Null);
+    }
+    title(prop, label)
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContextUsageDto {
+    #[serde(deserialize_with = "nullable")]
+    pub tokens: Option<AgentCounter>,
+    #[serde(deserialize_with = "nullable")]
+    pub window: Option<AgentCounter>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub at: Field<f64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReadStateDto {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub read: bool,
+
+    pub revision: AgentCounter,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentRole {
+    Lead,
+    Worker,
+    Orchestrator,
+    Agent,
+    Implementer,
+    Reviewer,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentNativeRelease {
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub phase: Field<crate::persistence::NativeReleasePhase>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub reset_pending: Field<bool>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -22,7 +83,6 @@ pub struct AgentEntityCapacityRetryDto {
     #[serde(deserialize_with = "nullable")]
     pub thread_id: Option<String>,
     #[serde(deserialize_with = "nullable")]
-    #[schemars(schema_with = "nullable_counter")]
     pub epoch: Option<AgentCounter>,
     #[serde(deserialize_with = "nullable")]
     pub account_key: Option<String>,
@@ -31,16 +91,12 @@ pub struct AgentEntityCapacityRetryDto {
     #[serde(deserialize_with = "nullable")]
     pub due_at: Option<f64>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub accepted_turn_id: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<CapacityContinuationCause>")]
     pub cause: Field<CapacityContinuationCause>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<f64>")]
     pub claimed_at: Field<f64>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub reason: Field<String>,
 }
 
@@ -59,7 +115,7 @@ pub struct AgentEntityUsageResumeDto {
     pub due_at: Option<f64>,
 }
 
-pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 3], String> {
+pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 8], String> {
     use crate::agent_entity_nested::{nullable as normalize_nullable, object, property, title};
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
@@ -85,7 +141,6 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 3], String
         ("id", "Id"),
         ("status", "Status"),
         ("updatedAt", "Updatedat"),
-        ("epoch", "Epoch"),
     ] {
         let prop = property(&mut retry, name)?;
         title(prop, label)?;
@@ -95,18 +150,28 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 3], String
             }
         }
     }
+    normalize_nullable_counter(&mut retry, "epoch", "Epoch", false)?;
     let cause = property(&mut retry, "cause")?;
     let variants = object(cause)?
         .get_mut("anyOf")
         .and_then(serde_json::Value::as_array_mut)
         .ok_or("capacity retry cause must be nullable")?;
     if variants.len() != 2
-        || variants[0]["$ref"] != "#/components/schemas/CapacityContinuationCause"
-        || variants[1] != serde_json::json!({"type":"null"})
+        || variants
+            .first()
+            .and_then(|v| v.get("$ref"))
+            .and_then(serde_json::Value::as_str)
+            != Some("#/components/schemas/CapacityContinuationCause")
+        || variants.get(1) != Some(&serde_json::json!({"type":"null"}))
     {
         return Err("capacity retry cause must reference its owner and null".into());
     }
-    variants[0]["$ref"] = "#/components/schemas/CapacityRetryCause".into();
+    let reference = variants
+        .first_mut()
+        .and_then(serde_json::Value::as_object_mut)
+        .and_then(|v| v.get_mut("$ref"))
+        .ok_or("missing capacity retry cause reference")?;
+    *reference = "#/components/schemas/CapacityRetryCause".into();
     object(cause)?.insert("default".into(), serde_json::Value::Null);
     let mut retry_cause = CapacityContinuationCause::json_schema(&mut generator).to_value();
     title(&mut retry_cause, "CapacityRetryCause")?;
@@ -137,10 +202,65 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 3], String
             }
         }
     }
+    let mut usage = ContextUsageDto::json_schema(&mut generator).to_value();
+    title(&mut usage, "ContextUsageDto")?;
+    normalize_nullable(&mut usage, "at", "At", true)?;
+    for (name, label) in [("tokens", "Tokens"), ("window", "Window")] {
+        normalize_nullable_counter(&mut usage, name, label, false)?;
+    }
+    let mut read = ReadStateDto::json_schema(&mut generator).to_value();
+    title(&mut read, "ReadStateDto")?;
+    for (name, label) in [
+        ("threadId", "Threadid"),
+        ("turnId", "Turnid"),
+        ("read", "Read"),
+        ("revision", "Revision"),
+    ] {
+        title(property(&mut read, name)?, label)?;
+    }
+    let mut role = AgentRole::json_schema(&mut generator).to_value();
+    title(&mut role, "AgentRole")?;
+    let mut release = AgentNativeRelease::json_schema(&mut generator).to_value();
+    title(&mut release, "AgentNativeRelease")?;
+    normalize_nullable(&mut release, "resetPending", "Resetpending", true)?;
+    let phase = property(&mut release, "phase")?;
+    let variants = object(phase)?
+        .get_mut("anyOf")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or("release phase must be nullable")?;
+    if variants.len() != 2
+        || variants
+            .first()
+            .and_then(|v| v.get("$ref"))
+            .and_then(serde_json::Value::as_str)
+            != Some("#/components/schemas/NativeReleasePhase")
+        || variants.get(1) != Some(&serde_json::json!({"type":"null"}))
+    {
+        return Err("release phase must reference its owner and null".into());
+    }
+    object(phase)?.insert("default".into(), serde_json::Value::Null);
+    let mut release_phase =
+        crate::persistence::NativeReleasePhase::json_schema(&mut generator).to_value();
+    title(&mut release_phase, "NativeReleasePhase")?;
+    let entries = object(&mut release_phase)?
+        .get_mut("enum")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or("release phases must be an enum")?;
+    if entries.get(2).and_then(serde_json::Value::as_str) != Some("unknown")
+        || entries.get(3).and_then(serde_json::Value::as_str) != Some("released")
+    {
+        return Err("release phase order changed".into());
+    }
+    entries.swap(2, 3);
     Ok([
         ("AgentEntityCapacityRetryDto", retry),
         ("CapacityRetryCause", retry_cause),
         ("AgentEntityUsageResumeDto", resume),
+        ("ContextUsageDto", usage),
+        ("ReadStateDto", read),
+        ("AgentRole", role),
+        ("AgentNativeRelease", release),
+        ("NativeReleasePhase", release_phase),
     ])
 }
 
@@ -173,5 +293,36 @@ mod tests {
         let mut missing = resume;
         missing.as_object_mut().unwrap().remove("reason");
         assert!(serde_json::from_value::<AgentEntityUsageResumeDto>(missing).is_err());
+    }
+    #[derive(JsonSchema)]
+    struct ChangedReadState {
+        read: String,
+    }
+
+    #[test]
+    fn read_field_change_changes_rendered_schema() {
+        let witness = ChangedReadState { read: "x".into() };
+        assert_eq!(witness.read, "x");
+        let mut generator = schemars::generate::SchemaSettings::openapi3()
+            .for_serialize()
+            .into_generator();
+        let changed = ChangedReadState::json_schema(&mut generator).to_value();
+        let actual = ReadStateDto::json_schema(&mut generator).to_value();
+        assert_ne!(changed["properties"]["read"], actual["properties"]["read"]);
+    }
+
+    #[test]
+    fn context_and_read_state_reject_missing_or_out_of_range_counters() {
+        assert!(
+            serde_json::from_value::<ContextUsageDto>(json!({"tokens": null, "window": null}))
+                .is_ok()
+        );
+        assert!(serde_json::from_value::<ContextUsageDto>(json!({"tokens": null})).is_err());
+        assert!(
+            serde_json::from_value::<ReadStateDto>(
+                json!({"threadId":"t", "turnId":"u", "read":true, "revision":-1})
+            )
+            .is_err()
+        );
     }
 }

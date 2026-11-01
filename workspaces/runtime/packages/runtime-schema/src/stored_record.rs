@@ -37,6 +37,17 @@ impl<'de> Deserialize<'de> for StoredJsonInteger {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct AgentCounter(StoredJsonInteger);
+impl schemars::JsonSchema for AgentCounter {
+    fn inline_schema() -> bool {
+        true
+    }
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "AgentCounter".into()
+    }
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({"type":"integer","minimum":0,"maximum":crate::shared_values::MAX_SAFE_INTEGER})
+    }
+}
 impl AgentCounter {
     pub fn from_i64(value: i64) -> Option<Self> {
         (0..=crate::shared_values::MAX_SAFE_INTEGER)
@@ -94,6 +105,23 @@ impl<'de> Deserialize<'de> for NonnegativeNumber {
 mod tests {
     use serde::{Deserialize, Serialize};
     use serde_json::{Value, json};
+
+    #[test]
+    fn agent_counter_schema_tracks_its_safe_integer_bound() {
+        use schemars::JsonSchema;
+        let schema =
+            super::AgentCounter::json_schema(&mut schemars::SchemaGenerator::default()).to_value();
+        assert_eq!(
+            schema.get("maximum"),
+            Some(&json!(crate::shared_values::MAX_SAFE_INTEGER))
+        );
+        assert_eq!(schema.get("minimum"), Some(&json!(0)));
+        assert_ne!(
+            schema,
+            <String as JsonSchema>::json_schema(&mut schemars::SchemaGenerator::default())
+                .to_value()
+        );
+    }
 
     #[test]
     fn presence_round_trips_missing_null_and_value_across_record_owners() {

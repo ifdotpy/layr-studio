@@ -25,10 +25,8 @@ pub enum TransferScope {
 pub struct AccountTransferNoticeDto {
     pub id: String,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub name: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub reason: Field<String>,
 }
 
@@ -37,79 +35,53 @@ pub struct AccountTransferNoticeDto {
 pub struct AccountTransferLeftOnSourceDto {
     pub id: String,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub name: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub reason: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<ProviderKind>")]
     pub provider: Field<ProviderKind>,
-}
-
-fn nullable_counter(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    schemars::json_schema!({"anyOf":[{"type":"integer","minimum":0,"maximum":crate::shared_values::MAX_SAFE_INTEGER},{"type":"null"}]})
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AccountTransferSummaryDto {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub id: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub target_account_key: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<TransferStatus>")]
     pub status: Field<TransferStatus>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<TransferScope>")]
     pub scope: Field<TransferScope>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<f64>")]
     pub updated: Field<f64>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<bool>")]
     pub finish_history: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(schema_with = "nullable_counter")]
     pub total: Field<AgentCounter>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(schema_with = "nullable_counter")]
     pub completed: Field<AgentCounter>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(schema_with = "nullable_counter")]
     pub moved: Field<AgentCounter>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(schema_with = "nullable_counter")]
     pub native_history_pending: Field<AgentCounter>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(schema_with = "nullable_counter")]
     pub moving_now: Field<AgentCounter>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<bool>")]
     pub can_finish_history: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(schema_with = "nullable_counter")]
     pub waiting_count: Field<AgentCounter>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<bool>")]
     pub needs_attention: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<bool>")]
     pub can_retry: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<Vec<AccountTransferNoticeDto>>")]
     pub interrupted: Field<Vec<AccountTransferNoticeDto>>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<Vec<AccountTransferLeftOnSourceDto>>")]
     pub left_on_source: Field<Vec<AccountTransferLeftOnSourceDto>>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<Vec<AccountTransferNoticeDto>>")]
     pub blocked: Field<Vec<AccountTransferNoticeDto>>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub waiting: Field<String>,
 }
 
@@ -126,12 +98,21 @@ fn nullable_ref(
         .and_then(serde_json::Value::as_array_mut)
         .ok_or_else(|| format!("{name} must be nullable"))?;
     if variants.len() != 2
-        || variants[0]["$ref"] != from
-        || variants[1] != serde_json::json!({"type":"null"})
+        || variants
+            .first()
+            .and_then(|v| v.get("$ref"))
+            .and_then(serde_json::Value::as_str)
+            != Some(from)
+        || variants.get(1) != Some(&serde_json::json!({"type":"null"}))
     {
         return Err(format!("{name} must reference its owner and null"));
     }
-    variants[0]["$ref"] = to.into();
+    let reference = variants
+        .first_mut()
+        .and_then(serde_json::Value::as_object_mut)
+        .and_then(|v| v.get_mut("$ref"))
+        .ok_or_else(|| format!("{name} is missing its reference"))?;
+    *reference = to.into();
     object(prop)?.insert("default".into(), serde_json::Value::Null);
     Ok(())
 }
@@ -146,11 +127,24 @@ fn nullable_list(
     use crate::agent_entity_nested::{object, property, title};
     let prop = property(schema, name)?;
     let mut item = prop.clone();
-    if item["type"] != serde_json::json!(["array", "null"]) || item["items"]["$ref"] != from {
+    if item.get("type") != Some(&serde_json::json!(["array", "null"]))
+        || item
+            .get("items")
+            .and_then(|v| v.get("$ref"))
+            .and_then(serde_json::Value::as_str)
+            != Some(from)
+    {
         return Err(format!("{name} must contain its owner and null"));
     }
-    item["type"] = "array".into();
-    item["items"]["$ref"] = to.into();
+    let item_object = object(&mut item)?;
+    *item_object
+        .get_mut("type")
+        .ok_or_else(|| format!("{name} has no type"))? = "array".into();
+    *item_object
+        .get_mut("items")
+        .and_then(serde_json::Value::as_object_mut)
+        .and_then(|items| items.get_mut("$ref"))
+        .ok_or_else(|| format!("{name} has no item reference"))? = to.into();
     *prop = serde_json::json!({"anyOf":[item,{"type":"null"}]});
     object(prop)?.insert("default".into(), serde_json::Value::Null);
     title(prop, label)
@@ -170,7 +164,7 @@ fn notice_schema<T: JsonSchema>(
 }
 
 pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 6], String> {
-    use crate::agent_entity_nested::{nullable, object, property, title};
+    use crate::agent_entity_nested::{nullable, object, title};
     let mut g = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .with(|s| s.definitions_path = "/components/schemas".into())
@@ -216,19 +210,12 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 6], String
         ("movingNow", "Movingnow"),
         ("waitingCount", "Waitingcount"),
     ] {
-        let prop = property(&mut summary, name)?;
-        let variants = object(prop)?
-            .get("anyOf")
-            .and_then(serde_json::Value::as_array)
-            .ok_or_else(|| format!("{name} must be a nullable counter"))?;
-        if variants.len() != 2
-            || variants[0]["maximum"] != crate::shared_values::MAX_SAFE_INTEGER
-            || variants[1] != serde_json::json!({"type":"null"})
-        {
-            return Err(format!("{name} must use the safe counter"));
-        }
-        object(prop)?.insert("default".into(), serde_json::Value::Null);
-        title(prop, label)?;
+        crate::agent_entity_nested_extra::normalize_nullable_counter(
+            &mut summary,
+            name,
+            label,
+            true,
+        )?;
     }
     for (name, from, to) in [
         ("scope", "TransferScope", "AccountTransferScope"),
