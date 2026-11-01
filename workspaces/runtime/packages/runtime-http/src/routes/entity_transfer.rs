@@ -288,6 +288,17 @@ mod tests {
         state.validators = crate::validation::Registry::compile(&[]).expect("canonical validators");
         (directory, state)
     }
+    fn task(
+        id: &str,
+        agent: &str,
+        status: &str,
+    ) -> studio_runtime_schema::process_controls::TaskProjection {
+        let record: studio_runtime_store::TaskRecord = serde_json::from_value(json!({
+            "id": id, "agent": agent, "created": 1, "itemId": id, "turnId": "turn",
+            "kind": "command", "status": status, "type": "commandExecution", "name": "commandExecution"
+        })).expect("typed task record");
+        studio_runtime_services::sync_views::project_task_record(&record).expect("task projection")
+    }
     fn event(state: &HttpState) -> ResourceChangeEvent {
         serde_json::from_value(json!({"protocol":studio_runtime_schema::SYNC_PROTOCOL_VERSION,"workspaceId":state.workspace_id,"epoch":"fixture","revision":1,"reason":"initial","resources":[],"resourceVersions":[]})).expect("event")
     }
@@ -458,13 +469,30 @@ mod tests {
      {
         let (_directory, state) = fixture().await;
         let store = state.store.as_ref().expect("store");
-        store.transaction(|tx| {
-            for (id, agent) in [("a-task","a"),("b-task","b"),("latest","lead")] {
-                SyncDocumentsRepository::put_entity(tx,"task",id,json!({"id":id,"agent":agent,"kind":"command","status":"running","created":1}),false)?;
-            }
-            for (id, root) in [("a","lead"),("b","other")] { SyncDocumentsRepository::put_entity(tx,"agentSummary",id,json!({"id":id,"rootId":root,"status":"idle","source":"managed"}),false)?; }
-            Ok(())
-        }).await.expect("scope source");
+        store
+            .transaction(|tx| {
+                for (id, agent) in [("a-task", "a"), ("b-task", "b"), ("latest", "lead")] {
+                    SyncDocumentsRepository::put_entity(
+                        tx,
+                        "task",
+                        id,
+                        task(id, agent, "running"),
+                        false,
+                    )?;
+                }
+                for (id, root) in [("a", "lead"), ("b", "other")] {
+                    SyncDocumentsRepository::put_entity(
+                        tx,
+                        "agentSummary",
+                        id,
+                        json!({"id":id,"rootId":root,"status":"idle","source":"managed"}),
+                        false,
+                    )?;
+                }
+                Ok(())
+            })
+            .await
+            .expect("scope source");
         let resource: ResourceRef =
             serde_json::from_value(json!({"kind":"tasks","agentId":"lead"})).expect("resource");
         let (_, _, before) = prepare(&state, &event(&state), resource.clone(), None)
@@ -480,56 +508,121 @@ mod tests {
         let (entry, _, swapped) = prepare(&state, &event(&state), resource.clone(), Some(before))
             .await
             .expect("swapped scope");
-        let entry = serde_json::to_value(entry.expect("small snapshot")).expect("entry");
+        let entry = entry.expect("small snapshot");
         assert_eq!(
-            entry["replyKind"], "snapshot",
+            entry.reply_kind,
+            Some(crate::generated::SubscriptionReplyKind::Snapshot),
             "membership movement must not advance an empty delta past old selected rows"
         );
         assert_eq!(
-            entry["entityChanges"]["documents"]
-                .as_array()
+            entry
+                .entity_changes
+                .as_ref()
+                .and_then(Option::as_ref)
                 .expect("rows")
+                .documents
                 .iter()
-                .map(|row| row["id"].as_str().expect("id"))
+                .map(|row| row.id.as_str())
                 .collect::<Vec<_>>(),
             ["b-task", "latest"]
         );
-        store.transaction(|tx| { SyncDocumentsRepository::put_entity(tx,"task","b-task",json!({"id":"b-task","agent":"a","kind":"command","status":"running","created":1}),false)?; Ok(()) }).await.expect("existing task moved away");
+        store
+            .transaction(|tx| {
+                SyncDocumentsRepository::put_entity(
+                    tx,
+                    "task",
+                    "b-task",
+                    task("b-task", "a", "running"),
+                    false,
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("existing task moved away");
         let (entry, _, moved) = prepare(&state, &event(&state), resource.clone(), Some(swapped))
             .await
             .expect("moved scope");
-        let entry = serde_json::to_value(entry.expect("replacement")).expect("entry");
-        assert_eq!(entry["replyKind"], "snapshot");
+        let entry = entry.expect("replacement");
         assert_eq!(
-            entry["entityChanges"]["documents"]
-                .as_array()
+            entry.reply_kind,
+            Some(crate::generated::SubscriptionReplyKind::Snapshot)
+        );
+        assert_eq!(
+            entry
+                .entity_changes
+                .as_ref()
+                .and_then(Option::as_ref)
                 .expect("rows")
+                .documents
                 .len(),
             1
         );
-        store.transaction(|tx| { SyncDocumentsRepository::put_entity(tx,"agentSummary","unrelated",json!({"id":"unrelated","rootId":"other","status":"idle","source":"managed"}),false)?; SyncDocumentsRepository::put_entity(tx,"task","latest",json!({"id":"latest","agent":"lead","kind":"command","status":"completed","created":1}),false)?; Ok(()) }).await.expect("other team and local content");
+        store
+            .transaction(|tx| {
+                SyncDocumentsRepository::put_entity(
+                    tx,
+                    "agentSummary",
+                    "unrelated",
+                    json!({"id":"unrelated","rootId":"other","status":"idle","source":"managed"}),
+                    false,
+                )?;
+                SyncDocumentsRepository::put_entity(
+                    tx,
+                    "task",
+                    "latest",
+                    task("latest", "lead", "completed"),
+                    false,
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("other team and local content");
         let (entry, _, current) = prepare(&state, &event(&state), resource.clone(), Some(moved))
             .await
             .expect("content delta");
-        let entry = serde_json::to_value(entry.expect("delta")).expect("entry");
-        assert_eq!(entry["replyKind"], "delta");
+        let entry = entry.expect("delta");
         assert_eq!(
-            entry["entityChanges"]["documents"]
-                .as_array()
+            entry.reply_kind,
+            Some(crate::generated::SubscriptionReplyKind::Delta)
+        );
+        assert_eq!(
+            entry
+                .entity_changes
+                .as_ref()
+                .and_then(Option::as_ref)
                 .expect("rows")
+                .documents
                 .len(),
             1
         );
-        store.transaction(|tx| { SyncDocumentsRepository::put_entity(tx,"task","new",json!({"id":"new","agent":"lead","kind":"command","status":"running","created":1}),false)?; Ok(()) }).await.expect("ordinary append");
+        store
+            .transaction(|tx| {
+                SyncDocumentsRepository::put_entity(
+                    tx,
+                    "task",
+                    "new",
+                    task("new", "lead", "running"),
+                    false,
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("ordinary append");
         let (entry, _, _) = prepare(&state, &event(&state), resource, Some(current))
             .await
             .expect("append delta");
-        let entry = serde_json::to_value(entry.expect("delta")).expect("entry");
-        assert_eq!(entry["replyKind"], "delta");
+        let entry = entry.expect("delta");
         assert_eq!(
-            entry["entityChanges"]["documents"]
-                .as_array()
+            entry.reply_kind,
+            Some(crate::generated::SubscriptionReplyKind::Delta)
+        );
+        assert_eq!(
+            entry
+                .entity_changes
+                .as_ref()
+                .and_then(Option::as_ref)
                 .expect("rows")
+                .documents
                 .len(),
             1
         );
@@ -539,7 +632,19 @@ mod tests {
     async fn restored_ownership_replaces_the_old_scope_and_delivers_the_new_scope() {
         let (_directory, state) = fixture().await;
         let store = state.store.as_ref().expect("fixture store");
-        store.transaction(|tx| { SyncDocumentsRepository::put_entity(tx,"task","restored",json!({"id":"restored","agent":"alpha","kind":"command","status":"running","created":1}),false)?; Ok(()) }).await.expect("publish initial task owner");
+        store
+            .transaction(|tx| {
+                SyncDocumentsRepository::put_entity(
+                    tx,
+                    "task",
+                    "restored",
+                    task("restored", "alpha", "running"),
+                    false,
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("publish initial task owner");
         let alpha: ResourceRef = serde_json::from_value(json!({"kind":"tasks","agentId":"alpha"}))
             .expect("alpha task resource");
         let beta: ResourceRef = serde_json::from_value(json!({"kind":"tasks","agentId":"beta"}))
@@ -547,32 +652,57 @@ mod tests {
         let (_, _, baseline) = prepare(&state, &event(&state), alpha.clone(), None)
             .await
             .expect("initial owner baseline");
-        store.transaction(|tx| {
-            SyncDocumentsRepository::put_entity(tx,"task","restored",json!({}),true)?;
-            SyncDocumentsRepository::put_entity(tx,"task","restored",json!({"id":"restored","agent":"beta","kind":"command","status":"running","created":1}),false)?;
-            Ok(())
-        }).await.expect("delete and restore under new owner");
+        store
+            .transaction(|tx| {
+                SyncDocumentsRepository::put_entity(tx, "task", "restored", json!({}), true)?;
+                SyncDocumentsRepository::put_entity(
+                    tx,
+                    "task",
+                    "restored",
+                    task("restored", "beta", "running"),
+                    false,
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("delete and restore under new owner");
         let (old, _, _) = prepare(&state, &event(&state), alpha, Some(baseline.clone()))
             .await
             .expect("old scope replacement");
-        let old = serde_json::to_value(old.expect("inline old scope entry"))
-            .expect("serialize old scope replacement");
-        assert_eq!(old["replyKind"], "snapshot");
+        let old = old.expect("inline old scope entry");
+        assert_eq!(
+            old.reply_kind,
+            Some(crate::generated::SubscriptionReplyKind::Snapshot)
+        );
         assert!(
-            old["entityChanges"]["documents"]
-                .as_array()
+            old.entity_changes
+                .as_ref()
+                .and_then(Option::as_ref)
                 .expect("old scope replacement documents")
+                .documents
                 .is_empty()
         );
         let (new, _, _) = prepare(&state, &event(&state), beta, Some(baseline))
             .await
             .expect("new owner interval");
-        let new = serde_json::to_value(new.expect("inline new owner entry"))
-            .expect("serialize new owner interval");
-        assert_eq!(
-            new["entityChanges"]["documents"][0]["value"]["agent"],
-            "beta"
-        );
+        let new = new.expect("inline new owner entry");
+        let documents = &new
+            .entity_changes
+            .as_ref()
+            .and_then(Option::as_ref)
+            .expect("new scope documents")
+            .documents;
+        let projection: studio_runtime_schema::process_controls::TaskProjection =
+            serde_json::from_value(
+                documents
+                    .first()
+                    .expect("new owner document")
+                    .value
+                    .clone()
+                    .expect("task value"),
+            )
+            .expect("typed task projection");
+        assert_eq!(projection.agent, "beta");
     }
 
     #[tokio::test]

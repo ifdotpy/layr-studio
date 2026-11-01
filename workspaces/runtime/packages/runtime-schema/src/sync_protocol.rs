@@ -77,35 +77,84 @@ pub fn global_entity_collections_json() -> &'static str {
 mod tests {
     #[test]
     fn root_only_scope_matches_canonical_dto_predicates() {
-        let document: serde_json::Value =
+        use std::collections::BTreeMap;
+        #[derive(serde::Deserialize)]
+        struct Document {
+            components: Components,
+        }
+        #[derive(serde::Deserialize)]
+        struct Components {
+            schemas: BTreeMap<String, Schema>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Schema {
+            #[serde(default)]
+            properties: BTreeMap<String, Schema>,
+            #[serde(default, rename = "allOf")]
+            all_of: Vec<Schema>,
+            #[serde(rename = "$ref")]
+            reference: Option<String>,
+            discriminator: Option<Discriminator>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Discriminator {
+            mapping: BTreeMap<String, String>,
+        }
+        fn schema_ref<'a>(schemas: &'a BTreeMap<String, Schema>, reference: &str) -> &'a Schema {
+            let name = reference
+                .strip_prefix("#/components/schemas/")
+                .expect("local schema reference");
+            schemas.get(name).expect("referenced schema")
+        }
+        fn has_property(
+            schemas: &BTreeMap<String, Schema>,
+            schema: &Schema,
+            property: &str,
+        ) -> bool {
+            schema.properties.contains_key(property)
+                || schema.reference.as_ref().is_some_and(|reference| {
+                    has_property(schemas, schema_ref(schemas, reference), property)
+                })
+                || schema
+                    .all_of
+                    .iter()
+                    .any(|part| has_property(schemas, part, property))
+        }
+        let document: Document =
             serde_json::from_slice(crate::OPENAPI).expect("committed OpenAPI document");
-        let schemas = &document["components"]["schemas"];
+        let schemas = &document.components.schemas;
+        let mapping = &schemas
+            .get("SyncEntityPayload")
+            .expect("payload schema")
+            .discriminator
+            .as_ref()
+            .expect("payload discriminator")
+            .mapping;
         for scope in super::subscription_entity_scopes()
             .values()
             .filter(|s| !s.include_team_members)
         {
             for collection in &scope.collections {
-                let payload_ref = schemas["SyncEntityPayload"]["discriminator"]["mapping"]
-                    [collection]
-                    .as_str()
-                    .expect("payload discriminator reference");
-                let payload = &schemas[payload_ref
-                    .rsplit('/')
-                    .next()
-                    .expect("payload schema reference name")];
-                let value_ref = payload["properties"]["value"]["$ref"]
-                    .as_str()
-                    .expect("canonical value schema reference");
-                let dto = &schemas[value_ref
-                    .rsplit('/')
-                    .next()
-                    .expect("canonical value schema name")];
+                let payload = schema_ref(
+                    schemas,
+                    mapping
+                        .get(collection)
+                        .expect("payload discriminator reference"),
+                );
+                let value = payload.properties.get("value").expect("payload value");
+                let dto = schema_ref(
+                    schemas,
+                    value
+                        .reference
+                        .as_ref()
+                        .expect("canonical value schema reference"),
+                );
                 assert!(
-                    dto["properties"].get("rootId").is_some(),
+                    has_property(schemas, dto, "rootId"),
                     "root-only DTO needs rootId: {collection}"
                 );
                 assert!(
-                    dto["properties"].get("agent").is_none(),
+                    !has_property(schemas, dto, "agent"),
                     "root-only DTO must not select team agents: {collection}"
                 );
             }
