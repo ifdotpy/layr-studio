@@ -951,6 +951,7 @@ enum Effect {
         Option<i64>,
     ),
     LimitsUpdated(crate::account_session_runtime::LimitsUpdate),
+    AccountUpdated,
     /// A committed terminal limit failure owes one account refresh before its wake.
     LimitFailure {
         agent: String,
@@ -1507,6 +1508,15 @@ impl Worker {
                 })?;
                 session
                     .ingest_limits(update)
+                    .await
+                    .map_err(|error| WorkerError::PreparationRefused(error.to_string()))?;
+            }
+            Effect::AccountUpdated => {
+                let session = self.resources.account_session.as_ref().ok_or_else(|| {
+                    WorkerError::PreparationRefused("account-registry/refresh".into())
+                })?;
+                session
+                    .refresh_account(&self.account)
                     .await
                     .map_err(|error| WorkerError::PreparationRefused(error.to_string()))?;
             }
@@ -4988,6 +4998,7 @@ impl Worker {
                     }
                 }
                 effect @ Effect::LimitsUpdated(_)
+                | effect @ Effect::AccountUpdated
                 | effect @ Effect::LimitFailure { .. }
                 | effect @ Effect::Submit(_)
                 | effect @ Effect::Interrupt { .. }

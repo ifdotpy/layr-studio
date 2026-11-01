@@ -112,3 +112,41 @@ async fn live_limits_worker_delivers_account_notification_to_session_owner() {
     worker.shutdown().await.unwrap();
     assert!(received.try_recv().is_err());
 }
+
+struct CapturedRefresh {
+    calls: tokio::sync::mpsc::UnboundedSender<String>,
+}
+impl crate::account_session_runtime::AccountSessionPort for CapturedRefresh {
+    fn refresh_account<'a>(
+        &'a self,
+        account: &'a str,
+    ) -> crate::account_session_runtime::AccountSessionFuture<'a, ()> {
+        Box::pin(async move {
+            self.calls.send(account.to_owned()).unwrap();
+            Ok(())
+        })
+    }
+}
+
+#[tokio::test]
+async fn threadless_account_updated_refreshes_its_account() {
+    let state = State::new().await;
+    let (calls, mut received) = tokio::sync::mpsc::unbounded_channel();
+    let mut resources = test_resources().unwrap();
+    resources.account_session = Some(Arc::new(CapturedRefresh { calls }));
+    let mut peer = Peer::new();
+    let mut worker = peer
+        .open_worker_with_resources(state.bridge.clone(), resources)
+        .await;
+    let cursor = peer
+        .frame(json!({"method":"account/updated","params":{}}))
+        .await;
+    peer.acknowledged(cursor).await;
+    let account = tokio::time::timeout(Duration::from_secs(2), received.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(account, "default");
+    worker.shutdown().await.unwrap();
+    assert!(received.try_recv().is_err());
+}

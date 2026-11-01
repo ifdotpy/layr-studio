@@ -2186,15 +2186,55 @@
           },
           "runway": {
             "$ref": "#/components/schemas/WeeklyRunway"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AccountLimitsStatus",
+            "default": {
+              "kind": "current"
+            }
           }
         },
         "required": [
+          "status",
           "runway",
           "reset",
           "buckets",
           "agents"
         ],
         "type": "object"
+      },
+      "AccountLimitsStatus": {
+        "oneOf": [
+          {
+            "properties": {
+              "kind": {
+                "const": "current",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "checking",
+                "type": "string"
+              },
+              "resetAt": {
+                "format": "double",
+                "type": "number"
+              }
+            },
+            "required": [
+              "kind",
+              "resetAt"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "AccountLoginResponse": {
         "additionalProperties": false,

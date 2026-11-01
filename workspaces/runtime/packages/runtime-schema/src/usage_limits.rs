@@ -429,6 +429,7 @@ impl RateLimitView {
         }
         Ok(Self {
             projection: AccountLimitsProjection {
+                status: AccountLimitsStatus::Current,
                 runway: weekly_runway(&value, now),
                 reset: reset_projection(&value, now),
                 buckets: bucket_projection(&value, now),
@@ -443,11 +444,27 @@ impl RateLimitView {
 #[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AccountLimitsProjection {
+    #[serde(default)]
+    pub status: AccountLimitsStatus,
     pub runway: WeeklyRunway,
     pub reset: ResetProjection,
     pub buckets: BucketProjection,
     #[serde(default)]
     pub agents: BTreeMap<String, AgentLimitProjection>,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum AccountLimitsStatus {
+    #[default]
+    Current,
+    Checking {
+        reset_at: f64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]

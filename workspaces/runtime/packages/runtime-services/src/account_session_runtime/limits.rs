@@ -1,5 +1,6 @@
 //! Ordered limits persistence. The journal identity and the snapshot commit together.
 use super::*;
+use rusqlite::OptionalExtension;
 use studio_runtime_store::account_state;
 use studio_runtime_store::{StoreError, SyncDocumentsRepository};
 
@@ -229,6 +230,18 @@ fn commit(
         .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
     let mut view = studio_runtime_schema::usage_limits::RateLimitView::read(&raw, account, now)?;
     populate_agents(tx, &mut view, now)?;
+    let existing: Option<String> = tx.query_row(
+        "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0",
+        [account], |row| row.get(0),
+    ).optional()?;
+    if let Some(payload) = existing {
+        let LimitsEntity { value: previous } = serde_json::from_str(&payload)?;
+        if let studio_runtime_schema::usage_limits::AccountLimitsStatus::Checking { reset_at } =
+            previous.projection.status
+        {
+            mark_checking(&mut view, reset_at);
+        }
+    }
     SyncDocumentsRepository::put_entity(tx, "rateLimit", account, view, false)?;
     Ok((Some(value), true))
 }
@@ -259,6 +272,74 @@ pub(crate) fn populate_agents(
 #[derive(serde::Deserialize)]
 struct LimitsEntity {
     value: studio_runtime_schema::usage_limits::RateLimitView,
+}
+
+pub(super) async fn recovery_deadline(
+    store: Arc<studio_runtime_store::RuntimeStore>,
+    account: String,
+) -> Option<f64> {
+    store.read_async("account-session/recovery-deadline", move |db| {
+        use studio_runtime_schema::usage_limits::RecoveryTiming;
+        let payload: Option<String> = db.query_row(
+            "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0",
+            [&account], |row| row.get(0),
+        ).optional()?;
+        let Some(payload) = payload else { return Ok::<_, StoreError>(None) };
+        let LimitsEntity { value } = serde_json::from_str(&payload)?;
+        Ok(value.projection.agents.values().filter_map(|agent| {
+            match &agent.recovery.as_ref()?.timing {
+                RecoveryTiming::Waiting { reset_at } | RecoveryTiming::Unconfirmed { reset_at } => Some(*reset_at),
+                _ => None,
+            }
+        }).reduce(f64::min))
+    }).await.ok().flatten()
+}
+
+fn mark_checking(view: &mut studio_runtime_schema::usage_limits::RateLimitView, reset_at: f64) {
+    use studio_runtime_schema::usage_limits::{AccountLimitsStatus, RecoveryTiming};
+    view.projection.status = AccountLimitsStatus::Checking { reset_at };
+    for agent in view.projection.agents.values_mut() {
+        if let Some(recovery) = &mut agent.recovery
+            && matches!(recovery.timing, RecoveryTiming::Waiting { reset_at: at } | RecoveryTiming::Unconfirmed { reset_at: at } if at <= reset_at)
+        {
+            recovery.timing = RecoveryTiming::Checking { reset_at };
+        }
+    }
+}
+
+pub(super) async fn publish_checking(
+    store: Arc<studio_runtime_store::RuntimeStore>,
+    account: String,
+    reset_at: f64,
+) -> Result<(), AccountSessionError> {
+    store.transaction(move |tx| {
+        let payload: String = tx.query_row(
+            "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0",
+            [&account], |row| row.get(0),
+        )?;
+        let LimitsEntity { mut value } = serde_json::from_str(&payload)?;
+        mark_checking(&mut value, reset_at);
+        SyncDocumentsRepository::put_entity(tx, "rateLimit", &account, value, false)?;
+        Ok(())
+    }).await.map_err(|_| AccountSessionError::Persistence)
+}
+
+pub(super) async fn publish_finished(
+    store: Arc<studio_runtime_store::RuntimeStore>,
+    account: String,
+) -> Result<(), AccountSessionError> {
+    let now = timestamp()?;
+    store.transaction(move |tx| {
+        let payload: String = tx.query_row(
+            "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0",
+            [&account], |row| row.get(0),
+        )?;
+        let LimitsEntity { mut value } = serde_json::from_str(&payload)?;
+        value.projection.status = studio_runtime_schema::usage_limits::AccountLimitsStatus::Current;
+        populate_agents(tx, &mut value, now)?;
+        SyncDocumentsRepository::put_entity(tx, "rateLimit", &account, value, false)?;
+        Ok(())
+    }).await.map_err(|_| AccountSessionError::Persistence)
 }
 
 /// Recompute affected agent projections in the transaction that publishes them.
@@ -304,6 +385,11 @@ pub(crate) fn publish_agent_change(
         } else if value.projection.agents.remove(agent_id).is_none() {
             continue;
         }
+        if let studio_runtime_schema::usage_limits::AccountLimitsStatus::Checking { reset_at } =
+            value.projection.status
+        {
+            mark_checking(&mut value, reset_at);
+        }
         SyncDocumentsRepository::put_entity(tx, "rateLimit", &account, value, false)?;
     }
     Ok(())
@@ -322,6 +408,7 @@ pub(crate) fn seed_agents(tx: &studio_runtime_store::Transaction<'_>) -> Result<
     };
     for (account, payload) in rows {
         let LimitsEntity { mut value } = serde_json::from_str(&payload)?;
+        value.projection.status = studio_runtime_schema::usage_limits::AccountLimitsStatus::Current;
         populate_agents(tx, &mut value, now)?;
         SyncDocumentsRepository::put_entity(tx, "rateLimit", &account, value, false)?;
     }

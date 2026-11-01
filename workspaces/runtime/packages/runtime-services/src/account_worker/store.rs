@@ -2542,6 +2542,12 @@ fn journal_one(
                 .map_err(|_| invalid(&operation))?;
                 effect = Some(Effect::LimitsUpdated(update));
             }
+        } else if let Some(("account/updated", _)) = notice {
+            if publication.native_source.as_ref().is_some_and(|source| {
+                source.account == account && source.generation == Some(entry.generation.0)
+            }) {
+                effect = Some(Effect::AccountUpdated);
+            }
         } else if let Some((method, params)) = notice
             && record_manual_release_closure(
                 tx,

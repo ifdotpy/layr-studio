@@ -3072,7 +3072,24 @@ export interface components {
       buckets: components["schemas"]["BucketProjection"];
       reset: components["schemas"]["ResetProjection"];
       runway: components["schemas"]["WeeklyRunway"];
+      /**
+       * @default {
+       *       "kind": "current"
+       *     }
+       */
+      status: components["schemas"]["AccountLimitsStatus"];
     };
+    AccountLimitsStatus:
+      | {
+          /** @constant */
+          kind: "current";
+        }
+      | {
+          /** @constant */
+          kind: "checking";
+          /** Format: double */
+          resetAt: number;
+        };
     /** AccountLoginResponse */
     AccountLoginResponse: {
       /** Accountkey */

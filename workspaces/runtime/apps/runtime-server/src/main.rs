@@ -625,9 +625,7 @@ async fn run(
     let retained_session: Arc<
         dyn studio_runtime_services::account_session_runtime::RetainedAccountSession,
     > = Arc::new(account_session_broker.clone());
-    let account_session: Arc<
-        dyn studio_runtime_services::account_session_runtime::AccountSessionPort,
-    > = Arc::new(
+    let account_session_runtime =
         studio_runtime_services::account_session_runtime::AccountSessionRuntime::new(
             account_driver.clone(),
             Some(retained_session),
@@ -638,8 +636,11 @@ async fn run(
         )
         .with_limits(account_policy.clone())
         .with_store(Arc::clone(&store))
-        .with_continuation_wake(Arc::clone(&continuation_wake)),
-    );
+        .with_continuation_wake(Arc::clone(&continuation_wake));
+    account_session_runtime.restore_reset_deadlines().await?;
+    let account_session: Arc<
+        dyn studio_runtime_services::account_session_runtime::AccountSessionPort,
+    > = Arc::new(account_session_runtime);
     let session_binaries = Arc::new(Mutex::new(BTreeMap::<
         String,
         provider_ports::SessionExecutables,
