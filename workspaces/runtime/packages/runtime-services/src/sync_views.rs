@@ -933,10 +933,12 @@ mod projection_plan_tests {
         let lead = json!({"id":"lead","rootId":"lead","epoch":1,"isLead":true,
             "provider":"codex","excludedAccountKeys":["blocked"]});
         let context = super::AgentViewContext {
-            account_destinations: serde_json::from_value(json!([
+            account_destinations: serde_json::from_str(
+                r#"[
                 {"accountKey":"blocked","eligibility":{"kind":"available"}},
                 {"accountKey":"other","eligibility":{"kind":"available"}}
-            ]))
+            ]"#,
+            )
             .unwrap(),
             ..Default::default()
         };
