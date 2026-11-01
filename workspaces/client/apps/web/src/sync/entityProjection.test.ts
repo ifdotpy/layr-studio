@@ -1472,7 +1472,7 @@ it("maps all runtime collections and carries workspace and edge data into snapsh
     ["work", "work"],
   ] as const)
     assert.deepEqual(snapshot.runtime[key], [
-      { id: (entries.find(([name]) => name === collection)![2] as Agent).id },
+      entries.find(([name]) => name === collection)![2],
     ]);
 });
 

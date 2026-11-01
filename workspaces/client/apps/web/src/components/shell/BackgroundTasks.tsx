@@ -392,24 +392,31 @@ export default function BackgroundTasks({
           >;
         },
   ) => {
-    if (
-      !leadId ||
-      !scopeOwner ||
-      scopeOwner.epoch == null ||
-      controlPending ||
-      processLoading ||
-      processLoadError
-    )
-      return;
+    if (!leadId || controlPending || processLoading || processLoadError) return;
     if (pendingControl) {
       notify("Check the earlier stop result before starting another stop.");
       return;
     }
+    const identity =
+      control.action === "stop_response"
+        ? responseTarget
+        : scopeOwner?.epoch == null
+          ? null
+          : {
+              agent: leadId,
+              accountKey: scopeOwner.accountKey || "default",
+              epoch: scopeOwner.epoch,
+            };
+    if (!identity) {
+      if (control.action === "stop_response")
+        notify("Refresh the process list before stopping this response.");
+      return;
+    }
     const scope = {
       requestId: randomUUID(),
-      agent: leadId,
-      accountKey: scopeOwner.accountKey || "default",
-      epoch: scopeOwner.epoch,
+      agent: identity.agent,
+      accountKey: identity.accountKey,
+      epoch: identity.epoch,
     };
     let body: PostBody<"/api/processes/action">;
     switch (control.action) {

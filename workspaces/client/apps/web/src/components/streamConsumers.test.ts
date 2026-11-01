@@ -29,6 +29,7 @@ const h = vi.hoisted(() => ({
     return () => {};
   }),
   get: vi.fn(async () => ({})),
+  post: vi.fn(async () => ({ status: "completed", processes: [] })),
   storage: {},
   writes: [] as string[],
   nullRefs: 0,
@@ -102,6 +103,7 @@ vi.mock("../sync/transcriptCache", () => ({}));
 vi.mock("../servers/ServerServicesContext", () => ({
   useServerApi: () => ({
     get: h.get,
+    post: h.post,
     syncGet: h.get,
     saved: (_key: string, value: unknown) => value,
   }),
@@ -150,6 +152,7 @@ afterEach(() => {
   h.statuses.clear();
   h.watchConnection.mockClear();
   h.get.mockClear();
+  h.post.mockClear();
   h.writes = [];
   h.nullRefs = 0;
   h.refs = [];
@@ -223,6 +226,87 @@ it("allows stopping a recovered server-verified response when the owner is not i
     (node) => node.props.children === "Stop response",
   );
   expect(button?.props.disabled).toBe(false);
+});
+it("uses the verified response identity even when the agent snapshot is stale", () => {
+  h.nullRefs = 100;
+  vi.stubGlobal("sessionStorage", {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+  });
+  const props = processProps();
+  props.data.threads[0] = {
+    id: "lead",
+    epoch: 1,
+    accountKey: "old",
+    inFlight: false,
+  };
+  const target = {
+    agent: "lead",
+    accountKey: "new",
+    epoch: 2,
+    connectionId: "connection",
+    threadId: "thread",
+    turnId: "turn",
+  };
+  h.data.set("processes", {
+    processes: [],
+    activities: [],
+    responseTarget: target,
+  });
+  const button = elements(render(() => BackgroundTasks(props))).find(
+    (node) => node.props.children === "Stop response",
+  )!;
+  (button.props.onClick as () => void)();
+  expect(h.post).toHaveBeenCalledWith(
+    "/api/processes/action",
+    expect.objectContaining({
+      action: "stop_response",
+      agent: "lead",
+      accountKey: "new",
+      epoch: 2,
+      responseTarget: target,
+    }),
+    expect.anything(),
+  );
+});
+it("stops a verified response even before the agent snapshot arrives", () => {
+  h.nullRefs = 100;
+  vi.stubGlobal("sessionStorage", {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+  });
+  const props = processProps();
+  props.data.threads = [];
+  const target = {
+    agent: "lead",
+    accountKey: "new",
+    epoch: 2,
+    connectionId: "connection",
+    threadId: "thread",
+    turnId: "turn",
+  };
+  h.data.set("processes", {
+    processes: [],
+    activities: [],
+    responseTarget: target,
+  });
+  const button = elements(render(() => BackgroundTasks(props))).find(
+    (node) => node.props.children === "Stop response",
+  )!;
+  (button.props.onClick as () => void)();
+  expect(h.post).toHaveBeenCalledWith(
+    "/api/processes/action",
+    expect.objectContaining({
+      action: "stop_response",
+      agent: "lead",
+      accountKey: "new",
+      epoch: 2,
+      responseTarget: target,
+    }),
+    expect.anything(),
+  );
 });
 it("keeps monitor resize available after stdin closes", () => {
   h.nullRefs = 100;
