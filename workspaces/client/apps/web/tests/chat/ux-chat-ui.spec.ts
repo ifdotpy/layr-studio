@@ -404,16 +404,21 @@ test("Ux Chat Ui", async ({
     assert.equal(writes.length, 2);
     assert.equal(required(writes[1]).body.delivery, "current_turn");
     assert.equal(required(writes[1]).body.text, "Send from button");
-    const longDraft = "L".repeat(12050);
+    const longDraft = "L".repeat(32001);
     await composer.fill(longDraft);
     assert.equal(await composer.inputValue(), longDraft);
     await page.locator("#draft-length-error").waitFor();
-    assert.equal(await page.locator("#send").isDisabled(), true);
+    assert.equal(await page.locator("#send").isEnabled(), true);
+    const longSend = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/api/fixture-send",
+    );
     await composer.press("Enter");
+    await longSend;
     assert.equal(
       writes.filter((write) => write.path === "/api/fixture-send").length,
-      2,
+      3,
     );
+    await composer.fill(longDraft);
     const attach = page.getByRole("button", {
       name: "Attach text as a file",
       exact: true,
@@ -428,19 +433,7 @@ test("Ux Chat Ui", async ({
       () =>
         document.querySelector<HTMLTextAreaElement>("#message")!.value === "",
     );
-    await page
-      .getByRole("button", { name: "Remove pending message.txt", exact: true })
-      .waitFor();
-    // Pending files live in memory only; the page writes no upload database.
-    assert.deepEqual(
-      (await page.evaluate(() => indexedDB.databases())).filter(
-        (database) => database.name === "codex-studio-uploads",
-      ),
-      [],
-    );
-    await page
-      .getByRole("button", { name: "Remove pending message.txt", exact: true })
-      .click();
+    assert.equal(required(writes.at(-1)).body.asTextFile, true);
 
     await page.locator("#earlier-messages").click();
     await page.locator('[data-message="item-6"]').waitFor();
@@ -615,6 +608,8 @@ test("Ux Chat Ui", async ({
       [
         "Draft must remain unsent",
         "Send from button",
+        longDraft,
+        longDraft,
         "Send while history loads",
       ],
       "branch creation never sends the reviewed draft",
@@ -649,6 +644,8 @@ test("Ux Chat Ui", async ({
       [
         "Draft must remain unsent",
         "Send from button",
+        longDraft,
+        longDraft,
         "Send while history loads",
       ],
     );

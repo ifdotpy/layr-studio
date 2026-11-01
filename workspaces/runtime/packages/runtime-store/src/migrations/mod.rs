@@ -52,6 +52,7 @@ mod m2026_10_31_sync_project;
 mod m2026_10_31_transfer_history_pages;
 mod m2026_10_31_work_projection;
 mod m2026_10_31_work_records;
+mod m2026_11_01_account_projection;
 mod m2026_11_01_annotation_record;
 mod m2026_11_01_approval_secrets;
 mod m2026_11_01_plan_record;
@@ -923,6 +924,16 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
+            id: "2026-11-01-account-eligibility-projection",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Derived account snapshots without eligibility",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_account_projection::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
             id: "2026-10-31-restore-monitor-active-index",
             introduced: OCTOBER_31,
             target: MigrationTarget::Canvas,
@@ -1104,6 +1115,27 @@ static CATALOG: &[&dyn Migration] = &[
         },
         apply: |c| m2026_11_01_approval_secrets::apply(c.transaction),
     },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-send-admissions",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Databases without durable send admission fingerprints",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| {
+            let now = c.transaction.query_row(
+                "SELECT CAST((julianday('now')-2440587.5)*86400000 AS INTEGER)",
+                [],
+                |row| row.get(0),
+            )?;
+            crate::repositories::command_watermarks::CommandWatermarks::install_send_admissions(
+                c.transaction,
+                now,
+            )?;
+            Ok(())
+        },
+    },
 ];
 
 /// Operator-facing catalog; implementation and metadata have one owner.
@@ -1206,6 +1238,19 @@ fn apply_target(db: &mut Connection, target: MigrationTarget) -> StoreResult<()>
     apply_target_catalog(db, target, CATALOG)
 }
 
+/// Hash of the ids of the SQL steps that the catalog marker covers.
+fn catalog_fingerprint(catalog: &[&dyn Migration], target: MigrationTarget) -> String {
+    crate::sha256_hex(
+        catalog
+            .iter()
+            .filter(|step| step.definition().target == target && step.receipt_family().is_none())
+            .map(|step| step.definition().id)
+            .collect::<Vec<_>>()
+            .join("\0")
+            .as_bytes(),
+    )
+}
+
 fn apply_target_catalog(
     db: &mut Connection,
     target: MigrationTarget,
@@ -1216,15 +1261,7 @@ fn apply_target_catalog(
         MigrationTarget::Analytics => Some("analytics_meta"),
         MigrationTarget::Supervisor | MigrationTarget::AccountRegistry => None,
     };
-    let fingerprint = crate::sha256_hex(
-        catalog
-            .iter()
-            .filter(|step| step.definition().target == target && step.receipt_family().is_none())
-            .map(|step| step.definition().id)
-            .collect::<Vec<_>>()
-            .join("\0")
-            .as_bytes(),
-    );
+    let fingerprint = catalog_fingerprint(catalog, target);
     if let Some(table) = marker_table
         && crate::schema::table_exists(db, table)?
         && db
@@ -1609,6 +1646,13 @@ fn run_receipt_migrations(
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     m2026_10_30_one_outbox::apply(&tx)?;
     m2026_10_31_drop_old_outbox_tables::apply(&tx)?;
+    // The drop changes the schema version after `apply_target` stored the catalog
+    // marker. Store the marker again, or the next open repeats the whole catalog.
+    let fingerprint = catalog_fingerprint(CATALOG, MigrationTarget::Canvas);
+    tx.execute(
+        "UPDATE sync_entity_meta SET value=?1 WHERE key='migration_catalog'",
+        [catalog_marker(&tx, &fingerprint)?],
+    )?;
     tx.commit()?;
     crate::schema::verify_bootstrap(db)?;
     crate::verify_observed_tables_are_rowid(db)
@@ -1677,6 +1721,28 @@ mod tests {
             crate::RuntimeStore::open(Some(root.path()))
                 .await
                 .expect("reopen"),
+        );
+    }
+
+    #[tokio::test]
+    async fn first_open_leaves_a_marker_that_matches_the_final_schema() {
+        let root = tempfile::tempdir().expect("state");
+        let store = crate::RuntimeStore::open(Some(root.path()))
+            .await
+            .expect("first open");
+        let db = store.test_reader().expect("reader");
+        let stored: String = db
+            .query_row(
+                "SELECT value FROM sync_entity_meta WHERE key='migration_catalog'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("catalog marker");
+        let fingerprint = catalog_fingerprint(CATALOG, MigrationTarget::Canvas);
+        assert_eq!(
+            stored,
+            catalog_marker(&db, &fingerprint).expect("current marker"),
+            "a later schema change must not leave the marker stale"
         );
     }
 

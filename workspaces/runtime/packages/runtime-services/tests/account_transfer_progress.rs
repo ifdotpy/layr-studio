@@ -436,6 +436,7 @@ async fn lazy_first_native_thread_preparation_moves_history_or_reports_error() {
             latest_work_result_file: None,
             command_progress: vec![],
             stall: None,
+            ..Default::default()
         },
     )
     .expect("agent view");

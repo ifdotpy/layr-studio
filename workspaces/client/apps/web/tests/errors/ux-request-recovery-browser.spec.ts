@@ -365,8 +365,8 @@ test("Ux request recovery browser", async ({
           );
         } else if (mode === "transfer") {
           const text = await page.locator('[role="status"]').innerText();
-          assert.equal(text.includes("0 waiting"), false);
-          assert.match(text, /History transfer in progress: 1 remaining/);
+          assert.match(text, /Transfer waiting/);
+          assert.match(text, /Waiting for the next turn/);
         } else if (mode === "unready") {
           assert.equal(
             await page

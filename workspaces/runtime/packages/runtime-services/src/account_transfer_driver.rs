@@ -13,6 +13,96 @@ use studio_runtime_store::{
     AccountTransferRepository as Repository, AgentId, AgentRepository, RuntimeStore, Transaction,
 };
 
+use studio_runtime_schema::queue_command::Field;
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedNotice {
+    id: String,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    name: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    provider: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    reason: Field<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedMember {
+    phase: crate::account_transfer::Phase,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    source_account_key: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    source_thread_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    target_thread_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    provider: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    name: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    reason: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    error: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    waiting: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    lazy: Field<bool>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    interrupt_reason: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    interrupt_outcome: Field<SavedInterruptOutcome>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    continue_after_transfer: Field<bool>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum SavedInterruptOutcome {
+    Acknowledged,
+    Unknown,
+    Rejected,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum SavedScope {
+    Team,
+    Subagents,
+}
+
+/// The immutable response delivered for one transfer request.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedTransferResponse {
+    id: String,
+    lead_id: String,
+    target_account_key: studio_runtime_schema::account_key::AccountKey,
+    status: crate::account_transfer::TransferStatus,
+    created: f64,
+    scope: SavedScope,
+    members: std::collections::BTreeMap<String, SavedMember>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    target_provider: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    updated: Field<f64>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    finish_history: Field<bool>,
+    total: usize,
+    completed: usize,
+    moved: usize,
+    native_history_pending: usize,
+    moving_now: usize,
+    can_finish_history: bool,
+    waiting_count: usize,
+    needs_attention: bool,
+    can_retry: bool,
+    interrupted: Vec<SavedNotice>,
+    left_on_source: Vec<SavedNotice>,
+    blocked: Vec<SavedNotice>,
+}
+
 pub fn load(tx: &Transaction<'_>, id: &str) -> Result<Snapshot, TransferError> {
     if !Repository::available(tx)? {
         return Err(TransferError::Requires(
@@ -207,6 +297,65 @@ pub async fn action(
         })
         .await
 }
+
+fn replay_in(
+    tx: &Transaction<'_>,
+    id: &str,
+    lead: &str,
+    target: &str,
+    scope: &str,
+) -> Result<Option<Value>, TransferError> {
+    let Some(key) = Repository::request_operation(tx, id)? else {
+        return Ok(None);
+    };
+    let snapshot = load(tx, &key)?;
+    if snapshot.replay(id, lead, target, scope)? {
+        let saved = snapshot.operation()["requests"][id]
+            .get("savedResponse")
+            .ok_or(TransferError::Refused(
+                "The original transfer response is unavailable",
+            ))?;
+        let saved = SavedTransferResponse::deserialize(saved)
+            .map_err(|_| TransferError::Refused("The original transfer response is invalid"))?;
+        return saved
+            .serialize(serde_json::value::Serializer)
+            .map(Some)
+            .map_err(|_| TransferError::Refused("The original transfer response is invalid"));
+    }
+    Err(TransferError::Refused(
+        "This transfer id has different content",
+    ))
+}
+
+fn excludes_account(agent: &studio_runtime_store::AgentRecord, target: &str) -> bool {
+    account_is_excluded(agent.extra.get("excludedAccountKeys"), target)
+}
+
+/// The single compatibility accessor for per-chat account exclusions.
+pub(crate) fn account_is_excluded(exclusions: Option<&Value>, target: &str) -> bool {
+    exclusions
+        .and_then(Value::as_array)
+        .is_some_and(|keys| keys.iter().any(|key| key.as_str() == Some(target)))
+}
+
+/// Return a retained request before consulting mutable account eligibility.
+pub async fn replay(
+    store: &RuntimeStore,
+    id: &str,
+    lead: &str,
+    target: &str,
+    scope: &str,
+) -> Result<Option<Value>, TransferError> {
+    let (id, lead, target, scope) = (
+        id.to_owned(),
+        lead.to_owned(),
+        target.to_owned(),
+        scope.to_owned(),
+    );
+    store
+        .transaction_with_error(move |tx| replay_in(tx, &id, &lead, &target, &scope))
+        .await
+}
 /// No provider submission is repeated by this method. It only replays an exact
 /// durable request; a genuinely new request needs the executor before any write.
 pub async fn request(
@@ -220,26 +369,30 @@ pub async fn request(
 ) -> Result<Value, TransferError> {
     uuid::Uuid::parse_str(id)
         .map_err(|_| TransferError::Refused("Supply a transfer request id"))?;
-    if scope != "team" {
-        return Err(TransferError::Refused(
-            "Choose a valid transfer scope and destination provider",
-        ));
-    }
     let id = id.to_owned();
     let lead = lead.to_owned();
     let target = target.to_owned();
     let scope = scope.to_owned();
-    let target_provider = target_provider
-        .parse::<studio_runtime_providers::ProviderKind>()
-        .map_err(|_| {
-            TransferError::Refused("Choose a valid transfer scope and destination provider")
-        })?;
-    let target_provider = target_provider.key().to_owned();
+    let target_provider = target_provider.to_owned();
     store
         .transaction_with_error(move |tx| {
             if !Repository::available(tx)? {
                 return Err(TransferError::Requires(EXECUTOR_REQUIRED));
             }
+            if let Some(result) = replay_in(tx, &id, &lead, &target, &scope)? {
+                return Ok(result);
+            }
+            if scope != "team" {
+                return Err(TransferError::Refused(
+                    "Choose a valid transfer scope and destination provider",
+                ));
+            }
+            let target_provider = target_provider
+                .parse::<studio_runtime_providers::ProviderKind>()
+                .map_err(|_| {
+                    TransferError::Refused("Choose a valid transfer scope and destination provider")
+                })?;
+            let target_provider = target_provider.key().to_owned();
             drop_orphan_summary_in(tx, &lead)?;
             let actor = crate::event_write::checked_agent(tx, &lead)
                 .map_err(|_| TransferError::Refused("Unknown managed agent"))?;
@@ -248,21 +401,10 @@ pub async fn request(
                     "Choose the orchestrator to transfer its team",
                 ));
             }
-            if actor
-                .extra
-                .get("excludedAccountKeys")
-                .and_then(Value::as_array)
-                .is_some_and(|keys| keys.iter().any(|key| key.as_str() == Some(target.as_str())))
-            {
+            if excludes_account(&actor, &target) {
                 return Err(TransferError::Refused(
                     "This account is disabled for this chat",
                 ));
-            }
-            if let Some(key) = Repository::request_operation(tx, &id)? {
-                let snapshot = load(tx, &key)?;
-                if snapshot.replay(&id, &lead, &target, &scope)? {
-                    return snapshot.public_view();
-                }
             }
             if let Some(active) = actor.extra.get("accountTransfer").filter(|value| {
                 !matches!(value["status"].as_str(), Some("completed" | "cancelled"))
@@ -296,7 +438,7 @@ pub async fn request(
                 decision.operation = operation;
                 decision.agents = agents;
                 decision.changed = true;
-                return persist(tx, decision, now);
+                return persist_request(tx, decision, now, Some(&id));
             }
 
             // Only the chat itself moves. Its subagents keep their accounts.
@@ -344,7 +486,7 @@ pub async fn request(
             decision.operation = operation;
             decision.agents = agents;
             decision.changed = true;
-            persist(tx, decision, now)
+            persist_request(tx, decision, now, Some(&operation_id))
         })
         .await
 }
@@ -387,7 +529,16 @@ pub async fn receive(
         .await
 }
 
-fn persist(tx: &Transaction<'_>, mut decision: Decision, now: f64) -> Result<Value, TransferError> {
+fn persist(tx: &Transaction<'_>, decision: Decision, now: f64) -> Result<Value, TransferError> {
+    persist_request(tx, decision, now, None)
+}
+
+fn persist_request(
+    tx: &Transaction<'_>,
+    mut decision: Decision,
+    now: f64,
+    request_id: Option<&str>,
+) -> Result<Value, TransferError> {
     if !decision.changed {
         return decision.public_view();
     }
@@ -405,6 +556,14 @@ fn persist(tx: &Transaction<'_>, mut decision: Decision, now: f64) -> Result<Val
         .flatten()
         .and_then(|op| op["created"].as_f64());
     decision.stamp(now, previous_created)?;
+    if let Some(request_id) = request_id {
+        let response = decision.public_view()?;
+        let saved = SavedTransferResponse::deserialize(&response)
+            .map_err(|_| TransferError::Refused("Invalid transfer response"))?;
+        decision.operation["requests"][request_id]["savedResponse"] = saved
+            .serialize(serde_json::value::Serializer)
+            .map_err(|_| TransferError::Refused("Invalid transfer response"))?;
+    }
     let raw = decision.encoded()?;
     let id = decision.operation["id"]
         .as_str()
@@ -1258,6 +1417,34 @@ mod request_tests {
     }
 
     #[test]
+    fn saved_alias_outcomes_stay_bounded_with_many_prior_requests() {
+        let (_root, store) = store_with_agents();
+        let original = "5a300f72-4ea6-4d30-8a0e-9b2c13c42270";
+        let alias = "5a300f72-4ea6-4d30-8a0e-9b2c13c42271";
+        request(&store, original, "lead", "target", "team", "codex", 10.0).unwrap();
+        run_async(store.transaction(move |tx| {
+            let mut op = Repository::get(tx, original)?.unwrap();
+            for i in 0..256 {
+                op["requests"][format!("prior-{i:04}")] =
+                    json!({"leadId":"lead","targetAccountKey":"target","scope":"team"});
+            }
+            Repository::put(tx, original, &op.to_string())
+        }))
+        .unwrap();
+        let response = request(&store, alias, "lead", "target", "team", "codex", 11.0).unwrap();
+        assert!(response.get("requests").is_none());
+        let saved = run_async(store.read_async("alias-size-test", move |tx| {
+            Ok::<_, studio_runtime_store::StoreError>(
+                Repository::get(tx, original)?.unwrap()["requests"][alias]["savedResponse"]
+                    .to_string(),
+            )
+        }))
+        .unwrap();
+        assert!(!saved.contains("\"requests\""));
+        assert!((saved.len() + 200) * 4096 < studio_runtime_store::MAX_TRANSFER_RECORD_BYTES);
+    }
+
+    #[test]
     fn request_identity_is_global_even_between_leads() {
         let (_root, store) = store_with_agents();
         let id = "5a300f72-4ea6-4d30-8a0e-9b2c13c42286";
@@ -1454,6 +1641,41 @@ mod request_tests {
     }
 
     #[test]
+    fn exact_retry_returns_original_result_after_transfer_changes() {
+        let (_root, store) = store_with_agents();
+        let id = "5a300f72-4ea6-4d30-8a0e-9b2c13c4226b";
+        let first = request(&store, id, "lead", "target", "team", "codex", 10.0).unwrap();
+        let cancelled = run_async(action(&store, id, Action::Cancel, 20.0)).unwrap();
+        assert_eq!(cancelled["status"], "cancelled");
+        let replay = request(&store, id, "lead", "target", "team", "codex", 30.0).unwrap();
+        assert_eq!(replay, first, "retry returns the original accepted result");
+    }
+
+    #[test]
+    fn legacy_request_without_original_result_fails_closed() {
+        let (_root, store) = store_with_agents();
+        let id = "5a300f72-4ea6-4d30-8a0e-9b2c13c4226c";
+        request(&store, id, "lead", "target", "team", "codex", 10.0).unwrap();
+        run_async(store.transaction(move |tx| {
+            let mut operation = Repository::get(tx, id)?.unwrap();
+            operation["requests"][id]
+                .as_object_mut()
+                .unwrap()
+                .remove("savedResponse");
+            Repository::put(tx, id, &operation.to_string())
+        }))
+        .unwrap();
+        let before = stored(&store, "lead");
+        assert!(matches!(
+            request(&store, id, "lead", "target", "team", "codex", 11.0),
+            Err(TransferError::Refused(
+                "The original transfer response is unavailable"
+            ))
+        ));
+        assert_eq!(stored(&store, "lead"), before);
+    }
+
+    #[test]
     fn request_cancels_pending_usage_resume_in_the_transfer_transaction() {
         let (_root, store) = store_with_agents();
         let resume = json!({"id":"resume","status":"scheduled","accountKey":"source",
@@ -1569,6 +1791,29 @@ mod request_tests {
             !run_async(release_waiting(&store, "lead", 13.0)).expect("release reads"),
             "a released member is not released again"
         );
+    }
+
+    #[test]
+    fn exact_request_replays_after_target_becomes_excluded() {
+        let (_root, store) = store_with_agents();
+        let id = "5a300f72-4ea6-4d30-8a0e-9b2c13c4226a";
+        let first = request(&store, id, "lead", "target", "team", "codex", 10.0)
+            .expect("initial transfer succeeds");
+        run_async(store.transaction_with_error(|tx| {
+            let mut lead = AgentRepository::get(tx, &AgentId::from("lead"))?.unwrap();
+            lead.extra
+                .insert("excludedAccountKeys".into(), json!(["target"]));
+            AgentRepository::put(tx, &lead)?;
+            Ok::<_, studio_runtime_store::StoreError>(())
+        }))
+        .expect("change eligibility after the request");
+        let before = stored(&store, "lead");
+        assert_eq!(
+            request(&store, id, "lead", "target", "team", "codex", 11.0)
+                .expect("lost response retry replays the accepted request"),
+            first
+        );
+        assert_eq!(stored(&store, "lead"), before);
     }
 
     #[test]

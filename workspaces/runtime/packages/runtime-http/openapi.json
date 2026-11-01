@@ -1393,6 +1393,9 @@
             "default": null,
             "title": "Duplicateof"
           },
+          "eligibility": {
+            "$ref": "#/components/schemas/AccountEligibility"
+          },
           "email": {
             "anyOf": [
               {
@@ -1492,6 +1495,54 @@
         ],
         "title": "Account",
         "type": "object"
+      },
+      "AccountChange": {
+        "description": "Account changes available to this chat.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "select",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "transfer",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "unavailable",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "reason"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "AccountCostData": {
         "additionalProperties": false,
@@ -1912,12 +1963,65 @@
         "title": "AccountCostResponse",
         "type": "object"
       },
+      "AccountDestination": {
+        "additionalProperties": false,
+        "properties": {
+          "accountKey": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "eligibility": {
+            "$ref": "#/components/schemas/AccountEligibility"
+          }
+        },
+        "required": [
+          "accountKey",
+          "eligibility"
+        ],
+        "type": "object"
+      },
       "AccountDiscoverRequest": {
         "additionalProperties": false,
         "description": "The legacy discover operation accepts an empty JSON object or no body.",
         "properties": {},
         "title": "AccountDiscoverRequest",
         "type": "object"
+      },
+      "AccountEligibility": {
+        "description": "Whether an account can be selected for a new turn.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "available",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "unavailable",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "reason"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "AccountGroupRequest": {
         "additionalProperties": false,
@@ -2456,6 +2560,22 @@
         "title": "AccountStatus",
         "type": "string"
       },
+      "AccountTransferAction": {
+        "enum": [
+          "retry",
+          "cancel"
+        ],
+        "type": "string"
+      },
+      "AccountTransferActions": {
+        "enum": [
+          "none",
+          "retry",
+          "cancel",
+          "retry_cancel"
+        ],
+        "type": "string"
+      },
       "AccountTransferBlockedDto": {
         "additionalProperties": false,
         "properties": {
@@ -2712,6 +2832,158 @@
         ],
         "title": "AccountTransferLeftOnSourceRecordResponse",
         "type": "object"
+      },
+      "AccountTransferProgress": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "none",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "actions": {
+                "$ref": "#/components/schemas/WaitingTransferActions"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "waiting",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "targetAccountKey": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "targetAccountKey",
+              "reason",
+              "actions"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "actions": {
+                "$ref": "#/components/schemas/MovingTransferActions"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "moving",
+                "type": "string"
+              },
+              "targetAccountKey": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "targetAccountKey",
+              "actions"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "actions": {
+                "$ref": "#/components/schemas/AccountTransferActions"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "blocked",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "targetAccountKey": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "targetAccountKey",
+              "reason",
+              "actions"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "completed",
+                "type": "string"
+              },
+              "targetAccountKey": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "targetAccountKey"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "cancelled",
+                "type": "string"
+              },
+              "targetAccountKey": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "targetAccountKey"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "AccountTransferScope": {
         "enum": [
@@ -3646,6 +3918,15 @@
         "additionalProperties": false,
         "description": "Open chat fields. Merge with the current agentSummary by id; summaries own shared list fields.",
         "properties": {
+          "accountChange": {
+            "$ref": "#/components/schemas/AccountChange"
+          },
+          "accountDestinations": {
+            "items": {
+              "$ref": "#/components/schemas/AccountDestination"
+            },
+            "type": "array"
+          },
           "accountTransfer": {
             "anyOf": [
               {
@@ -3666,6 +3947,9 @@
               }
             ],
             "title": "Accounttransferid"
+          },
+          "accountTransferProgress": {
+            "$ref": "#/components/schemas/AccountTransferProgress"
           },
           "activity": {
             "anyOf": [
@@ -4671,6 +4955,15 @@
       "AgentEntityDto": {
         "additionalProperties": false,
         "properties": {
+          "accountChange": {
+            "$ref": "#/components/schemas/AccountChange"
+          },
+          "accountDestinations": {
+            "items": {
+              "$ref": "#/components/schemas/AccountDestination"
+            },
+            "type": "array"
+          },
           "accountKey": {
             "anyOf": [
               {
@@ -4702,6 +4995,9 @@
               }
             ],
             "title": "Accounttransferid"
+          },
+          "accountTransferProgress": {
+            "$ref": "#/components/schemas/AccountTransferProgress"
           },
           "activity": {
             "anyOf": [
@@ -8102,6 +8398,15 @@
         "additionalProperties": false,
         "description": "Agent entity response that also accepts the HTTP sync envelope.",
         "properties": {
+          "accountChange": {
+            "$ref": "#/components/schemas/AccountChange"
+          },
+          "accountDestinations": {
+            "items": {
+              "$ref": "#/components/schemas/AccountDestination"
+            },
+            "type": "array"
+          },
           "accountKey": {
             "anyOf": [
               {
@@ -8136,6 +8441,9 @@
             ],
             "default": null,
             "title": "Accounttransferid"
+          },
+          "accountTransferProgress": {
+            "$ref": "#/components/schemas/AccountTransferProgress"
           },
           "activity": {
             "anyOf": [
@@ -9644,6 +9952,15 @@
         "additionalProperties": false,
         "description": "Chat list identity, ordering, operational attention and durable read state. OpenAPI owns the exact summary field set; runtime projections filter through this schema.",
         "properties": {
+          "accountChange": {
+            "$ref": "#/components/schemas/AccountChange"
+          },
+          "accountDestinations": {
+            "items": {
+              "$ref": "#/components/schemas/AccountDestination"
+            },
+            "type": "array"
+          },
           "accountKey": {
             "anyOf": [
               {
@@ -9654,6 +9971,9 @@
               }
             ],
             "title": "Accountkey"
+          },
+          "accountTransferProgress": {
+            "$ref": "#/components/schemas/AccountTransferProgress"
           },
           "archived": {
             "anyOf": [
@@ -21784,6 +22104,10 @@
       "CommandSendBody": {
         "additionalProperties": false,
         "properties": {
+          "asTextFile": {
+            "default": false,
+            "type": "boolean"
+          },
           "assets": {
             "default": [],
             "items": {
@@ -21796,7 +22120,7 @@
             "$ref": "#/components/schemas/DeliveryMomentInput"
           },
           "text": {
-            "maxLength": 32000,
+            "maxLength": 100000,
             "type": "string"
           }
         },
@@ -31900,6 +32224,13 @@
         ],
         "title": "MovedToolRequestResponse",
         "type": "object"
+      },
+      "MovingTransferActions": {
+        "description": "A moving transfer cannot be cancelled or retried.",
+        "enum": [
+          "none"
+        ],
+        "type": "string"
       },
       "MultiServerResource": {
         "additionalProperties": false,
@@ -42744,7 +43075,7 @@
             "$ref": "#/components/schemas/SubscriptionCursor"
           },
           "data": {
-            "maxLength": 262144,
+            "maxLength": 2097152,
             "type": "string"
           },
           "epoch": {
@@ -58266,21 +58597,6 @@
             "default": null,
             "title": "Needsattention"
           },
-          "requests": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/TransferRequestReceipt"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Requests"
-          },
           "scope": {
             "$ref": "#/components/schemas/TransferScope"
           },
@@ -61419,6 +61735,14 @@
           "native"
         ],
         "title": "VoiceTransport",
+        "type": "string"
+      },
+      "WaitingTransferActions": {
+        "description": "A waiting transfer may only be cancelled.",
+        "enum": [
+          "none",
+          "cancel"
+        ],
         "type": "string"
       },
       "WalCheckpoint": {

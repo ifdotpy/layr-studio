@@ -1148,12 +1148,20 @@ pub(super) async fn draft_initial_snapshot(
                     SYNC_DRAFT_STREAM_MAX_DOCUMENTS + 1,
                 )
                 .map_err(|_| ApiError::internal())?;
-                let complete = rows.len() as i64 <= SYNC_DRAFT_STREAM_MAX_DOCUMENTS;
+                let mut complete = rows.len() as i64 <= SYNC_DRAFT_STREAM_MAX_DOCUMENTS;
                 rows.truncate(SYNC_DRAFT_STREAM_MAX_DOCUMENTS as usize);
-                let documents = rows
-                    .into_iter()
-                    .map(super::sync_documents::draft_document)
-                    .collect::<Result<Vec<_>, _>>()?;
+                let mut documents = Vec::with_capacity(rows.len());
+                for row in rows {
+                    let oversized = serde_json::from_str::<Value>(&row.payload)
+                        .ok()
+                        .is_some_and(|payload| payload.get("text").and_then(Value::as_str)
+                            .is_some_and(|text| text.chars().count() > studio_runtime_schema::shared_values::MAX_DRAFT_TEXT_CODEPOINTS));
+                    if oversized {
+                        complete = false;
+                        continue;
+                    }
+                    documents.push(super::sync_documents::draft_document(row)?);
+                }
                 Ok::<_, ApiError>((
                     revision,
                     DraftSnapshot {
@@ -4801,10 +4809,20 @@ mod tests {
 
     #[tokio::test]
     async fn state_stream_subscription_transcript_window_shrinks_by_complete_utf8_event_bytes() {
-        let page: TranscriptPageResponse = serde_json::from_value(json!({
-            "items": (0..40).map(|index| json!({"id":format!("item-{index:03}"),"role":"assistant","text":"🧑‍💻".repeat(2000)})).collect::<Vec<_>>(),
-            "truncated":false
-        })).expect("page");
+        let text = "🧑‍💻".repeat(SYNC_STREAM_EVENT_MAX_BYTES / 40 / "🧑‍💻".len() + 1);
+        let items = (0..40)
+            .map(|index| {
+                format!(r#"{{"id":"item-{index:03}","role":"assistant","text":"{text}"}}"#)
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let page: TranscriptPageResponse =
+            serde_json::from_str(&format!(r#"{{"items":[{items}],"truncated":false}}"#))
+                .expect("page");
+        assert!(
+            serde_json::to_vec(&page).expect("page bytes").len() > SYNC_STREAM_EVENT_MAX_BYTES,
+            "fixture must exceed the event limit"
+        );
         let mut event: ResourceChangeEvent = serde_json::from_value(resource_event(
             "workspace",
             "epoch",
@@ -5301,6 +5319,107 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oversized_legacy_draft_does_not_block_other_drafts() {
+        let root = tempfile::tempdir().expect("isolated state");
+        let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
+        store
+            .transaction(|tx| {
+                for (session, text) in [
+                    (
+                        "large",
+                        "x".repeat(
+                            studio_runtime_schema::shared_values::MAX_DRAFT_TEXT_CODEPOINTS + 1,
+                        ),
+                    ),
+                    ("good", "kept".to_owned()),
+                ] {
+                    let id = format!("phone:{session}");
+                    let payload =
+                        json!({"id":id,"device":"phone","session":session,"text":text,"updated":1})
+                            .to_string();
+                    SyncDocumentsRepository::put_draft(tx, &id, &payload, false)?;
+                }
+                Ok(())
+            })
+            .await
+            .expect("drafts");
+        let state = HttpState::new(
+            "token".into(),
+            "workspace".into(),
+            root.path().display().to_string(),
+            4321,
+            None,
+            Some(store),
+            None,
+        );
+        let resource =
+            ResourceRef::DraftsResource(studio_runtime_schema::resource_ref::EmptyResource {});
+        let snapshot = draft_initial_snapshot(state, resource)
+            .await
+            .expect("snapshot")
+            .draft_snapshot
+            .expect("baseline");
+        assert!(!snapshot.complete);
+        assert_eq!(snapshot.documents.len(), 1);
+        assert_eq!(snapshot.documents[0].id, "phone:good");
+    }
+
+    #[tokio::test]
+    async fn escaped_emoji_draft_at_cap_round_trips_through_sse() {
+        let root = tempfile::tempdir().expect("isolated state");
+        let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
+        let count = studio_runtime_schema::shared_values::MAX_DRAFT_TEXT_CODEPOINTS;
+        let payload = format!(
+            r#"{{"id":"phone:chat","device":"phone","session":"chat","text":"{}","updated":1}}"#,
+            "\\ud83d\\ude00".repeat(count)
+        );
+        let saved = payload.clone();
+        store
+            .transaction(move |tx| {
+                SyncDocumentsRepository::put_draft(tx, "phone:chat", &saved, false).map(|_| ())
+            })
+            .await
+            .expect("save");
+        let state = HttpState::new(
+            "token".into(),
+            "workspace".into(),
+            root.path().display().to_string(),
+            4321,
+            None,
+            Some(store),
+            None,
+        );
+        let resource =
+            ResourceRef::DraftsResource(studio_runtime_schema::resource_ref::EmptyResource {});
+        let entry = draft_initial_snapshot(state, resource)
+            .await
+            .expect("snapshot");
+        let mut event: ResourceChangeEvent = serde_json::from_value(resource_event(
+            "workspace",
+            "epoch",
+            1,
+            "initial",
+            &[json!({"kind":"drafts"})],
+            0,
+            false,
+        ))
+        .expect("event");
+        event.resource_versions = vec![entry];
+        let bytes = frame_bytes(resource_sse_event(1, event)).await;
+        assert!(bytes.len() <= SYNC_STREAM_EVENT_MAX_BYTES);
+        let frame = std::str::from_utf8(&bytes).expect("UTF8");
+        let data = frame
+            .lines()
+            .find_map(|line| line.strip_prefix("data: "))
+            .expect("data");
+        let event: Value = serde_json::from_str(data).expect("event JSON");
+        assert_eq!(
+            event["resourceVersions"][0]["draftSnapshot"]["documents"][0]["payload"],
+            payload
+        );
+    }
+
+    #[tokio::test]
     async fn draft_snapshot_reports_its_limit() {
         let root = tempfile::tempdir().expect("isolated state");
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
@@ -5619,7 +5738,7 @@ mod tests {
                 let count = if scenario == "documents" { 513 } else { 1 };
                 for index in 0..count {
                     let id = format!("agent-{index}");
-                    let name = if scenario == "bytes" { "é".repeat(262144) } else { "Agent".into() };
+                    let name = if scenario == "bytes" { "é".repeat(SYNC_STREAM_EVENT_MAX_BYTES / 2) } else { "Agent".into() };
                     SyncDocumentsRepository::put_entity(tx, "agentSummary", &id, json!({"id":id,"name":name,"status":"idle","source":"managed"}), false)?;
                 }
                 if scenario == "pruned" {
@@ -6626,7 +6745,7 @@ mod tests {
     async fn event_document(event: Result<Event, Infallible>) -> Value {
         let body = axum::body::to_bytes(
             Sse::new(stream::iter([event])).into_response().into_body(),
-            262144,
+            SYNC_STREAM_EVENT_MAX_BYTES,
         )
         .await
         .expect("frame");
@@ -7087,7 +7206,7 @@ mod tests {
                 Sse::new(stream::iter([Ok::<_, Infallible>(event)]))
                     .into_response()
                     .into_body(),
-                262144,
+                SYNC_STREAM_EVENT_MAX_BYTES,
             )
             .await
             .expect("frame")

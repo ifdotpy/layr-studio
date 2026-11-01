@@ -261,7 +261,7 @@ fn base64_encode(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-fn map_payload_store_error(error: PayloadStoreError) -> ApiError {
+pub(crate) fn map_payload_store_error(error: PayloadStoreError) -> ApiError {
     match error {
         PayloadStoreError::InvalidData => {
             ApiError::new(StatusCode::BAD_REQUEST, "Invalid file data")

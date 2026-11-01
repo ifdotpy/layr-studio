@@ -132,6 +132,13 @@ pub struct Begun {
     client: String,
     number: i64,
     records: bool,
+    legacy_send: bool,
+}
+
+impl Begun {
+    pub fn legacy_send(&self) -> bool {
+        self.legacy_send
+    }
 }
 
 #[derive(Debug)]
@@ -198,6 +205,23 @@ pub fn begin(
         });
     }
     let records = !is_create(&request.command);
+    let legacy_send =
+        !records && !trusted && identity.issued_ms() < CommandWatermarks::send_cutover(tx)?;
+    if !records
+        && !legacy_send
+        && !CommandWatermarks::reserve_send(
+            tx,
+            identity.id(),
+            &signature,
+            identity.issued_ms(),
+            now_ms,
+        )?
+    {
+        return Err(RequestResultError::Conflict {
+            id: identity.id().into(),
+        }
+        .into());
+    }
     if records
         && let Some(reference) =
             RequestResults::replay_reference(tx, identity.id(), &signature, now_ms)?
@@ -210,6 +234,7 @@ pub fn begin(
         client,
         number,
         records,
+        legacy_send,
     }))
 }
 

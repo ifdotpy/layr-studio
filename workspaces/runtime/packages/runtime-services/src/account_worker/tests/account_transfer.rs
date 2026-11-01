@@ -10,6 +10,161 @@ use crate::account_session_runtime::{
 
 const TRANSFER: &str = "5a300f72-4ea6-4d30-8a0e-9b2c13c4a001";
 
+struct SuccessfulTransferSession {
+    source_path: String,
+    requests: std::sync::Mutex<Vec<(String, String)>>,
+}
+
+impl AccountSessionPort for SuccessfulTransferSession {
+    fn current_scope(&self, account: &str) -> Option<ConnectionScope> {
+        Some(ConnectionScope {
+            account: account.into(),
+            connection: format!("{account}-connection"),
+            generation: 1,
+        })
+    }
+
+    fn provider_request<'a>(
+        &'a self,
+        request: ProviderRequest,
+    ) -> AccountSessionFuture<'a, SessionReceipt> {
+        use crate::account_session_runtime::{ProviderResponse, SessionOutcome};
+        use studio_runtime_providers::{Method, RequestId, RequestTicket};
+        self.requests
+            .lock()
+            .unwrap()
+            .push((request.account.clone(), request.method.as_str().into()));
+        let result = if request.method == Method::ModelList {
+            json!({"data":[{"model":"fake-model","isDefault":true,"supportedReasoningEfforts":[{"reasoningEffort":"medium"}]}],"nextCursor":null})
+        } else if request.method == Method::ThreadRead {
+            json!({"thread":{"id":"fake-thread-0","status":{"type":"notLoaded"},"path":self.source_path}})
+        } else if request.method == Method::ThreadQueueList
+            || request.method == Method::ThreadTurnsList
+        {
+            json!({"data":[],"nextCursor":null})
+        } else if request.method == Method::ThreadFork {
+            json!({"thread":{"id":"fake-thread-0"}})
+        } else {
+            return Box::pin(async {
+                Err(AccountSessionError::Refused("Unexpected fixture request"))
+            });
+        };
+        let scope = self.current_scope(&request.account).unwrap();
+        Box::pin(async move {
+            Ok(SessionReceipt {
+                scope,
+                operation: request.operation,
+                replayed: false,
+                outcome: SessionOutcome::Written {
+                    ticket: RequestTicket {
+                        generation: 1,
+                        id: RequestId::Number(1),
+                        method: request.method,
+                    },
+                    response: ProviderResponse::Reply(result),
+                },
+            })
+        })
+    }
+
+    fn transfer_provider_request<'a>(
+        &'a self,
+        request: crate::account_session_runtime::TransferProviderRequest,
+    ) -> AccountSessionFuture<'a, SessionReceipt> {
+        use crate::account_session_runtime::{ProviderResponse, SessionOutcome};
+        use studio_runtime_providers::{Method, RequestId, RequestTicket};
+        assert_eq!(request.method, Method::ThreadQueueList);
+        self.requests.lock().unwrap().push((
+            request.source_account.clone(),
+            request.method.as_str().into(),
+        ));
+        Box::pin(async move {
+            Ok(SessionReceipt {
+                scope: request.expected_scope,
+                operation: request.operation,
+                replayed: false,
+                outcome: SessionOutcome::Written {
+                    ticket: RequestTicket {
+                        generation: 1,
+                        id: RequestId::Number(2),
+                        method: request.method,
+                    },
+                    response: ProviderResponse::Reply(json!({"data":[],"nextCursor":null})),
+                },
+            })
+        })
+    }
+}
+
+#[tokio::test]
+async fn transfer_completes_before_next_turn_on_destination() {
+    let state = State::new().await;
+    edit_agent(&state, |row| {
+        row.account_key = "source".into();
+        row.extra
+            .insert("executionSettingsAccountKey".into(), json!("source"));
+    })
+    .await;
+    let source_home = state.root.join("source-home");
+    let target_home = state.root.join("target-home");
+    let source_path = source_home.join("sessions/source.jsonl");
+    std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(&target_home).unwrap();
+    std::fs::write(
+        &source_path,
+        b"{\"type\":\"session_meta\",\"payload\":{\"id\":\"fake-thread-0\"}}\n",
+    )
+    .unwrap();
+    request_transfer(&state, "default").await;
+    let session = Arc::new(SuccessfulTransferSession {
+        source_path: source_path.display().to_string(),
+        requests: Default::default(),
+    });
+    let mut resources = test_resources().unwrap();
+    resources.model_catalog.retain_accounts(&[
+        json!({"id":"source","home":source_home,"provider":"codex"}),
+        json!({"id":"default","home":target_home,"provider":"codex"}),
+    ]);
+    resources.account_home = target_home.display().to_string();
+    resources.account_session = Some(session.clone());
+    resources
+        .model_catalog
+        .set_account_session(Some(session.clone()));
+    let mut peer = Peer::new();
+    let mut worker = peer
+        .open_worker_with_resources(state.bridge.clone(), resources)
+        .await;
+    let mut ready = peer.ready.clone();
+    while !*ready.borrow_and_update() {
+        ready.changed().await.unwrap();
+    }
+    let turn = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        state.start(&mut peer, &worker),
+    )
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "destination turn not started; requests: {:?}",
+            session.requests.lock().unwrap()
+        )
+    });
+    assert_eq!(turn["method"], "turn/start");
+    assert_eq!(state.record().await["accountKey"], "default");
+    assert_eq!(
+        stored_transfer(&state).await["members"][state.agent.as_str()]["phase"],
+        "completed"
+    );
+    assert!(
+        session
+            .requests
+            .lock()
+            .unwrap()
+            .contains(&("default".into(), "thread/fork".into()))
+    );
+    worker.shutdown().await.unwrap();
+}
+
 #[tokio::test]
 async fn bridge_startup_recovers_transfer_phases_before_exposing_workers() {
     let root = tempfile::tempdir().expect("isolated state");

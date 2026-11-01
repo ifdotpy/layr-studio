@@ -5,6 +5,7 @@ import {
   type StagedEntityInterval,
 } from "./entityTransfer";
 import type { components } from "../generated/api";
+import { SYNC_STREAM_EVENT_MAX_BYTES } from "../generated/sharedValues";
 
 type Batch = components["schemas"]["EntityChangeBatch"];
 class MemoryStaging implements TransferStorage {
@@ -141,7 +142,10 @@ describe("complete bounded entity transfer", () => {
     expect(storage.rows.size).toBe(0);
     await expect(assembler.receive(frames[1]!)).rejects.toThrow();
     await expect(
-      assembler.receive({ ...frames[0], data: "x".repeat(262144) }),
+      assembler.receive({
+        ...frames[0],
+        data: "x".repeat(SYNC_STREAM_EVENT_MAX_BYTES),
+      }),
     ).rejects.toThrow();
     await expect(
       new EntityTransferAssembler(new MemoryStaging()).receive(

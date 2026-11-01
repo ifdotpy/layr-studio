@@ -3,16 +3,13 @@ import {
   AgentSource,
   AgentStatus,
   ProviderKind,
-  TransferScope,
 } from "../../generated/api";
 import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
-import { beforeEach, expect, expectTypeOf, test, vi } from "vitest";
-import { confirmedTransfer, ExecutionSettings } from "./ExecutionSettings";
+import { beforeEach, expect, test, vi } from "vitest";
+import { ExecutionSettings } from "./ExecutionSettings";
 import type { AgentSetupPickerProps } from "./AgentSetupPicker";
-import type { PostResult } from "../../apiTypes.ts";
-import { TransferStatus } from "../../generated/api";
 import type { Agent } from "../../types";
 
 const choices = vi.hoisted(() => ({
@@ -24,6 +21,50 @@ const choices = vi.hoisted(() => ({
 }));
 
 const capability = vi.hoisted(() => ({ priority: false }));
+
+test("shows the server reason alongside an unavailable account", () => {
+  const markup = renderToStaticMarkup(
+    createElement(
+      MantineProvider,
+      null,
+      createElement(ExecutionSettings, {
+        presentation: "panel",
+        initialRole: "orchestrator",
+        agent: {
+          id: "lead",
+          isLead: true,
+          source: AgentSource.managed,
+          status: AgentStatus.idle,
+          provider: ProviderKind.codex,
+          accountKey: "source",
+          accountDestinations: [
+            {
+              accountKey: "target",
+              eligibility: {
+                kind: "unavailable",
+                reason: "Server says reconnect",
+              },
+            },
+          ],
+        },
+        accounts: [
+          {
+            id: "target",
+            label: "Target",
+            home: "",
+            source: "fixture",
+            provider: ProviderKind.codex,
+            status: AccountStatus.error,
+          },
+        ],
+        catalog: { models: [], loading: false, error: "", retry: () => {} },
+        refresh: async () => {},
+        onAccountChange: () => {},
+      }),
+    ),
+  );
+  expect(markup).toContain("Server says reconnect");
+});
 
 vi.mock("react", async (load) => {
   const actual = await load<typeof import("react")>();
@@ -57,126 +98,6 @@ vi.mock("./AgentSetupPicker", async (load) => {
   };
 });
 
-type TransferResponse = PostResult<"/api/agents/account-transfer">;
-const transferResponse = {
-  id: "operation",
-  leadId: "lead",
-  targetAccountKey: "target",
-  scope: TransferScope.subagents,
-  status: TransferStatus.pending,
-  created: 1,
-  members: {},
-  requests: {
-    extension: {
-      leadId: "lead",
-      targetAccountKey: "target",
-      scope: TransferScope.subagents,
-    },
-  },
-} satisfies TransferResponse;
-
-test("transfer confirmation preserves the generated response and receipt types", () => {
-  expectTypeOf<
-    (typeof TransferStatus)[keyof typeof TransferStatus]
-  >().toEqualTypeOf<TransferResponse["status"]>();
-  expectTypeOf(confirmedTransfer)
-    .parameter(0)
-    .toEqualTypeOf<TransferResponse>();
-  expectTypeOf(confirmedTransfer).returns.toEqualTypeOf<TransferResponse>();
-  expectTypeOf(confirmedTransfer)
-    .parameter(4)
-    .toEqualTypeOf<TransferResponse["scope"]>();
-  const confirmed = confirmedTransfer(
-    transferResponse,
-    "extension",
-    "lead",
-    "target",
-    TransferScope.subagents,
-  );
-  expect(confirmed).toBe(transferResponse);
-  expect(confirmed.requests?.extension).toBe(
-    transferResponse.requests.extension,
-  );
-});
-
-for (const requestId of ["operation", "extension"]) {
-  test(`transfer confirmation accepts correlated ${requestId} identity`, () => {
-    expect(
-      confirmedTransfer(
-        transferResponse,
-        requestId,
-        "lead",
-        "target",
-        TransferScope.subagents,
-      ).id,
-    ).toBe("operation");
-  });
-}
-
-for (const patch of [
-  { leadId: "another-lead" },
-  { targetAccountKey: "another-account" },
-  { scope: TransferScope.team },
-  { requests: null },
-  {
-    requests: {
-      extension: {
-        ...transferResponse.requests.extension,
-        leadId: "another-lead",
-      },
-    },
-  },
-  {
-    requests: {
-      extension: {
-        ...transferResponse.requests.extension,
-        targetAccountKey: "another-account",
-      },
-    },
-  },
-  {
-    requests: {
-      extension: {
-        ...transferResponse.requests.extension,
-        scope: TransferScope.team,
-      },
-    },
-  },
-] satisfies Partial<TransferResponse>[]) {
-  test(`transfer confirmation rejects mismatched identity ${JSON.stringify(patch)}`, () => {
-    expect(() =>
-      confirmedTransfer(
-        { ...transferResponse, ...patch },
-        "extension",
-        "lead",
-        "target",
-        TransferScope.subagents,
-      ),
-    ).toThrow("The server did not confirm this account transfer.");
-  });
-}
-
-test("transfer confirmation rejects malformed runtime ingress", () => {
-  for (const value of [
-    null,
-    [],
-    "operation",
-    { ...transferResponse, status: "unsupported" },
-    { ...transferResponse, id: 42 },
-    { ...transferResponse, requests: { extension: null } },
-  ]) {
-    expect(() =>
-      confirmedTransfer(
-        // @ts-expect-error Deliberately malformed transport data still needs runtime rejection.
-        value,
-        "extension",
-        "lead",
-        "target",
-        TransferScope.subagents,
-      ),
-    ).toThrow("The server did not confirm this account transfer.");
-  }
-});
 vi.mock("./WorkerModelPicker", async (load) => ({
   ...(await load<typeof import("./WorkerModelPicker")>()),
   useModelCatalogReader: () => ({

@@ -8,7 +8,6 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
-  statfsSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
@@ -37,11 +36,6 @@ export const legacy = {
 export function fixture(t: TestContext, report: unknown = legacy) {
   const temporary =
     process.platform === "darwin" ? "/private/tmp" : os.tmpdir();
-  const disk = statfsSync(temporary);
-  assert(
-    disk.bavail * disk.bsize >= 15 * 1024 ** 3,
-    "Fixtures need 15 GiB free",
-  );
   const root = mkdtempSync(path.join(temporary, "vm-upgrade-"));
   const file = (name: string) => path.join(root, name.replace(/^\//, ""));
   const write = (name: string, body: string, mode = 0o644) => {

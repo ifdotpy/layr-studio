@@ -1,38 +1,6 @@
 {
   "from_value": [
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_selection.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "b24048192a2b133a5339ef598571064dbe2548dc9fdbcdd2ee5df81891b7fed8:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:2"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:3"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:4"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:5"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
       "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
     },
@@ -1110,10 +1078,6 @@
     {
       "file": "workspaces/runtime/apps/runtime-server/src/peer_link.rs",
       "fingerprint": "1597ef76e1f7800da7e0b498334ebf0b27f53e8cbaa7fc8f54c77640f9d7093e:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-http/src/bounded_entities.rs",
-      "fingerprint": "855d91779dc5c231c360eb45c9ea353e2af201462997d9e8adab4f9be8a844f2:0"
     },
     {
       "file": "workspaces/runtime/packages/runtime-http/src/error.rs",
@@ -2486,10 +2450,6 @@
     },
     {
       "file": "workspaces/runtime/packages/runtime-http/src/routes/sync_stream.rs",
-      "fingerprint": "479484212283c62fdddc769e49600f159df70def4234b22917ca36fdae3df58a:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-http/src/routes/sync_stream.rs",
       "fingerprint": "8ec747c1b9d78087ebd5915e8d76a343fa4bb3e688948615060ac9e49977c7e3:0"
     },
     {
@@ -2673,10 +2633,6 @@
       "fingerprint": "5dac839a508a4f83f7d210dcf218af488d0774c847c2ed31c35508b144159cc8:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/sync_views.rs",
-      "fingerprint": "e8a70eff58fdafdd2899f6c830f5aee7ec31d22734aa5e88f369fad59a4eabc3:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/thread_prepare.rs",
       "fingerprint": "677b7a0a4e7bcf68d460ccd4512ab3b4304f0311ab9ad243c54484069a131eb6:0"
     },
@@ -2691,22 +2647,6 @@
   ],
   "switch-default": [],
   "to_value": [
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:2"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:3"
-    },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"

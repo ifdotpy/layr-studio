@@ -1,9 +1,5 @@
 import { appendAppLog } from "../../appLog";
-import {
-  AgentStatus,
-  AccountTransferScope,
-  AccountTransferStatus as GeneratedAccountTransferStatus,
-} from "../../generated/api";
+import { AgentStatus } from "../../generated/api";
 import { randomUUID } from "../../uuid";
 import {
   ProviderKind,
@@ -39,9 +35,8 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { ApiError, errorText, type PostBody, type PostResult } from "../../api";
-import { busy, type Agent, type JsonValue } from "../../types";
-import { TransferStatus } from "../../generated/api";
+import { ApiError, errorText, type PostBody } from "../../api";
+import { busy, type Agent } from "../../types";
 import {
   isDaybreakAlias,
   useModelCatalogReader,
@@ -190,51 +185,6 @@ const sameSettings = (left: SettingsValue, right: SettingsValue) =>
   left.fast_mode === right.fast_mode &&
   !!left.daybreak_enabled === !!right.daybreak_enabled &&
   left.delegation_depth === right.delegation_depth;
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-const isJsonValue = (value: unknown): value is JsonValue => {
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "boolean" ||
-    (typeof value === "number" && Number.isFinite(value))
-  )
-    return true;
-  if (Array.isArray(value)) return value.every(isJsonValue);
-  return isRecord(value) && Object.values(value).every(isJsonValue);
-};
-type TransferResponse = PostResult<"/api/agents/account-transfer">;
-export const confirmedTransfer = (
-  operation: TransferResponse,
-  requestId: string,
-  leadId: string,
-  target: string,
-  scope: TransferResponse["scope"],
-): TransferResponse => {
-  // HTTP payloads still need runtime checks; generated types do not validate ingress.
-  if (!isRecord(operation) || !isJsonValue(operation))
-    throw new Error("The server did not confirm this account transfer.");
-  const receipt = isRecord(operation.requests)
-    ? operation.requests[requestId]
-    : undefined;
-  if (
-    typeof operation.id !== "string" ||
-    operation.leadId !== leadId ||
-    operation.targetAccountKey !== target ||
-    operation.scope !== scope ||
-    !Object.values(TransferStatus).some(
-      (status) => status === operation.status,
-    ) ||
-    (operation.id !== requestId &&
-      (!isRecord(receipt) ||
-        receipt.leadId !== leadId ||
-        receipt.targetAccountKey !== target ||
-        receipt.scope !== scope))
-  )
-    throw new Error("The server did not confirm this account transfer.");
-  return operation;
-};
-
 export function ExecutionSettings(props: SettingsProps) {
   return <ExecutionSettingsController {...props} />;
 }
@@ -690,10 +640,6 @@ function ScopedExecutionSettings({
     target: string;
     baseline: string | null;
   } | null>(null);
-  const [transfer, setTransfer] = useState<{
-    value: TransferResponse;
-    baseline: string;
-  } | null>(null);
   const [error, setError] = useState("");
   const [status, setStatus] = useState<{
     kind: "saving" | "saved" | "accepted";
@@ -710,7 +656,7 @@ function ScopedExecutionSettings({
   const reviewStored = reviewSettingsFor(agent);
   const reviewCurrent = reviewPending?.values || reviewStored;
   const current = pending?.values || stored;
-  const refreshConfirmed = (
+  const refreshSavedSettings = (
     generation: number,
     confirmation = "Settings saved.",
   ) => {
@@ -739,7 +685,11 @@ function ScopedExecutionSettings({
       : parentCatalog;
   const allowedModels = useModelChoices();
   const connectedAccounts = accounts.filter((account) =>
-    accountCanStart(account),
+    teamDefaults
+      ? accountCanStart(account)
+      : agent.accountDestinations?.some(
+          (destination) => destination.accountKey === account.id,
+        ),
   );
   const activeAccount = accounts.find(
     (account) => account.id === (effectiveAccount || accountOf(agent)),
@@ -1168,72 +1118,42 @@ function ScopedExecutionSettings({
       `${modelDisplayName(wanted)} is not available on ${setupAccountName(accounts.find((account) => account.id === stored.account_key))}. Using ${modelDisplayName(replacement)}, the account default.`,
     );
   });
-  const storedTransfer = agent.accountTransfer;
-  const snapshotTransfer =
-    storedTransfer &&
-    (teamDefaults
-      ? storedTransfer.scope === AccountTransferScope.subagents
-      : storedTransfer.scope !== AccountTransferScope.subagents)
-      ? storedTransfer
-      : null;
-  // Keep the confirmed response until replication changes its old summary.
-  const responseIsNewer =
-    transfer?.value.id === snapshotTransfer?.id &&
-    typeof transfer?.value.updated === "number" &&
-    typeof snapshotTransfer?.updated === "number" &&
-    transfer.value.updated > snapshotTransfer.updated;
-  const shownTransfer =
-    transfer &&
-    (responseIsNewer || transfer.baseline === JSON.stringify(snapshotTransfer))
-      ? transfer.value
-      : snapshotTransfer || transfer?.value;
+  const shownTransfer = teamDefaults
+    ? undefined
+    : agent.accountTransferProgress;
+  const blockedTransfer = shownTransfer?.kind === "blocked";
   useEffect(() => {
-    for (const member of shownTransfer?.blocked ?? []) {
-      const key = JSON.stringify([shownTransfer?.id, member.id, member.reason]);
-      appendAppLog({
-        at: Date.now(),
-        level: "error",
-        title: "Account transfer blocked",
-        dedupeKey: `account-transfer:${key}`,
-        reason: `${member.name || "Agent"}: ${member.reason}`,
-      });
-    }
+    if (shownTransfer?.kind !== "blocked") return;
+    appendAppLog({
+      at: Date.now(),
+      level: "error",
+      title: "Account transfer blocked",
+      dedupeKey: `account-transfer:${shownTransfer.id}:${shownTransfer.reason}`,
+      reason: shownTransfer.reason,
+    });
   }, [shownTransfer]);
-  // A move shows only when it cannot go on. The chat shows its new account at once.
-  const blockedTransfer = (shownTransfer?.blocked?.length ?? 0) > 0;
-  const shownTransferTarget = accounts.find(
-    (account) => account.id === shownTransfer?.targetAccountKey,
-  );
+  const shownTransferTarget =
+    shownTransfer && "targetAccountKey" in shownTransfer
+      ? accounts.find(
+          (account) => account.id === shownTransfer.targetAccountKey,
+        )
+      : undefined;
   const runTeamTransferAction = async (action: "retry" | "cancel") => {
     if (
       saveLock.current ||
-      typeof shownTransfer?.id !== "string" ||
-      typeof shownTransfer.targetAccountKey !== "string"
+      !shownTransfer ||
+      !("actions" in shownTransfer) ||
+      !shownTransfer.actions.includes(action)
     )
       return;
     saveLock.current = true;
     setSaving(true);
     setError("");
-    const generation = ++refreshGeneration.current;
     try {
-      const op = await post("/api/agents/account-transfer", {
+      await post("/api/agents/account-transfer", {
         action,
-        scope: teamDefaults ? "subagents" : "team",
         request_id: shownTransfer.id,
       });
-      const transferResult = confirmedTransfer(
-        op,
-        shownTransfer.id,
-        agent.id,
-        shownTransfer.targetAccountKey,
-        teamDefaults ? "subagents" : "team",
-      );
-      if (mounted.current)
-        setTransfer({
-          value: transferResult,
-          baseline: JSON.stringify(snapshotTransfer),
-        });
-      refreshConfirmed(generation, "Transfer updated.");
     } catch (failure) {
       appendAppLog({
         at: Date.now(),
@@ -1423,7 +1343,7 @@ function ScopedExecutionSettings({
         value: canonical.permissionMode === "bypassPermissions",
         baseline: agent.permissionMode === "bypassPermissions",
       });
-      refreshConfirmed(generation);
+      refreshSavedSettings(generation);
     } catch (failure) {
       if (!mounted.current) return;
       if (!confirmed) setPendingYolo(previousPending);
@@ -1567,6 +1487,18 @@ function ScopedExecutionSettings({
         providers={pickerProviders}
         onProvider={setBrowsedProvider}
         accounts={inheritedUnavailable ? [] : connectedAccounts}
+        accountUnavailableReason={
+          teamDefaults
+            ? undefined
+            : (account) => {
+                const destination = agent.accountDestinations?.find(
+                  (entry) => entry.accountKey === account.id,
+                );
+                return destination?.eligibility.kind === "unavailable"
+                  ? destination.eligibility.reason
+                  : undefined;
+              }
+        }
         accountKey={
           teamDefaults
             ? current.account_key ||
@@ -1583,15 +1515,6 @@ function ScopedExecutionSettings({
           saving ||
           accountDisabled ||
           (!teamDefaults && !onAccountChange)
-        }
-        isAccountDisabled={(account) =>
-          !!(
-            !teamDefaults &&
-            agent.isLead &&
-            shownTransfer?.status === GeneratedAccountTransferStatus.pending &&
-            shownTransfer.scope !== AccountTransferScope.subagents &&
-            account.id !== shownTransfer.targetAccountKey
-          )
         }
         modelId={
           presentation !== "menu" ? `${agent.id}-${role}-model` : undefined

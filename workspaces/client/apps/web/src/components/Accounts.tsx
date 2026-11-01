@@ -1,9 +1,5 @@
 import { appendAppLog } from "../appLog";
-import {
-  AccountStatus as GeneratedApiAccountStatus,
-  AccountTransferStatus as GeneratedApiAccountTransferStatus,
-  AccountTransferScope as GeneratedApiAccountTransferScope,
-} from "../generated/api.ts";
+import { AccountStatus as GeneratedApiAccountStatus } from "../generated/api.ts";
 import { randomUUID } from "../uuid";
 import ClaudeOrganization from "./ClaudeOrganization";
 import Disclosure from "./ui/Disclosure";
@@ -494,7 +490,7 @@ export function AccountTransferStatus({
   error,
   onAction,
 }: {
-  transfer?: NonNullable<Agent["accountTransfer"]> | undefined;
+  transfer?: NonNullable<Agent["accountTransferProgress"]> | undefined;
   targetLabel?: string;
   pending?: boolean;
   opened?: boolean;
@@ -502,41 +498,7 @@ export function AccountTransferStatus({
   error?: string;
   onAction: (action: "retry" | "cancel") => void;
 }) {
-  const waiting = Number(transfer?.waitingCount || 0);
-  const left = Array.isArray(transfer?.leftOnSource)
-    ? transfer.leftOnSource
-    : [];
-  // One line per reason: a team move can leave many subagents for one reason.
-  const leftGroups = [
-    ...left
-      .reduce(
-        (groups, member) => {
-          const key = JSON.stringify([member.provider, member.reason]);
-          const group = groups.get(key) || {
-            key,
-            provider: member.provider,
-            reason: member.reason,
-            names: [] as string[],
-          };
-          group.names.push(String(member.name || "Agent"));
-          return groups.set(key, group);
-        },
-        new Map<
-          string,
-          {
-            key: string;
-            provider: (typeof left)[number]["provider"];
-            reason: (typeof left)[number]["reason"];
-            names: string[];
-          }
-        >(),
-      )
-      .values(),
-  ];
-  const blocked = Array.isArray(transfer?.blocked) ? transfer.blocked : [];
-  const interrupted = Array.isArray(transfer?.interrupted)
-    ? transfer.interrupted
-    : [];
+  const active = transfer && "actions" in transfer ? transfer : undefined;
   return (
     <Modal
       opened={opened}
@@ -545,59 +507,18 @@ export function AccountTransferStatus({
       centered
       zIndex={layerZIndex.modalAbovePopover}
     >
-      {!transfer ? (
-        <div>
-          {error ? (
-            <p role="alert">{error}</p>
-          ) : (
-            <p role="status">Starting transfer…</p>
-          )}
-        </div>
-      ) : (
+      {error && <p role="alert">{error}</p>}
+      {transfer && transfer.kind !== "none" && (
         <div className="account-menu-note" role="status">
-          {error && <p role="alert">{error}</p>}
           <ArrowRightLeft size={14} />
           <div>
-            {transfer.status !== GeneratedApiAccountTransferStatus.pending && (
-              <div>Transfer {transfer.status}.</div>
+            {targetLabel && <div>Account: {targetLabel}</div>}
+            <div>Transfer {transfer.kind}.</div>
+            {"reason" in transfer && transfer.reason && (
+              <small>{transfer.reason}</small>
             )}
-            {Number(transfer.moved ?? transfer.completed ?? 0) > 0 &&
-              targetLabel && (
-                <div>
-                  Moved {transfer.moved ?? transfer.completed} subagents to{" "}
-                  {targetLabel}.
-                </div>
-              )}
-            {transfer.status === GeneratedApiAccountTransferStatus.pending &&
-              waiting > 0 && <div>{waiting} waiting</div>}
-            {!!transfer.nativeHistoryPending && (
-              <small>
-                History transfer in progress: {transfer.nativeHistoryPending}{" "}
-                remaining.
-              </small>
-            )}
-            {!!transfer.movingNow && (
-              <small>{transfer.movingNow} moving now</small>
-            )}
-            {transfer.waiting && <small>{transfer.waiting}</small>}
-            {interrupted.map((member) => (
-              <small key={String(member.id)}>
-                {member.name || "Agent"}: {member.reason}
-              </small>
-            ))}
-            {blocked.map((member) => (
-              <small key={String(member.id)} role="alert">
-                {member.name || "Agent"} blocked: {member.reason}
-              </small>
-            ))}
-            {leftGroups.map((group) => (
-              <small key={group.key}>
-                {group.names.join(", ")} left on source ({group.provider}):{" "}
-                {group.reason}
-              </small>
-            ))}
             <div className="account-transfer-actions">
-              {transfer.canRetry && (
+              {active?.actions.includes("retry") && (
                 <Button
                   size="compact-xs"
                   variant="subtle"
@@ -607,19 +528,11 @@ export function AccountTransferStatus({
                   Retry
                 </Button>
               )}
-              {transfer.status ===
-                GeneratedApiAccountTransferStatus.pending && (
+              {active?.actions.includes("cancel") && (
                 <Button
                   size="compact-xs"
                   variant="subtle"
-                  // A subagent whose history is moving now finishes first; the server
-                  // refuses a cancel until then.
-                  disabled={pending || Number(transfer.movingNow || 0) > 0}
-                  title={
-                    Number(transfer.movingNow || 0) > 0
-                      ? "Cancel after the subagent that is moving now finishes."
-                      : undefined
-                  }
+                  disabled={!!pending}
                   onClick={() => onAction("cancel")}
                 >
                   Cancel remaining
@@ -633,33 +546,21 @@ export function AccountTransferStatus({
   );
 }
 
-/** One line next to the model picker while a team moves to another account. The details,
- * with Retry and Cancel, are in the model settings; the tooltip shows the same reasons. */
 export function AccountTransferChip({
   transfer,
 }: {
-  transfer?: NonNullable<Agent["accountTransfer"]> | undefined;
+  transfer?: NonNullable<Agent["accountTransferProgress"]> | undefined;
 }) {
-  if (
-    !transfer ||
-    transfer.status !== GeneratedApiAccountTransferStatus.pending
-  )
-    return null;
-  const blocked = Array.isArray(transfer.blocked) ? transfer.blocked : [];
-  // The chat shows its new account at once. Only a failed move shows here.
-  if (!blocked.length) return null;
+  if (transfer?.kind !== "blocked") return null;
   const label = "Account move blocked";
-  const details = [
-    ...blocked.map((member) => `${member.name || "Agent"}: ${member.reason}`),
-    "Open the model settings to retry or cancel.",
-  ].join("\n");
+  const details = transfer.reason;
   return (
     <Tooltip label={details} multiline w={320} withinPortal>
       <span
         className="account-transfer-chip"
         data-blocked=""
         role="status"
-        aria-label={`${label}. ${details}`}
+        aria-label={label + ". " + details}
       >
         <ArrowRightLeft size={12} />
         {label}
@@ -854,17 +755,9 @@ export default function Accounts({
   const selected =
     accounts.find((a) => a.id === accountKey) ||
     state.data.archivedAccounts?.find((a) => a.id === accountKey);
-  const pinned =
-    !!agent &&
-    (!agent.isLead || !agent.empty || !!agent.threadId || !!agent.inFlight);
+  const accountChange = agent?.accountChange;
   const owner = agent?.isLead ? agent : undefined;
-  const transfer = owner?.accountTransfer;
-  const teamTransfer =
-    transfer?.scope === GeneratedApiAccountTransferScope.subagents
-      ? undefined
-      : transfer;
-  const transferring =
-    teamTransfer?.status === GeneratedApiAccountTransferStatus.pending;
+  const teamTransfer = owner?.accountTransferProgress;
   const replacement = accounts.find(
     (account) =>
       account.id !== disconnectChoice?.id &&
@@ -998,13 +891,17 @@ export default function Accounts({
       !account ||
       actionLock.current ||
       pending ||
-      !accountCanStart(account) ||
-      (pinned && !owner) ||
-      (transferring && account.id !== teamTransfer?.targetAccountKey)
+      !agent?.accountDestinations?.some(
+        (destination) =>
+          destination.accountKey === account.id &&
+          destination.eligibility.kind === "available",
+      ) ||
+      !accountChange ||
+      accountChange.kind === "unavailable"
     )
       return;
     if (account.id === accountKey) return;
-    if (pinned && owner) {
+    if (accountChange.kind === "transfer" && owner) {
       onModalOpenChange?.(true);
       setTransferChoice({
         target: account,
@@ -1012,7 +909,7 @@ export default function Accounts({
         agentId: owner.id,
         requestId: randomUUID(),
       });
-    } else if (!pinned)
+    } else if (accountChange.kind === "select")
       void action(account.id, async () => {
         await changeAccount?.(account.id);
       });
@@ -1047,7 +944,10 @@ export default function Accounts({
       )}
       {!managerOnly &&
         renderPicker &&
-        renderPicker(selectAccount, !!pending || (pinned && !owner))}
+        renderPicker(
+          selectAccount,
+          !!pending || !accountChange || accountChange.kind === "unavailable",
+        )}
       {!managerOnly && renderPicker && showTransferStatus && (
         <AccountTransferChip transfer={teamTransfer ?? undefined} />
       )}

@@ -21,7 +21,7 @@ import { useWorkspacePanelWidth } from "./components/shell/workspacePanelWidth";
 import { useWorkspaceLayout } from "./layout/useWorkspaceLayout";
 import { layoutQueries } from "./layout/layout-contract.generated";
 import { restoreSidebarFocus } from "./components/sidebar/SidebarFrame";
-import type { SendMessageBody } from "./commands";
+import { sendsTextFile, type SendMessageBody } from "./commands";
 import {
   StudioErrorsScope,
   useStudioErrorsState,
@@ -67,6 +67,7 @@ import {
   DEFAULT_LOCAL_SERVER_ALIAS,
 } from "./servers/serverAliases";
 import { serverLocalStorage as localStorage } from "./servers/storage";
+import { MAX_DRAFT_TEXT_CODEPOINTS } from "./generated/sharedValues";
 import SearchOverlay from "./components/shell/SearchOverlay";
 import { SettingsRow } from "./components/ui/primitives";
 import { modalSizes } from "./theme";
@@ -1022,13 +1023,20 @@ export default function App({ active = true }: { active?: boolean }) {
   const setDraft = useCallback(
     (text: string | ((current: string) => string), id = opened || "new") =>
       setDrafts((old) => {
+        const value = typeof text === "function" ? text(old[id] || "") : text;
+        if (Array.from(value).length > MAX_DRAFT_TEXT_CODEPOINTS) {
+          notify(
+            `Drafts can contain at most ${MAX_DRAFT_TEXT_CODEPOINTS.toLocaleString()} characters. Previous text was kept.`,
+          );
+          return old;
+        }
         const next = {
           ...old,
-          [id]: typeof text === "function" ? text(old[id] || "") : text,
+          [id]: value,
         };
         return next;
       }),
-    [opened, setDrafts],
+    [opened, setDrafts, notify],
   );
   const finishConversationDelete = useCallback(
     (deleted: string[]) => {
@@ -1596,6 +1604,7 @@ export default function App({ active = true }: { active?: boolean }) {
     }
   };
   const send = async (options?: {
+    asTextFile?: boolean;
     assets?: string[];
     attachments?: Attachment[];
     onPersist?: () => void | Promise<void>;
@@ -1603,7 +1612,9 @@ export default function App({ active = true }: { active?: boolean }) {
   }) => {
     if (schemaMismatch || isApiSchemaMismatch()) return;
     const draftKey = opened || "new",
-      text = getDraft(draftKey).trim();
+      draft = getDraft(draftKey),
+      fileSend = sendsTextFile(draft, options?.asTextFile),
+      text = fileSend ? draft : draft.trim();
     if ((!text && !options?.assets?.length) || sendingLock.current) return;
     const attempt = Symbol();
     sendingLock.current = attempt;
@@ -1616,12 +1627,13 @@ export default function App({ active = true }: { active?: boolean }) {
     };
     let request: SendMessageBody | undefined;
     try {
-      if (renameCommand(text) !== undefined && !opened)
+      if (!fileSend && renameCommand(text) !== undefined && !opened)
         throw new Error("Open a chat before using /rename.");
       const id = opened || (await newChat());
       if (!id) return;
       latestSend.current[id] = attempt;
       if (
+        !fileSend &&
         agent?.source === GeneratedApiAgentSource.managed &&
         studioCommand(text, agent.provider ?? undefined)
       ) {
@@ -1675,13 +1687,15 @@ export default function App({ active = true }: { active?: boolean }) {
           JSON.stringify(sends.current[id]?.assets || []) !==
             JSON.stringify(options?.assets || []) ||
           sends.current[id]?.delivery !==
-            (options?.delivery || DeliveryMoment.CurrentTurn)
+            (options?.delivery || DeliveryMoment.CurrentTurn) ||
+          !!sends.current[id]?.asTextFile !== !!options?.asTextFile
         )
           sends.current[id] = {
             id: randomUUID(),
             room: id,
             text,
             assets: options?.assets || [],
+            ...(options?.asTextFile ? { asTextFile: true } : {}),
             // Enter delivers after the current tool call; Tab after the turn.
             delivery: options?.delivery || DeliveryMoment.CurrentTurn,
           };
@@ -1702,8 +1716,8 @@ export default function App({ active = true }: { active?: boolean }) {
             // Keep the draft until the request is saved.
             setDrafts((old) => {
               const next = { ...old };
-              if (next[draftKey]?.trim() === text) delete next[draftKey];
-              if (next[id]?.trim() === text) delete next[id];
+              if (next[draftKey] === draft) delete next[draftKey];
+              if (next[id] === draft) delete next[id];
               return next;
             });
             // The saved command owns this message. A new user submission,
