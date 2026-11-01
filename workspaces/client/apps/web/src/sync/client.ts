@@ -131,6 +131,10 @@ export type { TranscriptProjectionPayload } from "../apiTypes.ts";
 import { clearTranscript } from "./transcriptCache";
 export type SyncClientOptions = {
   cacheStorage?: SubscriptionCacheStorage | undefined;
+  onFreshReceipts?: (
+    workspaceId: string,
+    receipts: import("./messageReceipts").MessageReceipt[],
+  ) => void | Promise<void>;
   api: Pick<
     import("../api").ServerApi,
     | "syncGet"
@@ -177,6 +181,17 @@ export function createSyncClient(options: SyncClientOptions) {
   let pending: ReturnType<typeof open> | undefined;
   let subscriptionCache: ReturnType<typeof createSubscriptionCache> | undefined;
   let cachePolicySession = {};
+  async function freshReceipts(
+    workspaceId: string,
+    documents: components["schemas"]["SyncEntity"][],
+  ) {
+    const receipts = documents.flatMap((row) =>
+      row.op === "upsert" && row.collection === "messageReceipt"
+        ? [row.value]
+        : [],
+    );
+    if (receipts.length) await options.onFreshReceipts?.(workspaceId, receipts);
+  }
 
   async function open() {
     const cached = saved<string>("codex-sync-workspace", "");
@@ -786,6 +801,11 @@ export function createSyncClient(options: SyncClientOptions) {
       }
       await persistSubscriptionCursor(resource, interval.cursor, isCurrent);
     });
+    if (!isCurrent()) return;
+    for await (const page of interval.pages()) {
+      if (!isCurrent()) return;
+      await freshReceipts(workspaceId, page.documents);
+    }
   }
 
   async function persistResourceEntityChanges(
@@ -1027,6 +1047,12 @@ export function createSyncClient(options: SyncClientOptions) {
         isCurrent,
         event.epoch,
       );
+    }
+    if (!isCurrent()) return;
+    for (const entry of event.resourceVersions) {
+      if (!isCurrent()) return;
+      if (entry.entityChanges)
+        await freshReceipts(workspaceId, entry.entityChanges.documents);
     }
   }
 

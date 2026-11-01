@@ -36,7 +36,7 @@ import MessageQueue, {
 } from "./MessageQueue";
 import { useMessageQueue } from "./useMessageQueue";
 import { useMessageReceipts } from "./useMessageReceipts";
-import { receiptOutgoing, receiptTranscript } from "../sync/messageReceipts";
+import { receiptTranscript } from "../sync/messageReceipts";
 import { useVisibleChatResult, type ChatReadProof } from "./useChatReadState";
 import {
   NativeError,
@@ -477,9 +477,7 @@ export default function Conversation(p: {
     () =>
       outgoingTranscript(
         receiptTranscript(history, p.id || "", receipts),
-        (p.outgoing || [])
-          .filter((entry) => entry.body.room === p.id)
-          .map((entry) => receiptOutgoing(entry, receipts.get(entry.id))),
+        (p.outgoing || []).filter((entry) => entry.body.room === p.id),
       ),
     [history, p.outgoing, p.id, receipts],
   );
@@ -1439,8 +1437,7 @@ export default function Conversation(p: {
           serverStatus(m.deliveryStatus) === MessageSendStatus.uncertain ||
           (m.deliveryStatus?.source === "device" &&
             (m.deliveryStatus.state.kind === "transport_failed" ||
-              m.deliveryStatus.state.kind === "receipt_expired" ||
-              m.deliveryStatus.state.kind === "uncertain"))) && (
+              m.deliveryStatus.state.kind === "receipt_expired"))) && (
           <div className="message-delivery-error">
             <p>{m.deliveryError}</p>
             {serverStatus(m.deliveryStatus) === MessageSendStatus.failed && (

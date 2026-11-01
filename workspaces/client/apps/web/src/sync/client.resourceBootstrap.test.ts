@@ -1313,3 +1313,44 @@ it("discards a slow old stream policy after a reset and applies NoCache", async 
   expect(storage.put).not.toHaveBeenCalled();
   client.disposeCache();
 });
+
+it("sends only applied live receipt rows to the outbox", async () => {
+  const f = await setup();
+  const { createEntitySequenceScope } = await import("./entitySequence");
+  const { createTranscriptCache } = await import("./transcriptCache");
+  const onFreshReceipts = vi.fn();
+  const options = {
+    api: {
+      syncGet: mocks.syncGet,
+      syncPost: vi.fn(),
+      saved: <T>(_key: string, fallback: T) => fallback,
+      save: vi.fn(),
+      setWorkspace: vi.fn(),
+      isApiSchemaMismatch: () => false,
+    },
+    resources: {
+      watchResourceChanges: () => () => {},
+      watchResourceConnection: () => () => {},
+    },
+    sequences: createEntitySequenceScope(),
+    transcripts: createTranscriptCache(),
+    databaseSuffix: "fresh-receipts-test",
+    onFreshReceipts,
+  };
+  const client = f.client.createSyncClient(options);
+  const frame = f.frame(1);
+  frame.resourceVersions[0]!.entityChanges!.documents = [
+    {
+      op: "upsert",
+      collection: "messageReceipt",
+      id: "one",
+      seq: 1,
+      value: { id: "one", agent: "lead", status: MessageSendStatus.uncertain },
+    },
+  ];
+  await client.persistResourceEntityChanges(frame, () => true);
+  expect(onFreshReceipts).toHaveBeenCalledOnce();
+  expect(onFreshReceipts).toHaveBeenCalledWith(f.workspaceId, [
+    { id: "one", agent: "lead", status: MessageSendStatus.uncertain },
+  ]);
+});

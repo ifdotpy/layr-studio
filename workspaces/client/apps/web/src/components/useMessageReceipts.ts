@@ -1,7 +1,4 @@
-import {
-  useServerSync,
-  useServerOutbox,
-} from "../servers/ServerServicesContext";
+import { useServerSync } from "../servers/ServerServicesContext";
 import { useEffect, useRef, useState } from "react";
 import "../api";
 import "../sync/send";
@@ -14,7 +11,6 @@ export function useMessageReceipts(
   ids: string[],
 ) {
   const { subscribeStateProjection } = useServerSync();
-  const { reconcileOutboxReceipts } = useServerOutbox();
 
   const requested = useRef(ids);
   requested.current = ids;
@@ -49,14 +45,6 @@ export function useMessageReceipts(
         queued = queued
           .then(async () => {
             if (!active || controller.signal.aborted) return;
-            // Publishing delivery can retire the local message and change the
-            // requested IDs, which aborts this effect. Persist the receipt first.
-            await reconcileOutboxReceipts(
-              room,
-              receipts,
-              workspaceId,
-              controller.signal,
-            );
             if (!active || controller.signal.aborted) return;
             setState((previous) => {
               const next = new Map(
@@ -95,14 +83,7 @@ export function useMessageReceipts(
       controller.abort();
       stop();
     };
-  }, [
-    room,
-    scope,
-    workspaceId,
-    requestedKey,
-    subscribeStateProjection,
-    reconcileOutboxReceipts,
-  ]);
+  }, [room, scope, workspaceId, requestedKey, subscribeStateProjection]);
   return state.scope === scope
     ? state.receipts
     : new Map<string, MessageReceipt>();

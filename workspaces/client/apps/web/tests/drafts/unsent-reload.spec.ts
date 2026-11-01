@@ -310,3 +310,35 @@ test("confirmed upload stays attached to the draft after reload", async ({
     page.getByRole("button", { name: "Remove confirmed.txt" }),
   ).toBeVisible();
 });
+
+test("a stored send is not restored to the composer after a lost response", async ({
+  page,
+}) => {
+  const root = await mkdtemp(join(tmpdir(), "studio-send-duplicate-"));
+  const fixture = spawnFixture(process.execPath, [rustUiFixture, root], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let log = "";
+  fixture.stderr!.on("data", (chunk) => {
+    log += chunk;
+  });
+  const port = await waitForFixturePort(fixture, { diagnostics: () => log });
+  const origin = `http://127.0.0.1:${port}`;
+  const initial = await readTestState(origin);
+  const chat = initial.threads.find((agent) => agent.name === "Other project");
+  expect(chat).toBeDefined();
+  const ids: string[] = [];
+  await page.route("**/api/commands", (route) => {
+    const send = commandOf(route.request(), "send");
+    if (!send) return route.continue();
+    ids.push(send.id);
+    return route.abort("failed");
+  });
+  await page.goto(origin);
+  await page.locator(`[data-chat="${chat!.id}"]`).click();
+  await page.locator("#message").fill("Do not duplicate this request");
+  await page.locator("#send").click();
+  await expect(page.getByText("Could not contact server")).toBeVisible();
+  await expect(page.locator("#message")).toHaveValue("");
+  expect(ids).toHaveLength(1);
+});

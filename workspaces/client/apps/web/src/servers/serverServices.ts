@@ -84,6 +84,16 @@ export function createServerServices(server: StudioServer) {
       resources,
       sequences,
       transcripts,
+      onFreshReceipts: async (workspaceId, receipts) => {
+        for (const receipt of receipts) {
+          if (receipt.agent)
+            await outbox.reconcileOutboxReceipts(
+              receipt.agent,
+              [receipt],
+              workspaceId,
+            );
+        }
+      },
       cacheStorage: indexedDb(
         `studio-subscription-cache:${transport.owner.id}`,
         "subscriptions",
@@ -107,7 +117,6 @@ export function createServerServices(server: StudioServer) {
     serverId: transport.owner.id,
     watchResourceConnection: (...args) =>
       synchronization().resources.watchResourceConnection(...args),
-    storage,
   });
   let browserDrafts: ReturnType<typeof createBrowserDrafts> | undefined;
   const drafts = () => {

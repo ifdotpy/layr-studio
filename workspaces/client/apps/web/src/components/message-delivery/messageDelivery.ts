@@ -94,7 +94,9 @@ export function mergeOutgoing(
     )
       visibleSends.set(entry.id, entry);
   }
-  return [...visibleSends.values()].filter((entry) => !observed.has(entry.id));
+  return [...visibleSends.values()].filter(
+    (entry) => stored.has(entry.id) || !observed.has(entry.id),
+  );
 }
 
 export function outgoingTranscript(

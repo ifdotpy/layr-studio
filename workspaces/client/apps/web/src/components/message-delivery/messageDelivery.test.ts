@@ -771,3 +771,7 @@ it("lets the durable outbox state replace an in-flight send copy", () => {
     [],
   );
 });
+
+it("keeps a stored request visible when a cached projection marks it observed", () => {
+  assert.equal(mergeOutgoing([receipt], {}, new Set([receipt.id])).length, 1);
+});

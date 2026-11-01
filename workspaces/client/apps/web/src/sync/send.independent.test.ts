@@ -80,7 +80,6 @@ it("sends another message while an earlier request remains uncertain and retries
       command,
       getStreamSession: () => ({ workspaceId: "workspace" }),
     } as never,
-    storage,
     buffer,
     watchResourceConnection: () => () => {},
   });
@@ -121,7 +120,6 @@ it("keeps an uncertain server receipt retryable with the exact command", async (
       command: createCommandClient(storage, post),
       getStreamSession: () => ({ workspaceId: "workspace" }),
     } as never,
-    storage,
     buffer,
     watchResourceConnection: () => () => {},
   });
@@ -161,7 +159,6 @@ it("continues sending when storage fails", async () => {
       command: createCommandClient(storage, post),
       getStreamSession: () => ({ workspaceId: "workspace" }),
     } as never,
-    storage,
     buffer,
     watchResourceConnection: () => () => {},
   });
@@ -186,7 +183,6 @@ it("does not resurrect a discarded send when its request fails later", async () 
       command: createCommandClient(storage, post as never),
       getStreamSession: () => ({ workspaceId: "workspace" }),
     } as never,
-    storage,
     buffer,
     watchResourceConnection: () => () => {},
   });
@@ -211,7 +207,6 @@ it("removes a pending request when the stream confirms the matching workspace an
       command: createCommandClient(storage, post as never),
       getStreamSession: () => ({ workspaceId: "workspace" }),
     } as never,
-    storage,
     buffer,
     watchResourceConnection: () => () => {},
   });
@@ -250,7 +245,6 @@ it("removes a definitive rejection from the buffer", async () => {
       command: createCommandClient(storage, post as never),
       getStreamSession: () => ({ workspaceId: "workspace" }),
     } as never,
-    storage,
     buffer,
     watchResourceConnection: () => () => {},
   });
@@ -275,7 +269,6 @@ it("does not send a stored message to a different workspace", async () => {
       command: createCommandClient(storage, post as never),
       getStreamSession: () => ({ workspaceId }),
     } as never,
-    storage,
     buffer,
     watchResourceConnection: () => () => {},
   });
@@ -300,7 +293,6 @@ it("does not migrate legacy saved messages", async () => {
       command: createCommandClient(storage, post),
       getStreamSession: () => ({ workspaceId: "workspace" }),
     } as never,
-    storage,
     buffer,
     watchResourceConnection: () => () => {},
   });
@@ -336,7 +328,6 @@ it("accepts a command reply whose receipt projection precedes the flat receipt",
       command: createCommandClient(storage, post as never),
       getStreamSession: () => ({ workspaceId: "workspace" }),
     } as never,
-    storage,
     buffer,
     watchResourceConnection: () => () => {},
   });
@@ -365,7 +356,6 @@ it("removes a confirmed command even when its response omits the receipt", async
       command: createCommandClient(storage, post),
       getStreamSession: () => ({ workspaceId: "workspace" }),
     } as never,
-    storage,
     buffer,
     watchResourceConnection: () => () => {},
   });
@@ -401,7 +391,6 @@ it("coalesces a reconnect with a send whose persistence callback is still runnin
       command: createCommandClient(storage, post as never),
       getStreamSession: () => ({ workspaceId: "workspace" }),
     } as never,
-    storage,
     buffer,
     watchResourceConnection: () => () => {},
   });
@@ -430,7 +419,6 @@ it("keeps a remote outcome-unknown error uncertain instead of treating it as a r
       command: createCommandClient(storage, post),
       getStreamSession: () => ({ workspaceId: "workspace" }),
     } as never,
-    storage,
     buffer,
     watchResourceConnection: () => () => {},
   });
@@ -473,7 +461,6 @@ it("restores an uncertain command after reload and removes it on confirmation", 
       command: createCommandClient(storage, post),
       getStreamSession: () => ({ workspaceId: "workspace" }),
     } as never,
-    storage,
     buffer,
     watchResourceConnection: () => () => {},
   };
@@ -505,7 +492,6 @@ it("dispatches immediately when the buffer write never finishes", async () => {
       command: createCommandClient(storage, post),
       getStreamSession: () => ({ workspaceId: "workspace" }),
     } as never,
-    storage,
     buffer,
     watchResourceConnection: () => () => {},
   });
@@ -532,7 +518,6 @@ it("does not resurrect a command confirmed in another tab", async () => {
       command: createCommandClient(storage, post),
       getStreamSession: () => ({ workspaceId: "workspace" }),
     } as never,
-    storage,
     buffer,
     watchResourceConnection: () => () => {},
   };
@@ -566,7 +551,6 @@ it("retries initialization after a storage failure", async () => {
       command: createCommandClient(storage, post),
       getStreamSession: () => ({ workspaceId: "workspace" }),
     } as never,
-    storage,
     buffer,
     watchResourceConnection: () => () => {},
   });

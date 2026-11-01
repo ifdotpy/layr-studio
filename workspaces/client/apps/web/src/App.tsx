@@ -286,8 +286,7 @@ export default function App({ active = true }: { active?: boolean }) {
   const serverAliases = useServerAliases(readServerAliases);
   const { useServerActivity, serverActivityActive, subscribeServerActivity } =
     useServerActivityScope();
-  const { acknowledgeOutbox, editOutboxDisplay, durableSend, useOutbox } =
-    useServerOutbox();
+  const { editOutboxDisplay, durableSend, useOutbox } = useServerOutbox();
   const {
     get,
     post,
@@ -331,7 +330,6 @@ export default function App({ active = true }: { active?: boolean }) {
         Object.entries(old).filter(([id]) => !observedSends.current.has(id)),
       ),
     );
-    void acknowledgeOutbox(ids).catch(() => {});
   }, []);
   const editSend = useCallback((id: string, text: string) => {
     setOutgoing((old) =>
@@ -686,11 +684,6 @@ export default function App({ active = true }: { active?: boolean }) {
     if (data?.stateDir && saved(sharedCreationKey(data.stateDir), null))
       setSharedCreate({});
   }, [data?.stateDir]);
-  const receipts = useMemo(
-    () =>
-      new Map((data?.runtime?.events || []).map((event) => [event.id, event])),
-    [data?.runtime?.events],
-  );
   const prefetchData = useMemo(() => {
     if (
       !data ||
@@ -718,31 +711,7 @@ export default function App({ active = true }: { active?: boolean }) {
     if (tasksOpen) setTasksRendered(true);
     if (workspaceOpen) setWorkspaceRendered(true);
   }, [tasksOpen, workspaceOpen]);
-  const cancelledSends = outgoingMessages
-    .filter((entry) => receipts.get(entry.id)?.status === "cancelled")
-    .map((entry) => entry.id)
-    .join(",");
-  useEffect(() => {
-    if (cancelledSends) observeSends(cancelledSends.split(","));
-  }, [cancelledSends, observeSends]);
-  const visibleOutgoing = useMemo(
-    () =>
-      outgoingMessages
-        .filter((entry) => receipts.get(entry.id)?.status !== "cancelled")
-        .map((entry) => {
-          const receipt = receipts.get(entry.id);
-          const status = Object.values(MessageSendStatus).find(
-            (value) => value === receipt?.status,
-          );
-          if (status)
-            return {
-              ...entry,
-              status: { source: "server", status },
-            } satisfies OutgoingMessage;
-          return entry;
-        }),
-    [outgoingMessages, receipts],
-  );
+  const visibleOutgoing = outgoingMessages;
   const conversationOutgoing = useRetainedArray(
     visibleOutgoing.filter((entry) => entry.body.room === opened),
   );
@@ -1743,8 +1712,6 @@ export default function App({ active = true }: { active?: boolean }) {
               status: { source: "device", state: result.state },
             },
           }));
-          if (result.state.kind === "transport_failed")
-            throw new Error(result.state.error);
         }
         if (sends.current[id]?.id === entry.id) {
           delete sends.current[id];

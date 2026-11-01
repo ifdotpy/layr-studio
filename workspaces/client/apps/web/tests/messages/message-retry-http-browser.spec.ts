@@ -195,6 +195,7 @@ test("message retry http browser", async ({ page: runnerPage }) => {
       /expired/i,
     );
     await mount();
+    await expect.poll(() => expiredAttempts).toBe(2);
     await page.waitForFunction(
       (id) =>
         window.outbox.entries.some(
@@ -217,8 +218,8 @@ test("message retry http browser", async ({ page: runnerPage }) => {
     );
     assert.equal(
       expiredAttempts,
-      1,
-      "expiry and reload never resend or replace the ID",
+      2,
+      "reload sends the same expired ID once and the fresh 410 blocks further retries",
     );
     assert.equal(
       required(
