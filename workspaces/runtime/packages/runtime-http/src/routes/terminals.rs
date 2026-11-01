@@ -1,6 +1,6 @@
 //! Persisted terminal reads and session-dependent terminal operations.
 
-use super::extractors::{ApiJson, QueryParams};
+use super::extractors::{ApiJson, TypedQuery};
 #[cfg(not(unix))]
 use super::manifest::Dependency;
 use super::manifest::{OperationStatus, RouteGroup, get, post};
@@ -99,24 +99,48 @@ pub(super) async fn listing(
     ))
 }
 
+#[derive(serde::Deserialize)]
+enum HistoryFlag {
+    #[serde(rename = "1")]
+    Enabled,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TerminalOutputQuery {
+    id: Option<
+        studio_runtime_schema::bounded_text::BoundedText<
+            0,
+            { studio_runtime_schema::terminal_ingress::TERMINAL_ID_MAX_CODEPOINTS },
+        >,
+    >,
+    offset: Option<
+        studio_runtime_schema::bounded_integer::BoundedInteger<
+            0,
+            { studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64 },
+        >,
+    >,
+    history: Option<HistoryFlag>,
+    limit: Option<
+        studio_runtime_schema::bounded_integer::BoundedInteger<
+            1,
+            { studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64 },
+        >,
+    >,
+}
+
 async fn output(
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<TerminalOutputQuery>,
     State(state): State<HttpState>,
 ) -> Result<Json<crate::generated::TerminalOutput>, ApiError> {
     let id = query
-        .typed_value("id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
+        .id
+        .as_ref()
+        .map_or("", |value| value.as_str())
         .to_owned();
-    let offset = query
-        .typed_value("offset")
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
-    let history = query.typed_value("history").and_then(Value::as_str) == Some("1");
-    let limit = query
-        .typed_value("limit")
-        .and_then(Value::as_i64)
-        .unwrap_or(65_536);
+    let offset = query.offset.map_or(0, |value| value.get());
+    let history = query.history.is_some();
+    let limit = query.limit.map_or(65_536, |value| value.get());
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let result = if history {
         terminal_driver::history_output(Arc::clone(&store), &id, offset, limit)
@@ -360,6 +384,17 @@ inventory::submit! {
 #[cfg(all(test, unix))]
 #[allow(clippy::disallowed_methods)]
 mod tests {
+    #[test]
+    fn output_query_enforces_history_and_limit() {
+        fn valid(query: &str) -> bool {
+            let uri: axum::http::Uri = format!("/api/terminals/output?{query}").parse().unwrap();
+            axum::extract::Query::<super::TerminalOutputQuery>::try_from_uri(&uri).is_ok()
+        }
+        assert!(valid("id=term&history=1&limit=5"));
+        assert!(!valid("history=0"));
+        assert!(!valid("limit=0"));
+        assert!(!valid("extra=1"));
+    }
     use std::sync::Arc;
 
     use axum::body::{Body, to_bytes};

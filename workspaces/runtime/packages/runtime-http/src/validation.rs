@@ -79,6 +79,8 @@ const TYPED_BODIES: &[(&str, &str)] = &[
 // Temporary migration marker; typed extractors own these query contracts.
 const TYPED_QUERIES: &[(&str, &str)] = &[
     ("GET", "/api/messages"),
+    ("GET", "/api/agent-chat"),
+    ("GET", "/api/messages/receipts"),
     ("GET", "/api/search"),
     ("GET", "/api/search/item"),
     ("GET", "/api/transcript"),
@@ -86,6 +88,7 @@ const TYPED_QUERIES: &[(&str, &str)] = &[
     ("GET", "/api/transcript/item"),
     ("GET", "/api/transcript/page"),
     ("GET", "/api/transcript/search"),
+    ("GET", "/api/terminals/output"),
 ];
 
 #[derive(Debug, Clone)]
@@ -1918,7 +1921,7 @@ mod tests {
 
     #[test]
     fn repeated_scalar_query_parameters_are_refused_even_when_empty() {
-        let registry = Registry::compile(&[("GET".to_owned(), "/api/agent-chat".to_owned())])
+        let registry = Registry::compile(&[("GET".to_owned(), "/api/sync/stream".to_owned())])
             .expect("query schema compiles");
         for values in [
             vec!["01".to_owned(), "2".to_owned()],
@@ -1928,33 +1931,33 @@ mod tests {
             let error = registry
                 .validate_route(
                     "GET",
-                    "/api/agent-chat",
+                    "/api/sync/stream",
                     RawRequest {
-                        query: BTreeMap::from([("before".to_owned(), values)]),
+                        query: BTreeMap::from([("after".to_owned(), values)]),
                         ..RawRequest::default()
                     },
                 )
                 .expect_err("a declared scalar must occur at most once");
-            assert_eq!(error.location, vec![json!("query"), json!("before")]);
+            assert_eq!(error.location, vec![json!("query"), json!("after")]);
         }
     }
 
     #[test]
     fn oversized_integer_query_parameter_returns_a_located_validation_error() {
-        let registry = Registry::compile(&[("GET".to_owned(), "/api/agent-chat".to_owned())])
+        let registry = Registry::compile(&[("GET".to_owned(), "/api/sync/stream".to_owned())])
             .expect("query schema compiles");
         let huge = "9".repeat(401);
         let error = registry
             .validate_route(
                 "GET",
-                "/api/agent-chat",
+                "/api/sync/stream",
                 RawRequest {
-                    query: BTreeMap::from([("before".to_owned(), vec![huge])]),
+                    query: BTreeMap::from([("after".to_owned(), vec![huge])]),
                     ..RawRequest::default()
                 },
             )
             .expect_err("an integer outside the serde_json exact range is rejected");
-        assert_eq!(error.location, vec![json!("query"), json!("before")]);
+        assert_eq!(error.location, vec![json!("query"), json!("after")]);
     }
 
     #[test]

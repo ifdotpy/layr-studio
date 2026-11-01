@@ -1796,7 +1796,7 @@ mod tests {
 
     #[tokio::test]
     async fn huge_integer_body_and_query_return_located_client_errors() {
-        let (app, _directory) = probe_app(&[("POST", "/api/agents"), ("GET", "/api/agent-chat")]);
+        let (app, _directory) = probe_app(&[("POST", "/api/agents"), ("GET", "/api/sync/stream")]);
         let peer = ConnectInfo(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 12345));
         let huge = "9".repeat(401);
         let body = format!("{{\"prompt\":\"x\",\"concurrency\":{huge}}}");
@@ -1826,7 +1826,7 @@ mod tests {
 
         let request = Request::builder()
             .method("GET")
-            .uri(format!("/api/agent-chat?before={huge}"))
+            .uri(format!("/api/sync/stream?after={huge}"))
             .header("host", "127.0.0.1:4620")
             .extension(peer)
             .body(Body::empty())
@@ -1840,7 +1840,7 @@ mod tests {
         )
         .expect("error is JSON");
         assert_eq!(body["error"], "Invalid request");
-        assert_eq!(body["location"], serde_json::json!(["query", "before"]));
+        assert_eq!(body["location"], serde_json::json!(["query", "after"]));
     }
 
     #[tokio::test]
@@ -2101,11 +2101,11 @@ mod tests {
 
     #[tokio::test]
     async fn encoded_repeated_scalar_query_parameter_is_refused_by_router() {
-        let (app, _directory) = probe_app(&[("GET", "/api/agent-chat")]);
+        let (app, _directory) = probe_app(&[("GET", "/api/sync/stream")]);
         let peer = ConnectInfo(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 12345));
         let request = Request::builder()
             .method("GET")
-            .uri("/api/agent-chat?%62efore=1&before=1")
+            .uri("/api/sync/stream?%61fter=1&after=1")
             .header("host", "127.0.0.1:4620")
             .extension(peer)
             .body(Body::empty())
@@ -2118,7 +2118,7 @@ mod tests {
                 .expect("body reads"),
         )
         .expect("error envelope parses");
-        assert_eq!(body["location"], serde_json::json!(["query", "before"]));
+        assert_eq!(body["location"], serde_json::json!(["query", "after"]));
     }
 
     #[tokio::test]
