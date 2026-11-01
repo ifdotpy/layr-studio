@@ -26,6 +26,7 @@ const deviceLabels: Record<
   in_flight: "Sending…",
   transport_failed: "Could not contact server",
   receipt_expired: "Delivery outcome unknown",
+  uncertain: "Delivery unconfirmed",
   removed: "Removed from device",
 };
 
@@ -127,7 +128,8 @@ export function outgoingTranscript(
           deliveryError:
             entry.status.source === "device" &&
             (entry.status.state.kind === "transport_failed" ||
-              entry.status.state.kind === "receipt_expired")
+              entry.status.state.kind === "receipt_expired" ||
+              entry.status.state.kind === "uncertain")
               ? entry.status.state.error
               : entry.receipt?.error,
         });
@@ -161,7 +163,8 @@ export function outgoingTranscript(
       deliveryError:
         entry.status.source === "device" &&
         (entry.status.state.kind === "transport_failed" ||
-          entry.status.state.kind === "receipt_expired")
+          entry.status.state.kind === "receipt_expired" ||
+          entry.status.state.kind === "uncertain")
           ? entry.status.state.error
           : entry.receipt?.error,
       localDelivery: true,

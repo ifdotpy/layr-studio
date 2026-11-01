@@ -1439,7 +1439,8 @@ export default function Conversation(p: {
           serverStatus(m.deliveryStatus) === MessageSendStatus.uncertain ||
           (m.deliveryStatus?.source === "device" &&
             (m.deliveryStatus.state.kind === "transport_failed" ||
-              m.deliveryStatus.state.kind === "receipt_expired"))) && (
+              m.deliveryStatus.state.kind === "receipt_expired" ||
+              m.deliveryStatus.state.kind === "uncertain"))) && (
           <div className="message-delivery-error">
             <p>{m.deliveryError}</p>
             {serverStatus(m.deliveryStatus) === MessageSendStatus.failed && (

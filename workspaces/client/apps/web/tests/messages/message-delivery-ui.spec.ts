@@ -282,10 +282,13 @@ for (const attachmentCase of [false, true])
                 if (resource.kind !== "transcript")
                   return { resource, revision: streamRevision };
                 const revision = revisions.get(resource.agentId) ?? 1;
+                const originalAgent = history.get(resource.agentId)?.agent;
+                const { contextUsage: _contextUsage, ...transcriptAgent } =
+                  originalAgent ?? { id: resource.agentId };
                 const transcriptSnapshot: components["schemas"]["TranscriptPageResponse"] =
                   {
                     items: history.get(resource.agentId)?.items ?? [],
-                    agent: history.get(resource.agentId)?.agent,
+                    agent: transcriptAgent,
                     truncated: false,
                     historyVersion: String(revision),
                   };
@@ -712,10 +715,6 @@ for (const attachmentCase of [false, true])
           await page.setViewportSize({ width: 1440, height: 960 });
 
           if (attachmentCase) {
-            test.fail(
-              true,
-              "finishUpload marks the confirmed asset cancelled; work-1793530381442156544-11.",
-            );
             // A rejected message keeps its draft, attachments, and an inline error.
             await page.locator('input[type="file"]').setInputFiles({
               name: "delivery-evidence.txt",
@@ -780,6 +779,16 @@ for (const attachmentCase of [false, true])
           await row(uncertainText).locator(".message-delivery-error").waitFor();
           assert.equal(await input.inputValue(), "");
           const beforeUncertainRetry = posts.length;
+          const uncertainRequest = uncertain.route.request().postDataJSON();
+          await page.reload();
+          await page.locator(`[data-chat="${a.id}"]`).click();
+          await row(uncertainText).waitFor();
+          await page.waitForTimeout(500);
+          assert.equal(
+            posts.length,
+            beforeUncertainRetry,
+            `${mode}: reload does not retry an uncertain receipt`,
+          );
           await row(uncertainText)
             .getByRole("button", { name: "Retry", exact: true })
             .click();
@@ -790,7 +799,7 @@ for (const attachmentCase of [false, true])
           const retry = required(posts.at(-1));
           assert.deepEqual(
             retry.route.request().postDataJSON(),
-            uncertain.route.request().postDataJSON(),
+            uncertainRequest,
             `${mode}: retry reuses the exact command`,
           );
           await retry.route.fulfill({

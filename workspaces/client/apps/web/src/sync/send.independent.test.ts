@@ -254,12 +254,9 @@ it("removes a definitive rejection from the buffer", async () => {
     buffer,
     watchResourceConnection: () => () => {},
   });
-  expect(
-    await outbox.durableSend({ id: "refused", room: "chat", text: "hello" }),
-  ).toMatchObject({
-    kind: "local",
-    state: { kind: "transport_failed", error: "refused" },
-  });
+  await expect(
+    outbox.durableSend({ id: "refused", room: "chat", text: "hello" }),
+  ).rejects.toThrow("refused");
   expect(post).toHaveBeenCalledTimes(1);
   expect(buffer.values.size).toBe(0);
   await expect(outbox.changeOutbox("refused", "resume")).rejects.toThrow(

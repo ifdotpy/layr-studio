@@ -219,7 +219,13 @@ export function createOutbox(options: {
         notifyPersisted();
         if (receipt.status === MessageSendStatus.uncertain) {
           if (read(value.body.room, id))
-            await write({ ...value, localState: { kind: "stored" } });
+            await write({
+              ...value,
+              localState: {
+                kind: "uncertain",
+                error: receipt.error ?? "Delivery unconfirmed",
+              },
+            });
         } else {
           void remove(value.body.room, id).catch(reportUnsentFailure);
         }
@@ -238,16 +244,18 @@ export function createOutbox(options: {
         const definitive =
           error instanceof ApiError &&
           !serverMutationResponseIsUncertain(error.status, error.response);
-        if (definitive) refused = true;
+        if (definitive) {
+          refused = true;
+          if (read(value.body.room, id)) await remove(value.body.room, id);
+          throw error;
+        }
         const localState: LocalSend = {
           kind: expired ? "receipt_expired" : "transport_failed",
           error: errorText(error),
         };
         const failed: SavedSend = { ...value, localState };
         if (read(value.body.room, id)) {
-          if (definitive)
-            void remove(value.body.room, id).catch(reportUnsentFailure);
-          else if (expired) await write(failed);
+          if (expired) await write(failed);
           else void write(failed);
         }
         return result(failed);
@@ -365,7 +373,7 @@ export function createOutbox(options: {
         try {
           for (const entry of list()) {
             const value = read(entry.body.room, entry.id);
-            if (value)
+            if (value?.localState.kind === "transport_failed")
               void send(value).catch((failure) => setError(errorText(failure)));
           }
         } catch (failure) {
