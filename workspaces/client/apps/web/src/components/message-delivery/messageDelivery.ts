@@ -99,6 +99,15 @@ export function mergeOutgoing(
   );
 }
 
+function deliveryError(entry: OutgoingMessage) {
+  return entry.status.source === "device" &&
+    (entry.status.state.kind === "transport_failed" ||
+      entry.status.state.kind === "receipt_expired" ||
+      entry.status.state.kind === "uncertain")
+    ? entry.status.state.error
+    : entry.receipt?.error;
+}
+
 export function outgoingTranscript(
   items: Message[],
   entries: OutgoingMessage[],
@@ -127,13 +136,7 @@ export function outgoingTranscript(
         updates.set(present.id, {
           ...shown,
           deliveryStatus: entry.status,
-          deliveryError:
-            entry.status.source === "device" &&
-            (entry.status.state.kind === "transport_failed" ||
-              entry.status.state.kind === "receipt_expired" ||
-              entry.status.state.kind === "uncertain")
-              ? entry.status.state.error
-              : entry.receipt?.error,
+          deliveryError: deliveryError(entry),
         });
       if (
         present.deliveryStatus?.source === "server" &&
@@ -162,13 +165,7 @@ export function outgoingTranscript(
       assets: entry.attachments || [],
       at: entry.created / 1000,
       deliveryStatus: entry.status,
-      deliveryError:
-        entry.status.source === "device" &&
-        (entry.status.state.kind === "transport_failed" ||
-          entry.status.state.kind === "receipt_expired" ||
-          entry.status.state.kind === "uncertain")
-          ? entry.status.state.error
-          : entry.receipt?.error,
+      deliveryError: deliveryError(entry),
       localDelivery: true,
       requestedDelivery: normalizeDelivery(
         entry.body.delivery ?? DeliveryMoment.CurrentTurn,

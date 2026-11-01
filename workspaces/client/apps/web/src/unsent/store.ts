@@ -51,6 +51,18 @@ export function unsentKey(server: string, feature: string, id: string) {
 export function unsentStore(server: string, feature: TextFeature) {
   const prefix = (id: string) => unsentKey(server, feature, id);
   return {
+    async get(id: string) {
+      const key = prefix(id);
+      const raw = await db.get(key);
+      const record = decode(raw);
+      if (raw !== undefined && !record) {
+        console.error("Discarding invalid unsent input", key);
+        await db.update(key, (current) =>
+          decode(current) === undefined ? undefined : current,
+        );
+      }
+      return record?.value;
+    },
     async put(id: string, value: string) {
       await putRecord(prefix(id), encode(value));
     },

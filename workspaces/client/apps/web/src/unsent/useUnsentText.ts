@@ -20,9 +20,8 @@ export function useUnsentText(feature: TextFeature, id: string) {
     const owner = current.current;
     setValue(null);
     void unsentStore(server, feature)
-      .loadAll()
-      .then((rows) => {
-        const saved = rows.find(([key]) => key === id)?.[1];
+      .get(id)
+      .then((saved) => {
         if (active && !owner.changed && typeof saved === "string") {
           owner.value = saved;
           setValue(saved);

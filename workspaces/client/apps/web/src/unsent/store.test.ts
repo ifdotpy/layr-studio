@@ -3,6 +3,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 const rows = vi.hoisted(() => new Map<string, unknown>());
 vi.mock("../indexedDb.ts", () => ({
   indexedDb: () => ({
+    get: async (key: string) => rows.get(key),
     put: async (key: string, value: unknown) => {
       rows.set(key, value);
     },
@@ -60,7 +61,18 @@ it("deletes an unknown record version", async () => {
 
 it("round trips a valid record", async () => {
   await store.put("one", "hello");
+  expect(await store.get("one")).toBe("hello");
+  expect(await store.get("missing")).toBeUndefined();
   expect(await store.loadAll()).toEqual([["one", "hello"]]);
+});
+
+it("reads only the requested record and discards it if invalid", async () => {
+  const other = unsentKey("other", "upload", "file");
+  rows.set(other, { broken: true });
+  rows.set(key, { broken: true });
+  expect(await store.get("one")).toBeUndefined();
+  expect(rows.has(key)).toBe(false);
+  expect(rows.has(other)).toBe(true);
 });
 
 it("deletes an invalid message payload instead of returning a partial record", async () => {
