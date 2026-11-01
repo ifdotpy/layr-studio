@@ -435,7 +435,12 @@ test("Ux Chat Ui", async ({
     );
     assert.equal(required(writes.at(-1)).body.asTextFile, true);
 
-    await page.locator("#earlier-messages").click();
+    await page.locator("#messages").evaluate((root) => {
+      root.scrollTop = 0;
+      root.dispatchEvent(
+        new WheelEvent("wheel", { deltaY: -1000, bubbles: true }),
+      );
+    });
     await page.locator('[data-message="item-6"]').waitFor();
     assert.equal(await page.locator('[data-message="item-13"]').count(), 1);
     await page.evaluate(() =>
@@ -476,17 +481,27 @@ test("Ux Chat Ui", async ({
       .evaluate((element) => {
         const root = document.querySelector("#messages");
         if (!root) throw new Error("Missing messages");
-
-        return (
-          element.getBoundingClientRect().top -
-          root!.getBoundingClientRect().top
-        );
+        return {
+          top:
+            element.getBoundingClientRect().top -
+            root.getBoundingClientRect().top,
+          scrollTop: root.scrollTop,
+          max: root.scrollHeight - root.clientHeight,
+        };
       });
+    // Removing the later-page button can leave too little content to align the result near the top.
     assert.ok(
-      position >= 0 && position < 100,
-      `exact result is visible: ${position}`,
+      position.top >= 0 &&
+        (position.top < 100 ||
+          (position.max - position.scrollTop <= 1 && position.top < 200)),
+      `exact result is visible: ${JSON.stringify(position)}`,
     );
-    await page.locator("#newer-messages").click();
+    await page.locator("#messages").evaluate((root) => {
+      root.scrollTop = root.scrollHeight;
+      root.dispatchEvent(
+        new WheelEvent("wheel", { deltaY: 1000, bubbles: true }),
+      );
+    });
     await page.locator('[data-message="item-9"]').waitFor();
     await page
       .getByRole("button", { name: "Return to latest messages", exact: true })
@@ -657,7 +672,12 @@ test("Ux Chat Ui", async ({
 
     await page.evaluate(() => window.chatFixture.select("lead"));
     await page.locator('[data-message="item-10"]').waitFor();
-    await page.locator("#earlier-messages").click();
+    await page.locator("#messages").evaluate((root) => {
+      root.scrollTop = 0;
+      root.dispatchEvent(
+        new WheelEvent("wheel", { deltaY: -1000, bubbles: true }),
+      );
+    });
     await page.locator('[data-message="item-6"]').waitFor();
     await page.evaluate(() =>
       fetch("/api/fixture-restore", { method: "POST" }),
