@@ -9922,23 +9922,19 @@ export interface components {
        */
       turnId?: null | string | undefined;
     };
-    /** ChatEntityDto */
     ChatEntityDto: {
-      /** Id */
       id: string;
-      /** Kind */
-      kind?: "chat" | null | undefined;
-      /** Lastmessageat */
-      lastMessageAt?: null | number | undefined;
-      /** Members */
+      kind?: components["schemas"]["ChatKind"] | null | undefined;
+      /** Format: double */
+      lastMessageAt?: number | null | undefined;
       members?: string[] | null | undefined;
-      /** Messagecount */
+      /** Format: uint64 */
       messageCount?: number | null | undefined;
-      /** Name */
-      name?: null | string | undefined;
-      /** Tail */
-      tail?: null | string | undefined;
+      name?: string | null | undefined;
+      tail?: string | null | undefined;
     };
+    /** @enum {string} */
+    ChatKind: "chat";
     /** ChatMessage */
     ChatMessage: {
       /** Created */
@@ -23169,14 +23165,12 @@ export interface components {
       id: string;
       value: components["schemas"]["AnnotationEntityDto"];
     };
-    /** SyncChatEntityPayload */
     SyncChatEntityPayload: {
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
       collection: "chat";
-      /** Id */
       id: string;
       value: components["schemas"]["ChatEntityDto"];
     };
@@ -38842,6 +38836,8 @@ export const CapacityRetryStatus = {
   failed: "failed",
 } as const;
 export type CapacityRetryStatus = components["schemas"]["CapacityRetryStatus"];
+export const ChatKind = { chat: "chat" } as const;
+export type ChatKind = components["schemas"]["ChatKind"];
 export const CommandErrorCode = { receipt_expired: "receipt_expired" } as const;
 export type CommandErrorCode = components["schemas"]["CommandErrorCode"];
 export const ComplaintResponseStatus = {

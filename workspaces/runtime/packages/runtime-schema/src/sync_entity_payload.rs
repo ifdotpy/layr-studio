@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "collection", rename_all = "camelCase", deny_unknown_fields)]
 pub enum SyncEntityPayload {
     Edge { id: String, value: EdgeEntity },
+    Chat { id: String, value: ChatEntity },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -19,6 +20,26 @@ pub struct EdgeEntity {
     pub source: Option<String>,
     #[schemars(default)]
     pub target: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename = "ChatEntityDto")]
+pub struct ChatEntity {
+    pub id: String,
+    pub kind: Option<ChatKind>,
+    pub last_message_at: Option<f64>,
+    pub members: Option<Vec<String>>,
+    #[schemars(with = "Option<u64>", range(max = crate::shared_values::MAX_SAFE_INTEGER))]
+    pub message_count: Option<crate::recovery_record::SafeInteger>,
+    pub name: Option<String>,
+    pub tail: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ChatKind {
+    Chat,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -91,7 +112,41 @@ mod tests {
     }
 
     #[test]
-    fn edge_serde_dispatch_is_the_live_validator() {
+    fn chat_previous_wire_fixtures() {
+        for (value, valid) in [
+            (json!({"id":"c"}), true),
+            (
+                json!({"id":"c","kind":"chat","members":["a"],"messageCount":1.0,"lastMessageAt":1.5}),
+                true,
+            ),
+            (
+                json!({"id":"c","kind":null,"members":null,"messageCount":null}),
+                true,
+            ),
+            (json!({"id":"c","kind":"other"}), false),
+            (json!({"id":"c","messageCount":-1}), false),
+            (json!({"id":"c","messageCount":1.5}), false),
+            (json!({"id":"c","messageCount":9007199254740992_u64}), false),
+            (json!({"id":"c","members":[1]}), false),
+            (json!({"id":"c","extra":true}), false),
+            (json!({}), false),
+        ] {
+            let payload = json!({"collection":"chat","id":"c","value":value});
+            assert_eq!(
+                serde_json::from_value::<SyncEntityPayload>(payload.clone()).is_ok(),
+                valid,
+                "{payload}"
+            );
+            assert_eq!(
+                crate::validate_sync_entity_payload_strict("chat", "c", false, &payload).unwrap(),
+                valid,
+                "{payload}"
+            );
+        }
+    }
+
+    #[test]
+    fn migrated_payloads_use_the_serde_validator() {
         let source = include_str!("lib.rs");
         let body = source
             .split("pub fn validate_sync_entity_payload_strict(")
@@ -100,12 +155,12 @@ mod tests {
             .split("fn sync_entity_envelope_matches(")
             .next()
             .unwrap();
-        let dispatch = "if collection == \"edge\" {";
+        let dispatch = "if matches!(collection, \"edge\" | \"chat\") {";
         let owner = "serde_json::from_value::<sync_entity_payload::SyncEntityPayload>";
-        let owns_edge = |text: &str| text.contains(dispatch) && text.contains(owner);
-        assert!(owns_edge(body));
+        let owns_payloads = |text: &str| text.contains(dispatch) && text.contains(owner);
+        assert!(owns_payloads(body));
         // Negative control: removing this dispatch must make the witness fail.
-        assert!(!owns_edge(&body.replace(dispatch, "")));
+        assert!(!owns_payloads(&body.replace(dispatch, "")));
     }
 
     #[test]

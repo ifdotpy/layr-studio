@@ -19474,87 +19474,66 @@
         "additionalProperties": false,
         "properties": {
           "id": {
-            "title": "Id",
             "type": "string"
           },
           "kind": {
             "anyOf": [
               {
-                "const": "chat",
-                "type": "string"
+                "$ref": "#/components/schemas/ChatKind"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Kind"
+            ]
           },
           "lastMessageAt": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "Lastmessageat"
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "members": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Members"
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "messageCount": {
-            "anyOf": [
-              {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Messagecount"
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "name": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Name"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "tail": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Tail"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "id"
         ],
-        "title": "ChatEntityDto",
         "type": "object"
+      },
+      "ChatKind": {
+        "enum": [
+          "chat"
+        ],
+        "type": "string"
       },
       "ChatMessage": {
         "additionalProperties": false,
@@ -52149,11 +52128,9 @@
         "properties": {
           "collection": {
             "const": "chat",
-            "title": "Collection",
             "type": "string"
           },
           "id": {
-            "title": "Id",
             "type": "string"
           },
           "value": {
@@ -52165,7 +52142,6 @@
           "id",
           "value"
         ],
-        "title": "SyncChatEntityPayload",
         "type": "object"
       },
       "SyncCheckpoint": {

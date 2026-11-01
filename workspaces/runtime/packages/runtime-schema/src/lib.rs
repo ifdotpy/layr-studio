@@ -652,7 +652,7 @@ pub fn validate_sync_entity_payload_strict(
             .and_then(Value::as_object)
             .is_some_and(serde_json::Map::is_empty));
     }
-    if collection == "edge" {
+    if matches!(collection, "edge" | "chat") {
         return Ok(
             serde_json::from_value::<sync_entity_payload::SyncEntityPayload>(payload.clone())
                 .is_ok(),
