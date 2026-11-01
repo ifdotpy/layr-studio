@@ -1220,6 +1220,7 @@ mod tests {
         history_output, new_id, output, receipt_signature, terminal_title,
     };
     use serde_json::Value;
+    use studio_runtime_schema::terminal_ingress::{TerminalAction, TerminalInput};
     use studio_runtime_store::path_identity::CanonicalPath;
     use studio_runtime_store::{
         AgentId, AgentRecord, AgentRepository, AgentStatus, RuntimeStore, TerminalRecord,
@@ -1495,9 +1496,12 @@ mod tests {
         )
         .expect("receipt read");
         let requests_before = driver.session.requests.lock().expect("requests").len();
-        let too_large = serde_json::json!({"id":id,"text":"x".repeat(INPUT_LIMIT + 1),"request_id":request_id("input-limit-too-large").as_str()});
+        let too_large = serde_json::json!({"id":id,"text":"é".repeat(INPUT_LIMIT / 2 + 1),"request_id":request_id("input-limit-too-large").as_str()});
+        let input = <TerminalInput as serde::Deserialize>::deserialize(&too_large)
+            .expect("input is within the character limit");
+        assert!(before.is_none());
         assert!(matches!(
-            driver.action("input", &too_large).await,
+            driver.perform_action(&TerminalAction::Input(input)).await,
             Err(TerminalError::InvalidRequest)
         ));
         let after = TerminalsRepository::action_result(

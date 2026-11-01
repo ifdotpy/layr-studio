@@ -441,10 +441,7 @@ pub async fn create_invite(
     .map_err(|_| {
         MultiServerError::Refused("The local server credentials are unavailable".into())
     })?;
-    let fingerprint = studio_runtime_store::sha256_hex(
-        &serde_json::to_vec(body)
-            .map_err(|_| MultiServerError::Refused("Invalid pairing request".into()))?,
-    );
+    let fingerprint = invite_fingerprint(body)?;
     let request_id_for_read = request_id.to_owned();
     let prior = store
         .read_async("runtime-services/multi_server", move |tx| {
@@ -547,6 +544,18 @@ pub async fn create_invite(
         "invitation": invitation,
         "expires": invite.expires
     }))
+}
+
+/// Preserve the canonical JSON bytes used by stored invite fingerprints before
+/// request bodies became typed, including omitted fields and explicit nulls.
+fn invite_fingerprint(
+    body: &studio_runtime_schema::multi_server_ingress::ManagementRequest,
+) -> Result<String, MultiServerError> {
+    let value = serde::Serialize::serialize(body, serde_json::value::Serializer)
+        .map_err(|_| MultiServerError::Refused("Invalid pairing request".into()))?;
+    let canonical = crate::remote_transport::canonical_json(&value)
+        .map_err(|_| MultiServerError::Refused("Invalid pairing request".into()))?;
+    Ok(studio_runtime_store::sha256_hex(canonical.as_bytes()))
 }
 
 fn project_records(tx: &rusqlite::Transaction<'_>, table: &str) -> Result<Vec<Value>, StoreError> {
@@ -786,6 +795,50 @@ mod tests {
             studio_runtime_schema::multi_server_ingress::ManagementRequest::deserialize(body)
                 .map_err(|_| MultiServerError::Refused("invalid test request".into()))?;
         super::manage(store, identity, &request, actor).await
+    }
+
+    #[test]
+    fn stored_invite_fingerprint_matches_legacy_canonical_json() {
+        use studio_runtime_schema::multi_server_ingress::ManagementRequest;
+
+        let wire =
+            r#"{"requestId":"stored-1","label":"Café","grant":"observe","action":"create_invite"}"#;
+        let old_body: serde_json::Value = serde_json::from_str(wire).unwrap();
+        let typed: ManagementRequest = serde_json::from_str(wire).unwrap();
+        let old_bytes = crate::remote_transport::canonical_json(&old_body).unwrap();
+        assert_eq!(
+            old_bytes,
+            r#"{"action":"create_invite","grant":"observe","label":"Café","requestId":"stored-1"}"#
+        );
+        let old_hash = studio_runtime_store::sha256_hex(old_bytes.as_bytes());
+        assert_eq!(
+            old_hash,
+            "016cd5bb32c6b282facf16337fee8493688172cab5a6bfbb0f1d1fa4af3360ca"
+        );
+        assert_eq!(super::invite_fingerprint(&typed).unwrap(), old_hash);
+
+        let missing = r#"{"action":"create_invite","requestId":"r"}"#;
+        let null = r#"{"action":"create_invite","requestId":"r","label":null}"#;
+        let missing_body: ManagementRequest = serde_json::from_str(missing).unwrap();
+        let null_body: ManagementRequest = serde_json::from_str(null).unwrap();
+        let serialized = serde_json::to_string(&missing_body).unwrap();
+        let serialized: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(
+            serialized,
+            json!({"action":"create_invite","requestId":"r"})
+        );
+        for (wire, typed) in [(missing, &missing_body), (null, &null_body)] {
+            let old: serde_json::Value = serde_json::from_str(wire).unwrap();
+            let old = crate::remote_transport::canonical_json(&old).unwrap();
+            assert_eq!(
+                super::invite_fingerprint(typed).unwrap(),
+                studio_runtime_store::sha256_hex(old.as_bytes())
+            );
+        }
+        assert_ne!(
+            super::invite_fingerprint(&missing_body).unwrap(),
+            super::invite_fingerprint(&null_body).unwrap()
+        );
     }
 
     #[tokio::test]

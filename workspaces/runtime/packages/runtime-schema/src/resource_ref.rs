@@ -108,6 +108,7 @@ pub struct RoomResource {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TranscriptResource {
     pub agent_id: NonEmpty,
+    /// Integral float spellings such as 40.0 are refused; no producer emits them.
     #[serde(default, deserialize_with = "present")]
     pub tail: Option<
         BoundedInteger<1, { crate::shared_values::SYNC_TRANSCRIPT_STREAM_MAX_ITEMS as u64 }>,
@@ -322,6 +323,15 @@ impl Serialize for ResourceRef {
 mod tests {
     use super::ResourceRef;
     use serde_json::json;
+
+    #[test]
+    fn notification_tail_refuses_integral_float_spelling() {
+        use crate::resource_notification::ResourceNotifyRequest;
+        let body =
+            r#"{"requestId":"r","resources":[{"kind":"transcript","agentId":"a","tail":40.0}]}"#;
+        assert!(serde_json::from_str::<ResourceNotifyRequest>(body).is_err());
+        assert!(serde_json::from_str::<ResourceNotifyRequest>(&body.replace("40.0", "40")).is_ok());
+    }
 
     #[test]
     fn resource_ref_matches_schema_and_preserves_canonical_key() {
