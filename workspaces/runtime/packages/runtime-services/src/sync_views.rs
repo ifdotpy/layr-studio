@@ -4,6 +4,8 @@ use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, OnceLock};
 use studio_runtime_schema::provider_errors::is_misalignment_policy_violation;
+use studio_runtime_store::entity_publication::WorkHistoryKind;
+use studio_runtime_store::{StoreError, StoreResult};
 
 use crate::event_write::truthy;
 use crate::submit_gates::{AgentAuthorityRow, Deletion, PeerTeamRow, StoredField};
@@ -383,6 +385,101 @@ pub fn project_work_record(
             )),
         },
     })
+}
+
+/// Work detail document: source metadata with empty history lists, the
+/// submission refusal, and the server policy. `metadata` is validated before
+/// the policy is attached. Serializes as one flat object, `policy` last.
+#[derive(serde::Serialize)]
+pub struct WorkDetailView {
+    #[serde(flatten)]
+    pub metadata: Value,
+    pub policy: studio_runtime_schema::task_gate::WorkDetailPolicy,
+}
+
+/// One work collection row. Serializes as the bare document it wraps.
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+pub enum WorkView {
+    Summary(WorkProjection),
+    Detail(WorkDetailView),
+    Entry(Value),
+}
+
+pub fn work_detail_view(
+    item: &studio_runtime_store::WorkItemRecord,
+    record: &Value,
+    refusal: Value,
+    statuses: &BTreeMap<String, studio_runtime_store::WorkStatus>,
+) -> StoreResult<WorkDetailView> {
+    let mut metadata = Value::Object(
+        record
+            .as_object()
+            .ok_or(StoreError::RecordContract(
+                "work detail source is not an object",
+            ))?
+            .iter()
+            .filter(|(field, _)| {
+                !matches!(
+                    field.as_str(),
+                    "results" | "decisions" | "releases" | "policy"
+                )
+            })
+            .map(|(field, value)| (field.clone(), value.clone()))
+            .collect(),
+    );
+    for field in ["results", "decisions", "releases"] {
+        metadata[field] = json!([]);
+    }
+    metadata["submissionRefusal"] = refusal;
+    Ok(WorkDetailView {
+        metadata,
+        policy: crate::work_policy::detail_policy(item, statuses),
+    })
+}
+
+/// One history entry, keyed `{task}:{index}`. None when the index is absent.
+pub fn work_history_view(
+    id: &str,
+    record: &Value,
+    kind: WorkHistoryKind,
+    index: usize,
+) -> Option<Value> {
+    let value = record[kind.field()].as_array()?.get(index)?;
+    Some(json!({
+        "id": format!("{id}:{index}"), "taskId": id, "rootId": record["rootId"],
+        "index": index, "value": value,
+    }))
+}
+
+/// Every work collection row for one record: summary, detail, then each
+/// result, decision and release entry. Publication writes these rows, except
+/// that metadata-only writes skip history and the per-index diff writes only
+/// the changed entries.
+pub fn work_views(
+    item: &studio_runtime_store::WorkItemRecord,
+    record: &Value,
+    refusal: Value,
+    statuses: &BTreeMap<String, studio_runtime_store::WorkStatus>,
+) -> StoreResult<Vec<(&'static str, WorkView)>> {
+    let id: &str = item.id().as_ref();
+    let mut rows = Vec::new();
+    if let Some(summary) = project_work_record(item) {
+        rows.push(("work", WorkView::Summary(summary)));
+    }
+    rows.push((
+        "workDetail",
+        WorkView::Detail(work_detail_view(item, record, refusal, statuses)?),
+    ));
+    for kind in WorkHistoryKind::ALL {
+        let length = record[kind.field()].as_array().map_or(0, Vec::len);
+        for index in 0..length {
+            if let Some(entry) = work_history_view(id, record, kind, index) {
+                rows.push((kind.collection(), WorkView::Entry(entry)));
+            }
+        }
+    }
+    Ok(rows)
 }
 
 /// Filter a stored record through the committed renderer DTO schema.
@@ -1261,5 +1358,57 @@ mod projection_plan_tests {
             property
         ));
         assert!(std::ptr::eq(plan, schema_projection_properties()));
+    }
+}
+
+#[cfg(test)]
+mod work_views_tests {
+    use super::{WorkView, work_views};
+    use serde_json::{Value, json};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn work_views_build_results_decisions_and_releases() {
+        let raw = json!({
+            "id": "w", "rootId": "lead", "title": "work", "status": "review",
+            "results": [{"id": "r0"}, {"id": "r1"}],
+            "decisions": [{"id": "d0"}],
+            "releases": [{"id": "x0"}],
+        });
+        let item: studio_runtime_store::WorkItemRecord =
+            serde_json::from_value(raw.clone()).unwrap();
+        let refusal = json!({"reason": "none"});
+        let views = work_views(&item, &raw, refusal.clone(), &BTreeMap::new()).unwrap();
+        let rows: Vec<(&str, Value)> = views
+            .iter()
+            .map(|(collection, view)| (*collection, serde_json::to_value(view).unwrap()))
+            .collect();
+        let collections: Vec<&str> = rows.iter().map(|(collection, _)| *collection).collect();
+        assert_eq!(
+            collections,
+            [
+                "work",
+                "workDetail",
+                "workResult",
+                "workResult",
+                "workDecision",
+                "workRelease"
+            ]
+        );
+        assert_eq!(rows[0].1["status"], "review");
+        let detail = &rows[1].1;
+        assert_eq!(detail["results"], json!([]));
+        assert_eq!(detail["decisions"], json!([]));
+        assert_eq!(detail["releases"], json!([]));
+        assert_eq!(detail["submissionRefusal"], refusal);
+        assert_eq!(detail["policy"]["acceptAvailable"], json!(true));
+        assert_eq!(
+            rows[2].1,
+            json!({"id": "w:0", "taskId": "w", "rootId": "lead", "index": 0, "value": {"id": "r0"}})
+        );
+        assert_eq!(rows[3].1["id"], "w:1");
+        assert_eq!(rows[4].1["value"], json!({"id": "d0"}));
+        assert_eq!(rows[5].1["value"], json!({"id": "x0"}));
+        assert!(matches!(views[1].1, WorkView::Detail(_)));
     }
 }
