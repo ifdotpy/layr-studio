@@ -301,7 +301,11 @@ pub fn progress_view(
                         .unwrap_or_default(),
                     actions,
                 }
-            } else if summary.moving_now.value().copied().unwrap_or(0) > 0 {
+            } else if summary
+                .moving_now
+                .value()
+                .is_some_and(|count| count.as_i64() > 0)
+            {
                 Progress::Moving {
                     id,
                     target_account_key,
@@ -2341,6 +2345,20 @@ fn summary_record(
             .collect()
     }
     let view = public_view_record(op);
+    let count = |value: usize| -> Result<studio_runtime_schema::AgentCounter, TransferError> {
+        i64::try_from(value)
+            .ok()
+            .and_then(studio_runtime_schema::AgentCounter::from_i64)
+            .ok_or_else(|| invalid("account transfer", "/count"))
+    };
+    let updated = match &op.updated {
+        Field::Missing | Field::Null => Field::Null,
+        Field::Value(value) => Field::Value(
+            value
+                .as_f64()
+                .ok_or_else(|| invalid("account transfer", "/updated"))?,
+        ),
+    };
     let waiting = op
         .members
         .0
@@ -2362,16 +2380,16 @@ fn summary_record(
             .map_err(|_| invalid("account transfer", "/id"))?,
         target_account_key: op.target_account_key.clone(),
         status: op.status,
-        updated: null_if_missing(&op.updated),
+        updated,
         scope: null_if_missing(&op.scope),
         finish_history: Field::Value(true),
-        total: Field::Value(view.total),
-        completed: Field::Value(view.completed),
-        moved: Field::Value(view.moved),
-        native_history_pending: Field::Value(view.native_history_pending),
-        moving_now: Field::Value(view.moving_now),
+        total: Field::Value(count(view.total)?),
+        completed: Field::Value(count(view.completed)?),
+        moved: Field::Value(count(view.moved)?),
+        native_history_pending: Field::Value(count(view.native_history_pending)?),
+        moving_now: Field::Value(count(view.moving_now)?),
         can_finish_history: Field::Value(view.can_finish_history),
-        waiting_count: Field::Value(view.waiting_count),
+        waiting_count: Field::Value(count(view.waiting_count)?),
         needs_attention: Field::Value(view.needs_attention),
         can_retry: Field::Value(view.can_retry),
         can_cancel: Field::Missing,

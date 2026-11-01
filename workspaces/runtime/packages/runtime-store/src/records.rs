@@ -3676,7 +3676,15 @@ mod tests {
             json!({"compactions":0,"id":"agent","rootId":"agent","epoch":2,"status":"idle","accountKey":"default","updatedAt":1.0}),
         );
         assert!(!record.extra.contains_key("updatedAt"));
-        assert_eq!(serde_json::to_value(record).unwrap()["updatedAt"], 1.0);
+        assert!(
+            matches!(record.updated_at, studio_runtime_schema::queue_command::Field::Value(super::StoredTransferValue::Known(value)) if value == 1.0)
+        );
+        let integer = agent(
+            json!({"compactions":0,"id":"agent","rootId":"agent","epoch":2,"status":"idle","accountKey":"default","updatedAt":1}),
+        );
+        assert!(
+            matches!(integer.updated_at, studio_runtime_schema::queue_command::Field::Value(super::StoredTransferValue::Known(value)) if value == 1.0)
+        );
     }
 
     #[test]
@@ -3687,8 +3695,32 @@ mod tests {
         assert!(!record.extra.contains_key("pendingSettings"));
         assert!(!record.extra.contains_key("pendingSettingsAccountKey"));
         assert!(matches!(
-            record.pending_settings.value(),
-            Some(super::StoredTransferObject::Known(_))
+            &record.pending_settings,
+            studio_runtime_schema::queue_command::Field::Value(super::StoredTransferObject::Known(settings))
+                if settings.model.value().map(String::as_str) == Some("m") && settings.account_key.is_none()
+        ));
+        assert!(
+            matches!(record.pending_settings_account_key, studio_runtime_schema::queue_command::Field::Value(super::StoredTransferValue::Known(ref key)) if key.as_str() == "default")
+        );
+        let null_key = agent(
+            json!({"compactions":0,"id":"agent","rootId":"agent","epoch":2,"status":"idle","accountKey":"default","pendingSettings":{"accountKey":null}}),
+        );
+        assert!(
+            matches!(null_key.pending_settings, studio_runtime_schema::queue_command::Field::Value(super::StoredTransferObject::Known(ref settings)) if settings.account_key.is_none())
+        );
+        let missing = agent(
+            json!({"compactions":0,"id":"agent","rootId":"agent","epoch":2,"status":"idle","accountKey":"default"}),
+        );
+        assert!(matches!(
+            missing.pending_settings,
+            studio_runtime_schema::queue_command::Field::Missing
+        ));
+        let null = agent(
+            json!({"compactions":0,"id":"agent","rootId":"agent","epoch":2,"status":"idle","accountKey":"default","pendingSettings":null}),
+        );
+        assert!(matches!(
+            null.pending_settings,
+            studio_runtime_schema::queue_command::Field::Null
         ));
         for raw in [json!([1, 2]), json!({"unknown":42})] {
             let record = agent(json!({"compactions":0,"id":"agent","rootId":"agent",
