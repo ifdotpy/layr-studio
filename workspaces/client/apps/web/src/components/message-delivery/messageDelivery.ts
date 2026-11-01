@@ -132,7 +132,7 @@ export function outgoingTranscript(
       if (entry.status.source === "device")
         shown = { ...shown, localDelivery: true };
       updates.set(present.id, shown);
-      if (!shown.deliveryStatus || entry.status.source === "server")
+      if (!shown.deliveryStatus)
         updates.set(present.id, {
           ...shown,
           deliveryStatus: entry.status,
@@ -140,7 +140,15 @@ export function outgoingTranscript(
         });
       // This only hides the duplicate display copy. The outbox separately
       // retains its request until fresh receipt evidence reconciles it.
-      if (present.clientMessageId === entry.id) observed.push(entry.id);
+      if (
+        (present.clientMessageId === entry.id &&
+          present.materialized === true &&
+          serverStatus(present.deliveryStatus) ===
+            MessageSendStatus.delivered) ||
+        (entry.receipt?.status === MessageSendStatus.delivered &&
+          entry.receipt.materialized === true)
+      )
+        observed.push(entry.id);
       continue;
     }
     // An input outside the loaded page can replace its local card only after

@@ -783,17 +783,28 @@ for (const attachmentCase of [false, true])
           await page.reload();
           await page.locator(`[data-chat="${a.id}"]`).click();
           await row(uncertainText).waitFor();
-          await page.waitForTimeout(500);
-          assert.equal(
-            posts.length,
-            beforeUncertainRetry,
-            `${mode}: reload does not retry an uncertain receipt`,
+          await until(
+            () => posts.length === beforeUncertainRetry + 1,
+            `${mode}: reload retries the stored request without cached receipt evidence`,
           );
+          const resumed = required(posts.at(-1));
+          assert.deepEqual(
+            resumed.route.request().postDataJSON(),
+            uncertainRequest,
+          );
+          await resumed.route.fulfill({
+            json: sendReply({
+              id: resumed.body.id,
+              status: "uncertain",
+              error: "Fixture cannot confirm delivery",
+            } satisfies MessageDelivery),
+          });
+          await row(uncertainText).locator(".message-delivery-error").waitFor();
           await row(uncertainText)
             .getByRole("button", { name: "Retry", exact: true })
             .click();
           await until(
-            () => posts.length === beforeUncertainRetry + 1,
+            () => posts.length === beforeUncertainRetry + 2,
             `${mode}: uncertain card retries`,
           );
           const retry = required(posts.at(-1));

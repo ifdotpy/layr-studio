@@ -95,7 +95,7 @@ it("matches transcript rows by receipt identity and retains edited text and atta
   // Transcript identity hides duplicate display copies without reconciling storage.
   assert.deepEqual(
     outgoingTranscript(batch, [receipt, { ...receipt, id: "two" }]).observed,
-    ["one", "two"],
+    [],
   );
   const edited: OutgoingMessage = {
     ...receipt,
@@ -338,9 +338,12 @@ it("updates a matching receipt without replacing existing transcript content", (
     componentAttachment({ id: "server-asset" }),
   ]);
   assert.equal(required(result.items[0]).requestedDelivery, "next_turn");
-  // Removed inference: a delivered transcript no longer overrides the current server receipt.
-  assert.deepEqual(required(result.items[0]).deliveryStatus, entry.status);
-  assert.equal(required(result.items[0]).deliveryError, "late receipt error");
+  // The projected row owns its displayed status; recovery uses the receipt.
+  assert.deepEqual(
+    required(result.items[0]).deliveryStatus,
+    durable.deliveryStatus,
+  );
+  assert.equal(required(result.items[0]).deliveryError, undefined);
 
   const emptyDurable: Message = {
     ...durable,
@@ -387,7 +390,7 @@ it("restores attachments and requested delivery to a local transcript row", () =
     componentAttachment({ id: "asset-one" }),
   ]);
   assert.equal(required(result.items[0]).requestedDelivery, "current_turn");
-  assert.deepEqual(result.observed, ["one"]);
+  assert.deepEqual(result.observed, []);
 
   const existingDelivery: Message = {
     ...materializing,
@@ -435,7 +438,7 @@ it("shows failed and uncertain receipts until the transcript confirms their outc
       status,
     });
     assert.equal(required(result.items[0]).deliveryError, `${status} detail`);
-    assert.deepEqual(result.observed, ["one"]);
+    assert.deepEqual(result.observed, []);
 
     const alreadyLabeled: Message = {
       ...present,
@@ -451,15 +454,12 @@ it("shows failed and uncertain receipts until the transcript confirms their outc
         },
       ],
     );
-    // Removed inference: prior transcript status does not override a server receipt.
+    // Display the status carried by the projected row.
     assert.deepEqual(required(preserved.items[0]).deliveryStatus, {
       source: "server",
-      status,
+      status: MessageSendStatus.sending,
     });
-    assert.equal(
-      required(preserved.items[0]).deliveryError,
-      "must not overwrite",
-    );
+    assert.equal(required(preserved.items[0]).deliveryError, undefined);
 
     const materializedWithoutLabel: Message = {
       ...present,
@@ -476,7 +476,7 @@ it("shows failed and uncertain receipts until the transcript confirms their outc
         },
       ],
     );
-    assert.deepEqual(notYetObserved.observed, ["one"]);
+    assert.deepEqual(notYetObserved.observed, []);
     assert.deepEqual(required(notYetObserved.items[0]).deliveryStatus, {
       source: "server",
       status,
