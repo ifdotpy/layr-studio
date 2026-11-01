@@ -1292,6 +1292,121 @@ async fn a_paired_window_reaches_the_ordinary_api_with_signed_requests() {
         .await
         .expect("body");
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    // The same signed device receives a cacheable stream and resumes its cursor.
+    use futures_util::StreamExt;
+    async fn stream_frames(response: axum::response::Response) -> Vec<(String, Value)> {
+        let mut stream = response.into_body().into_data_stream();
+        let mut frames = Vec::new();
+        for _ in 0..8 {
+            let bytes = tokio::time::timeout(std::time::Duration::from_secs(5), stream.next())
+                .await
+                .expect("stream frame timeout")
+                .expect("stream remains open")
+                .expect("frame bytes");
+            let text = std::str::from_utf8(&bytes).expect("UTF-8");
+            for frame in text.split("\n\n") {
+                let event = frame.lines().find_map(|line| line.strip_prefix("event: "));
+                let data = frame.lines().find_map(|line| line.strip_prefix("data: "));
+                if let (Some(event), Some(data)) = (event, data) {
+                    frames.push((
+                        event.to_owned(),
+                        serde_json::from_str(data).expect("frame JSON"),
+                    ));
+                }
+            }
+            if frames.iter().any(|(event, _)| event == "resources") {
+                return frames;
+            }
+        }
+        panic!("missing resource frame");
+    }
+    let resources = serde_json::json!([{"kind":"state"}]);
+    let query = |since: Option<Value>| {
+        let mut query = form_urlencoded::Serializer::new(String::new());
+        query
+            .append_pair("protocol", "4")
+            .append_pair("resources", &resources.to_string());
+        if let Some(since) = since {
+            query.append_pair("since", &since.to_string());
+        }
+        format!("/api/sync/stream?{}", query.finish())
+    };
+    let first = app
+        .clone()
+        .oneshot(signed_api_request(
+            &window_signing,
+            &receiver_identity,
+            origin,
+            "GET",
+            &query(None),
+            b"",
+            "windowstreamnonce000000000000001",
+        ))
+        .await
+        .expect("stream");
+    assert_eq!(first.status(), StatusCode::OK);
+    let first = stream_frames(first).await;
+    let session = &first
+        .iter()
+        .find(|(event, _)| event == "session")
+        .expect("session")
+        .1;
+    assert_eq!(session["locality"], "remote");
+    assert_eq!(session["cachePolicies"][0]["policy"], "cache");
+    let entry = &first
+        .iter()
+        .find(|(event, _)| event == "resources")
+        .expect("resources")
+        .1["resourceVersions"][0];
+    let cursor = entry["cursor"].clone();
+    assert!(cursor.is_object(), "snapshot cursor: {entry}");
+    let since = serde_json::json!([{"resource":{"kind":"state"},"since":cursor}]);
+    let second = app
+        .clone()
+        .oneshot(signed_api_request(
+            &window_signing,
+            &receiver_identity,
+            origin,
+            "GET",
+            &query(Some(since.clone())),
+            b"",
+            "windowstreamnonce000000000000002",
+        ))
+        .await
+        .expect("resume");
+    assert_eq!(second.status(), StatusCode::OK);
+    let second = stream_frames(second).await;
+    let entry = &second
+        .iter()
+        .find(|(event, _)| event == "resources")
+        .expect("resources")
+        .1["resourceVersions"][0];
+    assert_eq!(entry["replyKind"], "delta", "{entry}");
+    let owner = Request::builder()
+        .uri(query(Some(since)))
+        .header("host", "127.0.0.1:4000")
+        .extension(ConnectInfo(
+            "127.0.0.1:4321"
+                .parse::<std::net::SocketAddr>()
+                .expect("peer"),
+        ))
+        .body(Body::empty())
+        .expect("owner request");
+    let owner = stream_frames(app.clone().oneshot(owner).await.expect("owner stream")).await;
+    let session = &owner
+        .iter()
+        .find(|(event, _)| event == "session")
+        .expect("session")
+        .1;
+    assert_eq!(session["locality"], "local");
+    assert_eq!(session["cachePolicies"][0]["policy"], "noCache");
+    let entry = &owner
+        .iter()
+        .find(|(event, _)| event == "resources")
+        .expect("resources")
+        .1["resourceVersions"][0];
+    assert_eq!(entry["replyKind"], "snapshot", "{entry}");
+
     // A forged signature and a revoked window reach no route.
     let mut forged = signed_api_request(
         &window_signing,

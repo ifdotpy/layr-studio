@@ -21,9 +21,19 @@ secrets, the monitor input journal, outbox request identities, the unsent input
 buffer, and the remote frontend's subscription cache. Secret answer fields remain
 in memory only. The cache is never used to decide whether to send or retry a command.
 
+A remote frontend stores one IndexedDB record per cacheable subscription, with
+its data and cursor together. It writes at most once per five seconds and when
+the page becomes hidden. The server decides locality and cacheability; local
+frontends and subscriptions without provable row ownership use snapshots. A
+corrupt or unknown record is discarded and recovered with a snapshot. A browser
+on the server machine that pairs as a remote device is treated as remote.
+
+Drafts, uploads, recordings, and unconfirmed sends share one IndexedDB input
+buffer. Input is written immediately and removed on server confirmation. Old
+RxDB unsent messages are intentionally not migrated.
+
 Message send receipts and queue projections use the Rust-owned `MessageSendStatus`
-contract generated into the web API. `buffered` means the device holds a send
-before server acknowledgement; an uncertain result keeps its request identity.
+contract generated into the web API. An uncertain result keeps its request identity.
 
 ## Routes and reconnect
 

@@ -1274,6 +1274,9 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     for (name, schema) in delivery_generator.take_definitions(true) {
         openapi["components"]["schemas"][name] = schema;
     }
+    openapi["components"]["schemas"]["FrontendLocality"] = serde_json::json!({
+        "type": "string", "enum": <crate::sync_protocol::FrontendLocality as strum::VariantNames>::VARIANTS
+    });
     openapi["components"]["schemas"]["MessageSendStatus"] = serde_json::json!({
         "type": "string", "enum": <crate::delivery::MessageSendStatus as strum::VariantNames>::VARIANTS
     });

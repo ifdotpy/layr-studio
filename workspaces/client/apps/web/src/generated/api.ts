@@ -13732,6 +13732,8 @@ export interface components {
       found: true;
       result: components["schemas"]["ProcessActionResult"];
     };
+    /** @enum {string} */
+    FrontendLocality: "local" | "remote";
     /** HistoricalInputProofRecordResponse */
     HistoricalInputProofRecordResponse: {
       /**
@@ -22696,6 +22698,16 @@ export interface components {
       resource: components["schemas"]["ResourceRef"];
       since?: components["schemas"]["SubscriptionCursor"] | undefined;
     };
+    /** SubscriptionCacheDecision */
+    SubscriptionCacheDecision: {
+      policy: components["schemas"]["SubscriptionCachePolicy"];
+      resource: components["schemas"]["ResourceRef"];
+    };
+    /**
+     * SubscriptionCachePolicy
+     * @enum {string}
+     */
+    SubscriptionCachePolicy: "cache" | "noCache";
     /**
      * SubscriptionCursor
      * @description Last fully applied durable sequence for one resource ref. Workspace identity survives server restarts; a different identity requires a fresh snapshot.
@@ -23755,6 +23767,8 @@ export interface components {
     };
     /** SyncSessionEvent */
     SyncSessionEvent: {
+      cachePolicies: components["schemas"]["SubscriptionCacheDecision"][];
+      locality: components["schemas"]["FrontendLocality"];
       /** Routes */
       routes: string[];
       sessionId: string;
@@ -23774,6 +23788,7 @@ export interface components {
     };
     /** SyncSubscriptionAck */
     SyncSubscriptionAck: {
+      cachePolicies: components["schemas"]["SubscriptionCacheDecision"][];
       gen: number;
     };
     /** SyncSubscriptionRequest */
@@ -38828,6 +38843,8 @@ export const ExecutionStatus = {
   not_applied: "not_applied",
 } as const;
 export type ExecutionStatus = components["schemas"]["ExecutionStatus"];
+export const FrontendLocality = { local: "local", remote: "remote" } as const;
+export type FrontendLocality = components["schemas"]["FrontendLocality"];
 export const HttpErrorKind = {
   handler_panic: "handler_panic",
   store_configuration: "store_configuration",
@@ -39299,6 +39316,12 @@ export const StudioErrorLevel = {
   log: "log",
 } as const;
 export type StudioErrorLevel = components["schemas"]["StudioErrorLevel"];
+export const SubscriptionCachePolicy = {
+  cache: "cache",
+  noCache: "noCache",
+} as const;
+export type SubscriptionCachePolicy =
+  components["schemas"]["SubscriptionCachePolicy"];
 export const SubscriptionReplyKind = {
   delta: "delta",
   snapshot: "snapshot",

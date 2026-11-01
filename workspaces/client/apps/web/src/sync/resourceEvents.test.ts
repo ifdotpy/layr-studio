@@ -1,3 +1,4 @@
+import { FrontendLocality } from "../generated/api";
 import assert from "node:assert/strict";
 import type { ResourceConnectionDetail } from "./resourceEvents";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -55,6 +56,8 @@ class Source {
     if (name === "session" && this.autoHandshake) {
       listener({
         data: JSON.stringify({
+          locality: FrontendLocality.local,
+          cachePolicies: [],
           sessionId: "session-test",
           workspaceId,
           routes: [],
@@ -181,7 +184,9 @@ async function loadTransport() {
     };
     subscriptionPosts.push(update);
     queueMicrotask(() =>
-      Source.instances.at(-1)?.emit("subscriptions", { gen: update.gen }),
+      Source.instances
+        .at(-1)
+        ?.emit("subscriptions", { gen: update.gen, cachePolicies: [] }),
     );
     return { gen: update.gen } as never;
   });
@@ -2093,6 +2098,8 @@ describe("shared resource event transport", () => {
     const source = Source.instances[0] as NativeSource;
     source.open();
     source.emit("session", {
+      locality: FrontendLocality.local,
+      cachePolicies: [],
       sessionId: "session-one",
       workspaceId,
       routes: [],
@@ -2139,6 +2146,8 @@ describe("shared resource event transport", () => {
     ]);
     source.open();
     source.emit("session", {
+      locality: FrontendLocality.local,
+      cachePolicies: [],
       sessionId: "session-two",
       workspaceId,
       routes: [],

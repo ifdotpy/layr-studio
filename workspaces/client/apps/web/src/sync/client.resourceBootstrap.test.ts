@@ -2,6 +2,7 @@ import type { ConnectionActivity, ConnectionHealth } from "./connectionState";
 import { backgroundDisplay } from "../components/componentTestFixtures";
 import {
   MessageSendStatus,
+  SubscriptionCachePolicy,
   SubscriptionReplyKind,
   AgentStatus,
   TaskKind,
@@ -370,12 +371,16 @@ it("reloads a scoped projection before exposing its resume cursor", async () => 
       value: {
         id: "message",
         agent: "lead",
-        status: "pending",
+        status: MessageSendStatus.queued,
         materialized: false,
       },
     },
   ];
   await first.persistResourceEntityChanges(baseline, () => true);
+  first.setCachePolicies([
+    { resource: ref, policy: SubscriptionCachePolicy.cache },
+    { resource: state, policy: SubscriptionCachePolicy.cache },
+  ]);
   vi.useFakeTimers();
   await first.cacheSubscription(ref);
   await first.cacheSubscription(state);
@@ -398,7 +403,9 @@ it("reloads a scoped projection before exposing its resume cursor", async () => 
   });
   const receipt = () =>
     db.projections.findOne("entity:messageReceipt:message").exec();
-  expect((await receipt())?.entity?.value).toMatchObject({ status: "pending" });
+  expect((await receipt())?.entity?.value).toMatchObject({
+    status: MessageSendStatus.queued,
+  });
   const delta = f.frame(5);
   assert.ok(delta.resourceVersions[0]?.entityChanges);
   delta.resourceVersions[0].replyKind = SubscriptionReplyKind.delta;
@@ -771,7 +778,10 @@ it.each([false, true])(
     const source = mocks.sources[0];
     assert.ok(source != null);
     source.emit("api-schema", { hash: API_SCHEMA_HASH });
-    source.emit("session", { sessionId: "quiet-work-session" });
+    source.emit("session", {
+      sessionId: "quiet-work-session",
+      cachePolicies: [],
+    });
     const frame = (seq: number, snapshot: boolean): ResourceChangeEvent => ({
       protocol: SYNC_PROTOCOL_VERSION,
       workspaceId: f.workspaceId,
@@ -1111,7 +1121,10 @@ it.each(["burst", "inline removal", "staged removal"])(
     assert.ok(source != null);
     source.emit("api-schema", { hash: API_SCHEMA_HASH });
     let finish!: () => void;
-    source.emit("session", { sessionId: "quiet-work-discard-session" });
+    source.emit("session", {
+      sessionId: "quiet-work-discard-session",
+      cachePolicies: [],
+    });
     const gate = new Promise<void>((resolve) => {
       finish = resolve;
     });
@@ -1261,3 +1274,42 @@ it.each(["burst", "inline removal", "staged removal"])(
     }
   },
 );
+
+it("discards a slow old stream policy after a reset and applies NoCache", async () => {
+  const f = await setup();
+  const { createEntitySequenceScope } = await import("./entitySequence");
+  const { createTranscriptCache } = await import("./transcriptCache");
+  const identity = Promise.withResolvers<{ workspaceId: string }>();
+  const storage = { get: vi.fn(), put: vi.fn(), delete: vi.fn() };
+  const client = f.client.createSyncClient({
+    api: {
+      syncGet: vi.fn().mockImplementation(() => identity.promise),
+      syncPost: vi.fn(),
+      saved: (_key, fallback) => fallback,
+      save: vi.fn(),
+      setWorkspace: vi.fn(),
+      isApiSchemaMismatch: () => false,
+    },
+    resources: {
+      watchResourceChanges: () => () => {},
+      watchResourceConnection: () => () => {},
+    },
+    sequences: createEntitySequenceScope(),
+    transcripts: createTranscriptCache(),
+    cacheStorage: storage,
+    databaseSuffix: "slow-policy-test",
+  });
+  const ref = { kind: "state" } as const;
+  client.setCachePolicies([
+    { resource: ref, policy: SubscriptionCachePolicy.cache },
+  ]);
+  client.clearCachePolicies();
+  client.setCachePolicies([
+    { resource: ref, policy: SubscriptionCachePolicy.noCache },
+  ]);
+  identity.resolve({ workspaceId: f.workspaceId });
+  await vi.waitFor(() => expect(storage.delete).toHaveBeenCalledOnce());
+  await client.cacheSubscription(ref);
+  expect(storage.put).not.toHaveBeenCalled();
+  client.disposeCache();
+});

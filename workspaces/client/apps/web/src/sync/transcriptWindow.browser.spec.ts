@@ -111,6 +111,7 @@ test("a transcript window streams without pulls and older history uses one bound
                 stream.write(
                   protocol3SseEvent("subscriptions", {
                     gen: update.gen,
+                    cachePolicies: [],
                   } satisfies components["schemas"]["SyncSubscriptionAck"]),
                 );
                 baseline(
@@ -120,6 +121,7 @@ test("a transcript window streams without pulls and older history uses one bound
               }
               json({
                 gen: update.gen,
+                cachePolicies: [],
               } satisfies components["schemas"]["SyncSubscriptionAck"]);
             } else if (url.pathname === "/api/sync/pull") {
               pulls.push(url.searchParams.get("scope"));

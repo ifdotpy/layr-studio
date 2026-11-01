@@ -30,10 +30,6 @@ import { createServerTransport } from "./serverTransport";
 import { serverCredentialAdapter } from "./transport";
 import { scopedSessionOutbox } from "../browserPersistence";
 import { indexedDb } from "../indexedDb";
-import { frontendIsLocal } from "../sync/localFrontend";
-
-/** Disable all remote subscription persistence here. */
-const SUBSCRIPTION_CACHE_ENABLED = true;
 
 /** Services belong to a server, never to the currently visible chat. */
 export function createServerServices(server: StudioServer) {
@@ -88,13 +84,10 @@ export function createServerServices(server: StudioServer) {
       resources,
       sequences,
       transcripts,
-      cacheStorage:
-        SUBSCRIPTION_CACHE_ENABLED && !frontendIsLocal(transport.owner.id)
-          ? indexedDb(
-              `studio-subscription-cache:${transport.owner.id}`,
-              "subscriptions",
-            )
-          : undefined,
+      cacheStorage: indexedDb(
+        `studio-subscription-cache:${transport.owner.id}`,
+        "subscriptions",
+      ),
       databaseSuffix:
         transport.owner.id === "local"
           ? ""

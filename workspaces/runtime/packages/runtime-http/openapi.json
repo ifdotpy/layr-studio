@@ -28140,6 +28140,13 @@
         ],
         "type": "object"
       },
+      "FrontendLocality": {
+        "enum": [
+          "local",
+          "remote"
+        ],
+        "type": "string"
+      },
       "HistoricalInputProofRecordResponse": {
         "additionalProperties": {
           "$ref": "#/components/schemas/JsonValue"
@@ -50729,6 +50736,31 @@
         "title": "SubscriptionAdd",
         "type": "object"
       },
+      "SubscriptionCacheDecision": {
+        "additionalProperties": false,
+        "properties": {
+          "policy": {
+            "$ref": "#/components/schemas/SubscriptionCachePolicy"
+          },
+          "resource": {
+            "$ref": "#/components/schemas/ResourceRef"
+          }
+        },
+        "required": [
+          "resource",
+          "policy"
+        ],
+        "title": "SubscriptionCacheDecision",
+        "type": "object"
+      },
+      "SubscriptionCachePolicy": {
+        "enum": [
+          "cache",
+          "noCache"
+        ],
+        "title": "SubscriptionCachePolicy",
+        "type": "string"
+      },
       "SubscriptionCursor": {
         "additionalProperties": false,
         "description": "Last fully applied durable sequence for one resource ref. Workspace identity survives server restarts; a different identity requires a fresh snapshot.",
@@ -53530,6 +53562,15 @@
       "SyncSessionEvent": {
         "additionalProperties": false,
         "properties": {
+          "cachePolicies": {
+            "items": {
+              "$ref": "#/components/schemas/SubscriptionCacheDecision"
+            },
+            "type": "array"
+          },
+          "locality": {
+            "$ref": "#/components/schemas/FrontendLocality"
+          },
           "routes": {
             "items": {
               "type": "string"
@@ -53552,7 +53593,9 @@
         "required": [
           "sessionId",
           "routes",
-          "workspaceId"
+          "workspaceId",
+          "locality",
+          "cachePolicies"
         ],
         "title": "SyncSessionEvent",
         "type": "object"
@@ -53584,6 +53627,12 @@
       "SyncSubscriptionAck": {
         "additionalProperties": false,
         "properties": {
+          "cachePolicies": {
+            "items": {
+              "$ref": "#/components/schemas/SubscriptionCacheDecision"
+            },
+            "type": "array"
+          },
           "gen": {
             "maximum": 9007199254740991,
             "minimum": 1,
@@ -53591,7 +53640,8 @@
           }
         },
         "required": [
-          "gen"
+          "gen",
+          "cachePolicies"
         ],
         "title": "SyncSubscriptionAck",
         "type": "object"

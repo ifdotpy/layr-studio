@@ -379,7 +379,7 @@ A server never decodes data in a form that it does not know.
 ### Frontend cache
 
 - The IndexedDB uses are the thin cache, the unsent input buffer, and the device key.
-- Native and loopback frontends keep no cache; a browser on the server machine using a LAN address may cache.
+- A frontend on the same machine as its server keeps no cache.
 - A remote frontend (phone, UI-only computer) keeps one IndexedDB record for each
   subscription: its data and its cursor in one value. It writes at most every 5 seconds
   and when the page becomes hidden, after the UI has shown the data. RxDB and Dexie are not used.
@@ -532,9 +532,7 @@ BEGIN SELECT RAISE(ABORT, 'invalid delivery state'); END;
 - Do not delete a "copy" of data before a check shows that the data exists elsewhere
   (transcript rows in `sync_entities`, client stores).
 - Rewind, restore, and delete make a layr snapshot first. Items are hidden, not deleted.
-- The device keeps unsent input until the server confirms or refuses it. Secret answer
-  fields remain in memory only.
-- Owner note (2026-11-01): old RxDB unsent messages are intentionally not migrated.
+- The device keeps unsent input until the server confirms it.
 - Blob order: write the blob, fsync, then write the row. Blob collection uses mark and sweep with a delay.
 - Move client drafts, uploads, and recordings to the server before the client store is deleted.
 - Move a receipt table in one transaction. Keep the old table read-only until it is empty.
