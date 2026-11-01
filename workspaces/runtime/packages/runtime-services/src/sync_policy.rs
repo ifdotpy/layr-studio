@@ -1119,6 +1119,21 @@ fn publish_direct(
     raw: &str,
     validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
+    if collection == "plan" {
+        let record: studio_runtime_store::PlanRecord =
+            serde_json::from_str(raw).map_err(|_| StoreError::InvalidStoredRecord {
+                object: "plans",
+                id: id.to_owned(),
+            })?;
+        if !record.id().is_empty() {
+            let view = record.sync_view(
+                &|value, field| crate::sync_views::bound_sync_text(value, field, false),
+                crate::sync_views::SYNC_ARRAY_ITEMS,
+            );
+            SyncDocumentsRepository::put_entity(transaction, collection, id, view, false)?;
+        }
+        return Ok(());
+    }
     if collection == "rule" {
         let invalid = || StoreError::InvalidStoredRecord {
             object: "rules",

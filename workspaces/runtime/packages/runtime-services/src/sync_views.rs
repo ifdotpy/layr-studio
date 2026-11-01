@@ -376,7 +376,6 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
         "task" => "TaskEntityDto",
         "taskDetail" => "TaskDetailResponse",
         "retainedWorktree" => "RetainedWorktreeEntityDto",
-        "plan" => "PlanSummaryEntityDto",
         "annotation" => "AnnotationEntityDto",
         "monitor" => "MonitorEntityDto",
         "request" => "RequestEntityDto",

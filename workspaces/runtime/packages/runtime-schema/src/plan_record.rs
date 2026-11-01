@@ -3,7 +3,6 @@ use crate::queue_command::Field;
 use crate::stored_record::StoredJsonInteger;
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
-use std::collections::BTreeMap;
 
 /// A plan version is an integral JSON number within the safe-integer domain.
 #[derive(Clone, Debug, PartialEq, Serialize, schemars::JsonSchema)]
@@ -47,7 +46,15 @@ where
     T::deserialize(deserializer).map(Some)
 }
 
+fn native_plan<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Field<NativePlan>, D::Error> {
+    Option::<crate::json_object::JsonObject<NativePlan>>::deserialize(deserializer)
+        .map(|value| value.map_or(Field::Null, |value| Field::Value(value.0)))
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PlanRecord {
     id: String,
     #[serde(rename = "rootId")]
@@ -60,9 +67,13 @@ pub struct PlanRecord {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<String>")]
     agent: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<BTreeMap<String, Value>>")]
-    native: Field<BTreeMap<String, Value>>,
+    #[serde(
+        default,
+        deserialize_with = "native_plan",
+        skip_serializing_if = "Field::is_missing"
+    )]
+    #[schemars(with = "Option<NativePlan>")]
+    native: Field<NativePlan>,
     #[serde(
         default,
         deserialize_with = "present",
@@ -70,8 +81,26 @@ pub struct PlanRecord {
     )]
     #[schemars(schema_with = "steps_schema")]
     steps: Option<Vec<Value>>,
-    #[serde(flatten)]
-    extra: BTreeMap<String, Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct NativePlan {
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    thread_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    turn_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    explanation: Field<String>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    plan: Option<Vec<Value>>,
 }
 
 impl PlanRecord {
@@ -88,13 +117,51 @@ impl PlanRecord {
     pub fn into_value(self) -> Value {
         self.value()
     }
+    pub fn sync_view(&self, bound: &impl Fn(&str, &str) -> String, max_items: usize) -> Self {
+        let mut view = self.clone();
+        view.id = bound(&view.id, "id");
+        view.root_id = bound(&view.root_id, "rootId");
+        view.text = bound(&view.text, "text");
+        if let Field::Value(agent) = &mut view.agent {
+            *agent = bound(agent, "agent");
+        }
+        if let Some(steps) = &mut view.steps {
+            steps.truncate(max_items);
+        }
+        if let Field::Value(native) = &mut view.native {
+            for (field, name) in [
+                (&mut native.thread_id, "threadId"),
+                (&mut native.turn_id, "turnId"),
+                (&mut native.explanation, "explanation"),
+            ] {
+                if let Field::Value(value) = field {
+                    *value = bound(value, name);
+                }
+            }
+            if let Some(plan) = &mut native.plan {
+                plan.truncate(max_items);
+            }
+        }
+        view
+    }
     pub fn update_native(&mut self, native: Value, updated: f64) -> Result<(), serde_json::Error> {
         let steps = native
             .get("plan")
             .map(Deserialize::deserialize)
             .transpose()?
             .unwrap_or_default();
-        let native: Option<BTreeMap<String, Value>> = Deserialize::deserialize(native)?;
+        let native = match native {
+            Value::Object(mut fields) => {
+                fields.retain(|key, _| {
+                    matches!(key.as_str(), "threadId" | "turnId" | "explanation" | "plan")
+                });
+                Some(NativePlan::deserialize(Value::Object(fields))?)
+            }
+            Value::Null => None,
+            Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_) => {
+                return Err(serde::de::Error::custom("native plan must be an object"));
+            }
+        };
         self.native = native.map_or(Field::Null, Field::Value);
         self.steps = Some(steps);
         self.updated = Number::from_f64(updated);
@@ -127,8 +194,11 @@ mod tests {
         )
         .unwrap();
         let native = json!({"plan":[{"future":[1.0,null]}],"extension":{"keep":true}});
-        record.update_native(native.clone(), 2.0).unwrap();
-        assert_eq!(record.value()["native"], native);
+        record.update_native(native, 2.0).unwrap();
+        assert_eq!(
+            record.value()["native"],
+            json!({"plan":[{"future":[1.0,null]}]})
+        );
         assert_eq!(record.value()["steps"], json!([{"future":[1.0,null]}]));
         assert!(record.update_native(json!({"plan":null}), 3.0).is_err());
         record
