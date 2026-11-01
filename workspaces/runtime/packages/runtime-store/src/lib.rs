@@ -59,6 +59,7 @@ pub mod text_blobs;
 pub mod transfer_record;
 pub mod vm_work_intent;
 pub mod wal_backup;
+pub mod work_history;
 mod write_alert;
 pub mod writer_lanes;
 pub use schema::{

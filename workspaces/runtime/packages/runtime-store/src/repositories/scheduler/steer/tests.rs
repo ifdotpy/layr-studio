@@ -428,7 +428,12 @@ fn claim_refuses_every_ineligible_agent_state() {
 fn unclean_restart_does_not_release_a_reserved_steer() {
     let mut connection = database();
     claim(&mut connection, "s1").expect("claims");
-    settle(&mut connection, SchedulerRepository::hold_unclean_steers);
+    settle(&mut connection, |tx| {
+        for id in Outbox::hold_pending(tx, OutboxKind::Steer)? {
+            SchedulerRepository::hold_steer(tx, &id)?;
+        }
+        Ok(())
+    });
     settle(&mut connection, |tx| {
         SchedulerRepository::abandon_steers(tx, "acct", 8)
     });
@@ -1114,7 +1119,7 @@ fn frozen_projection_survives_response_loss_and_rejects_payload_changes() {
 fn business_notification_resolved_during_busy_preparation_releases_the_exact_batch() {
     let mut connection = database();
     connection
-        .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL)")
+        .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL)")
         .expect("work table");
     connection
         .execute(

@@ -1577,7 +1577,7 @@ mod tests {
     #[test]
     fn notification_reader_skips_rows_with_invalid_unused_json_values() {
         let mut db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL);")
+        db.execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);")
             .unwrap();
         let depth = format!("{}0{}", "[".repeat(150), "]".repeat(150));
         let rows = [
@@ -1612,7 +1612,7 @@ mod tests {
     #[test]
     fn malformed_work_json_remains_a_sql_query_error_without_writes() {
         let mut db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL); INSERT INTO runtime_work VALUES('bad','{');").unwrap();
+        db.execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); INSERT INTO runtime_work VALUES('bad','{');").unwrap();
         let tx = db.transaction().unwrap();
         assert!(matches!(
             owned_work_records(&tx, "child"),

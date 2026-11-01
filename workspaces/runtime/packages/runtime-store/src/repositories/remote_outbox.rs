@@ -4,7 +4,7 @@
 //! a retry sends the same request id and the exact stored body.
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind};
+use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind, RestartRule};
 
 use super::outbox::{Outbox, OutboxError, OutboxRow};
 
@@ -59,17 +59,6 @@ impl RemoteEffect {
             Self::ServerRequest | Self::FederationMessage => RestartRule::TargetDedupes,
         }
     }
-}
-
-/// Restart rule of an effect kind (target architecture, "Command execution").
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RestartRule {
-    /// The target dedupes by id: send again with the same id.
-    TargetDedupes,
-    /// Ask the target. Found: done. Proven absent: queue again. Else: unknown.
-    AskTarget,
-    /// The outcome is unknown. Only the user resolves it.
-    None,
 }
 
 /// The typed payload of every remote entry.

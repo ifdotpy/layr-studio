@@ -446,10 +446,15 @@ pub fn work_history_view(
     index: usize,
 ) -> Option<Value> {
     let value = record[kind.field()].as_array()?.get(index)?;
-    Some(json!({
-        "id": format!("{id}:{index}"), "taskId": id, "rootId": record["rootId"],
+    Some(work_history_entry(id, &record["rootId"], index, value))
+}
+
+/// The published entry of one history row. `value` is the stored entry.
+pub fn work_history_entry(id: &str, root_id: &Value, index: usize, value: &Value) -> Value {
+    json!({
+        "id": format!("{id}:{index}"), "taskId": id, "rootId": root_id,
         "index": index, "value": value,
-    }))
+    })
 }
 
 /// Every work collection row for one record: summary, detail, then each
