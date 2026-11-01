@@ -1,3 +1,4 @@
+import { LimitColor, RunwayColor } from "../generated/api";
 import { StudioErrorLevel } from "../generated/api";
 import {
   AgentSource,
@@ -1697,13 +1698,56 @@ it("applies v4 structured entity rows without parsing JSON strings", () => {
 
 it("projects independent account limits and preserves them across workspace updates", () => {
   const state = emptyEntityProjection();
-  const alpha = { accountKey: "alpha", at: 100, data: { accountId: "A" } };
+  const projection: import("../generated/api").components["schemas"]["WeeklyRunway"] =
+    {
+      computedAt: 100,
+      validUntil: null,
+      current: {
+        color: RunwayColor.gray,
+        days: null,
+        unlimited: false,
+        windows: [],
+      },
+      next: {
+        color: RunwayColor.gray,
+        days: null,
+        unlimited: false,
+        windows: [],
+      },
+    };
+  const reset = {
+    present: false,
+    accountId: null,
+    availableCount: null,
+    countLabel: "Count unavailable",
+    emptyMessage: "Reset credit details unavailable. Refresh to check.",
+    credits: [],
+  };
+  const bucketState = {
+    buckets: [],
+    remaining: null,
+    color: LimitColor.paused,
+    low: false,
+  };
+  const combinedProjection = {
+    runway: projection,
+    reset,
+    buckets: { current: bucketState, next: bucketState, validUntil: null },
+  };
+  const alpha = {
+    observation: { accountKey: "alpha", at: 100, data: { accountId: "A" } },
+    projection: combinedProjection,
+  };
+  const defaultLimits = {
+    observation: { accountKey: "default", at: 101 },
+    projection: combinedProjection,
+  };
   const initial = applyEntityRows(
     state,
     [
       entityRow("workspace", "current", { stateDir: "fixture" }, 1),
       entityRow("rateLimit", "alpha", alpha, 2),
-      entityRow("rateLimit", "default", { accountKey: "default", at: 101 }, 3),
+      entityRow("rateLimit", "default", defaultLimits, 3),
     ],
     true,
   );
@@ -1727,7 +1771,7 @@ it("projects independent account limits and preserves them across workspace upda
     [
       entityRow("workspace", "current", { stateDir: "updated" }, 4),
       entityRow("rateLimit", "alpha", alpha, 2),
-      entityRow("rateLimit", "default", { accountKey: "default", at: 101 }, 3),
+      entityRow("rateLimit", "default", defaultLimits, 3),
     ],
     true,
   );
@@ -1740,7 +1784,7 @@ it("projects independent account limits and preserves them across workspace upda
     state,
     [
       entityRow("workspace", "current", { stateDir: "updated" }, 4),
-      entityRow("rateLimit", "default", { accountKey: "default", at: 101 }, 3),
+      entityRow("rateLimit", "default", defaultLimits, 3),
       {
         id: "entity:rateLimit:alpha",
         payload: "{}",
@@ -1757,7 +1801,10 @@ it("projects independent account limits and preserves them across workspace upda
   );
   assert.equal(withoutAlpha.runtime.rateLimitsByAccount.alpha, undefined);
 
-  assert.equal(withoutAlpha.runtime.rateLimits!.accountKey, "default");
+  assert.equal(
+    withoutAlpha.runtime.rateLimits!.observation.accountKey,
+    "default",
+  );
 });
 
 it("projects Studio error entities and removes dismissed rows by tombstone", () => {

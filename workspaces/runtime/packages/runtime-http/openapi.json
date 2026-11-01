@@ -2076,6 +2076,27 @@
         "title": "AccountKeyRequest",
         "type": "object"
       },
+      "AccountLimitsProjection": {
+        "additionalProperties": false,
+        "description": "Server-owned account presentation; each field is derived from the same observation.",
+        "properties": {
+          "buckets": {
+            "$ref": "#/components/schemas/BucketProjection"
+          },
+          "reset": {
+            "$ref": "#/components/schemas/ResetProjection"
+          },
+          "runway": {
+            "$ref": "#/components/schemas/WeeklyRunway"
+          }
+        },
+        "required": [
+          "runway",
+          "reset",
+          "buckets"
+        ],
+        "type": "object"
+      },
       "AccountLoginResponse": {
         "additionalProperties": false,
         "properties": {
@@ -18039,6 +18060,142 @@
         "title": "BrowserStatus",
         "type": "object"
       },
+      "BucketProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "current": {
+            "$ref": "#/components/schemas/BucketState"
+          },
+          "next": {
+            "$ref": "#/components/schemas/BucketState"
+          },
+          "validUntil": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "current",
+          "validUntil",
+          "next"
+        ],
+        "type": "object"
+      },
+      "BucketState": {
+        "additionalProperties": false,
+        "properties": {
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/BucketView"
+            },
+            "type": "array"
+          },
+          "color": {
+            "$ref": "#/components/schemas/LimitColor"
+          },
+          "low": {
+            "type": "boolean"
+          },
+          "remaining": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "buckets",
+          "remaining",
+          "color",
+          "low"
+        ],
+        "type": "object"
+      },
+      "BucketView": {
+        "additionalProperties": false,
+        "properties": {
+          "creditsLabel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "planType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "shortName": {
+            "type": "string"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/BucketWindowView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "shortName",
+          "planType",
+          "creditsLabel",
+          "windows"
+        ],
+        "type": "object"
+      },
+      "BucketWindowView": {
+        "additionalProperties": false,
+        "properties": {
+          "color": {
+            "$ref": "#/components/schemas/LimitColor"
+          },
+          "expired": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "remaining": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "reset": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "warning": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "label",
+          "remaining",
+          "reset",
+          "expired",
+          "color",
+          "warning"
+        ],
+        "type": "object"
+      },
       "BudgetWaitRecordResponse": {
         "additionalProperties": {
           "$ref": "#/components/schemas/JsonValue"
@@ -28506,6 +28663,16 @@
         },
         "title": "LazyAccountTransferSourceRecordResponse",
         "type": "object"
+      },
+      "LimitColor": {
+        "description": "Account bucket colors and thresholds are selected by the server.",
+        "enum": [
+          "paused",
+          "unread",
+          "answer",
+          "error"
+        ],
+        "type": "string"
       },
       "LimitResetResponse": {
         "additionalProperties": false,
@@ -40283,6 +40450,22 @@
         "title": "RateLimitResetCredits",
         "type": "object"
       },
+      "RateLimitView": {
+        "additionalProperties": false,
+        "properties": {
+          "observation": {
+            "$ref": "#/components/schemas/AccountRateLimitsDto"
+          },
+          "projection": {
+            "$ref": "#/components/schemas/AccountLimitsProjection"
+          }
+        },
+        "required": [
+          "observation",
+          "projection"
+        ],
+        "type": "object"
+      },
       "RateLimitWindow": {
         "additionalProperties": {
           "$ref": "#/components/schemas/JsonValue"
@@ -42190,6 +42373,102 @@
           "account_key"
         ],
         "title": "RequiredAccountKeyRequest",
+        "type": "object"
+      },
+      "ResetCreditView": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmLabel": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "enabledAfter": {
+            "type": "boolean"
+          },
+          "expiresAt": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "validUntil": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "confirmLabel",
+          "description",
+          "expiresAt",
+          "enabled",
+          "validUntil",
+          "enabledAfter"
+        ],
+        "type": "object"
+      },
+      "ResetProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "accountId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "availableCount": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "countLabel": {
+            "type": "string"
+          },
+          "credits": {
+            "items": {
+              "$ref": "#/components/schemas/ResetCreditView"
+            },
+            "type": "array"
+          },
+          "emptyMessage": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "present": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "present",
+          "accountId",
+          "availableCount",
+          "countLabel",
+          "emptyMessage",
+          "credits"
+        ],
         "type": "object"
       },
       "ResetRequest": {
@@ -45751,6 +46030,15 @@
           "stages"
         ],
         "type": "object"
+      },
+      "RunwayColor": {
+        "enum": [
+          "green",
+          "yellow",
+          "red",
+          "gray"
+        ],
+        "type": "string"
       },
       "SafetyAction": {
         "enum": [
@@ -51813,7 +52101,7 @@
                 "type": "string"
               },
               "value": {
-                "$ref": "#/components/schemas/AccountRateLimitsDto"
+                "$ref": "#/components/schemas/RateLimitView"
               }
             },
             "required": [
@@ -52907,7 +53195,7 @@
             "type": "string"
           },
           "value": {
-            "$ref": "#/components/schemas/AccountRateLimitsDto"
+            "$ref": "#/components/schemas/RateLimitView"
           }
         },
         "required": [
@@ -61040,6 +61328,111 @@
           "endpointFingerprint"
         ],
         "title": "WebPushSubscription",
+        "type": "object"
+      },
+      "WeeklyRunway": {
+        "additionalProperties": false,
+        "description": "Server-owned weekly allowance estimate, computed at `computed_at` (Unix seconds).",
+        "properties": {
+          "computedAt": {
+            "format": "double",
+            "type": "number"
+          },
+          "current": {
+            "$ref": "#/components/schemas/WeeklyRunwayState"
+          },
+          "next": {
+            "$ref": "#/components/schemas/WeeklyRunwayState"
+          },
+          "validUntil": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "computedAt",
+          "validUntil",
+          "current",
+          "next"
+        ],
+        "type": "object"
+      },
+      "WeeklyRunwayState": {
+        "additionalProperties": false,
+        "properties": {
+          "color": {
+            "$ref": "#/components/schemas/RunwayColor"
+          },
+          "days": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "unlimited": {
+            "type": "boolean"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/WeeklyRunwayWindow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "color",
+          "days",
+          "unlimited",
+          "windows"
+        ],
+        "type": "object"
+      },
+      "WeeklyRunwayWindow": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "remaining": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "reset": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "resetFirst": {
+            "type": "boolean"
+          },
+          "unlimited": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "remaining",
+          "reset",
+          "days",
+          "unlimited",
+          "resetFirst"
+        ],
         "type": "object"
       },
       "WhoisStatus": {

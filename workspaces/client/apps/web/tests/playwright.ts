@@ -1,3 +1,4 @@
+import { LimitColor, RunwayColor } from "../src/generated/api.ts";
 import { spawn } from "node:child_process";
 import {
   SYNC_IDENTITY_PROTOCOL_VERSION,
@@ -1916,7 +1917,55 @@ function entityValuesFromSnapshot(
       : {};
   for (const [account, value] of Object.entries(limits))
     if (isJsonObject(value))
-      values.push({ collection: "rateLimit", id: account, value });
+      values.push({
+        collection: "rateLimit",
+        id: account,
+        value: {
+          observation: value,
+          projection: {
+            buckets: {
+              current: {
+                buckets: [],
+                remaining: null,
+                color: LimitColor.paused,
+                low: false,
+              },
+              next: {
+                buckets: [],
+                remaining: null,
+                color: LimitColor.paused,
+                low: false,
+              },
+              validUntil: null,
+            },
+            reset: {
+              present: false,
+              accountId: null,
+              availableCount: null,
+              countLabel: "Count unavailable",
+              emptyMessage:
+                "Reset credit details unavailable. Refresh to check.",
+              credits: [],
+            },
+            runway: {
+              computedAt: 0,
+              validUntil: null,
+              current: {
+                color: RunwayColor.gray,
+                days: null,
+                unlimited: false,
+                windows: [],
+              },
+              next: {
+                color: RunwayColor.gray,
+                days: null,
+                unlimited: false,
+                windows: [],
+              },
+            },
+          },
+        },
+      });
 
   const workspaceSource = {
     ...runtime,

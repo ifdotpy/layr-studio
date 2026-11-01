@@ -1,6 +1,7 @@
 import {
   DeliveryStatus,
   AgentStatus as GeneratedApiAgentStatus,
+  AccountStatus,
   AgentSource as GeneratedApiAgentSource,
   RequestStatus as GeneratedApiRequestStatus,
   AgentRole as GeneratedApiAgentRole,
@@ -39,7 +40,6 @@ import {
   useServerStorageEventKey,
   useServerChatCreations,
   useServerResources,
-  useServerAccountLimits,
   useServerOutbox,
   useServerActivityScope,
   useServerSidebarServices,
@@ -67,7 +67,6 @@ import {
   DEFAULT_LOCAL_SERVER_ALIAS,
 } from "./servers/serverAliases";
 import { serverLocalStorage as localStorage } from "./servers/storage";
-import { ACCOUNT_LIMITS_WINDOW_FRESH_SECONDS } from "./generated/sharedValues";
 import SearchOverlay from "./components/shell/SearchOverlay";
 import { SettingsRow } from "./components/ui/primitives";
 import { modalSizes } from "./theme";
@@ -87,12 +86,7 @@ import {
   type PendingConversationDelete,
 } from "./chatDeleteScope";
 import { useTeamTokenRateStream } from "./hooks/useTeamTokenRateStream";
-import {
-  accountLimits,
-  limitsReadSucceeded,
-  shouldReplaceLimitsSnapshot,
-} from "./usage/accountUsage";
-import type { AccountLimitsSnapshot } from "./usage/accountUsage";
+import { accountLimits, limitsReadSucceeded } from "./usage/accountUsage";
 import {
   useMobileViewport,
   focusSelectedComposer,
@@ -291,12 +285,6 @@ export default function App({ active = true }: { active?: boolean }) {
   const { watchResourceConnection } = renameEvents;
   const sidebarServices = useServerSidebarServices();
   const serverAliases = useServerAliases(readServerAliases);
-  const {
-    configureLimitsCache,
-    cachedLimitsByAccount,
-    cacheAccountLimits,
-    subscribeLimitsCache,
-  } = useServerAccountLimits();
   const { useServerActivity, serverActivityActive, subscribeServerActivity } =
     useServerActivityScope();
   const { acknowledgeOutbox, editOutboxDisplay, durableSend, useOutbox } =
@@ -695,26 +683,6 @@ export default function App({ active = true }: { active?: boolean }) {
   );
   const openedRef = useRef(opened);
   openedRef.current = opened;
-  if (data?.stateDir) configureLimitsCache(data.stateDir);
-  const limitsByAccount = useSyncExternalStore(
-    subscribeLimitsCache,
-    cachedLimitsByAccount,
-    cachedLimitsByAccount,
-  );
-  const setLimitsByAccount = useCallback(
-    (
-      update:
-        | Record<string, AccountLimitsSnapshot>
-        | ((
-            old: Record<string, AccountLimitsSnapshot>,
-          ) => Record<string, AccountLimitsSnapshot>),
-    ) => {
-      const next =
-        typeof update === "function" ? update(cachedLimitsByAccount()) : update;
-      for (const snapshot of Object.values(next)) cacheAccountLimits(snapshot);
-    },
-    [cachedLimitsByAccount, cacheAccountLimits],
-  );
   useEffect(() => {
     if (data?.stateDir && saved(sharedCreationKey(data.stateDir), null))
       setSharedCreate({});
@@ -999,7 +967,7 @@ export default function App({ active = true }: { active?: boolean }) {
         provider: account.provider,
         email: account.email || null,
         plan: account.plan || null,
-        status: account.disconnected ? "signedOut" : account.status,
+        status: account.status,
         label: account.label,
         isDefault: account.id === accounts.data.defaultAccountKey,
       })),
@@ -1023,20 +991,15 @@ export default function App({ active = true }: { active?: boolean }) {
     accounts.data.accounts.find((a) => a.id === accountKey) ||
     accounts.data.archivedAccounts?.find((a) => a.id === accountKey);
   const accountId = selectedAccount?.accountId;
-  const cachedLimits = accountLimits(
-    limitsByAccount[accountKey],
-    accountKey,
-    accountId,
-  );
   const snapshotLimits =
     data?.runtime?.rateLimitsByAccount?.[accountKey] ||
     (accountKey === "default" ? data?.runtime?.rateLimits : null);
-  const matchingSnapshot = accountLimits(snapshotLimits, accountKey, accountId);
-  const visibleLimits =
-    matchingSnapshot &&
-    (!cachedLimits || (matchingSnapshot.at || 0) > (cachedLimits.at || 0))
-      ? matchingSnapshot
-      : cachedLimits || null;
+  const matchingSnapshot = accountLimits(
+    snapshotLimits?.observation,
+    accountKey,
+    accountId,
+  );
+  const visibleLimits = matchingSnapshot;
   const readableLeadId =
     lead?.id && !projectDeleteScope.has(lead.id) ? lead.id : undefined;
   const chatData = useChatSnapshot(data, readableLeadId);
@@ -1229,75 +1192,19 @@ export default function App({ active = true }: { active?: boolean }) {
     }
     setNavigationTarget(undefined);
   }, [navigationTarget, data, agents, notify]);
-  const limitsCache = useRef(limitsByAccount);
-  limitsCache.current = limitsByAccount;
   const accountsForLimits = useRef(accounts.data.accounts);
   accountsForLimits.current = accounts.data.accounts;
   const reloadLimitsFor = useCallback(
-    (key: string, force = false) => {
-      const selected = accounts.data.accounts.find((item) => item.id === key);
-      const selectedId = selected?.accountId;
+    (key: string) => {
       const pending = limitsRequests.current.get(key);
       if (pending) return pending;
-      const cached = accountLimits(limitsCache.current[key], key, selectedId);
-      if (
-        !force &&
-        cached?.data &&
-        !cached.error &&
-        Date.now() / 1000 - (cached.at || 0) <
-          ACCOUNT_LIMITS_WINDOW_FRESH_SECONDS
-      )
-        return Promise.resolve(true);
-      const requestStartedAt = Date.now() / 1000;
       setLimitsLoading((old) => ({ ...old, [key]: true }));
       const request = get("/api/limits", {
         query: key === "default" ? undefined : { account_key: key },
         timeoutMs: 25000,
       })
-        .then((result) => {
-          const responseSnapshot = accountLimits(result, key, selectedId);
-          if (!responseSnapshot)
-            throw new Error("Codex returned limits for another account.");
-          const snapshot =
-            responseSnapshot.data === null && limitsReadSucceeded(result)
-              ? { ...responseSnapshot, at: requestStartedAt }
-              : responseSnapshot;
-          const currentSnapshot = accountLimits(
-            limitsCache.current[key],
-            key,
-            selectedId,
-          );
-          if (shouldReplaceLimitsSnapshot(currentSnapshot, snapshot))
-            limitsCache.current = {
-              ...limitsCache.current,
-              [key]: { ...snapshot, accountKey: key },
-            };
-          setLimitsByAccount((old) => {
-            const previous = accountLimits(old[key], key, selectedId);
-            if (!shouldReplaceLimitsSnapshot(previous, snapshot)) return old;
-            return { ...old, [key]: { ...snapshot, accountKey: key } };
-          });
-          return limitsReadSucceeded(result);
-        })
-        .catch((error) => {
-          limitsCache.current = {
-            ...limitsCache.current,
-            [key]: {
-              ...(limitsCache.current[key] || { data: null }),
-              error: errorText(error),
-              accountKey: key,
-            },
-          };
-          setLimitsByAccount((old) => ({
-            ...old,
-            [key]: {
-              ...(old[key] || { data: null }),
-              error: errorText(error),
-              accountKey: key,
-            },
-          }));
-          return false;
-        })
+        .then(limitsReadSucceeded)
+        .catch(() => false)
         .finally(() => {
           limitsRequests.current.delete(key);
           setLimitsLoading((old) => ({ ...old, [key]: false }));
@@ -1305,18 +1212,11 @@ export default function App({ active = true }: { active?: boolean }) {
       limitsRequests.current.set(key, request);
       return request;
     },
-    [accounts.data.accounts],
+    [get],
   );
-  const reloadLimits = useCallback(
-    async (force = false) => {
-      await reloadLimitsFor(accountKey, force);
-    },
-    [accountKey, reloadLimitsFor],
-  );
-  const forceReloadLimits = useCallback(
-    () => reloadLimits(true),
-    [reloadLimits],
-  );
+  const forceReloadLimits = useCallback(async () => {
+    await reloadLimitsFor(accountKey);
+  }, [accountKey, reloadLimitsFor]);
   const reloadLimitsForRef = useRef(reloadLimitsFor);
   reloadLimitsForRef.current = reloadLimitsFor;
   const usageTeamIndicators = team
@@ -1360,19 +1260,15 @@ export default function App({ active = true }: { active?: boolean }) {
       )
       .map((key) => {
         const account = accounts.data.accounts.find((item) => item.id === key);
-        const cached = accountLimits(
-          limitsByAccount[key],
-          key,
-          account?.accountId,
-        );
         const snapshot =
           data?.runtime?.rateLimitsByAccount?.[key] ||
           (key === "default" ? data?.runtime?.rateLimits : null);
-        const matching = accountLimits(snapshot, key, account?.accountId);
-        const limits =
-          matching && (!cached || (matching.at || 0) > (cached.at || 0))
-            ? matching
-            : cached || null;
+        const matching = accountLimits(
+          snapshot?.observation,
+          key,
+          account?.accountId,
+        );
+        const limits = matching;
         return {
           key,
           label: account?.label || key,
@@ -1380,12 +1276,16 @@ export default function App({ active = true }: { active?: boolean }) {
           provider: account?.provider ?? undefined,
           plan: account?.plan,
           accountId: account?.accountId,
-          signedOut: !!account?.disconnected,
+          signedOut: !!account && account.status !== AccountStatus.ready,
+          runway: limits === matching ? snapshot?.projection.runway : undefined,
+          reset: limits === matching ? snapshot?.projection.reset : undefined,
+          buckets:
+            limits === matching ? snapshot?.projection.buckets : undefined,
           limits,
           loading: !!limitsLoading[key],
           // Reads the latest loader, so an equal account keeps its old closure.
-          reload: async (force = false) => {
-            await reloadLimitsForRef.current(key, force);
+          reload: async () => {
+            await reloadLimitsForRef.current(key);
           },
         };
       });
@@ -1394,29 +1294,12 @@ export default function App({ active = true }: { active?: boolean }) {
     team,
     usageTeamIndicators,
     accounts.data.accounts,
-    limitsByAccount,
     data?.runtime?.rateLimitsByAccount,
     data?.runtime?.rateLimits,
     limitsLoading,
     reloadLimitsFor,
   ]);
   const usageAccounts = useRetainedUsageAccounts(nextUsageAccounts);
-  useEffect(() => {
-    // Keep each account's latest snapshot for immediate return navigation.
-    const incoming = { ...data?.runtime?.rateLimitsByAccount };
-    if (data?.runtime?.rateLimits && !incoming.default)
-      incoming.default = data.runtime.rateLimits;
-    setLimitsByAccount((old) => {
-      let next = old;
-      for (const [key, value] of Object.entries(incoming)) {
-        if (!value?.at || (value.accountKey || "default") !== key) continue;
-        if (!old[key] || value.at > (old[key].at || 0)) {
-          next = { ...next, [key]: { ...value, accountKey: key } };
-        }
-      }
-      return next;
-    });
-  }, [data?.runtime?.rateLimits, data?.runtime?.rateLimitsByAccount]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (!activeScreen.current) return;

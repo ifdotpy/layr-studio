@@ -18,7 +18,7 @@ import type {
 } from "../generated/api";
 import type { components } from "../generated/api";
 import { RequestStatus } from "../generated/api";
-type AccountRateLimitsDto = components["schemas"]["AccountRateLimitsDto"];
+type RateLimitView = components["schemas"]["RateLimitView"];
 type StudioError = components["schemas"]["StudioError"];
 export type UiPreferencesDto = components["schemas"]["UiPreferencesDto"];
 import type { Snapshot } from "../types";
@@ -162,7 +162,7 @@ function emptyEntityValues(): EntityValues {
     desktop: new Map<string, components["schemas"]["DesktopResponse"]>(),
     terminal: new Map<string, components["schemas"]["TerminalRecord"]>(),
     queue: new Map<string, components["schemas"]["QueueView"]>(),
-    rateLimit: new Map<string, AccountRateLimitsDto>(),
+    rateLimit: new Map<string, RateLimitView>(),
     model: new Map<string, ModelEntityDto>(),
     studioError: new Map<string, StudioError>(),
     uiPreferences: new Map<string, UiPreferencesDto>(),
