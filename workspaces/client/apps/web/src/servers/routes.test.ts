@@ -4,8 +4,8 @@ import {
   ROUTE_FAILURE_COOLDOWN_MS,
   RouteIdentityError,
   ServerRoutes,
-  routesFor,
   retarget,
+  routesFor,
   sendRouted,
 } from "./routes";
 
@@ -82,18 +82,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
-});
-
-it("keeps learned routes in this page only", () => {
-  const getItem = vi.fn(() => JSON.stringify([LAN]));
-  const setItem = vi.fn();
-  vi.stubGlobal("localStorage", { getItem, setItem });
-  const routes = routesFor({ id: "memory-route-test", origin: PAIRED });
-  expect(routes.routes()).toEqual([PAIRED]);
-  routes.learn([LAN]);
-  expect(routes.routes()).toEqual([PAIRED, LAN]);
-  expect(getItem).not.toHaveBeenCalled();
-  expect(setItem).not.toHaveBeenCalled();
 });
 
 describe("route list (rule 1)", () => {
@@ -211,6 +199,53 @@ describe("learned routes (rule 3)", () => {
     expect(routes.routes()).toEqual([PAIRED]);
     expect(await routes.resolve()).toBe(PAIRED);
     expect(net.calls).toHaveLength(0);
+  });
+
+  it("keeps learned routes in device storage across a reload", async () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    });
+    routesFor({ id: "reload-test", origin: PAIRED }).learn([LAN]);
+    expect(values.get("studio-routes-v1:reload-test")).toBe(
+      JSON.stringify([LAN]),
+    );
+    vi.resetModules();
+    const reloaded = await import("./routes");
+    expect(
+      reloaded.routesFor({ id: "reload-test", origin: PAIRED }).routes(),
+    ).toEqual([PAIRED, LAN]);
+  });
+
+  it("drops a stored route that the server stops reporting after a reload", async () => {
+    const values = new Map<string, string>([
+      ["studio-routes-v1:reload-drop", JSON.stringify([LAN])],
+    ]);
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    });
+    const routes = routesFor({ id: "reload-drop", origin: PAIRED });
+    expect(routes.routes()).toEqual([PAIRED, LAN]);
+    routes.learn([]);
+    expect(values.get("studio-routes-v1:reload-drop")).toBe("[]");
+    expect(routes.routes()).toEqual([PAIRED]);
+  });
+
+  it("does not use a stored plain HTTP route for a key paired over HTTPS", async () => {
+    const values = new Map<string, string>([
+      [
+        "studio-routes-v1:reload-http",
+        JSON.stringify(["http://192.168.1.5:8080"]),
+      ],
+    ]);
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    });
+    const routes = routesFor({ id: "reload-http", origin: PAIRED });
+    expect(routes.routes()).toEqual([PAIRED]);
   });
 });
 

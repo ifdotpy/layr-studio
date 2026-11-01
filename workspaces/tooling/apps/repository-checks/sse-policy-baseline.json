@@ -248,6 +248,14 @@
     "callee": "fetch"
   },
   {
+    "file": "servers/routes.ts",
+    "callee": "localStorage.getItem"
+  },
+  {
+    "file": "servers/routes.ts",
+    "callee": "localStorage.setItem"
+  },
+  {
     "file": "servers/serverNames.ts",
     "callee": "serverCredentialAdapter().fetch"
   },
