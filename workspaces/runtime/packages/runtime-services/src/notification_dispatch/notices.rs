@@ -240,8 +240,8 @@ pub(super) fn decide(
                 .filter(|v| !v.is_null() && **v != json!({}))
                 .unwrap_or(&fallback);
             let typed: studio_runtime_schema::provider_errors::AgentError =
-                serde_json::from_value(raw_error.clone())?;
-            let error = serde_json::to_value(typed)?;
+                serde::Deserialize::deserialize(raw_error.clone())?;
+            let error = serde::Serialize::serialize(&typed, serde_json::value::Serializer)?;
             let error_kind = known_error_kind(&error);
             let policy = matches!(
                 error_kind,

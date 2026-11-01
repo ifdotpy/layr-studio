@@ -10,37 +10,6 @@ use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::provider_errors::is_misalignment_policy_violation;
 use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, Transaction};
 
-#[cfg(test)]
-mod admission_tests {
-    use super::*;
-    use serde_json::json;
-    use studio_runtime_store::RuntimeStore;
-
-    #[tokio::test]
-    async fn excluded_account_refuses_native_actions() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
-        store
-            .transaction_with(|tx| {
-                let agent = json!({"id":"lead","rootId":"lead","epoch":1,"status":"idle",
-                "compactions":0,"accountKey":"blocked","provider":"codex","excludedAccountKeys":["blocked"]});
-                AgentRepository::put(tx, &AgentRecord::from_value(agent.clone()).unwrap())?;
-                let admission = MessageNativeAdmission::new(Arc::new(
-                    crate::message_admission::PreparedAdmission::default(),
-                ));
-                for action in [Action::Compact, Action::Review] {
-                    assert!(matches!(
-                        admission.check(tx, &agent, action),
-                        Err(NativeError::Invalid("account-excluded"))
-                    ));
-                }
-                Ok::<_, studio_runtime_store::StoreError>(())
-            })
-            .await
-            .unwrap();
-    }
-}
-
 /// Native action admission over the message-ingress workspace and budget owner.
 /// Review also applies the global and team concurrency limits of Python's dispatcher.
 pub struct MessageNativeAdmission(Arc<dyn MessageAdmission>);
@@ -245,5 +214,36 @@ fn admission_error(error: crate::coordination::CoordinationError) -> NativeError
         | CoordinationError::Conflict(_)
         | CoordinationError::InvalidStored { .. }
         | CoordinationError::Store(_) => NativeError::Invalid("admission"),
+    }
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+    use serde_json::json;
+    use studio_runtime_store::RuntimeStore;
+
+    #[tokio::test]
+    async fn excluded_account_refuses_native_actions() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        store
+            .transaction_with(|tx| {
+                let agent = json!({"id":"lead","rootId":"lead","epoch":1,"status":"idle",
+                "compactions":0,"accountKey":"blocked","provider":"codex","excludedAccountKeys":["blocked"]});
+                AgentRepository::put(tx, &AgentRecord::from_value(agent.clone()).unwrap())?;
+                let admission = MessageNativeAdmission::new(Arc::new(
+                    crate::message_admission::PreparedAdmission::default(),
+                ));
+                for action in [Action::Compact, Action::Review] {
+                    assert!(matches!(
+                        admission.check(tx, &agent, action),
+                        Err(NativeError::Invalid("account-excluded"))
+                    ));
+                }
+                Ok::<_, studio_runtime_store::StoreError>(())
+            })
+            .await
+            .unwrap();
     }
 }

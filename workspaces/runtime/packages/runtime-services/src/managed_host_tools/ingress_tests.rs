@@ -1801,6 +1801,12 @@ managed_write_cases! {
 #[tokio::test]
 async fn startup_reconciles_reserved_callback_once() {
     let (root, store, _) = fixture().await;
+    // The fixture contains legacy agent fields. Reopen first to establish the
+    // migrated state that the recovery snapshot must preserve.
+    drop(store);
+    let store = RuntimeStore::open(Some(root.path())).await.unwrap();
+    drop(store);
+    let store = Arc::new(RuntimeStore::open(Some(root.path())).await.unwrap());
     let seed = &template().value;
     let expected = &seed["managedToolCases"][0];
     store

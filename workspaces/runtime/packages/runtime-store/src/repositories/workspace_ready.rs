@@ -512,10 +512,13 @@ impl WorkspaceReadyRepository {
         operation["updated"] = json!(now);
         operation["error"] = Value::Null;
         if let Err(reason) = checkpoint {
-            operation["result"] = serde_json::to_value(CheckpointDiagnostic {
-                checkpoint_error: reason,
-                reservation_id: None,
-            })?;
+            operation["result"] = serde::Serialize::serialize(
+                &CheckpointDiagnostic {
+                    checkpoint_error: reason,
+                    reservation_id: None,
+                },
+                serde_json::value::Serializer,
+            )?;
         }
         tx.execute(
             "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",

@@ -354,6 +354,9 @@ async fn resolved_answering_and_unknown_cards_keep_what_nobody_inferred() {
             expected
         );
         let mut expected_actor = case["expectedActor"].clone();
+        if case["actor"] != case["expectedActor"] {
+            crate::agent_view_fixtures::materialize_agent_defaults(&mut expected_actor);
+        }
         crate::normalize_agent_nulls(&mut expected_actor);
         let mut actual_actor = record(&store, "runtime_agents", &context.agent);
         crate::normalize_agent_nulls(&mut actual_actor);

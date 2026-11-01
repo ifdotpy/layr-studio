@@ -561,11 +561,11 @@ mod tests {
 
     fn agents() -> Vec<Value> {
         vec![
-            json!({"compactions":0,"id":"a","provider":"codex","rootId":"a","epoch":1,"status":"running","threadId":"t","accountKey":"default",
+            json!({"capacity":{"kind":"automatic","max":64},"naming":"automatic","compactions":0,"id":"a","provider":"codex","rootId":"a","epoch":1,"status":"running","threadId":"t","accountKey":"default",
                 "events":7,"lastEvent":"2026-10-20T00:00:00Z","activity":{"phase":"writing","at":5.0},
                 "activeTools":[],"tail":"answer tail","lastAnswer":"answer","contextUsage":null,
                 "tokensUsed":120,"tokenUsageAccounting":"total","prompt":"keep"}),
-            json!({"compactions":0,"id":"b","provider":"codex","rootId":"a","epoch":0,"status":"idle","name":"no volatile fields","accountKey":"default"}),
+            json!({"capacity":{"kind":"automatic","max":64},"naming":"automatic","compactions":0,"id":"b","provider":"codex","rootId":"a","epoch":0,"status":"idle","name":"no volatile fields","accountKey":"default"}),
         ]
     }
 

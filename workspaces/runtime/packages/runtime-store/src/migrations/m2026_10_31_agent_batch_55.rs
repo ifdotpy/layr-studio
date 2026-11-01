@@ -152,9 +152,20 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 record.remove(key);
             }
         }
+        let normalized = serde_json::to_string(&record)?;
+        if serde_json::from_str::<serde_json::Value>(&raw)?
+            == serde_json::from_str::<serde_json::Value>(&normalized)?
+            && !tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM json_each(?1) GROUP BY key HAVING count(*) > 1)",
+                [&raw],
+                |row| row.get::<_, bool>(0),
+            )?
+        {
+            continue;
+        }
         tx.execute(
             "UPDATE runtime_agents SET record=?1 WHERE id=?2",
-            rusqlite::params![serde_json::to_string(&record)?, id],
+            rusqlite::params![normalized, id],
         )?;
     }
     Ok(())
@@ -182,6 +193,51 @@ fn clear_bad_workspace_value(
 mod tests {
     use rusqlite::Connection;
 
+    #[tokio::test]
+    async fn reopened_store_does_not_rewrite_normalized_errors() {
+        let root = tempfile::tempdir().unwrap();
+        let store = crate::RuntimeStore::open(Some(root.path())).await.unwrap();
+        store.transaction(|tx| {
+            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('agent',?1)", [r#"{"id":"agent","rootId":"agent","epoch":0,"status":"failed","accountKey":"default","provider":"codex","compactions":0,"error":{"message":"failed","data":{"id":1}}}"#])?;
+                super::super::normalize_agent_fixtures(tx)?;
+            Ok(())
+        }).await.unwrap();
+        drop(store);
+        let store = crate::RuntimeStore::open(Some(root.path())).await.unwrap();
+        let before: String = store
+            .test_reader()
+            .unwrap()
+            .query_row(
+                "SELECT record FROM runtime_agents WHERE id='agent'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&before).unwrap();
+        assert_eq!(
+            value["error"]["studioRawEvidence"],
+            serde_json::json!({"message":"failed","data":{"id":1}})
+        );
+        store.transaction(|tx| {
+            tx.execute_batch("CREATE TRIGGER no_agent_rewrite BEFORE UPDATE ON runtime_agents BEGIN SELECT RAISE(FAIL, 'unexpected agent rewrite'); END")?;
+            Ok(())
+        }).await.unwrap();
+        drop(store);
+        for _ in 0..2 {
+            let reopened = crate::RuntimeStore::open(Some(root.path())).await.unwrap();
+            let after: String = reopened
+                .test_reader()
+                .unwrap()
+                .query_row(
+                    "SELECT record FROM runtime_agents WHERE id='agent'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(after, before);
+        }
+    }
+
     #[test]
     fn agent_batch_55_normalizes_all_owned_fields() {
         let mut malformed = serde_json::from_str::<
@@ -202,7 +258,9 @@ mod tests {
         INSERT INTO runtime_agents VALUES('legacy','{"id":"legacy","provider":"future","created":-1,"complaintMisses":9,"startRecoveryCheck":{"state":"waiting"},"workspaceBackend":null,"complaintsPresented":["c"],"checkpointError":"legacy failure","compactionsObservedOnly":false,"turnRecovery":{"outcome":"idle"},"lastContextRepairWait":{"status":"superseded"},"lastContextRepairCheck":{"phase":"waiting"},"completedWorkerTurns":2,"supervisorRestore":{"status":"not_restored"},"countedWorkerTurn":true,"imageWorkspaceBaseError":"old","imageWorkspaceBaseRef":"main","imageWorkspaceCreatedAt":2,"imageWorkspaceError":"old","imageWorkspaceHasGit":true,"imageWorkspaceNoticeSent":true,"imageWorkspaceNoticeText":"old","imageWorkspaceRelative":".","imageWorkspaceStartCommit":"abc","imageWorkspaceSubpath":".","archived":"yes","pinned":[],"maxAgents":-1,"nativeEffort":42,"imageWorkspace":42,"projectFolder":42,"checkpointHistoryHead":42,"workspaceReservationId":42,"workspaceOperation":42,"excludedAccountKeys":["blocked",42],"layrReady":"bad","queueMutationRevision":-1,"authResumeAttempt":-1,"lastCompletedTurn":42,"hostProjectPath":42,"executionSettingsAccountKey":42,"lastCompletedTurnStatus":42,"error":{"error":{"message":"nested","code":42},"ignored":true},"lastCompletedTurnError":{"message":"previous","ignored":true}}');"#).unwrap();
         let tx = db.transaction().unwrap();
         super::apply(&tx).unwrap();
+        tx.execute_batch("CREATE TRIGGER no_repeat BEFORE UPDATE ON runtime_agents BEGIN SELECT RAISE(FAIL, 'unexpected rewrite'); END;").unwrap();
         super::apply(&tx).unwrap();
+        tx.execute_batch("DROP TRIGGER no_repeat;").unwrap();
         let raw: String = tx
             .query_row("SELECT record FROM runtime_agents", [], |row| row.get(0))
             .unwrap();

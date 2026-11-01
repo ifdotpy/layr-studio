@@ -113,7 +113,7 @@ impl<'de> Deserialize<'de> for AgentError {
             .and_then(|value| match value {
                 Value::String(value) => Some(value),
                 Value::Number(value) => Some(value.to_string()),
-                _ => None,
+                Value::Null | Value::Bool(_) | Value::Array(_) | Value::Object(_) => None,
             })
             .or_else(|| {
                 [
@@ -213,7 +213,7 @@ fn readable_message(value: &Value, depth: usize) -> Option<String> {
             }
             Some(text.clone())
         }
-        _ => None,
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) => None,
     }
 }
 

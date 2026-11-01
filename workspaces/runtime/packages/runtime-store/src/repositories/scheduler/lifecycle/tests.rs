@@ -192,7 +192,7 @@ fn authentication_repair_requires_the_exact_stored_error() {
             AGENT,
             0,
             ACCOUNT,
-            &json!({"message":"expired","data":{"b":2,"a":1}}),
+            &json!({"message":"expired","data":{"b":2,"a":1},"studioRawEvidence":{"message":"expired","data":{"a":1,"b":2}}}),
         )
         .unwrap()
     }));

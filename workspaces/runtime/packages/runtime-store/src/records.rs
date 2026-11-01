@@ -3116,11 +3116,19 @@ mod tests {
     }
 
     #[test]
-    fn agent_error_rejects_non_error_values() {
+    fn agent_error_preserves_non_error_values() {
         let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"failed","accountKey":"default","compactions":0,"error":42}"#;
-        assert!(serde_json::from_str::<AgentRecord>(raw).is_err());
+        let decoded: AgentRecord = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            decoded.value()["error"],
+            serde_json::json!({"message":"","studioRawEvidence":42})
+        );
         let last_error = raw.replace("\"error\":42", "\"lastCompletedTurnError\":42");
-        assert!(serde_json::from_str::<AgentRecord>(&last_error).is_err());
+        let decoded: AgentRecord = serde_json::from_str(&last_error).unwrap();
+        assert_eq!(
+            decoded.value()["lastCompletedTurnError"],
+            serde_json::json!({"message":"","studioRawEvidence":42})
+        );
         let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"failed","accountKey":"default","compactions":0,"error":{"message":"failed","data":{"id":1}}}"#;
         let decoded: AgentRecord = serde_json::from_str(raw).unwrap();
         assert_eq!(decoded.value()["error"]["data"]["id"], 1);

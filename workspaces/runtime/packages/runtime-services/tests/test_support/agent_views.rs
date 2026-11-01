@@ -3,6 +3,7 @@
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+#[allow(dead_code)]
 pub(crate) fn materialize_agent_defaults(value: &mut Value) {
     let fields = value.as_object_mut().expect("agent fixture");
     fields

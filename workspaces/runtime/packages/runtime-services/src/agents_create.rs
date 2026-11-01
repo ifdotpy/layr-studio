@@ -216,7 +216,10 @@ pub(crate) fn set_capacity(record: &mut Value, max: i64, explicit: bool) -> Resu
     record
         .as_object_mut()
         .ok_or(StoreError::RecordContract("invalid agent record"))?
-        .insert("capacity".into(), serde_json::to_value(capacity)?);
+        .insert(
+            "capacity".into(),
+            serde::Serialize::serialize(&capacity, serde_json::value::Serializer)?,
+        );
     Ok(())
 }
 

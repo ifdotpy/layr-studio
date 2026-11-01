@@ -84,7 +84,12 @@ mod tests {
     #[test]
     fn capacity_migration_normalizes_and_reseeds_once() {
         let mut db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE sync_entity_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); INSERT INTO sync_entity_meta VALUES('agent_projections_v1','1');").unwrap();
+        db.execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE sync_entity_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);").unwrap();
+        db.execute(
+            "INSERT INTO sync_entity_meta VALUES(?1,'1')",
+            [crate::AGENT_PROJECTIONS_SEED_MARKER],
+        )
+        .unwrap();
         for (id, raw, kind, max) in [
             ("default", r#"{"id":"default"}"#, "automatic", 64),
             (
@@ -142,23 +147,23 @@ mod tests {
             assert!(value.get("maxAgents").is_none() && value.get("maxAgentsExplicit").is_none());
             assert_eq!(
                 tx.query_row(
-                    "SELECT count(*) FROM sync_entity_meta WHERE key='agent_projections_v1'",
-                    [],
+                    "SELECT count(*) FROM sync_entity_meta WHERE key=?1",
+                    [crate::AGENT_PROJECTIONS_SEED_MARKER],
                     |r| r.get::<_, i64>(0)
                 )
                 .unwrap(),
                 0
             );
             tx.execute(
-                "INSERT INTO sync_entity_meta VALUES('agent_projections_v1','1')",
-                [],
+                "INSERT INTO sync_entity_meta VALUES(?1,'1')",
+                [crate::AGENT_PROJECTIONS_SEED_MARKER],
             )
             .unwrap();
             super::apply(&tx).unwrap();
             assert_eq!(
                 tx.query_row(
-                    "SELECT count(*) FROM sync_entity_meta WHERE key='agent_projections_v1'",
-                    [],
+                    "SELECT count(*) FROM sync_entity_meta WHERE key=?1",
+                    [crate::AGENT_PROJECTIONS_SEED_MARKER],
                     |r| r.get::<_, i64>(0)
                 )
                 .unwrap(),

@@ -1277,7 +1277,7 @@ mod tests {
                         .find(|op| op.record["result"]["checkpointError"].is_string())
                         .expect("diagnostic retained");
                     let _: crate::WorkspaceOperationRecord =
-                        serde_json::from_value(diagnostic.record.clone())?;
+                        serde::Deserialize::deserialize(diagnostic.record.clone())?;
                     assert_eq!(
                         diagnostic.record["result"]["reservationId"],
                         "checkpoint:lost"

@@ -1115,9 +1115,9 @@ mod tests {
         let accounts = accounts();
         let drafts =
             prepare(&body(), directory.path(), ids, &accounts, &Catalog).expect("checked drafts");
-        assert!(drafts[0].extra.get("_p02CreationIdentity").is_some());
+        assert!(drafts[0].extra.contains_key("_p02CreationIdentity"));
         let persisted = persisted_record(&drafts[0]).expect("persistable typed record");
-        assert!(persisted.extra.get("_p02CreationIdentity").is_none());
+        assert!(!persisted.extra.contains_key("_p02CreationIdentity"));
         for (draft, id) in drafts.iter().zip(IDS) {
             assert_eq!(draft.id.0, id);
             assert_eq!(draft.root_id.0, id);
