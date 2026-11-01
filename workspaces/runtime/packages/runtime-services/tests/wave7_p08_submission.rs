@@ -26,8 +26,29 @@ fn corpus() -> Vec<Case> {
         crate::turn_fixtures::load(include_bytes!("wave7_p08_submission.json"));
     cases
         .into_iter()
-        .map(|c| {
+        .map(|mut c| {
             let _ = c.database;
+            for state in [&mut c.case.before, &mut c.case.after] {
+                for row in state
+                    .get_mut("runtime_agents")
+                    .and_then(Value::as_array_mut)
+                    .expect("agent rows")
+                {
+                    crate::turn_fixtures::current_agent(
+                        row.get_mut("record").expect("agent record"),
+                    );
+                }
+            }
+            if !c.case.retry {
+                for pointer in [
+                    "/runtime_agents/0/record/startAttempt/claudeInputRequest/source",
+                    "/runtime_execution_attempts/0/record/claudeInputRequest/source",
+                ] {
+                    if let Some(source) = c.case.after.pointer_mut(pointer) {
+                        crate::turn_fixtures::current_source(source);
+                    }
+                }
+            }
             c.case
         })
         .collect()
@@ -260,23 +281,6 @@ fn compare(db: &rusqlite::Connection, expected: &Value, label: &str) {
     // before comparing the unchanged Python record fields.
     let mut expected = expected.clone();
     for state in [&mut actual, &mut expected] {
-        if let Some(attempts) = state
-            .get_mut("runtime_execution_attempts")
-            .and_then(Value::as_array_mut)
-        {
-            for row in attempts {
-                if let Some(source) = row
-                    .pointer_mut("/record/claudeInputRequest/source")
-                    .and_then(Value::as_object_mut)
-                {
-                    for key in ["effort", "fastMode", "nativeEffort", "parentId"] {
-                        if source.get(key).is_some_and(Value::is_null) {
-                            source.remove(key);
-                        }
-                    }
-                }
-            }
-        }
         for row in state
             .get_mut("runtime_agents")
             .and_then(Value::as_array_mut)
@@ -291,17 +295,6 @@ fn compare(db: &rusqlite::Connection, expected: &Value, label: &str) {
                     .is_some_and(Value::is_null)
                 {
                     attempt.remove("supervisorIdentity");
-                }
-                if let Some(source) = attempt
-                    .get_mut("claudeInputRequest")
-                    .and_then(|value| value.get_mut("source"))
-                    .and_then(Value::as_object_mut)
-                {
-                    for key in ["effort", "fastMode", "nativeEffort", "parentId"] {
-                        if source.get(key).is_some_and(Value::is_null) {
-                            source.remove(key);
-                        }
-                    }
                 }
             }
             if let Some(record) = row.get_mut("record").and_then(Value::as_object_mut) {
