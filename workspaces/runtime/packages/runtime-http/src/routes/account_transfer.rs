@@ -166,35 +166,31 @@ async fn transfer(
         {
             return super::generated_json::<generated::TransferResponse>(saved).map(Json);
         }
-        let registered = if let Some(driver) = state.account_driver.clone() {
+        let accounts = if let Some(driver) = state.account_driver.clone() {
             studio_runtime_process::blocking_pool::spawn_blocking(
                 "runtime-http/routes/account_transfer",
-                move || {
-                    driver
-                        .snapshot()
-                        .map(|snapshot| snapshot.known_account_keys)
-                },
+                move || driver.snapshot(),
             )
             .await
             .map_err(|_| ApiError::internal())?
             .map_err(|_| ApiError::internal())?
-            .contains(target)
         } else if let Some(policy) = &state.account_policy {
-            policy.has_account(target)
+            policy.accounts()
         } else {
             return Err(error(TransferError::Refused("Unknown account")));
         };
-        if !registered {
+        if !accounts.known_account_keys.contains(target) {
             return Err(error(TransferError::Refused("Unknown account")));
         }
-        if state.account_policy.as_ref().is_some_and(|policy| {
-            policy.accounts().accounts.iter().any(|account| {
-                account.id.as_str() == Some(target)
-                    && (account.deleted.truthy() || account.disconnected.truthy())
-            })
+        if !accounts.accounts.iter().any(|account| {
+            account.id.as_str() == Some(target)
+                && matches!(
+                    account.eligibility(),
+                    studio_runtime_schema::agent_progress::AccountEligibility::Available
+                )
         }) {
             return Err(error(TransferError::Refused(
-                "Reconnect this account before transferring a team to it",
+                "This account is not available for transfer",
             )));
         }
         let target_provider = state
@@ -312,11 +308,11 @@ mod replay_tests {
             .transaction(move |tx| AgentRepository::put(tx, &agent))
             .await
             .unwrap();
-        let app = |disconnected| {
+        let app = |disconnected, status| {
             let registry = json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,
                 "defaultAccountKey":"target","logins":{},"accounts":{"target":{
                     "id":"target","provider":"codex","home":root.path(),"label":"Target",
-                    "source":"fixture","status":"ready","disconnected":disconnected}}});
+                    "source":"fixture","status":status,"disconnected":disconnected}}});
             let policy =
                 AccountPolicyState::from_startup(Some(&serde_json::to_vec(&registry).unwrap()), [])
                     .unwrap();
@@ -353,16 +349,21 @@ mod replay_tests {
             .unwrap();
             (status, body)
         };
-        let first = call(app(false), body.clone()).await;
+        let refused = call(app(false, "error"), body.clone()).await;
+        assert_eq!(
+            refused.0, 400,
+            "unavailable account must not start a transfer"
+        );
+        let first = call(app(false, "ready"), body.clone()).await;
         assert_eq!(first.0, 200, "initial request: {:?}", first.1);
-        let retry = call(app(true), body.clone()).await;
+        let retry = call(app(true, "ready"), body.clone()).await;
         assert_eq!(
             retry, first,
             "exact retry returns the accepted result after disconnect"
         );
         let mut changed = body;
         changed["account_key"] = json!("another");
-        let conflict = call(app(true), changed).await;
+        let conflict = call(app(true, "ready"), changed).await;
         assert_eq!(conflict.0, 400);
         assert_eq!(
             conflict.1["error"],
