@@ -2537,7 +2537,10 @@ export function handleEntitySyncFixtureRequest(
       }
       // Preserve the array observed by the caller's subscription assertions.
       requestedResources.splice(0, requestedResources.length, ...next);
-      writeFrame("subscriptions", { gen: update.gen, cachePolicies: [] });
+      writeFrame("subscriptions", {
+        gen: update.gen,
+        cachePolicies: [],
+      } satisfies import("../src/generated/api.ts").components["schemas"]["SyncSubscriptionAck"]);
       if (update.add.length)
         writeFrame("resources", {
           ...initial,

@@ -3099,10 +3099,6 @@
       "fingerprint": "69d1dc386914d5abc5b5a3e330ea6d60632d17d778b851eec08d3c91801727ee:0"
     },
     {
-      "file": "workspaces/client/apps/web/src/hooks/snapshotDeleteReadback.test.ts",
-      "fingerprint": "b3f2d33979f6f5b2081292f8d0bef7246b2633c338a69b974665f355239c2c01:0"
-    },
-    {
       "file": "workspaces/client/apps/web/src/native/audioFrames.test.ts",
       "fingerprint": "41b0e38d1064a7820fcdae1a395462deb510a04127f5437e32094b3aedc559c0:0"
     },

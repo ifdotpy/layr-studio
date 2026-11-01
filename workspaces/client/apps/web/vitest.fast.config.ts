@@ -177,8 +177,6 @@ export default {
       "src/servers/mergedSidebar.test.ts",
       "src/sync/uiPreferenceBridge.test.ts",
       // Reserved preference keys survive profile import.
-      // An authoritative delete readback must settle even when another refresh owns the current render generation.
-      "src/hooks/snapshotDeleteReadback.test.ts",
       "src/chatDeleteScope.test.ts",
       "src/projectDelete.test.ts",
       "src/useProjectDelete.test.ts",

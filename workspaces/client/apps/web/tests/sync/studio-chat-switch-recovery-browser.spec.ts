@@ -187,7 +187,7 @@ test("selected Studio chat recovers after slow cursor preparation without reload
             protocol3SseEvent("subscriptions", {
               gen: update.gen,
               cachePolicies: [],
-            }),
+            } satisfies import("../../src/generated/api.ts").components["schemas"]["SyncSubscriptionAck"]),
           );
           if (update.add.length)
             stream.write(baseline(update.add.map((entry) => entry.resource)));
