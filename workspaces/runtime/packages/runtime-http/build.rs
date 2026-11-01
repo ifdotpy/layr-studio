@@ -111,8 +111,128 @@ fn main() -> Result<(), Box<dyn Error>> {
     // such as 7.0; the pull-output ingress validates them before typed decoding.
     for (name, owner) in [
         (
+            "ActiveToolDto",
+            "studio_runtime_schema::agent_entity_nested::ActiveToolDto",
+        ),
+        (
+            "AgentActivity",
+            "studio_runtime_schema::agent_entity_nested::AgentActivity",
+        ),
+        (
+            "WorkspaceCleanupSummaryDto",
+            "studio_runtime_schema::agent_entity_nested::WorkspaceCleanupSummaryDto",
+        ),
+        (
+            "NativeSafetyBufferingRecord",
+            "studio_runtime_schema::agent_entity_nested_extra::NativeSafetyBufferingRecord",
+        ),
+        (
+            "AgentStartAttempt",
+            "studio_runtime_schema::agent_entity_nested_extra::AgentStartAttempt",
+        ),
+        (
+            "ConvertedFromLeadDto",
+            "studio_runtime_schema::agent_entity_nested_extra::ConvertedFromLeadDto",
+        ),
+        (
+            "AgentNativeRelease",
+            "studio_runtime_schema::agent_entity_nested_extra::AgentNativeRelease",
+        ),
+        (
+            "NativeReleasePhase",
+            "studio_runtime_schema::persistence::NativeReleasePhase",
+        ),
+        (
+            "ContextUsageDto",
+            "studio_runtime_schema::agent_entity_nested_extra::ContextUsageDto",
+        ),
+        (
+            "ReadStateDto",
+            "studio_runtime_schema::agent_entity_nested_extra::ReadStateDto",
+        ),
+        (
+            "AgentRole",
+            "studio_runtime_schema::agent_entity_nested_extra::AgentRole",
+        ),
+        (
+            "AccountTransferSummaryDto",
+            "studio_runtime_schema::agent_entity_transfer::AccountTransferSummaryDto",
+        ),
+        (
+            "AccountTransferBlockedDto",
+            "studio_runtime_schema::agent_entity_transfer::AccountTransferNoticeDto",
+        ),
+        (
+            "AccountTransferInterruptedDto",
+            "studio_runtime_schema::agent_entity_transfer::AccountTransferNoticeDto",
+        ),
+        (
+            "AccountTransferLeftOnSourceDto",
+            "studio_runtime_schema::agent_entity_transfer::AccountTransferLeftOnSourceDto",
+        ),
+        (
+            "AccountTransferScope",
+            "studio_runtime_schema::agent_entity_transfer::TransferScope",
+        ),
+        (
+            "AccountTransferStatus",
+            "studio_runtime_schema::agent_entity_transfer::TransferStatus",
+        ),
+        (
+            "AgentEntityCapacityRetryDto",
+            "studio_runtime_schema::agent_entity_nested_extra::AgentEntityCapacityRetryDto",
+        ),
+        (
+            "AgentEntityUsageResumeDto",
+            "studio_runtime_schema::agent_entity_nested_extra::AgentEntityUsageResumeDto",
+        ),
+        (
+            "CapacityRetryCause",
+            "studio_runtime_schema::continuation_snapshot::CapacityContinuationCause",
+        ),
+        (
+            "AgentNativeStatus",
+            "studio_runtime_schema::agent_entity_nested::AgentNativeStatus",
+        ),
+        (
+            "ExecutionSettingsDto",
+            "studio_runtime_schema::agent_entity_nested::ExecutionSettingsDto",
+        ),
+        (
+            "ConnectionCheckDto",
+            "studio_runtime_schema::agent_entity_native::ConnectionCheckDto",
+        ),
+        (
+            "NativeThreadBlockDto",
+            "studio_runtime_schema::agent_entity_native::NativeThreadBlockDto",
+        ),
+        (
+            "NativeTurnErrorDto",
+            "studio_runtime_schema::agent_entity_native::NativeTurnErrorDto",
+        ),
+        (
+            "NativeSafetyRetryDto",
+            "studio_runtime_schema::agent_entity_native::NativeSafetyRetryDto",
+        ),
+        (
+            "NativeSafetyStage",
+            "studio_runtime_schema::agent_entity_native::NativeSafetyStage",
+        ),
+        (
             "WorkerDefaultsDto",
             "studio_runtime_schema::agent_entity_nested::WorkerDefaultsDto",
+        ),
+        (
+            "RemoteParentLinkDto",
+            "studio_runtime_schema::agent_entity_remote::RemoteParentLinkDto",
+        ),
+        (
+            "RemoteWorkerLinkDto",
+            "studio_runtime_schema::agent_entity_remote::RemoteWorkerLinkDto",
+        ),
+        (
+            "ReviewDefaultsDto",
+            "studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto",
         ),
         (
             "AgentNativeStatusValue",
@@ -208,11 +328,21 @@ fn main() -> Result<(), Box<dyn Error>> {
             serde_with: None,
         };
     }
-    // The start-wait union is owned by agent_progress; its generated branches
-    // are no longer referenced by the mapped component.
-    analysis
-        .schemas
-        .retain(|name, _| !name.starts_with("AgentEntityStartWaitDtoVariant"));
+    // These union branches are owned by agent_progress, not generated DTOs.
+    analysis.schemas.retain(|name, _| {
+        name != "ConvertedFromLeadDtoBy"
+            && ![
+                "AgentEntityStartWaitDtoVariant",
+                "AgentNativeStatusError",
+                "AgentNativeStatusPhase",
+                "AccountChangeVariant",
+                "AccountChangeKind",
+                "AccountTransferProgressVariant",
+                "AccountTransferProgressKind",
+            ]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+    });
     analysis
         .schemas
         .get_mut("MonitorState")
