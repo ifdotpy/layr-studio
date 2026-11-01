@@ -1802,15 +1802,6 @@ fn public_view(op: &Value, order: &[String]) -> Result<Value, TransferError> {
             output[key] = value.clone();
         }
     }
-    if let Some(requests) = op.get("requests").and_then(Value::as_object) {
-        let mut public = requests.clone();
-        for request in public.values_mut() {
-            if let Some(fields) = request.as_object_mut() {
-                fields.remove("savedResponse");
-            }
-        }
-        output["requests"] = Value::Object(public);
-    }
     output["scope"] = op.get("scope").cloned().unwrap_or(json!("team"));
     let mut members = json!({});
     for id in order {

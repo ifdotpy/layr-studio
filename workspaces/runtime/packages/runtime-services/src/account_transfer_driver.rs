@@ -72,15 +72,6 @@ enum SavedScope {
     Subagents,
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SavedRequestIdentity {
-    lead_id: String,
-    target_account_key: studio_runtime_schema::account_key::AccountKey,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    scope: Field<SavedScope>,
-}
-
 /// The immutable response delivered for one transfer request.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -92,7 +83,6 @@ struct SavedTransferResponse {
     created: f64,
     scope: SavedScope,
     members: std::collections::BTreeMap<String, SavedMember>,
-    requests: std::collections::BTreeMap<String, SavedRequestIdentity>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     target_provider: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -1424,6 +1414,34 @@ mod request_tests {
             run_async(recover(&store, 12.0)).expect("pending recovery ignores completed history"),
             0
         );
+    }
+
+    #[test]
+    fn saved_alias_outcomes_stay_bounded_with_many_prior_requests() {
+        let (_root, store) = store_with_agents();
+        let original = "5a300f72-4ea6-4d30-8a0e-9b2c13c42270";
+        let alias = "5a300f72-4ea6-4d30-8a0e-9b2c13c42271";
+        request(&store, original, "lead", "target", "team", "codex", 10.0).unwrap();
+        run_async(store.transaction(move |tx| {
+            let mut op = Repository::get(tx, original)?.unwrap();
+            for i in 0..256 {
+                op["requests"][format!("prior-{i:04}")] =
+                    json!({"leadId":"lead","targetAccountKey":"target","scope":"team"});
+            }
+            Repository::put(tx, original, &op.to_string())
+        }))
+        .unwrap();
+        let response = request(&store, alias, "lead", "target", "team", "codex", 11.0).unwrap();
+        assert!(response.get("requests").is_none());
+        let saved = run_async(store.read_async("alias-size-test", move |tx| {
+            Ok::<_, studio_runtime_store::StoreError>(
+                Repository::get(tx, original)?.unwrap()["requests"][alias]["savedResponse"]
+                    .to_string(),
+            )
+        }))
+        .unwrap();
+        assert!(!saved.contains("\"requests\""));
+        assert!((saved.len() + 200) * 4096 < studio_runtime_store::MAX_TRANSFER_RECORD_BYTES);
     }
 
     #[test]
