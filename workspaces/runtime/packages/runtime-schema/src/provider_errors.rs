@@ -146,17 +146,70 @@ impl AgentError {
 
     /// Normalize a provider receipt at its existing JSON ingress boundary.
     pub fn from_receipt(value: Value) -> Result<Self, serde_json::Error> {
+        fn readable(value: &Value) -> bool {
+            match value {
+                Value::String(text) => !text.trim().is_empty(),
+                Value::Object(fields) => {
+                    fields.get("error").is_some_and(readable)
+                        || fields.get("message").is_some_and(readable)
+                        || fields
+                            .get("codexErrorInfo")
+                            .is_some_and(|value| !value.is_null())
+                        || fields.get("code").is_some_and(|v| v == "bio_policy")
+                }
+                _ => false,
+            }
+        }
         fn normalize(value: Value, depth: usize) -> Value {
             if depth >= 8 {
                 return value;
             }
             match value {
                 Value::String(ref text) => {
-                    let candidate = text.find('{').map(|i| &text[i..]).unwrap_or(text);
-                    match serde_json::from_str::<Value>(candidate) {
-                        Ok(parsed @ Value::Object(_)) => normalize(parsed, depth + 1),
-                        _ => value,
+                    if text.len() > 65_536 {
+                        return value;
                     }
+                    if let Ok(parsed) = serde_json::from_str::<Value>(text) {
+                        if parsed != value && readable(&parsed) {
+                            return normalize(parsed, depth + 1);
+                        }
+                    }
+                    let (mut start, mut level, mut quoted, mut escaped) =
+                        (None, 0usize, false, false);
+                    for (index, ch) in text.char_indices() {
+                        if start.is_none() {
+                            if ch == '{' {
+                                start = Some(index);
+                                level = 1;
+                            }
+                            continue;
+                        }
+                        if quoted {
+                            if escaped {
+                                escaped = false;
+                            } else if ch == '\\' {
+                                escaped = true;
+                            } else if ch == '"' {
+                                quoted = false;
+                            }
+                        } else if ch == '"' {
+                            quoted = true;
+                        } else if ch == '{' {
+                            level += 1;
+                        } else if ch == '}' {
+                            level -= 1;
+                            if level == 0 {
+                                if let Some(begin) = start.take()
+                                    && let Ok(parsed @ Value::Object(_)) =
+                                        serde_json::from_str::<Value>(&text[begin..=index])
+                                    && readable(&parsed)
+                                {
+                                    return normalize(parsed, depth + 1);
+                                }
+                            }
+                        }
+                    }
+                    value
                 }
                 Value::Object(mut fields) => {
                     for key in ["error", "message"] {
@@ -193,29 +246,58 @@ impl AgentError {
                 _ => value,
             }
         }
+        let original = value.clone();
         let mut fields = match normalize(value, 0) {
+            Value::String(message) if original != Value::String(message.clone()) => {
+                [("message".to_owned(), Value::String(message))]
+                    .into_iter()
+                    .collect()
+            }
             Value::String(message) => return Ok(Self::Message(message)),
             Value::Object(fields) => fields,
             other => return Ok(Self::Message(other.to_string())),
         };
+        let changed_message = original.is_string()
+            || original.get("message").is_some_and(Value::is_object)
+            || original
+                .get("message")
+                .is_some_and(|value| fields.get("message") != Some(value));
         let message = match fields.remove("message") {
             Some(Value::String(message)) => message,
             Some(Value::Object(message)) => Value::Object(message).to_string(),
             _ => String::new(),
         };
-        let code = match fields.remove("code") {
+        let mut code = match fields.remove("code") {
             Some(Value::String(code)) => Some(code),
             Some(Value::Number(code)) if code.is_i64() || code.is_u64() => Some(code.to_string()),
             _ => None,
         };
+        if code.is_none()
+            && [
+                "Invalid prompt: we've limited access to this content for safety reasons.",
+                "This content was flagged for possible biological risk.",
+            ]
+            .iter()
+            .any(|prefix| message.starts_with(prefix))
+        {
+            code = Some("bio_policy".to_owned());
+        }
         let codex_error_info = fields
             .remove("codexErrorInfo")
             .filter(|v| !v.is_null())
             .and_then(|v| CodexErrorInfo::deserialize(v).ok());
-        let claude_failure = fields
-            .remove("claudeFailure")
-            .filter(|v| !v.is_null())
-            .and_then(|v| crate::claude_failure::ClaudeFailure::deserialize(v).ok());
+        let claude_raw = fields.remove("claudeFailure").filter(|v| !v.is_null());
+        let claude_failure = claude_raw
+            .as_ref()
+            .and_then(|v| crate::claude_failure::ClaudeFailure::deserialize(v.clone()).ok());
+        let lost_claude = claude_raw.is_some() && claude_failure.is_none();
+        if lost_claude || changed_message {
+            let mut key = "rawEvidence".to_string();
+            while fields.contains_key(&key) {
+                key.push('_');
+            }
+            fields.insert(key, original);
+        }
         let raw = |value: Value| serde_json::value::RawValue::from_string(value.to_string());
         let data = fields
             .remove("data")
@@ -351,6 +433,169 @@ mod tests {
         assert_eq!(
             document["components"]["schemas"]["NativeProviderError"],
             native_provider_error_schema()
+        );
+    }
+
+    #[test]
+    fn provider_receipt_preserves_unrecognized_failure_and_nested_collisions() {
+        for receipt in [
+            json!({"message":"failure", "claudeFailure":{"kind":"future", "opaque":[1,null]}}),
+            json!({"message":{"message":"inner", "code":"inner", "detail":1}, "code":"outer"}),
+        ] {
+            let normalized =
+                serde_json::to_value(AgentError::from_receipt(receipt.clone()).unwrap()).unwrap();
+            assert_eq!(normalized.get("rawEvidence"), Some(&receipt));
+            let decoded: AgentError = serde_json::from_value(normalized.clone()).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap(), normalized);
+        }
+    }
+
+    #[test]
+    fn legacy_renderer_raw_cases_are_normalized_at_ingress() {
+        let nested = r#"{"error":{"message":"Service unavailable","code":"unavailable"}}"#;
+        let nested_notification = json!({"error":{"message":nested}}).to_string();
+        for raw in [
+            nested.to_owned(),
+            format!("```json\n{nested}\n```"),
+            format!("HTTP 503: {nested} (request abc)"),
+            nested_notification,
+            format!("HTTP error {{\"requestId\":\"abc\"}} then {nested}"),
+        ] {
+            let direct =
+                serde_json::to_value(AgentError::from_receipt(json!(raw)).unwrap()).unwrap();
+            assert_eq!(direct.get("message"), Some(&json!("Service unavailable")));
+            assert_eq!(direct.get("code"), Some(&json!("unavailable")));
+            assert_eq!(direct.get("rawEvidence"), Some(&json!(raw)));
+            let receipt = json!({"message":raw,"codexErrorInfo":"httpConnectionFailed"});
+            let wrapped =
+                serde_json::to_value(AgentError::from_receipt(receipt.clone()).unwrap()).unwrap();
+            assert_eq!(wrapped.get("message"), Some(&json!("Service unavailable")));
+            assert_eq!(wrapped.get("code"), Some(&json!("unavailable")));
+            assert_eq!(
+                wrapped.get("codexErrorInfo"),
+                Some(&json!("httpConnectionFailed"))
+            );
+            assert_eq!(wrapped.get("rawEvidence"), Some(&receipt));
+        }
+        let rpc = r#"{"message":"RPC rejected","code":-32600}"#;
+        assert_eq!(
+            serde_json::to_value(AgentError::from_receipt(json!(rpc)).unwrap()).unwrap(),
+            json!({"message":"RPC rejected","code":"-32600","rawEvidence":rpc})
+        );
+        let quoted = r#""Service unavailable""#;
+        assert_eq!(
+            serde_json::to_value(AgentError::from_receipt(json!(quoted)).unwrap()).unwrap(),
+            json!({"message":"Service unavailable","rawEvidence":quoted})
+        );
+        let nested = json!({"error":{"message":"Nested failure"}});
+        assert_eq!(
+            serde_json::to_value(AgentError::from_receipt(nested).unwrap()).unwrap(),
+            json!({"message":"Nested failure","error":{"message":"Nested failure"}})
+        );
+        for raw in [
+            "Error instance",
+            r#"HTTP 503: {"error":{"message":"Unavailable"}}"#,
+        ] {
+            let actual = AgentError::from_receipt(json!({"message":raw})).unwrap();
+            assert_eq!(
+                actual.display_text(),
+                if raw == "Error instance" {
+                    raw
+                } else {
+                    "Unavailable"
+                }
+            );
+        }
+        let raw = json!({"message":"  ","codexErrorInfo":"serverOverloaded"}).to_string();
+        let actual = serde_json::to_value(AgentError::from_receipt(json!(raw)).unwrap()).unwrap();
+        assert_eq!(
+            actual,
+            json!({"message":"  ","codexErrorInfo":"serverOverloaded","rawEvidence":raw})
+        );
+        let actual = serde_json::to_value(
+            AgentError::from_receipt(json!({"data":{"codexErrorInfo":"serverOverloaded"}}))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            actual,
+            json!({"message":"","codexErrorInfo":"serverOverloaded","data":{"codexErrorInfo":"serverOverloaded"}})
+        );
+    }
+
+    #[test]
+    fn legacy_renderer_remaining_raw_cases_have_exact_normalized_fields() {
+        let biological = [
+            "Invalid prompt: we've limited access to this content for safety reasons. More context",
+            "This content was flagged for possible biological risk.",
+        ];
+        for message in biological {
+            let actual = serde_json::to_value(
+                AgentError::from_receipt(json!({"message":message,"codexErrorInfo":"other"}))
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(actual.get("message"), Some(&json!(message)));
+            assert_eq!(actual.get("code"), Some(&json!("bio_policy")));
+            assert_eq!(actual.get("codexErrorInfo"), Some(&json!("other")));
+        }
+        for raw in [
+            r#"HTTP 400: {"error":{"code":"bio_policy","message":"Restricted"}} tail"#,
+            "```json\n{\"error\":{\"code\":\"bio_policy\",\"message\":\"Restricted\"}}\n```",
+        ] {
+            let receipt = json!({"message":raw,"codexErrorInfo":"other"});
+            let actual =
+                serde_json::to_value(AgentError::from_receipt(receipt.clone()).unwrap()).unwrap();
+            assert_eq!(actual.get("message"), Some(&json!("Restricted")));
+            assert_eq!(actual.get("code"), Some(&json!("bio_policy")));
+            assert_eq!(actual.get("codexErrorInfo"), Some(&json!("other")));
+            assert_eq!(actual.get("rawEvidence"), Some(&receipt));
+        }
+        for raw in [
+            r#"HTTP 500: {"message":"bio_policy mentioned in a log"}"#,
+            r#"HTTP 500: {"error":{"message":"Failed"},"metadata":{"code":"bio_policy"}}"#,
+            r#"HTTP 500: {"error":{"message":"Failed","codexErrorInfo":"misalignmentPolicyViolation"}}"#,
+            r#"{"message":"Failed","metadata":{"error":{"code":"bio_policy"}}}"#,
+        ] {
+            let actual = serde_json::to_value(
+                AgentError::from_receipt(json!({"message":raw,"codexErrorInfo":"other"})).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(actual.get("codexErrorInfo"), Some(&json!("other")));
+            assert_eq!(actual.get("code"), None);
+        }
+        for raw in [
+            r#"HTTP failure {"requestId":"abc"} tail"#,
+            r#"{"requestId":"abc"}"#,
+            r#"HTTP failure {"error":{"message":null}} tail"#,
+            r#"HTTP failure {"error":{"message":"unterminated}"#,
+        ] {
+            assert_eq!(
+                AgentError::from_receipt(json!(raw)).unwrap().display_text(),
+                raw
+            );
+        }
+        let excessive = format!("HTTP failure {}", "{".repeat(70_000));
+        assert_eq!(
+            AgentError::from_receipt(json!(excessive))
+                .unwrap()
+                .display_text(),
+            excessive
+        );
+        let receipt =
+            json!({"message":r#"{"error":{"message":"<img src=x onerror=\"alert(1)\"> {text}"}}"#});
+        assert_eq!(
+            AgentError::from_receipt(receipt).unwrap().display_text(),
+            r#"<img src=x onerror="alert(1)"> {text}"#
+        );
+        let disk = serde_json::to_value(
+            AgentError::from_receipt(json!({"message":"Disk is full.","data":{"diskFull":true}}))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            disk,
+            json!({"message":"Disk is full.","data":{"diskFull":true},"codexErrorInfo":"diskFull"})
         );
     }
 
