@@ -89,8 +89,8 @@ struct CancellableResume {
     reason: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     auth_attempt: Field<u64>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    waiting_for_auth: Field<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    waiting_for_auth: Option<bool>,
     #[serde(
         default,
         deserialize_with = "optional_claims",
@@ -578,6 +578,25 @@ mod tests {
             expected
         );
         tx.rollback().unwrap();
+    }
+
+    #[test]
+    fn cancellation_normalizes_null_waiting_for_auth_on_both_copies() {
+        let mut stored = resume("resume", "started");
+        stored
+            .as_object_mut()
+            .unwrap()
+            .insert("waitingForAuth".into(), Value::Null);
+        let db = database(json!({"usageResumeEnabled":true,"usageResume":stored}));
+        insert(&db, "runtime_usage_resumes", "resume", &stored);
+        let tx = db.unchecked_transaction().unwrap();
+        let result = cancel_usage_resume(&tx, AGENT, "resume", "moved", 200.0).unwrap();
+        assert!(result.get("waitingForAuth").is_none());
+        let row: Value =
+            serde_json::from_str(&read(&tx, "runtime_usage_resumes", "resume")).unwrap();
+        let agent: Value = serde_json::from_str(&read(&tx, "runtime_agents", AGENT)).unwrap();
+        assert_eq!(row, result);
+        assert_eq!(agent.get("usageResume"), Some(&result));
     }
 
     #[test]
