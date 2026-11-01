@@ -23377,7 +23377,7 @@ export interface components {
           collection: "workDetail";
           /** @constant */
           op: "upsert";
-          value: components["schemas"]["WorkItem"];
+          value: components["schemas"]["WorkDetail"];
         }
       | {
           /** @constant */
@@ -23782,7 +23782,7 @@ export interface components {
       collection: "workDetail";
       /** Id */
       id: string;
-      value: components["schemas"]["WorkItem"];
+      value: components["schemas"]["WorkDetail"];
     };
     /** SyncWorkEntityPayload */
     SyncWorkEntityPayload: {
@@ -27337,6 +27337,16 @@ export interface components {
       resultId?: string | undefined;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
+    };
+    WorkDetail: components["schemas"]["WorkItem"] & {
+      policy: components["schemas"]["WorkDetailPolicy"];
+    };
+    /** @description Current server-owned dependency and acceptance policy for one work detail. */
+    WorkDetailPolicy: {
+      acceptAvailable: boolean;
+      blockedBy: string[];
+      displayStatus: components["schemas"]["WorkStatus"];
+      gateOverrideRequired: boolean;
     };
     /** WorkEntityDto */
     WorkEntityDto: {

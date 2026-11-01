@@ -1801,6 +1801,12 @@ function entityValuesFromSnapshot(
     id: row.id,
     value: {
       ...row,
+      policy: {
+        blockedBy: [],
+        displayStatus: row.status,
+        acceptAvailable: row.status === "review",
+        gateOverrideRequired: false,
+      },
       results: [],
       decisions: [],
       releases: [],

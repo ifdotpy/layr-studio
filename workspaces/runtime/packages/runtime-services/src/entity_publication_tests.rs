@@ -1432,3 +1432,83 @@ async fn the_view_log_matches_the_published_views_of_agents_requests_and_work() 
     assert!(!after.is_empty());
     assert_eq!(logged(&store), after, "after updates and a retired card");
 }
+
+#[tokio::test]
+async fn work_detail_tracks_dependency_status_without_rewriting_the_dependent() {
+    let (_dir, store) = store().await;
+    let parent = json!({"id":"parent","rootId":CHAT,"title":"Parent","status":"ready","created":1,"updated":1,"version":1,"dependencies":[],"results":[],"decisions":[]});
+    let child = json!({"id":"child","rootId":CHAT,"title":"Child","status":"ready","created":1,"updated":1,"version":1,"dependencies":["parent"],"results":[],"decisions":[]});
+    for (id, record) in [("parent", parent), ("child", child)] {
+        write(
+            &store,
+            "INSERT INTO runtime_work(id,record) VALUES(?1,?2)",
+            vec![id.into(), record.to_string()],
+        )
+        .await;
+    }
+    let detail = client_entity(&store, "workDetail", "child")
+        .expect("detail")
+        .1;
+    assert_eq!(detail["policy"]["blockedBy"], json!(["parent"]));
+    assert_eq!(detail["policy"]["displayStatus"], "blocked");
+    assert!(
+        studio_runtime_schema::validate_sync_entity_payload_strict(
+            "workDetail",
+            "child",
+            false,
+            &json!({"collection":"workDetail","id":"child","value":detail}),
+        )
+        .expect("work detail schema")
+    );
+    write(
+        &store,
+        "UPDATE runtime_work SET record=json_set(record,'$.status','accepted') WHERE id=?1",
+        vec!["parent".into()],
+    )
+    .await;
+    let detail = client_entity(&store, "workDetail", "child")
+        .expect("updated detail")
+        .1;
+    assert_eq!(detail["policy"]["blockedBy"], json!([]));
+    assert_eq!(detail["policy"]["displayStatus"], "ready");
+    write(
+        &store,
+        "DELETE FROM runtime_work WHERE id=?1",
+        vec!["parent".into()],
+    )
+    .await;
+    let detail = client_entity(&store, "workDetail", "child")
+        .expect("updated detail")
+        .1;
+    assert_eq!(detail["policy"]["blockedBy"], json!(["parent"]));
+    assert_eq!(detail["policy"]["displayStatus"], "blocked");
+}
+
+#[tokio::test]
+async fn work_detail_publishes_acceptance_gate_requirement() {
+    let (_dir, store) = store().await;
+    let work = json!({"id":"gated","rootId":CHAT,"title":"Gated","status":"review","dependencies":[],"gate":{"command":"check","timeout_ms":600000},"results":[],"decisions":[]});
+    write(
+        &store,
+        "INSERT INTO runtime_work(id,record) VALUES(?1,?2)",
+        vec!["gated".into(), work.to_string()],
+    )
+    .await;
+    let detail = client_entity(&store, "workDetail", "gated")
+        .expect("detail")
+        .1;
+    assert_eq!(detail["policy"]["gateOverrideRequired"], true);
+    assert_eq!(detail["policy"]["acceptAvailable"], false);
+    let result = json!({"id":"result","agent":CHAT,"text":"done","checks":"ok","revision":"abc","files":[],"created":1,"gate":{"status":"passed","config":{"command":"check","timeout_ms":600000},"monitorId":"monitor","exitCode":0,"cwd":null,"revision":"abc","output":"","log":null}});
+    write(
+        &store,
+        "UPDATE runtime_work SET record=json_set(record,'$.results',json(?2)) WHERE id=?1",
+        vec!["gated".into(), json!([result]).to_string()],
+    )
+    .await;
+    let detail = client_entity(&store, "workDetail", "gated")
+        .expect("updated detail")
+        .1;
+    assert_eq!(detail["policy"]["gateOverrideRequired"], false);
+    assert_eq!(detail["policy"]["acceptAvailable"], true);
+}

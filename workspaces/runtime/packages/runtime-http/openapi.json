@@ -52162,7 +52162,7 @@
                 "type": "string"
               },
               "value": {
-                "$ref": "#/components/schemas/WorkItem"
+                "$ref": "#/components/schemas/WorkDetail"
               }
             },
             "required": [
@@ -53270,7 +53270,7 @@
             "type": "string"
           },
           "value": {
-            "$ref": "#/components/schemas/WorkItem"
+            "$ref": "#/components/schemas/WorkDetail"
           }
         },
         "required": [
@@ -62258,6 +62258,52 @@
           "created"
         ],
         "title": "WorkDecisionRecordResponse",
+        "type": "object"
+      },
+      "WorkDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WorkItem"
+          },
+          {
+            "properties": {
+              "policy": {
+                "$ref": "#/components/schemas/WorkDetailPolicy"
+              }
+            },
+            "required": [
+              "policy"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "WorkDetailPolicy": {
+        "additionalProperties": false,
+        "description": "Current server-owned dependency and acceptance policy for one work detail.",
+        "properties": {
+          "acceptAvailable": {
+            "type": "boolean"
+          },
+          "blockedBy": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "displayStatus": {
+            "$ref": "#/components/schemas/WorkStatus"
+          },
+          "gateOverrideRequired": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "blockedBy",
+          "displayStatus",
+          "acceptAvailable",
+          "gateOverrideRequired"
+        ],
         "type": "object"
       },
       "WorkEntityDto": {
