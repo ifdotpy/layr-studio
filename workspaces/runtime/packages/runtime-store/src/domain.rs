@@ -664,13 +664,25 @@ pub fn unfinished_turn(connection: &Connection, chat: &str) -> StoreResult<Optio
         .transpose()
 }
 
+/// SQL: the turn row `alias` (`""` or an alias with its dot) is unfinished. The
+/// states are [`TurnState::UNFINISHED`], the same as [`ONE_UNFINISHED_TURN_INDEX`].
+pub fn unfinished_turn_sql(alias: &str) -> String {
+    format!("{alias}state IN ({})", in_list(&TurnState::UNFINISHED))
+}
+
+/// SQL: the chat `chat` (a column expression) is busy, that is, it has an
+/// unfinished turn. SQL readers use this instead of the agent `in_flight` column.
+pub fn chat_busy_sql(chat: &str) -> String {
+    format!(
+        "EXISTS(SELECT 1 FROM {TURN_TABLE} WHERE chat={chat} AND {})",
+        unfinished_turn_sql("")
+    )
+}
+
 /// A chat is busy exactly when it has an unfinished turn.
 pub fn chat_busy(connection: &Connection, chat: &str) -> StoreResult<bool> {
     Ok(connection
-        .prepare_cached(&format!(
-            "SELECT EXISTS(SELECT 1 FROM turns WHERE chat=?1 AND state IN ({}))",
-            in_list(&TurnState::UNFINISHED)
-        ))?
+        .prepare_cached(&format!("SELECT {}", chat_busy_sql("?1")))?
         .query_row([chat], |row| row.get(0))?)
 }
 
@@ -844,6 +856,30 @@ mod tests {
 
     fn fail(db: &Connection, sql: &str) -> String {
         db.execute(sql, []).expect_err(sql).to_string()
+    }
+
+    #[test]
+    fn chat_busy_sql_is_true_only_for_an_unfinished_turn() {
+        let db = crate::fresh_state::test_canvas();
+        db.execute(
+            "INSERT INTO turns(id,chat,state) VALUES('t1','c','completed')",
+            [],
+        )
+        .unwrap();
+        assert!(!chat_busy(&db, "c").unwrap());
+        db.execute(
+            "INSERT INTO turns(id,chat,state) VALUES('t2','c','starting')",
+            [],
+        )
+        .unwrap();
+        assert!(chat_busy(&db, "c").unwrap());
+        let busy: bool = db
+            .query_row(&format!("SELECT {}", chat_busy_sql("?1")), ["c"], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert!(busy);
+        assert!(!chat_busy(&db, "other").unwrap());
     }
 
     #[test]

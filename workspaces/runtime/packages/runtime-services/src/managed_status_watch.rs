@@ -579,7 +579,7 @@ fn capacity_snapshot(
     let (global_active, team_active): (i64, i64) = connection.query_row(
         &format!(
             "SELECT count(*), count(*) FILTER (WHERE root_id=?1 AND id<>?1) FROM ({})",
-            studio_runtime_store::RESERVED_TURN_INPUT
+            studio_runtime_store::reserved_turn_input()
         ),
         [&root.id.0],
         |row| Ok((row.get(0)?, row.get(1)?)),

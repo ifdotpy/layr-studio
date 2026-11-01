@@ -95,7 +95,7 @@ impl Admission for MessageNativeAdmission {
             let global_limit = usize::try_from(global_limit)
                 .map_err(|_| NativeError::Invalid("review/global-concurrency"))?;
             let active = tx
-                .prepare(studio_runtime_store::RESERVED_TURN_INPUT)?
+                .prepare(studio_runtime_store::reserved_turn_input())?
                 .query_map([], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
                 })?

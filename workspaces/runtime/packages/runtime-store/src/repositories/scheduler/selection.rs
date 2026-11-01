@@ -1,5 +1,6 @@
 use super::*;
 use crate::CachedSql;
+use crate::domain::chat_busy_sql;
 use std::sync::LazyLock;
 
 #[derive(serde::Serialize, serde::Deserialize, PartialEq)]
@@ -147,12 +148,17 @@ fn account_wake_index_eligibility(a: &str) -> String {
 /// `ch`). An index predicate cannot read another table, so the account wake
 /// index leaves these terms out and the queries add them (`exact`).
 fn chat_has(a: &str, condition: &str) -> String {
-    let id = if a.is_empty() {
+    let id = agent_id(a);
+    format!("EXISTS(SELECT 1 FROM chats ch WHERE ch.id={id} AND {condition})")
+}
+
+/// The chat id column of the agent row `a` (`""` or an alias with its dot).
+fn agent_id(a: &str) -> String {
+    if a.is_empty() {
         "runtime_agents.id".to_owned()
     } else {
         format!("{a}id")
-    };
-    format!("EXISTS(SELECT 1 FROM chats ch WHERE ch.id={id} AND {condition})")
+    }
 }
 
 fn account_wake_queued_candidate(a: &str, exact: bool) -> String {
@@ -161,9 +167,13 @@ fn account_wake_queued_candidate(a: &str, exact: bool) -> String {
     } else {
         String::new()
     };
+    let idle = if exact {
+        format!("AND NOT {} ", chat_busy_sql(&agent_id(a)))
+    } else {
+        String::new()
+    };
     format!(
-        "({a}status='queued' {auto_wake}\
-         AND COALESCE({a}in_flight,0)=0 \
+        "({a}status='queued' {auto_wake}{idle}\
          AND COALESCE({a}native_failure_hold,0)=0)"
     )
 }
@@ -173,7 +183,8 @@ fn account_wake_queued_candidate(a: &str, exact: bool) -> String {
 fn account_wake_steer_candidate(a: &str, exact: bool) -> String {
     let chat = if exact {
         format!(
-            "AND {} AND NOT {} ",
+            "AND {} AND {} AND NOT {} ",
+            chat_busy_sql(&agent_id(a)),
             chat_has(a, "ch.auto_wake=1"),
             chat_has(a, "ch.execution_mode='vm'")
         )
@@ -181,7 +192,7 @@ fn account_wake_steer_candidate(a: &str, exact: bool) -> String {
         String::new()
     };
     format!(
-        "({a}status='running' AND {a}in_flight=1 \
+        "({a}status='running' \
          AND {a}turn_id IS NOT NULL \
          AND COALESCE({a}steer_rejected_turn_id,'')<>{a}turn_id \
          AND COALESCE({a}native_failure_hold,0)=0 {chat})"
@@ -867,18 +878,19 @@ impl SchedulerRepository {
 
     /// Return queued local agents with pending events in the current epoch.
     pub fn pending_agents(connection: &Connection) -> StoreResult<Vec<(String, i64)>> {
-        let mut statement = connection.prepare_cached(
+        let mut statement = connection.prepare_cached(&format!(
             "SELECT a.id,json_extract(a.record,'$.epoch') FROM runtime_agents a \
              WHERE a.status='queued' \
              AND EXISTS(SELECT 1 FROM chats ch WHERE ch.id=a.id AND ch.auto_wake=1) \
-             AND COALESCE(a.in_flight,0)=0 \
+             AND NOT {} \
              AND COALESCE(a.native_failure_hold,0)=0 \
              AND COALESCE(a.remote_worker,0)=0 \
              AND COALESCE(a.remote_anchor,0)=0 \
              AND EXISTS(SELECT 1 FROM runtime_events e WHERE e.agent=a.id \
                         AND e.epoch=json_extract(a.record,'$.epoch') AND e.status='pending') \
              ORDER BY a.rowid",
-        )?;
+            chat_busy_sql("a.id")
+        ))?;
         let rows = statement.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
