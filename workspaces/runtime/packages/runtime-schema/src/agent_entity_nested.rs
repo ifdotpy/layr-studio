@@ -39,13 +39,38 @@ pub enum AgentSource {
     OrchestratorReference,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentNaming {
+    #[default]
+    Automatic,
+    PendingTitle,
+    Manual,
+}
+
+impl AgentNaming {
+    pub fn set_needs_title(&mut self, title: Option<bool>) {
+        if *self != Self::Manual {
+            *self = if title == Some(true) {
+                Self::PendingTitle
+            } else {
+                Self::Automatic
+            };
+        }
+    }
+
+    pub fn needs_title(&self) -> Option<bool> {
+        Some(*self == Self::PendingTitle)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentEntityDtoKind {
     Agent,
 }
 
-pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 2] {
+pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 3] {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
@@ -71,7 +96,12 @@ pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 2] {
     }
     let mut source = AgentSource::json_schema(&mut generator).to_value();
     source["title"] = "AgentSource".into();
-    [("AgentOverview", overview), ("AgentSource", source)]
+    let naming = AgentNaming::json_schema(&mut generator).to_value();
+    [
+        ("AgentOverview", overview),
+        ("AgentSource", source),
+        ("AgentNaming", naming),
+    ]
 }
 
 #[cfg(test)]
