@@ -231,6 +231,16 @@ pub struct ExecutionSettingsDto {
     pub updated_at: Field<f64>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceCleanupSummaryDto {
+    pub phase: String,
+    #[serde(deserialize_with = "required_nullable")]
+    pub reason: Option<String>,
+    #[serde(deserialize_with = "required_nullable")]
+    pub path: Option<String>,
+}
+
 fn object(
     value: &mut serde_json::Value,
 ) -> Result<&mut serde_json::Map<String, serde_json::Value>, String> {
@@ -292,7 +302,7 @@ fn nullable(
     Ok(())
 }
 
-pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 11], String> {
+pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 12], String> {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
@@ -391,6 +401,22 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 11], Strin
     ] {
         nullable(&mut settings, name, label, true)?;
     }
+    let mut cleanup = WorkspaceCleanupSummaryDto::json_schema(&mut generator).to_value();
+    for name in ["reason", "path"] {
+        let prop = property(&mut cleanup, name)?;
+        let prop_object = object(prop)?;
+        let types = prop_object
+            .get("type")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| format!("{name} must have nullable type"))?;
+        if types.len() != 2 || types[1] != "null" {
+            return Err(format!("{name} must have one type and null"));
+        }
+        let kind = types[0].clone();
+        let mut inner = prop.clone();
+        object(&mut inner)?.insert("type".into(), kind);
+        *prop = serde_json::json!({"anyOf":[inner,{"type":"null"}]});
+    }
     Ok([
         ("AgentOverview", overview),
         ("AgentSource", source),
@@ -403,6 +429,7 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 11], Strin
         ("MovePointerDto", pointer),
         ("WorkerDefaultsDto", defaults),
         ("ExecutionSettingsDto", settings),
+        ("WorkspaceCleanupSummaryDto", cleanup),
     ])
 }
 
