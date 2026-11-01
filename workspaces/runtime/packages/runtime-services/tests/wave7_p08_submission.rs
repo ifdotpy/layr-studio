@@ -289,13 +289,11 @@ fn compare(db: &rusqlite::Connection, expected: &Value, label: &str) {
             if let Some(attempt) = row
                 .pointer_mut("/record/startAttempt")
                 .and_then(Value::as_object_mut)
-            {
-                if attempt
+                && attempt
                     .get("supervisorIdentity")
                     .is_some_and(Value::is_null)
-                {
-                    attempt.remove("supervisorIdentity");
-                }
+            {
+                attempt.remove("supervisorIdentity");
             }
             if let Some(record) = row.get_mut("record").and_then(Value::as_object_mut) {
                 for key in ["threadId", "turnId"] {
