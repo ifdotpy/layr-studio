@@ -178,7 +178,9 @@ as `TMPDIR` to their test processes, and remove it on exit. They require 2 GiB
 free before starting and fail if the scratch filesystem is not tmpfs. Set
 `TMPDIR` to another existing tmpfs directory to choose the parent for one run,
 for example `TMPDIR=/tmp/my-scratch nice -n 10 just test-fast`. Cargo target and
-build outputs stay in their normal locations. SQLite durability is unchanged.
+build outputs stay in their normal locations. The requirement covers a sampled
+peak of 1005908 KiB plus 1091244 KiB margin. The installer test fixture uses the
+same scratch; its sampled peak was 200 KiB. SQLite durability is unchanged.
 
 Use `nice -n 10`, not `taskpolicy -b`. Background priority made the WASM build
 miss its 30-minute limit. On macOS, `just test-fast` takes 12.3 min cold, about
