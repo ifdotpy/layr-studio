@@ -83,6 +83,8 @@ const TYPED_QUERIES: &[(&str, &str)] = &[
     ("GET", "/api/messages/receipts"),
     ("GET", "/api/search"),
     ("GET", "/api/search/item"),
+    ("GET", "/api/sync/pull"),
+    ("GET", "/api/sync/stream"),
     ("GET", "/api/transcript"),
     ("GET", "/api/transcript/blob"),
     ("GET", "/api/transcript/item"),
@@ -169,7 +171,6 @@ impl Registry {
             "RequestRecordResponse",
             "RequestEntityDto",
             "ResourceRef",
-            "SubscriptionAdd",
             "ResourceProgressEvent",
             "ResourceEntityTransferEvent",
             "EntityChangeBatch",
@@ -1645,12 +1646,11 @@ mod tests {
 
     #[test]
     fn query_scalars_are_converted_from_the_registered_parameter_schema() {
-        let registry = Registry::compile(&[("GET".to_owned(), "/api/sync/pull".to_owned())])
-            .expect("documented query schema compiles");
+        let registry = query_probe_registry();
         let validated = registry
             .validate_route(
                 "GET",
-                "/api/sync/pull",
+                "/query-probe",
                 RawRequest {
                     query: BTreeMap::from([
                         ("scope".to_owned(), vec!["state:entities:v1".to_owned()]),
@@ -1921,8 +1921,7 @@ mod tests {
 
     #[test]
     fn repeated_scalar_query_parameters_are_refused_even_when_empty() {
-        let registry = Registry::compile(&[("GET".to_owned(), "/api/sync/stream".to_owned())])
-            .expect("query schema compiles");
+        let registry = query_probe_registry();
         for values in [
             vec!["01".to_owned(), "2".to_owned()],
             vec![String::new(), String::new()],
@@ -1931,7 +1930,7 @@ mod tests {
             let error = registry
                 .validate_route(
                     "GET",
-                    "/api/sync/stream",
+                    "/query-probe",
                     RawRequest {
                         query: BTreeMap::from([("after".to_owned(), values)]),
                         ..RawRequest::default()
@@ -1944,13 +1943,12 @@ mod tests {
 
     #[test]
     fn oversized_integer_query_parameter_returns_a_located_validation_error() {
-        let registry = Registry::compile(&[("GET".to_owned(), "/api/sync/stream".to_owned())])
-            .expect("query schema compiles");
+        let registry = query_probe_registry();
         let huge = "9".repeat(401);
         let error = registry
             .validate_route(
                 "GET",
-                "/api/sync/stream",
+                "/query-probe",
                 RawRequest {
                     query: BTreeMap::from([("after".to_owned(), vec![huge])]),
                     ..RawRequest::default()
@@ -1958,6 +1956,21 @@ mod tests {
             )
             .expect_err("an integer outside the serde_json exact range is rejected");
         assert_eq!(error.location, vec![json!("query"), json!("after")]);
+    }
+
+    fn query_probe_registry() -> Registry {
+        let document = json!({"components":{"schemas":{}},"paths":{"/query-probe":{}}});
+        let operation = json!({"parameters":[
+            {"name":"after","in":"query","schema":{"type":"integer","minimum":0,"maximum":MAX_SAFE_INTEGER}},
+            {"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":500}},
+            {"name":"scope","in":"query","schema":{"type":"string"}}
+        ]});
+        let validator =
+            compile_for_test(&document, "/query-probe", &operation).expect("query schema compiles");
+        Registry {
+            operations: Arc::new(BTreeMap::from([("GET /query-probe".to_owned(), validator)])),
+            ..Registry::default()
+        }
     }
 
     #[test]

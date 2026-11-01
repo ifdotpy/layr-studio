@@ -799,10 +799,14 @@ pub(crate) fn validation_probe_router(
             .pointer("/requestBody/required")
             .and_then(serde_json::Value::as_bool)
             == Some(true);
-        let handler = match (body_schema.is_some(), required) {
-            (true, true) => probe_required_body as ProbeHandler,
-            (true, false) => probe_without_body as ProbeHandler,
-            (false, _) => probe_without_body as ProbeHandler,
+        let handler = if method == "GET" && path == "/api/sync/stream" {
+            probe_typed_sync_query as ProbeHandler
+        } else {
+            match (body_schema.is_some(), required) {
+                (true, true) => probe_required_body as ProbeHandler,
+                (true, false) => probe_without_body as ProbeHandler,
+                (false, _) => probe_without_body as ProbeHandler,
+            }
         };
         let status = crate::routes::manifest::OperationStatus::Implemented;
         let registration = match method {
@@ -837,6 +841,22 @@ type ProbeHandler = fn(
     axum::extract::State<HttpState>,
     Request<Body>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>>;
+
+#[cfg(test)]
+fn probe_typed_sync_query(
+    state: axum::extract::State<HttpState>,
+    request: Request<Body>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>> {
+    Box::pin(async move {
+        use axum::extract::FromRequestParts;
+        use axum::response::IntoResponse;
+        let (mut parts, body) = request.into_parts();
+        if let Err(error) = crate::routes::extractors::TypedQuery::<crate::routes::SyncStreamQuery>::from_request_parts(&mut parts, &state.0).await {
+            return error.into_response();
+        }
+        probe_echo(state.0, Request::from_parts(parts, body), 0).await
+    })
+}
 
 #[cfg(test)]
 fn probe_required_body(
@@ -1840,7 +1860,7 @@ mod tests {
         )
         .expect("error is JSON");
         assert_eq!(body["error"], "Invalid request");
-        assert_eq!(body["location"], serde_json::json!(["query", "after"]));
+        assert_eq!(body["location"], serde_json::json!(["query"]));
     }
 
     #[tokio::test]
@@ -2118,7 +2138,7 @@ mod tests {
                 .expect("body reads"),
         )
         .expect("error envelope parses");
-        assert_eq!(body["location"], serde_json::json!(["query", "after"]));
+        assert_eq!(body["location"], serde_json::json!(["query"]));
     }
 
     #[tokio::test]
