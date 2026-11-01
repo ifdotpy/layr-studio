@@ -29,8 +29,12 @@ async fn seeded(path: &Path, case: &Value) -> RuntimeStore {
 }
 
 async fn seed(store: RuntimeStore, case: &Value) -> RuntimeStore {
-    let agent = studio_runtime_store::AgentRecord::from_value(case["agent"].clone())
-        .expect("fixture agent");
+    let mut agent_fixture = case["agent"].clone();
+    if agent_fixture["role"] == "lead" {
+        agent_fixture["role"] = json!("orchestrator");
+    }
+    let agent =
+        studio_runtime_store::AgentRecord::from_value(agent_fixture).expect("fixture agent");
     let attempt = case["attempt"].to_string();
     store.transaction(move |tx| {
         studio_runtime_store::AgentRepository::put(tx, &agent)?;
@@ -346,7 +350,14 @@ async fn retry_attempt_owner_preserves_nullable_identity_and_frozen_receipt() {
         "attempt",
     );
     assert_eq!(saved["future"], json!({"opaque":[1,null]}));
-    assert_eq!(saved["claudeInputRequest"], case["frozen"]);
+    let mut expected = case["frozen"].clone();
+    expected["source"]["role"] = json!("orchestrator");
+    expected["source"]
+        .as_object_mut()
+        .unwrap()
+        .remove("yoloMode");
+    expected["source"]["permissionMode"] = Value::Null;
+    assert_eq!(saved["claudeInputRequest"], expected);
 }
 
 #[tokio::test]

@@ -732,19 +732,18 @@ pub struct LocationReference {
 
 impl From<studio_runtime_schema::project_record::ProjectLocation> for LocationReference {
     fn from(value: studio_runtime_schema::project_record::ProjectLocation) -> Self {
-        use studio_runtime_schema::queue_command::Field;
         Self {
             server_id: value.server_id,
             path: value.path,
             project_id: value.project_id,
-            git_origin: value.git_origin.map_or(Field::Missing, Field::Value),
-            requested_path: value.requested_path.map_or(Field::Missing, Field::Value),
+            git_origin: value.git_origin,
+            requested_path: value.requested_path,
         }
     }
 }
 
 /// Cross-server location command. Optional fields preserve presence for the
-/// durable typed-request fingerprint; old fingerprints can refuse a retry.
+/// durable request fingerprint.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LocationPayload {

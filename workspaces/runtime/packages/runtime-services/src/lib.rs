@@ -154,6 +154,7 @@ pub mod principal;
 pub mod process_controls;
 pub mod project_deletion;
 pub mod project_locations;
+pub mod project_projection;
 pub mod project_secrets;
 pub mod projects;
 pub mod provider_adapter;

@@ -30,9 +30,7 @@ pub struct RequestProjection {
     deferred: Option<bool>,
 }
 
-fn text(value: &str, field: &str) -> String {
-    crate::sync_views::bound_sync_text(value, field, false)
-}
+use crate::sync_views::bound_sync_text as text;
 fn bound(value: &mut Field<String>, field: &str) {
     if let Field::Value(value) = value {
         *value = text(value, field);

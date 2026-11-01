@@ -36,20 +36,25 @@ mod tests {
     use studio_runtime_schema::work_item_record::WorkItem;
 
     #[test]
-    fn preserves_valid_record_bytes() {
+    fn preserves_already_valid_row_bytes() {
         let mut db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); INSERT INTO runtime_work VALUES('w', '{\"id\": \"w\", \"status\": \"review\"}');").unwrap();
+        db.execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE writes(id TEXT); CREATE TRIGGER log_write AFTER UPDATE ON runtime_work BEGIN INSERT INTO writes VALUES(new.id); END;").unwrap();
+        let original = r#"{ "status": "ready", "id": "a" }"#;
+        db.execute("INSERT INTO runtime_work VALUES('a',?1)", [original])
+            .unwrap();
         let tx = db.transaction().unwrap();
-        let before: String = tx
-            .query_row("SELECT record FROM runtime_work", [], |r| r.get(0))
-            .unwrap();
-        let changes = tx.total_changes();
-        super::apply(&tx).unwrap();
-        let after: String = tx
-            .query_row("SELECT record FROM runtime_work", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(after, before);
-        assert_eq!(tx.total_changes(), changes);
+        apply(&tx).unwrap();
+        assert_eq!(
+            tx.query_row("SELECT record FROM runtime_work", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            original
+        );
+        assert_eq!(
+            tx.query_row("SELECT count(*) FROM writes", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
     }
 
     #[test]

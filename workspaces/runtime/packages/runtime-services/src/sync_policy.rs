@@ -4,7 +4,7 @@ use studio_runtime_schema::shared_values::MODEL_CHOICES_PREFERENCE_KEY;
 use crate::event_write::truthy;
 pub use crate::sync_views::{
     AgentViewContext, ComplaintViewContext, RoomViewContext, agent_entity_view, openapi_document,
-    project_entity_view, project_persisted_record,
+    project_persisted_record,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use serde_json::{Map, Value, json};
@@ -356,7 +356,7 @@ pub fn maintain_entity_projections_with_server_id(
             ]
             .into_iter()
             .map(|table| {
-                let rows = if table == "runtime_rooms" {
+                let rows = if matches!(table, "runtime_rooms" | "runtime_projects") {
                     stored_record_rows(transaction, table)
                 } else {
                     projection_records(transaction, table)
@@ -444,6 +444,10 @@ pub fn maintain_entity_projections_with_server_id(
                 ))?
             };
             for (id, raw) in records {
+                if table == "runtime_projects" && !valid_stored_record(table, id, raw) {
+                    eprintln!("ERROR project projection skipped invalid row id={id}");
+                    continue;
+                }
                 if matches!(collection, "request" | "rule" | "work") {
                     publish_direct(transaction, collection, id, raw, &validate_projection)?;
                     continue;
@@ -495,53 +499,55 @@ pub fn maintain_entity_projections_with_server_id(
                     }
                     continue;
                 }
-                let record = serde_json::from_str::<Value>(raw)?;
-                let projected = match collection {
-                    "project" => {
-                        let prior = transaction.query_row(
-                        "SELECT payload FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=0",
-                        [&id],
-                        |row| row.get::<_, Option<String>>(0),
-                    ).optional()?.flatten();
-                        let prior =
-                            prior.and_then(|payload| serde_json::from_str::<Value>(&payload).ok());
-                        let value = prior.as_ref().and_then(|payload| payload.get("value"));
-                        let readiness = value.and_then(|value| value.get("layrReadiness"));
-                        let readiness_is_ready = readiness.is_some_and(|value| {
-                            value.get("state").and_then(Value::as_str) == Some("ready")
-                        });
-                        let cached_vault = if readiness_is_ready {
-                            vault_snapshot.view(id, &record)?
-                        } else {
-                            None
-                        };
-                        let vault = if readiness_is_ready && !state_dir.is_empty() {
-                            cached_vault.as_ref()
-                        } else {
-                            value.and_then(|value| value.get("vault"))
-                        };
-                        let cached_sync = if readiness_is_ready && !state_dir.is_empty() {
-                            vault_snapshot.sync_view(id, &record)?
-                        } else {
-                            None
-                        };
-                        let sync = if readiness_is_ready && !state_dir.is_empty() {
-                            cached_sync.as_ref()
-                        } else {
-                            value.and_then(|value| value.get("layrSync"))
-                        };
-                        project_entity_view(&record, readiness, sync, vault)
-                    }
-                    _ => unreachable!("the loop lists every directly projected collection"),
+                let record: studio_runtime_schema::project_record::ProjectRecord =
+                    match serde_json::from_str(raw) {
+                        Ok(record) => record,
+                        Err(error) => {
+                            eprintln!("ERROR project projection skipped row id={id}: {error}");
+                            continue;
+                        }
+                    };
+                let studio_runtime_schema::project_record::ProjectRecord::Live(project) = record
+                else {
+                    retire_if_live(transaction, "project", id, &validate_projection)?;
+                    continue;
                 };
-                if let Some(projected) = projected {
-                    put_projection(
+                let source: Value = serde_json::from_str(raw)?;
+                let prior = transaction.query_row(
+                    "SELECT payload FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=0",
+                    [&id], |row| row.get::<_, Option<String>>(0),
+                ).optional()?.flatten();
+                let prior = prior
+                    .map(|payload| serde_json::from_str::<Value>(&payload))
+                    .transpose()?;
+                let value = prior.as_ref().and_then(|payload| payload.get("value"));
+                let readiness =
+                    project_context::<studio_runtime_schema::project_projection::ProjectReadiness>(
+                        value.and_then(|value| value.get("layrReadiness")),
+                    )?;
+                let ready = matches!(&readiness, studio_runtime_schema::queue_command::Field::Value(context) if context.state == studio_runtime_schema::project_projection::ReadinessState::Ready);
+                let (sync, vault) = if ready && !state_dir.is_empty() {
+                    let cached_sync = vault_snapshot.sync_view(id, &source)?;
+                    let cached_vault = vault_snapshot.view(id, &source)?;
+                    (
+                        project_context(cached_sync.as_ref())?,
+                        project_context(cached_vault.as_ref())?,
+                    )
+                } else {
+                    (
+                        project_context(value.and_then(|value| value.get("layrSync")))?,
+                        project_context(value.and_then(|value| value.get("vault")))?,
+                    )
+                };
+                if let Some(projected) =
+                    crate::project_projection::project_record(*project, readiness, sync, vault)
+                {
+                    SyncDocumentsRepository::put_entity(
                         transaction,
-                        collection,
+                        "project",
                         id,
                         projected,
                         false,
-                        &validate_projection,
                     )?;
                 }
             }
@@ -905,27 +911,24 @@ pub(crate) fn publish_summary_changes(
             std::slice::from_ref(&id),
         )
         .map_err(|_| StoreError::RecordContract("message receipt projection failed"))?;
-        for receipt in response.items {
+        for mut receipt in response.items {
             #[derive(serde::Serialize)]
             struct ReceiptProjection {
                 agent: String,
-                id: String,
-                status: crate::coordination_reads::ReceiptStatus,
-                error: Option<String>,
-                materialized: bool,
+                #[serde(flatten)]
+                receipt: crate::coordination_reads::MessageReceipt,
             }
+            receipt.id = crate::sync_views::bound_sync_text(&receipt.id, "id");
+            receipt.error = receipt
+                .error
+                .map(|error| crate::sync_views::bound_sync_text(&error, "error"));
             SyncDocumentsRepository::put_entity(
                 transaction,
                 "messageReceipt",
                 &id,
                 ReceiptProjection {
-                    agent: crate::sync_views::bound_sync_text(&agent, "agent", false),
-                    id: crate::sync_views::bound_sync_text(&receipt.id, "id", false),
-                    status: receipt.status,
-                    error: receipt
-                        .error
-                        .map(|error| crate::sync_views::bound_sync_text(&error, "error", false)),
-                    materialized: receipt.materialized,
+                    agent: crate::sync_views::bound_sync_text(&agent, "agent"),
+                    receipt,
                 },
                 false,
             )?;
@@ -1119,6 +1122,35 @@ fn publish_direct(
     raw: &str,
     validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
+    if collection == "annotation" {
+        let record: studio_runtime_store::AnnotationRecord =
+            serde_json::from_str(raw).map_err(|_| StoreError::InvalidStoredRecord {
+                object: "annotations",
+                id: id.to_owned(),
+            })?;
+        if !record.id().is_empty() {
+            let view =
+                record.sync_view(&|value, field| crate::sync_views::bound_sync_text(value, field));
+            SyncDocumentsRepository::put_entity(transaction, collection, id, view, false)?;
+        }
+        return Ok(());
+    }
+    if collection == "plan" {
+        let record: studio_runtime_store::PlanRecord =
+            serde_json::from_str(raw).map_err(|_| StoreError::InvalidStoredRecord {
+                object: "plans",
+                id: id.to_owned(),
+            })?;
+        if !record.id().is_empty() {
+            let view = record.sync_view(
+                &|value, field| crate::sync_views::bound_sync_text(value, field),
+                crate::sync_views::SYNC_ARRAY_ITEMS,
+                &|value, depth| crate::sync_views::bound_opaque_json(value, "", depth),
+            );
+            SyncDocumentsRepository::put_entity(transaction, collection, id, view, false)?;
+        }
+        return Ok(());
+    }
     if collection == "rule" {
         let invalid = || StoreError::InvalidStoredRecord {
             object: "rules",
@@ -1147,7 +1179,13 @@ fn publish_direct(
             .map_err(|_| StoreError::RecordContract("invalid question history entity"))?;
         match question {
             Some(value) => {
-                put_projection(transaction, "questionHistory", id, value, false, validate)?
+                SyncDocumentsRepository::put_entity(
+                    transaction,
+                    "questionHistory",
+                    id,
+                    value,
+                    false,
+                )?;
             }
             None => retire_if_live(transaction, "questionHistory", id, validate)?,
         }
@@ -1164,11 +1202,9 @@ fn publish_direct(
         publish_work_detail(transaction, id, &record, validate)?;
         return publish_work_summary(transaction, id, raw);
     }
-    let record = serde_json::from_str::<Value>(raw)?;
-    match project_persisted_record(collection, &record) {
-        Some(projected) => put_projection(transaction, collection, id, projected, false, validate),
-        None => Ok(()),
-    }
+    Err(StoreError::RecordContract(
+        "unsupported direct sync collection",
+    ))
 }
 
 fn publish_work_summary(transaction: &Transaction<'_>, id: &str, raw: &str) -> StoreResult<()> {
@@ -1502,6 +1538,21 @@ fn project_vault_source(project: &Value) -> Option<&str> {
                 .and_then(Value::as_str)
                 .filter(|id| !id.is_empty())
         })
+}
+
+fn project_context<T: serde::de::DeserializeOwned>(
+    value: Option<&Value>,
+) -> StoreResult<studio_runtime_schema::queue_command::Field<T>> {
+    use studio_runtime_schema::queue_command::Field;
+    match value {
+        None => Ok(Field::Missing),
+        Some(Value::Null) => Ok(Field::Null),
+        Some(value) => {
+            let studio_runtime_schema::json_object::JsonObject(context) =
+                serde::Deserialize::deserialize(value)?;
+            Ok(Field::Value(context))
+        }
+    }
 }
 
 fn put_projection(
@@ -1859,7 +1910,7 @@ pub fn project_monitor_record(
             id: record.id.clone(),
         });
     }
-    let bound = |text: &str, field: &str| crate::sync_views::bound_sync_text(text, field, false);
+    let bound = |text: &str, field: &str| crate::sync_views::bound_sync_text(text, field);
     Ok(MonitorProjection {
         agent: bound(&record.agent, "agent"),
         bytes: record.bytes.get(),
@@ -2136,12 +2187,12 @@ fn maintain_event_window(
         .query_map([], |row| {
             let id: String = row.get(0)?;
             let bound = |value: Option<String>, field| {
-                value.map(|text| crate::sync_views::bound_sync_text(&text, field, false))
+                value.map(|text| crate::sync_views::bound_sync_text(&text, field))
             };
             Ok((
                 id.clone(),
                 EventProjection {
-                    id: crate::sync_views::bound_sync_text(&id, "id", false),
+                    id: crate::sync_views::bound_sync_text(&id, "id"),
                     agent: bound(row.get(1)?, "agent"),
                     kind: bound(row.get(2)?, "kind"),
                     status: bound(row.get(3)?, "status"),
@@ -2208,6 +2259,14 @@ fn maintain_peer_team_entities(
     {
         return Ok(());
     }
+    // An undecodable project keeps its last published state until it is repaired.
+    if project_records.iter().any(|(id, raw)| {
+        !valid_stored_record("runtime_projects", id, raw)
+            || serde_json::from_str::<studio_runtime_schema::project_record::ProjectRecord>(raw)
+                .is_err()
+    }) {
+        return Ok(());
+    }
     let agents = agent_records
         .iter()
         .filter_map(|(_, raw)| serde_json::from_str::<Value>(raw).ok())
@@ -2238,7 +2297,7 @@ fn maintain_peer_team_entities(
             studio_runtime_schema::queue_command::Field::Null => None,
             studio_runtime_schema::queue_command::Field::Value(value) => Some(value),
         };
-        for team in &project.peer_teams {
+        for team in project.peer_teams.value().into_iter().flatten() {
             let mut selected = Vec::new();
             for member in &team.members {
                 if agents.get(member.as_str()).is_some_and(|agent| {
@@ -2254,8 +2313,7 @@ fn maintain_peer_team_entities(
                 }
             }
             if selected.len() >= 2 && !team.id.is_empty() {
-                let bound =
-                    |value: &str, field| crate::sync_views::bound_sync_text(value, field, false);
+                let bound = |value: &str, field| crate::sync_views::bound_sync_text(value, field);
                 current.insert(
                     team.id.clone(),
                     PeerTeamProjection {
@@ -2851,6 +2909,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn project_maintenance_skips_unmigrated_float_revision() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(root.path())).await.unwrap();
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO runtime_projects(id,record) VALUES('bad',?1)",
+                    [r#"{"recordKind":"live","id":"bad","path":"/bad","accountRevision":1.0}"#],
+                )?;
+                tx.execute(
+                    "INSERT INTO runtime_projects(id,record) VALUES('good',?1)",
+                    [r#"{"recordKind":"live","id":"good","path":"/good"}"#],
+                )?;
+                SyncDocumentsRepository::put_entity(tx, "project", "bad", json!({"id":"bad","name":"last known"}), false)?;
+                SyncDocumentsRepository::put_entity(tx, "peerTeam", "team", json!({"id":"team","name":"last known","projectPath":"/bad","members":["a","b"]}), false)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let snapshot = ProjectVaultSnapshot::capture_for_sync(&store, root.path())
+            .await
+            .unwrap();
+        store.transaction(move |tx| {
+            let rooms = crate::sync_entity_context::RoomDirectory::load(tx)?;
+            maintain_entity_projections_with_server_id(tx, "", None, &snapshot, &rooms, |_, _, _, _| true)?;
+            let count: i64 = tx.query_row("SELECT count(*) FROM sync_entities WHERE collection='project' AND id='good' AND deleted=0", [], |row| row.get(0))?;
+            assert_eq!(count, 1);
+            for (collection, id) in [("project", "bad"), ("peerTeam", "team")] {
+                let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection=?1 AND id=?2 AND deleted=0", [collection, id], |row| row.get(0))?;
+                let payload: Value = serde_json::from_str(&payload)?;
+                assert_eq!(payload["value"]["name"], "last known");
+            }
+            Ok(())
+        }).await.unwrap();
+    }
+
+    #[tokio::test]
     async fn event_window_publishes_bounded_typed_event() {
         let root = tempfile::tempdir().unwrap();
         let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
@@ -2863,8 +2958,7 @@ mod tests {
             maintain_event_window(tx, &|_, _, _, _| true)?;
             let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='event' AND id='event'", [], |row| row.get(0))?;
             let actual: Value = serde_json::from_str(&payload)?;
-            let old = crate::sync_views::project_persisted_record("event", &json!({"id":"event","agent":"agent","kind":"user","status":"pending","created":1.0,"error":error})).unwrap();
-            assert_eq!(actual["value"], old);
+            assert_eq!(actual["value"], json!({"id":"event","agent":"agent","kind":"user","status":"pending","created":1.0,"error":"é".repeat(2_000)}));
             Ok::<_, StoreError>(())
         }).await.unwrap();
     }
@@ -2891,10 +2985,31 @@ mod tests {
     }
 
     #[test]
-    fn typed_monitor_projection_keeps_existing_public_bounds() {
-        let record = crate::monitor_policy::complete_test_monitor(
-            serde_json::json!({"id":"monitor","agent":"owner","created":0.0,"activityAt":0.0,"command":"雪".repeat(2100),"tail":"é".repeat(2100),"error":"x".repeat(2100),"outputPatterns":["ready"]}),
+    fn plan_projection_bounds_nested_steps() {
+        let raw = json!({"id":"p","rootId":"r","text":"plan","version":1,"updated":null,"steps":[{"nested":{"long":"x".repeat(12_001),"items":vec![1;201]}}]});
+        let record: studio_runtime_store::PlanRecord =
+            serde::Deserialize::deserialize(&raw).unwrap();
+        let view = record.sync_view(
+            &|value, field| crate::sync_views::bound_sync_text(value, field),
+            crate::sync_views::SYNC_ARRAY_ITEMS,
+            &|value, depth| crate::sync_views::bound_opaque_json(value, "", depth),
         );
+        let result = view.value();
+        assert_eq!(
+            result["steps"][0]["nested"]["long"].as_str().unwrap().len(),
+            12_000
+        );
+        assert_eq!(
+            result["steps"][0]["nested"]["items"]
+                .as_array()
+                .unwrap()
+                .len(),
+            200
+        );
+    }
+
+    #[test]
+    fn typed_monitor_projection_keeps_existing_public_bounds() {
         let raw = format!(
             r#"{{"id":"monitor","agent":"owner","epoch":0,"status":"running","requestId":"fixture","created":0.0,"activityAt":0.0,"activityGeneration":0,"bytes":0,"command":{},"cwd":{},"interactive":false,"livenessCommand":"","log":{},"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":{},"error":{},"timeout_ms":3600000,"wakeOn":"exit","outputPatterns":["ready"]}}"#,
             serde_json::to_string(&"雪".repeat(2100)).unwrap(),
@@ -2904,12 +3019,10 @@ mod tests {
             serde_json::to_string(&"x".repeat(2100)).unwrap()
         );
         let typed: studio_runtime_store::MonitorRecord = serde_json::from_str(&raw).unwrap();
-        let old = crate::sync_views::project_persisted_record("monitor", &record).unwrap();
         let new = super::project_monitor_record(&typed).unwrap();
-        assert_eq!(serde_json::to_string(&new).unwrap(), old.to_string());
-        assert_eq!(new.command, old["command"]);
-        assert_eq!(new.tail, old["tail"]);
-        assert_eq!(new.error.as_deref(), old["error"].as_str());
+        assert_eq!(new.command, "雪".repeat(2_000));
+        assert_eq!(new.tail, "é".repeat(2_000));
+        assert_eq!(new.error.as_deref(), Some("x".repeat(2_000).as_str()));
         assert_eq!(new.output_patterns, Some(vec!["ready".to_owned()]));
     }
 
@@ -4436,7 +4549,7 @@ mod tests {
                     ProjectsRepository::put_project(transaction, record)?;
                     let mut prior = record.clone();
                     prior["layrReadiness"] = json!({"state":"ready"});
-                    prior["layrSync"] = json!({"state":"synced"});
+                    prior["layrSync"] = json!({"projectId":"old","state":"synced","enabled":true,"conflicts":[],"choices":[],"withAgent":[],"deletes":0});
                     SyncDocumentsRepository::put_entity(
                         transaction,
                         "project",
@@ -4531,8 +4644,8 @@ mod tests {
                 ProjectsRepository::put_project(transaction, &project)?;
                 let mut prior = prior;
                 prior["layrReadiness"] = json!({"state":"ready"});
-                prior["layrSync"] = json!({"state":"ok"});
-                prior["vault"] = json!({"state":"stale"});
+                prior["layrSync"] = json!({"projectId":"old","state":"synced","enabled":true,"conflicts":[],"choices":[],"withAgent":[],"deletes":0});
+                prior["vault"] = json!({"projectId":"old","state":"none"});
                 SyncDocumentsRepository::put_entity(
                     transaction,
                     "project",

@@ -8,19 +8,19 @@ use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore, Transacti
 #[test]
 fn monitor_budget_and_task_file_survive_renderer_projections() {
     let budget = json!({"totalSuppressedMatches":1234,"paused":true,"tokens":0.5});
-    let mut raw = json!({"id":"monitor","agent":"owner","created":1,"status":"running","outputPatterns":["ready"],"outputWakeBudget":budget});
-    raw["outputWakeBudget"]["noticeSent"] = json!(true);
-    let projected = sync_views::project_persisted_record("monitor", &raw).unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let raw = json!({"id":"monitor","agent":"owner","epoch":0,"status":"running","requestId":"fixture","created":1.0,"activityAt":1.0,"activityGeneration":0,"bytes":0,"command":"test","cwd":root.path(),"interactive":false,"livenessCommand":"","log":root.path().join("log"),"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit","outputPatterns":["ready"],"outputWakeBudget":{"totalSuppressedMatches":1234,"paused":true,"tokens":0.5,"updatedAt":1.0,"suppressedMatches":0,"floodSince":null,"lastSuppressedAt":null,"noticeSent":true}});
+    let record: studio_runtime_store::MonitorRecord =
+        serde::Deserialize::deserialize(&raw).unwrap();
+    let projected = studio_runtime_services::sync_policy::project_monitor_record(&record).unwrap();
+    let projected = serde::Serialize::serialize(&projected, serde_json::value::Serializer).unwrap();
     assert_eq!(projected["outputWakeBudget"], budget);
     assert_eq!(projected["outputPatterns"], json!(["ready"]));
-    for collection in ["task", "taskDetail"] {
-        let task = sync_views::project_persisted_record(
-            collection,
-            &json!({"id":"task","outputFile":"logs/out.txt"}),
-        )
-        .unwrap();
-        assert_eq!(task["outputFile"], "logs/out.txt");
-    }
+    let raw = json!({"id":"task","agent":"owner","created":1.0,"itemId":"item","kind":"command","status":"running","turnId":"turn","type":"commandExecution","name":"run","outputFile":"logs/out.txt"});
+    let task: studio_runtime_store::TaskRecord = serde::Deserialize::deserialize(&raw).unwrap();
+    let task = sync_views::project_task_record(&task).unwrap();
+    let task = serde::Serialize::serialize(&task, serde_json::value::Serializer).unwrap();
+    assert_eq!(task["outputFile"], "logs/out.txt");
     let process = process_controls::project(
         "claude_task",
         &json!({"id":"task","outputFile":"logs/out.txt"}),

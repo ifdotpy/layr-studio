@@ -1098,7 +1098,7 @@ mod annotation_typed_tests {
         }
         for value in [
             json!({"id":"a"}),
-            json!({"id":"a","line":1.0,"created":null,"extra":[1]}),
+            json!({"id":"a","line":1.0,"created":null}),
         ] {
             let record = AnnotationRecord::deserialize(value.clone()).unwrap();
             assert_eq!(record.into_value(), value);
@@ -1120,13 +1120,13 @@ mod annotation_typed_tests {
     }
 
     #[test]
-    fn annotation_store_preserves_identity_extensions_and_rejects_duplicate() {
+    fn annotation_store_preserves_identity_and_rejects_duplicate() {
         let db = rusqlite::Connection::open_in_memory().unwrap();
         db.execute_batch(
             "CREATE TABLE runtime_annotations(id TEXT PRIMARY KEY,record TEXT NOT NULL)",
         )
         .unwrap();
-        let value = json!({"id":"a","line":-1.0,"created":null,"future":{"x":1}});
+        let value = json!({"id":"a","line":-1.0,"created":null,"rootId":"r"});
         let record = AnnotationRecord::from_value(value.clone()).unwrap();
         Table::<AnnotationRecord>::new(&db).put(&record).unwrap();
         assert_eq!(

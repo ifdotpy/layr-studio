@@ -1196,11 +1196,6 @@ async fn task_absence_consumer_matches_python_lost_and_persists_named_hold() {
         .expect("task API read")
         .expect("task");
         assert_eq!(detail["error"], rows[0]["error"]);
-        assert_eq!(
-            studio_runtime_services::sync_views::project_persisted_record("taskDetail", &detail)
-                .expect("detail projection")["error"],
-            rows[0]["error"]
-        );
         if case["absent"] == true {
             let mut expected = case["after"].clone();
             expected["name"] = case["task"]["type"].clone();

@@ -52,11 +52,6 @@ pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
 pub struct ProjectsRepository;
 
 impl ProjectsRepository {
-    pub fn room_retired(room: &Value) -> bool {
-        room.get(studio_runtime_schema::room_record::PROJECT_DELETED_AT)
-            .is_some_and(|value| !value.is_null())
-    }
-
     /// Distinguish a destructive project lifetime fence from sidebar-only removal.
     /// The recorded sequence is the exact project tombstone's durable sequence.
     pub fn record_destructive_removal(
@@ -282,6 +277,62 @@ impl ProjectsRepository {
                 Ok((id, value))
             })
             .collect()
+    }
+
+    pub fn put_live(transaction: &Transaction<'_>, project: &ProjectLive) -> StoreResult<()> {
+        let mut project = project.clone();
+        if let Some(previous) = Self::get_record(transaction, &project.id)? {
+            macro_rules! preserve_missing {
+                ($($field:ident),+ $(,)?) => {$({
+                    if project.$field.is_missing() {
+                        project.$field = previous.$field;
+                    }
+                })+};
+            }
+            preserve_missing!(
+                peer_teams,
+                account_key,
+                account_groups,
+                account_keys,
+                name,
+                locations,
+                project_aliases,
+                locations_revision,
+                account_revision,
+                account_groups_revision,
+                home_server_id,
+                created,
+                updated,
+                sidebar_hidden,
+                peer_teams_revision,
+                organization_revision,
+                folders,
+                worker_base_ref,
+                worker_base_revision,
+                worker_environment,
+                worker_environment_revision,
+                workspace_policy,
+                workspace_policy_revision,
+                location_intents,
+                registration
+            );
+        }
+        let record = serde_json::to_string(&project)?;
+        let stored: String = transaction.query_row(
+            "INSERT INTO runtime_projects(id,record) VALUES (?1,json_set(?2,'$.recordKind','live')) \
+             ON CONFLICT(id) DO UPDATE SET record=excluded.record RETURNING record",
+            params![project.id, record],
+            |row| row.get(0),
+        )?;
+        let record = serde_json::value::RawValue::from_string(stored)?;
+        SyncDocumentsRepository::put_entity(
+            transaction,
+            "project",
+            &project.id,
+            record,
+            project.sidebar_hidden.value() == Some(&true),
+        )?;
+        Ok(())
     }
 
     pub fn put_project(transaction: &Transaction<'_>, project: &Value) -> StoreResult<()> {
@@ -521,6 +572,70 @@ inventory::submit! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typed_project_write_keeps_omitted_fields_and_explicit_null() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_projects(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+            CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
+            CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE durable_rows(seq INTEGER);
+            CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);").unwrap();
+        let tx = db.transaction().unwrap();
+        let original: ProjectLive =
+            serde_json::from_str(r#"{"id":"p","path":"/p","name":"Old","sidebarHidden":true}"#)
+                .unwrap();
+        ProjectsRepository::put_live(&tx, &original).unwrap();
+        let update: ProjectLive =
+            serde_json::from_str(r#"{"id":"p","path":"/p","name":null}"#).unwrap();
+        ProjectsRepository::put_live(&tx, &update).unwrap();
+        let saved: String = tx
+            .query_row(
+                "SELECT record FROM runtime_projects WHERE id='p'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let saved: Value = serde_json::from_str(&saved).unwrap();
+        assert_eq!(saved["name"], Value::Null);
+        assert_eq!(saved["sidebarHidden"], true);
+    }
+
+    #[test]
+    fn typed_project_write_preserves_missing_null_and_empty() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_projects(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+            CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
+            CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE durable_rows(seq INTEGER);
+            CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);").unwrap();
+        let tx = db.transaction().unwrap();
+        let project: ProjectLive = serde_json::from_str(
+            r#"{"id":"p","path":"/p","name":null,"peerTeams":[],"locations":null}"#,
+        )
+        .unwrap();
+        ProjectsRepository::put_live(&tx, &project).unwrap();
+        let saved: String = tx
+            .query_row(
+                "SELECT record FROM runtime_projects WHERE id='p'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let value: Value = serde_json::from_str(&saved).unwrap();
+        assert_eq!(
+            value,
+            json!({"recordKind":"live","id":"p","path":"/p","name":null,"peerTeams":[],"locations":null})
+        );
+        let restored = ProjectsRepository::get_record(&tx, "p").unwrap().unwrap();
+        ProjectsRepository::put_live(&tx, &restored).unwrap();
+        let again: String = tx
+            .query_row(
+                "SELECT record FROM runtime_projects WHERE id='p'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(saved, again);
+    }
 
     #[test]
     fn sidebar_hide_retains_pending_location_owner() {

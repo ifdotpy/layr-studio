@@ -18,6 +18,46 @@ pub(crate) const AGENT_SYNC_LAST_ANSWER_CHARS: usize = 4_000;
 pub(crate) const SYNC_TEXT_CHARS: usize = 12_000;
 /// Maximum items in a projected sync array. Unit: array elements.
 pub(crate) const SYNC_ARRAY_ITEMS: usize = 200;
+/// Maximum sidebar order entries in a sync view. Unit: array elements.
+const SYNC_SIDEBAR_ORDER_ITEMS: usize = 10_000;
+/// Maximum recursive sync projection depth. Unit: nested JSON levels.
+const SYNC_JSON_DEPTH: usize = 32;
+
+pub(crate) fn bound_opaque_json(value: &mut Value, field: &str, depth: usize) {
+    if depth > SYNC_JSON_DEPTH {
+        *value = Value::Null;
+        return;
+    }
+    match value {
+        Value::String(text) => *text = bound_sync_text(text, field),
+        Value::Array(items) => {
+            items.truncate(if field == "sidebarOrder" {
+                SYNC_SIDEBAR_ORDER_ITEMS
+            } else {
+                SYNC_ARRAY_ITEMS
+            });
+            for item in items {
+                bound_opaque_json(item, "", depth + 1);
+            }
+        }
+        Value::Object(fields) => {
+            for (name, item) in fields {
+                bound_opaque_json(item, name, depth + 1);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
+pub(crate) fn bound_raw_json(
+    raw: &serde_json::value::RawValue,
+    field: &str,
+    depth: usize,
+) -> Result<Box<serde_json::value::RawValue>, serde_json::Error> {
+    let mut value: Value = serde_json::from_str(raw.get())?;
+    bound_opaque_json(&mut value, field, depth);
+    serde_json::value::to_raw_value(&value)
+}
 
 const AGENT_SHORT_STRING_OBJECTS: &[&str] = &[
     "activity",
@@ -64,7 +104,7 @@ fn collect_schema_properties<'a>(
     properties: &mut BTreeMap<&'a str, &'a Value>,
     depth: usize,
 ) {
-    if depth > 32 {
+    if depth > SYNC_JSON_DEPTH {
         return;
     }
     let schema = schema_definition(schema, document);
@@ -120,7 +160,11 @@ fn schema_projection_properties() -> &'static SchemaProjectionProperties {
     })
 }
 
-pub(crate) fn bound_sync_text(text: &str, field: &str, agent_short_strings: bool) -> String {
+pub(crate) fn bound_sync_text(text: &str, field: &str) -> String {
+    bound_sync_text_mode(text, field, false)
+}
+
+fn bound_sync_text_mode(text: &str, field: &str, agent_short_strings: bool) -> String {
     let limit = if agent_short_strings {
         2_000
     } else {
@@ -136,7 +180,9 @@ pub(crate) fn bound_sync_text(text: &str, field: &str, agent_short_strings: bool
 }
 fn bound_sync_value(value: &Value, field: &str, agent_short_strings: bool) -> Value {
     match value {
-        Value::String(text) => Value::String(bound_sync_text(text, field, agent_short_strings)),
+        Value::String(text) => {
+            Value::String(bound_sync_text_mode(text, field, agent_short_strings))
+        }
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_) => {
             value.clone()
         }
@@ -152,7 +198,7 @@ fn project_schema_value(
     agent_record: bool,
     agent_short_strings: bool,
 ) -> Value {
-    if depth > 32 {
+    if depth > SYNC_JSON_DEPTH {
         return Value::Null;
     }
     let schema = schema_definition(schema, document);
@@ -213,7 +259,7 @@ fn project_schema_value(
         Value::Array(items) => {
             let item_schema = schema.get("items").unwrap_or(&Value::Null);
             let limit = if field == "sidebarOrder" {
-                10_000
+                SYNC_SIDEBAR_ORDER_ITEMS
             } else {
                 SYNC_ARRAY_ITEMS
             };
@@ -284,7 +330,7 @@ pub fn project_task_record(record: &studio_runtime_store::TaskRecord) -> Option<
     if id.is_empty() {
         return None;
     }
-    let bounded = |text: &str, field| bound_sync_text(text, field, false);
+    let bounded = |text: &str, field| bound_sync_text(text, field);
     let optional =
         |value: &Option<String>, field| value.as_deref().map(|text| bounded(text, field));
     let (tail, truncated) = record.tail.as_deref().map_or((None, false), |text| {
@@ -355,15 +401,21 @@ pub fn project_work_record(
     let field = |value: &Field<String>, name| match value {
         Field::Missing => Field::Missing,
         Field::Null => Field::Null,
-        Field::Value(value) => Field::Value(bound_sync_text(value, name, false)),
+        Field::Value(value) => Field::Value(bound_sync_text(value, name)),
     };
     Some(WorkProjection {
-        id: bound_sync_text(id, "id", false),
+        id: bound_sync_text(id, "id"),
         status: record.status(),
         root_id: field(record.root_id_field(), "rootId"),
         title: field(record.title_field(), "title"),
         agent: field(record.agent_field(), "agent"),
-        archive: record.archive_field().clone(),
+        archive: match record.archive_field() {
+            Field::Missing => Field::Missing,
+            Field::Null => Field::Null,
+            Field::Value(raw) => Field::Value(studio_runtime_schema::raw_json::RawJson(
+                bound_raw_json(&raw.0, "archive", 1).ok()?,
+            )),
+        },
     })
 }
 
@@ -373,22 +425,6 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
         "agent" => "AgentEntityDto",
         "agentSummary" => "AgentSummaryEntityDto",
         "agentDetail" => "AgentDetailEntityDto",
-        "task" => "TaskEntityDto",
-        "taskDetail" => "TaskDetailResponse",
-        "retainedWorktree" => "RetainedWorktreeEntityDto",
-        "questionHistory" => "AgentRequest",
-        "plan" => "PlanSummaryEntityDto",
-        "annotation" => "AnnotationEntityDto",
-        "monitor" => "MonitorEntityDto",
-        "request" => "RequestEntityDto",
-        "rule" => "RuleEntityDto",
-        "project" => "ProjectEntityDto",
-        "peerTeam" => "PeerTeamEntityDto",
-        "event" => "EventEntityDto",
-        "work" => "WorkEntityDto",
-        "workspace" => "WorkspaceEntityDto",
-        "chat" => "ChatEntityDto",
-        "edge" => "EdgeEntityDto",
         _ => return None,
     };
     record
@@ -411,15 +447,6 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
             "path": intent.pointer("/effect/identity/cwd").or_else(|| intent.get("path")).or_else(|| record.get("cwd")).and_then(Value::as_str),
         });
     }
-    // Publish these fields only when set. The older view never published
-    // them, and the client reads a missing one as its default.
-    if let Some((_, field)) = UNSET_DEFAULT_FIELDS
-        .iter()
-        .find(|(owner, field)| *owner == collection && record.get(*field).is_some_and(unset))
-        && let Some(fields) = public_record.to_mut().as_object_mut()
-    {
-        fields.remove(*field);
-    }
     let mut projected = project_schema_value(
         &public_record,
         schema,
@@ -429,37 +456,12 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
         collection == "agent",
         false,
     );
-    if collection == "task"
-        && let Some(tail) = record.get("tail").and_then(Value::as_str)
-        && let Some(summary) = projected.get("tail").and_then(Value::as_str)
-        && summary != tail
-    {
-        // The canonical text projection owns the bound. A task tail keeps
-        // that many newest characters and advertises the omitted output.
-        let suffix = tail
-            .chars()
-            .rev()
-            .take(summary.chars().count())
-            .collect::<String>();
-        projected["tail"] = json!(suffix.chars().rev().collect::<String>());
-        projected["outputTruncated"] = json!(true);
-    }
     if matches!(collection, "agent" | "agentDetail")
         && let Some(gate) = record.get("taskDefaultGate")
     {
         projected["taskDefaultGate"] = gate.clone();
     }
     Some(projected)
-}
-
-/// `(collection, field)` pairs that a sync view publishes only when set: a
-/// monitor's output patterns (empty means none). The client reads a missing
-/// one as that default.
-const UNSET_DEFAULT_FIELDS: &[(&str, &str)] = &[("monitor", "outputPatterns")];
-
-/// Whether a field value is its unset default: null or an empty list.
-fn unset(value: &Value) -> bool {
-    value.is_null() || value.as_array().is_some_and(Vec::is_empty)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -734,9 +736,9 @@ pub struct ComplaintProjection {
     author: Option<String>,
     lead_id: Option<String>,
     status: studio_runtime_schema::complaint_record::ComplaintStatus,
-    created: Option<f64>,
-    updated: Option<f64>,
-    read_at: Option<f64>,
+    created: Option<studio_runtime_schema::complaint_record::ComplaintSeconds>,
+    updated: Option<studio_runtime_schema::complaint_record::ComplaintSeconds>,
+    read_at: Option<studio_runtime_schema::complaint_record::ComplaintSeconds>,
     title: String,
     recipient: studio_runtime_schema::complaint_record::ComplaintRecipient,
     version: Option<i64>,
@@ -768,7 +770,7 @@ pub fn project_complaint_record(
                 .responses
                 .iter()
                 .any(|response| response.author == "user"));
-    let bound = |value: &str, field| bound_sync_text(value, field, false);
+    let bound = |value: &str, field| bound_sync_text(value, field);
     let name = |id: Option<&str>, fallback: Option<&str>, field| {
         let value = id.and_then(|id| {
             context
@@ -787,9 +789,9 @@ pub fn project_complaint_record(
         author: author.map(|value| bound(value, "author")),
         lead_id: lead.map(|value| bound(value, "leadId")),
         status: record.status,
-        created: record.created,
-        updated: record.updated,
-        read_at: record.read_at,
+        created: record.created.clone(),
+        updated: record.updated.clone(),
+        read_at: record.read_at.clone(),
         title: record
             .text
             .as_deref()
@@ -807,29 +809,6 @@ pub fn project_complaint_record(
         ),
         lead_name: name(lead, lead, "leadName"),
     })
-}
-
-/// Build project renderer fields from persisted records and optional live context.
-pub fn project_entity_view(
-    record: &Value,
-    readiness: Option<&Value>,
-    sync: Option<&Value>,
-    vault: Option<&Value>,
-) -> Option<Value> {
-    let mut view = record.as_object()?.clone();
-
-    if let Some(readiness) = readiness.filter(|value| truthy(Some(value))) {
-        view.insert("layrReadiness".to_owned(), readiness.clone());
-        if readiness.get("state").and_then(Value::as_str) == Some("ready") {
-            if let Some(sync) = sync {
-                view.insert("layrSync".to_owned(), sync.clone());
-            }
-            if let Some(vault) = vault {
-                view.insert("vault".to_owned(), vault.clone());
-            }
-        }
-    }
-    project_persisted_record("project", &Value::Object(view))
 }
 
 #[derive(serde::Deserialize)]
@@ -909,32 +888,52 @@ mod projection_plan_tests {
     }
 
     #[test]
+    fn opaque_archive_projection_bounds_nested_text_and_arrays() {
+        let raw = json!({"id":"w","status":"ready","archive":{"nested":{"long":"x".repeat(12_001),"items":vec![1; 201]}}});
+        let record: studio_runtime_store::WorkItemRecord =
+            serde::Deserialize::deserialize(&raw).unwrap();
+        let view = super::project_work_record(&record).unwrap();
+        let encoded = serde_json::to_string(&view).unwrap();
+        let view: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(
+            view["archive"]["nested"]["long"].as_str().unwrap().len(),
+            12_000
+        );
+        assert_eq!(
+            view["archive"]["nested"]["items"].as_array().unwrap().len(),
+            200
+        );
+    }
+
+    #[test]
     fn work_projection_preserves_presence_and_opaque_archive() {
         for raw in [
             r#"{"id":"w","status":"ready"}"#,
             r#"{"id":"w","status":"ready","agent":null,"rootId":"r","title":"work","archive":{"reason":"kept"}}"#,
         ] {
             let record: studio_runtime_store::WorkItemRecord = serde_json::from_str(raw).unwrap();
-            let old =
-                project_persisted_record("work", &serde_json::from_str(raw).unwrap()).unwrap();
+            let expected: serde_json::Value = serde_json::from_str(raw).unwrap();
             let encoded =
                 serde_json::to_string(&super::project_work_record(&record).unwrap()).unwrap();
             let new: serde_json::Value = serde_json::from_str(&encoded).unwrap();
-            assert_eq!(new, old);
+            assert_eq!(new, expected);
         }
     }
 
     #[test]
-    fn task_projection_matches_schema_projection() {
+    fn task_projection_has_expected_public_fields() {
         for length in [12, 2_100] {
             let raw = json!({"id":"a:item", "agent":"a", "created":1.0, "itemId":"item", "kind":"command", "status":"running", "turnId":"turn", "type":"commandExecution", "name":"run", "tail":"雪".repeat(length), "outputTruncated":false, "command":"x".repeat(length), "sourceThreadId":"private", "interactive":true});
             let task: studio_runtime_store::TaskRecord =
                 serde::Deserialize::deserialize(&raw).unwrap();
-            let old = project_persisted_record("task", &raw).unwrap();
             let encoded =
                 serde_json::to_string(&super::project_task_record(&task).unwrap()).unwrap();
             let new: serde_json::Value = serde_json::from_str(&encoded).unwrap();
-            assert_eq!(new, old);
+            let limit = length.min(2_000);
+            assert_eq!(
+                new,
+                json!({"id":"a:item","agent":"a","created":1.0,"kind":"command","status":"running","turnId":"turn","name":"run","tail":"雪".repeat(limit),"outputTruncated":length > 2_000,"command":"x".repeat(limit),"interactive":true})
+            );
         }
     }
 
@@ -997,6 +996,24 @@ mod projection_plan_tests {
     }
 
     #[test]
+    fn complaint_projection_preserves_integer_seconds() {
+        let raw = r#"{"id":"c","author":null,"leadId":null,"text":null,"recipient":"lead","status":"open","created":1,"updated":2,"readAt":null,"version":null,"responses":[]}"#;
+        let record = serde_json::from_str(raw).unwrap();
+        let view =
+            super::project_complaint_record(&record, &super::ComplaintViewContext::default())
+                .unwrap();
+        let encoded = serde_json::to_string(&view).unwrap();
+        let actual: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(actual["created"], json!(1));
+        assert_eq!(actual["updated"], json!(2));
+        let stored = serde_json::to_string(&record).unwrap();
+        assert_eq!(
+            studio_runtime_store::sha256_hex(stored.as_bytes()),
+            "413cdeb2d2cd1fb25994cbbac3469ccb6fb478a625197a6ebd205b453f97e49a"
+        );
+    }
+
+    #[test]
     fn complaint_names_preserve_missing_and_null() {
         let raw = r#"{"id":"complaint","author":"author","leadId":null,"text":"Question","recipient":"lead","status":"open","created":null,"updated":null,"readAt":null,"version":null,"responses":[]}"#;
         let record: studio_runtime_schema::complaint_record::ComplaintRecord =
@@ -1016,13 +1033,6 @@ mod projection_plan_tests {
             let actual: serde_json::Value = serde_json::from_str(&encoded).unwrap();
             assert_eq!(actual["authorName"], expected);
         }
-    }
-
-    #[test]
-    fn project_with_extension_status_is_projected() {
-        let view =
-            super::project_entity_view(&json!({"id": "project", "status": 42}), None, None, None);
-        assert!(view.is_some());
     }
 
     /// The agent view publishes no team budget or token count, also when an
@@ -1053,11 +1063,12 @@ mod projection_plan_tests {
         }
 
         let monitor = |patterns| {
-            project_persisted_record(
-                "monitor",
-                &json!({"id":"monitor","agent":"lead","status":"running","outputPatterns":patterns}),
-            )
-            .expect("monitor view")
+            let raw = crate::monitor_policy::complete_test_monitor(
+                json!({"id":"monitor","agent":"lead","status":"running","outputPatterns":patterns}),
+            );
+            let record = serde::Deserialize::deserialize(&raw).unwrap();
+            let view = crate::sync_policy::project_monitor_record(&record).unwrap();
+            serde::Serialize::serialize(&view, serde_json::value::Serializer).unwrap()
         };
         let unset = monitor(json!([]));
         assert!(unset.get("outputPatterns").is_none(), "{unset}");

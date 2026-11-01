@@ -139,6 +139,10 @@ impl Fixture {
         );
         store.transaction(move |tx| {
             tx.execute_batch(&sql)?;
+            // These legacy rows are inserted after the template was migrated.
+            // Apply the permission migration to the records and retained projections.
+            tx.execute("UPDATE runtime_agents SET record=json_remove(json_set(record,'$.permissionMode',CASE WHEN json_extract(record,'$.yoloMode') THEN 'bypassPermissions' ELSE 'default' END),'$.yoloMode') WHERE json_type(record,'$.yoloMode') IN ('true','false')", [])?;
+            tx.execute("UPDATE sync_entities SET payload=json_remove(json_set(payload,'$.value.permissionMode',CASE WHEN json_extract(payload,'$.value.yoloMode') THEN 'bypassPermissions' ELSE 'default' END),'$.value.yoloMode') WHERE collection='agent' AND json_type(payload,'$.value.yoloMode') IN ('true','false')", [])?;
             tx.execute("UPDATE runtime_agents SET record=json_remove(record,'$.threadId') WHERE json_type(record,'$.threadId')='null'", [])?;
             tx.execute("UPDATE runtime_agents SET record=json_remove(record,'$.turnId') WHERE json_type(record,'$.turnId')='null'", [])?;
             tx.execute("UPDATE sync_entities SET hash=sync_entity_hash(payload) WHERE payload IS NOT NULL", [])?;
@@ -490,6 +494,9 @@ fn assert_json(actual: &Value, expected: &Value, path: &str) {
                 b.remove("sync_versions");
             }
             if a.contains_key("rootId") && a.contains_key("epoch") {
+                if let Some(Value::Bool(yolo)) = b.remove("yoloMode") {
+                    b.insert("permissionMode".into(), json!(if yolo { "bypassPermissions" } else { "default" }));
+                }
                 for key in studio_runtime_store::agent_volatile::AGENT_VOLATILE_FIELDS
                     .into_iter()
                     .chain(["parentId", "threadId", "turnId"])

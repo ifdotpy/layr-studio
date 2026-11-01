@@ -528,10 +528,6 @@ impl Registry {
         self.validate_stored(schema, value)
     }
 
-    pub(crate) fn project_entity(&self, schema: &str, value: &Value) -> Option<Value> {
-        studio_runtime_services::sync_views::project_persisted_record(schema, value)
-    }
-
     #[cfg(test)]
     pub(crate) fn validated_stored(&self, schema: &str, raw: &str) -> Option<Value> {
         let value = serde_json::from_str(raw).ok()?;

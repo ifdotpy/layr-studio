@@ -504,8 +504,8 @@ pub fn submit_complaint(
         recipient: ComplaintRecipient::Lead,
         version: Some(1),
         status: ComplaintStatus::Open,
-        created: Some(now),
-        updated: Some(now),
+        created: studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(now),
+        updated: studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(now),
         read_at: None,
         responses: Vec::new(),
         source_type: None,
@@ -624,9 +624,11 @@ pub fn respond_to_complaint(
         ComplaintResponseStatus::Resolved => ComplaintStatus::Resolved,
         ComplaintResponseStatus::Declined => ComplaintStatus::Declined,
     };
-    complaint.updated = Some(now);
+    complaint.updated =
+        studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(now);
     if complaint.read_at.is_none() {
-        complaint.read_at = Some(now);
+        complaint.read_at =
+            studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(now);
     }
     complaint.version = Some(version + 1);
     let reporter = stored_agent(transaction, &author)?
@@ -768,8 +770,8 @@ mod receipt_tests {
             recipient: super::ComplaintRecipient::Lead,
             version: Some(1),
             status: super::ComplaintStatus::Open,
-            created: Some(0.0),
-            updated: Some(0.0),
+            created: studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(0.0),
+            updated: studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(0.0),
             read_at: None,
             responses: Vec::new(),
             source_type: None,

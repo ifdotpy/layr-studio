@@ -36,7 +36,7 @@ pub struct WorkspaceViewData {
     pub plans: Vec<Value>,
     pub rules: Vec<studio_runtime_store::RuleRecord>,
     pub inbox: Vec<WorkspaceInboxItem>,
-    pub tasks: Vec<Value>,
+    pub tasks: Vec<crate::sync_views::TaskProjection>,
     pub monitors: Vec<crate::sync_policy::MonitorProjection>,
 }
 

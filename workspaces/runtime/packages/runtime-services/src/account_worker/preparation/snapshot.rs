@@ -1483,6 +1483,8 @@ pub(super) fn submission_snapshot(
                 .map_err(|_| invalid("complaint/version"))?,
             created: complaint
                 .created
+                .as_ref()
+                .and_then(|value| value.seconds())
                 .ok_or_else(|| invalid("complaint/created"))?,
         });
     }

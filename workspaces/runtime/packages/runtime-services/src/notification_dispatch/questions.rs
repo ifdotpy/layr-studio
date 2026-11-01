@@ -85,8 +85,8 @@ pub(crate) fn submit_agent_complaint(
         recipient,
         version: Some(1),
         status: ComplaintStatus::Open,
-        created: Some(at),
-        updated: Some(at),
+        created: studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(at),
+        updated: studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(at),
         read_at: None,
         responses: Vec::new(),
         source_type: None,
@@ -206,8 +206,16 @@ pub(crate) fn agent_complaint_action(
                     .then_with(|| {
                         right
                             .created
+                            .as_ref()
+                            .and_then(|value| value.seconds())
                             .unwrap_or_default()
-                            .total_cmp(&left.created.unwrap_or_default())
+                            .total_cmp(
+                                &left
+                                    .created
+                                    .as_ref()
+                                    .and_then(|value| value.seconds())
+                                    .unwrap_or_default(),
+                            )
                     })
             });
             let total = complaints.len();
@@ -216,7 +224,8 @@ pub(crate) fn agent_complaint_action(
                     && complaint.recipient == ComplaintRecipient::Lead
                     && complaint.read_at.is_none()
                 {
-                    complaint.read_at = Some(at);
+                    complaint.read_at =
+                        studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(at);
                     save_complaint_projection(tx, complaint)?;
                 }
             }
@@ -286,9 +295,11 @@ pub(crate) fn agent_complaint_action(
                     ComplaintStatus::Declined
                 }
             };
-            complaint.updated = Some(at);
+            complaint.updated =
+                studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(at);
             if complaint.read_at.is_none() {
-                complaint.read_at = Some(at);
+                complaint.read_at =
+                    studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(at);
             }
             complaint.version = Some(complaint.version.unwrap_or(0) + 1);
             save_complaint_projection(tx, &complaint)?;
