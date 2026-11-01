@@ -274,17 +274,18 @@ mod replay_tests {
         let root = tempfile::tempdir().unwrap();
         let signed_in = root.path().join("signed-in");
         let signed_out = root.path().join("signed-out");
-        std::fs::create_dir_all(&signed_in).unwrap();
-        std::fs::create_dir_all(&signed_out).unwrap();
-        std::fs::write(
+        tokio::fs::create_dir_all(&signed_in).await.unwrap();
+        tokio::fs::create_dir_all(&signed_out).await.unwrap();
+        tokio::fs::write(
             signed_in.join("auth.json"),
             br#"{"OPENAI_API_KEY":"fixture"}"#,
         )
+        .await
         .unwrap();
         let registry = root.path().join("accounts.json");
-        std::fs::write(&registry, json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"signed-in","logins":{},"accounts":{
+        tokio::fs::write(&registry, json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"signed-in","logins":{},"accounts":{
             "signed-in":{"id":"signed-in","provider":"codex","home":signed_in,"label":"In","source":"fixture","status":"signedOut"},
-            "signed-out":{"id":"signed-out","provider":"codex","home":signed_out,"label":"Out","source":"fixture","status":"ready"}}}).to_string()).unwrap();
+            "signed-out":{"id":"signed-out","provider":"codex","home":signed_out,"label":"Out","source":"fixture","status":"ready"}}}).to_string()).await.unwrap();
         let driver = Arc::new(
             studio_runtime_services::account_driver::AccountDriver::open(registry).unwrap(),
         );
@@ -316,7 +317,7 @@ mod replay_tests {
             );
         }
         let state_dir = root.path().join("state");
-        std::fs::create_dir(&state_dir).unwrap();
+        tokio::fs::create_dir(&state_dir).await.unwrap();
         let store = Arc::new(RuntimeStore::open(Some(&state_dir)).await.unwrap());
         for id in ["select-in", "select-out", "move-in", "move-out"] {
             let agent = AgentRecord::from_value(json!({"compactions":0,"id":id,"rootId":id,"epoch":1,"status":"idle","isLead":true,"accountKey":"source","provider":"codex","serverId":"local","model":"gpt-6-astra","cwd":root.path()})).unwrap();

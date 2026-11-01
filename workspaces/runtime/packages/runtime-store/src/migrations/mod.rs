@@ -51,6 +51,7 @@ mod m2026_10_31_sync_project;
 mod m2026_10_31_transfer_history_pages;
 mod m2026_10_31_work_projection;
 mod m2026_10_31_work_records;
+mod m2026_11_01_account_projection;
 mod m2026_11_01_annotation_record;
 mod m2026_11_01_approval_secrets;
 mod m2026_11_01_plan_record;
@@ -58,7 +59,6 @@ mod m2026_11_01_project_context;
 mod m2026_11_01_project_revisions;
 mod m2026_11_01_rate_limit_view;
 mod m2026_11_01_work_detail_policy;
-mod m2026_11_01_account_projection;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
