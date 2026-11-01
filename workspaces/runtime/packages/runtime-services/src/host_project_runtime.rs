@@ -1,7 +1,7 @@
 //! Filesystem preparation for host project writes. No filesystem access in a transaction.
 use crate::projects::{ProjectsError, project_key};
 use rusqlite::Connection;
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::collections::BTreeMap;
 use studio_runtime_store::{ProjectsRepository, RuntimeStore};
 
@@ -60,7 +60,7 @@ impl PreparedHost {
         for (_, row) in projects.iter().chain(&agents) {
             for field in ["path", "cwd"] {
                 if let Some(path) = row.get(field).and_then(Value::as_str) {
-                    paths.insert(path.to_owned(), project_key(Some(&json!(path)), false)?);
+                    paths.insert(path.to_owned(), project_key(Some(path), false)?);
                 }
             }
         }
@@ -95,7 +95,7 @@ impl PreparedHost {
                 let Some(path) = row.get(field).and_then(Value::as_str) else {
                     continue;
                 };
-                let current = project_key(Some(&json!(path)), false)?;
+                let current = project_key(Some(path), false)?;
                 if self.paths.get(path) != Some(&current) {
                     return Err(ProjectsError::Conflict(
                         "Project path changed during preparation. Retry",
@@ -111,7 +111,7 @@ impl PreparedHost {
                 let Some(path) = path.as_str() else {
                     continue;
                 };
-                let current = project_key(Some(&json!(path)), false)?;
+                let current = project_key(Some(path), false)?;
                 if self.paths.get(path) != Some(&current) {
                     return Err(ProjectsError::Conflict(
                         "Project path changed during preparation. Retry",

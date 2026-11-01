@@ -5449,6 +5449,7 @@ version = "0.1.0"
 dependencies = [
  "data-encoding",
  "jsonschema 0.60.0",
+ "regex",
  "rusqlite",
  "schemars 1.2.3",
  "serde",

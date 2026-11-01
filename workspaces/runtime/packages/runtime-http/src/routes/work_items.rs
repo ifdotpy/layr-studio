@@ -236,14 +236,13 @@ pub(crate) fn python_operation_signature(body: &Value) -> Result<String, ApiErro
     Ok(studio_runtime_store::sha256_hex(canonical.as_bytes()))
 }
 
-pub(crate) fn work_request_signature(
+pub(crate) fn work_request_signature<T: serde::Serialize>(
     agent: &str,
     actor: Option<&str>,
-    body: &Value,
+    body: &T,
 ) -> Result<String, ApiError> {
-    let value = json!({"agent": agent, "actor": actor, "body": body});
-    let canonical = event_write::python_json(&value);
-    Ok(studio_runtime_store::sha256_hex(canonical.as_bytes()))
+    let canonical = serde_json::to_vec(&(agent, actor, body)).map_err(ApiError::json)?;
+    Ok(studio_runtime_store::sha256_hex(&canonical))
 }
 
 pub(crate) fn write_error(error: EventWriteError) -> ApiError {
