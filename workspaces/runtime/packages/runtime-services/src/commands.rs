@@ -7,8 +7,8 @@
 //!    window, and the replay record. A repeated command returns its first reference.
 //! 2. Run the command. `execute_sync` runs `withdraw` and `stop` inside the caller's
 //!    transaction, including the reference and the watermark, so no crash can separate the
-//!    change from its record. `send` needs the message admission path, so its caller runs it
-//!    between `begin` and `finish`.
+//!    change from its record. `send` posts its message in the caller's transaction too: the
+//!    HTTP edge runs `finish` in that same transaction (`messages::send_message_with`).
 //! 3. `finish`: record the reference in `request_results` (not for a create command, whose
 //!    row is the receipt) and raise the client's watermark, in the same transaction.
 //! 4. `response`: read the referenced rows at response time. They are never stored.
@@ -125,7 +125,7 @@ pub fn authorize(
 }
 
 /// A command that passed `begin` and has not run yet.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Begun {
     identity: RequestIdentity,
     signature: String,
