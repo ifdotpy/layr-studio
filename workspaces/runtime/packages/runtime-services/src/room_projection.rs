@@ -82,7 +82,7 @@ struct RadioProjection {
 }
 
 fn bounded(text: &str, field: &str) -> String {
-    bound_sync_text(text, field, false)
+    bound_sync_text(text, field)
 }
 fn active_agent<'a>(context: &'a RoomViewContext, id: &str) -> Option<&'a AgentAuthorityRow> {
     context

@@ -356,7 +356,7 @@ pub fn maintain_entity_projections_with_server_id(
             ]
             .into_iter()
             .map(|table| {
-                let rows = if table == "runtime_rooms" {
+                let rows = if matches!(table, "runtime_rooms" | "runtime_projects") {
                     stored_record_rows(transaction, table)
                 } else {
                     projection_records(transaction, table)
@@ -444,6 +444,10 @@ pub fn maintain_entity_projections_with_server_id(
                 ))?
             };
             for (id, raw) in records {
+                if table == "runtime_projects" && !valid_stored_record(table, id, raw) {
+                    eprintln!("ERROR project projection skipped invalid row id={id}");
+                    continue;
+                }
                 if matches!(collection, "request" | "rule" | "work") {
                     publish_direct(transaction, collection, id, raw, &validate_projection)?;
                     continue;
@@ -499,7 +503,7 @@ pub fn maintain_entity_projections_with_server_id(
                     match serde_json::from_str(raw) {
                         Ok(record) => record,
                         Err(error) => {
-                            eprintln!("project projection skipped row id={id}: {error}");
+                            eprintln!("ERROR project projection skipped row id={id}: {error}");
                             continue;
                         }
                     };
@@ -914,16 +918,16 @@ pub(crate) fn publish_summary_changes(
                 #[serde(flatten)]
                 receipt: crate::coordination_reads::MessageReceipt,
             }
-            receipt.id = crate::sync_views::bound_sync_text(&receipt.id, "id", false);
+            receipt.id = crate::sync_views::bound_sync_text(&receipt.id, "id");
             receipt.error = receipt
                 .error
-                .map(|error| crate::sync_views::bound_sync_text(&error, "error", false));
+                .map(|error| crate::sync_views::bound_sync_text(&error, "error"));
             SyncDocumentsRepository::put_entity(
                 transaction,
                 "messageReceipt",
                 &id,
                 ReceiptProjection {
-                    agent: crate::sync_views::bound_sync_text(&agent, "agent", false),
+                    agent: crate::sync_views::bound_sync_text(&agent, "agent"),
                     receipt,
                 },
                 false,
@@ -1125,8 +1129,8 @@ fn publish_direct(
                 id: id.to_owned(),
             })?;
         if !record.id().is_empty() {
-            let view = record
-                .sync_view(&|value, field| crate::sync_views::bound_sync_text(value, field, false));
+            let view =
+                record.sync_view(&|value, field| crate::sync_views::bound_sync_text(value, field));
             SyncDocumentsRepository::put_entity(transaction, collection, id, view, false)?;
         }
         return Ok(());
@@ -1139,7 +1143,7 @@ fn publish_direct(
             })?;
         if !record.id().is_empty() {
             let view = record.sync_view(
-                &|value, field| crate::sync_views::bound_sync_text(value, field, false),
+                &|value, field| crate::sync_views::bound_sync_text(value, field),
                 crate::sync_views::SYNC_ARRAY_ITEMS,
                 &|value, depth| crate::sync_views::bound_opaque_json(value, "", depth),
             );
@@ -1906,7 +1910,7 @@ pub fn project_monitor_record(
             id: record.id.clone(),
         });
     }
-    let bound = |text: &str, field: &str| crate::sync_views::bound_sync_text(text, field, false);
+    let bound = |text: &str, field: &str| crate::sync_views::bound_sync_text(text, field);
     Ok(MonitorProjection {
         agent: bound(&record.agent, "agent"),
         bytes: record.bytes.get(),
@@ -2183,12 +2187,12 @@ fn maintain_event_window(
         .query_map([], |row| {
             let id: String = row.get(0)?;
             let bound = |value: Option<String>, field| {
-                value.map(|text| crate::sync_views::bound_sync_text(&text, field, false))
+                value.map(|text| crate::sync_views::bound_sync_text(&text, field))
             };
             Ok((
                 id.clone(),
                 EventProjection {
-                    id: crate::sync_views::bound_sync_text(&id, "id", false),
+                    id: crate::sync_views::bound_sync_text(&id, "id"),
                     agent: bound(row.get(1)?, "agent"),
                     kind: bound(row.get(2)?, "kind"),
                     status: bound(row.get(3)?, "status"),
@@ -2255,6 +2259,14 @@ fn maintain_peer_team_entities(
     {
         return Ok(());
     }
+    // An undecodable project keeps its last published state until it is repaired.
+    if project_records.iter().any(|(id, raw)| {
+        !valid_stored_record("runtime_projects", id, raw)
+            || serde_json::from_str::<studio_runtime_schema::project_record::ProjectRecord>(raw)
+                .is_err()
+    }) {
+        return Ok(());
+    }
     let agents = agent_records
         .iter()
         .filter_map(|(_, raw)| serde_json::from_str::<Value>(raw).ok())
@@ -2301,8 +2313,7 @@ fn maintain_peer_team_entities(
                 }
             }
             if selected.len() >= 2 && !team.id.is_empty() {
-                let bound =
-                    |value: &str, field| crate::sync_views::bound_sync_text(value, field, false);
+                let bound = |value: &str, field| crate::sync_views::bound_sync_text(value, field);
                 current.insert(
                     team.id.clone(),
                     PeerTeamProjection {
@@ -2911,6 +2922,8 @@ mod tests {
                     "INSERT INTO runtime_projects(id,record) VALUES('good',?1)",
                     [r#"{"recordKind":"live","id":"good","path":"/good"}"#],
                 )?;
+                SyncDocumentsRepository::put_entity(tx, "project", "bad", json!({"id":"bad","name":"last known"}), false)?;
+                SyncDocumentsRepository::put_entity(tx, "peerTeam", "team", json!({"id":"team","name":"last known","projectPath":"/bad","members":["a","b"]}), false)?;
                 Ok(())
             })
             .await
@@ -2923,6 +2936,11 @@ mod tests {
             maintain_entity_projections_with_server_id(tx, "", None, &snapshot, &rooms, |_, _, _, _| true)?;
             let count: i64 = tx.query_row("SELECT count(*) FROM sync_entities WHERE collection='project' AND id='good' AND deleted=0", [], |row| row.get(0))?;
             assert_eq!(count, 1);
+            for (collection, id) in [("project", "bad"), ("peerTeam", "team")] {
+                let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection=?1 AND id=?2 AND deleted=0", [collection, id], |row| row.get(0))?;
+                let payload: Value = serde_json::from_str(&payload)?;
+                assert_eq!(payload["value"]["name"], "last known");
+            }
             Ok(())
         }).await.unwrap();
     }
@@ -2940,8 +2958,7 @@ mod tests {
             maintain_event_window(tx, &|_, _, _, _| true)?;
             let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='event' AND id='event'", [], |row| row.get(0))?;
             let actual: Value = serde_json::from_str(&payload)?;
-            let old = crate::sync_views::project_persisted_record("event", &json!({"id":"event","agent":"agent","kind":"user","status":"pending","created":1.0,"error":error})).unwrap();
-            assert_eq!(actual["value"], old);
+            assert_eq!(actual["value"], json!({"id":"event","agent":"agent","kind":"user","status":"pending","created":1.0,"error":"é".repeat(2_000)}));
             Ok::<_, StoreError>(())
         }).await.unwrap();
     }
@@ -2973,7 +2990,7 @@ mod tests {
         let record: studio_runtime_store::PlanRecord =
             serde::Deserialize::deserialize(&raw).unwrap();
         let view = record.sync_view(
-            &|value, field| crate::sync_views::bound_sync_text(value, field, false),
+            &|value, field| crate::sync_views::bound_sync_text(value, field),
             crate::sync_views::SYNC_ARRAY_ITEMS,
             &|value, depth| crate::sync_views::bound_opaque_json(value, "", depth),
         );
@@ -2993,9 +3010,6 @@ mod tests {
 
     #[test]
     fn typed_monitor_projection_keeps_existing_public_bounds() {
-        let record = crate::monitor_policy::complete_test_monitor(
-            serde_json::json!({"id":"monitor","agent":"owner","created":0.0,"activityAt":0.0,"command":"雪".repeat(2100),"tail":"é".repeat(2100),"error":"x".repeat(2100),"outputPatterns":["ready"]}),
-        );
         let raw = format!(
             r#"{{"id":"monitor","agent":"owner","epoch":0,"status":"running","requestId":"fixture","created":0.0,"activityAt":0.0,"activityGeneration":0,"bytes":0,"command":{},"cwd":{},"interactive":false,"livenessCommand":"","log":{},"stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":{},"error":{},"timeout_ms":3600000,"wakeOn":"exit","outputPatterns":["ready"]}}"#,
             serde_json::to_string(&"雪".repeat(2100)).unwrap(),
@@ -3005,12 +3019,10 @@ mod tests {
             serde_json::to_string(&"x".repeat(2100)).unwrap()
         );
         let typed: studio_runtime_store::MonitorRecord = serde_json::from_str(&raw).unwrap();
-        let old = crate::sync_views::project_persisted_record("monitor", &record).unwrap();
         let new = super::project_monitor_record(&typed).unwrap();
-        assert_eq!(serde_json::to_string(&new).unwrap(), old.to_string());
-        assert_eq!(new.command, old["command"]);
-        assert_eq!(new.tail, old["tail"]);
-        assert_eq!(new.error.as_deref(), old["error"].as_str());
+        assert_eq!(new.command, "雪".repeat(2_000));
+        assert_eq!(new.tail, "é".repeat(2_000));
+        assert_eq!(new.error.as_deref(), Some("x".repeat(2_000).as_str()));
         assert_eq!(new.output_patterns, Some(vec!["ready".to_owned()]));
     }
 

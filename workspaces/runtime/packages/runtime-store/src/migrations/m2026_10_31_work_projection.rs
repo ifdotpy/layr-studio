@@ -90,40 +90,4 @@ mod tests {
             studio_runtime_schema::queue_command::Field::Null
         ));
     }
-
-    #[test]
-    #[ignore = "manual verification on a disposable reflink copy"]
-    fn verify_work_projection_migration_on_copy() {
-        let path = std::env::var_os("STUDIO_WORK_PROJECTION_COPY").unwrap();
-        let mut db = Connection::open(path).unwrap();
-        crate::schema::register_python_trigger_functions(&db).unwrap();
-        let tx = db.transaction().unwrap();
-        if !crate::schema::table_exists(&tx, "runtime_work").unwrap() {
-            println!("work table absent; work rows=0, refused=0");
-            return;
-        }
-        apply(&tx).unwrap();
-        super::super::m2026_10_31_work_records::apply(&tx).unwrap();
-        apply(&tx).unwrap();
-        apply(&tx).unwrap();
-        let mut query = tx.prepare("SELECT id,record FROM runtime_work").unwrap();
-        let rows = query
-            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-            .unwrap();
-        let mut total = 0;
-        let mut refused = 0;
-        for row in rows {
-            let (id, raw) = row.unwrap();
-            total += 1;
-            if !serde_json::from_str::<WorkItem>(&raw)
-                .is_ok_and(|record| record.id().as_ref() == id)
-            {
-                refused += 1;
-            }
-        }
-        println!("work rows={total}, refused={refused}");
-        assert_eq!(refused, 0);
-        drop(query);
-        tx.commit().unwrap();
-    }
 }

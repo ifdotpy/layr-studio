@@ -22,8 +22,11 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             "line" => studio_runtime_schema::annotation_record::valid_line(value),
             _ => false,
         });
-        if fields != original {
-            let normalized = serde_json::to_string(&fields)?;
+        let normalized = serde_json::to_string(&fields)?;
+        if fields != original
+            || (serde_json::from_str::<studio_runtime_schema::annotation_record::AnnotationRecord>(&raw).is_err()
+                && serde_json::from_str::<studio_runtime_schema::annotation_record::AnnotationRecord>(&normalized).is_ok())
+        {
             tx.execute(
                 "UPDATE runtime_annotations SET record=?2 WHERE id=?1",
                 (&id, normalized),
@@ -38,6 +41,27 @@ mod tests {
     use super::*;
     use rusqlite::Connection;
     use studio_runtime_schema::annotation_record::AnnotationRecord;
+
+    #[test]
+    fn normalizes_duplicate_fields_for_typed_decode() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE runtime_annotations(id TEXT PRIMARY KEY,record TEXT NOT NULL);",
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO runtime_annotations VALUES('a',?1)",
+            [r#"{"id":"a","text":"old","text":"new"}"#],
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        apply(&tx).unwrap();
+        let raw: String = tx
+            .query_row("SELECT record FROM runtime_annotations", [], |r| r.get(0))
+            .unwrap();
+        let annotation: AnnotationRecord = serde_json::from_str(&raw).unwrap();
+        assert_eq!(annotation.value()["text"], "new");
+    }
 
     #[test]
     fn preserves_already_valid_row_bytes() {
@@ -85,43 +109,5 @@ mod tests {
         assert!(record.value()["turnId"].is_null());
         assert!(record.value().get("extra").is_none());
         assert!(record.value().get("line").is_none());
-    }
-
-    #[test]
-    #[ignore = "manual verification on a disposable reflink copy"]
-    fn verify_annotation_migration_on_copy() {
-        let path = std::env::var_os("STUDIO_ANNOTATION_MIGRATION_COPY").unwrap();
-        let mut db = Connection::open(path).unwrap();
-        crate::schema::register_python_trigger_functions(&db).unwrap();
-        let tx = db.transaction().unwrap();
-        if !crate::schema::table_exists(&tx, "runtime_annotations").unwrap() {
-            println!("annotation table absent; rows=0, refused=0");
-            return;
-        }
-        apply(&tx).unwrap();
-        apply(&tx).unwrap();
-        let mut statement = tx
-            .prepare("SELECT id,record FROM runtime_annotations")
-            .unwrap();
-        let rows = statement
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .unwrap();
-        let mut total = 0;
-        let mut refused = 0;
-        for row in rows {
-            let (id, raw) = row.unwrap();
-            total += 1;
-            if !serde_json::from_str::<AnnotationRecord>(&raw)
-                .is_ok_and(|record| record.id() == &id)
-            {
-                refused += 1;
-            }
-        }
-        println!("annotation rows={total}, refused={refused}");
-        assert_eq!(refused, 0);
-        drop(statement);
-        tx.commit().unwrap();
     }
 }

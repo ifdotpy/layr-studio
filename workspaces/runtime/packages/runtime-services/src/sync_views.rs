@@ -29,7 +29,7 @@ pub(crate) fn bound_opaque_json(value: &mut Value, field: &str, depth: usize) {
         return;
     }
     match value {
-        Value::String(text) => *text = bound_sync_text(text, field, false),
+        Value::String(text) => *text = bound_sync_text(text, field),
         Value::Array(items) => {
             items.truncate(if field == "sidebarOrder" {
                 SYNC_SIDEBAR_ORDER_ITEMS
@@ -160,7 +160,11 @@ fn schema_projection_properties() -> &'static SchemaProjectionProperties {
     })
 }
 
-pub(crate) fn bound_sync_text(text: &str, field: &str, agent_short_strings: bool) -> String {
+pub(crate) fn bound_sync_text(text: &str, field: &str) -> String {
+    bound_sync_text_mode(text, field, false)
+}
+
+fn bound_sync_text_mode(text: &str, field: &str, agent_short_strings: bool) -> String {
     let limit = if agent_short_strings {
         2_000
     } else {
@@ -176,7 +180,9 @@ pub(crate) fn bound_sync_text(text: &str, field: &str, agent_short_strings: bool
 }
 fn bound_sync_value(value: &Value, field: &str, agent_short_strings: bool) -> Value {
     match value {
-        Value::String(text) => Value::String(bound_sync_text(text, field, agent_short_strings)),
+        Value::String(text) => {
+            Value::String(bound_sync_text_mode(text, field, agent_short_strings))
+        }
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_) => {
             value.clone()
         }
@@ -324,7 +330,7 @@ pub fn project_task_record(record: &studio_runtime_store::TaskRecord) -> Option<
     if id.is_empty() {
         return None;
     }
-    let bounded = |text: &str, field| bound_sync_text(text, field, false);
+    let bounded = |text: &str, field| bound_sync_text(text, field);
     let optional =
         |value: &Option<String>, field| value.as_deref().map(|text| bounded(text, field));
     let (tail, truncated) = record.tail.as_deref().map_or((None, false), |text| {
@@ -395,10 +401,10 @@ pub fn project_work_record(
     let field = |value: &Field<String>, name| match value {
         Field::Missing => Field::Missing,
         Field::Null => Field::Null,
-        Field::Value(value) => Field::Value(bound_sync_text(value, name, false)),
+        Field::Value(value) => Field::Value(bound_sync_text(value, name)),
     };
     Some(WorkProjection {
-        id: bound_sync_text(id, "id", false),
+        id: bound_sync_text(id, "id"),
         status: record.status(),
         root_id: field(record.root_id_field(), "rootId"),
         title: field(record.title_field(), "title"),
@@ -419,9 +425,6 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
         "agent" => "AgentEntityDto",
         "agentSummary" => "AgentSummaryEntityDto",
         "agentDetail" => "AgentDetailEntityDto",
-        #[cfg(test)]
-        other => test_fixture_schema(other)?,
-        #[cfg(not(test))]
         _ => return None,
     };
     record
@@ -444,16 +447,6 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
             "path": intent.pointer("/effect/identity/cwd").or_else(|| intent.get("path")).or_else(|| record.get("cwd")).and_then(Value::as_str),
         });
     }
-    // Publish these fields only when set. The older view never published
-    // them, and the client reads a missing one as its default.
-    #[cfg(test)]
-    if let Some((_, field)) = UNSET_DEFAULT_FIELDS
-        .iter()
-        .find(|(owner, field)| *owner == collection && record.get(*field).is_some_and(unset))
-        && let Some(fields) = public_record.to_mut().as_object_mut()
-    {
-        fields.remove(*field);
-    }
     let mut projected = project_schema_value(
         &public_record,
         schema,
@@ -463,51 +456,12 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
         collection == "agent",
         false,
     );
-    #[cfg(test)]
-    if collection == "task"
-        && let Some(tail) = record.get("tail").and_then(Value::as_str)
-        && let Some(summary) = projected.get("tail").and_then(Value::as_str)
-        && summary != tail
-    {
-        // The canonical text projection owns the bound. A task tail keeps
-        // that many newest characters and advertises the omitted output.
-        let suffix = tail
-            .chars()
-            .rev()
-            .take(summary.chars().count())
-            .collect::<String>();
-        projected["tail"] = json!(suffix.chars().rev().collect::<String>());
-        projected["outputTruncated"] = json!(true);
-    }
     if matches!(collection, "agent" | "agentDetail")
         && let Some(gate) = record.get("taskDefaultGate")
     {
         projected["taskDefaultGate"] = gate.clone();
     }
     Some(projected)
-}
-
-#[cfg(test)]
-fn test_fixture_schema(collection: &str) -> Option<&'static str> {
-    match collection {
-        "task" => Some("TaskEntityDto"),
-        "monitor" => Some("MonitorEntityDto"),
-        "event" => Some("EventEntityDto"),
-        "work" => Some("WorkEntityDto"),
-        _ => None,
-    }
-}
-
-/// `(collection, field)` pairs that a sync view publishes only when set: a
-/// monitor's output patterns (empty means none). The client reads a missing
-/// one as that default.
-#[cfg(test)]
-const UNSET_DEFAULT_FIELDS: &[(&str, &str)] = &[("monitor", "outputPatterns")];
-
-/// Whether a field value is its unset default: null or an empty list.
-#[cfg(test)]
-fn unset(value: &Value) -> bool {
-    value.is_null() || value.as_array().is_some_and(Vec::is_empty)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -816,7 +770,7 @@ pub fn project_complaint_record(
                 .responses
                 .iter()
                 .any(|response| response.author == "user"));
-    let bound = |value: &str, field| bound_sync_text(value, field, false);
+    let bound = |value: &str, field| bound_sync_text(value, field);
     let name = |id: Option<&str>, fallback: Option<&str>, field| {
         let value = id.and_then(|id| {
             context
@@ -958,26 +912,28 @@ mod projection_plan_tests {
             r#"{"id":"w","status":"ready","agent":null,"rootId":"r","title":"work","archive":{"reason":"kept"}}"#,
         ] {
             let record: studio_runtime_store::WorkItemRecord = serde_json::from_str(raw).unwrap();
-            let old =
-                project_persisted_record("work", &serde_json::from_str(raw).unwrap()).unwrap();
+            let expected: serde_json::Value = serde_json::from_str(raw).unwrap();
             let encoded =
                 serde_json::to_string(&super::project_work_record(&record).unwrap()).unwrap();
             let new: serde_json::Value = serde_json::from_str(&encoded).unwrap();
-            assert_eq!(new, old);
+            assert_eq!(new, expected);
         }
     }
 
     #[test]
-    fn task_projection_matches_schema_projection() {
+    fn task_projection_has_expected_public_fields() {
         for length in [12, 2_100] {
             let raw = json!({"id":"a:item", "agent":"a", "created":1.0, "itemId":"item", "kind":"command", "status":"running", "turnId":"turn", "type":"commandExecution", "name":"run", "tail":"雪".repeat(length), "outputTruncated":false, "command":"x".repeat(length), "sourceThreadId":"private", "interactive":true});
             let task: studio_runtime_store::TaskRecord =
                 serde::Deserialize::deserialize(&raw).unwrap();
-            let old = project_persisted_record("task", &raw).unwrap();
             let encoded =
                 serde_json::to_string(&super::project_task_record(&task).unwrap()).unwrap();
             let new: serde_json::Value = serde_json::from_str(&encoded).unwrap();
-            assert_eq!(new, old);
+            let limit = length.min(2_000);
+            assert_eq!(
+                new,
+                json!({"id":"a:item","agent":"a","created":1.0,"kind":"command","status":"running","turnId":"turn","name":"run","tail":"雪".repeat(limit),"outputTruncated":length > 2_000,"command":"x".repeat(limit),"interactive":true})
+            );
         }
     }
 
@@ -1107,11 +1063,12 @@ mod projection_plan_tests {
         }
 
         let monitor = |patterns| {
-            project_persisted_record(
-                "monitor",
-                &json!({"id":"monitor","agent":"lead","status":"running","outputPatterns":patterns}),
-            )
-            .expect("monitor view")
+            let raw = crate::monitor_policy::complete_test_monitor(
+                json!({"id":"monitor","agent":"lead","status":"running","outputPatterns":patterns}),
+            );
+            let record = serde::Deserialize::deserialize(&raw).unwrap();
+            let view = crate::sync_policy::project_monitor_record(&record).unwrap();
+            serde::Serialize::serialize(&view, serde_json::value::Serializer).unwrap()
         };
         let unset = monitor(json!([]));
         assert!(unset.get("outputPatterns").is_none(), "{unset}");

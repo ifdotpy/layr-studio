@@ -214,74 +214,157 @@ impl Migration for RegistryMigration {
     }
 }
 
+fn apply_projection_records(tx: &Transaction<'_>) -> StoreResult<()> {
+    m2026_11_01_project_revisions::apply(tx)?;
+    m2026_11_01_project_context::apply(tx)?;
+    m2026_11_01_annotation_record::apply(tx)?;
+    m2026_11_01_plan_record::apply(tx)?;
+    m2026_10_31_work_projection::apply(tx)
+}
+
+#[cfg(test)]
+mod projection_copy_tests {
+    use super::*;
+    use serde::Deserialize;
+    use studio_runtime_schema::json_object::JsonObject;
+    use studio_runtime_schema::project_projection::{ProjectReadiness, ProjectSync, ProjectVault};
+
+    #[test]
+    #[ignore = "manual verification on a disposable reflink copy"]
+    fn verify_projection_migrations_on_copy() {
+        let path = std::env::var_os("STUDIO_PROJECTION_MIGRATION_COPY").unwrap();
+        let mut db = Connection::open(path).unwrap();
+        crate::schema::register_python_trigger_functions(&db).unwrap();
+        let tx = db.transaction().unwrap();
+        let needed = [
+            "2026-11-01-projection-records",
+            "2026-10-31-work-records",
+            "2026-10-30-project-teams",
+            "2026-10-31-sync-project-duplicates",
+            "2026-10-31-project-record-kind",
+            "2026-10-31-project-record-kind-repair",
+        ];
+        for _ in 0..2 {
+            for migration in CATALOG
+                .iter()
+                .filter(|step| needed.contains(&step.definition().id))
+            {
+                migration
+                    .apply(&Context::Sql(SqlContext { transaction: &tx }))
+                    .unwrap();
+            }
+        }
+        for table in [
+            "runtime_projects",
+            "runtime_work",
+            "runtime_plans",
+            "runtime_annotations",
+        ] {
+            if !crate::schema::table_exists(&tx, table).unwrap() {
+                println!("{table}: table absent; rows=0, refused=0");
+                continue;
+            }
+            let mut statement = tx
+                .prepare(&format!("SELECT id,record FROM {table}"))
+                .unwrap();
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .unwrap();
+            let (mut count, mut refused) = (0, 0);
+            for row in rows {
+                let (id, raw) = row.unwrap();
+                count += 1;
+                let valid = match table {
+                    "runtime_projects" => match serde_json::from_str::<
+                        studio_runtime_schema::project_record::ProjectRecord,
+                    >(&raw)
+                    {
+                        Ok(studio_runtime_schema::project_record::ProjectRecord::Live(record)) => {
+                            record.id == id
+                        }
+                        Ok(studio_runtime_schema::project_record::ProjectRecord::Removal(
+                            record,
+                        )) => record.id == id,
+                        Err(_) => false,
+                    },
+                    "runtime_work" => serde_json::from_str::<
+                        studio_runtime_schema::work_item_record::WorkItem,
+                    >(&raw)
+                    .is_ok_and(|record| record.id().as_ref() == id),
+                    "runtime_plans" => {
+                        serde_json::from_str::<studio_runtime_schema::plan_record::PlanRecord>(&raw)
+                            .is_ok_and(|record| record.id() == id)
+                    }
+                    "runtime_annotations" => serde_json::from_str::<
+                        studio_runtime_schema::annotation_record::AnnotationRecord,
+                    >(&raw)
+                    .is_ok_and(|record| record.id() == &id),
+                    _ => unreachable!(),
+                };
+                refused += usize::from(!valid);
+            }
+            println!("{table}: rows={count}, refused={refused}");
+            assert_eq!(refused, 0);
+        }
+        if crate::schema::table_exists(&tx, "sync_entities").unwrap() {
+            let mut stmt = tx.prepare("SELECT payload FROM sync_entities WHERE collection='project' AND deleted=0 AND payload IS NOT NULL").unwrap();
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0)).unwrap();
+            let (mut count, mut refused) = (0, 0);
+            for row in rows {
+                let payload: serde_json::Value = serde_json::from_str(&row.unwrap()).unwrap();
+                let value = &payload["value"];
+                count += 1;
+                for (name, valid) in [
+                    (
+                        "layrReadiness",
+                        value.get("layrReadiness").is_none_or(|v| {
+                            v.is_null() || JsonObject::<ProjectReadiness>::deserialize(v).is_ok()
+                        }),
+                    ),
+                    (
+                        "layrSync",
+                        value.get("layrSync").is_none_or(|v| {
+                            v.is_null() || JsonObject::<ProjectSync>::deserialize(v).is_ok()
+                        }),
+                    ),
+                    (
+                        "vault",
+                        value.get("vault").is_none_or(|v| {
+                            v.is_null() || JsonObject::<ProjectVault>::deserialize(v).is_ok()
+                        }),
+                    ),
+                ] {
+                    if !valid {
+                        eprintln!("invalid project context: {name}");
+                        refused += 1;
+                    }
+                }
+            }
+            println!("project contexts: rows={count}, refused={refused}");
+            assert_eq!(refused, 0);
+        }
+        tx.commit().unwrap();
+    }
+}
+
 // Explicit dependency order: provider leaves precede strict generated columns;
 // columns precede indexes; volatile data moves before its new triggers exist.
 static CATALOG: &[&dyn Migration] = &[
     &SqlMigration {
         definition: MigrationDefinition {
-            id: "2026-11-01-project-revisions",
+            id: "2026-11-01-projection-records",
             introduced: MigrationDate {
                 year: 2026,
                 month: 11,
                 day: 1,
             },
             target: MigrationTarget::Canvas,
-            supported_source: "Project records with integral floating-point revisions",
+            supported_source: "Legacy projection records and cached project contexts",
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
-        apply: |c| m2026_11_01_project_revisions::apply(c.transaction),
-    },
-    &SqlMigration {
-        definition: MigrationDefinition {
-            id: "2026-11-01-project-context",
-            introduced: MigrationDate {
-                year: 2026,
-                month: 11,
-                day: 1,
-            },
-            target: MigrationTarget::Canvas,
-            supported_source: "Derived project contexts with invalid cached fields",
-            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
-        },
-        apply: |c| m2026_11_01_project_context::apply(c.transaction),
-    },
-    &SqlMigration {
-        definition: MigrationDefinition {
-            id: "2026-11-01-annotation-record",
-            introduced: MigrationDate {
-                year: 2026,
-                month: 11,
-                day: 1,
-            },
-            target: MigrationTarget::Canvas,
-            supported_source: "Legacy annotations with unused extension fields",
-            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
-        },
-        apply: |c| m2026_11_01_annotation_record::apply(c.transaction),
-    },
-    &SqlMigration {
-        definition: MigrationDefinition {
-            id: "2026-11-01-plan-record",
-            introduced: MigrationDate {
-                year: 2026,
-                month: 11,
-                day: 1,
-            },
-            target: MigrationTarget::Canvas,
-            supported_source: "Legacy plans with unused extension fields",
-            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
-        },
-        apply: |c| m2026_11_01_plan_record::apply(c.transaction),
-    },
-    &SqlMigration {
-        definition: MigrationDefinition {
-            id: "2026-10-31-work-projection-agent",
-            introduced: OCTOBER_31,
-            target: MigrationTarget::Canvas,
-            supported_source: "Work records with non-string agent fields",
-            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
-        },
-        apply: |c| m2026_10_31_work_projection::apply(c.transaction),
+        apply: |c| apply_projection_records(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {

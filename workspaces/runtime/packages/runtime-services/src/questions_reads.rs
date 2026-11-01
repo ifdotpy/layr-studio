@@ -80,9 +80,7 @@ struct QuestionOption {
     description: Option<String>,
 }
 
-fn history_text(value: &str, field: &str) -> String {
-    crate::sync_views::bound_sync_text(value, field, false)
-}
+use crate::sync_views::bound_sync_text as history_text;
 fn history_optional(value: Option<&str>, field: &str) -> Option<String> {
     value.map(|value| history_text(value, field))
 }

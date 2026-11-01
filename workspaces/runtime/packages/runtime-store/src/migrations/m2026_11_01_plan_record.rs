@@ -41,8 +41,15 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 fields.remove("native");
             }
         }
-        if fields != original {
-            let normalized = serde_json::to_string(&fields)?;
+        let normalized = serde_json::to_string(&fields)?;
+        if fields != original
+            || (serde_json::from_str::<studio_runtime_schema::plan_record::PlanRecord>(&raw)
+                .is_err()
+                && serde_json::from_str::<studio_runtime_schema::plan_record::PlanRecord>(
+                    &normalized,
+                )
+                .is_ok())
+        {
             tx.execute(
                 "UPDATE runtime_plans SET record=?2 WHERE id=?1",
                 (&id, normalized),
@@ -57,6 +64,25 @@ mod tests {
     use super::*;
     use rusqlite::Connection;
     use studio_runtime_schema::plan_record::PlanRecord;
+
+    #[test]
+    fn normalizes_duplicate_fields_for_typed_decode() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_plans(id TEXT PRIMARY KEY,record TEXT NOT NULL);")
+            .unwrap();
+        db.execute(
+            "INSERT INTO runtime_plans VALUES('a',?1)",
+            [r#"{"id":"a","rootId":"r","text":"old","text":"new","version":1,"updated":null}"#],
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        apply(&tx).unwrap();
+        let raw: String = tx
+            .query_row("SELECT record FROM runtime_plans", [], |r| r.get(0))
+            .unwrap();
+        let plan: PlanRecord = serde_json::from_str(&raw).unwrap();
+        assert_eq!(plan.value()["text"], "new");
+    }
 
     #[test]
     fn preserves_already_valid_row_bytes() {
@@ -100,36 +126,5 @@ mod tests {
         assert_eq!(record.value()["native"]["threadId"], "t");
         assert!(record.value().get("unused").is_none());
         assert!(record.value()["native"].get("extension").is_none());
-    }
-
-    #[test]
-    #[ignore = "manual verification on a disposable reflink copy"]
-    fn verify_plan_migration_on_copy() {
-        let path = std::env::var_os("STUDIO_PLAN_MIGRATION_COPY").unwrap();
-        let mut db = Connection::open(path).unwrap();
-        crate::schema::register_python_trigger_functions(&db).unwrap();
-        let tx = db.transaction().unwrap();
-        if !crate::schema::table_exists(&tx, "runtime_plans").unwrap() {
-            println!("plan table absent; rows=0, refused=0");
-            return;
-        }
-        apply(&tx).unwrap();
-        apply(&tx).unwrap();
-        let mut statement = tx.prepare("SELECT record FROM runtime_plans").unwrap();
-        let rows = statement
-            .query_map([], |row| row.get::<_, String>(0))
-            .unwrap();
-        let mut total = 0;
-        let mut refused = 0;
-        for row in rows {
-            total += 1;
-            if serde_json::from_str::<PlanRecord>(&row.unwrap()).is_err() {
-                refused += 1;
-            }
-        }
-        println!("plan rows={total}, refused={refused}");
-        assert_eq!(refused, 0);
-        drop(statement);
-        tx.commit().unwrap();
     }
 }

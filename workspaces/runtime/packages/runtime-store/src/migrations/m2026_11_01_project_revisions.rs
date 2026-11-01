@@ -94,44 +94,4 @@ mod tests {
             1
         );
     }
-
-    #[test]
-    #[ignore = "manual verification on a disposable reflink copy"]
-    fn verify_project_revisions_on_copy() {
-        let path = std::env::var_os("STUDIO_PROJECT_REVISIONS_COPY").unwrap();
-        let mut db = rusqlite::Connection::open(path).unwrap();
-        crate::schema::register_python_trigger_functions(&db).unwrap();
-        let tx = db.transaction().unwrap();
-        if !crate::schema::table_exists(&tx, "runtime_projects").unwrap() {
-            println!("project table absent; rows=0, refused=0");
-            return;
-        }
-        super::super::m2026_10_30_project_teams::apply(&tx).unwrap();
-        super::super::m2026_10_31_sync_project::apply(&tx).unwrap();
-        apply(&tx).unwrap();
-        super::super::m2026_10_31_project_record_kind::apply(&tx).unwrap();
-        apply(&tx).unwrap();
-        let mut stmt = tx
-            .prepare("SELECT id,record FROM runtime_projects")
-            .unwrap();
-        let rows = stmt
-            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-            .unwrap();
-        let mut total = 0;
-        let mut refused = 0;
-        for row in rows {
-            let (id, raw) = row.unwrap();
-            total += 1;
-            if serde_json::from_str::<studio_runtime_schema::project_record::ProjectRecord>(&raw)
-                .is_err()
-            {
-                eprintln!("refused project id={id}");
-                refused += 1;
-            }
-        }
-        println!("project rows={total}, refused={refused}");
-        assert_eq!(refused, 0);
-        drop(stmt);
-        tx.commit().unwrap();
-    }
 }

@@ -64,14 +64,14 @@ pub struct ProjectProjection {
 
 fn text(field: &mut Field<String>, name: &str) {
     if let Field::Value(value) = field {
-        *value = bound_sync_text(value, name, false);
+        *value = bound_sync_text(value, name);
     }
 }
 fn strings(field: &mut Field<Vec<String>>) {
     if let Field::Value(values) = field {
         values.truncate(SYNC_ARRAY_ITEMS);
         for value in values {
-            *value = bound_sync_text(value, "", false);
+            *value = bound_sync_text(value, "");
         }
     }
 }
@@ -88,8 +88,8 @@ pub fn project_record(
     if project.id.is_empty() {
         return None;
     }
-    project.id = bound_sync_text(&project.id, "id", false);
-    project.path = bound_sync_text(&project.path, "path", false);
+    project.id = bound_sync_text(&project.id, "id");
+    project.path = bound_sync_text(&project.path, "path");
     for (value, name) in [
         (&mut project.account_key, "accountKey"),
         (&mut project.name, "name"),
@@ -104,20 +104,20 @@ pub fn project_record(
     if let Field::Value(teams) = &mut project.peer_teams {
         teams.truncate(SYNC_ARRAY_ITEMS);
         for team in teams {
-            team.id = bound_sync_text(&team.id, "id", false);
-            team.name = bound_sync_text(&team.name, "name", false);
+            team.id = bound_sync_text(&team.id, "id");
+            team.name = bound_sync_text(&team.name, "name");
             team.members.truncate(SYNC_ARRAY_ITEMS);
             for member in &mut team.members {
-                *member = bound_sync_text(member, "", false);
+                *member = bound_sync_text(member, "");
             }
         }
     }
     if let Field::Value(locations) = &mut project.locations {
         locations.truncate(SYNC_ARRAY_ITEMS);
         for location in locations {
-            location.server_id = bound_sync_text(&location.server_id, "serverId", false);
-            location.path = bound_sync_text(&location.path, "path", false);
-            location.project_id = bound_sync_text(&location.project_id, "projectId", false);
+            location.server_id = bound_sync_text(&location.server_id, "serverId");
+            location.path = bound_sync_text(&location.path, "path");
+            location.project_id = bound_sync_text(&location.project_id, "projectId");
             text(&mut location.git_origin, "gitOrigin");
             text(&mut location.requested_path, "requestedPath");
         }
@@ -125,16 +125,16 @@ pub fn project_record(
     if let Field::Value(aliases) = &mut project.project_aliases {
         aliases.truncate(SYNC_ARRAY_ITEMS);
         for alias in aliases {
-            alias.server_id = bound_sync_text(&alias.server_id, "serverId", false);
-            alias.project_id = bound_sync_text(&alias.project_id, "projectId", false);
-            alias.name = bound_sync_text(&alias.name, "name", false);
+            alias.server_id = bound_sync_text(&alias.server_id, "serverId");
+            alias.project_id = bound_sync_text(&alias.project_id, "projectId");
+            alias.name = bound_sync_text(&alias.name, "name");
         }
     }
     if let Field::Value(folders) = &mut project.folders {
         folders.truncate(SYNC_ARRAY_ITEMS);
         for folder in folders {
-            folder.id = bound_sync_text(&folder.id, "id", false);
-            folder.name = bound_sync_text(&folder.name, "name", false);
+            folder.id = bound_sync_text(&folder.id, "id");
+            folder.name = bound_sync_text(&folder.name, "name");
             text(&mut folder.parent_id, "parentId");
         }
     }
@@ -147,7 +147,7 @@ pub fn project_record(
         vault = Field::Missing;
     }
     if let Field::Value(value) = &mut sync {
-        value.project_id = bound_sync_text(&value.project_id, "projectId", false);
+        value.project_id = bound_sync_text(&value.project_id, "projectId");
         for values in [
             &mut value.conflicts,
             &mut value.choices,
@@ -155,13 +155,13 @@ pub fn project_record(
         ] {
             values.truncate(SYNC_ARRAY_ITEMS);
             for item in values {
-                *item = bound_sync_text(item, "", false);
+                *item = bound_sync_text(item, "");
             }
         }
         text(&mut value.reason, "reason");
     }
     if let Field::Value(value) = &mut vault {
-        value.project_id = bound_sync_text(&value.project_id, "projectId", false);
+        value.project_id = bound_sync_text(&value.project_id, "projectId");
         for (field, name) in [
             (&mut value.disk, "disk"),
             (&mut value.prefix, "prefix"),
