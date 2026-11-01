@@ -2157,7 +2157,7 @@ impl Decision {
         {
             return Ok(());
         }
-        lead["accountTransfer"] = serde_json::to_value(summary_record(&operation)?)
+        lead["accountTransfer"] = serde_json::to_value(summary_record(operation)?)
             .map_err(|_| invalid("account transfer", "/summary"))?;
         Ok(())
     }

@@ -60,18 +60,17 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             "UPDATE runtime_account_transfers SET record=?2 WHERE id=?1",
             params![id, held],
         )?;
-        if crate::schema::table_exists(tx, "runtime_agents")? {
-            if let Ok(LegacyOwner {
+        if crate::schema::table_exists(tx, "runtime_agents")?
+            && let Ok(LegacyOwner {
                 lead_id: Some(lead),
             }) = serde_json::from_str::<LegacyOwner>(&raw)
-            {
-                let marker = serde_json::to_string(&UnreadableTransferSummary {
-                    kind: UnreadableTransferKind::Unreadable,
-                    reason,
-                    original: None,
-                })?;
-                tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.accountTransfer',json(?2)) WHERE id=?1 AND json_valid(record)", params![lead, marker])?;
-            }
+        {
+            let marker = serde_json::to_string(&UnreadableTransferSummary {
+                kind: UnreadableTransferKind::Unreadable,
+                reason,
+                original: None,
+            })?;
+            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.accountTransfer',json(?2)) WHERE id=?1 AND json_valid(record)", params![lead, marker])?;
         }
     }
     Ok(())
