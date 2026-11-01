@@ -132,8 +132,7 @@ pub struct AccessInvitation {
     pub expires: Expiry,
 }
 
-/// Invite fingerprints use the typed JSON bytes. Invites recorded by older peers
-/// may mismatch after upgrade; the peers must create a new invitation.
+/// Management requests preserve missing fields for durable invite fingerprints.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(
     tag = "action",
@@ -390,19 +389,19 @@ mod tests {
     }
 
     #[test]
-    fn invite_fingerprint_is_deterministic_and_preserves_null_presence() {
+    fn invite_serialization_preserves_missing_and_null_presence() {
         use super::ManagementRequest;
         let parse = |value| serde_json::from_value::<ManagementRequest>(value).unwrap();
         let first = parse(json!({"action":"create_invite", "requestId":"r"}));
         let same = parse(json!({"requestId":"r", "action":"create_invite"}));
         let explicit_null = parse(json!({"action":"create_invite", "requestId":"r", "label":null}));
-        let fingerprint = |body: &ManagementRequest| {
-            let bytes = serde_json::to_vec(body).unwrap();
-            use sha2::{Digest, Sha256};
-            Sha256::digest(bytes)
-        };
-        assert_eq!(fingerprint(&first), fingerprint(&same));
-        assert_ne!(fingerprint(&first), fingerprint(&explicit_null));
+        let bytes = |body: &ManagementRequest| serde_json::to_vec(body).unwrap();
+        assert_eq!(bytes(&first), bytes(&same));
+        assert_ne!(bytes(&first), bytes(&explicit_null));
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&bytes(&first)).unwrap(),
+            json!({"action":"create_invite", "requestId":"r"})
+        );
     }
 
     #[test]
