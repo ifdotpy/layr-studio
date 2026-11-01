@@ -520,6 +520,7 @@ test("Account Transfer Ui", async ({
       true,
     );
     await page.keyboard.press("Escape");
+    await agentSettings.waitFor({ state: "hidden" });
     await page.screenshot({
       path: join(evidence, "transfer-pending.png"),
       animations: "disabled",

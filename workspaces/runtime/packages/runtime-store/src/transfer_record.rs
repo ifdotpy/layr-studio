@@ -190,22 +190,103 @@ pub enum ResponseKind {
     Reply,
     Rejected,
 }
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ProviderResult {
-    pub kind: ResponseKind,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub value: Field<ProviderPayload>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub value_blob: Field<PayloadBlob>,
+#[derive(Clone, Debug, Serialize)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum ProviderResult {
+    Inline {
+        kind: ResponseKind,
+        value: Option<ProviderPayload>,
+    },
+    Blob {
+        kind: ResponseKind,
+        #[serde(rename = "valueBlob")]
+        value_blob: PayloadBlob,
+    },
 }
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+impl<'de> Deserialize<'de> for ProviderResult {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Wire {
+            kind: ResponseKind,
+            #[serde(default)]
+            value: Field<ProviderPayload>,
+            #[serde(default)]
+            value_blob: Field<PayloadBlob>,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        match (wire.value, wire.value_blob) {
+            (Field::Value(value), Field::Missing) => Ok(Self::Inline {
+                kind: wire.kind,
+                value: Some(value),
+            }),
+            (Field::Null, Field::Missing) => Ok(Self::Inline {
+                kind: wire.kind,
+                value: None,
+            }),
+            (Field::Missing, Field::Value(value_blob)) => Ok(Self::Blob {
+                kind: wire.kind,
+                value_blob,
+            }),
+            _ => Err(serde::de::Error::custom("invalid provider result body")),
+        }
+    }
+}
+impl ProviderResult {
+    pub fn kind(&self) -> &ResponseKind {
+        match self {
+            Self::Inline { kind, .. } | Self::Blob { kind, .. } => kind,
+        }
+    }
+    pub fn value(&self) -> Option<&ProviderPayload> {
+        match self {
+            Self::Inline { value, .. } => value.as_ref(),
+            Self::Blob { .. } => None,
+        }
+    }
+    pub fn value_blob(&self) -> Option<&PayloadBlob> {
+        match self {
+            Self::Blob { value_blob, .. } => Some(value_blob),
+            Self::Inline { .. } => None,
+        }
+    }
+}
+#[derive(Clone, Debug)]
 pub struct ProviderReadReceipt {
-    pub certainty: ReceiptCertainty,
     pub receipt: ProviderReceipt,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub result: Field<ProviderResult>,
+}
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProviderReadReceiptWire {
+    certainty: ReceiptCertainty,
+    receipt: ProviderReceipt,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    result: Field<ProviderResult>,
+}
+impl Serialize for ProviderReadReceipt {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        ProviderReadReceiptWire {
+            certainty: self.receipt.certainty.clone(),
+            receipt: self.receipt.clone(),
+            result: self.result.clone(),
+        }
+        .serialize(serializer)
+    }
+}
+impl<'de> Deserialize<'de> for ProviderReadReceipt {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = ProviderReadReceiptWire::deserialize(deserializer)?;
+        if wire.certainty != wire.receipt.certainty {
+            return Err(serde::de::Error::custom(
+                "conflicting read receipt certainty",
+            ));
+        }
+        Ok(Self {
+            receipt: wire.receipt,
+            result: wire.result,
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -681,12 +762,9 @@ pub enum UnreadableTransferKind {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentTransferSummary {
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub id: Field<TransferId>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub target_account_key: Field<AccountKey>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub status: Field<TransferStatus>,
+    pub id: TransferId,
+    pub target_account_key: AccountKey,
+    pub status: TransferStatus,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub updated: Field<serde_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -826,6 +904,16 @@ pub struct LazySourceState {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn read_receipt_rejects_conflicting_certainty_and_result_shapes() {
+        let scope = serde_json::json!({"account":"source","connection":"conn","generation":1});
+        let receipt = serde_json::json!({"operation":"read","scope":scope,"certainty":"written"});
+        let conflict = serde_json::json!({"certainty":"unknown","receipt":receipt});
+        assert!(serde_json::from_value::<ProviderReadReceipt>(conflict).is_err());
+        let both =
+            serde_json::json!({"kind":"reply","value":{},"valueBlob":{"sha256":"hash","size":2}});
+        assert!(serde_json::from_value::<ProviderResult>(both).is_err());
+    }
     use super::*;
 
     #[test]

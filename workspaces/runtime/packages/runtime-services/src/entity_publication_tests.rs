@@ -97,6 +97,32 @@ async fn interrupted_child_turn_end_republishes_lead_cancel_eligibility() {
 }
 
 #[tokio::test]
+async fn blocked_summary_without_pointer_offers_cancel() {
+    let (_dir, store) = store().await;
+    let op = json!({"id":"move","leadId":CHAT,"targetAccountKey":"target",
+        "status":"pending","created":1.0,"members":{"published-chat":{
+            "phase":"blocked","sourceAccountKey":"default","lazy":true,
+            "error":"History unavailable"}}});
+    store
+        .transaction(move |tx| {
+            studio_runtime_store::AccountTransferRepository::put(tx, "move", &op.to_string())
+        })
+        .await
+        .unwrap();
+    seed_chat(
+        &store,
+        chat(json!({"accountTransfer":{
+        "id":"move","targetAccountKey":"target","status":"pending","movingNow":0,
+        "canRetry":true,"blocked":[{"id":CHAT,"reason":"History unavailable"}]}})),
+    )
+    .await;
+    assert_eq!(
+        chat_view(&store, CHAT)["accountTransferProgress"]["actions"],
+        "retry_cancel"
+    );
+}
+
+#[tokio::test]
 async fn legacy_blocked_summary_offers_cancel_when_operation_allows_it() {
     let (_dir, store) = store().await;
     let op = json!({"id":"move","leadId":CHAT,"targetAccountKey":"target",

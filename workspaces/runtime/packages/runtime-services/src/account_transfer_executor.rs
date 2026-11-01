@@ -585,13 +585,12 @@ async fn session_reply(
             .result
             .value()
             .ok_or(TransferError::Refused("Invalid saved provider receipt"))?;
-        if matches!(result.kind, ResponseKind::Rejected) {
+        if matches!(result.kind(), ResponseKind::Rejected) {
             return Err(TransferError::Refused(
                 "The provider rejected a transfer read",
             ));
         }
         let value = result
-            .value
             .value()
             .ok_or(TransferError::Refused("Invalid saved provider receipt"))?;
         let value: Value = serde_json::from_str(value.get())

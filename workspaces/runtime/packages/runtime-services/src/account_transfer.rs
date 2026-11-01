@@ -145,34 +145,34 @@ fn read_result(response: Option<&ProviderResponse>) -> Result<ReadResult, Transf
         None => return Ok((Field::Null, None)),
     };
     let bytes = serde_json::to_vec(value).map_err(|_| invalid("provider payload", "/"))?;
-    let (value, value_blob, spill) =
-        if bytes.len() > studio_runtime_store::MAX_INLINE_READ_REPLY_BYTES {
-            let digest = studio_runtime_store::sha256_hex(&bytes);
-            let blob = PayloadBlob {
-                sha256: digest.clone(),
-                size: bytes.len() as u64,
-            };
-            (Field::Missing, Field::Value(blob), Some((digest, bytes)))
-        } else if value.is_null() {
-            (Field::Null, Field::Missing, None)
-        } else {
-            (
-                Field::Value(
+    let (body, spill) = if bytes.len() > studio_runtime_store::MAX_INLINE_READ_REPLY_BYTES {
+        let digest = studio_runtime_store::sha256_hex(&bytes);
+        let blob = PayloadBlob {
+            sha256: digest.clone(),
+            size: bytes.len() as u64,
+        };
+        (
+            ProviderResult::Blob {
+                kind,
+                value_blob: blob,
+            },
+            Some((digest, bytes)),
+        )
+    } else if value.is_null() {
+        (ProviderResult::Inline { kind, value: None }, None)
+    } else {
+        (
+            ProviderResult::Inline {
+                kind,
+                value: Some(
                     serde_json::value::to_raw_value(value)
                         .map_err(|_| invalid("provider payload", "/"))?,
                 ),
-                Field::Missing,
-                None,
-            )
-        };
-    Ok((
-        Field::Value(ProviderResult {
-            kind,
-            value,
-            value_blob,
-        }),
-        spill,
-    ))
+            },
+            None,
+        )
+    };
+    Ok((Field::Value(body), spill))
 }
 
 /// The reply body that `provider_read_receipt` leaves out of the record.
@@ -268,21 +268,9 @@ pub fn progress_view(
         }
         studio_runtime_store::transfer_record::AgentTransferState::Summary(value) => value,
     };
-    let id = summary
-        .id
-        .value()
-        .ok_or_else(|| invalid("account transfer summary", "/id"))?
-        .as_str()
-        .to_owned();
-    let target_account_key = summary
-        .target_account_key
-        .value()
-        .ok_or_else(|| invalid("account transfer summary", "/targetAccountKey"))?
-        .clone();
-    let status = summary
-        .status
-        .value()
-        .ok_or_else(|| invalid("account transfer summary", "/status"))?;
+    let id = summary.id.as_str().to_owned();
+    let target_account_key = summary.target_account_key.clone();
+    let status = &summary.status;
     let waiting = summary.waiting.value().cloned();
     let can_retry = summary.can_retry.value() == Some(&true);
     Ok(match status {
@@ -995,7 +983,7 @@ impl Snapshot {
         else {
             return Ok(None);
         };
-        if result.certainty != ReceiptCertainty::Written {
+        if result.receipt.certainty != ReceiptCertainty::Written {
             return Ok(None);
         }
         let refused = || {
@@ -1039,8 +1027,7 @@ impl Snapshot {
             || result.receipt.scope != saved.scope
             || ticket.generation != saved.scope.generation
             || ticket.method != saved.method
-            || !matches!(response.kind, ResponseKind::Reply)
-            || (response.value.is_missing() && response.value_blob.is_missing())
+            || !matches!(response.kind(), ResponseKind::Reply)
         {
             return Err(refused());
         }
@@ -1116,7 +1103,7 @@ impl Snapshot {
                 .provider_read_receipts
                 .value()
                 .and_then(|receipts| receipts.get(&intent.operation))
-                .map(|receipt| &receipt.certainty)
+                .map(|receipt| &receipt.receipt.certainty)
             {
                 Some(ReceiptCertainty::Written | ReceiptCertainty::NotSent) => {
                     return Ok(self.decision(self.operation.clone(), self.agents.clone(), vec![]));
@@ -1167,7 +1154,6 @@ impl Snapshot {
         let ticket = provider_ticket(receipt)?;
         let (result, _) = read_result(receipt.response())?;
         let record = ProviderReadReceipt {
-            certainty: certainty.clone(),
             receipt: ProviderReceipt {
                 operation: receipt.operation.clone(),
                 scope: receipt.scope.clone(),
@@ -1874,9 +1860,9 @@ pub fn before_start(agent: &studio_runtime_store::AgentRecord) -> Result<(), Tra
         Some(AgentTransferState::Unreadable(_)) => true,
         Some(AgentTransferState::Summary(summary)) => {
             !matches!(
-                summary.status.value(),
-                Some(TransferStatus::Completed | TransferStatus::Cancelled)
-            ) && !(matches!(summary.status.value(), Some(TransferStatus::Pending))
+                summary.status,
+                TransferStatus::Completed | TransferStatus::Cancelled
+            ) && !(matches!(summary.status, TransferStatus::Pending)
                 && matches!(summary.scope.value(), Some(TransferScope::Subagents))
                 && agent.is_lead == Some(true))
         }
@@ -1953,15 +1939,42 @@ fn read_receipts_equal(
     right: &studio_runtime_store::transfer_record::ProviderReadReceipt,
 ) -> bool {
     use studio_runtime_schema::queue_command::Field;
-    left.certainty == right.certainty
-        && provider_receipts_equal(&left.receipt, &right.receipt)
+    provider_receipts_equal(&left.receipt, &right.receipt)
         && match (&left.result, &right.result) {
             (Field::Missing, Field::Missing) | (Field::Null, Field::Null) => true,
-            (Field::Value(a), Field::Value(b)) => {
-                a.kind == b.kind
-                    && a.value_blob == b.value_blob
-                    && payload_fields_equal(&a.value, &b.value)
-            }
+            (Field::Value(a), Field::Value(b)) => match (a, b) {
+                (
+                    studio_runtime_store::transfer_record::ProviderResult::Blob {
+                        kind: ak,
+                        value_blob: av,
+                    },
+                    studio_runtime_store::transfer_record::ProviderResult::Blob {
+                        kind: bk,
+                        value_blob: bv,
+                    },
+                ) => ak == bk && av == bv,
+                (
+                    studio_runtime_store::transfer_record::ProviderResult::Inline {
+                        kind: ak,
+                        value: av,
+                    },
+                    studio_runtime_store::transfer_record::ProviderResult::Inline {
+                        kind: bk,
+                        value: bv,
+                    },
+                ) => {
+                    ak == bk
+                        && match (av, bv) {
+                            (None, None) => true,
+                            (Some(a), Some(b)) => {
+                                serde_json::from_str::<Value>(a.get()).ok()
+                                    == serde_json::from_str::<Value>(b.get()).ok()
+                            }
+                            _ => false,
+                        }
+                }
+                _ => false,
+            },
             (Field::Missing | Field::Null, Field::Value(_) | Field::Missing | Field::Null)
             | (Field::Value(_), Field::Missing | Field::Null) => false,
         }
@@ -2055,8 +2068,8 @@ impl Decision {
         admission: studio_runtime_store::transfer_record::ProviderAdmission,
     ) -> Result<(), TransferError> {
         use studio_runtime_schema::queue_command::Field;
-        let mut record = self.operation_record()?;
-        let member = record
+        let member = self
+            .operation
             .members
             .get_mut(agent)
             .ok_or(TransferError::Refused("Unknown transfer member"))?;
@@ -2072,7 +2085,8 @@ impl Decision {
             ));
         }
         admissions.insert(operation.to_owned(), admission);
-        self.replace_operation_record(record)
+        self.changed = true;
+        Ok(())
     }
 
     pub fn agent_records(
@@ -2108,25 +2122,7 @@ impl Decision {
     pub fn typed_public_view(
         &self,
     ) -> Result<studio_runtime_store::transfer_record::SavedTransferResponse, TransferError> {
-        Ok(public_view_record(&self.operation_record()?))
-    }
-
-    /// Read or replace the complete persisted operation through its closed type.
-    pub(crate) fn operation_record(
-        &self,
-    ) -> Result<studio_runtime_store::transfer_record::TransferRecord, TransferError> {
-        Ok(self.operation.clone())
-    }
-
-    pub(crate) fn replace_operation_record(
-        &mut self,
-        operation: studio_runtime_store::transfer_record::TransferRecord,
-    ) -> Result<(), TransferError> {
-        self.changed |= serde_json::to_vec(&self.operation)
-            .map_err(|_| invalid("account transfer", "/"))?
-            != serde_json::to_vec(&operation).map_err(|_| invalid("account transfer", "/"))?;
-        self.operation = operation;
-        Ok(())
+        Ok(public_view_record(&self.operation))
     }
 
     /// Atomically maintained renderer summary; a newer operation owns its lead.
@@ -2137,9 +2133,8 @@ impl Decision {
         }
         let now = serde_json::Number::from_f64(now)
             .ok_or(TransferError::Refused("Invalid transfer timestamp"))?;
-        let mut operation = self.operation_record()?;
-        operation.updated = Field::Value(now);
-        self.replace_operation_record(operation.clone())?;
+        self.operation.updated = Field::Value(now);
+        let operation = &self.operation;
         let lead = self
             .agents
             .get_mut(&operation.lead_id)
@@ -2327,14 +2322,13 @@ fn summary_record(
         .cloned()
         .map_or(Field::Null, Field::Value);
     Ok(AgentTransferSummary {
-        id: Field::Value(
-            op.id
-                .clone()
-                .try_into()
-                .map_err(|_| invalid("account transfer", "/id"))?,
-        ),
-        target_account_key: Field::Value(op.target_account_key.clone()),
-        status: Field::Value(op.status),
+        id: op
+            .id
+            .clone()
+            .try_into()
+            .map_err(|_| invalid("account transfer", "/id"))?,
+        target_account_key: op.target_account_key.clone(),
+        status: op.status,
         updated: null_if_missing(&op.updated),
         scope: null_if_missing(&op.scope),
         finish_history: Field::Value(true),
@@ -2463,13 +2457,7 @@ mod provider_receipt_tests {
             .unwrap();
         assert!(decision.changed);
         assert_eq!(
-            decision
-                .operation_record()
-                .unwrap()
-                .members
-                .get("agent")
-                .unwrap()
-                .phase,
+            decision.operation.members.get("agent").unwrap().phase,
             super::Phase::Blocked
         );
         let absent = raw.replace(",\"source\":null", "");
@@ -2502,7 +2490,7 @@ mod provider_receipt_tests {
         .unwrap();
         assert_eq!(member.phase, super::Phase::Lazy);
         assert_eq!(agent.account_transfer_id.value().unwrap().as_str(), "move");
-        let mut decision = snapshot.decide(super::Command::Restart).unwrap();
+        let decision = snapshot.decide(super::Command::Restart).unwrap();
         assert_eq!(decision.typed_public_view().unwrap().total, 1);
         let mut agents = decision.agent_records().unwrap();
         agents.insert("agent".into(), agent);
@@ -2525,7 +2513,7 @@ mod provider_receipt_tests {
         };
         let snapshot = super::Snapshot::read(raw, [agent("z"), agent("a")]).unwrap();
         let mut decision = snapshot.decide(super::Command::Restart).unwrap();
-        let record = decision.operation_record().unwrap();
+        let record = &decision.operation;
         assert_eq!(
             record
                 .members
@@ -2535,7 +2523,6 @@ mod provider_receipt_tests {
                 .collect::<Vec<_>>(),
             ["z", "a"]
         );
-        decision.replace_operation_record(record).unwrap();
         let encoded = decision.encoded().unwrap();
         assert!(encoded.find("\"z\":{").unwrap() < encoded.find("\"a\":{").unwrap());
     }
@@ -2550,10 +2537,7 @@ mod provider_receipt_tests {
             "7d695b80524fb81f4595aeb033d2661666a31db1feb18e1e3a8589cd6e7c2fe9"
         );
         assert_eq!(bytes, serde_json::to_vec(&"x".repeat(65537)).unwrap());
-        assert_eq!(
-            result.value().unwrap().value_blob.value().unwrap().sha256,
-            digest
-        );
+        assert_eq!(result.value().unwrap().value_blob().unwrap().sha256, digest);
     }
     use super::*;
     trait TestIntentFixtures {
@@ -3126,17 +3110,7 @@ mod provider_receipt_tests {
             )
             .expect("exact replay")
             .expect("written page replays");
-        assert!(
-            replay
-                .result
-                .value()
-                .unwrap()
-                .value_blob
-                .value()
-                .unwrap()
-                .size
-                > 1024 * 1024
-        );
+        assert!(replay.result.value().unwrap().value_blob().unwrap().size > 1024 * 1024);
     }
 
     #[test]
@@ -3407,7 +3381,6 @@ mod provider_receipt_tests {
                     .result
                     .value()
                     .unwrap()
-                    .value
                     .value()
                     .unwrap()
                     .get()

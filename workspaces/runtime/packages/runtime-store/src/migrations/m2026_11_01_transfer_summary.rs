@@ -53,6 +53,22 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn incomplete_summary_becomes_unreadable() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL); INSERT INTO runtime_agents VALUES('lead','{\"accountTransfer\":{}}');").unwrap();
+        let tx = db.transaction().unwrap();
+        super::apply(&tx).unwrap();
+        let kind: String = tx
+            .query_row(
+                "SELECT record->>'$.accountTransfer.kind' FROM runtime_agents WHERE id='lead'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(kind, "unreadable");
+    }
+
+    #[test]
     #[ignore = "run against a disposable copy of the graph database"]
     fn copied_summary_corpus_migrates() {
         let path = std::env::var("STUDIO_TRANSFER_CORPUS").unwrap();

@@ -33,7 +33,16 @@ fn transfer_observation(transaction: &Transaction<'_>, record: &Value) -> Transf
                 .to_owned(),
         };
     }
-    let Some(id) = record.get("accountTransferId").and_then(Value::as_str) else {
+    let id = record
+        .get("accountTransferId")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            let summary = record.get("accountTransfer")?;
+            (summary.get("status").and_then(Value::as_str) == Some("pending"))
+                .then(|| summary.get("id").and_then(Value::as_str))
+                .flatten()
+        });
+    let Some(id) = id else {
         return TransferObservation::Absent;
     };
     match crate::account_transfer_driver::load(transaction, id) {

@@ -267,7 +267,7 @@ pub(crate) fn idle(
                 agent.account_transfer.value(),
                 Some(studio_runtime_store::transfer_record::AgentTransferState::Unreadable(_))
             )
-            || matches!(agent.account_transfer.value(), Some(studio_runtime_store::transfer_record::AgentTransferState::Summary(summary)) if matches!(summary.status.value(), Some(studio_runtime_store::transfer_record::TransferStatus::Pending)))
+            || matches!(agent.account_transfer.value(), Some(studio_runtime_store::transfer_record::AgentTransferState::Summary(summary)) if matches!(summary.status, studio_runtime_store::transfer_record::TransferStatus::Pending))
         {
             return Err(ProjectsError::Invalid("Finish the account transfer first"));
         }

@@ -24,15 +24,13 @@ pub(crate) fn active_summary_id(agent: &studio_runtime_store::AgentRecord) -> Op
         return None;
     };
     if matches!(
-        summary.status.value(),
-        Some(
-            studio_runtime_store::transfer_record::TransferStatus::Completed
-                | studio_runtime_store::transfer_record::TransferStatus::Cancelled
-        )
+        summary.status,
+        studio_runtime_store::transfer_record::TransferStatus::Completed
+            | studio_runtime_store::transfer_record::TransferStatus::Cancelled
     ) {
         return None;
     }
-    summary.id.value().map(|id| id.as_str())
+    Some(summary.id.as_str())
 }
 
 pub fn load(tx: &Transaction<'_>, id: &str) -> Result<Snapshot, TransferError> {
@@ -360,11 +358,9 @@ pub async fn request(
             };
             if let Some(active) = summary.filter(|value| {
                 !matches!(
-                    value.status.value(),
-                    Some(
-                        studio_runtime_store::transfer_record::TransferStatus::Completed
-                            | studio_runtime_store::transfer_record::TransferStatus::Cancelled
-                    )
+                    value.status,
+                    studio_runtime_store::transfer_record::TransferStatus::Completed
+                        | studio_runtime_store::transfer_record::TransferStatus::Cancelled
                 )
             }) {
                 let active_scope = match active.scope.value() {
@@ -375,19 +371,12 @@ pub async fn request(
                         "team"
                     }
                 };
-                if active.target_account_key.value().map(|key| key.as_str())
-                    != Some(target.as_str())
-                    || active_scope != scope
-                {
+                if active.target_account_key.as_str() != target.as_str() || active_scope != scope {
                     return Err(TransferError::Refused(
                         "Finish or cancel the current transfer first",
                     ));
                 }
-                let active_id = active
-                    .id
-                    .value()
-                    .map(|id| id.as_str())
-                    .ok_or(TransferError::Refused("Invalid current transfer"))?;
+                let active_id = active.id.as_str();
                 let snapshot = load(tx, active_id)?;
                 let mut operation = snapshot.record().clone();
                 let agents = snapshot_agents(&snapshot)?;
@@ -413,7 +402,7 @@ pub async fn request(
                     }),
                 )?
                 .decide(Command::Restart)?;
-                decision.replace_operation_record(operation)?;
+                decision.operation = operation;
                 decision.replace_agent_records(agents)?;
                 decision.changed = true;
                 return persist_request(tx, decision, now, Some(&id));
@@ -477,7 +466,7 @@ pub async fn request(
                 }),
             )?;
             let mut decision = snapshot.decide(Command::Restart)?;
-            decision.replace_operation_record(operation)?;
+            decision.operation = operation;
             decision.replace_agent_records(agents)?;
             decision.changed = true;
             persist_request(tx, decision, now, Some(&operation_id))
@@ -547,7 +536,7 @@ fn persist_request(
         return serde_json::to_value(decision.typed_public_view()?)
             .map_err(|_| TransferError::Refused("Invalid transfer response"));
     }
-    let operation = decision.operation_record()?;
+    let operation = &decision.operation;
     let agents = decision.agent_records()?;
     let old =
         agents
@@ -555,7 +544,7 @@ fn persist_request(
             .and_then(|agent| match agent.account_transfer.value() {
                 Some(studio_runtime_store::transfer_record::AgentTransferState::Summary(
                     summary,
-                )) => summary.id.value().map(|id| id.as_str()),
+                )) => Some(summary.id.as_str()),
                 _ => None,
             });
     let previous_created = old
@@ -566,12 +555,10 @@ fn persist_request(
     decision.stamp(now, previous_created)?;
     if let Some(request_id) = request_id {
         let saved = decision.typed_public_view()?;
-        let mut operation = decision.operation_record()?;
-        operation.save_response(request_id, saved)?;
-        decision.replace_operation_record(operation)?;
+        decision.operation.save_response(request_id, saved)?;
     }
     let raw = decision.encoded()?;
-    let operation = decision.operation_record()?;
+    let operation = &decision.operation;
     Repository::put(tx, &operation.id, &raw)?;
     let mut agents = decision.agent_records()?;
     for (id, agent) in &mut agents {
@@ -792,8 +779,8 @@ fn admit_mutation(
         .ok_or(TransferError::Refused("Unknown transfer member"))?;
     if member.provider_intent.is_missing() {
         use studio_runtime_schema::queue_command::Field;
-        let mut operation = decision.operation_record()?;
-        let member = operation
+        let member = decision
+            .operation
             .members
             .get_mut(agent)
             .ok_or(TransferError::Refused("Unknown transfer member"))?;
@@ -801,7 +788,7 @@ fn admit_mutation(
             root_request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
             admitted_request: Field::Null,
         });
-        decision.replace_operation_record(operation)?;
+        decision.changed = true;
     } else if member.provider_admission.is_missing() {
         return Err(TransferError::Refused(
             "The transfer provider admission is missing",
@@ -892,7 +879,7 @@ pub(crate) async fn provider_read_intent(
                 .provider_read_receipts
                 .value()
                 .and_then(|receipts| receipts.get(&operation))
-                .filter(|receipt| receipt.certainty == ReceiptCertainty::Written)
+                .filter(|receipt| receipt.receipt.certainty == ReceiptCertainty::Written)
                 .cloned()
                 .map(|saved| inline_reply(&root, saved))
                 .transpose()?;
@@ -941,22 +928,21 @@ fn inline_reply(
     }) else {
         return Ok(saved);
     };
-    let reference = match &result.value_blob {
-        Field::Missing => return Ok(saved),
-        Field::Null => {
-            return Err(TransferError::Refused(
-                "The saved provider reply is unavailable",
-            ));
+    let (kind, reference) = match result {
+        studio_runtime_store::transfer_record::ProviderResult::Inline { .. } => return Ok(saved),
+        studio_runtime_store::transfer_record::ProviderResult::Blob { kind, value_blob } => {
+            (kind.clone(), value_blob)
         }
-        Field::Value(reference) => reference,
     };
     let lost = |_| TransferError::Refused("The saved provider reply is unavailable");
     let reference = serde_json::to_value(reference).map_err(lost)?;
     let bytes = crate::payload_blobs::load_blob(root, &reference)
         .map_err(|_| TransferError::Refused("The saved provider reply is unavailable"))?;
     let value = serde_json::from_slice(&bytes).map_err(lost)?;
-    result.value_blob = Field::Missing;
-    result.value = Field::Value(value);
+    *result = studio_runtime_store::transfer_record::ProviderResult::Inline {
+        kind,
+        value: Some(value),
+    };
     Ok(saved)
 }
 
@@ -1204,7 +1190,7 @@ pub async fn execute_member(
             let snapshot = load(tx, &operation_id)?;
             let decision = snapshot.begin_read(&transaction_agent_id)?;
             let input = TransferPreparation {
-                operation: decision.operation_record()?,
+                operation: decision.operation.clone(),
                 agent: snapshot.agent_record(&transaction_agent_id)?.value(),
             };
             persist(tx, decision, now)?;
