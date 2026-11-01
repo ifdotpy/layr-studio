@@ -125,9 +125,9 @@ async fn fixture(
     let agent = json!({"compactions":0,"id":"agent","rootId":"agent","epoch":2,"cwd":root.path(),"model":"model","role":"orchestrator","provider":provider,"accountKey":"account","threadId":"thread","status":"paused","autoWake":false});
     store
         .transaction(move |tx| {
-            tx.execute(
-                "INSERT INTO runtime_agents(id,record) VALUES('agent',?1)",
-                [agent.to_string()],
+            studio_runtime_store::AgentRepository::put(
+                tx,
+                &studio_runtime_store::AgentRecord::from_value(agent)?,
             )?;
             Ok(())
         })

@@ -953,14 +953,7 @@ mod tests {
             store
                 .transaction(|tx| {
                     for id in ["a", "b"] {
-                        tx.execute(
-                            "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
-                            [
-                                id,
-                                &json!({"id":id,"rootId":id,"isLead":true,"provider":"codex"})
-                                    .to_string(),
-                            ],
-                        )?;
+                        studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","id":id,"rootId":id,"epoch":0,"status":"idle","isLead":true,"provider":"codex"}))?)?;
                     }
                     Ok(())
                 })
@@ -1180,13 +1173,7 @@ mod tests {
             .as_ref()
             .expect("store")
             .transaction(|tx| {
-                tx.execute(
-                    "INSERT INTO runtime_agents(id,record) VALUES('pricing-team',?1)",
-                    [
-                        json!({"id":"pricing-team","rootId":"pricing-team","isLead":true,"provider":studio_runtime_schema::ProviderKind::Codex})
-                            .to_string(),
-                    ],
-                )?;
+                studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","id":"pricing-team","rootId":"pricing-team","epoch":0,"status":"idle","isLead":true,"provider":studio_runtime_schema::ProviderKind::Codex}))?)?;
                 Ok(())
             })
             .await
@@ -1364,10 +1351,7 @@ mod tests {
             .expect("store")
             .transaction(|tx| {
                 for id in ["a", "b"] {
-                    tx.execute(
-                        "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
-                        [id, &json!({"id":id,"rootId":id,"isLead":true,"provider":studio_runtime_schema::ProviderKind::Codex}).to_string()],
-                    )?;
+                    studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","id":id,"rootId":id,"epoch":0,"status":"idle","isLead":true,"provider":studio_runtime_schema::ProviderKind::Codex}))?)?;
                 }
                 Ok(())
             })
@@ -1874,7 +1858,7 @@ mod tests {
         let (_root, state) = state().await;
         let store = state.store.as_ref().expect("store");
         store.transaction(|tx| {
-            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('a',?1)", [json!({"id":"a","rootId":"a","isLead":true,"provider":"codex","accountKey":"default","threadId":"thread"}).to_string()])?;
+            studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"id":"a","rootId":"a","epoch":0,"status":"idle","isLead":true,"provider":"codex","accountKey":"default","threadId":"thread"}))?)?;
             Ok(())
         }).await.expect("agent");
         let mut roots = read_agent_roots(store).await.expect("initial roots");
@@ -1948,10 +1932,7 @@ mod tests {
         store
             .transaction(|tx| {
                 for id in ["a", "b"] {
-                    tx.execute(
-                        "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
-                        [id, &json!({"id":id,"rootId":id,"isLead":true,"provider":studio_runtime_schema::ProviderKind::Codex}).to_string()],
-                    )?;
+                    studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","id":id,"rootId":id,"epoch":0,"status":"idle","isLead":true,"provider":studio_runtime_schema::ProviderKind::Codex}))?)?;
                 }
                 Ok(())
             })
@@ -2057,8 +2038,7 @@ mod tests {
         let (root, state) = state().await;
         let store = state.store.as_ref().expect("store");
         store.transaction(|tx| {
-            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('large-team',?1)",
-                [json!({"id":"large-team","rootId":"large-team","isLead":true,"provider":"codex"}).to_string()])?;
+            studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","id":"large-team","rootId":"large-team","epoch":0,"status":"idle","isLead":true,"provider":"codex"}))?)?;
             Ok(())
         }).await.expect("lead");
         store.analytics_transaction::<_, StoreError>(|tx, _| {
@@ -2190,10 +2170,7 @@ mod tests {
         store
             .transaction(|tx| {
                 tx.execute("DELETE FROM runtime_agents WHERE id='b'", [])?;
-                tx.execute(
-                    "INSERT INTO runtime_agents(id,record) VALUES('c',?1)",
-                    [json!({"provider":"codex","id":"c","rootId":"c","isLead":true}).to_string()],
-                )?;
+                studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":"codex","id":"c","rootId":"c","epoch":0,"status":"idle","isLead":true}))?)?;
                 Ok(())
             })
             .await
@@ -2389,7 +2366,7 @@ mod tests {
             .expect("pricing directory");
         tokio::fs::write(root.path().join("model-pricing/models-dev-v1.json"),json!({"version":1,"catalog":{"providers":{"openai":{"models":{"gpt-test":{"cost":{"input":1,"output":1}}}},"anthropic":{"models":{"claude-test":{"cost":{"input":1,"output":1}}}}}}}).to_string()).await.expect("pricing source");
         let store = state.store.as_ref().expect("store");
-        store.transaction(|tx|{tx.execute("INSERT INTO runtime_agents(id,record) VALUES('lead',?1)",[json!({"compactions":0,"id":"lead","rootId":"lead","epoch":1,"isLead":true,"status":"idle","provider":"codex","model":"gpt-test","cwd":"/fixture","accountKey":"default"}).to_string()])?;Ok(())}).await.expect("chat source");
+        store.transaction(|tx|{studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"id":"lead","rootId":"lead","epoch":1,"isLead":true,"status":"idle","provider":"codex","model":"gpt-test","cwd":"/fixture","accountKey":"default"}))?)?;Ok(())}).await.expect("chat source");
         publish_sessions(&state)
             .await
             .expect("session costs published");

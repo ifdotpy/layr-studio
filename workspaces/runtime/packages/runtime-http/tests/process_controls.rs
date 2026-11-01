@@ -658,7 +658,7 @@ async fn fixture(behavior: &'static str) -> (tempfile::TempDir, axum::Router, Ar
         let task=json!({"id":"owner:command","agent":"owner","kind":"command","type":"commandExecution","name":"commandExecution","itemId":"command",
             "processId":"42","status":"running","ownerEpoch":1,"sourceAccountKey":"default",
             "sourceConnectionId":"actual-uuid","sourceThreadId":"thread","turnId":"turn","created":1});
-        tx.execute("INSERT INTO runtime_agents(id,record) VALUES('owner',?)",[owner.to_string()])?;
+        studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(owner)?)?;
         tx.execute("INSERT INTO runtime_tasks(id,record) VALUES('owner:command',?)",[task.to_string()])?;
         Ok::<_,StoreError>(())
     }).await.unwrap();
