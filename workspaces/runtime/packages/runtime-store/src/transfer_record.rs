@@ -124,24 +124,26 @@ pub enum ReceiptCertainty {
     Unknown,
     NotSent,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub enum TransferMethod {
-    #[serde(rename = "thread/start")]
-    Start,
-    #[serde(rename = "thread/fork")]
-    Fork,
-    #[serde(rename = "model/list")]
-    ModelList,
-    #[serde(rename = "thread/read")]
-    ThreadRead,
-    #[serde(rename = "thread/turns/list")]
-    TurnsList,
-    #[serde(rename = "thread/queue/list")]
-    QueueList,
-    #[serde(rename = "thread/backgroundTerminals/list")]
-    BackgroundList,
-    #[serde(rename = "thread/unsubscribe")]
-    Unsubscribe,
+macro_rules! transfer_methods {
+    ($($variant:ident => $wire:literal),+ $(,)?) => {
+        #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+        pub enum TransferMethod { $(#[serde(rename = $wire)] $variant),+ }
+        impl TransferMethod {
+            pub const fn as_str(&self) -> &'static str {
+                match self { $(Self::$variant => $wire),+ }
+            }
+        }
+    };
+}
+transfer_methods! {
+    Start => "thread/start",
+    Fork => "thread/fork",
+    ModelList => "model/list",
+    ThreadRead => "thread/read",
+    TurnsList => "thread/turns/list",
+    QueueList => "thread/queue/list",
+    BackgroundList => "thread/backgroundTerminals/list",
+    Unsubscribe => "thread/unsubscribe",
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -504,6 +506,105 @@ pub struct TransferRecord {
     pub requests: Field<BTreeMap<String, TransferRequestIdentity>>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransferRecordError {
+    ConflictingRequest,
+    UnknownRequest,
+}
+
+impl TransferRecord {
+    pub fn new_team(
+        id: String,
+        lead_id: String,
+        target: AccountKey,
+        provider: studio_runtime_schema::ProviderKind,
+        created: serde_json::Number,
+        members: OrderedMembers<TransferMember>,
+    ) -> Self {
+        let status = if members.0.iter().all(|(_, member)| member.phase.terminal()) {
+            TransferStatus::Completed
+        } else {
+            TransferStatus::Pending
+        };
+        let request = TransferRequestIdentity {
+            lead_id: lead_id.clone(),
+            target_account_key: target.clone(),
+            scope: Field::Value(TransferScope::Team),
+            saved_response: Field::Missing,
+        };
+        Self {
+            id: id.clone(),
+            lead_id,
+            target_account_key: target,
+            status,
+            created,
+            members,
+            target_provider: Field::Value(provider),
+            updated: Field::Missing,
+            scope: Field::Value(TransferScope::Team),
+            finish_history: Field::Missing,
+            requests: Field::Value(BTreeMap::from([(id, request)])),
+        }
+    }
+
+    pub fn add_team_request(
+        &mut self,
+        id: String,
+        lead_id: String,
+        target: AccountKey,
+    ) -> Result<(), TransferRecordError> {
+        if self.lead_id != lead_id
+            || self.target_account_key != target
+            || matches!(self.scope.value(), Some(TransferScope::Subagents))
+        {
+            return Err(TransferRecordError::ConflictingRequest);
+        }
+        let requests = match &mut self.requests {
+            Field::Value(requests) => requests,
+            Field::Missing | Field::Null => {
+                self.requests = Field::Value(BTreeMap::new());
+                match &mut self.requests {
+                    Field::Value(requests) => requests,
+                    _ => unreachable!(),
+                }
+            }
+        };
+        if let Some(saved) = requests.get(&id) {
+            if saved.lead_id != lead_id
+                || saved.target_account_key != target
+                || !matches!(saved.scope.value(), None | Some(TransferScope::Team))
+            {
+                return Err(TransferRecordError::ConflictingRequest);
+            }
+            return Ok(());
+        }
+        requests.insert(
+            id,
+            TransferRequestIdentity {
+                lead_id,
+                target_account_key: target,
+                scope: Field::Value(TransferScope::Team),
+                saved_response: Field::Missing,
+            },
+        );
+        Ok(())
+    }
+
+    pub fn save_response(
+        &mut self,
+        request_id: &str,
+        saved: SavedTransferResponse,
+    ) -> Result<(), TransferRecordError> {
+        let request = match &mut self.requests {
+            Field::Value(requests) => requests.get_mut(request_id),
+            _ => None,
+        }
+        .ok_or(TransferRecordError::UnknownRequest)?;
+        request.saved_response = Field::Value(saved);
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum AgentTransferState {
@@ -673,6 +774,36 @@ pub struct LazySourceState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn team_record_keeps_request_identity_and_terminal_status() {
+        let member: TransferMember = serde_json::from_value(
+            serde_json::json!({"phase":"completed","sourceAccountKey":"source"}),
+        )
+        .unwrap();
+        let target: AccountKey = "target".to_owned().try_into().unwrap();
+        let mut record = TransferRecord::new_team(
+            "move".into(),
+            "lead".into(),
+            target.clone(),
+            studio_runtime_schema::ProviderKind::Codex,
+            1.into(),
+            OrderedMembers(vec![("lead".into(), member)]),
+        );
+        assert_eq!(record.status, TransferStatus::Completed);
+        assert_eq!(record.requests.value().unwrap().len(), 1);
+        record
+            .add_team_request("retry".into(), "lead".into(), target.clone())
+            .unwrap();
+        record
+            .add_team_request("retry".into(), "lead".into(), target.clone())
+            .unwrap();
+        assert_eq!(record.requests.value().unwrap().len(), 2);
+        assert_eq!(
+            record.add_team_request("retry".into(), "other".into(), target),
+            Err(TransferRecordError::ConflictingRequest)
+        );
+    }
 
     #[test]
     fn agent_transfer_pointers_are_owned_by_typed_fields() {

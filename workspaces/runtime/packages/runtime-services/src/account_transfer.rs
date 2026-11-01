@@ -159,6 +159,20 @@ pub enum TransferError {
     Store(#[from] studio_runtime_store::StoreError),
 }
 
+impl From<studio_runtime_store::transfer_record::TransferRecordError> for TransferError {
+    fn from(error: studio_runtime_store::transfer_record::TransferRecordError) -> Self {
+        use studio_runtime_store::transfer_record::TransferRecordError;
+        match error {
+            TransferRecordError::ConflictingRequest => {
+                Self::Refused("This transfer id has different content")
+            }
+            TransferRecordError::UnknownRequest => {
+                Self::Refused("The original transfer request is unavailable")
+            }
+        }
+    }
+}
+
 pub use studio_runtime_store::transfer_record::TransferPhase as Phase;
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -392,6 +406,11 @@ impl Snapshot {
     pub fn public_view(&self) -> Result<Value, TransferError> {
         public_view(&self.operation, &self.order)
     }
+    pub fn typed_public_view(
+        &self,
+    ) -> Result<studio_runtime_store::transfer_record::SavedTransferResponse, TransferError> {
+        serde_json::from_value(self.public_view()?).map_err(|_| invalid("account transfer", "/"))
+    }
     pub fn lead_id(&self) -> &str {
         &self.identity.lead_id
     }
@@ -408,6 +427,13 @@ impl Snapshot {
         self.agents
             .get(id)
             .ok_or(TransferError::Refused("Unknown transfer member"))
+    }
+    pub fn agent_record(
+        &self,
+        id: &str,
+    ) -> Result<studio_runtime_store::AgentRecord, TransferError> {
+        studio_runtime_store::AgentRecord::from_value(self.agent(id)?.clone())
+            .map_err(|_| invalid("transfer agent", "/"))
     }
     fn phase(&self, id: &str) -> Result<Phase, TransferError> {
         self.identity
@@ -475,37 +501,34 @@ impl Snapshot {
         Ok(true)
     }
     pub fn decide(&self, command: Command) -> Result<Decision, TransferError> {
-        let mut op = self.operation.clone();
+        use studio_runtime_schema::queue_command::Field;
+        use studio_runtime_store::transfer_record::InterruptOutcome;
+        let mut op = self.identity.clone();
         let mut agents = self.agents.clone();
         let mut followups = Vec::new();
         if !self.pending() {
-            return Ok(self.decision(op, agents, followups));
+            return Ok(self.decision(self.operation.clone(), agents, followups));
         }
         match command {
             Command::Restart => {
-                for id in &self.order {
-                    let member = &mut op["members"][id];
-                    match self.phase(id)? {
+                for (_, member) in &mut op.members.0 {
+                    match member.phase {
                         Phase::Reading => {
-                            member["phase"] = json!(if flag(member, "lazy") {
-                                "lazy"
+                            member.phase = if member.lazy.value() == Some(&true) {
+                                Phase::Lazy
                             } else {
-                                "waiting"
-                            });
-                            member["waiting"] = json!(WAITING_FOR_NEXT_TURN);
+                                Phase::Waiting
+                            };
+                            member.waiting = Field::Value(WAITING_FOR_NEXT_TURN.into());
                         }
                         Phase::Submitted | Phase::LazySubmitted => {
-                            member["phase"] = json!("unknown");
-                            member["error"] = json!(
-                                "The server restarted before the transfer receipt arrived. No request was repeated."
-                            );
+                            member.phase = Phase::Unknown;
+                            member.error = Field::Value("The server restarted before the transfer receipt arrived. No request was repeated.".into());
                         }
                         Phase::Interrupting => {
-                            member["phase"] = json!("blocked");
-                            member["interruptOutcome"] = json!("unknown");
-                            member["error"] = json!(
-                                "The server restarted before the turn interrupt receipt arrived. No request was repeated."
-                            );
+                            member.phase = Phase::Blocked;
+                            member.interrupt_outcome = Field::Value(InterruptOutcome::Unknown);
+                            member.error = Field::Value("The server restarted before the turn interrupt receipt arrived. No request was repeated.".into());
                         }
                         Phase::Waiting
                         | Phase::Lazy
@@ -517,64 +540,68 @@ impl Snapshot {
                     }
                 }
             }
-            Command::Action(Action::FinishHistory) => op["finishHistory"] = json!(true),
+            Command::Action(Action::FinishHistory) => op.finish_history = Field::Value(true),
             Command::Action(Action::Retry) => {
-                if self
-                    .order
+                if op
+                    .members
+                    .0
                     .iter()
-                    .any(|id| flag(&op["members"][id], "archiveInvalidated"))
+                    .any(|(_, member)| member.archive_invalidated.value() == Some(&true))
                 {
                     return Err(TransferError::Refused(
                         "The source changed after history export. Cancel this transfer and start a new one.",
                     ));
                 }
-                for id in &self.order {
-                    if self.phase(id)? != Phase::Blocked {
+                for (id, member) in &mut op.members.0 {
+                    if member.phase != Phase::Blocked {
                         continue;
                     }
-                    let member = &mut op["members"][id];
-                    if flag(member, "lazy")
+                    if member.lazy.value() == Some(&true)
                         && !studio_runtime_store::truthy(agents[id].get("lazyAccountTransfer"))
                     {
                         return Err(TransferError::Requires(SETTINGS_REQUIRED));
                     }
-                    member["phase"] = json!(if flag(member, "lazy") {
-                        "lazy"
-                    } else if studio_runtime_store::truthy(member.get("result")) {
-                        "ready"
+                    let result = member
+                        .result
+                        .value()
+                        .and_then(|raw| serde_json::from_str(raw.get()).ok())
+                        .is_some_and(|value| studio_runtime_store::truthy(Some(&value)));
+                    member.phase = if member.lazy.value() == Some(&true) {
+                        Phase::Lazy
+                    } else if result {
+                        Phase::Ready
                     } else {
-                        "waiting"
-                    });
-                    if member["phase"] != "ready" {
-                        member["waiting"] = json!(WAITING_FOR_NEXT_TURN);
+                        Phase::Waiting
+                    };
+                    if member.phase != Phase::Ready {
+                        member.waiting = Field::Value(WAITING_FOR_NEXT_TURN.into());
                     }
-                    member["error"] = Value::Null;
-                    member["nextCheck"] = json!(0);
-                    if studio_runtime_store::truthy(member.get("interruptSubmittedAt")) {
-                        remove(
-                            member,
-                            &[
-                                "interruptTurnId",
-                                "interruptSubmittedAt",
-                                "interruptOutcome",
-                            ],
-                        )?;
+                    member.error = Field::Null;
+                    member.next_check = Field::Value(0.into());
+                    if member
+                        .interrupt_submitted_at
+                        .value()
+                        .and_then(serde_json::Number::as_f64)
+                        .is_some_and(|n| n != 0.0)
+                    {
+                        member.interrupt_turn_id = Field::Missing;
+                        member.interrupt_submitted_at = Field::Missing;
+                        member.interrupt_outcome = Field::Missing;
                     }
                 }
             }
             Command::Action(Action::Cancel) => {
                 check_cancel(&self.identity, &agents)?;
-                op["status"] = json!("cancelled");
-                for id in &self.order {
+                op.status = TransferStatus::Cancelled;
+                for (id, m) in &op.members.0 {
                     let a = agents
                         .get_mut(id)
                         .ok_or_else(|| invalid("transfer agent", "/id"))?;
-                    let m = &op["members"][id];
-                    if a["accountTransferId"] != op["id"] || self.phase(id)? == Phase::Reading {
+                    if a["accountTransferId"] != op.id || m.phase == Phase::Reading {
                         continue;
                     }
                     let lazy = a.get("lazyAccountTransfer").cloned().unwrap_or(Value::Null);
-                    if lazy["id"] == op["id"] && flag(m, "lazy") {
+                    if lazy["id"] == op.id && m.lazy.value() == Some(&true) {
                         if !lazy["sourceAccountKey"].is_string() {
                             return Err(invalid(
                                 "transfer agent",
@@ -604,16 +631,15 @@ impl Snapshot {
                         }
                         remove(a, &["lazyAccountTransfer"])?;
                     }
-                    if studio_runtime_store::truthy(m.get("interruptReason"))
-                        && flag(m, "continueAfterTransfer")
+                    if m.interrupt_reason
+                        .value()
+                        .is_some_and(|reason| !reason.is_empty())
+                        && m.continue_after_transfer.value() == Some(&true)
                         && flag(a, "autoWake")
                     {
                         followups.push(Followup {
                             agent: id.clone(),
-                            id: format!(
-                                "account-transfer-cancel:{}:{id}",
-                                op["id"].as_str().unwrap_or_default()
-                            ),
+                            id: format!("account-transfer-cancel:{}:{id}", op.id),
                             text: CANCEL_FOLLOWUP,
                         });
                         a["status"] = json!("queued");
@@ -622,7 +648,8 @@ impl Snapshot {
                 }
             }
         }
-        let mut decision = self.decision(op, agents, followups);
+        let operation = serde_json::to_value(op).map_err(|_| invalid("account transfer", "/"))?;
+        let mut decision = self.decision(operation, agents, followups);
         decision.changed |= matches!(command, Command::Action(_));
         Ok(decision)
     }
@@ -750,6 +777,21 @@ impl Snapshot {
 
     /// Persist the stable provider operation and current connection scope before
     /// crossing the retained-session boundary. A changed replay is refused.
+    pub fn typed_provider_intent(
+        &self,
+        agent: &str,
+        operation: &str,
+        scope: studio_runtime_schema::provider_call_contract::ConnectionScope,
+        method: studio_runtime_store::transfer_record::TransferMethod,
+        params: studio_runtime_store::transfer_record::ProviderPayload,
+    ) -> Result<Decision, TransferError> {
+        let method = method.as_str();
+        let scope = serde_json::to_value(scope).map_err(|_| invalid("provider scope", "/"))?;
+        let params =
+            serde_json::from_str(params.get()).map_err(|_| invalid("provider payload", "/"))?;
+        self.provider_intent(agent, operation, scope, method, params)
+    }
+
     pub fn provider_intent(
         &self,
         agent: &str,
@@ -805,6 +847,20 @@ impl Snapshot {
 
     /// Replay an exact read or source-unsubscribe reply with its original scope.
     /// A new authenticated connection does not authorize another native send.
+    pub fn written_read_replay_typed(
+        &self,
+        agent: &str,
+        next: &studio_runtime_store::transfer_record::ProviderIntent,
+    ) -> Result<Option<studio_runtime_store::transfer_record::ProviderReadReceipt>, TransferError>
+    {
+        let next = serde_json::to_value(next).map_err(|_| invalid("provider intent", "/"))?;
+        self.written_read_replay(agent, &next)?
+            .map(|receipt| {
+                serde_json::from_value(receipt).map_err(|_| invalid("provider receipt", "/"))
+            })
+            .transpose()
+    }
+
     pub(crate) fn written_read_replay(
         &self,
         agent: &str,
@@ -881,6 +937,29 @@ impl Snapshot {
     /// Journal a provider read independently from the final thread mutation.
     /// An existing Written receipt is replayed, NotSent may retry the same
     /// operation, and an intent without a receipt is held as uncertain.
+    pub fn typed_provider_read_intent(
+        &self,
+        agent: &str,
+        intent: &studio_runtime_store::transfer_record::ProviderIntent,
+    ) -> Result<Decision, TransferError> {
+        let account = intent
+            .account
+            .value()
+            .ok_or(TransferError::Refused("Invalid transfer account"))?;
+        let scope =
+            serde_json::to_value(&intent.scope).map_err(|_| invalid("provider scope", "/"))?;
+        let params = serde_json::from_str(intent.params.get())
+            .map_err(|_| invalid("provider payload", "/"))?;
+        self.provider_read_intent(
+            agent,
+            &intent.operation,
+            account.as_str(),
+            scope,
+            intent.method.as_str(),
+            params,
+        )
+    }
+
     pub fn provider_read_intent(
         &self,
         agent: &str,
@@ -1307,6 +1386,18 @@ impl Snapshot {
 
     /// Receipts can arrive after restart or cancellation. Preserve the success
     /// without adopting it; adoption requires fresh source and archive checks.
+    pub fn typed_receive(
+        &self,
+        ticket: &Ticket,
+        result: Option<studio_runtime_store::transfer_record::ProviderPayload>,
+    ) -> Result<Decision, TransferError> {
+        let result = result
+            .map(|raw| serde_json::from_str(raw.get()))
+            .transpose()
+            .map_err(|_| invalid("provider payload", "/"))?;
+        self.receive(ticket, result)
+    }
+
     pub fn receive(
         &self,
         ticket: &Ticket,
@@ -1407,6 +1498,28 @@ pub const WAITING_FOR_NEXT_TURN: &str = "Moves when its next turn starts";
 /// agent's hold. A member on another provider stays on its source account. A
 /// member busy with a turn waits for its next turn. An idle member gets the lazy
 /// hold: its account changes now, and its history moves at its next turn start.
+pub fn typed_enroll(
+    agent: &mut studio_runtime_store::AgentRecord,
+    operation_id: &studio_runtime_store::transfer_record::TransferId,
+    target: &studio_runtime_schema::account_key::AccountKey,
+    target_provider: studio_runtime_schema::ProviderKind,
+    lead: bool,
+) -> Result<studio_runtime_store::transfer_record::TransferMember, TransferError> {
+    let mut value = serde_json::to_value(&*agent).map_err(|_| invalid("transfer agent", "/"))?;
+    let member = enroll(
+        &mut value,
+        operation_id.as_str(),
+        target.as_str(),
+        target_provider.key(),
+        lead,
+    )?;
+    let member =
+        serde_json::from_value(member).map_err(|_| invalid("account transfer", "/members"))?;
+    *agent = studio_runtime_store::AgentRecord::from_value(value)
+        .map_err(|_| invalid("transfer agent", "/"))?;
+    Ok(member)
+}
+
 pub(crate) fn enroll(
     value: &mut Value,
     operation_id: &str,
@@ -1650,6 +1763,69 @@ fn check_cancel(
 }
 
 impl Decision {
+    pub fn admit_provider_read(
+        &mut self,
+        agent: &str,
+        operation: &str,
+        admission: studio_runtime_store::transfer_record::ProviderAdmission,
+    ) -> Result<(), TransferError> {
+        use studio_runtime_schema::queue_command::Field;
+        let mut record = self.operation_record()?;
+        let member = record
+            .members
+            .get_mut(agent)
+            .ok_or(TransferError::Refused("Unknown transfer member"))?;
+        if member.provider_read_admissions.value().is_none() {
+            member.provider_read_admissions = Field::Value(BTreeMap::new());
+        }
+        let Field::Value(admissions) = &mut member.provider_read_admissions else {
+            unreachable!()
+        };
+        if admissions.contains_key(operation) {
+            return Err(TransferError::Refused(
+                "The transfer provider admission already exists",
+            ));
+        }
+        admissions.insert(operation.to_owned(), admission);
+        self.replace_operation_record(record)
+    }
+
+    pub fn agent_records(
+        &self,
+    ) -> Result<BTreeMap<String, studio_runtime_store::AgentRecord>, TransferError> {
+        self.agents
+            .iter()
+            .map(|(id, value)| {
+                studio_runtime_store::AgentRecord::from_value(value.clone())
+                    .map(|agent| (id.clone(), agent))
+                    .map_err(|_| invalid("transfer agent", "/"))
+            })
+            .collect()
+    }
+
+    pub fn replace_agent_records(
+        &mut self,
+        agents: BTreeMap<String, studio_runtime_store::AgentRecord>,
+    ) -> Result<(), TransferError> {
+        let agents = agents
+            .into_iter()
+            .map(|(id, agent)| {
+                serde_json::to_value(agent)
+                    .map(|value| (id, value))
+                    .map_err(|_| invalid("transfer agent", "/"))
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        self.changed |= self.agents != agents;
+        self.agents = agents;
+        Ok(())
+    }
+
+    pub fn typed_public_view(
+        &self,
+    ) -> Result<studio_runtime_store::transfer_record::SavedTransferResponse, TransferError> {
+        serde_json::from_value(self.public_view()?).map_err(|_| invalid("account transfer", "/"))
+    }
+
     /// Read or replace the complete persisted operation through its closed type.
     pub(crate) fn operation_record(
         &self,
@@ -1986,6 +2162,40 @@ fn validate_source_for_submission(member: &Value, agent: &Value) -> Result<(), T
 
 #[cfg(test)]
 mod provider_receipt_tests {
+    #[test]
+    fn typed_boundary_exposes_agent_and_public_transfer() {
+        let raw = r#"{"id":"move","leadId":"agent","targetAccountKey":"target","status":"pending","created":1,"members":{"agent":{"phase":"waiting","sourceAccountKey":"source"}}}"#;
+        let agent = serde_json::json!({"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0});
+        let snapshot = super::Snapshot::read(raw, [("agent".into(), agent.to_string())]).unwrap();
+        assert_eq!(snapshot.typed_public_view().unwrap().total, 1);
+        let mut agent = snapshot.agent_record("agent").unwrap();
+        let id = "move".to_owned().try_into().unwrap();
+        let target = "target".to_owned().try_into().unwrap();
+        let member = super::typed_enroll(
+            &mut agent,
+            &id,
+            &target,
+            studio_runtime_schema::ProviderKind::Codex,
+            true,
+        )
+        .unwrap();
+        assert_eq!(member.phase, super::Phase::Lazy);
+        assert_eq!(agent.account_transfer_id.value().unwrap().as_str(), "move");
+        let mut decision = snapshot.decide(super::Command::Restart).unwrap();
+        assert_eq!(decision.typed_public_view().unwrap().total, 1);
+        let mut agents = decision.agent_records().unwrap();
+        agents.insert("agent".into(), agent);
+        decision.replace_agent_records(agents).unwrap();
+        assert_eq!(
+            decision.agent_records().unwrap()["agent"]
+                .account_transfer_id
+                .value()
+                .unwrap()
+                .as_str(),
+            "move"
+        );
+    }
+
     #[test]
     fn typed_decision_preserves_member_order() {
         let raw = r#"{"id":"move","leadId":"z","targetAccountKey":"target","status":"pending","created":1,"members":{"z":{"phase":"waiting","sourceAccountKey":"source"},"a":{"phase":"waiting","sourceAccountKey":"source"}}}"#;

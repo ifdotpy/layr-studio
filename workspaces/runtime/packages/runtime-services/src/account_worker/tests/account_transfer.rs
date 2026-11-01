@@ -199,11 +199,14 @@ async fn bridge_startup_recovers_transfer_phases_before_exposing_workers() {
             operation["members"][id]["phase"] = json!(phase);
             if id == "lead" {
                 operation["members"][id]["providerReadIntents"] = json!({"source-history":{
-                    "operation":"exact-read", "method":"thread/read", "scope":{"generation":1}
+                    "operation":"exact-read", "account":"source", "method":"thread/read",
+                    "scope":{"account":"source","connection":"source-connection","generation":1},
+                    "params":{"threadId":"source-thread"}
                 }});
-            } else {
+            } else if id != "interrupting" {
                 operation["members"][id]["providerIntent"] = json!({"operation":format!("exact-{id}"),
-                    "method":if id == "interrupting" {"turn/interrupt"} else {"thread/fork"},"scope":{"generation":1}});
+                    "method":"thread/fork", "scope":{"account":"target","connection":"target-connection","generation":1},
+                    "params":{"threadId":"source-thread"}});
             }
             operation["members"][id]["providerReceipts"] = json!([]);
         }
