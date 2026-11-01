@@ -173,6 +173,13 @@ nice -n 10 just test-fast
 nice -n 10 just test-comprehensive
 ```
 
+Both gates create a private scratch directory on tmpfs under `/tmp`, export it
+as `TMPDIR` to their test processes, and remove it on exit. They require 20 GiB
+free before starting and fail if the scratch filesystem is not tmpfs. Set
+`TMPDIR` to another existing tmpfs directory to choose the parent for one run,
+for example `TMPDIR=/tmp/my-scratch nice -n 10 just test-fast`. Cargo target and
+build outputs stay in their normal locations. SQLite durability is unchanged.
+
 Use `nice -n 10`, not `taskpolicy -b`. Background priority made the WASM build
 miss its 30-minute limit. On macOS, `just test-fast` takes 12.3 min cold, about
 4 min in a warm line after a code change, and 17 s after a docs-only change.
@@ -386,8 +393,7 @@ requires at least 2 GiB free before starting and removes its own fixtures:
 ```
 
 Watch free space during long runs and stop if other work needs it. This opt-in
-changes only temporary fixture placement; it does not change the gate defaults
-or SQLite durability settings.
+applies to direct and focused commands; the full gates use tmpfs by default.
 
 Cargo target selectors such as `--test compatibility` are routed to Cargo, for
 example `just test studio-diagnostics '' -- --test compatibility`. The server
