@@ -2822,7 +2822,7 @@ async fn provider_worker(
                 );
                 row.native_effort =
                     studio_runtime_schema::queue_command::Field::Value("medium".into());
-                row.extra.insert("claudeOptions".into(), json!({}));
+                row.claude_options = serde_json::from_value(json!({})).unwrap();
                 AgentRepository::put(tx, &row)?;
                 Ok(())
             })
@@ -5341,7 +5341,7 @@ async fn vm_claude_refresh_copies_rotation_to_active_guest_without_restart() {
                     record.cwd = Some("/home/studio/project".into());
                     record.workspace_mode =
                         Some(studio_runtime_schema::records::WorkspaceMode::Layr);
-                    record.extra.insert("claudeOptions".into(), json!({}));
+                    record.claude_options = serde_json::from_value(json!({})).unwrap();
                     record.thread_id = None;
                     AgentRepository::put(tx, &record)
                 })

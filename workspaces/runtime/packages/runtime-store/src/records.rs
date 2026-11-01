@@ -583,6 +583,19 @@ pub struct AgentRecord {
     pub portable_history: studio_runtime_schema::queue_command::Field<
         StoredTransferValue<crate::transfer_record::PortableHistory>,
     >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub cyber_access_program:
+        studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub claude_options: studio_runtime_schema::queue_command::Field<
+        StoredTransferValue<crate::transfer_record::TransferClaudeOptions>,
+    >,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_mode: Option<AgentExecutionMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1031,6 +1044,8 @@ impl AgentRecord {
             prepare_attempt: Default::default(),
             worker_defaults: Default::default(),
             portable_history: Default::default(),
+            cyber_access_program: Default::default(),
+            claude_options: Default::default(),
             execution_mode: None,
             turn_epoch: None,
             account_key: crate::cost_aggregate::DEFAULT_ACCOUNT.to_owned(),
@@ -3521,6 +3536,41 @@ mod tests {
         assert_eq!(
             legacy.value().get("portableHistory"),
             Some(&json!({"legacy":42}))
+        );
+    }
+
+    #[test]
+    fn enrollment_settings_are_not_extensions() {
+        let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+            "epoch":2, "status":"idle", "accountKey":"default", "cyberAccessProgram":"standard",
+            "claudeOptions":{"configDir":"profile"}}));
+        for key in ["cyberAccessProgram", "claudeOptions"] {
+            assert!(
+                !record.extra.contains_key(key),
+                "{key} remains an extension"
+            );
+        }
+        assert!(
+            matches!(record.cyber_access_program.value(), Some(super::StoredTransferValue::Known(value)) if value == "standard")
+        );
+        assert!(matches!(
+            record.claude_options.value(),
+            Some(super::StoredTransferValue::Known(_))
+        ));
+        let legacy = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
+            "epoch":2, "status":"idle", "accountKey":"default", "cyberAccessProgram":42,
+            "claudeOptions":{"future":true}}));
+        assert!(matches!(
+            legacy.cyber_access_program.value(),
+            Some(super::StoredTransferValue::Unreadable(_))
+        ));
+        assert!(matches!(
+            legacy.claude_options.value(),
+            Some(super::StoredTransferValue::Unreadable(_))
+        ));
+        assert_eq!(
+            legacy.value().get("claudeOptions"),
+            Some(&json!({"future":true}))
         );
     }
 

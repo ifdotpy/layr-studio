@@ -1806,7 +1806,19 @@ pub fn typed_enroll(
         fast_mode: agent.fast_mode.map_or(Field::Missing, Field::Value),
         daybreak_enabled: extra_field(agent, "daybreakEnabled")?,
         cyber_access_program: extra_field(agent, "cyberAccessProgram")?,
-        worker_defaults: extra_field(agent, "workerDefaults")?,
+        worker_defaults: match &agent.worker_defaults {
+            Field::Missing => Field::Missing,
+            Field::Null => Field::Null,
+            Field::Value(studio_runtime_store::StoredTransferValue::Known(defaults)) => {
+                Field::Value(defaults.clone().into())
+            }
+            Field::Value(studio_runtime_store::StoredTransferValue::Unreadable(raw)) => {
+                Field::Value(
+                    serde_json::from_value(raw.clone())
+                        .map_err(|_| invalid("transfer agent", "/workerDefaults"))?,
+                )
+            }
+        },
         pending_settings: extra_field(agent, "pendingSettings")?,
         pending_settings_account_key: pending_account,
         claude_options: extra_field(agent, "claudeOptions")?,
@@ -1828,17 +1840,14 @@ pub fn typed_enroll(
         agent.provider = Field::Value(target_provider);
         agent.model = Some(crate::provider_adapter::default_model(target_provider).into());
         agent.effort = Field::Null;
-        agent.extra.insert("nativeEffort".into(), json!("medium"));
+        agent.native_effort = Field::Value("medium".into());
         agent.fast_mode = Some(false);
-        agent.extra.insert("daybreakEnabled".into(), json!(false));
-        agent
-            .extra
-            .insert("cyberAccessProgram".into(), json!("standard"));
-        for key in [
-            "claudeOptions",
-            "pendingSettings",
-            "pendingSettingsAccountKey",
-        ] {
+        agent.daybreak_enabled = Some(false);
+        agent.cyber_access_program = Field::Value(
+            studio_runtime_store::StoredTransferValue::Known("standard".into()),
+        );
+        agent.claude_options = Field::Missing;
+        for key in ["pendingSettings", "pendingSettingsAccountKey"] {
             agent.extra.remove(key);
         }
     }
@@ -2487,6 +2496,70 @@ mod provider_receipt_tests {
                 .unwrap()
                 .changed
         );
+    }
+
+    #[test]
+    fn enrollment_preserves_known_and_legacy_worker_defaults() {
+        for defaults in [
+            serde_json::json!({"model":"m","effort":null,"fastMode":false}),
+            serde_json::json!({"model":"legacy"}),
+        ] {
+            let mut agent: studio_runtime_store::AgentRecord =
+                serde_json::from_value(serde_json::json!({
+                    "id":"agent","rootId":"agent","provider":"codex","accountKey":"source",
+                    "epoch":0,"status":"idle","compactions":0,"workerDefaults":defaults
+                }))
+                .unwrap();
+            let id = "move".to_owned().try_into().unwrap();
+            let target = "target".to_owned().try_into().unwrap();
+            super::typed_enroll(
+                &mut agent,
+                &id,
+                &target,
+                studio_runtime_schema::ProviderKind::Codex,
+                true,
+            )
+            .unwrap();
+            let lazy = agent
+                .lazy_account_transfer
+                .value()
+                .and_then(|value| value.pending())
+                .unwrap();
+            let source = lazy.source_state.value().unwrap();
+            assert_eq!(
+                serde_json::to_value(&source.worker_defaults).unwrap(),
+                defaults
+            );
+        }
+    }
+
+    #[test]
+    fn enrollment_provider_change_writes_typed_settings() {
+        let mut agent: studio_runtime_store::AgentRecord =
+            serde_json::from_value(serde_json::json!({
+                "id":"agent","rootId":"agent","provider":"codex","accountKey":"source",
+                "epoch":0,"status":"idle","compactions":0,"cyberAccessProgram":"other",
+                "claudeOptions":{"configDir":"profile"}
+            }))
+            .unwrap();
+        let id = "move".to_owned().try_into().unwrap();
+        let target = "target".to_owned().try_into().unwrap();
+        super::typed_enroll(
+            &mut agent,
+            &id,
+            &target,
+            studio_runtime_schema::ProviderKind::Claude,
+            true,
+        )
+        .unwrap();
+        assert!(agent.claude_options.is_missing());
+        assert!(
+            matches!(agent.cyber_access_program.value(), Some(studio_runtime_store::StoredTransferValue::Known(value)) if value == "standard")
+        );
+        assert!(!agent.extra.contains_key("cyberAccessProgram"));
+        assert!(!agent.extra.contains_key("claudeOptions"));
+        assert!(!agent.extra.contains_key("nativeEffort"));
+        assert!(!agent.extra.contains_key("daybreakEnabled"));
     }
 
     #[test]
