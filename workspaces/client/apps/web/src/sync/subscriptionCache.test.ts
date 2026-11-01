@@ -68,7 +68,7 @@ it("drops a malformed entity before exposing a resume cursor", async () => {
           kind: "entity",
           id: "entity:agentDetail:agent",
           seq: 4,
-          entity: { collection: "agentDetail", id: "agent", value: null },
+          entity: { collection: "agentDetail", id: "agent", value: {} },
         },
       ],
     }),
@@ -80,6 +80,40 @@ it("drops a malformed entity before exposing a resume cursor", async () => {
   expect(await cache.load(selected)).toBeUndefined();
   expect(storage.delete).toHaveBeenCalledOnce();
   expect(collection.all()).toEqual([]);
+  cache.stop();
+});
+
+it("hydrates an agent detail with its matching identity", async () => {
+  const selected = { kind: "agentDetail", agentId: "agent" } as const;
+  const entity = {
+    collection: "agentDetail",
+    id: "agent",
+    value: { id: "agent" },
+  };
+  const storage = {
+    get: vi.fn().mockResolvedValue({
+      version: SUBSCRIPTION_CACHE_VERSION,
+      contractHash: API_SCHEMA_HASH,
+      subscription: subscriptionKey(selected),
+      cursor,
+      data: [
+        { kind: "entity", id: "entity:agentDetail:agent", seq: 4, entity },
+      ],
+    }),
+    put: vi.fn(),
+    delete: vi.fn(),
+  };
+  const collection = new LocalCollection("fixture");
+  const cache = createSubscriptionCache(storage, collection, "workspace");
+  expect(await cache.load(selected)).toEqual(cursor);
+  expect(collection.all()).toContainEqual({
+    id: "entity:agentDetail:agent",
+    seq: 4,
+    payload: "",
+    _deleted: false,
+    entity,
+  });
+  expect(storage.delete).not.toHaveBeenCalled();
   cache.stop();
 });
 
