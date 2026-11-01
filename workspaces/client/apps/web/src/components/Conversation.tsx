@@ -898,7 +898,7 @@ export default function Conversation(p: {
     const draftTooLong = Array.from(draft).length > MAX_DRAFT_TEXT_CODEPOINTS;
     const modelCommand = /^\/model(?:\s|$)/i.test(draft.trim());
     const exactModelCommand = /^\/model$/i.test(draft.trim());
-    if (modelCommand) {
+    if (!asTextFile && modelCommand) {
       if (!exactModelCommand) {
         p.notify("Use /model without arguments to choose a model.");
       } else if (!managed || !agent) {
@@ -2063,14 +2063,6 @@ export default function Conversation(p: {
                     modelCommand={modelCommand}
                     hasAttachments={!!assets.length}
                     onChange={(value) => {
-                      if (
-                        Array.from(value).length > MAX_DRAFT_TEXT_CODEPOINTS
-                      ) {
-                        p.notify(
-                          `Drafts can contain at most ${MAX_DRAFT_TEXT_CODEPOINTS.toLocaleString()} characters. Previous text was kept.`,
-                        );
-                        return;
-                      }
                       promptRecall.reset();
                       p.setDraft(value);
                     }}

@@ -1103,6 +1103,20 @@ static CATALOG: &[&dyn Migration] = &[
         },
         apply: |c| m2026_11_01_approval_secrets::apply(c.transaction),
     },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-send-admissions",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Databases without durable send admission fingerprints",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| {
+            c.transaction
+                .execute_batch(crate::repositories::command_watermarks::SEND_ADMISSIONS_SCHEMA)?;
+            Ok(())
+        },
+    },
 ];
 
 /// Operator-facing catalog; implementation and metadata have one owner.

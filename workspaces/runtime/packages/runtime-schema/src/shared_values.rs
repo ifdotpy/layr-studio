@@ -86,10 +86,10 @@ pub use studio_client_domain::sync_entity::SYNC_ENTITY_PAGE_LIMIT;
 /// Maximum records in a complete state stream interval, in documents.
 pub const SYNC_ENTITY_STREAM_MAX_DOCUMENTS: i64 = 512;
 /// Maximum complete resources SSE event in UTF-8 bytes. Each draft code point
-/// needs at most seven bytes after two JSON escaping layers; reserve 16 KiB for
+/// needs at most fourteen bytes after two JSON escaping layers; reserve 16 KiB for
 /// the resource and SSE envelope, then round up to the next power of two.
 pub const SYNC_STREAM_EVENT_MAX_BYTES: usize =
-    (MAX_DRAFT_TEXT_CODEPOINTS * 7 + 16 * 1024).next_power_of_two();
+    (MAX_DRAFT_TEXT_CODEPOINTS * 14 + 16 * 1024).next_power_of_two();
 /// Maximum retained terminal output per stream snapshot and renderer cache, in Unicode scalars.
 pub const SYNC_TERMINAL_STREAM_MAX_CHARS: usize = 16_384;
 /// Maximum transfer identity length, in Unicode code points.

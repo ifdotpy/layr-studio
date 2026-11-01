@@ -453,6 +453,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn send_fingerprint_is_reserved_before_upload_and_checked_after_completion() {
+        let (app, store, _directory) = app_with_queue().await;
+        let id = RequestIdentity::issue_root();
+        let request = json!({"id":id,"client":"web-1","number":1,"kind":"send","target":"workspace","body":{"text":"hello","asTextFile":true}});
+        let typed: studio_runtime_schema::command::CommandRequest =
+            serde_json::from_str(&request.to_string()).expect("command");
+        store
+            .transaction_with_error(move |tx| {
+                studio_runtime_services::commands::begin(tx, &Principal::Owner, &typed, now_ms())
+            })
+            .await
+            .expect("admission");
+        let asset_id = uuid::Uuid::new_v5(
+            &uuid::Uuid::NAMESPACE_OID,
+            format!("text-file:{id}").as_bytes(),
+        )
+        .to_string();
+        studio_runtime_services::payload_store::upload(
+            &store,
+            "workspace",
+            "message.txt",
+            Some(&asset_id),
+            "aGVsbG8=",
+        )
+        .await
+        .expect("uploaded before interrupted send");
+        let mut changed = request.clone();
+        changed["body"]["delivery"] = json!("next_turn");
+        let (status, _) = post(&app, None, changed).await;
+        assert_eq!(status, 409, "changed retry after admission");
+        let mut changed = request.clone();
+        changed["body"]["assets"] = json!(["other"]);
+        let (status, _) = post(&app, None, changed).await;
+        assert_eq!(status, 409, "changed attachments after admission");
+        let (status, response) = post(&app, None, request.clone()).await;
+        assert_eq!(status, 200, "{response}");
+        let mut changed = request;
+        changed["body"]["asTextFile"] = json!(false);
+        let (status, _) = post(&app, None, changed).await;
+        assert_eq!(status, 409, "changed retry after completion");
+    }
+
+    #[tokio::test]
     async fn send_command_uses_the_typed_message_path() {
         let (app, _store, _directory) = app_with_queue().await;
         let id = RequestIdentity::issue_root();

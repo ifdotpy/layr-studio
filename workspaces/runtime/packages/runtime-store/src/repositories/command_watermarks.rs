@@ -14,7 +14,30 @@ pub(crate) const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS client_command_w
 
 pub struct CommandWatermarks;
 
+/// Durable admission for a send, saved before its asset upload.
+pub const SEND_ADMISSIONS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS command_send_admissions (id TEXT PRIMARY KEY, signature TEXT NOT NULL, created INTEGER NOT NULL) WITHOUT ROWID; CREATE INDEX IF NOT EXISTS command_send_admissions_created ON command_send_admissions(created,id);";
+
 impl CommandWatermarks {
+    /// Reserve the original fingerprint for the lifetime of the replay window.
+    pub fn reserve_send(
+        tx: &Transaction<'_>,
+        id: &str,
+        signature: &str,
+        created: i64,
+        now: i64,
+    ) -> rusqlite::Result<bool> {
+        let cutoff = now.saturating_sub(studio_runtime_schema::persistence::REQUEST_RESULT_TTL_MS);
+        tx.execute("DELETE FROM command_send_admissions WHERE id IN (SELECT id FROM command_send_admissions WHERE created<=?1 ORDER BY created,id LIMIT ?2)", params![cutoff, crate::request_results::REQUEST_RESULT_GC_BATCH_ROWS as i64])?;
+        tx.execute(
+            "INSERT OR IGNORE INTO command_send_admissions(id,signature,created) VALUES(?1,?2,?3)",
+            params![id, signature, created],
+        )?;
+        tx.query_row(
+            "SELECT signature=?2 FROM command_send_admissions WHERE id=?1",
+            params![id, signature],
+            |row| row.get(0),
+        )
+    }
     /// The highest applied number of `client`, or 0 when it never applied a command.
     pub fn applied(conn: &Connection, client: &str) -> rusqlite::Result<i64> {
         Ok(conn

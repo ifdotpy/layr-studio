@@ -67,7 +67,7 @@ import {
   DEFAULT_LOCAL_SERVER_ALIAS,
 } from "./servers/serverAliases";
 import { serverLocalStorage as localStorage } from "./servers/storage";
-import { MAX_MANAGED_MESSAGE_CODEPOINTS } from "./generated/sharedValues";
+import { MAX_MANAGED_MESSAGE_CODEPOINTS, MAX_DRAFT_TEXT_CODEPOINTS } from "./generated/sharedValues";
 import SearchOverlay from "./components/shell/SearchOverlay";
 import { SettingsRow } from "./components/ui/primitives";
 import { modalSizes } from "./theme";
@@ -1023,13 +1023,20 @@ export default function App({ active = true }: { active?: boolean }) {
   const setDraft = useCallback(
     (text: string | ((current: string) => string), id = opened || "new") =>
       setDrafts((old) => {
+        const value = typeof text === "function" ? text(old[id] || "") : text;
+        if (Array.from(value).length > MAX_DRAFT_TEXT_CODEPOINTS) {
+          notify(
+            `Drafts can contain at most ${MAX_DRAFT_TEXT_CODEPOINTS.toLocaleString()} characters. Previous text was kept.`,
+          );
+          return old;
+        }
         const next = {
           ...old,
-          [id]: typeof text === "function" ? text(old[id] || "") : text,
+          [id]: value,
         };
         return next;
       }),
-    [opened, setDrafts],
+    [opened, setDrafts, notify],
   );
   const finishConversationDelete = useCallback(
     (deleted: string[]) => {
@@ -1623,12 +1630,13 @@ export default function App({ active = true }: { active?: boolean }) {
     };
     let request: SendMessageBody | undefined;
     try {
-      if (renameCommand(text) !== undefined && !opened)
+      if (!options?.asTextFile && renameCommand(text) !== undefined && !opened)
         throw new Error("Open a chat before using /rename.");
       const id = opened || (await newChat());
       if (!id) return;
       latestSend.current[id] = attempt;
       if (
+        !options?.asTextFile &&
         agent?.source === GeneratedApiAgentSource.managed &&
         studioCommand(text, agent.provider ?? undefined)
       ) {

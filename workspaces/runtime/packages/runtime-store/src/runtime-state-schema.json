@@ -334,6 +334,13 @@
     "pragma_user_version": 0,
     "sqlite_master": [
       {
+        "create_order": 307,
+        "name": "command_send_admissions_created",
+        "sql": "CREATE INDEX command_send_admissions_created ON command_send_admissions(created,id)",
+        "table": "command_send_admissions",
+        "type": "index"
+      },
+      {
         "create_order": 134,
         "name": "durable_rows_seq",
         "sql": "CREATE INDEX durable_rows_seq ON durable_rows(seq)",
@@ -1157,6 +1164,13 @@
         "name": "client_command_watermarks",
         "sql": "CREATE TABLE client_command_watermarks (\n    client  TEXT PRIMARY KEY,\n    applied INTEGER NOT NULL CHECK (applied >= 0)\n) WITHOUT ROWID",
         "table": "client_command_watermarks",
+        "type": "table"
+      },
+      {
+        "create_order": 306,
+        "name": "command_send_admissions",
+        "sql": "CREATE TABLE command_send_admissions (id TEXT PRIMARY KEY, signature TEXT NOT NULL, created INTEGER NOT NULL) WITHOUT ROWID",
+        "table": "command_send_admissions",
         "type": "table"
       },
       {

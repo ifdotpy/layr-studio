@@ -12,7 +12,7 @@ import {
 } from "../playwright.ts";
 import { fixtureStateDirectory } from "../fixtures/rust-ui-fixture.ts";
 
-for (const action of ["paste", "button"] as const) {
+for (const action of ["paste", "button", "stop"] as const) {
   test(`long text ${action} sends one server asset`, async ({ browser }) => {
     test.setTimeout(90_000);
     const state = await mkdtemp(join(tmpdir(), "text-file-send-"));
@@ -41,8 +41,18 @@ for (const action of ["paste", "button"] as const) {
         .click();
       const composer = page.locator("#message");
       const text =
-        action === "paste" ? "\\".repeat(100_000) : "L".repeat(32_001);
+        action === "paste"
+          ? "\\".repeat(100_000)
+          : (action === "stop" ? "/stop " : "/model ") + "L".repeat(32_001);
       if (action === "paste") {
+        const nearlyFull = "Q".repeat(99_995);
+        await composer.fill(nearlyFull);
+        await page
+          .getByRole("button", { name: "Quote message" })
+          .first()
+          .click();
+        await expect(composer).toHaveValue(nearlyFull);
+        await expect(page.getByText(/Draft.*100,000/)).toBeVisible();
         await composer.fill("previous");
         await composer.fill("x".repeat(100_001));
         await expect(composer).toHaveValue("previous");
@@ -79,8 +89,9 @@ for (const action of ["paste", "button"] as const) {
         (response) =>
           new URL(response.url()).pathname === "/api/commands" &&
           response.request().postDataJSON()?.kind === "send",
+        { timeout: 8_000 },
       );
-      if (action === "button")
+      if (action !== "paste")
         await page
           .getByRole("button", { name: "Attach text as a file" })
           .click();
@@ -90,9 +101,9 @@ for (const action of ["paste", "button"] as const) {
       const command = response.request().postDataJSON();
       expect(command.body.text).toBe(text);
       expect(command.body.asTextFile).toBe(
-        action === "button" ? true : undefined,
+        action !== "paste" ? true : undefined,
       );
-      if (action === "button") await page.reload();
+      if (action !== "paste") await page.reload();
       await expect
         .poll(
           () =>

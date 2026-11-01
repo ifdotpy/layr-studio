@@ -198,6 +198,20 @@ pub fn begin(
         });
     }
     let records = !is_create(&request.command);
+    if !records
+        && !CommandWatermarks::reserve_send(
+            tx,
+            identity.id(),
+            &signature,
+            identity.issued_ms(),
+            now_ms,
+        )?
+    {
+        return Err(RequestResultError::Conflict {
+            id: identity.id().into(),
+        }
+        .into());
+    }
     if records
         && let Some(reference) =
             RequestResults::replay_reference(tx, identity.id(), &signature, now_ms)?

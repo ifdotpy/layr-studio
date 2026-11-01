@@ -2486,10 +2486,6 @@
     },
     {
       "file": "workspaces/runtime/packages/runtime-http/src/routes/sync_stream.rs",
-      "fingerprint": "479484212283c62fdddc769e49600f159df70def4234b22917ca36fdae3df58a:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-http/src/routes/sync_stream.rs",
       "fingerprint": "8ec747c1b9d78087ebd5915e8d76a343fa4bb3e688948615060ac9e49977c7e3:0"
     },
     {
