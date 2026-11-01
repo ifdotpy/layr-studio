@@ -552,10 +552,15 @@ fn assert_pull(
     if changed_delivery_projection {
         // The materialized input and queued receipt each change their retained
         // projection, allocating two transcript sequence numbers.
-        expected["checkpoint"]["seq"] = json!(expected["checkpoint"]["seq"].as_i64().unwrap() + 2);
+        expected["checkpoint"]["seq"] = json!(
+            expected["checkpoint"]["seq"]
+                .as_i64()
+                .expect("checkpoint sequence")
+                + 2
+        );
         let documents = expected["documents"].as_array_mut().expect("documents");
         assert_eq!(documents.len(), 1);
-        documents[0]["seq"] = json!(documents[0]["seq"].as_i64().unwrap() + 2);
+        documents[0]["seq"] = json!(documents[0]["seq"].as_i64().expect("document sequence") + 2);
     }
     assert_eq!(decode(got), expected);
 }
