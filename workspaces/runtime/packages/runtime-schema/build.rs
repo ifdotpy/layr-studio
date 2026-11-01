@@ -38,11 +38,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     // The generator prints absolute paths; re-emit them relative to the package.
     let mut inputs = String::new();
-    std::io::Read::read_to_string(&mut child.stdout.take().ok_or("missing generator output")?, &mut inputs)?;
+    std::io::Read::read_to_string(
+        &mut child.stdout.take().ok_or("missing generator output")?,
+        &mut inputs,
+    )?;
     let canonical_root = format!("{}/", root.canonicalize()?.display());
     for line in inputs.lines() {
-        let path = line.strip_prefix("cargo:rerun-if-changed=").ok_or("unexpected generator output")?;
-        let file = path.strip_prefix(&canonical_root).ok_or("generator input outside the repository")?;
+        let path = line
+            .strip_prefix("cargo:rerun-if-changed=")
+            .ok_or("unexpected generator output")?;
+        let file = path
+            .strip_prefix(&canonical_root)
+            .ok_or("generator input outside the repository")?;
         println!("cargo:rerun-if-changed={relative_root}/{file}");
     }
     if !status.success() {

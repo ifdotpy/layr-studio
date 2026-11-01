@@ -363,6 +363,8 @@ test("build scripts print relative rerun-if-changed paths", () => {
   const builds = path.join(root, "target/debug/build");
   if (existsSync(builds))
     for (const name of readdirSync(builds)) {
+      // tauri-build prints absolute paths and has no option to change that (docs/testing.md).
+      if (name.startsWith("studio-native-client-")) continue;
       const output = path.join(builds, name, "output");
       if (existsSync(output))
         assert.deepEqual(
