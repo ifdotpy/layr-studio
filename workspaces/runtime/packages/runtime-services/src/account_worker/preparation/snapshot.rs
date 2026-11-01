@@ -1363,7 +1363,7 @@ pub(super) fn thread_snapshot(
             profile_instructions: text(record, "profileInstructions")?.unwrap_or_default(),
             role,
             is_lead: lead,
-            needs_title: flag(record, "needsTitle")?,
+            needs_title: record["naming"] == "pending_title",
             claude_options: native_claude_options(resources, record, state_root)?,
             daybreak_enabled: stored(record, "daybreakEnabled")?,
             cyber_access_program: stored(record, "cyberAccessProgram")?,

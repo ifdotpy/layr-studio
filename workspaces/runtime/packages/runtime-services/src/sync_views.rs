@@ -1022,24 +1022,14 @@ mod projection_plan_tests {
     }
 
     #[test]
-    fn naming_states_project_with_canonical_capacity() {
-        let mut views = Vec::new();
-        for manual in ["", ",\"manualName\":true", ",\"manualName\":false"] {
-            for title in ["", ",\"needsTitle\":true", ",\"needsTitle\":false"] {
-                let raw = format!(
-                    r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0{manual}{title}}}"#
-                );
-                let agent: studio_runtime_store::AgentRecord = serde_json::from_str(&raw).unwrap();
-                views.push(
-                    super::agent_entity_view(&agent.value(), &super::AgentViewContext::default())
-                        .unwrap(),
-                );
-            }
+    fn canonical_naming_states_project_to_agent() {
+        for naming in ["automatic", "pending_title", "manual"] {
+            let record = serde_json::json!({"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"naming":naming});
+            let view =
+                super::agent_entity_view(&record, &super::AgentViewContext::default()).unwrap();
+            assert_eq!(view["naming"], naming);
+            assert!(view.get("manualName").is_none());
         }
-        assert_eq!(
-            studio_runtime_store::sha256_hex(&serde_json::to_vec(&views).unwrap()),
-            "c473f5fcc225364f3589280823ce7c331476e6c4ca74e20078d54a32c363d7c2"
-        );
     }
 
     #[test]
@@ -1050,7 +1040,7 @@ mod projection_plan_tests {
             super::agent_entity_view(&agent.value(), &super::AgentViewContext::default()).unwrap();
         assert_eq!(
             studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
-            "9e3a41a0e2306280189ca22d69b54df40fd0fd51a8fdc93a1f42216e45cb90f2"
+            "0375690c54e6b6a10c9913b01c9e4690b922aad5961015481d0a6c4a6d903594"
         );
     }
 

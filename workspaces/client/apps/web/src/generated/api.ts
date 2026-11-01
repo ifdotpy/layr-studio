@@ -3949,9 +3949,8 @@ export interface components {
       layrReady?: boolean | null | undefined;
       /** Layrstateid */
       layrStateId?: null | string | undefined;
-      /** Manualname */
-      manualName?: boolean | null | undefined;
       movedFrom?: components["schemas"]["MovePointerDto"] | null | undefined;
+      naming?: components["schemas"]["AgentNaming"] | undefined;
       /** Nativeerror */
       nativeError?: null | string | undefined;
       /** Nativelimiterrorat */
@@ -4264,8 +4263,6 @@ export interface components {
       layrReady?: boolean | null | undefined;
       /** Layrstateid */
       layrStateId?: null | string | undefined;
-      /** Manualname */
-      manualName?: boolean | null | undefined;
       /** Model */
       model?: null | string | undefined;
       movedFrom?: components["schemas"]["MovePointerDto"] | null | undefined;
@@ -4277,6 +4274,7 @@ export interface components {
       moveImportPending?: boolean | undefined;
       /** Name */
       name?: null | string | undefined;
+      naming?: components["schemas"]["AgentNaming"] | undefined;
       /** Nativeerror */
       nativeError?: null | string | undefined;
       /** Nativelimiterrorat */
@@ -4589,6 +4587,8 @@ export interface components {
        */
       workspaceMode: "shared";
     };
+    /** @enum {string} */
+    AgentNaming: "automatic" | "pending_title" | "manual";
     /** AgentNativeRelease */
     AgentNativeRelease: {
       /** @default null */
@@ -5184,11 +5184,6 @@ export interface components {
        */
       liveSteerRejectedTurnId?: string | undefined;
       /**
-       * Manualname
-       * @default null
-       */
-      manualName?: boolean | undefined;
-      /**
        * Model
        * @default null
        */
@@ -5218,6 +5213,7 @@ export interface components {
        * @default null
        */
       name?: string | undefined;
+      naming?: components["schemas"]["AgentNaming"] | undefined;
       /**
        * Nativeeffort
        * @default null
@@ -5329,11 +5325,6 @@ export interface components {
        * @default null
        */
       needsAttention?: boolean | undefined;
-      /**
-       * Needstitle
-       * @default null
-       */
-      needsTitle?: boolean | undefined;
       /**
        * Parentid
        * @default null
@@ -6002,11 +5993,6 @@ export interface components {
        */
       layrStateId?: null | string | undefined;
       /**
-       * Manualname
-       * @default null
-       */
-      manualName?: boolean | null | undefined;
-      /**
        * Model
        * @default null
        */
@@ -6025,6 +6011,7 @@ export interface components {
        * @default null
        */
       name?: null | string | undefined;
+      naming?: components["schemas"]["AgentNaming"] | undefined;
       /**
        * Nativeerror
        * @default null
@@ -9026,11 +9013,6 @@ export interface components {
        */
       layrStateId?: null | string | undefined;
       /**
-       * Manualname
-       * @default null
-       */
-      manualName?: boolean | null | undefined;
-      /**
        * Model
        * @default null
        */
@@ -9049,6 +9031,7 @@ export interface components {
        * @default null
        */
       name?: null | string | undefined;
+      naming?: components["schemas"]["AgentNaming"] | undefined;
       /**
        * Nativeerror
        * @default null
@@ -38709,6 +38692,12 @@ export type AccountTransferStatus =
   components["schemas"]["AccountTransferStatus"];
 export const AgentMode = { multi: "multi", single: "single" } as const;
 export type AgentMode = components["schemas"]["AgentMode"];
+export const AgentNaming = {
+  automatic: "automatic",
+  pending_title: "pending_title",
+  manual: "manual",
+} as const;
+export type AgentNaming = components["schemas"]["AgentNaming"];
 export const AgentNativeStatusValue = {
   idle: "idle",
   notLoaded: "notLoaded",

@@ -191,7 +191,9 @@ pub fn prepare(
             created,
             None,
         );
-        value["needsTitle"] = json!(false);
+        if value["naming"] != "manual" {
+            value["naming"] = json!("automatic");
+        }
         value["model"] = json!(settings.model);
         value["effort"] = json!(settings.effort);
         value["fastMode"] = json!(settings.fast_mode);

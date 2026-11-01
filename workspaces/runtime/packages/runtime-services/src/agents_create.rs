@@ -541,7 +541,7 @@ fn create_agent_with_identity(
             id: id.to_owned(),
         });
     }
-    let draft = record.get("needsTitle").and_then(Value::as_bool) == Some(true);
+    let draft = record["naming"] == "pending_title";
     let expected_status = if draft {
         AgentStatus::Idle
     } else {
@@ -750,8 +750,7 @@ fn rename(
     };
 
     record["name"] = json!(name);
-    record["manualName"] = json!(true);
-    record["needsTitle"] = json!(false);
+    record["naming"] = json!("manual");
     save_agent(transaction, &record, &validate)?;
 
     let result = RenameReply {

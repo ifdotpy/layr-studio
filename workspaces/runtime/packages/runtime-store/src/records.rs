@@ -330,67 +330,28 @@ pub enum AgentSandbox {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AgentNaming {
     #[default]
-    Unspecified,
-    Automatic(Option<bool>),
-    Manual(Option<bool>),
-    TitleOnly(bool),
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AgentNamingWire {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    manual_name: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    needs_title: Option<bool>,
+    Automatic,
+    PendingTitle,
+    Manual,
 }
 
 impl AgentNaming {
-    fn from_parts(manual: Option<bool>, title: Option<bool>) -> Self {
-        match (manual, title) {
-            (Some(true), title) => Self::Manual(title),
-            (Some(false), title) => Self::Automatic(title),
-            (None, Some(title)) => Self::TitleOnly(title),
-            (None, None) => Self::Unspecified,
-        }
-    }
-
-    fn parts(&self) -> (Option<bool>, Option<bool>) {
-        match self {
-            Self::Unspecified => (None, None),
-            Self::Automatic(title) => (Some(false), *title),
-            Self::Manual(title) => (Some(true), *title),
-            Self::TitleOnly(title) => (None, Some(*title)),
-        }
-    }
-
     pub fn set_needs_title(&mut self, title: Option<bool>) {
-        *self = Self::from_parts(self.parts().0, title);
+        if *self != Self::Manual {
+            *self = if title == Some(true) {
+                Self::PendingTitle
+            } else {
+                Self::Automatic
+            };
+        }
     }
 
     pub fn needs_title(&self) -> Option<bool> {
-        self.parts().1
-    }
-}
-
-impl Serialize for AgentNaming {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let (manual_name, needs_title) = self.parts();
-        AgentNamingWire {
-            manual_name,
-            needs_title,
-        }
-        .serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for AgentNaming {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let fields = AgentNamingWire::deserialize(deserializer)?;
-        Ok(Self::from_parts(fields.manual_name, fields.needs_title))
+        Some(*self == Self::PendingTitle)
     }
 }
 
@@ -470,7 +431,7 @@ pub struct AgentRecord {
     pub fast_mode: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daybreak_enabled: Option<bool>,
-    #[serde(flatten)]
+    #[serde(default)]
     pub naming: AgentNaming,
     #[serde(default)]
     pub capacity: AgentCapacity,
@@ -2968,7 +2929,7 @@ mod tests {
             ("error", serde_json::json!(null)),
             ("error", serde_json::json!(42)),
             ("capacity", serde_json::json!(null)),
-            ("manualName", serde_json::json!(null)),
+            ("naming", serde_json::json!(null)),
             ("id", serde_json::json!(null)),
         ] {
             let mut agent = super::AgentRecord::from_value(serde_json::json!({
@@ -3040,7 +3001,7 @@ mod tests {
         );
         assert_eq!(agent.clone().into_value(), agent.value());
 
-        let current = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{"kind":"automatic","max":64},"vmLaunch":{"identity":{"agentId":"agent","epoch":1,"handle":"handle","requestId":"request","launchFingerprint":"digest"},"signature":"signature","status":"submitted"},"credentialCopy":{"agentId":"agent","epoch":1,"accountKey":"account","provider":"codex","relativePath":"path","digest":"digest","requestId":"request","signature":"signature","status":"submitted"},"vmAuthBootstrap":{"agentId":"agent","epoch":1,"requestId":"request","rootRequestId":"root","admittedRequest":{"id":"token","signature":"signature","created":1},"fingerprint":"digest","state":"submitted"},"nativeRelease":{"scope":{"account":"account","connection":"connection","generation":2},"admittedRequest":{"id":"token","signature":"signature","created":1},"id":"release"}}"#;
+        let current = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{"kind":"automatic","max":64},"naming":"automatic","vmLaunch":{"identity":{"agentId":"agent","epoch":1,"handle":"handle","requestId":"request","launchFingerprint":"digest"},"signature":"signature","status":"submitted"},"credentialCopy":{"agentId":"agent","epoch":1,"accountKey":"account","provider":"codex","relativePath":"path","digest":"digest","requestId":"request","signature":"signature","status":"submitted"},"vmAuthBootstrap":{"agentId":"agent","epoch":1,"requestId":"request","rootRequestId":"root","admittedRequest":{"id":"token","signature":"signature","created":1},"fingerprint":"digest","state":"submitted"},"nativeRelease":{"scope":{"account":"account","connection":"connection","generation":2},"admittedRequest":{"id":"token","signature":"signature","created":1},"id":"release"}}"#;
         let agent: AgentRecord = serde_json::from_str(current).expect("current effect fields");
         let encoded = serde_json::to_string(&agent).expect("serialize current agent");
         assert_eq!(
@@ -3091,8 +3052,6 @@ mod tests {
         for field in [
             "fastMode",
             "daybreakEnabled",
-            "needsTitle",
-            "manualName",
             "agentModeSupported",
             "layrReady",
         ] {
@@ -3177,29 +3136,13 @@ mod tests {
     }
 
     #[test]
-    fn agent_naming_preserves_wire_keys_and_presence() {
-        for manual in ["", ",\"manualName\":true", ",\"manualName\":false"] {
-            for title in ["", ",\"needsTitle\":true", ",\"needsTitle\":false"] {
-                let raw = format!(
-                    r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0{manual}{title}}}"#
-                );
-                let agent: AgentRecord = serde_json::from_str(&raw).unwrap();
-                let output = agent.value();
-                for (key, source) in [("manualName", manual), ("needsTitle", title)] {
-                    let expected = (!source.is_empty()).then(|| source.ends_with("true"));
-                    assert_eq!(
-                        output.get(key).and_then(|v| v.as_bool()),
-                        expected,
-                        "{key} in {raw}"
-                    );
-                    assert_eq!(
-                        output.get(key).is_some(),
-                        expected.is_some(),
-                        "{key} in {raw}"
-                    );
-                    assert!(!agent.extra.contains_key(key));
-                }
-            }
+    fn agent_naming_uses_canonical_states() {
+        for state in ["automatic", "pending_title", "manual"] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"naming":"{state}"}}"#
+            );
+            let agent: AgentRecord = serde_json::from_str(&raw).unwrap();
+            assert_eq!(agent.value()["naming"], state);
         }
     }
 
@@ -3399,7 +3342,7 @@ mod tests {
             projected,
             json!({"compactions":0,
                 "id":"agent-1", "provider":"codex", "rootId":"root-1", "epoch":3, "status":"running", "accountKey":"default",
-                "capacity":{"kind":"automatic","max":64},
+                "capacity":{"kind":"automatic","max":64},"naming":"automatic",
                 "futureField":[{"nested":"retained"}]
             })
         );
@@ -3446,7 +3389,7 @@ mod tests {
         let connection = database();
         let value = json!({"compactions":0,
             "id":"agent", "rootId":"agent", "epoch":2, "status":"idle",
-            "capacity":{"kind":"automatic","max":64},
+            "capacity":{"kind":"automatic","max":64},"naming":"automatic",
             "inFlight":true, "autoWake":false, "executionMode":"native", "turnEpoch":2,
             "accountKey":"account", "threadId":"thread", "turnId":"turn", "future":42
         });
@@ -3477,7 +3420,7 @@ mod tests {
     fn agent_round_trip_keeps_unknown_json_fields_and_number_kinds() {
         let value = json!({"compactions":0,
             "id":"agent-1", "provider":"codex", "rootId":"agent-1", "epoch":2, "status":"idle", "accountKey":"default",
-            "capacity":{"kind":"automatic","max":64},
+            "capacity":{"kind":"automatic","max":64},"naming":"automatic",
             "futureObject":{"number":1.5,"flag":true}, "futureInteger":9007199254740993_i64
         });
         let record = agent(value.clone());
@@ -3498,7 +3441,7 @@ mod tests {
             json!({"startOutcomeHold":{"stage":"recovery","epoch":2,"reason":"pending"}}),
             json!({"titleJob":{"requestId":"r","agentId":"agent","rootRequestId":"root","admittedRequest":{"id":"r","signature":"s","created":1},"status":"pending","future":true}}),
         ] {
-            let mut value = json!({"compactions":0,"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","capacity":{"kind":"automatic","max":64}});
+            let mut value = json!({"compactions":0,"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","capacity":{"kind":"automatic","max":64},"naming":"automatic"});
             value
                 .as_object_mut()
                 .unwrap()
@@ -3609,7 +3552,7 @@ mod tests {
 
     #[test]
     fn unknown_agent_status_and_fields_survive_carrier_rewrite() {
-        let value = json!({"compactions":0,"id":"agent-1","provider":"codex","rootId":"agent-1","epoch":4,"accountKey":"default","capacity":{"kind":"automatic","max":64},
+        let value = json!({"compactions":0,"id":"agent-1","provider":"codex","rootId":"agent-1","epoch":4,"accountKey":"default","capacity":{"kind":"automatic","max":64},"naming":"automatic",
             "status":"future-agent-state","future":{"enabled":true,"count":9007199254740993_i64}});
         let record = agent(value.clone());
         assert_eq!(

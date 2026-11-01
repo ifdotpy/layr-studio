@@ -1867,8 +1867,8 @@ mod vault_maintenance_tests {
         assert_eq!(response.status(), StatusCode::OK);
         assert!(sync_policy::has_complete_entity_seed(&store.test_reader().unwrap()).unwrap());
         store.transaction(|tx| {
-            tx.execute("UPDATE runtime_agents SET record=json_set(json_remove(record,'$.capacity'),'$.maxAgents',80,'$.maxAgentsExplicit',json('true')) WHERE id='agent-1'", [])?;
-            tx.execute("UPDATE sync_entities SET hash=sync_entity_hash(json_remove(payload,'$.value.capacity')), payload=json_remove(payload,'$.value.capacity') WHERE collection IN ('agent','agentDetail') AND id='agent-1'", [])?;
+            tx.execute("UPDATE runtime_agents SET record=json_set(json_remove(record,'$.capacity','$.naming'),'$.maxAgents',80,'$.maxAgentsExplicit',json('true'),'$.needsTitle',json('true')) WHERE id='agent-1'", [])?;
+            tx.execute("UPDATE sync_entities SET hash=sync_entity_hash(json_remove(payload,'$.value.capacity','$.value.naming')), payload=json_remove(payload,'$.value.capacity','$.value.naming') WHERE collection IN ('agent','agentDetail') AND id='agent-1'", [])?;
             Ok(())
         }).await.unwrap();
         drop(store);
@@ -1917,6 +1917,8 @@ mod vault_maintenance_tests {
             json!({"kind":"explicit","max":80})
         );
         assert!(document["value"].get("maxAgents").is_none());
+        assert_eq!(document["value"]["naming"], "pending_title");
+        assert!(document["value"].get("manualName").is_none());
         assert!(sync_policy::has_complete_entity_seed(&store.test_reader().unwrap()).unwrap());
     }
 

@@ -55,6 +55,7 @@ mod m2026_10_31_work_projection;
 mod m2026_10_31_work_records;
 mod m2026_11_01_account_projection;
 mod m2026_11_01_agent_capacity;
+mod m2026_11_01_agent_naming;
 mod m2026_11_01_annotation_record;
 mod m2026_11_01_approval_secrets;
 mod m2026_11_01_plan_record;
@@ -936,6 +937,16 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
+            id: "2026-11-01-agent-batch-57-naming",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with legacy naming flags",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_agent_naming::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
             id: "2026-10-31-transfer-history-pages",
             introduced: OCTOBER_31,
             target: MigrationTarget::Canvas,
@@ -1281,7 +1292,12 @@ pub fn test_apply_catalog_before_capacity(path: &std::path::Path) -> StoreResult
     let parent: Vec<_> = CATALOG
         .iter()
         .copied()
-        .filter(|step| step.definition().id != "2026-11-01-agent-batch-56-capacity")
+        .filter(|step| {
+            !matches!(
+                step.definition().id,
+                "2026-11-01-agent-batch-56-capacity" | "2026-11-01-agent-batch-57-naming"
+            )
+        })
         .collect();
     apply_target_catalog(&mut db, MigrationTarget::Canvas, &parent)
 }

@@ -317,6 +317,7 @@ mod tests {
         super::super::m2026_10_31_agent_core::apply(&tx).unwrap();
         super::apply(&tx).unwrap();
         super::super::m2026_11_01_agent_capacity::apply(&tx).unwrap();
+        super::super::m2026_11_01_agent_naming::apply(&tx).unwrap();
         let mut query = tx.prepare("SELECT id,record FROM runtime_agents").unwrap();
         let rows = query
             .query_map([], |row| {

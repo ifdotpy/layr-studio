@@ -3088,7 +3088,7 @@ pub(crate) fn build_agent_record(
         json!({
           "id":id,"threadId":null,"accountKey":account,"executionSettingsAccountKey":account,
           "provider":provider.key(),"permissionMode":studio_runtime_schema::claude_permissions::PermissionMode::from_full_access(yolo),"name":name,"prompt":prompt,"cwd":cwd,
-          "role":role,"isLead":is_lead,"needsTitle":draft,"parentId":null,"rootId":id,
+          "role":role,"isLead":is_lead,"naming":if draft { "pending_title" } else { "automatic" },"parentId":null,"rootId":id,
           "model":crate::provider_adapter::default_model(provider),"effort":"medium",
           "fastMode":false,"daybreakEnabled":false,"cyberAccessProgram":"standard",
           "capacity":{"kind":"automatic","max":max_agents},"status":status,"autoWake":true,

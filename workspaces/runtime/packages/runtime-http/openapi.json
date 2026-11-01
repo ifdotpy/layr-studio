@@ -4339,17 +4339,6 @@
             ],
             "title": "Layrstateid"
           },
-          "manualName": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Manualname"
-          },
           "movedFrom": {
             "anyOf": [
               {
@@ -4359,6 +4348,9 @@
                 "type": "null"
               }
             ]
+          },
+          "naming": {
+            "$ref": "#/components/schemas/AgentNaming"
           },
           "nativeError": {
             "anyOf": [
@@ -5557,17 +5549,6 @@
             ],
             "title": "Layrstateid"
           },
-          "manualName": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Manualname"
-          },
           "model": {
             "anyOf": [
               {
@@ -5614,6 +5595,9 @@
               }
             ],
             "title": "Name"
+          },
+          "naming": {
+            "$ref": "#/components/schemas/AgentNaming"
           },
           "nativeError": {
             "anyOf": [
@@ -6717,6 +6701,14 @@
         "title": "AgentMoveToHostResponse",
         "type": "object"
       },
+      "AgentNaming": {
+        "enum": [
+          "automatic",
+          "pending_title",
+          "manual"
+        ],
+        "type": "string"
+      },
       "AgentNativeRelease": {
         "additionalProperties": false,
         "properties": {
@@ -7557,11 +7549,6 @@
             "title": "Livesteerrejectedturnid",
             "type": "string"
           },
-          "manualName": {
-            "default": null,
-            "title": "Manualname",
-            "type": "boolean"
-          },
           "model": {
             "anyOf": [
               {
@@ -7610,6 +7597,9 @@
             "default": null,
             "title": "Name",
             "type": "string"
+          },
+          "naming": {
+            "$ref": "#/components/schemas/AgentNaming"
           },
           "nativeEffort": {
             "anyOf": [
@@ -7754,11 +7744,6 @@
           "needsAttention": {
             "default": null,
             "title": "Needsattention",
-            "type": "boolean"
-          },
-          "needsTitle": {
-            "default": null,
-            "title": "Needstitle",
             "type": "boolean"
           },
           "parentId": {
@@ -9003,18 +8988,6 @@
             "default": null,
             "title": "Layrstateid"
           },
-          "manualName": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Manualname"
-          },
           "model": {
             "anyOf": [
               {
@@ -9065,6 +9038,9 @@
             ],
             "default": null,
             "title": "Name"
+          },
+          "naming": {
+            "$ref": "#/components/schemas/AgentNaming"
           },
           "nativeError": {
             "anyOf": [
@@ -17429,18 +17405,6 @@
             "default": null,
             "title": "Layrstateid"
           },
-          "manualName": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Manualname"
-          },
           "model": {
             "anyOf": [
               {
@@ -17491,6 +17455,9 @@
             ],
             "default": null,
             "title": "Name"
+          },
+          "naming": {
+            "$ref": "#/components/schemas/AgentNaming"
           },
           "nativeError": {
             "anyOf": [
