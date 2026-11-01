@@ -51,8 +51,25 @@ pub(crate) fn state(status: OutboxStatus) -> ServerDeliveryState {
         OutboxStatus::Submitted
         | OutboxStatus::Unknown
         | OutboxStatus::Committed
-        | OutboxStatus::Cancelled
         | OutboxStatus::Unrecognized => ServerDeliveryState::Running,
+        // A discarded request will not run. `Complete` is the only terminal state of the
+        // delivery states; the stored error says why it ended.
+        OutboxStatus::Cancelled => ServerDeliveryState::Complete,
+    }
+}
+
+#[cfg(test)]
+mod state_tests {
+    use super::*;
+
+    #[test]
+    fn a_cancelled_request_is_terminal_and_never_running() {
+        assert_eq!(
+            state(OutboxStatus::Cancelled),
+            ServerDeliveryState::Complete
+        );
+        assert_ne!(state(OutboxStatus::Cancelled), ServerDeliveryState::Running);
+        assert_eq!(state(OutboxStatus::Pending), ServerDeliveryState::Queued);
     }
 }
 
