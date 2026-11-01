@@ -984,6 +984,27 @@ mod projection_plan_tests {
     }
 
     #[test]
+    fn naming_states_preserve_agent_projection_hash() {
+        let mut views = Vec::new();
+        for manual in ["", ",\"manualName\":true", ",\"manualName\":false"] {
+            for title in ["", ",\"needsTitle\":true", ",\"needsTitle\":false"] {
+                let raw = format!(
+                    r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0{manual}{title}}}"#
+                );
+                let agent: studio_runtime_store::AgentRecord = serde_json::from_str(&raw).unwrap();
+                views.push(
+                    super::agent_entity_view(&agent.value(), &super::AgentViewContext::default())
+                        .unwrap(),
+                );
+            }
+        }
+        assert_eq!(
+            studio_runtime_store::sha256_hex(&serde_json::to_vec(&views).unwrap()),
+            "cbd2809a85f03688db947643c553aa18779648d68e7da748acc7ced527bf4882"
+        );
+    }
+
+    #[test]
     fn chat_organization_flags_preserve_agent_projection_hash() {
         let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"archived":true,"pinned":true}"#;
         let agent: studio_runtime_store::AgentRecord = serde_json::from_str(raw).unwrap();

@@ -1073,7 +1073,7 @@ mod tests {
                     "model-two"
                 })
             );
-            assert_eq!(draft.needs_title, Some(false));
+            assert_eq!(draft.naming.needs_title(), Some(false));
         }
     }
 

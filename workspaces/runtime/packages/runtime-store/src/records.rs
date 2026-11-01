@@ -330,6 +330,70 @@ pub enum AgentSandbox {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum AgentNaming {
+    #[default]
+    Unspecified,
+    Automatic(Option<bool>),
+    Manual(Option<bool>),
+    TitleOnly(bool),
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentNamingWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    manual_name: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    needs_title: Option<bool>,
+}
+
+impl AgentNaming {
+    fn from_parts(manual: Option<bool>, title: Option<bool>) -> Self {
+        match (manual, title) {
+            (Some(true), title) => Self::Manual(title),
+            (Some(false), title) => Self::Automatic(title),
+            (None, Some(title)) => Self::TitleOnly(title),
+            (None, None) => Self::Unspecified,
+        }
+    }
+
+    fn parts(&self) -> (Option<bool>, Option<bool>) {
+        match self {
+            Self::Unspecified => (None, None),
+            Self::Automatic(title) => (Some(false), *title),
+            Self::Manual(title) => (Some(true), *title),
+            Self::TitleOnly(title) => (None, Some(*title)),
+        }
+    }
+
+    pub fn set_needs_title(&mut self, title: Option<bool>) {
+        *self = Self::from_parts(self.parts().0, title);
+    }
+
+    pub fn needs_title(&self) -> Option<bool> {
+        self.parts().1
+    }
+}
+
+impl Serialize for AgentNaming {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let (manual_name, needs_title) = self.parts();
+        AgentNamingWire {
+            manual_name,
+            needs_title,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentNaming {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = AgentNamingWire::deserialize(deserializer)?;
+        Ok(Self::from_parts(fields.manual_name, fields.needs_title))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRecord {
@@ -378,10 +442,8 @@ pub struct AgentRecord {
     pub fast_mode: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daybreak_enabled: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub needs_title: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub manual_name: Option<bool>,
+    #[serde(flatten)]
+    pub naming: AgentNaming,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_agents_explicit: Option<bool>,
     #[serde(
@@ -909,8 +971,7 @@ impl AgentRecord {
             compactions_observed_only: None,
             fast_mode: None,
             daybreak_enabled: None,
-            needs_title: None,
-            manual_name: None,
+            naming: AgentNaming::default(),
             max_agents_explicit: None,
             max_agents: Default::default(),
             agent_mode_supported: None,
@@ -3007,6 +3068,33 @@ mod tests {
         assert!(serde_json::from_str::<AgentRecord>(raw).is_err());
         let valid = raw.replace(",42", "");
         assert!(serde_json::from_str::<AgentRecord>(&valid).is_ok());
+    }
+
+    #[test]
+    fn agent_naming_preserves_wire_keys_and_presence() {
+        for manual in ["", ",\"manualName\":true", ",\"manualName\":false"] {
+            for title in ["", ",\"needsTitle\":true", ",\"needsTitle\":false"] {
+                let raw = format!(
+                    r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0{manual}{title}}}"#
+                );
+                let agent: AgentRecord = serde_json::from_str(&raw).unwrap();
+                let output = agent.value();
+                for (key, source) in [("manualName", manual), ("needsTitle", title)] {
+                    let expected = (!source.is_empty()).then(|| source.ends_with("true"));
+                    assert_eq!(
+                        output.get(key).and_then(|v| v.as_bool()),
+                        expected,
+                        "{key} in {raw}"
+                    );
+                    assert_eq!(
+                        output.get(key).is_some(),
+                        expected.is_some(),
+                        "{key} in {raw}"
+                    );
+                    assert!(!agent.extra.contains_key(key));
+                }
+            }
+        }
     }
 
     #[test]

@@ -1037,7 +1037,7 @@ async fn copy_branch_history(
         child.profile_id = provider.get("activePermissionProfile").map(studio_runtime_schema::queue_command::Field::<String>::deserialize).transpose()?.unwrap_or_else(|| if current.profile_id.is_missing() { studio_runtime_schema::queue_command::Field::Null } else { current.profile_id.clone() });
         child.thread_id = match &provider["thread"]["id"] { Value::Null => None, Value::String(id) => Some(id.clone()), Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_) => return Err(studio_runtime_store::StoreError::SchemaMismatch("invalid branch thread".into())) };
         child.extra.insert("forkedFrom".into(),json!(source)); child.extra.insert("sourceMessage".into(),json!(selected.id));
-        child.set_status(studio_runtime_store::AgentStatus::Idle); child.auto_wake = Some(true); child.needs_title = Some(false);
+        child.set_status(studio_runtime_store::AgentStatus::Idle); child.auto_wake = Some(true); child.naming.set_needs_title(Some(false));
         child.extra.remove("quickCreate"); child.extra.remove("quickCreateRequest");
         let mut stmt=tx.prepare_cached("SELECT id,record,created FROM runtime_items WHERE agent=?1 AND json_extract(record,'$.afterRestore') IS NULL ORDER BY created,id")?;
         let rows=stmt.query_map([source.as_str()],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,f64>(2)?)))?.collect::<Result<Vec<_>,_>>()?;
