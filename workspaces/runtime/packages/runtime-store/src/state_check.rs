@@ -371,8 +371,8 @@ mod tests {
             .execute_batch("CREATE TABLE runtime_rooms(id, record);")
             .unwrap();
         for (id, raw) in [
-            ("ok", r#"{"id":"old","id":"ok","kind":"room"}"#),
-            ("mismatch", r#"{"id":"other","kind":"room"}"#),
+            ("ok", r#"{"id":"old","id":"ok","kind":"private"}"#),
+            ("mismatch", r#"{"id":"other","kind":"private"}"#),
             ("bad", r#"{"id":"other","kind":false}"#),
             ("json", "{"),
         ] {
@@ -439,7 +439,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("canvas.sqlite3");
         let connection = Connection::open(&path).unwrap();
-        connection.execute_batch("CREATE TABLE runtime_rooms(id TEXT, record TEXT); INSERT INTO runtime_rooms VALUES ('one', '{\"id\":\"one\",\"kind\":\"room\"}'), ('two', '{\"id\":\"other\",\"kind\":\"room\"}');").unwrap();
+        connection.execute_batch("CREATE TABLE runtime_rooms(id TEXT, record TEXT); INSERT INTO runtime_rooms VALUES ('one', '{\"id\":\"one\",\"kind\":\"private\"}'), ('two', '{\"id\":\"other\",\"kind\":\"private\"}');").unwrap();
         drop(connection);
         let before = std::fs::read(&path).unwrap();
         let report = super::check_state_readonly(directory.path()).unwrap();

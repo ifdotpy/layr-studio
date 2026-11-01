@@ -373,6 +373,12 @@ mod delivery_tests {
     use studio_runtime_schema::{DeliveryMoment, delivery::LEGACY_DELIVERY_MOMENTS};
 
     #[test]
+    fn generated_closed_request_rejects_unknown_fields() {
+        let body = json!({"id":"00000000-0000-4000-8000-000000000001", "room":"agent", "text":"hello", "extra":true});
+        assert!(serde_json::from_value::<ManagedMessageBody>(body).is_err());
+    }
+
+    #[test]
     fn managed_message_serde_uses_the_owner_at_ingress() {
         let body =
             json!({"id":"00000000-0000-4000-8000-000000000001", "room":"agent", "text":"hello"});

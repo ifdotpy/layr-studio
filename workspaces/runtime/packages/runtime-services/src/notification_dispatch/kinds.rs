@@ -429,7 +429,7 @@ pub(super) fn put_task(
 pub(super) fn put_checked_task(
     tx: &Transaction<'_>,
     task_record: &TaskRecord,
-    task: &Value,
+    _task: &Value,
 ) -> Result<(), NotificationDispatchError> {
     let migrated: bool = tx
         .query_row_cached(
@@ -466,7 +466,7 @@ pub(super) fn put_checked_task(
         crate::sync_policy::maintain_task_window_after_write(
             tx,
             previous.as_ref(),
-            task,
+            task_record,
             &|_, _, _, _| true,
         )?;
     }

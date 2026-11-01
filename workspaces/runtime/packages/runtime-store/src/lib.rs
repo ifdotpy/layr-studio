@@ -37,6 +37,7 @@ pub mod receipt_schema;
 pub use studio_runtime_schema::raw_object;
 mod records;
 mod repositories;
+mod room_record;
 pub use repositories::multi_server_delivery;
 pub use repositories::process_actions::{
     ProcessActionKind, ProcessActionPhase, ProcessActionRecord,

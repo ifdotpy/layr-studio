@@ -730,12 +730,14 @@ async fn reset_service_holds_lost_response_without_resending() {
         lose_response: lose_response.clone(),
     });
     let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-    let body = json!({
-        "account_key":"default",
-        "account_id":"account-A",
-        "credit_id":"credit-A",
-        "request_id":request_id
-    });
+    let body = studio_runtime_schema::limit_reset_request::ResetRequest {
+        account_key: Some("default".to_owned()),
+        account_id: "account-A".to_owned().try_into().expect("account id"),
+        credit_id: "credit-A".to_owned().try_into().expect("credit id"),
+        request_id: uuid::Uuid::parse_str(&request_id)
+            .expect("request id")
+            .into(),
+    };
     let first_session = session.clone();
     let first_body = body.clone();
     let first_store = reset_store.clone();
