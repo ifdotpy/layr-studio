@@ -1,3 +1,4 @@
+import { AccessClientStatus } from "../generated/api";
 import type { components } from "../generated/api";
 
 // The wire adapter maps the local server's discovery snapshot to this view.
@@ -73,7 +74,7 @@ export function discoverySnapshot(
         status: peer.status,
         reachability: peer.reachability,
         lastSeen: peer.lastSeen ?? null,
-        paired: peer.status === "paired",
+        paired: peer.status === AccessClientStatus.paired,
         publicKey: peer.publicKey,
         generation: JSON.stringify([peer.created, peer.publicKey]),
         replacedBy: peer.replacedBy ?? null,

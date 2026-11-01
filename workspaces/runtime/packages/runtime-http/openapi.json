@@ -882,7 +882,7 @@
             "type": "string"
           },
           "invitation": {
-            "$ref": "#/components/schemas/AccessInvitation"
+            "$ref": "#/components/schemas/AccessInvitationRequest"
           },
           "requestId": {
             "maxLength": 128,
@@ -968,239 +968,239 @@
       },
       "AccessClient": {
         "additionalProperties": false,
+        "description": "Public projection of a stored client. Missing required fields become null.",
         "properties": {
           "alias": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Alias"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "autoPair": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Autopair"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "clientId": {
-            "title": "Clientid",
+            "maxLength": 128,
+            "minLength": 1,
             "type": "string"
           },
           "created": {
-            "title": "Created",
+            "minimum": 0,
             "type": "number"
           },
           "id": {
-            "title": "Id",
+            "maxLength": 128,
+            "minLength": 1,
             "type": "string"
           },
           "kind": {
-            "enum": [
-              "ui",
-              "server"
-            ],
-            "title": "Kind",
-            "type": "string"
+            "$ref": "#/components/schemas/AccessClientKind"
           },
           "label": {
-            "title": "Label",
+            "maxLength": 80,
+            "minLength": 1,
             "type": "string"
           },
           "lastAccess": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "Lastaccess"
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "lastSeen": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "default": null,
-            "title": "Lastseen"
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "origin": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Origin"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "publicKey": {
-            "title": "Publickey",
+            "maxLength": 4096,
             "type": "string"
           },
           "reachability": {
             "anyOf": [
               {
-                "enum": [
-                  "reachable",
-                  "unreachable",
-                  "unknown"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/Reachability"
               },
               {
                 "type": "null"
               }
-            ],
-            "default": null,
-            "title": "Reachability"
+            ]
           },
           "replacedBy": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "description": "The server identity that succeeds this lost identity.",
-            "title": "Replacedby"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "revoked": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "Revoked"
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "serverId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Serverid"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "status": {
-            "enum": [
-              "paired",
-              "revoked",
-              "discovered",
-              "unreachable"
-            ],
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/AccessClientStatus"
           },
           "tailscaleUser": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "description": "The Tailscale owner; null for the previous identity of this server after a historical identity replacement.",
-            "title": "Tailscaleuser"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "id",
           "clientId",
-          "serverId",
-          "label",
           "kind",
-          "origin",
-          "publicKey",
-          "tailscaleUser",
-          "status",
+          "label",
           "created",
+          "publicKey",
+          "status",
+          "serverId",
+          "origin",
+          "tailscaleUser",
           "lastAccess",
           "revoked"
         ],
-        "title": "AccessClient",
         "type": "object"
+      },
+      "AccessClientKind": {
+        "enum": [
+          "ui",
+          "server"
+        ],
+        "type": "string"
+      },
+      "AccessClientStatus": {
+        "enum": [
+          "paired",
+          "revoked",
+          "discovered",
+          "unreachable"
+        ],
+        "type": "string"
       },
       "AccessInvitation": {
         "additionalProperties": false,
         "properties": {
           "expires": {
+            "description": "Expiry in Unix seconds, including fractional seconds.",
             "maximum": 9007199254740991,
             "minimum": 0,
-            "title": "Expires",
-            "type": "integer"
+            "type": "number"
           },
           "inviteId": {
             "maxLength": 128,
             "minLength": 1,
-            "title": "Inviteid",
             "type": "string"
           },
           "label": {
             "maxLength": 80,
             "minLength": 1,
-            "title": "Label",
             "type": "string"
           },
           "origin": {
             "maxLength": 512,
-            "title": "Origin",
             "type": "string"
           },
           "protocol": {
             "const": 1,
             "maximum": 1,
             "minimum": 1,
-            "title": "Protocol",
             "type": "integer"
           },
           "publicKey": {
             "maxLength": 4096,
-            "title": "Publickey",
             "type": "string"
           },
           "serverId": {
             "maxLength": 128,
             "minLength": 1,
-            "title": "Serverid",
             "type": "string"
           },
           "tailscaleUser": {
             "maxLength": 254,
             "minLength": 1,
-            "title": "Tailscaleuser",
             "type": "string"
           },
           "token": {
             "maxLength": 128,
             "minLength": 1,
-            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol",
+          "inviteId",
+          "serverId",
+          "label",
+          "origin",
+          "publicKey",
+          "tailscaleUser",
+          "expires",
+          "token"
+        ],
+        "type": "object"
+      },
+      "AccessInvitationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expires": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "inviteId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/Origin"
+          },
+          "protocol": {
+            "maximum": 1,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "publicKey": {
+            "maxLength": 4096,
+            "type": "string"
+          },
+          "serverId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "tailscaleUser": {
+            "maxLength": 254,
+            "minLength": 1,
+            "type": "string"
+          },
+          "token": {
+            "maxLength": 128,
+            "minLength": 1,
             "type": "string"
           }
         },
@@ -1215,7 +1215,6 @@
           "tailscaleUser",
           "expires"
         ],
-        "title": "AccessInvitation",
         "type": "object"
       },
       "AccessSettings": {
@@ -1226,24 +1225,19 @@
               "type": "string"
             },
             "default": {},
-            "title": "Aliases",
             "type": "object"
           },
           "autoPair": {
-            "title": "Autopair",
             "type": "boolean"
           },
           "autoUpdate": {
             "default": true,
-            "description": "Install a newer build that a paired server runs (docs/peer-updates.md).",
-            "title": "Autoupdate",
             "type": "boolean"
           }
         },
         "required": [
           "autoPair"
         ],
-        "title": "AccessSettings",
         "type": "object"
       },
       "AccessSnapshot": {
@@ -1253,7 +1247,6 @@
             "items": {
               "$ref": "#/components/schemas/AccessClient"
             },
-            "title": "Clients",
             "type": "array"
           },
           "identity": {
@@ -1261,32 +1254,27 @@
           },
           "identityAlerts": {
             "default": [],
-            "description": "Warnings about references to previous server identities.",
             "items": {
               "$ref": "#/components/schemas/IdentityAlert"
             },
-            "title": "Identityalerts",
             "type": "array"
           },
           "invites": {
             "items": {
               "$ref": "#/components/schemas/InviteSummary"
             },
-            "title": "Invites",
             "type": "array"
           },
           "protocol": {
             "const": 1,
             "maximum": 1,
             "minimum": 1,
-            "title": "Protocol",
             "type": "integer"
           },
           "servers": {
             "items": {
-              "$ref": "#/components/schemas/DiscoveredServer"
+              "$ref": "#/components/schemas/AccessClient"
             },
-            "title": "Servers",
             "type": "array"
           },
           "settings": {
@@ -1301,7 +1289,6 @@
           "invites",
           "settings"
         ],
-        "title": "AccessSnapshot",
         "type": "object"
       },
       "Account": {
@@ -25744,188 +25731,7 @@
         "type": "object"
       },
       "DiscoveredServer": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
-        },
-        "description": "Stored discovery record; ``ServerDiscovery.servers`` passes it through.",
-        "properties": {
-          "alias": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Alias"
-          },
-          "autoPair": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Autopair"
-          },
-          "clientId": {
-            "title": "Clientid",
-            "type": "string"
-          },
-          "created": {
-            "title": "Created",
-            "type": "number"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "kind": {
-            "enum": [
-              "ui",
-              "server"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "lastAccess": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "Lastaccess"
-          },
-          "lastSeen": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "default": null,
-            "title": "Lastseen"
-          },
-          "origin": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Origin"
-          },
-          "publicKey": {
-            "title": "Publickey",
-            "type": "string"
-          },
-          "reachability": {
-            "anyOf": [
-              {
-                "enum": [
-                  "reachable",
-                  "unreachable",
-                  "unknown"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Reachability"
-          },
-          "replacedBy": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "description": "The server identity that succeeds this lost identity.",
-            "title": "Replacedby"
-          },
-          "revoked": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "Revoked"
-          },
-          "serverId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Serverid"
-          },
-          "status": {
-            "enum": [
-              "paired",
-              "revoked",
-              "discovered",
-              "unreachable"
-            ],
-            "title": "Status",
-            "type": "string"
-          },
-          "tailscaleUser": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "description": "The Tailscale owner; null for the previous identity of this server after a historical identity replacement.",
-            "title": "Tailscaleuser"
-          }
-        },
-        "required": [
-          "id",
-          "clientId",
-          "serverId",
-          "label",
-          "kind",
-          "origin",
-          "publicKey",
-          "tailscaleUser",
-          "status",
-          "created",
-          "lastAccess",
-          "revoked"
-        ],
-        "title": "DiscoveredServer",
-        "type": "object"
+        "$ref": "#/components/schemas/AccessClient"
       },
       "DiscoveryIdentity": {
         "additionalProperties": false,
@@ -29118,49 +28924,40 @@
       },
       "IdentityAlert": {
         "additionalProperties": false,
-        "description": "A server identity change that leaves live references to the lost identity.",
         "properties": {
           "code": {
-            "enum": [
-              "peer_identity_changed",
-              "local_identity_changed"
-            ],
-            "title": "Code",
-            "type": "string"
+            "$ref": "#/components/schemas/IdentityAlertCode"
           },
           "detail": {
-            "title": "Detail",
             "type": "string"
           },
           "newServerId": {
-            "title": "Newserverid",
             "type": "string"
           },
           "oldServerId": {
-            "title": "Oldserverid",
             "type": "string"
           },
           "origin": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Origin"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "code",
           "oldServerId",
           "newServerId",
-          "origin",
           "detail"
         ],
-        "title": "IdentityAlert",
         "type": "object"
+      },
+      "IdentityAlertCode": {
+        "enum": [
+          "peer_identity_changed",
+          "local_identity_changed"
+        ],
+        "type": "string"
       },
       "IdleCompactionSettings": {
         "additionalProperties": false,
@@ -29297,10 +29094,9 @@
         "additionalProperties": false,
         "properties": {
           "expires": {
-            "maximum": 9007199254740991,
+            "description": "Expiry in Unix seconds, including fractional seconds.",
             "minimum": 0,
-            "title": "Expires",
-            "type": "integer"
+            "type": "number"
           },
           "invitation": {
             "$ref": "#/components/schemas/AccessInvitation"
@@ -29310,7 +29106,6 @@
           "invitation",
           "expires"
         ],
-        "title": "InvitationResponse",
         "type": "object"
       },
       "InviteStatus": {
@@ -29318,44 +29113,34 @@
           "open",
           "used"
         ],
-        "title": "InviteStatus",
         "type": "string"
       },
       "InviteSummary": {
         "additionalProperties": false,
         "properties": {
           "created": {
-            "maximum": 9007199254740991,
+            "description": "Creation time in Unix seconds, including fractional seconds.",
             "minimum": 0,
-            "title": "Created",
             "type": "number"
           },
           "expires": {
-            "maximum": 9007199254740991,
+            "description": "Unix seconds, including fractional seconds.",
             "minimum": 0,
-            "title": "Expires",
             "type": "number"
           },
           "inviteId": {
-            "title": "Inviteid",
             "type": "string"
           },
           "status": {
-            "enum": [
-              "open",
-              "used"
-            ],
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/InviteStatus"
           }
         },
         "required": [
           "inviteId",
-          "expires",
           "created",
+          "expires",
           "status"
         ],
-        "title": "InviteSummary",
         "type": "object"
       },
       "JsonObjectResponse": {
@@ -34727,6 +34512,10 @@
         ],
         "title": "OrganizationBody",
         "type": "object"
+      },
+      "Origin": {
+        "maxLength": 512,
+        "type": "string"
       },
       "PairRequest": {
         "additionalProperties": false,
@@ -40430,6 +40219,10 @@
         "title": "ProviderVersions",
         "type": "object"
       },
+      "PublicAccessClient": {
+        "$ref": "#/components/schemas/AccessClient",
+        "description": "Public projection of a stored client, with missing required fields normalized to null."
+      },
       "PullRequest": {
         "additionalProperties": false,
         "properties": {
@@ -41487,6 +41280,14 @@
       },
       "RateLimitsDataDto": {
         "$ref": "#/components/schemas/UsageLimitsData"
+      },
+      "Reachability": {
+        "enum": [
+          "reachable",
+          "unreachable",
+          "unknown"
+        ],
+        "type": "string"
       },
       "ReadStateBody": {
         "additionalProperties": false,
@@ -47666,38 +47467,25 @@
         "additionalProperties": false,
         "properties": {
           "label": {
-            "title": "Label",
             "type": "string"
           },
           "origin": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Origin"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "publicKey": {
-            "title": "Publickey",
             "type": "string"
           },
           "serverId": {
-            "title": "Serverid",
             "type": "string"
           },
           "tailscaleUser": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Tailscaleuser"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -47707,7 +47495,6 @@
           "publicKey",
           "tailscaleUser"
         ],
-        "title": "ServerIdentity",
         "type": "object"
       },
       "ServerIdentityResponse": {

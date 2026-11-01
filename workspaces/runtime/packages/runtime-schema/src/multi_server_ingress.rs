@@ -26,9 +26,9 @@ type Token = BoundedText<1, TOKEN_MAX_CODEPOINTS>;
 type PairLabel = BoundedText<1, PAIR_LABEL_MAX_CODEPOINTS>;
 type InvitationLabel = BoundedText<1, INVITATION_LABEL_MAX_CODEPOINTS>;
 type CreateInviteLabel = BoundedText<1, CREATE_INVITE_LABEL_MAX_CODEPOINTS>;
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, schemars::JsonSchema)]
 #[serde(transparent)]
-pub struct Origin(String);
+pub struct Origin(#[schemars(length(max = ORIGIN_MAX_CODEPOINTS))] String);
 impl Origin {
     pub fn as_str(&self) -> &str {
         &self.0
@@ -135,8 +135,9 @@ impl Grant {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename = "AccessInvitationRequest")]
 pub struct AccessInvitation {
     pub protocol: Version,
     pub invite_id: InviteId,
@@ -296,6 +297,31 @@ mod tests {
             serde_json::from_str::<super::DevicePairRequest>(&pair.replace("1.0", "1")).is_ok()
         );
         assert!(serde_json::from_str::<super::AutoPairRequest>(&auto.replace("1.0", "1")).is_ok());
+    }
+
+    #[test]
+    fn accept_invite_expiry_schema_matches_ingress() {
+        let doc: serde_json::Value =
+            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let schemas = &doc["components"]["schemas"];
+        assert_eq!(
+            schemas["AcceptInvite"]["properties"]["invitation"]["$ref"],
+            "#/components/schemas/AccessInvitationRequest"
+        );
+        let expiry = &schemas["AccessInvitationRequest"]["properties"]["expires"];
+        for value in [
+            json!(1234),
+            json!(1234.5),
+            json!(-1),
+            json!(9007199254740992_u64),
+        ] {
+            assert_eq!(
+                jsonschema::is_valid(expiry, &value),
+                serde_json::from_slice::<super::Expiry>(&serde_json::to_vec(&value).unwrap())
+                    .is_ok(),
+                "{value}"
+            );
+        }
     }
 
     #[test]
