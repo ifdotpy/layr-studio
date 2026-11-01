@@ -123,6 +123,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             "studio_runtime_schema::agent_entity_nested::WorkspaceCleanupSummaryDto",
         ),
         (
+            "AgentEntityCapacityRetryDto",
+            "studio_runtime_schema::agent_entity_nested_extra::AgentEntityCapacityRetryDto",
+        ),
+        (
+            "AgentEntityUsageResumeDto",
+            "studio_runtime_schema::agent_entity_nested_extra::AgentEntityUsageResumeDto",
+        ),
+        (
+            "CapacityRetryCause",
+            "studio_runtime_schema::continuation_snapshot::CapacityContinuationCause",
+        ),
+        (
             "AgentNativeStatus",
             "studio_runtime_schema::agent_entity_nested::AgentNativeStatus",
         ),

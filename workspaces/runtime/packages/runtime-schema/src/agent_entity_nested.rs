@@ -264,7 +264,7 @@ pub struct AgentActivity {
     pub tools: Field<Vec<ActiveToolDto>>,
 }
 
-fn object(
+pub(crate) fn object(
     value: &mut serde_json::Value,
 ) -> Result<&mut serde_json::Map<String, serde_json::Value>, String> {
     value
@@ -272,7 +272,7 @@ fn object(
         .ok_or_else(|| "agent schema must be an object".into())
 }
 
-fn property<'a>(
+pub(crate) fn property<'a>(
     schema: &'a mut serde_json::Value,
     name: &str,
 ) -> Result<&'a mut serde_json::Value, String> {
@@ -283,13 +283,13 @@ fn property<'a>(
         .ok_or_else(|| format!("missing agent schema property {name}"))
 }
 
-fn title(schema: &mut serde_json::Value, name: &str) -> Result<(), String> {
+pub(crate) fn title(schema: &mut serde_json::Value, name: &str) -> Result<(), String> {
     object(schema)?.insert("title".into(), name.into());
     Ok(())
 }
 
 // Keep the established OpenAPI nullable spelling while retaining schemars bounds.
-fn nullable(
+pub(crate) fn nullable(
     schema: &mut serde_json::Value,
     name: &str,
     label: &str,

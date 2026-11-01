@@ -6,12 +6,17 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Value, json};
 
 /// A nullable wire field whose omission must survive request signature serialization.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Field<T> {
-    #[default]
     Missing,
     Null,
     Value(T),
+}
+
+impl<T> Default for Field<T> {
+    fn default() -> Self {
+        Self::Missing
+    }
 }
 
 impl<T> Field<T> {
