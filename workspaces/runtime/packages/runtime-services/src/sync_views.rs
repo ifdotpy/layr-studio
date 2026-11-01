@@ -720,7 +720,16 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
             )
         }
     };
-    if let Some(summary) = view
+    if let Some(summary) = record.get("accountTransfer").and_then(|value| {
+        serde_json::from_value::<studio_runtime_store::transfer_record::AgentTransferSummary>(
+            value.clone(),
+        )
+        .ok()
+    }) {
+        let dto =
+            studio_runtime_schema::agent_entity_transfer::AccountTransferSummaryDto::from(summary);
+        view.insert("accountTransfer".into(), serde_json::to_value(dto).ok()?);
+    } else if let Some(summary) = view
         .get_mut("accountTransfer")
         .and_then(Value::as_object_mut)
     {
@@ -1230,13 +1239,19 @@ mod projection_plan_tests {
     fn agent_entity_publishes_transfer_actions_from_progress() {
         let lead = json!({"id":"lead","rootId":"lead","epoch":1,"isLead":true,"provider":"codex",
             "accountTransfer":{"id":"move","targetAccountKey":"target","status":"pending",
-                "blocked":[{"id":"lead","reason":"History unavailable"}],"canRetry":true,"canCancel":true,"movingNow":0}});
+                "blocked":[{"id":"lead","reason":"History unavailable","provider":"codex"}],"canRetry":true,"canCancel":true,"movingNow":0}});
         let context = super::AgentViewContext {
             transfer: super::TransferObservation::Cancellable,
             ..Default::default()
         };
         let view = super::agent_entity_view(&lead, &context).unwrap();
         assert_eq!(view["accountTransferProgress"]["kind"], "blocked");
+        assert!(
+            view["accountTransfer"]["blocked"][0]
+                .get("provider")
+                .is_none()
+        );
+        assert!(view["accountTransfer"].get("canCancel").is_none());
         assert_eq!(
             view["accountTransferProgress"]["actions"],
             json!("retry_cancel")

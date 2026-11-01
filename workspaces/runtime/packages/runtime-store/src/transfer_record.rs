@@ -82,20 +82,7 @@ impl TransferPhase {
         )
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TransferStatus {
-    Pending,
-    Completed,
-    Cancelled,
-}
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TransferScope {
-    #[default]
-    Team,
-    Subagents,
-}
+pub use studio_runtime_schema::agent_entity_transfer::{TransferScope, TransferStatus};
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum InterruptOutcome {
@@ -868,25 +855,25 @@ pub struct AgentTransferSummary {
     pub target_account_key: AccountKey,
     pub status: TransferStatus,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub updated: Field<serde_json::Number>,
+    pub updated: Field<f64>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub scope: Field<TransferScope>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub finish_history: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub total: Field<usize>,
+    pub total: Field<studio_runtime_schema::AgentCounter>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub completed: Field<usize>,
+    pub completed: Field<studio_runtime_schema::AgentCounter>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub moved: Field<usize>,
+    pub moved: Field<studio_runtime_schema::AgentCounter>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub native_history_pending: Field<usize>,
+    pub native_history_pending: Field<studio_runtime_schema::AgentCounter>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub moving_now: Field<usize>,
+    pub moving_now: Field<studio_runtime_schema::AgentCounter>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub can_finish_history: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub waiting_count: Field<usize>,
+    pub waiting_count: Field<studio_runtime_schema::AgentCounter>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub needs_attention: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -901,6 +888,58 @@ pub struct AgentTransferSummary {
     pub blocked: Field<Vec<TransferNotice>>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub waiting: Field<String>,
+}
+
+impl From<AgentTransferSummary>
+    for studio_runtime_schema::agent_entity_transfer::AccountTransferSummaryDto
+{
+    fn from(summary: AgentTransferSummary) -> Self {
+        use studio_runtime_schema::agent_entity_transfer::{
+            AccountTransferLeftOnSourceDto, AccountTransferNoticeDto,
+        };
+        fn map<T, U>(field: Field<T>, f: impl FnOnce(T) -> U) -> Field<U> {
+            match field {
+                Field::Missing => Field::Missing,
+                Field::Null => Field::Null,
+                Field::Value(value) => Field::Value(f(value)),
+            }
+        }
+        let notice = |n: TransferNotice| AccountTransferNoticeDto {
+            id: n.id,
+            name: n.name,
+            reason: n.reason,
+        };
+        Self {
+            id: Field::Value(summary.id.as_str().to_owned()),
+            target_account_key: Field::Value(summary.target_account_key.as_str().to_owned()),
+            status: Field::Value(summary.status),
+            updated: summary.updated,
+            scope: summary.scope,
+            finish_history: summary.finish_history,
+            total: summary.total,
+            completed: summary.completed,
+            moved: summary.moved,
+            native_history_pending: summary.native_history_pending,
+            moving_now: summary.moving_now,
+            can_finish_history: summary.can_finish_history,
+            waiting_count: summary.waiting_count,
+            needs_attention: summary.needs_attention,
+            can_retry: summary.can_retry,
+            interrupted: map(summary.interrupted, |v| v.into_iter().map(notice).collect()),
+            blocked: map(summary.blocked, |v| v.into_iter().map(notice).collect()),
+            left_on_source: map(summary.left_on_source, |v| {
+                v.into_iter()
+                    .map(|n| AccountTransferLeftOnSourceDto {
+                        id: n.id,
+                        name: n.name,
+                        reason: n.reason,
+                        provider: n.provider,
+                    })
+                    .collect()
+            }),
+            waiting: summary.waiting,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -1006,6 +1045,27 @@ pub struct LazySourceState {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn public_summary_projects_typed_transfer() {
+        let summary: super::AgentTransferSummary = serde_json::from_value(serde_json::json!({
+            "id":"move", "targetAccountKey":"target", "status":"pending", "total":2,
+            "updated":1, "canCancel":true,
+            "blocked":[{"id":"a","provider":"codex","reason":"busy"}],
+            "leftOnSource":[{"id":"b","provider":"claude"}]
+        }))
+        .unwrap();
+        let dto: studio_runtime_schema::agent_entity_transfer::AccountTransferSummaryDto =
+            summary.into();
+        let actual = serde_json::to_value(dto).unwrap();
+        assert_eq!(actual["total"], 2);
+        assert_eq!(
+            actual["blocked"][0],
+            serde_json::json!({"id":"a","reason":"busy"})
+        );
+        assert_eq!(actual["leftOnSource"][0]["provider"], "claude");
+        assert!(actual.get("canCancel").is_none());
+    }
+
     #[test]
     fn read_receipt_rejects_conflicting_certainty_and_result_shapes() {
         let scope = serde_json::json!({"account":"source","connection":"conn","generation":1});
