@@ -106,6 +106,20 @@ const TYPED_QUERIES: &[(&str, &str)] = &[
     ("GET", "/api/project-locations"),
     ("GET", "/api/processes"),
     ("GET", "/api/processes/action"),
+    ("GET", "/api/limits"),
+    ("GET", "/api/agents/finder-view"),
+    ("GET", "/api/skills"),
+    ("GET", "/api/capabilities"),
+    ("GET", "/api/claude/repair-report"),
+    ("GET", "/api/accounts/claude/login"),
+    ("GET", "/api/analytics"),
+    ("GET", "/api/session-cost"),
+    ("GET", "/api/models"),
+    ("GET", "/api/complaint"),
+    ("GET", "/api/checkpoints"),
+    ("GET", "/api/directories"),
+    ("GET", "/api/costs"),
+    ("GET", "/api/diagnostics/usage-reconciliation"),
 ];
 
 #[derive(Debug, Clone)]
