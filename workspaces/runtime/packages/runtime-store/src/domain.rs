@@ -621,6 +621,10 @@ fn finish_turn(connection: &Connection, turn: &TurnId, outcome: &str) -> StoreRe
 /// A turn ended: its open approvals close, and an answer in delivery becomes
 /// unknown (`approvals::turn_ended`).
 fn close_turn_approvals(connection: &Connection, turn: &str) -> StoreResult<()> {
+    // Databases made before the approvals table has none to close.
+    if !crate::schema::table_exists(connection, approvals::TABLE)? {
+        return Ok(());
+    }
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0.0, |elapsed| elapsed.as_secs_f64());
