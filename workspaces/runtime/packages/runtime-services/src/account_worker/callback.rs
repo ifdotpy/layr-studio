@@ -690,6 +690,7 @@ mod tests {
         let agent = |id: &str| {
             json!({"compactions":0,
                 "id": id, "rootId": id, "epoch": 1, "status": "running", "autoWake": true,
+                "inFlight": true,
                 "provider": studio_runtime_schema::ProviderKind::Codex,
                 "accountKey": "account-a", "threadId": "thread-a", "turnId": "turn-a",
                 "startAttempt": {"connectionGeneration": 7, "connectionId": "connection-a"}
@@ -728,12 +729,13 @@ mod tests {
         assert_eq!(context.agent, "agent-a");
         // A turn that waits for a native card still owns its callbacks.
         store
-            .transaction(|transaction| {
-                transaction.execute(
-                    "UPDATE runtime_agents SET record=json_set(record,'$.status','approval') WHERE id='agent-a'",
-                    [],
-                )?;
-                Ok(())
+            .transaction(move |transaction| {
+                let mut record = agent("agent-a");
+                record["status"] = json!("approval");
+                studio_runtime_store::AgentRepository::put(
+                    transaction,
+                    &studio_runtime_store::AgentRecord::from_value(record)?,
+                )
             })
             .await
             .expect("agent waits for approval");
@@ -835,7 +837,7 @@ mod catalog_wait_tests {
         );
         let agent = json!({"compactions":0,
             "provider": "codex", "id": "agent-a", "rootId": "agent-a", "epoch": 1, "status": "running",
-            "autoWake": true, "accountKey": "account-a", "threadId": "thread-a",
+            "autoWake": true, "inFlight": true, "accountKey": "account-a", "threadId": "thread-a",
             "turnId": "turn-a",
             "startAttempt": {"connectionGeneration": 7, "connectionId": "connection-a"}
         });
