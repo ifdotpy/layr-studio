@@ -4,7 +4,7 @@ use studio_runtime_schema::shared_values::MODEL_CHOICES_PREFERENCE_KEY;
 use crate::event_write::truthy;
 pub use crate::sync_views::{
     AgentViewContext, ComplaintViewContext, RoomViewContext, agent_entity_view, openapi_document,
-    project_entity_view, project_persisted_record,
+    project_persisted_record,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use serde_json::{Map, Value, json};
@@ -495,53 +495,49 @@ pub fn maintain_entity_projections_with_server_id(
                     }
                     continue;
                 }
-                let record = serde_json::from_str::<Value>(raw)?;
-                let projected = match collection {
-                    "project" => {
-                        let prior = transaction.query_row(
-                        "SELECT payload FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=0",
-                        [&id],
-                        |row| row.get::<_, Option<String>>(0),
-                    ).optional()?.flatten();
-                        let prior =
-                            prior.and_then(|payload| serde_json::from_str::<Value>(&payload).ok());
-                        let value = prior.as_ref().and_then(|payload| payload.get("value"));
-                        let readiness = value.and_then(|value| value.get("layrReadiness"));
-                        let readiness_is_ready = readiness.is_some_and(|value| {
-                            value.get("state").and_then(Value::as_str) == Some("ready")
-                        });
-                        let cached_vault = if readiness_is_ready {
-                            vault_snapshot.view(id, &record)?
-                        } else {
-                            None
-                        };
-                        let vault = if readiness_is_ready && !state_dir.is_empty() {
-                            cached_vault.as_ref()
-                        } else {
-                            value.and_then(|value| value.get("vault"))
-                        };
-                        let cached_sync = if readiness_is_ready && !state_dir.is_empty() {
-                            vault_snapshot.sync_view(id, &record)?
-                        } else {
-                            None
-                        };
-                        let sync = if readiness_is_ready && !state_dir.is_empty() {
-                            cached_sync.as_ref()
-                        } else {
-                            value.and_then(|value| value.get("layrSync"))
-                        };
-                        project_entity_view(&record, readiness, sync, vault)
-                    }
-                    _ => unreachable!("the loop lists every directly projected collection"),
+                let record: studio_runtime_schema::project_record::ProjectRecord =
+                    serde_json::from_str(raw)?;
+                let studio_runtime_schema::project_record::ProjectRecord::Live(project) = record
+                else {
+                    retire_if_live(transaction, "project", id, &validate_projection)?;
+                    continue;
                 };
-                if let Some(projected) = projected {
-                    put_projection(
+                let source: Value = serde_json::from_str(raw)?;
+                let prior = transaction.query_row(
+                    "SELECT payload FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=0",
+                    [&id], |row| row.get::<_, Option<String>>(0),
+                ).optional()?.flatten();
+                let prior = prior
+                    .map(|payload| serde_json::from_str::<Value>(&payload))
+                    .transpose()?;
+                let value = prior.as_ref().and_then(|payload| payload.get("value"));
+                let readiness =
+                    project_context::<studio_runtime_schema::project_projection::ProjectReadiness>(
+                        value.and_then(|value| value.get("layrReadiness")),
+                    )?;
+                let ready = matches!(&readiness, studio_runtime_schema::queue_command::Field::Value(context) if context.state == studio_runtime_schema::project_projection::ReadinessState::Ready);
+                let (sync, vault) = if ready && !state_dir.is_empty() {
+                    let cached_sync = vault_snapshot.sync_view(id, &source)?;
+                    let cached_vault = vault_snapshot.view(id, &source)?;
+                    (
+                        project_context(cached_sync.as_ref())?,
+                        project_context(cached_vault.as_ref())?,
+                    )
+                } else {
+                    (
+                        project_context(value.and_then(|value| value.get("layrSync")))?,
+                        project_context(value.and_then(|value| value.get("vault")))?,
+                    )
+                };
+                if let Some(projected) =
+                    crate::project_projection::project_record(*project, readiness, sync, vault)
+                {
+                    SyncDocumentsRepository::put_entity(
                         transaction,
-                        collection,
+                        "project",
                         id,
                         projected,
                         false,
-                        &validate_projection,
                     )?;
                 }
             }
@@ -1536,6 +1532,21 @@ fn project_vault_source(project: &Value) -> Option<&str> {
                 .and_then(Value::as_str)
                 .filter(|id| !id.is_empty())
         })
+}
+
+fn project_context<T: serde::de::DeserializeOwned>(
+    value: Option<&Value>,
+) -> StoreResult<studio_runtime_schema::queue_command::Field<T>> {
+    use studio_runtime_schema::queue_command::Field;
+    match value {
+        None => Ok(Field::Missing),
+        Some(Value::Null) => Ok(Field::Null),
+        Some(value) => {
+            let studio_runtime_schema::json_object::JsonObject(context) =
+                serde::Deserialize::deserialize(value)?;
+            Ok(Field::Value(context))
+        }
+    }
 }
 
 fn put_projection(
@@ -4470,7 +4481,7 @@ mod tests {
                     ProjectsRepository::put_project(transaction, record)?;
                     let mut prior = record.clone();
                     prior["layrReadiness"] = json!({"state":"ready"});
-                    prior["layrSync"] = json!({"state":"synced"});
+                    prior["layrSync"] = json!({"projectId":"old","state":"synced","enabled":true,"conflicts":[],"choices":[],"withAgent":[],"deletes":0});
                     SyncDocumentsRepository::put_entity(
                         transaction,
                         "project",
@@ -4565,8 +4576,8 @@ mod tests {
                 ProjectsRepository::put_project(transaction, &project)?;
                 let mut prior = prior;
                 prior["layrReadiness"] = json!({"state":"ready"});
-                prior["layrSync"] = json!({"state":"ok"});
-                prior["vault"] = json!({"state":"stale"});
+                prior["layrSync"] = json!({"projectId":"old","state":"synced","enabled":true,"conflicts":[],"choices":[],"withAgent":[],"deletes":0});
+                prior["vault"] = json!({"projectId":"old","state":"none"});
                 SyncDocumentsRepository::put_entity(
                     transaction,
                     "project",

@@ -379,7 +379,6 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
         "monitor" => "MonitorEntityDto",
         "request" => "RequestEntityDto",
         "rule" => "RuleEntityDto",
-        "project" => "ProjectEntityDto",
         "peerTeam" => "PeerTeamEntityDto",
         "event" => "EventEntityDto",
         "work" => "WorkEntityDto",
@@ -806,29 +805,6 @@ pub fn project_complaint_record(
     })
 }
 
-/// Build project renderer fields from persisted records and optional live context.
-pub fn project_entity_view(
-    record: &Value,
-    readiness: Option<&Value>,
-    sync: Option<&Value>,
-    vault: Option<&Value>,
-) -> Option<Value> {
-    let mut view = record.as_object()?.clone();
-
-    if let Some(readiness) = readiness.filter(|value| truthy(Some(value))) {
-        view.insert("layrReadiness".to_owned(), readiness.clone());
-        if readiness.get("state").and_then(Value::as_str) == Some("ready") {
-            if let Some(sync) = sync {
-                view.insert("layrSync".to_owned(), sync.clone());
-            }
-            if let Some(vault) = vault {
-                view.insert("vault".to_owned(), vault.clone());
-            }
-        }
-    }
-    project_persisted_record("project", &Value::Object(view))
-}
-
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RetainedWorktreeView<'a> {
@@ -1013,13 +989,6 @@ mod projection_plan_tests {
             let actual: serde_json::Value = serde_json::from_str(&encoded).unwrap();
             assert_eq!(actual["authorName"], expected);
         }
-    }
-
-    #[test]
-    fn project_with_extension_status_is_projected() {
-        let view =
-            super::project_entity_view(&json!({"id": "project", "status": 42}), None, None, None);
-        assert!(view.is_some());
     }
 
     /// The agent view publishes no team budget or token count, also when an

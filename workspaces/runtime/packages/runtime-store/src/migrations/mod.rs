@@ -47,6 +47,7 @@ mod m2026_10_31_work_projection;
 mod m2026_10_31_work_records;
 mod m2026_11_01_annotation_record;
 mod m2026_11_01_plan_record;
+mod m2026_11_01_project_context;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -215,6 +216,20 @@ impl Migration for RegistryMigration {
 // Explicit dependency order: provider leaves precede strict generated columns;
 // columns precede indexes; volatile data moves before its new triggers exist.
 static CATALOG: &[&dyn Migration] = &[
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-project-context",
+            introduced: MigrationDate {
+                year: 2026,
+                month: 11,
+                day: 1,
+            },
+            target: MigrationTarget::Canvas,
+            supported_source: "Derived project contexts with invalid cached fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_project_context::apply(c.transaction),
+    },
     &SqlMigration {
         definition: MigrationDefinition {
             id: "2026-11-01-annotation-record",
