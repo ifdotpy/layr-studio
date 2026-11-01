@@ -786,7 +786,7 @@ mod tests {
                 &studio_runtime_store::agent_columns::fixture_sql("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
                  CREATE TABLE runtime_plans(id TEXT PRIMARY KEY,record TEXT NOT NULL);
                  CREATE TABLE runtime_annotations(id TEXT PRIMARY KEY,record TEXT NOT NULL,rev INTEGER NOT NULL DEFAULT 1);
-                 CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+                 CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
                  CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL);
                  CREATE TABLE runtime_event_meta(id TEXT PRIMARY KEY,record TEXT NOT NULL);
                  CREATE TABLE runtime_access_clients(id TEXT PRIMARY KEY,record TEXT NOT NULL);

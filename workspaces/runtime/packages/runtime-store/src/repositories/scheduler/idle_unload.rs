@@ -285,7 +285,7 @@ mod tests {
                 "CREATE TABLE runtime_events(id TEXT PRIMARY KEY, agent TEXT, kind TEXT, text TEXT,
                    status TEXT, created REAL, epoch INTEGER, turn_id TEXT, error TEXT);
                  CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL, monitor_status TEXT);
-                 CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL);
+                 CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
                  CREATE TABLE runtime_account_transfers(id TEXT PRIMARY KEY, record TEXT NOT NULL);",
             )
             .expect("schema creates");
