@@ -1405,7 +1405,17 @@ async fn a_paired_window_reaches_the_ordinary_api_with_signed_requests() {
         .find(|(event, _)| event == "resources")
         .expect("resources")
         .1["resourceVersions"][0];
-    assert_eq!(entry["replyKind"], "snapshot", "{entry}");
+    assert_eq!(
+        *entry,
+        serde_json::json!({
+            "resource": {"kind": "state"},
+            "revision": cursor["seq"],
+            "cursor": cursor,
+            "replyKind": "delta",
+            "entityChanges": {"after": cursor["seq"], "through": cursor["seq"], "documents": []},
+        }),
+        "a local owner resumes the same workspace cursor without persisting a cache"
+    );
 
     // A forged signature and a revoked window reach no route.
     let mut forged = signed_api_request(
