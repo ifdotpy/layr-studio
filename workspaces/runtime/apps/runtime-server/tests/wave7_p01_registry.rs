@@ -3526,7 +3526,8 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
         )
         .unwrap();
         std::fs::set_permissions(&node_wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let child = tokio::process::Command::new(std::env::current_exe().unwrap())
+        let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
+        command
             .args([
                 "--exact",
                 "wave7_p01_registry::rust_direct_claude_launch_runs_the_scripted_bridge_turn",
@@ -3544,9 +3545,16 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
             .env("CLAUDE_CONFIG_DIR", &config)
             .env("HOME", &home)
             .env_remove("CODEX_AGENTS_SUPERVISOR_MODE")
-            .kill_on_drop(true)
-            .output()
+            .kill_on_drop(true);
+        let child = tokio::time::timeout(std::time::Duration::from_secs(75), command.output())
             .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "the scripted Claude child hung; sdk-log={:?}; node-stderr={:?}",
+                    std::fs::read_to_string(&loader_log).unwrap_or_default(),
+                    std::fs::read_to_string(&node_log).unwrap_or_default()
+                )
+            })
             .unwrap();
         assert!(
             child.status.success(),
@@ -3599,26 +3607,31 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
         None,
     )
     .with_account_driver(accounts.clone());
-    let runtime = start_host(
-        &mut state,
-        fixture.store.clone(),
-        accounts.clone(),
-        None,
-        test_registry_config(),
+    let runtime = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        start_host(
+            &mut state,
+            fixture.store.clone(),
+            accounts.clone(),
+            None,
+            test_registry_config(),
+        ),
     )
     .await
+    .expect("the host started within 30 s")
     .unwrap();
     let app = studio_runtime_http::router(state.clone()).unwrap();
     let mut changes = state.sync_changes_handle().subscribe();
     let message_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-    assert_eq!(
+    let posted = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
         app.clone()
-            .oneshot(direct_message_post(&agent_id, &message_id, "split-stream"))
-            .await
-            .unwrap()
-            .status(),
-        200
-    );
+            .oneshot(direct_message_post(&agent_id, &message_id, "split-stream")),
+    )
+    .await
+    .expect("the message post answered within 30 s")
+    .unwrap();
+    assert_eq!(posted.status(), 200);
     let completed = tokio::time::timeout(std::time::Duration::from_secs(60), async {
         loop {
             let raw = fixture
