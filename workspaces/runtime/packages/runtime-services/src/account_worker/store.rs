@@ -3090,6 +3090,48 @@ mod effect_obligation_tests {
     }
 
     #[test]
+    fn journal_resumes_after_the_supervisor_ack_of_a_new_generation() {
+        let mut db = rusqlite::Connection::open_in_memory().expect("database");
+        studio_runtime_store::receipt_schema::create(&db).expect("schema");
+        db.execute("INSERT INTO runtime_account_state VALUES('account',8,7,'connection',0,0,'null',NULL,NULL)", []).expect("account");
+        let tx = db.transaction().expect("transaction");
+        for (generation, cursor, ready) in [(6, 90, true), (7, 91, true), (7, 93, true)] {
+            let row = OutboxRow {
+                id: journal_operation("account", generation, cursor),
+                kind: OutboxKind::JournalEntry,
+                owner_kind: OwnerKind::Account,
+                owner_id: "account".into(),
+                request_id: None,
+                signature: cursor.to_string(),
+                status: OutboxStatus::Committed,
+                account: Some("account".into()),
+                stream_id: Some("account".into()),
+                generation: Some(generation as i64),
+                ordinal: Some(cursor as i64),
+                next_at: None,
+                payload: JournalSettlement {
+                    cursor,
+                    digest: cursor.to_string(),
+                    ready,
+                    committed: ready,
+                    notification: None,
+                },
+                created: 1,
+            };
+            Outbox::put(&tx, &row).expect("journal");
+        }
+        compact(&tx, "account", 7).expect("compact");
+        assert_eq!(checkpoint(&tx, "account", 7).expect("ack"), 0);
+        seed_ack(&tx, "account", 7, 89).expect("supervisor ack");
+        compact(&tx, "account", 7).expect("compact");
+        assert_eq!(
+            checkpoint(&tx, "account", 7).expect("ack"),
+            91,
+            "the stream resumes after the supervisor ACK; a gap still holds"
+        );
+    }
+
+    #[test]
     fn mixed_generation_journal_compacts_only_the_contiguous_ready_prefix() {
         let mut db = rusqlite::Connection::open_in_memory().expect("database");
         studio_runtime_store::receipt_schema::create(&db).expect("schema");
@@ -3234,6 +3276,22 @@ fn current_stream_generation(
         return Err(invalid(scope));
     }
     Ok(generation)
+}
+
+/// A new generation's ACK starts at 0, but the supervisor stream keeps its cursors
+/// and resumes after what it acknowledged. Raise the ACK to that cursor so
+/// compaction can reach the entries after it.
+pub(super) fn seed_ack(
+    tx: &studio_runtime_store::Transaction<'_>,
+    journal_scope: &str,
+    generation: u64,
+    acknowledged: u64,
+) -> Result<(), WorkerError> {
+    if acknowledged > checkpoint(tx, journal_scope, generation)? {
+        set_checkpoint(tx, journal_scope, generation, acknowledged)?;
+        super::retained::storage::checkpoint_covered(tx, journal_scope, generation, acknowledged)?;
+    }
+    Ok(())
 }
 
 fn set_checkpoint(
