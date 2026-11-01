@@ -215,6 +215,24 @@ fn request_replay_is_bound_to_lead_destination_and_scope() {
     assert!(!saved.replay("fresh", "a", "target", "team").expect("new"));
 }
 #[test]
+fn selection_rejects_account_published_as_unavailable() {
+    let agent = json!({"compactions":0,"provider":"codex","id":"lead","rootId":"lead","epoch":0,"status":"idle","isLead":true,"accountKey":"source","cwd":"/project"});
+    let snapshot =
+        studio_runtime_services::account_selection::SelectionSnapshot::read(&agent.to_string())
+            .unwrap();
+    assert!(
+        snapshot
+            .decide(
+                "target",
+                Some(&json!({"provider":"codex","status":"error"})),
+                "/project",
+                true
+            )
+            .is_err()
+    );
+}
+
+#[test]
 fn selection_decision_keeps_resume_for_atomic_store_cancellation() {
     let agent = json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"lead","rootId":"lead","epoch":0,"status":"idle","isLead":true,"accountKey":"source","cwd":"/project","usageResume":{"status":"scheduled"}});
     let snapshot =
@@ -223,7 +241,7 @@ fn selection_decision_keeps_resume_for_atomic_store_cancellation() {
     let selected = snapshot
         .decide(
             "target",
-            Some(&json!({"provider":"codex"})),
+            Some(&json!({"provider":"codex","status":"ready"})),
             "/project",
             true,
         )

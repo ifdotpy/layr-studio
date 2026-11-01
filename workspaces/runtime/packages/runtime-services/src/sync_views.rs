@@ -432,7 +432,10 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
 }
 
 #[derive(Clone, Debug, Default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct AgentViewContext {
+    pub account_destinations: Vec<studio_runtime_schema::account_destination::AccountDestination>,
+    pub transfer_can_cancel: bool,
     pub project_server_id: Option<String>,
     pub launcher_alive: bool,
     pub empty_lead: bool,
@@ -441,6 +444,17 @@ pub struct AgentViewContext {
     pub latest_work_result_file: Option<String>,
     pub command_progress: Vec<studio_runtime_schema::agent_progress::AgentCommandProgress>,
     pub stall: Option<studio_runtime_schema::agent_progress::AgentStall>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountChangeAgent {
+    #[serde(default)]
+    is_lead: Option<bool>,
+    #[serde(default)]
+    thread_id: Option<String>,
+    #[serde(default)]
+    in_flight: Option<bool>,
 }
 
 /// Minimal displayable record for an agent whose stored schema failed. Keep
@@ -575,6 +589,70 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
     view.insert("id".to_owned(), Value::String(id.to_owned()));
     view.insert("kind".to_owned(), Value::String("agent".to_owned()));
     view.insert("source".to_owned(), Value::String("managed".to_owned()));
+    let progress = crate::account_transfer::progress_view(
+        record.get("accountTransfer"),
+        context.transfer_can_cancel,
+    )
+    .ok()?;
+    if let Some(summary) = view
+        .get_mut("accountTransfer")
+        .and_then(Value::as_object_mut)
+    {
+        summary.remove("canCancel");
+    }
+    let source = <AccountChangeAgent as serde::Deserialize>::deserialize(record).ok()?;
+    if source.is_lead == Some(true) {
+        let destinations = context
+            .account_destinations
+            .iter()
+            .cloned()
+            .map(|mut destination| {
+                if crate::account_transfer_driver::account_is_excluded(
+                    record.get("excludedAccountKeys"),
+                    destination.account_key.as_str(),
+                ) {
+                    destination.eligibility =
+                        studio_runtime_schema::agent_progress::AccountEligibility::Unavailable {
+                            reason: "This account is disabled for this chat".into(),
+                        };
+                }
+                destination
+            })
+            .collect::<Vec<_>>();
+        view.insert(
+            "accountDestinations".into(),
+            serde::Serialize::serialize(&destinations, serde_json::value::Serializer).ok()?,
+        );
+    }
+    let account_change = if source.is_lead != Some(true) {
+        studio_runtime_schema::agent_progress::AccountChange::Unavailable {
+            reason: "Choose the lead chat to change its account".into(),
+        }
+    } else if matches!(
+        progress,
+        studio_runtime_schema::agent_progress::AccountTransferProgress::Waiting { .. }
+            | studio_runtime_schema::agent_progress::AccountTransferProgress::Moving { .. }
+            | studio_runtime_schema::agent_progress::AccountTransferProgress::Blocked { .. }
+    ) {
+        studio_runtime_schema::agent_progress::AccountChange::Unavailable {
+            reason: "Finish or cancel the current transfer first".into(),
+        }
+    } else if context.empty_lead
+        && source.thread_id.as_deref().is_none_or(str::is_empty)
+        && source.in_flight != Some(true)
+    {
+        studio_runtime_schema::agent_progress::AccountChange::Select
+    } else {
+        studio_runtime_schema::agent_progress::AccountChange::Transfer
+    };
+    view.insert(
+        "accountChange".into(),
+        serde::Serialize::serialize(&account_change, serde_json::value::Serializer).ok()?,
+    );
+    view.insert(
+        "accountTransferProgress".into(),
+        serde::Serialize::serialize(&progress, serde_json::value::Serializer).ok()?,
+    );
     let block = native_thread_block(record);
     let can_send = block.is_none()
         && !truthy(record.get("movedTo"))
@@ -857,6 +935,55 @@ mod projection_plan_tests {
     }
 
     #[test]
+    fn destination_eligibility_includes_chat_exclusions() {
+        let lead = json!({"id":"lead","rootId":"lead","epoch":1,"isLead":true,
+            "provider":"codex","excludedAccountKeys":["blocked"]});
+        let context = super::AgentViewContext {
+            account_destinations: serde_json::from_str(
+                r#"[
+                {"accountKey":"blocked","eligibility":{"kind":"available"}},
+                {"accountKey":"other","eligibility":{"kind":"available"}}
+            ]"#,
+            )
+            .unwrap(),
+            ..Default::default()
+        };
+        let view = super::agent_entity_view(&lead, &context).unwrap();
+        assert_eq!(
+            view["accountDestinations"][0]["eligibility"]["kind"],
+            "unavailable"
+        );
+        assert_eq!(
+            view["accountDestinations"][1]["eligibility"]["kind"],
+            "available"
+        );
+    }
+
+    #[test]
+    fn agent_entity_publishes_account_change_mode() {
+        let lead = json!({"id":"lead","rootId":"lead","epoch":1,"isLead":true,"provider":"codex"});
+        let mut context = super::AgentViewContext {
+            empty_lead: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            super::agent_entity_view(&lead, &context).unwrap()["accountChange"],
+            json!({"kind":"select"})
+        );
+        context.empty_lead = false;
+        assert_eq!(
+            super::agent_entity_view(&lead, &context).unwrap()["accountChange"],
+            json!({"kind":"transfer"})
+        );
+        let worker =
+            json!({"id":"worker","rootId":"lead","epoch":1,"isLead":false,"provider":"codex"});
+        assert_eq!(
+            super::agent_entity_view(&worker, &context).unwrap()["accountChange"]["kind"],
+            "unavailable"
+        );
+    }
+
+    #[test]
     fn complaint_projection_preserves_public_fields() {
         let context = super::ComplaintViewContext::default();
         for recipient in ["user", "lead"] {
@@ -873,6 +1000,39 @@ mod projection_plan_tests {
                 actual,
                 json!({"id":"c","leadId":"lead","leadName":"lead","author":"user","authorName":"You","title":"hello","recipient":recipient,"version":1,"status":"open","created":1.0,"updated":1.0,"readAt":null,"needsUserResponse":recipient == "user"})
             );
+        }
+    }
+
+    #[test]
+    fn account_change_rejects_non_boolean_lead_identity() {
+        let malformed = json!({"compactions":0,"id":"lead","rootId":"lead","epoch":1,
+            "status":"idle","accountKey":"default","isLead":"yes","provider":"codex"});
+        let context = super::AgentViewContext {
+            empty_lead: true,
+            ..Default::default()
+        };
+        assert!(super::agent_entity_view(&malformed, &context).is_none());
+    }
+
+    #[test]
+    fn agent_entity_publishes_transfer_actions_from_progress() {
+        let lead = json!({"id":"lead","rootId":"lead","epoch":1,"isLead":true,"provider":"codex",
+            "accountTransfer":{"id":"move","targetAccountKey":"target","status":"pending",
+                "blocked":[{"id":"lead","reason":"History unavailable"}],"canRetry":true,"canCancel":true,"movingNow":0}});
+        let context = super::AgentViewContext {
+            transfer_can_cancel: true,
+            ..Default::default()
+        };
+        let view = super::agent_entity_view(&lead, &context).unwrap();
+        assert_eq!(view["accountTransferProgress"]["kind"], "blocked");
+        assert_eq!(
+            view["accountTransferProgress"]["actions"],
+            json!("retry_cancel")
+        );
+        for collection in ["agentSummary", "agentDetail"] {
+            let projected = project_persisted_record(collection, &view).unwrap();
+            assert_eq!(projected["accountTransferProgress"]["kind"], "blocked");
+            assert_eq!(projected["accountChange"]["kind"], "unavailable");
         }
     }
 

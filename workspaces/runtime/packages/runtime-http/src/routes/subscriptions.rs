@@ -771,7 +771,7 @@ mod tests {
             tx.execute("INSERT INTO runtime_agents(id,record) VALUES('lead',?1)", [json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"lead","rootId":"lead","isLead":true,"epoch":1,"status":"idle","name":"Lead","threadId":"thread"}).to_string()])?;
             tx.execute("INSERT INTO runtime_rooms(id,record) VALUES('room',?1)", [json!({"id":"room","kind":"broadcast","rootId":"lead","members":["lead"],"name":"Team"}).to_string()])?;
             for i in 0..40 {
-                tx.execute("INSERT INTO runtime_chat_messages(id,room,sender,text,created,deliveries) VALUES(?1,'room','lead',?2,?3,'{}')", rusqlite::params![format!("message-{i}"), "x".repeat(10_000), i])?;
+                tx.execute("INSERT INTO runtime_chat_messages(id,room,sender,text,created,deliveries) VALUES(?1,'room','lead',?2,?3,'{}')", rusqlite::params![format!("message-{i}"), "\\".repeat(SYNC_STREAM_EVENT_MAX_BYTES * 3 / 160), i])?;
             }
             Ok::<_, StoreError>(())
         }).await.expect("room fixture");
@@ -786,26 +786,58 @@ mod tests {
         );
         let resource =
             serde_json::from_value(json!({"kind":"room","roomId":"room"})).expect("room resource");
+        let initial =
+            super::super::messages::room_snapshot(state.clone(), "room".into(), None, None, 40)
+                .await
+                .expect("untrimmed room snapshot");
+        let initial = serde_json::to_value(initial).expect("initial value");
+        let initial_count = initial["messages"]
+            .as_array()
+            .expect("initial messages")
+            .len();
         let value = view_value(state.clone(), resource, None)
             .await
             .expect("room tail");
         let room = &value["room"];
         let messages = room["messages"].as_array().expect("messages");
-        assert_eq!(messages.len(), 10);
+        assert!(!messages.is_empty() && messages.len() < initial_count);
         assert_eq!(room["nextBefore"], messages[0]["seq"]);
-        let before = room["nextBefore"].as_i64().expect("history boundary");
-        let history =
-            super::super::messages::room_snapshot(state, "room".into(), Some(before), None, 40)
-                .await
-                .expect("history");
-        let history = serde_json::to_value(history).expect("history value");
-        assert_eq!(
-            history["messages"]
-                .as_array()
-                .expect("history messages")
-                .len(),
-            30
-        );
+        let tail_ids: Vec<String> = messages
+            .iter()
+            .map(|v| v["id"].as_str().expect("id").to_owned())
+            .collect();
+        let mut all_ids = tail_ids.clone();
+        let mut cursor = room["nextBefore"].as_i64();
+        while let Some(before) = cursor {
+            let history = super::super::messages::room_snapshot(
+                state.clone(),
+                "room".into(),
+                Some(before),
+                None,
+                40,
+            )
+            .await
+            .expect("history");
+            let history = serde_json::to_value(history).expect("history value");
+            let rows = history["messages"].as_array().expect("history messages");
+            assert!(
+                rows.iter()
+                    .all(|message| message["seq"].as_i64().is_some_and(|seq| seq < before))
+            );
+            all_ids.extend(
+                rows.iter()
+                    .map(|v| v["id"].as_str().expect("id").to_owned()),
+            );
+            cursor = history["nextBefore"].as_i64();
+        }
+        all_ids.sort();
+        let mut expected: Vec<String> = (0..40).map(|i| format!("message-{i}")).collect();
+        expected.sort();
+        assert_eq!(all_ids, expected);
+        let expected_tail: Vec<String> = (40 - tail_ids.len()..40)
+            .map(|i| format!("message-{i}"))
+            .collect();
+        assert_eq!(tail_ids, expected_tail);
         assert!(
             serde_json::to_vec(room).expect("serialized tail").len()
                 <= SYNC_STREAM_EVENT_MAX_BYTES / 2

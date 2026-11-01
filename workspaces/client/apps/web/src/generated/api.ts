@@ -2811,6 +2811,7 @@ export interface components {
        * @default null
        */
       duplicateOf?: null | string | undefined;
+      eligibility?: components["schemas"]["AccountEligibility"] | undefined;
       /**
        * Email
        * @default null
@@ -2854,6 +2855,21 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /** @description Account changes available to this chat. */
+    AccountChange:
+      | {
+          /** @constant */
+          kind: "select";
+        }
+      | {
+          /** @constant */
+          kind: "transfer";
+        }
+      | {
+          /** @constant */
+          kind: "unavailable";
+          reason: string;
+        };
     /** AccountCostData */
     AccountCostData: {
       /**
@@ -2987,11 +3003,26 @@ export interface components {
       /** Stale */
       stale: boolean;
     };
+    AccountDestination: {
+      accountKey: string;
+      eligibility: components["schemas"]["AccountEligibility"];
+    };
     /**
      * AccountDiscoverRequest
      * @description The legacy discover operation accepts an empty JSON object or no body.
      */
     AccountDiscoverRequest: Record<string, never>;
+    /** @description Whether an account can be selected for a new turn. */
+    AccountEligibility:
+      | {
+          /** @constant */
+          kind: "available";
+        }
+      | {
+          /** @constant */
+          kind: "unavailable";
+          reason: string;
+        };
     /**
      * AccountGroupRequest
      * @description Set one account's group, or clear it with null. Repeating a request sets the same value.
@@ -3306,6 +3337,10 @@ export interface components {
       | "error"
       | "changed"
       | "duplicate";
+    /** @enum {string} */
+    AccountTransferAction: "retry" | "cancel";
+    /** @enum {string} */
+    AccountTransferActions: "none" | "retry" | "cancel" | "retry_cancel";
     /** AccountTransferBlockedDto */
     AccountTransferBlockedDto: {
       /** Id */
@@ -3409,6 +3444,46 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    AccountTransferProgress:
+      | {
+          /** @constant */
+          kind: "none";
+        }
+      | {
+          actions: components["schemas"]["WaitingTransferActions"];
+          id: string;
+          /** @constant */
+          kind: "waiting";
+          reason: string;
+          targetAccountKey: string;
+        }
+      | {
+          actions: components["schemas"]["MovingTransferActions"];
+          id: string;
+          /** @constant */
+          kind: "moving";
+          targetAccountKey: string;
+        }
+      | {
+          actions: components["schemas"]["AccountTransferActions"];
+          id: string;
+          /** @constant */
+          kind: "blocked";
+          reason: string;
+          targetAccountKey: string;
+        }
+      | {
+          id: string;
+          /** @constant */
+          kind: "completed";
+          targetAccountKey: string;
+        }
+      | {
+          id: string;
+          /** @constant */
+          kind: "cancelled";
+          targetAccountKey: string;
+        };
     /**
      * AccountTransferScope
      * @enum {string}
@@ -3772,12 +3847,19 @@ export interface components {
      * @description Open chat fields. Merge with the current agentSummary by id; summaries own shared list fields.
      */
     AgentDetailEntityDto: {
+      accountChange?: components["schemas"]["AccountChange"] | undefined;
+      accountDestinations?:
+        | components["schemas"]["AccountDestination"][]
+        | undefined;
       accountTransfer?:
         | components["schemas"]["AccountTransferSummaryDto"]
         | null
         | undefined;
       /** Accounttransferid */
       accountTransferId?: null | string | undefined;
+      accountTransferProgress?:
+        | components["schemas"]["AccountTransferProgress"]
+        | undefined;
       activity?: components["schemas"]["AgentActivity"] | null | undefined;
       agentMode?: components["schemas"]["AgentMode"] | null | undefined;
       /** Agentmoderevision */
@@ -4043,6 +4125,10 @@ export interface components {
     };
     /** AgentEntityDto */
     AgentEntityDto: {
+      accountChange?: components["schemas"]["AccountChange"] | undefined;
+      accountDestinations?:
+        | components["schemas"]["AccountDestination"][]
+        | undefined;
       /** Accountkey */
       accountKey?: null | string | undefined;
       accountTransfer?:
@@ -4051,6 +4137,9 @@ export interface components {
         | undefined;
       /** Accounttransferid */
       accountTransferId?: null | string | undefined;
+      accountTransferProgress?:
+        | components["schemas"]["AccountTransferProgress"]
+        | undefined;
       activity?: components["schemas"]["AgentActivity"] | null | undefined;
       agentMode?: components["schemas"]["AgentMode"] | null | undefined;
       /** Agentmoderevision */
@@ -5664,6 +5753,10 @@ export interface components {
      * @description Agent entity response that also accepts the HTTP sync envelope.
      */
     AgentResponse: {
+      accountChange?: components["schemas"]["AccountChange"] | undefined;
+      accountDestinations?:
+        | components["schemas"]["AccountDestination"][]
+        | undefined;
       /**
        * Accountkey
        * @default null
@@ -5679,6 +5772,9 @@ export interface components {
        * @default null
        */
       accountTransferId?: null | string | undefined;
+      accountTransferProgress?:
+        | components["schemas"]["AccountTransferProgress"]
+        | undefined;
       /** @default null */
       activity?: components["schemas"]["AgentActivity"] | null | undefined;
       /** @default null */
@@ -6301,8 +6397,15 @@ export interface components {
      * @description Chat list identity, ordering, operational attention and durable read state. OpenAPI owns the exact summary field set; runtime projections filter through this schema.
      */
     AgentSummaryEntityDto: {
+      accountChange?: components["schemas"]["AccountChange"] | undefined;
+      accountDestinations?:
+        | components["schemas"]["AccountDestination"][]
+        | undefined;
       /** Accountkey */
       accountKey?: null | string | undefined;
+      accountTransferProgress?:
+        | components["schemas"]["AccountTransferProgress"]
+        | undefined;
       /** Archived */
       archived?: boolean | null | undefined;
       /** Autowake */
@@ -10932,6 +11035,8 @@ export interface components {
     CommandSendBody: {
       /** @default [] */
       assets?: string[] | undefined;
+      /** @default false */
+      asTextFile?: boolean | undefined;
       delivery?: components["schemas"]["DeliveryMomentInput"] | undefined;
       text: string;
     };
@@ -15228,6 +15333,11 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /**
+     * @description A moving transfer cannot be cancelled or retried.
+     * @enum {string}
+     */
+    MovingTransferActions: "none";
     /** MultiServerResource */
     MultiServerResource: {
       /**
@@ -25738,16 +25848,6 @@ export interface components {
        * @default null
        */
       needsAttention?: boolean | null | undefined;
-      /**
-       * Requests
-       * @default null
-       */
-      requests?:
-        | {
-            [key: string]: components["schemas"]["TransferRequestReceipt"];
-          }
-        | null
-        | undefined;
       scope: components["schemas"]["TransferScope"];
       status: components["schemas"]["TransferStatus"];
       /** Targetaccountkey */
@@ -26935,6 +27035,11 @@ export interface components {
      * @enum {string}
      */
     VoiceTransport: "native";
+    /**
+     * @description A waiting transfer may only be cancelled.
+     * @enum {string}
+     */
+    WaitingTransferActions: "none" | "cancel";
     /** WalCheckpoint */
     WalCheckpoint: {
       /** Busy */
@@ -38638,6 +38743,20 @@ export const AccountStatus = {
   duplicate: "duplicate",
 } as const;
 export type AccountStatus = components["schemas"]["AccountStatus"];
+export const AccountTransferAction = {
+  retry: "retry",
+  cancel: "cancel",
+} as const;
+export type AccountTransferAction =
+  components["schemas"]["AccountTransferAction"];
+export const AccountTransferActions = {
+  none: "none",
+  retry: "retry",
+  cancel: "cancel",
+  retry_cancel: "retry_cancel",
+} as const;
+export type AccountTransferActions =
+  components["schemas"]["AccountTransferActions"];
 export const AccountTransferScope = {
   team: "team",
   subagents: "subagents",
@@ -39003,6 +39122,9 @@ export const MonitorState = {
   lost: "lost",
 } as const;
 export type MonitorState = components["schemas"]["MonitorState"];
+export const MovingTransferActions = { none: "none" } as const;
+export type MovingTransferActions =
+  components["schemas"]["MovingTransferActions"];
 export const NativeAccountState = {
   waiting: "waiting",
   updating: "updating",
@@ -39528,6 +39650,12 @@ export const VoiceSpeechState = {
 export type VoiceSpeechState = components["schemas"]["VoiceSpeechState"];
 export const VoiceTransport = { native: "native" } as const;
 export type VoiceTransport = components["schemas"]["VoiceTransport"];
+export const WaitingTransferActions = {
+  none: "none",
+  cancel: "cancel",
+} as const;
+export type WaitingTransferActions =
+  components["schemas"]["WaitingTransferActions"];
 export const WhoisStatus = {
   pending: "pending",
   verified: "verified",

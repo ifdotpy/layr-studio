@@ -53,6 +53,7 @@ pub const TASK_SUBMISSION_MAX_FILES: usize = 500;
 pub const TASK_SUBMISSION_PATH_MAX_CODEPOINTS: usize = 4096;
 /// Largest managed user message, in Unicode code points (independent of UTF-8 bytes).
 pub const MAX_MANAGED_MESSAGE_CODEPOINTS: usize = 32000;
+pub use studio_client_domain::drafts::MAX_DRAFT_TEXT_CODEPOINTS;
 /// Display label of `MAX_USER_ATTACHMENT_BYTES`.
 pub const USER_ATTACHMENT_LIMIT_LABEL: &str = "20 MiB";
 /// Largest project secret value, in UTF-8 bytes.
@@ -84,8 +85,11 @@ pub const SYNC_BATCH_LIMIT: i64 = 100;
 pub use studio_client_domain::sync_entity::SYNC_ENTITY_PAGE_LIMIT;
 /// Maximum records in a complete state stream interval, in documents.
 pub const SYNC_ENTITY_STREAM_MAX_DOCUMENTS: i64 = 512;
-/// Maximum complete resources SSE event, including event/id/data lines, in UTF-8 bytes.
-pub const SYNC_STREAM_EVENT_MAX_BYTES: usize = 262144;
+/// Maximum complete resources SSE event in UTF-8 bytes. Each draft code point
+/// needs at most fourteen bytes after two JSON escaping layers; reserve 16 KiB for
+/// the resource and SSE envelope, then round up to the next power of two.
+pub const SYNC_STREAM_EVENT_MAX_BYTES: usize =
+    (MAX_DRAFT_TEXT_CODEPOINTS * 14 + 16 * 1024).next_power_of_two();
 /// Maximum retained terminal output per stream snapshot and renderer cache, in Unicode scalars.
 pub const SYNC_TERMINAL_STREAM_MAX_CHARS: usize = 16_384;
 /// Maximum transfer identity length, in Unicode code points.

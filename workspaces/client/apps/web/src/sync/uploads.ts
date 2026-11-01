@@ -151,7 +151,6 @@ export function createUploads(
     await finishUpload(id);
   }
   async function finishUpload(id: string) {
-    cancelled.add(id);
     rows.delete(id);
     contents.delete(id);
     uploadsChanged();

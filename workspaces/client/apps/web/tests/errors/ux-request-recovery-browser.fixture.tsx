@@ -130,11 +130,11 @@ let body =
   ) : (
     <AccountTransferStatus
       transfer={{
-        status: "pending",
-        moved: 1,
-        total: 1,
-        waitingCount: 0,
-        nativeHistoryPending: 1,
+        kind: "waiting",
+        id: "fixture-transfer",
+        targetAccountKey: "ready",
+        reason: "Waiting for the next turn",
+        actions: "none",
       }}
       targetLabel="Ready account"
       onAction={() => {}}

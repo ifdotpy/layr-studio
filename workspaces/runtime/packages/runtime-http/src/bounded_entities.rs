@@ -280,7 +280,7 @@ where
     Ok(sender)
 }
 
-async fn accounts(
+pub(crate) async fn accounts(
     state: &HttpState,
 ) -> Result<studio_runtime_services::account_policy::AccountsSnapshot, StoreError> {
     let driver = state.account_driver.clone();
@@ -469,16 +469,43 @@ async fn publish_accounts(state: &HttpState) -> Result<(), StoreError> {
     // Only this allowlisted DTO reaches sync_entities/RxDB. Login receipts,
     // URLs, device codes and credentials stay in the transient auth owner.
     let value = accounts_summary(snapshot);
-    replace(
-        state.store.as_ref().ok_or(StoreError::ReadTaskFailed)?,
-        "accounts",
-        vec![("current".into(), value)],
-    )
-    .await
+    state.store.as_ref().ok_or(StoreError::ReadTaskFailed)?
+        .transaction_with(move |tx| {
+            let payload = json!({"collection":"accounts","id":"current","value":value});
+            if !studio_runtime_schema::validate_sync_entity_payload_strict("accounts", "current", false, &payload)
+                .map_err(StoreError::SchemaValidation)? {
+                return Err(StoreError::InvalidSyncObject { scope: "accounts".into(), id: "current".into() });
+            }
+            let changed = SyncDocumentsRepository::put_entity(tx, "accounts", "current", value, false)?;
+            let seeded: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM sync_entity_meta WHERE key='account_destinations_projection_v1')", [], |row| row.get(0))?;
+            if changed || !seeded {
+                let leads = {
+                    let mut statement = tx.prepare("SELECT id FROM runtime_agents WHERE json_valid(record) AND json_extract(record, '$.isLead') = 1")?;
+                    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+                    rows.collect::<rusqlite::Result<BTreeSet<_>>>()?
+                };
+                let changes = studio_runtime_services::sync_policy::EntityChanges { agents: leads, ..Default::default() };
+                let server_id = RuntimeStore::transaction_local_server_id(tx)?;
+                studio_runtime_services::sync_policy::publish_entity_changes(tx, &changes, server_id.as_deref(), &|_, _, _, _| true)?;
+                tx.execute("INSERT OR IGNORE INTO sync_entity_meta(key,value) VALUES('account_destinations_projection_v1','1')", [])?;
+            }
+            Ok(())
+        }).await
 }
 
 fn accounts_summary(snapshot: studio_runtime_services::account_policy::AccountsSnapshot) -> Value {
-    json!({"accounts":snapshot.accounts,"archivedAccounts":snapshot.archived_accounts,"defaultAccountKey":snapshot.default_account_key,"defaultAccountGroups":snapshot.default_account_groups,"supportsDelete":true,"supportsDisconnect":true})
+    let rows = |accounts: Vec<studio_runtime_services::account_policy::PublicAccount>| {
+        accounts
+            .into_iter()
+            .map(|account| {
+                let eligibility = account.eligibility();
+                let mut row = json!(account);
+                row["eligibility"] = json!(eligibility);
+                row
+            })
+            .collect::<Vec<_>>()
+    };
+    json!({"accounts":rows(snapshot.accounts),"archivedAccounts":rows(snapshot.archived_accounts),"defaultAccountKey":snapshot.default_account_key,"defaultAccountGroups":snapshot.default_account_groups,"supportsDelete":true,"supportsDisconnect":true})
 }
 
 /// A scanner snapshot includes internal refresh metadata beside the public cost.
@@ -2228,8 +2255,93 @@ mod tests {
         .expect("accounts published");
         let value = entity(&state, "accounts", "current");
         assert_eq!(value["accounts"][0]["label"], "Source account");
+        assert_eq!(value["accounts"][0]["eligibility"]["kind"], "unavailable");
         assert!(value.get("logins").is_none());
         assert!(!value.to_string().contains("private-only"));
+    }
+
+    #[tokio::test]
+    async fn unchanged_accounts_republish_legacy_lead_projection_once() {
+        let (_root, state) = state().await;
+        publish_accounts(&state).await.unwrap();
+        let store = state.store.as_ref().unwrap().clone();
+        store.transaction(|tx| {
+            let value = json!({"compactions":0,"id":"lead","rootId":"lead","epoch":1,
+                "status":"idle","accountKey":"default","isLead":true,"provider":"codex"});
+            let agent = studio_runtime_store::AgentRecord::from_value(value.clone())?;
+            studio_runtime_store::AgentRepository::put(tx, &agent)?;
+            studio_runtime_services::agents_create::publish_agent(tx, &value)?;
+            tx.execute("UPDATE sync_entities SET payload=json_remove(payload,'$.value.accountDestinations') WHERE collection IN ('agent','agentSummary','agentDetail') AND id='lead'", [])?;
+            tx.execute("DELETE FROM sync_entity_meta WHERE key='account_destinations_projection_v1'", [])?;
+            Ok(())
+        }).await.unwrap();
+        assert!(
+            entity(&state, "agentDetail", "lead")
+                .get("accountDestinations")
+                .is_none()
+        );
+        publish_accounts(&state).await.unwrap();
+        assert!(entity(&state, "agentDetail", "lead")["accountDestinations"].is_array());
+        let sequence =
+            || {
+                store.test_reader().unwrap().query_row(
+            "SELECT seq FROM sync_entities WHERE collection='agentDetail' AND id='lead'", [],
+            |row| row.get::<_, i64>(0),
+        ).unwrap()
+            };
+        let after_seed = sequence();
+        publish_accounts(&state).await.unwrap();
+        assert_eq!(sequence(), after_seed);
+    }
+
+    #[tokio::test]
+    async fn account_change_republishes_lead_destinations_without_touching_worker() {
+        let (_root, mut state) = state().await;
+        publish_accounts(&state).await.unwrap();
+        let store = state.store.as_ref().unwrap().clone();
+        store
+            .transaction(|tx| {
+                for (id, lead) in [("lead", true), ("worker", false)] {
+                    let value = json!({"compactions":0,"id":id,"rootId":"lead","epoch":1,
+                    "status":"idle","accountKey":"default","isLead":lead,"provider":"codex"});
+                    let agent = studio_runtime_store::AgentRecord::from_value(value.clone())?;
+                    studio_runtime_store::AgentRepository::put(tx, &agent)?;
+                    studio_runtime_services::agents_create::publish_agent(tx, &value)?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            entity(&state, "agentDetail", "lead")["accountDestinations"][0]["eligibility"]["kind"],
+            "unavailable"
+        );
+        let worker_before = entity(&state, "agentDetail", "worker");
+        let worker_seq =
+            || {
+                store.test_reader().unwrap().query_row(
+            "SELECT seq FROM sync_entities WHERE collection='agentDetail' AND id='worker'", [],
+            |row| row.get::<_, i64>(0),
+        ).unwrap()
+            };
+        let sequence_before = worker_seq();
+        let registry = json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,
+            "defaultAccountKey":"default","accounts":{"default":{"id":"default","home":"/fixture",
+            "label":"Source account","source":"fixture","provider":"codex","status":"ready"}},"logins":{}});
+        state.account_policy = Some(Arc::new(
+            studio_runtime_services::account_policy::AccountPolicyState::from_startup(
+                Some(registry.to_string().as_bytes()),
+                [],
+            )
+            .unwrap(),
+        ));
+        publish_accounts(&state).await.unwrap();
+        assert_eq!(
+            entity(&state, "agentDetail", "lead")["accountDestinations"][0]["eligibility"]["kind"],
+            "available"
+        );
+        assert_eq!(entity(&state, "agentDetail", "worker"), worker_before);
+        assert_eq!(worker_seq(), sequence_before);
     }
 
     #[tokio::test]

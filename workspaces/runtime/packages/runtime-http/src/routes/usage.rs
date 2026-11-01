@@ -81,11 +81,42 @@ async fn costs(
     Ok(Json(snapshot.public))
 }
 
+/// Maximum usage agent identity length in Unicode code points.
+const USAGE_AGENT_MAX_CHARS: usize = 200;
+/// Maximum capacity retry identity length in Unicode code points.
+const CAPACITY_RETRY_MAX_CHARS: usize = 200;
+/// Maximum usage resume identity length in Unicode code points.
+const USAGE_RESUME_MAX_CHARS: usize = 200;
+type UsageAgent = studio_runtime_schema::bounded_text::BoundedText<1, USAGE_AGENT_MAX_CHARS>;
+type CapacityRetryId =
+    studio_runtime_schema::bounded_text::BoundedText<1, CAPACITY_RETRY_MAX_CHARS>;
+type UsageResumeId = studio_runtime_schema::bounded_text::BoundedText<1, USAGE_RESUME_MAX_CHARS>;
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CostInterestRequest {
+    account_key: studio_runtime_schema::bounded_text::BoundedText<1, { usize::MAX }>,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CapacityRetryRequest {
+    id: UsageAgent,
+    retry_id: CapacityRetryId,
+    action: crate::generated::RetryAction,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UsageResumeRequest {
+    id: UsageAgent,
+    resume_id: UsageResumeId,
+    enabled: bool,
+}
+
 async fn cost_interest(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<crate::generated::CostInterestRequest>,
+    ApiJson(body): ApiJson<CostInterestRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    crate::bounded_entities::request_cost_refresh(&state, &body.account_key)
+    crate::bounded_entities::request_cost_refresh(&state, body.account_key.as_str())
         .await
         .map_err(|error| match error {
             studio_runtime_store::StoreError::RecordContract("unknown cost account") => {
@@ -154,11 +185,11 @@ fn reset_error(error: studio_runtime_services::limit_reset::ResetError) -> ApiEr
 
 async fn capacity_retry(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<crate::generated::CapacityRetryRequest>,
+    ApiJson(body): ApiJson<CapacityRetryRequest>,
 ) -> Result<Json<crate::generated::RetryResponse>, ApiError> {
     if body.action == crate::generated::RetryAction::Retry {
-        let agent_id = body.id;
-        let retry_id = body.retry_id;
+        let agent_id = body.id.as_str().to_owned();
+        let retry_id = body.retry_id.as_str().to_owned();
         let store = state.store.clone().ok_or_else(ApiError::internal)?;
         let now = current_time()?;
         let retry_for_read = retry_id.clone();
@@ -201,8 +232,8 @@ async fn capacity_retry(
         }
         return Ok(Json(result.0));
     }
-    let agent_id = body.id;
-    let retry_id = body.retry_id;
+    let agent_id = body.id.as_str().to_owned();
+    let retry_id = body.retry_id.as_str().to_owned();
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let now = current_time()?;
     let result = {
@@ -229,10 +260,10 @@ async fn capacity_retry(
 
 async fn usage_resume(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<crate::generated::UsageResumeRequest>,
+    ApiJson(body): ApiJson<UsageResumeRequest>,
 ) -> Result<Json<Option<crate::generated::UsageResumeResponse>>, ApiError> {
-    let agent_id = body.id;
-    let resume_id = body.resume_id;
+    let agent_id = body.id.as_str().to_owned();
+    let resume_id = body.resume_id.as_str().to_owned();
     let enabled = body.enabled;
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let now = current_time()?;
@@ -645,5 +676,55 @@ mod typed_query_contract_tests {
         assert!(decode("account_key=x"));
         assert!(!decode("extra=x"));
         assert!(!decode("extra=x"));
+    }
+}
+#[cfg(test)]
+mod ingress_bounds_tests {
+    use super::{CapacityRetryRequest, CostInterestRequest, UsageResumeRequest};
+
+    #[test]
+    fn usage_body_bounds_are_enforced() {
+        assert!(serde_json::from_str::<CostInterestRequest>(r#"{"account_key":"a"}"#).is_ok());
+        assert!(serde_json::from_str::<CostInterestRequest>(r#"{"account_key":""}"#).is_err());
+        assert!(
+            serde_json::from_str::<CapacityRetryRequest>(
+                r#"{"id":"","retry_id":"r","action":"retry"}"#
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<UsageResumeRequest>(
+                r#"{"id":"a","resume_id":"","enabled":true}"#
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<CostInterestRequest>(r#"{"account_key":"a","extra":1}"#)
+                .is_err()
+        );
+        assert!(
+            serde_json::from_str::<CapacityRetryRequest>(
+                r#"{"id":"a","retry_id":"r","action":"retry"}"#
+            )
+            .is_ok()
+        );
+        assert!(
+            serde_json::from_str::<CapacityRetryRequest>(
+                r#"{"id":"a","retry_id":"r","action":"retry","extra":1}"#
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<UsageResumeRequest>(
+                r#"{"id":"a","resume_id":"r","enabled":true}"#
+            )
+            .is_ok()
+        );
+        assert!(
+            serde_json::from_str::<UsageResumeRequest>(
+                r#"{"id":"a","resume_id":"r","enabled":true,"extra":1}"#
+            )
+            .is_err()
+        );
     }
 }

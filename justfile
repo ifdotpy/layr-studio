@@ -78,11 +78,34 @@ check-affected base *args:
 
 [doc("Run the fast nextest profile and JS/guest witnesses in five bounded concurrent lanes.")]
 test-fast:
-    @node {{quote(facade)}} test-fast
+    @just _test-gate test-fast
 
 [doc("Run the broad nextest profile and JS/guest checks with one renderer build and browser smoke.")]
 test-comprehensive:
-    @node {{quote(facade)}} test-comprehensive
+    @just _test-gate test-comprehensive
+
+[private]
+_test-gate gate:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Gate scratch free space, KiB: measured peak 1005908 KiB plus 1091244 KiB margin.
+    required_kib=2097152
+    scratch="$(mktemp -d "${TMPDIR:-/tmp}/studio-gate.XXXXXX")"
+    trap 'chmod -R u+rwX "$scratch"; rm -rf -- "$scratch"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    if [ "$(uname -s)" = Linux ] && [ "$(stat -f -c %T "$scratch")" = tmpfs ]; then
+      free_kib="$(df -Pk "$scratch" | awk 'NR == 2 {print $4}')"
+      if [ "$free_kib" -lt "$required_kib" ]; then
+        echo "Gate scratch has ${free_kib} KiB free; ${required_kib} KiB required" >&2
+        exit 1
+      fi
+    else
+      echo "Gate scratch $scratch is not memory-backed" >&2
+    fi
+    export TMPDIR="$scratch"
+    echo "Gate scratch: $TMPDIR"
+    node {{quote(facade)}} {{quote(gate)}}
 
 [doc("Run the comprehensive checks excluding browser smoke (legacy CI composition).")]
 test-fast-rest:

@@ -159,7 +159,13 @@ impl Command {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SendBody {
-    pub text: BoundedText<0, { crate::shared_values::MAX_MANAGED_MESSAGE_CODEPOINTS }>,
+    pub text: BoundedText<0, { studio_client_domain::drafts::MAX_DRAFT_TEXT_CODEPOINTS }>,
+    #[serde(
+        default,
+        rename = "asTextFile",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub as_text_file: bool,
     #[serde(default)]
     pub assets: BoundedVec<String, COMMAND_SEND_MAX_ASSETS>,
     #[serde(

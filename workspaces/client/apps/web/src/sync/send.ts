@@ -139,6 +139,7 @@ export function createOutbox(options: {
         return;
       const expected = {
         text: value.body.text,
+        ...(value.body.asTextFile ? { asTextFile: true } : {}),
         ...(value.body.assets ? { assets: value.body.assets } : {}),
         ...(value.body.delivery ? { delivery: value.body.delivery } : {}),
       };
@@ -260,6 +261,7 @@ export function createOutbox(options: {
         body.room,
         {
           text: body.text,
+          ...(body.asTextFile ? { asTextFile: true } : {}),
           ...(body.assets ? { assets: body.assets } : {}),
           ...(body.delivery ? { delivery: body.delivery } : {}),
         },

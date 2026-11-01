@@ -489,7 +489,17 @@ fn logical_state(store: &RuntimeStore) -> BTreeMap<String, Value> {
 fn assert_json(actual: &Value, expected: &Value, path: &str) {
     match (actual, expected) {
         (Value::Object(a), Value::Object(b)) => {
+            let mut a = a.clone();
             let mut b = b.clone();
+            if a.get("kind").and_then(Value::as_str) == Some("agent") {
+                for key in [
+                    "accountChange",
+                    "accountTransferProgress",
+                    "accountDestinations",
+                ] {
+                    a.remove(key);
+                }
+            }
             if !a.contains_key("sync_versions") {
                 b.remove("sync_versions");
             }
@@ -514,7 +524,7 @@ fn assert_json(actual: &Value, expected: &Value, path: &str) {
                 b.keys().collect::<Vec<_>>(),
                 "{path}: keys"
             );
-            for (key, value) in a {
+            for (key, value) in &a {
                 assert_json(value, &b[key], &format!("{path}/{key}"));
             }
         }

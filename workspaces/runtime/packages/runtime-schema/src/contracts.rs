@@ -196,6 +196,10 @@ fn shared_values_ts() -> String {
                 values::MAX_MANAGED_MESSAGE_CODEPOINTS.to_string(),
             ),
             (
+                "MAX_DRAFT_TEXT_CODEPOINTS",
+                studio_client_domain::drafts::MAX_DRAFT_TEXT_CODEPOINTS.to_string(),
+            ),
+            (
                 "USER_ATTACHMENT_LIMIT_LABEL",
                 json_string(values::USER_ATTACHMENT_LIMIT_LABEL),
             ),
@@ -1202,6 +1206,8 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     check_backend_kind_parity(root)?;
     check_provider_sql_parity(root)?;
     let mut openapi = read_json(root, OPENAPI_PATH)?;
+    openapi["components"]["schemas"]["ResourceEntityTransferEvent"]["properties"]["data"]["maxLength"] =
+        values::SYNC_STREAM_EVENT_MAX_BYTES.into();
     crate::workspace_modes::update_openapi(&mut openapi);
     // The checked limits ingress schema also owns HTTP, SSE and bridge leaves.
     let mut limits: Value = serde_json::from_str(
@@ -1286,9 +1292,31 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             serde_json::json!({"$ref":"#/components/schemas/RecipientDelivery"});
     }
     openapi["components"]["schemas"]["AdmittedRequest"] = admitted_request_schema();
+    openapi["components"]["schemas"]["CommandSendBody"]["properties"]["text"]["maxLength"] =
+        studio_client_domain::drafts::MAX_DRAFT_TEXT_CODEPOINTS.into();
+    openapi["components"]["schemas"]["CommandSendBody"]["properties"]["asTextFile"] =
+        serde_json::json!({"type":"boolean","default":false});
     openapi["components"]["schemas"]["ServerOperationRequest"]["properties"]["action"] = serde_json::json!({"type":"string","enum":crate::persistence::ServerOperationKind::VARIANTS});
     crate::task_command::apply_api_contract(&mut openapi);
     crate::task_gate::apply_api_contract(&mut openapi);
+    for (name, schema) in crate::agent_progress::account_change_schemas() {
+        openapi["components"]["schemas"][name] = schema;
+    }
+    for name in [
+        "AgentResponse",
+        "AgentEntityDto",
+        "AgentSummaryEntityDto",
+        "AgentDetailEntityDto",
+    ] {
+        openapi["components"]["schemas"][name]["properties"]["accountChange"] =
+            serde_json::json!({"$ref":"#/components/schemas/AccountChange"});
+        openapi["components"]["schemas"][name]["properties"]["accountTransferProgress"] =
+            serde_json::json!({"$ref":"#/components/schemas/AccountTransferProgress"});
+        openapi["components"]["schemas"][name]["properties"]["accountDestinations"] = serde_json::json!({"type":"array","items":{"$ref":"#/components/schemas/AccountDestination"}});
+    }
+    openapi["components"]["schemas"]["AgentEntityDto"]["properties"]["accountTransfer"] = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/AccountTransferSummaryDto"},{"type":"null"}]});
+    openapi["components"]["schemas"]["Account"]["properties"]["eligibility"] =
+        serde_json::json!({"$ref":"#/components/schemas/AccountEligibility"});
     for (name, schema) in crate::studio_errors::schemas()? {
         openapi["components"]["schemas"][name] = schema;
     }

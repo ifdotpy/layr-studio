@@ -11,6 +11,102 @@ use studio_runtime_store::{AgentRecord, AgentRepository, StoreError};
 const CHAT: &str = "published-chat";
 
 #[tokio::test]
+async fn startup_recovers_agent_with_legacy_accounts_projection() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = studio_runtime_store::RuntimeStore::open(Some(dir.path()))
+        .await
+        .unwrap();
+    store.transaction(|tx| {
+        tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('accounts','current',1,'old',?1,0)",
+            [json!({"collection":"accounts","id":"current","value":{"accounts":[{"id":"default"}]}}).to_string()])?;
+        tx.execute("DELETE FROM sync_entity_meta WHERE key='migration_catalog'", [])?;
+        Ok(())
+    }).await.unwrap();
+    drop(store);
+    let store = studio_runtime_store::RuntimeStore::open(Some(dir.path()))
+        .await
+        .unwrap();
+    super::install(&store).await.unwrap();
+    seed_chat(&store, chat(json!({"status":"starting"}))).await;
+    store
+        .transaction(|tx| {
+            tx.execute(
+                "UPDATE runtime_agents SET record=json_set(record,'$.status','idle') WHERE id=?1",
+                [CHAT],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("startup recovery must publish the recovered agent");
+    assert_eq!(chat_view(&store, CHAT)["status"], "idle");
+}
+
+#[tokio::test]
+async fn interrupted_child_turn_end_republishes_lead_cancel_eligibility() {
+    let (_dir, store) = store().await;
+    let op = json!({"id":"move","leadId":CHAT,"targetAccountKey":"target",
+        "status":"pending","created":1.0,"members":{
+            "published-chat":{"phase":"completed","sourceAccountKey":"default","lazy":false},
+            "child":{"phase":"blocked","sourceAccountKey":"default","lazy":false,
+                "interruptOutcome":"acknowledged","interruptSubmittedAt":1.0,"error":"Waiting"}}});
+    store
+        .transaction(move |tx| {
+            let child =
+                AgentRecord::from_value(json!({"compactions":0,"id":"child","rootId":CHAT,
+            "parentId":CHAT,"epoch":1,"status":"running","inFlight":true,
+            "isLead":false,"provider":"codex","accountKey":"default"}))?;
+            AgentRepository::put(tx, &child)?;
+            studio_runtime_store::AccountTransferRepository::put(tx, "move", &op.to_string())
+        })
+        .await
+        .unwrap();
+    seed_chat(
+        &store,
+        chat(json!({"accountTransferId":"move","accountTransfer":{
+        "id":"move","targetAccountKey":"target","status":"pending","movingNow":0,
+        "canRetry":true,"blocked":[{"id":"child","reason":"Waiting"}]}})),
+    )
+    .await;
+    assert_eq!(
+        chat_view(&store, CHAT)["accountTransferProgress"]["actions"],
+        "retry"
+    );
+    store.transaction(|tx| {
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.inFlight',json('false')) WHERE id='child'", [])?;
+        Ok(())
+    }).await.unwrap();
+    assert_eq!(chat_view(&store, "child")["inFlight"], false);
+    assert_eq!(
+        chat_view(&store, CHAT)["accountTransferProgress"]["actions"],
+        "retry_cancel"
+    );
+}
+
+#[tokio::test]
+async fn legacy_blocked_summary_offers_cancel_when_operation_allows_it() {
+    let (_dir, store) = store().await;
+    let op = json!({"id":"move","leadId":CHAT,"targetAccountKey":"target",
+        "status":"pending","created":1.0,"members":{"published-chat":{
+            "phase":"blocked","sourceAccountKey":"default","lazy":true,
+            "error":"History unavailable"}}});
+    store
+        .transaction(move |tx| {
+            studio_runtime_store::AccountTransferRepository::put(tx, "move", &op.to_string())
+        })
+        .await
+        .unwrap();
+    seed_chat(
+        &store,
+        chat(json!({"accountTransferId":"move","accountTransfer":{
+        "id":"move","targetAccountKey":"target","status":"pending","movingNow":0,
+        "canRetry":true,"blocked":[{"id":CHAT,"reason":"History unavailable"}]}})),
+    )
+    .await;
+    let view = chat_view(&store, CHAT);
+    assert_eq!(view["accountTransferProgress"]["actions"], "retry_cancel");
+}
+
+#[tokio::test]
 async fn work_metadata_skips_history_and_explicit_publication_is_not_repeated() {
     use crate::sync_policy::{self, work_publication_probe};
     let (_dir, store) = store().await;

@@ -26,11 +26,12 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-it("reports an incomplete snapshot visibly", () => {
+it("reports an incomplete snapshot visibly while other drafts continue to sync", async () => {
   vi.useFakeTimers();
   let receive: ((version?: ResourceVersion) => void) | undefined;
+  const post = vi.fn(async () => []);
   const useDrafts = createBrowserDrafts({
-    api: { syncPost: vi.fn(async () => []) },
+    api: { syncPost: post },
     resources: {
       watchResourceChanges: (_ref, listener) => {
         receive = listener;
@@ -39,7 +40,7 @@ it("reports an incomplete snapshot visibly", () => {
       replaceStream: vi.fn(),
     },
   });
-  useDrafts();
+  const drafts = useDrafts();
   const cleanup = mocks.effects
     .map((effect) => effect())
     .filter((value) => typeof value === "function");
@@ -47,8 +48,28 @@ it("reports an incomplete snapshot visibly", () => {
     epoch: "e",
     revision: 3,
     reason: "initial",
-    draftSnapshot: { complete: false, documents: [] },
+    draftSnapshot: {
+      complete: false,
+      documents: [
+        {
+          id: "phone:good",
+          seq: 1,
+          _deleted: false,
+          payload: JSON.stringify({
+            id: "phone:good",
+            device: "phone",
+            session: "good",
+            text: "kept",
+            updated: 1,
+          }),
+        },
+      ],
+    },
   });
+  expect(drafts.getDraft("good")).toBe("kept");
+  drafts.setDrafts({ good: "edited" });
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(post).toHaveBeenCalled();
   expect(
     mocks.setters.some((setter) =>
       setter.mock.calls.some(

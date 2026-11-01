@@ -100,6 +100,7 @@ impl crate::managed_host_tools::SendPort for ProductionPorts {
                         .try_into()
                         .map_err(|_| crate::managed_host_tools::Error::Invalid("Invalid target"))?,
                     body: studio_runtime_schema::command::SendBody {
+                        as_text_file: false,
                         text: text.to_owned().try_into().map_err(|_| {
                             crate::managed_host_tools::Error::Invalid("Invalid message text")
                         })?,

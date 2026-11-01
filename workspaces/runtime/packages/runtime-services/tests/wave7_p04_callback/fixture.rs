@@ -558,6 +558,16 @@ fn insert_row(
 pub(crate) fn normalize_agent_nulls(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(fields) => {
+            // These projection fields postdate the frozen Python oracle.
+            if fields.get("kind").and_then(serde_json::Value::as_str) == Some("agent") {
+                for key in [
+                    "accountChange",
+                    "accountTransferProgress",
+                    "accountDestinations",
+                ] {
+                    fields.remove(key);
+                }
+            }
             if fields.contains_key("rootId") && fields.contains_key("epoch") {
                 for field in studio_runtime_store::agent_volatile::AGENT_VOLATILE_FIELDS
                     .into_iter()
