@@ -1,26 +1,6 @@
 {
   "from_value": [
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:2"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:3"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:4"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/account_worker/callback.rs",
       "fingerprint": "ee40c0b3955a00b1c72314f8bfd405afb2ecae120f0e813e627e6b94304b9cea:0"
     },
@@ -2604,10 +2584,6 @@
   "switch-default": [],
   "to_value": [
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_executor.rs",
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
     },
@@ -2874,18 +2850,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-services/src/studio_errors.rs",
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:3"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/sync_views.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/sync_views.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/sync_views.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:2"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/terminal_driver.rs",
