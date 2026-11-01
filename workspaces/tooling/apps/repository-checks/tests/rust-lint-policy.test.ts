@@ -372,14 +372,44 @@ test("build scripts print relative rerun-if-changed paths", () => {
       if (!existsSync(output)) continue;
       const mtime = statSync(output).mtimeMs;
       const pkg = name.replace(/-[0-9a-f]+$/, "");
-      if (mtime > (newest.get(pkg)?.mtime ?? -1)) newest.set(pkg, { name, mtime });
+      if (mtime > (newest.get(pkg)?.mtime ?? -1))
+        newest.set(pkg, { name, mtime });
     }
   for (const { name } of newest.values())
     assert.deepEqual(
-      absoluteRerunPaths(readFileSync(path.join(builds, name, "output"), "utf8")).filter((line) =>
+      absoluteRerunPaths(
+        readFileSync(path.join(builds, name, "output"), "utf8"),
+      ).filter((line) =>
         line.slice("cargo:rerun-if-changed=".length).startsWith(root),
       ),
       [],
       name,
     );
+  // Generated modules must not name absolute paths: a warm cache reuses them in other lines.
+  const absoluteModule =
+    /#\[path\s*=\s*"(\/|[A-Za-z]:[\\/])|include(_str|_bytes)?!\(\s*"(\/|[A-Za-z]:[\\/])/;
+  const walkOut = (directory: string): string[] =>
+    readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) return walkOut(full);
+      return entry.name.endsWith(".rs") &&
+        readFileSync(full, "utf8")
+          .split("\n")
+          .some((line) => absoluteModule.test(line))
+        ? [path.relative(builds, full)]
+        : [];
+    });
+  for (const { name } of newest.values()) {
+    const out = path.join(builds, name, "out");
+    assert.deepEqual(existsSync(out) ? walkOut(out) : [], [], name);
+  }
+  assert.ok(
+    absoluteModule.test('#[path = "/x/y.rs"] pub mod t;'),
+    "known bad module rejected",
+  );
+  assert.ok(
+    !absoluteModule.test(
+      'pub mod t { include!(concat!(env!("OUT_DIR"), "/t.rs")); }',
+    ),
+  );
 });
