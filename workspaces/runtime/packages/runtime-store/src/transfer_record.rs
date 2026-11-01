@@ -1056,14 +1056,34 @@ mod tests {
         .unwrap();
         let dto: studio_runtime_schema::agent_entity_transfer::AccountTransferSummaryDto =
             summary.into();
-        let actual = serde_json::to_value(dto).unwrap();
-        assert_eq!(actual["total"], 2);
+        assert_eq!(dto.total.value().expect("total").as_i64(), 2);
+        let blocked = dto
+            .blocked
+            .value()
+            .expect("blocked notices")
+            .first()
+            .expect("blocked notice");
+        assert_eq!(blocked.id, "a");
+        assert_eq!(blocked.reason.value().map(String::as_str), Some("busy"));
+        let left = dto
+            .left_on_source
+            .value()
+            .expect("left notices")
+            .first()
+            .expect("left notice");
+        assert_eq!(left.id, "b");
         assert_eq!(
-            actual["blocked"][0],
-            serde_json::json!({"id":"a","reason":"busy"})
+            left.provider.value(),
+            Some(&studio_runtime_schema::ProviderKind::Claude)
         );
-        assert_eq!(actual["leftOnSource"][0]["provider"], "claude");
-        assert!(actual.get("canCancel").is_none());
+        let actual = serde_json::to_value(dto).unwrap();
+        assert!(
+            actual
+                .as_object()
+                .expect("summary object")
+                .get("canCancel")
+                .is_none()
+        );
     }
 
     #[test]

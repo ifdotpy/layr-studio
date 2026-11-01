@@ -1052,7 +1052,7 @@ mod projection_plan_tests {
         invalid_agent_view, openapi_document, project_persisted_record,
         schema_projection_properties,
     };
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     #[test]
     fn task_entity_payload_hash_is_stable_after_projection_move() {
@@ -1245,21 +1245,40 @@ mod projection_plan_tests {
             ..Default::default()
         };
         let view = super::agent_entity_view(&lead, &context).unwrap();
-        assert_eq!(view["accountTransferProgress"]["kind"], "blocked");
-        assert!(
-            view["accountTransfer"]["blocked"][0]
-                .get("provider")
-                .is_none()
-        );
-        assert!(view["accountTransfer"].get("canCancel").is_none());
-        assert_eq!(
-            view["accountTransferProgress"]["actions"],
-            json!("retry_cancel")
-        );
+        let progress = view
+            .get("accountTransferProgress")
+            .and_then(Value::as_object)
+            .expect("transfer progress");
+        assert_eq!(progress.get("kind"), Some(&json!("blocked")));
+        assert_eq!(progress.get("actions"), Some(&json!("retry_cancel")));
+        let summary = view
+            .get("accountTransfer")
+            .and_then(Value::as_object)
+            .expect("transfer summary");
+        let blocked = summary
+            .get("blocked")
+            .and_then(Value::as_array)
+            .expect("blocked notices")
+            .first()
+            .and_then(Value::as_object)
+            .expect("blocked notice");
+        assert_eq!(blocked.get("id"), Some(&json!("lead")));
+        assert!(blocked.get("provider").is_none());
+        assert!(summary.get("canCancel").is_none());
         for collection in ["agentSummary", "agentDetail"] {
             let projected = project_persisted_record(collection, &view).unwrap();
-            assert_eq!(projected["accountTransferProgress"]["kind"], "blocked");
-            assert_eq!(projected["accountChange"]["kind"], "unavailable");
+            assert_eq!(
+                projected
+                    .get("accountTransferProgress")
+                    .and_then(|value| value.get("kind")),
+                Some(&json!("blocked"))
+            );
+            assert_eq!(
+                projected
+                    .get("accountChange")
+                    .and_then(|value| value.get("kind")),
+                Some(&json!("unavailable"))
+            );
         }
     }
 
