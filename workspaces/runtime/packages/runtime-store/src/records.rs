@@ -375,11 +375,7 @@ pub struct AgentRecord {
     pub cwd: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_safe_counter"
-    )]
+    #[serde(default, deserialize_with = "deserialize_optional_safe_counter")]
     pub compactions: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fast_mode: Option<bool>,
@@ -3023,7 +3019,7 @@ mod tests {
         let absent: AgentRecord = serde_json::from_str(absent).unwrap();
         let null: AgentRecord = serde_json::from_str(null).unwrap();
         assert_eq!(absent, null);
-        assert!(null.value().get("compactions").is_none());
+        assert!(null.value().get("compactions").unwrap().is_null());
     }
 
     #[test]

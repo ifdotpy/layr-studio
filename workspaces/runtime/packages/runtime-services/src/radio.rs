@@ -78,7 +78,7 @@ fn optional_bool(
     default: bool,
 ) -> Result<bool, RadioSnapshotError> {
     match object.get(field) {
-        None => Ok(default),
+        None | Some(Value::Null) => Ok(default),
         Some(Value::Bool(value)) => Ok(*value),
         _ => Err(invalid(format!("{location}/{field}"))),
     }
@@ -605,6 +605,24 @@ pub enum RadioTurnDecision {
 #[cfg(test)]
 mod project_contract_tests {
     use super::*;
+
+    #[test]
+    fn optional_flags_accept_null_and_reject_malformed() {
+        for field in ["isLead", "autoWake"] {
+            assert!(
+                !optional_bool(&serde_json::json!({(field):null}), field, "agent", false).unwrap()
+            );
+            assert!(
+                optional_bool(
+                    &serde_json::json!({(field):"invalid"}),
+                    field,
+                    "agent",
+                    false
+                )
+                .is_err()
+            );
+        }
+    }
 
     #[test]
     fn absent_compactions_are_unknown_like_null() {

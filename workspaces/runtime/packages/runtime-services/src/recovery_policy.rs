@@ -86,6 +86,9 @@ impl RecoverySnapshot {
     pub fn record(&self) -> &Value {
         self.agent.as_ref()
     }
+    pub(crate) fn turn_epoch_matches(&self) -> bool {
+        self.typed.turn_epoch.as_ref().unwrap_or(&self.typed.epoch) == &self.typed.epoch
+    }
     pub fn start_attempt(&self) -> &Value {
         self.agent
             .get("startAttempt")

@@ -1,7 +1,8 @@
 use crate::StoreResult;
 use rusqlite::Transaction;
 
-// Top-level AgentRecord Option fields. Field<T> and nested snapshots retain null.
+// Top-level AgentRecord Option fields. Compactions null preserves unknown across catalog replay.
+// Field<T> and nested snapshots also retain null.
 const OPTIONAL_FIELDS: &[&str] = &[
     "draft",
     "parentId",
@@ -17,7 +18,6 @@ const OPTIONAL_FIELDS: &[&str] = &[
     "model",
     "cwd",
     "name",
-    "compactions",
     "fastMode",
     "daybreakEnabled",
     "agentModeSupported",
@@ -106,7 +106,7 @@ mod tests {
             .filter_map(|line| {
                 let line = line.trim().strip_prefix("pub ")?;
                 let (name, ty) = line.split_once(": ")?;
-                if !ty.starts_with("Option<") {
+                if !ty.starts_with("Option<") || name == "compactions" {
                     return None;
                 }
                 let mut parts = name.split('_');
