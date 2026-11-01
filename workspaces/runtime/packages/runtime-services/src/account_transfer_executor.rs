@@ -295,8 +295,15 @@ mod reconnect_read_tests {
             "ticket-generation" => saved["receipt"]["ticket"]["generation"] = json!(8),
             "ticket-method" => saved["receipt"]["ticket"]["method"] = json!("thread/start"),
             "ticket-id" => saved["receipt"]["ticket"]["id"] = Value::Null,
-            "unknown" => saved["certainty"] = json!("unknown"),
-            "not-sent" => saved["certainty"] = json!("not_sent"),
+            "unknown" | "not-sent" => {
+                let certainty = if change == "unknown" {
+                    "unknown"
+                } else {
+                    "not_sent"
+                };
+                saved["certainty"] = json!(certainty);
+                saved["receipt"]["certainty"] = json!(certainty);
+            }
             "rejected" => saved["result"]["kind"] = json!("rejected"),
             _ => {}
         }

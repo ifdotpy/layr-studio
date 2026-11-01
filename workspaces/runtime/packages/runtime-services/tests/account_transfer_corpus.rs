@@ -198,7 +198,8 @@ fn subagents_summary_bypasses_only_an_unenrolled_leads_summary_hold() {
         .expect("agent")
         .remove("accountTransferId");
     agent["isLead"] = json!(true);
-    agent["accountTransfer"] = json!({"id":"op", "status":"pending", "scope":"subagents"});
+    agent["accountTransfer"] =
+        json!({"id":"op", "targetAccountKey":"target", "status":"pending", "scope":"subagents"});
     before_start(&agent).expect("unenrolled lead summary does not hold");
     for (key, marker) in [
         ("accountTransferId", json!("op")),
