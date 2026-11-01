@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { createPublicKey, verify } from "node:crypto";
 
 // The browser loads client_bg.wasm by URL. Node serves the same bytes from disk.
-beforeAll(() => {
+beforeAll(async () => {
   vi.stubGlobal(
     "fetch",
     async () =>
@@ -15,6 +15,8 @@ beforeAll(() => {
         { headers: { "Content-Type": "application/wasm" } },
       ),
   );
+  // Load the module once, before any test fakes timers: the first load awaits a timer-based stream.
+  await identityProofMessage("srv", "A".repeat(32));
 });
 afterAll(() => vi.unstubAllGlobals());
 import {
