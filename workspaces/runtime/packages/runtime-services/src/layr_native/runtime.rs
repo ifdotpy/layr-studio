@@ -64,6 +64,8 @@ struct OperationReceipt {
     intent: Value,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     result: Field<Value>,
+    #[serde(default, rename = "startedAt", skip_serializing_if = "Option::is_none")]
+    started_at: Option<u64>,
     #[serde(default, deserialize_with = "receipt_status")]
     status: ReceiptStatus,
 }
@@ -72,6 +74,7 @@ impl OperationReceipt {
         Self {
             id: Some(json!(id)),
             intent: intent.clone(),
+            started_at: Some(unix_millis()),
             status: ReceiptStatus::Pending,
             ..Self::default()
         }
@@ -274,6 +277,19 @@ pub(super) fn operation_with_preflight_in_store(
                         .into(),
                 ));
             }
+            // A crash can leave a save pending. The line's operation log shows whether it ran.
+            // When no save ran, the save retries below with a fresh pending receipt.
+            ReceiptStatus::Pending if intent["kind"] == "save" => {
+                if let Some(result) = settle_pending_save(state_dir, root, intent, &receipt)? {
+                    crate::atomic_file::replace(
+                        &path,
+                        &OperationReceipt::completed(id, intent, &result).bytes()?,
+                        Some(0o600),
+                        true,
+                    )?;
+                    return Ok(result);
+                }
+            }
             ReceiptStatus::Pending | ReceiptStatus::Unknown => {
                 return Err(NativeLayrError::Unknown(path.display().to_string()));
             }
@@ -309,6 +325,53 @@ pub(super) fn operation_with_preflight_in_store(
     };
     crate::atomic_file::replace(&path, &receipt.bytes()?, Some(0o600), true)?;
     outcome
+}
+
+fn unix_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis() as u64)
+}
+
+const OPERATION_LOG_WINDOW: usize = 200;
+
+/// Some(result) when the line's operation log holds a `save` after the receipt started,
+/// None when it holds none. A receipt without a start time, or a log window that cannot
+/// reach back to that time, proves nothing and stays unknown.
+fn settle_pending_save(
+    state_dir: &Path,
+    root: &Path,
+    intent: &Value,
+    receipt: &OperationReceipt,
+) -> Result<Option<Value>> {
+    let unknown = || NativeLayrError::Unknown("pending save without evidence".into());
+    let started = receipt.started_at.ok_or_else(unknown)?;
+    let cwd = Path::new(intent["cwd"].as_str().ok_or_else(unknown)?);
+    let window = OPERATION_LOG_WINDOW.to_string();
+    let log = run_in_store(
+        state_dir,
+        root,
+        cwd,
+        &["op", "log", "--json", "-n", &window],
+    )?;
+    let mut records = 0;
+    let mut oldest = u64::MAX;
+    let mut saved = false;
+    for line in log.lines().filter(|line| !line.trim().is_empty()) {
+        let record: Value = serde_json::from_str(line)
+            .map_err(|error| NativeLayrError::Refused(error.to_string()))?;
+        let time = record["time"].as_u64().ok_or_else(unknown)?;
+        records += 1;
+        oldest = oldest.min(time);
+        saved |= record["op"] == "save" && time >= started;
+    }
+    if saved {
+        return Ok(Some(json!({"stateId":working_state(state_dir, cwd)?})));
+    }
+    if records == OPERATION_LOG_WINDOW && oldest >= started {
+        return Err(unknown());
+    }
+    Ok(None)
 }
 
 /// A full working snapshot retains empty directories, modes, and attributes.
@@ -1017,25 +1080,26 @@ mod review_tests {
             r#"{"nested":[1,null,{"x":true}]}"#,
         ] {
             let value: Value = serde_json::from_str(raw).unwrap();
+            // A fixed start time keeps the byte-exact encoding comparable.
+            let started = |mut receipt: OperationReceipt| {
+                receipt.started_at = Some(7);
+                receipt.bytes().unwrap()
+            };
             assert_eq!(
-                OperationReceipt::pending("id", &value).bytes().unwrap(),
-                json!({"id":"id","intent":value,"status":"pending"})
+                started(OperationReceipt::pending("id", &value)),
+                json!({"id":"id","intent":value,"startedAt":7,"status":"pending"})
                     .to_string()
                     .as_bytes()
             );
             assert_eq!(
-                OperationReceipt::completed("id", &value, &value)
-                    .bytes()
-                    .unwrap(),
-                json!({"id":"id","intent":value,"status":"completed","result":value})
+                started(OperationReceipt::completed("id", &value, &value)),
+                json!({"id":"id","intent":value,"startedAt":7,"status":"completed","result":value})
                     .to_string()
                     .as_bytes()
             );
             assert_eq!(
-                OperationReceipt::failed("id", &value, "problem")
-                    .bytes()
-                    .unwrap(),
-                json!({"id":"id","intent":value,"status":"failed","error":"problem"})
+                started(OperationReceipt::failed("id", &value, "problem")),
+                json!({"id":"id","intent":value,"startedAt":7,"status":"failed","error":"problem"})
                     .to_string()
                     .as_bytes()
             );
