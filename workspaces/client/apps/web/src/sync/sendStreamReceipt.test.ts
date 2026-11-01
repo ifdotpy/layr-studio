@@ -1,4 +1,5 @@
 import type { CommandResponse } from "../commands";
+import { DeliveryMomentInput } from "../generated/api";
 import { afterEach, expect, it, vi } from "vitest";
 
 afterEach(() => {
@@ -24,7 +25,7 @@ it("settles a sent message when the answer lists the stream receipt row first", 
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() });
   const { createCommandClient } = await import("../commands");
   const { createOutbox } = await import("./send");
-  const response = {
+  const response: CommandResponse = {
     status: "applied",
     ref_kind: "message",
     ref_id: "stable-id",
@@ -48,9 +49,8 @@ it("settles a sent message when the answer lists the stream receipt row first", 
         payload: { id: "stable-id", status: "delivered" },
       },
     ],
-  } as unknown as CommandResponse;
-  const storage = { getItem: () => null, setItem: vi.fn() } as unknown as Storage;
-  const command = createCommandClient(storage, async () => response);
+  };
+  const command = createCommandClient(localStorage, async () => response);
   const buffer = {
     loadAll: async () => [],
     put: vi.fn(async () => undefined),
@@ -69,7 +69,7 @@ it("settles a sent message when the answer lists the stream receipt row first", 
     id: "stable-id",
     room: "chat",
     text: "hello",
-    delivery: "queue",
+    delivery: DeliveryMomentInput["queue"],
   });
   expect(result).toMatchObject({ kind: "server", status: "delivered" });
   expect(buffer.delete).toHaveBeenCalledWith(expect.stringContaining("stable-id"));
