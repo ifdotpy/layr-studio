@@ -51,7 +51,6 @@ struct LegacyHistory {
     #[allow(dead_code)]
     question: Option<String>,
     #[serde(rename = "isSecret")]
-    #[allow(dead_code)]
     is_secret: Option<bool>,
     answer: LegacyLeaf,
 }
@@ -327,7 +326,7 @@ fn request(id: &str, legacy: &Legacy, params: &mut Map<String, Value>) -> StoreR
     })
 }
 
-fn answer(id: &str, legacy: &Legacy) -> StoreResult<Option<Answer>> {
+fn answer(id: &str, legacy: &Legacy, request: &Request) -> StoreResult<Option<Answer>> {
     let Some(decision) = legacy.decision.as_deref() else {
         return Ok(None);
     };
@@ -358,18 +357,34 @@ fn answer(id: &str, legacy: &Legacy) -> StoreResult<Option<Answer>> {
                 answers: history
                     .iter()
                     .map(|entry| {
+                        let question_secret = match request {
+                            Request::Question { questions }
+                            | Request::AgentQuestion { questions } => questions
+                                .iter()
+                                .any(|question| question.id == entry.id && question.is_secret),
+                            _ => false,
+                        };
+                        let (answer, digest) = match &entry.answer {
+                            LegacyLeaf::Values(values)
+                                if entry.is_secret == Some(true) || question_secret =>
+                            {
+                                (
+                                    vec![QuestionAnswer::REDACTED.to_owned()],
+                                    Some(crate::sha256_hex(values.join("\u{0}").as_bytes())),
+                                )
+                            }
+                            LegacyLeaf::Values(values) => (values.clone(), None),
+                            LegacyLeaf::Redacted(text) if text == QuestionAnswer::REDACTED => {
+                                (vec![text.clone()], None)
+                            }
+                            LegacyLeaf::Redacted(_) => {
+                                return Err(bad(id, "answer text is not a list"));
+                            }
+                        };
                         Ok(QuestionAnswer {
                             id: entry.id.clone(),
-                            answer: match &entry.answer {
-                                LegacyLeaf::Values(values) => values.clone(),
-                                LegacyLeaf::Redacted(text) if text == QuestionAnswer::REDACTED => {
-                                    vec![text.clone()]
-                                }
-                                LegacyLeaf::Redacted(_) => {
-                                    return Err(bad(id, "answer text is not a list"));
-                                }
-                            },
-                            digest: None,
+                            answer,
+                            digest,
                         })
                     })
                     .collect::<StoreResult<Vec<_>>>()?,
@@ -377,6 +392,16 @@ fn answer(id: &str, legacy: &Legacy) -> StoreResult<Option<Answer>> {
         }
         other => return Err(bad(id, &format!("unknown decision {other}"))),
     }))
+}
+
+pub(super) fn legacy_secret_ids(id: &str, record: &str) -> StoreResult<Vec<String>> {
+    Ok(legacy_of(id, record)?
+        .answer_history
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|entry| entry.is_secret == Some(true))
+        .map(|entry| entry.id)
+        .collect())
 }
 
 fn convert(id: &str, legacy: Legacy) -> StoreResult<Approval> {
@@ -387,7 +412,7 @@ fn convert(id: &str, legacy: Legacy) -> StoreResult<Approval> {
     if legacy.answer_decision.is_some() && legacy.answer_decision != legacy.decision {
         return Err(bad(id, "answerDecision differs from decision"));
     }
-    let given = answer(id, &legacy)?;
+    let given = answer(id, &legacy, &request)?;
     if let Some(answer) = &given {
         request
             .accepts(answer)
@@ -675,6 +700,37 @@ mod tests {
         };
         assert_eq!(answers[0].answer, vec!["[redacted]"]);
         assert_eq!(answers[1].answer, vec!["x"]);
+    }
+
+    #[test]
+    fn legacy_secret_array_never_enters_the_stored_approval() {
+        let mut row = json!({"id":"s","method":"agent/asyncQuestion","agent":"a","status":"answered","createdAt":1.0,
+            "params":{"questions":[{"id":"0","question":"?","isSecret":true},{"id":"1","question":"?"}]},
+            "decision":"answer","answeredBy":"user","answeredAt":2.0,
+            "answerHistory":[{"id":"0","question":"?","isSecret":true,"answer":["sensitive-value"]},{"id":"1","question":"?","isSecret":false,"answer":["public-value"]}]});
+        let approval = approval_from_record("s", &row.to_string()).unwrap();
+        let serialized = serde_json::to_string(&approval).unwrap();
+        assert!(!serialized.contains("sensitive-value"));
+        assert!(serialized.contains("public-value"));
+        let ApprovalState::Answered {
+            answer: Answer::Answers { answers },
+            ..
+        } = approval.state
+        else {
+            panic!("answered");
+        };
+        assert_eq!(answers[0].answer, vec![QuestionAnswer::REDACTED]);
+        assert_eq!(
+            answers[0].digest.as_deref(),
+            Some(crate::sha256_hex(b"sensitive-value").as_str())
+        );
+        row["answerHistory"][0]["isSecret"] = json!(false);
+        let approval = approval_from_record("s", &row.to_string()).unwrap();
+        assert!(
+            !serde_json::to_string(&approval)
+                .unwrap()
+                .contains("sensitive-value")
+        );
     }
 
     #[test]
