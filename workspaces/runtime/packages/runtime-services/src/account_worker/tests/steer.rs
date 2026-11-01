@@ -410,8 +410,20 @@ async fn transport_close_before_reply_is_unconfirmed_and_never_resent(provider: 
     assert_eq!(input(&state).await.0, "failed");
     let mut peer = Peer::identity("default", 2, None);
     let mut worker = peer.worker(state.bridge.clone()).await;
+    // Startup recovery reads the thread on this new connection, and that read
+    // can be submitted after the worker barrier. The rule under test is that the
+    // steer is never resent, so a history read is answered and anything else fails.
+    worker_barrier_with_history(&worker, &mut peer).await;
     state.wake(&worker).await;
-    no_write(&mut peer).await;
+    frame(&mut peer, json!({"method":"test/barrier","params":{}})).await;
+    while let Ok(wire) = peer.writes.try_recv() {
+        assert_eq!(
+            wire.value["method"], "thread/read",
+            "only a history read may follow a closed steer: {}",
+            wire.value
+        );
+        answer_history(&mut peer, wire).await;
+    }
     assert_eq!(input(&state).await.0, "failed");
     worker.shutdown().await.unwrap();
 }
