@@ -14,7 +14,10 @@ import type {
 import type { ResourceData } from "../../src/sync/subscriptions/contracts.ts";
 import type { ServerEventSource } from "../../src/servers/eventSource.ts";
 import { API_SCHEMA_HASH } from "../../src/generated/apiSchema.ts";
-import { SYNC_PROTOCOL_VERSION } from "../../src/generated/api.ts";
+import {
+  SYNC_PROTOCOL_VERSION,
+  type components,
+} from "../../src/generated/api.ts";
 import { SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS } from "../../src/generated/sharedValues.ts";
 import { fixturePostBody, fixturePostResult } from "../misc-fixture.ts";
 
@@ -137,11 +140,15 @@ function scope(ownerId: string, hold = false) {
           ),
           ...update.add.map((item) => item.resource),
         ];
+        const ack = {
+          gen: update.gen,
+          cachePolicies: [],
+        } satisfies components["schemas"]["SyncSubscriptionAck"];
         queueMicrotask(() => {
-          source.emit("subscriptions", { gen: update.gen });
+          source.emit("subscriptions", ack);
           if (!hold) source.baseline();
         });
-        return fixturePostResult<typeof path>({ gen: update.gen });
+        return fixturePostResult<typeof path>(ack);
       },
       isApiSchemaMismatch: () => false,
       onApiSchemaMismatch: () => () => {},
