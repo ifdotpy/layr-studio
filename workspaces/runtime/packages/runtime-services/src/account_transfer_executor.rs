@@ -23,7 +23,6 @@ use crate::{
         StoredField,
     },
 };
-use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
@@ -43,32 +42,6 @@ use studio_runtime_store::path_identity::CanonicalPath;
 const READ_DEADLINE: Duration = Duration::from_secs(120);
 const MUTATION_DEADLINE: Duration = Duration::from_secs(60);
 
-#[derive(Deserialize)]
-struct SavedRead {
-    receipt: SavedReadReceipt,
-    result: SavedReadResponse,
-}
-
-#[derive(Deserialize)]
-struct SavedReadReceipt {
-    operation: String,
-    scope: crate::account_session_runtime::ConnectionScope,
-    ticket: SavedReadTicket,
-}
-
-#[derive(Deserialize)]
-struct SavedReadTicket {
-    generation: u64,
-    id: studio_runtime_providers::RequestId,
-    method: String,
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
-enum SavedReadResponse {
-    Reply(Value),
-    Rejected(Value),
-}
 static NATIVE_IMPORT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 static NATIVE_IMPORT_LOCKS: LazyLock<Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -338,7 +311,13 @@ mod reconnect_read_tests {
                     "providerReadIntents":{"read":{"operation":"read","account":"source","scope":old_scope,
                         "method":"thread/read","params":{"threadId":"source-thread","includeTurns":false}}},
                     "providerReadReceipts":{"read":saved}}},"requests":{}});
-            studio_runtime_store::AccountTransferRepository::put(tx, "move", &operation.to_string())
+            if change == "ticket-id" {
+                // Simulate a corrupt retained receipt that cannot pass typed writes.
+                tx.execute("INSERT INTO runtime_account_transfers(id,record) VALUES('move',?1)", [operation.to_string()])?;
+                Ok(())
+            } else {
+                studio_runtime_store::AccountTransferRepository::put(tx, "move", &operation.to_string())
+            }
         }).await.expect("written read");
         (root, store, expected)
     }
@@ -585,21 +564,31 @@ async fn session_reply(
     )
     .await?;
     if let Some(saved) = replay {
-        let saved: SavedRead = serde_json::from_value(saved)
+        use studio_runtime_store::transfer_record::ResponseKind;
+        let result = saved
+            .result
+            .value()
+            .ok_or(TransferError::Refused("Invalid saved provider receipt"))?;
+        if matches!(result.kind, ResponseKind::Rejected) {
+            return Err(TransferError::Refused(
+                "The provider rejected a transfer read",
+            ));
+        }
+        let value = result
+            .value
+            .value()
+            .ok_or(TransferError::Refused("Invalid saved provider receipt"))?;
+        let value: Value = serde_json::from_str(value.get())
             .map_err(|_| TransferError::Refused("Invalid saved provider receipt"))?;
-        let value = match saved.result {
-            SavedReadResponse::Reply(value) => value,
-            SavedReadResponse::Rejected(value) => {
-                drop(value);
-                return Err(TransferError::Refused(
-                    "The provider rejected a transfer read",
-                ));
-            }
-        };
+        let stored_ticket = saved
+            .receipt
+            .ticket
+            .value()
+            .ok_or(TransferError::Refused("Invalid saved provider ticket"))?;
         let ticket = studio_runtime_providers::RequestTicket {
-            generation: saved.receipt.ticket.generation,
-            id: saved.receipt.ticket.id,
-            method: Method::from_wire(&saved.receipt.ticket.method)
+            generation: stored_ticket.generation,
+            id: stored_ticket.id.clone(),
+            method: Method::from_wire(stored_ticket.method.as_str())
                 .ok_or(TransferError::Refused("Invalid saved provider ticket"))?,
         };
         return Ok((
@@ -980,25 +969,29 @@ impl TransferExecutor for AccountTransferExecutor {
         Box::pin(async move {
             let operation = input.operation();
             let agent = input.agent();
-            let member = &operation["members"][agent["id"].as_str().unwrap_or_default()];
             let agent_id = agent["id"]
                 .as_str()
                 .ok_or(TransferError::Refused("Invalid transfer agent"))?;
+            let member = operation
+                .members
+                .get(agent_id)
+                .ok_or(TransferError::Refused("Unknown transfer member"))?;
             let epoch = agent["epoch"]
                 .as_i64()
                 .ok_or(TransferError::Refused("Invalid transfer epoch"))?;
-            let transfer_id = operation["id"]
-                .as_str()
-                .ok_or(TransferError::Refused("Invalid transfer id"))?;
-            let source_account = member["sourceAccountKey"].as_str().unwrap_or("default");
-            let target_account = operation["targetAccountKey"]
-                .as_str()
-                .ok_or(TransferError::Refused("Invalid transfer target"))?;
-            let source_provider = studio_runtime_providers::ProviderKind::of_record(member)
-                .map_err(|_| TransferError::Refused("Invalid transfer provider"))?;
-            let target_provider =
-                studio_runtime_providers::ProviderKind::of_field(operation.get("targetProvider"))
-                    .map_err(|_| TransferError::Refused("Invalid transfer provider"))?;
+            let transfer_id = operation.id.as_str();
+            let source_account = member.source_account_key.as_str();
+            let target_account = operation.target_account_key.as_str();
+            let source_provider = member
+                .provider
+                .value()
+                .copied()
+                .ok_or(TransferError::Refused("Invalid transfer provider"))?;
+            let target_provider = operation
+                .target_provider
+                .value()
+                .copied()
+                .ok_or(TransferError::Refused("Invalid transfer provider"))?;
             if let Some(accounts) = &self.preparation.account_driver {
                 // The registry snapshot is already validated and performs no auth refresh.
                 // Transfer preparation must not depend on an earlier HTTP model read.
@@ -1034,7 +1027,7 @@ impl TransferExecutor for AccountTransferExecutor {
             let mut portable = None;
             let mut history_text = None;
             let mut copied_history_path = None;
-            let source_thread = member["sourceThreadId"].as_str();
+            let source_thread = member.source_thread_id.value().map(String::as_str);
             if let Some(thread_id) = source_thread {
                 // No other agent may use the source account any more, so its
                 // worker can be stopped. Start it before the source reads.
