@@ -83,7 +83,7 @@ pub struct StoredCheckpointObject {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorkspaceSnapshot {
-    pub agent: AgentRecord,
+    pub agent: Box<AgentRecord>,
     pub parent_checkpoint: Option<StoredCheckpointObject>,
     pub agents: Vec<StoredCheckpointObject>,
     pub operations: Vec<StoredCheckpointObject>,
@@ -195,7 +195,7 @@ impl CheckpointsRepository {
             .transpose()?
             .flatten();
         Ok(Some(WorkspaceSnapshot {
-            agent,
+            agent: Box::new(agent),
             parent_checkpoint,
             agents: read_live_or_reserved_agents(connection)?,
             operations: read_active(
@@ -226,7 +226,7 @@ impl CheckpointsRepository {
             return Ok(None);
         };
         Ok(Some(WorkspaceSnapshot {
-            agent,
+            agent: Box::new(agent),
             parent_checkpoint: None,
             agents: read_reserving_agents(connection)?,
             operations: read_active(
@@ -367,7 +367,7 @@ impl CheckpointsRepository {
         if object.get("phase").and_then(Value::as_str) != Some("capture_pending")
             || object.get("kind") != agent.get("workspaceOperation")
             || object.get("agent").and_then(Value::as_str) != Some(expected.agent.id.0.as_str())
-            || object.get("cwd") != agent.get("cwd")
+            || object.get("cwd").and_then(Value::as_str) != expected.agent.cwd.as_deref()
             || object.get("epoch") != agent.get("epoch")
         {
             return Ok(false);
@@ -1203,7 +1203,7 @@ mod tests {
             }),
         };
         let snapshot = WorkspaceSnapshot {
-            agent: crate::AgentRecord::from_value(agent.record.clone()).unwrap(),
+            agent: Box::new(crate::AgentRecord::from_value(agent.record.clone()).unwrap()),
             parent_checkpoint: None,
             agents: vec![agent, other_agent],
             operations: Vec::new(),

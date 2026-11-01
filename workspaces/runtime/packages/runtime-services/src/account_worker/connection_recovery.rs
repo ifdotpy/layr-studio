@@ -15,7 +15,7 @@ use crate::{
 };
 use serde_json::{Value, json};
 use std::sync::Arc;
-use studio_runtime_store::{AgentId, AgentRepository, RuntimeStore};
+use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore};
 
 pub(super) struct Command {
     pub bridge: StoreBridge,
@@ -379,7 +379,9 @@ pub(super) async fn begin_request(
 ) -> Result<Value, RecoveryError> {
     let id = id.to_owned();
     let expected_epoch = expected.get("epoch").cloned();
-    let expected_thread_id = expected.get("threadId").cloned();
+    let expected_thread_id = AgentRecord::from_value(expected.clone())
+        .map_err(|_| RecoveryError::CommitFailed)?
+        .thread_id;
     let recovery_id = recovery_id.to_owned();
     crate::scheduler::lifecycle_transaction_with(store, move |tx| {
         let Some(raw) = AgentRepository::get_raw(tx, &AgentId::from(id))? else {
@@ -392,7 +394,10 @@ pub(super) async fn begin_request(
             .connection_recovery_id();
         if current_id != recovery_id
             || current.get("epoch") != expected_epoch.as_ref()
-            || current.get("threadId") != expected_thread_id.as_ref()
+            || AgentRecord::from_value(current.clone())
+                .map_err(|_| RecoveryError::CommitFailed)?
+                .thread_id
+                != expected_thread_id
         {
             return Err(RecoveryError::CommitFailed);
         }

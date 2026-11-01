@@ -519,7 +519,11 @@ BEGIN SELECT RAISE(ABORT, 'invalid delivery state'); END;
 - The Electron application and its Python helpers (`recover_backend.py`, `deliver_server.py`,
   `desktop_delivery.py`, `install_update.py`). Tauri replaces them.
 - `workspaces/runtime/apps/server/`, which holds only untracked Python caches.
-- `client-wasm`, and the `client-core` stores, sync, outbox, and transport.
+- The `client-core` stores, sync, outbox, and transport.
+- `client-wasm` stays, without state: it carries pure functions that every UI shares, such
+  as the Rust markdown parser and SHA-256. The web frontend (browser, PWA, Tauri window)
+  calls them through wasm; a native UI such as Attar links the same Rust source (owner
+  decision, 2026-11-01). There is one markdown parser.
 - The entity publication copy into `sync_entities`.
 - The peer update actions (`peer_updates.rs`, `peer_update_pull.rs`, about 2.5k lines)
   move to the shared outbox and commands.

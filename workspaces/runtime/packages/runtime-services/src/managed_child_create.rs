@@ -360,10 +360,10 @@ pub(crate) async fn resolve_worker_settings(
         })?;
     let adapter = crate::provider_adapter::adapter(account.provider);
     let model = if requested_model == crate::agents_create::DEFAULT_LEAD_MODEL
-        && root.get("model").is_none()
-        && defaults.get("model").is_none()
+        && root.get("model").and_then(Value::as_str).is_none()
+        && defaults.get("model").and_then(Value::as_str).is_none()
         && profile_model.is_none()
-        && spec.model.is_missing()
+        && spec.model.value().is_none()
         && !adapter.owns_model(requested_model)
     {
         adapter.default_model()
@@ -805,9 +805,13 @@ pub(crate) async fn spawn_agents(
             record["profileInstructions"] = json!(profile.instructions);
         }
         record["name"] = json!(name.trim());
-        record["permissionMode"] = root_value.get("permissionMode").cloned().unwrap_or(json!(
-            studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
-        ));
+        record["permissionMode"] = root_value
+            .get("permissionMode")
+            .filter(|mode| !mode.is_null())
+            .cloned()
+            .unwrap_or(json!(
+                studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
+            ));
         crate::agents_create::set_capacity(
             &mut record,
             crate::agents_create::capacity_max(&root_value),
@@ -1154,10 +1158,17 @@ fn can_delegate(
         return Ok(false);
     }
     let limit = root
-        .extra
-        .get("workerDefaults")
-        .and_then(|value| value.get("delegationDepth"))
-        .and_then(Value::as_u64)
+        .worker_defaults
+        .value()
+        .and_then(|value| match value {
+            studio_runtime_store::StoredWorkerDefaults::Known(value) => value
+                .delegation_depth
+                .value()
+                .map(|depth| depth.get() as u64),
+            studio_runtime_store::StoredWorkerDefaults::Unreadable(value) => {
+                value.get("delegationDepth").and_then(Value::as_u64)
+            }
+        })
         .filter(|value| (1..=3).contains(value))
         .unwrap_or(1);
     let mut cursor = actor.clone();

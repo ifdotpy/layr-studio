@@ -405,6 +405,12 @@ mod delivery_tests {
     use studio_runtime_schema::{DeliveryMoment, delivery::LEGACY_DELIVERY_MOMENTS};
 
     #[test]
+    fn chat_read_accepts_projected_room_roots() {
+        let value = json!({"room": {"id": "room", "leadIds": ["lead"]}, "messages": []});
+        assert!(serde_json::from_value::<crate::generated::ChatRead>(value).is_ok());
+    }
+
+    #[test]
     fn chat_queries_reject_unknown_and_unsafe_limits() {
         let valid: axum::http::Uri = "/api/agent-chat?room=room&limit=10".parse().unwrap();
         assert!(axum::extract::Query::<super::AgentChatQuery>::try_from_uri(&valid).is_ok());

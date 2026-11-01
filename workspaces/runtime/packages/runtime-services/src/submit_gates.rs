@@ -37,6 +37,7 @@ impl Deletion {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentAuthorityRow {
+    pub created: Option<f64>,
     pub id: Option<String>,
     pub root_id: Option<String>,
     pub parent_id: Option<String>,

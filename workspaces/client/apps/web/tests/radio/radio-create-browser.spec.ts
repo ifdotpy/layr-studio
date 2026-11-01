@@ -155,6 +155,14 @@ test("radio create browser", async ({ page: runnerPage }) => {
               kind: "private",
               members: ["agent0", "agent1"],
               radio: {
+                controls: {
+                  busy: false,
+                  inputBlocked: false,
+                  canPass: false,
+                  stopping: false,
+                  speaking: false,
+                  busyNotice: null,
+                },
                 direct: true,
                 teamId: "direct",
                 revision: 0,

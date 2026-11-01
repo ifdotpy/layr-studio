@@ -2,7 +2,7 @@ import { RunwayColor } from "../generated/api";
 import type { UsageAccount } from "../components/Usage";
 import type { components } from "../generated/api";
 import { retainUsageAccounts } from "./snapshotSelection";
-import { AgentSource, AgentStatus } from "../generated/api";
+import { AgentSource, AgentStatus, RoomKind } from "../generated/api";
 import { describe, expect, it } from "vitest";
 import { createChatSnapshotSelector } from "./snapshotSelection";
 import type { Agent, Snapshot } from "../types";
@@ -62,6 +62,23 @@ function changeAgent(
 }
 
 describe("chat snapshot selection", () => {
+  it("shows rooms in the server-projected lead scope", () => {
+    const data = fixture();
+    data.runtime.rooms = [
+      {
+        id: "room",
+        kind: RoomKind.private,
+        members: ["worker"],
+        leadIds: ["other"],
+        name: "Room",
+      },
+    ];
+    const select = createChatSnapshotSelector();
+    expect(select(data, "lead")!.runtime.rooms).toEqual([]);
+    expect(select(data, "other")!.runtime.rooms.map((room) => room.id)).toEqual(
+      ["room"],
+    );
+  });
   it("retains the selected tree after unrelated updates but publishes its real changes", () => {
     const select = createChatSnapshotSelector(true);
     const initial = fixture();

@@ -1252,7 +1252,7 @@ fn native_claude_options(
 ) -> Result<serde_json::Map<String, Value>, WorkerError> {
     let mut options: serde_json::Map<String, Value> =
         optional(record, "claudeOptions")?.unwrap_or_default();
-    if let Some(mode) = record.get("permissionMode") {
+    if let Some(mode) = record.get("permissionMode").filter(|mode| !mode.is_null()) {
         options.insert("permissionMode".into(), mode.clone());
     }
     if crate::layr_native::is_native(record) && record["role"] == "reviewer" {

@@ -582,11 +582,11 @@ pub fn workspace_inbox(
         projection["recipient"] = complaint.get("recipient").cloned().unwrap_or(Value::Null);
         projection["needsResponse"] = json!(true);
         projection["authorName"] = author_record
-            .and_then(|agent| agent.get("name"))
+            .and_then(|agent| agent.get("name").filter(|v| !v.is_null()))
             .cloned()
             .unwrap_or_else(|| json!(if author == "user" { "You" } else { author }));
         projection["leadName"] = lead
-            .and_then(|agent| agent.get("name"))
+            .and_then(|agent| agent.get("name").filter(|v| !v.is_null()))
             .cloned()
             .unwrap_or_else(|| json!(lead_id));
         projection["leadStopped"] = json!(

@@ -54,9 +54,12 @@ mod m2026_10_31_sync_project;
 mod m2026_10_31_transfer_history_pages;
 mod m2026_10_31_work_projection;
 mod m2026_10_31_work_records;
+mod m2026_11_01_access_invite_created;
 mod m2026_11_01_account_projection;
 mod m2026_11_01_agent_capacity;
 mod m2026_11_01_agent_naming;
+mod m2026_11_01_agent_null_parity;
+mod m2026_11_01_agent_turn_null;
 mod m2026_11_01_annotation_record;
 mod m2026_11_01_approval_secrets;
 mod m2026_11_01_chat_busy_deleted_index;
@@ -64,7 +67,11 @@ mod m2026_11_01_chat_busy_indexes;
 mod m2026_11_01_plan_record;
 mod m2026_11_01_project_context;
 mod m2026_11_01_project_revisions;
+mod m2026_11_01_radio_controls;
 mod m2026_11_01_rate_limit_view;
+mod m2026_11_01_room_leads;
+mod m2026_11_01_status_turn_indexes;
+mod m2026_11_01_transfer_delegation_depth;
 mod m2026_11_01_transfer_operations;
 mod m2026_11_01_transfer_pointers;
 mod m2026_11_01_transfer_summary;
@@ -940,6 +947,26 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
+            id: "2026-11-01-agent-null-parity",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with null optional fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_agent_null_parity::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-agent-turn-null",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with null turn identifiers",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_agent_turn_null::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
             id: "2026-11-01-agent-batch-56-capacity",
             introduced: NOVEMBER_1,
             target: MigrationTarget::Canvas,
@@ -980,6 +1007,38 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
+            id: "2026-11-01-room-lead-projection",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Room entities before lead roots were projected",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| {
+            apply_once(
+                c.transaction,
+                "2026-11-01-room-lead-projection",
+                m2026_11_01_room_leads::apply,
+            )
+        },
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-radio-controls-projection",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Radio room entities before server controls were projected",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| {
+            apply_once(
+                c.transaction,
+                "2026-11-01-radio-controls-projection",
+                m2026_11_01_radio_controls::apply,
+            )
+        },
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
             id: "2026-11-01-typed-transfer-summary",
             introduced: NOVEMBER_1,
             target: MigrationTarget::Canvas,
@@ -987,6 +1046,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_01_transfer_summary::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-transfer-delegation-depth",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent and transfer worker defaults with out-of-range delegation depth",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_transfer_delegation_depth::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {
@@ -1163,6 +1232,16 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
+            id: "2026-11-01-access-invite-created",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Invitations without valid creation timestamps",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_access_invite_created::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
             id: "2026-10-31-access-invites",
             introduced: OCTOBER_31,
             target: MigrationTarget::Canvas,
@@ -1231,6 +1310,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_01_chat_busy_deleted_index::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-status-turn-indexes",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent capacity and active indexes that read the status column",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_status_turn_indexes::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {
@@ -1518,6 +1607,36 @@ fn apply_target_catalog(
             error.into(),
         )),
     }
+}
+
+fn apply_once(
+    tx: &Transaction<'_>,
+    id: &str,
+    apply: fn(&Transaction<'_>) -> StoreResult<()>,
+) -> StoreResult<()> {
+    let previous: Option<(i64, String)> = tx
+        .query_row(
+            "SELECT complete,status FROM runtime_payload_migrations WHERE name=?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let status = studio_runtime_schema::persistence::MigrationStatus::Complete.as_str();
+    if let Some((complete, saved_status)) = previous {
+        return if complete == 1 && saved_status == status {
+            Ok(())
+        } else {
+            Err(StoreError::RecordContract(
+                "invalid room projection migration checkpoint",
+            ))
+        };
+    }
+    apply(tx)?;
+    tx.execute(
+        "INSERT INTO runtime_payload_migrations(name,cursor,complete,status) VALUES(?1,0,1,?2)",
+        rusqlite::params![id, status],
+    )?;
+    Ok(())
 }
 
 fn catalog_marker(db: &Connection, fingerprint: &str) -> rusqlite::Result<String> {

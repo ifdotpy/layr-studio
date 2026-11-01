@@ -684,7 +684,7 @@ impl ExecutionHistoryRepository {
         );
         saved.insert(
             "prepareAttemptId".into(),
-            serde_json::value::to_raw_value(&agent.extra.get("prepareAttempt"))?,
+            serde_json::value::to_raw_value(&agent.prepare_attempt.value())?,
         );
         saved.insert(
             "turnStatus".into(),

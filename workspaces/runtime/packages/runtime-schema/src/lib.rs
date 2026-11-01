@@ -4,6 +4,11 @@
 pub mod account_destination;
 pub mod account_key;
 pub mod account_registry;
+pub mod agent_entity_native;
+pub mod agent_entity_nested;
+pub mod agent_entity_nested_extra;
+pub mod agent_entity_remote;
+pub mod agent_entity_transfer;
 pub mod agent_limits;
 pub mod agent_progress;
 pub mod annotation_command;
@@ -12,6 +17,7 @@ pub mod api_schema;
 pub mod approvals;
 pub mod bounded_integer;
 pub mod bounded_text;
+pub mod chat_operational_status;
 pub mod checkpoint_record;
 pub mod claude_controls;
 pub mod claude_failure;
@@ -61,6 +67,7 @@ pub mod provider_method_policy;
 pub mod provider_rate_limits;
 pub mod question_answers;
 pub mod queue_command;
+pub mod radio_controls;
 pub mod raw_json;
 pub mod raw_object;
 pub mod records;
@@ -106,6 +113,7 @@ pub use jsonschema::{
 };
 use serde_json::{Value, json};
 
+pub mod sync_entity_payload;
 pub mod sync_protocol;
 pub use sync_protocol::{SYNC_ENTITY_SCOPE, SYNC_PROTOCOL_VERSION, SYNC_PROTOCOL_VERSION_TEXT};
 mod token_rate_limits;
@@ -650,6 +658,12 @@ pub fn validate_sync_entity_payload_strict(
             .get("value")
             .and_then(Value::as_object)
             .is_some_and(serde_json::Map::is_empty));
+    }
+    if matches!(collection, "edge" | "chat" | "workRelease") {
+        return Ok(
+            serde_json::from_value::<sync_entity_payload::SyncEntityPayload>(payload.clone())
+                .is_ok(),
+        );
     }
     Ok(first_error("SyncEntityPayload", payload)?.is_none())
 }

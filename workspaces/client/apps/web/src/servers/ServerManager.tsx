@@ -1,3 +1,4 @@
+import { AccessClientStatus } from "../generated/api";
 import type { ConnectionHealth } from "../sync/connectionState";
 import { randomUUID } from "../uuid";
 import { ProviderKind } from "../generated/providerKind.ts";
@@ -299,7 +300,7 @@ export default function ServerManager({
                         Revoke
                       </ActionButton>
                     )}
-                    {peer?.status === "revoked" &&
+                    {peer?.status === AccessClientStatus.revoked &&
                       !peer.replacedBy &&
                       localEnabled && (
                         <ActionButton

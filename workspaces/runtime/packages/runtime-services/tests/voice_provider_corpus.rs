@@ -406,7 +406,7 @@ async fn seeded_store() -> (tempfile::TempDir, RuntimeStore) {
                     in_flight: None,
         account_key: "account".into(),
         thread_id: Some("thread".into()),
-        turn_id: None,
+        turn_id: Default::default(),
         auto_wake: None,
         usage_resume_enabled: None,
         execution_mode: None,

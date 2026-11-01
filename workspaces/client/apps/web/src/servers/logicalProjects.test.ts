@@ -67,6 +67,14 @@ describe("project locations", () => {
           projectPath: "/shared-only",
           members: [],
           radio: {
+            controls: {
+              busy: false,
+              inputBlocked: false,
+              canPass: false,
+              stopping: false,
+              speaking: false,
+              busyNotice: null,
+            },
             direct: true,
             active: null,
             error: null,

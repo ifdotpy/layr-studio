@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   COMMAND_CLIENT_KEY,
   createCommandClient,
+  messageReceipt,
   nextCommandNumber,
   type CommandRequest,
   type CommandResponse,
@@ -123,5 +124,36 @@ describe("command client", () => {
     );
     await expect(client.stop("chat", true)).rejects.toThrow("refused");
     expect(pending.list()).toHaveLength(0);
+  });
+});
+
+describe("messageReceipt", () => {
+  // The server lists the stored stream row of the receipt before the receipt of this answer.
+  // The stream row keeps the receipt under `value`, so it has no `status` of its own.
+  const streamRow = {
+    collection: "messageReceipt",
+    id: "m1",
+    seq: 7,
+    payload: {
+      collection: "messageReceipt",
+      id: "m1",
+      value: { id: "m1", agent: "chat", status: "delivered" },
+    },
+  };
+  const answerRow = {
+    collection: "messageReceipt",
+    id: "m1",
+    seq: 0,
+    payload: { id: "m1", status: "delivered" },
+  };
+
+  it("skips a stream row and returns the receipt of the answer", () => {
+    const response: CommandResponse = {
+      ...applied,
+      ref_kind: "message",
+      ref_id: "m1",
+      rows: [streamRow, answerRow],
+    };
+    expect(messageReceipt(response)).toEqual({ id: "m1", status: "delivered" });
   });
 });
