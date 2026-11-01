@@ -621,7 +621,9 @@ export function useMessages(
     null,
   );
   const pageAttempt = useRef(0);
-  const pageBusy = useRef(false);
+  const pageBusy = useRef({ scope, busy: false });
+  if (pageBusy.current.scope !== scope)
+    pageBusy.current = { scope, busy: false };
   const pageAnchor = useRef<{ scope: string; id: string } | null>(null);
   const displayed = useRef<{ scope: string; items: Message[] }>({
     scope,
@@ -925,7 +927,7 @@ export function useMessages(
     setHistorical(!!page?.focused);
     setAfter(page?.after || roomPage?.after?.toString() || null);
     pageAttempt.current++;
-    pageBusy.current = false;
+    pageBusy.current.busy = false;
     setPageLoading(false);
     syncActive.current = null;
     setLiveAgent(null);
@@ -1057,17 +1059,20 @@ export function useMessages(
     after?: string;
     around?: string;
     anchor?: string | undefined;
+    captureAnchor?:
+      | (() => { id: string | null; endId: string | null })
+      | undefined;
   }) => {
     if (
       !id ||
       !managed ||
       kind !== "agent" ||
-      (pageBusy.current && !query.around)
+      (pageBusy.current.busy && !query.around)
     )
       return false;
     const attempt = ++pageAttempt.current;
-    pageBusy.current = true;
-    setPageLoading(true);
+    pageBusy.current.busy = true;
+    if (!query.captureAnchor) setPageLoading(true);
     try {
       const result = await syncGet("/api/transcript/page", {
         query: {
@@ -1094,20 +1099,24 @@ export function useMessages(
         );
       const existing =
         displayed.current.scope === scope ? displayed.current.items : [];
-      const focused = !!query.around || !!prior?.focused;
+      const focused =
+        !!query.around || (!!(query.before || query.after) && !!prior?.focused);
+      const captured = query.captureAnchor?.();
       const next: TranscriptPage = {
-        items: query.around
-          ? source
-          : query.after
-            ? mergeTranscript(existing, source)
-            : mergeTranscript(source, existing),
+        items:
+          query.around || (!query.before && !query.after)
+            ? source
+            : query.after
+              ? mergeTranscript(existing, source)
+              : mergeTranscript(source, existing),
         size: 0,
         before: query.after ? prior?.before || null : result.nextCursor || null,
         after: query.before
           ? result.nextAfterCursor || prior?.after || null
           : result.nextAfterCursor || null,
         focused,
-        anchorId: query.anchor || prior?.anchorId || query.around,
+        anchorId:
+          captured?.id || query.anchor || prior?.anchorId || query.around,
         version: result.historyVersion ?? undefined,
         latest: live,
       };
@@ -1135,6 +1144,7 @@ export function useMessages(
           nextAfter: result.nextAfterCursor || null,
         },
         next.anchorId,
+        captured?.endId || undefined,
       );
       next.items = bounded.items;
       next.size = bounded.bytes;
@@ -1151,24 +1161,28 @@ export function useMessages(
       return true;
     } finally {
       if (attempt === pageAttempt.current) {
-        pageBusy.current = false;
-        setPageLoading(false);
+        pageBusy.current.busy = false;
+        if (!query.captureAnchor) setPageLoading(false);
       }
     }
   };
-  const showLatest = () => {
+  const showLatest = async () => {
     if (kind === "room") {
       roomPages.current.delete(scope);
       setItems([]);
       setBefore(null);
       setAfter(null);
       setLoadedId(null);
-      void load();
+      await load();
       return;
     }
     pageAttempt.current++;
-    pageBusy.current = false;
+    pageBusy.current.busy = false;
     setPageLoading(false);
+    if (pages.current.get(scope)?.after && !pages.current.get(scope)?.focused) {
+      await fetchPage({});
+      return;
+    }
     if (!pages.current.get(scope)?.focused) return;
     const data =
       pages.current.get(scope)?.latest ||
@@ -1195,7 +1209,9 @@ export function useMessages(
     const roomPage = roomPages.current.get(scope);
     if (roomPage) roomPage.anchorId = anchorId || undefined;
   };
-  const newer = async () => {
+  const newer = async (
+    captureAnchor?: () => { id: string | null; endId: string | null },
+  ) => {
     if (kind === "room" && id) {
       const page = roomPages.current.get(scope);
       if (!page?.after) return;
@@ -1203,12 +1219,16 @@ export function useMessages(
         query: { room: id, after: page.after, limit: 100 },
       });
       if (active.current !== scope) return;
+      const captured = captureAnchor?.();
+      if (captured) setPageAnchor(captured.id);
       const later = agentChatMessages(d.messages);
       const bounded = boundTranscriptItems(
         [...page.items, ...later],
         sizeOfMessage,
         "newest",
         page.anchorId,
+        false,
+        captured?.endId || undefined,
       );
       const next: RoomPage = {
         items: bounded.items,
@@ -1231,13 +1251,16 @@ export function useMessages(
     if (after)
       await fetchPage({
         after,
+        captureAnchor,
         anchor:
           pageAnchor.current?.scope === scope
             ? pageAnchor.current.id
             : undefined,
       });
   };
-  const older = async () => {
+  const older = async (
+    captureAnchor?: () => { id: string | null; endId: string | null },
+  ) => {
     if (!id || !before) return;
     if (kind === "room") {
       const page = roomPages.current.get(scope);
@@ -1254,12 +1277,16 @@ export function useMessages(
       });
       if (!d) return;
       if (active.current !== scope) return;
+      const captured = captureAnchor?.();
+      if (captured) setPageAnchor(captured.id);
       const olderItems = agentChatMessages(d.messages);
       const bounded = boundTranscriptItems(
         [...olderItems, ...page.items],
         sizeOfMessage,
         "oldest",
         page.anchorId,
+        false,
+        captured?.endId || undefined,
       );
       const next: RoomPage = {
         items: bounded.items,
@@ -1284,6 +1311,7 @@ export function useMessages(
     if (managed && kind === "agent") {
       await fetchPage({
         before: String(before),
+        captureAnchor,
         anchor:
           pageAnchor.current?.scope === scope
             ? pageAnchor.current.id

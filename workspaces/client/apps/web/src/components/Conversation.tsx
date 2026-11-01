@@ -89,10 +89,7 @@ import {
 import { useRemovedMessages } from "./removedMessages";
 import { isSendingMessage } from "./removeSendingMessages";
 
-import {
-  useConversationScroll,
-  TRANSCRIPT_HISTORY_START_PX,
-} from "./useConversationScroll";
+import { useConversationScroll } from "./useConversationScroll";
 import { useAttachmentDrafts } from "./useAttachmentDrafts";
 import { useUploadRecovery } from "./useUploadRecovery";
 import { useServerUploads } from "../servers/ServerServicesContext";
@@ -184,6 +181,44 @@ function useMessageAction<Args extends unknown[], Result>(
     current.current = action;
   });
   return useCallback((...args: Args) => current.current(...args), []);
+}
+
+type PageStatus = {
+  id: string | null | undefined;
+  direction: "older" | "newer";
+  failed: boolean;
+} | null;
+type PageStatusStore = { value: PageStatus; listeners: Set<() => void> };
+function PageIndicator({
+  store,
+  id,
+  direction,
+  retry,
+}: {
+  store: PageStatusStore;
+  id: string | null | undefined;
+  direction: "older" | "newer";
+  retry: () => void;
+}) {
+  const status = useSyncExternalStore(
+    (listener) => {
+      store.listeners.add(listener);
+      return () => store.listeners.delete(listener);
+    },
+    () => store.value,
+    () => store.value,
+  );
+  if (!status || status.id !== id || status.direction !== direction)
+    return null;
+  return status.failed ? (
+    <Button size="compact-sm" onClick={retry}>
+      Retry loading {direction === "older" ? "earlier" : "later"} messages
+    </Button>
+  ) : (
+    <p className="transcript-page-link" role="status">
+      Loading messages…
+    </p>
+  );
 }
 
 function FollowLatest(p: {
@@ -572,34 +607,79 @@ export default function Conversation(p: {
     remember,
     revealRequest,
     getAnchorId,
-  } = useConversationScroll(`${p.data.stateDir}:${kind}:${p.id}`, loaded);
-  const loadOlderAtStart = () => {
+  } = useConversationScroll(
+    `${p.data.stateDir}:${kind}:${p.id}`,
+    loaded,
+    !after,
+    `studio-turns:${p.data.stateDir}:${p.id}`,
+  );
+  const pageStatus = useRef<PageStatusStore>({
+    value: null,
+    listeners: new Set(),
+  });
+  const setPageStatus = (value: PageStatus) => {
+    pageStatus.current.value = value;
+    pageStatus.current.listeners.forEach((listener) => listener());
+  };
+  const paging = useRef<{ id: string | null | undefined } | null>(null);
+  const loadPage = (direction: "older" | "newer") => {
+    if (paging.current?.id === p.id) return;
+    const request = { id: p.id };
+    paging.current = request;
+    setPageStatus({ id: p.id, direction, failed: false });
+    setFollow(false);
+    const captureAnchor = () => {
+      setFollow(false);
+      const detail: { id: string | null; endId: string | null } = {
+        id: null,
+        endId: null,
+      };
+      scroll.current?.dispatchEvent(
+        new CustomEvent("studio-history-page-anchor", { detail }),
+      );
+      const id = detail.id;
+      setPageAnchor(id);
+      return detail;
+    };
+    void (direction === "older" ? older(captureAnchor) : newer(captureAnchor))
+      .then(() => {
+        if (paging.current === request) setPageStatus(null);
+      })
+      .catch((error) => {
+        if (paging.current === request && activeId.current === request.id) {
+          setPageStatus({ id: p.id, direction, failed: true });
+          p.notify(errorText(error));
+        }
+      })
+      .finally(() => {
+        if (paging.current === request) paging.current = null;
+      });
+  };
+  const lastHistoryTop = useRef(0);
+  const touchHistoryY = useRef<number | null>(null);
+  const pageAtEdge = (direction: "older" | "newer") => {
+    const root = scroll.current;
     if (
-      !before ||
-      pageLoading ||
-      !scroll.current ||
-      scroll.current.scrollTop > TRANSCRIPT_HISTORY_START_PX ||
-      !consumeHistoryScrollInput()
+      !root ||
+      paging.current?.id === p.id ||
+      (pageStatus.current.value?.id === p.id && pageStatus.current.value.failed)
     )
       return;
-    setFollow(false);
-    setPageAnchor(getAnchorId());
-    void older().catch((error) => p.notify(errorText(error)));
+    const near =
+      direction === "older"
+        ? before && root.scrollTop <= root.clientHeight
+        : after &&
+          root.scrollHeight - root.scrollTop - root.clientHeight <=
+            root.clientHeight;
+    if (near && consumeHistoryScrollInput()) loadPage(direction);
   };
-  const historyStart = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const root = scroll.current;
-    const sentinel = historyStart.current;
-    if (!root || !sentinel || !before) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) loadOlderAtStart();
-      },
-      { root },
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  });
+  const onHistoryScroll = () => {
+    const top = scroll.current?.scrollTop ?? 0;
+    const direction = top < lastHistoryTop.current ? "older" : "newer";
+    lastHistoryTop.current = top;
+    onScroll();
+    pageAtEdge(direction);
+  };
   const input = useRef<HTMLTextAreaElement>(null);
   const navigationAttempt = useRef(0);
   const handledJump = useRef("");
@@ -639,12 +719,8 @@ export default function Conversation(p: {
           container = container.parentElement;
         }
         if (!target.hasAttribute("data-lazy-message")) {
-          root.scrollTop +=
-            target.getBoundingClientRect().top -
-            root.getBoundingClientRect().top -
-            16;
+          revealRequest(target, 16);
           setHighlighted(target.dataset.message || null);
-          remember();
           return;
         }
       }
@@ -659,10 +735,15 @@ export default function Conversation(p: {
   });
   const returnToLatest = () => {
     if (scroll.current) resetHistoryWindowAnchor(scroll.current);
-    navigationAttempt.current++;
-    showLatest();
+    const attempt = ++navigationAttempt.current;
+    const chat = p.id;
     setHighlighted(null);
-    setFollow(true);
+    void showLatest()
+      .then(() => {
+        if (activeId.current === chat && navigationAttempt.current === attempt)
+          setFollow(true);
+      })
+      .catch((error) => p.notify(errorText(error)));
   };
   useEffect(() => {
     if (!p.jumpTarget || handledJump.current === p.jumpTarget.requestId) return;
@@ -1514,6 +1595,8 @@ export default function Conversation(p: {
           items={transcriptItems}
           scrollContainer={scroll}
           rememberScroll={remember}
+          getFollow={getFollow}
+          followTail={!after}
           hasRecentScrollInput={hasRecentScrollInput}
           agent={managed && !p.room ? agent : undefined}
           currentTurn={agent?.turnId || undefined}
@@ -1558,6 +1641,7 @@ export default function Conversation(p: {
       </>
     ),
     [
+      after,
       items,
       pendingQuestions,
       questionCards,
@@ -1759,9 +1843,46 @@ export default function Conversation(p: {
           </details>,
           headerTools,
         )}
-      <div id="messages" ref={scroll} onScroll={onScroll}>
+      <div
+        id="messages"
+        ref={scroll}
+        onScroll={onHistoryScroll}
+        onWheel={(event) => {
+          lastHistoryTop.current = scroll.current?.scrollTop ?? 0;
+          if (event.deltaY) pageAtEdge(event.deltaY < 0 ? "older" : "newer");
+        }}
+        onTouchStart={(event) => {
+          lastHistoryTop.current = scroll.current?.scrollTop ?? 0;
+          touchHistoryY.current = event.touches[0]?.clientY ?? null;
+        }}
+        onTouchMove={(event) => {
+          const y = event.touches[0]?.clientY;
+          if (
+            y !== undefined &&
+            touchHistoryY.current !== null &&
+            y !== touchHistoryY.current
+          )
+            pageAtEdge(y > touchHistoryY.current ? "older" : "newer");
+          touchHistoryY.current = y ?? null;
+        }}
+        onKeyDown={(event) => {
+          lastHistoryTop.current = scroll.current?.scrollTop ?? 0;
+          if (
+            (event.target as HTMLElement).closest(
+              "input, textarea, [contenteditable=true]",
+            )
+          )
+            return;
+          if (
+            ["ArrowUp", "PageUp", "Home"].includes(event.key) ||
+            (event.key === " " && event.shiftKey)
+          )
+            pageAtEdge("older");
+          else if (["ArrowDown", "PageDown", "End", " "].includes(event.key))
+            pageAtEdge("newer");
+        }}
+      >
         <div ref={content} className="message-content">
-          <div ref={historyStart} aria-hidden="true" />
           {p.transcriptHeading && (
             <div className="transcript-heading">{p.transcriptHeading}</div>
           )}
@@ -1784,22 +1905,12 @@ export default function Conversation(p: {
               </Button>
             </p>
           )}
-          {before && (
-            <Button
-              id="earlier-messages"
-              className="transcript-page-link"
-              variant="subtle"
-              size="compact-sm"
-              loading={pageLoading}
-              onClick={() => {
-                setFollow(false);
-                setPageAnchor(getAnchorId());
-                void older().catch((e) => p.notify(errorText(e)));
-              }}
-            >
-              Earlier messages
-            </Button>
-          )}
+          <PageIndicator
+            store={pageStatus.current}
+            id={p.id}
+            direction="older"
+            retry={() => loadPage("older")}
+          />
           {loaded &&
             !items.length &&
             !notice &&
@@ -1822,23 +1933,12 @@ export default function Conversation(p: {
               />
             ))}
           {transcript}
-          {after && (
-            <Button
-              id="newer-messages"
-              className="transcript-page-link"
-              variant="subtle"
-              size="compact-sm"
-              loading={pageLoading}
-              onClick={() => {
-                const anchorId = getAnchorId();
-                setFollow(false);
-                setPageAnchor(anchorId);
-                void newer().catch((error) => p.notify(errorText(error)));
-              }}
-            >
-              Later messages
-            </Button>
-          )}
+          <PageIndicator
+            store={pageStatus.current}
+            id={p.id}
+            direction="newer"
+            retry={() => loadPage("newer")}
+          />
           {!p.room && agent && (
             <SafetyBuffering key={`safety:${agent.id}`} agent={agent} />
           )}

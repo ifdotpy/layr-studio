@@ -10,7 +10,7 @@ import {
   type RefObject,
 } from "react";
 import { messageRenderKey } from "../../message-delivery/messageDelivery";
-import { FOLLOW_THRESHOLD_PX } from "../../useConversationScroll";
+import { shouldFollowTranscriptTail } from "../../useConversationScroll";
 import type { HistoryGroup } from "../../turnHistoryModel";
 import {
   HISTORY_WINDOW_THRESHOLD,
@@ -21,8 +21,11 @@ import {
   historyRowsCanRestoreAnchor,
 } from "./historyWindowModel";
 
-type WindowAnchor = { id: string; offset: number; kind?: "message" | "row" };
-const anchors = new Map<string, WindowAnchor | null>();
+import { anchors, type WindowAnchor } from "./historyAnchorStore";
+/** CSS pixels represented by one wheel line. */
+const WHEEL_LINE_PX = 40;
+/** Rounding allowance, in CSS pixels, for a recent input movement. */
+const INPUT_SLACK_PX = 4;
 
 const HistoryRow = memo(function HistoryRow({
   row,
@@ -36,13 +39,15 @@ const HistoryRow = memo(function HistoryRow({
   return render(row, revealedMessage);
 });
 
-/** A viewport owns only mounted rows. The conversation scroll hook owns anchors. */
+/** Owns the virtualized viewport and its paging anchor. */
 export default function HistoryWindow({
   rows,
   scrollContainer,
   render,
   storageKey,
   rememberScroll,
+  getFollow,
+  followTail = true,
   hasRecentScrollInput,
   requiredRows,
 }: {
@@ -51,11 +56,15 @@ export default function HistoryWindow({
   render: (row: HistoryGroup, revealedMessage?: string) => ReactNode;
   storageKey: string;
   rememberScroll?: (() => void) | undefined;
+  getFollow?: (() => boolean) | undefined;
+  followTail?: boolean;
   hasRecentScrollInput?: (() => boolean) | undefined;
   /** Rows with pending user input must remain reachable while history is virtualized. */
   requiredRows?: string[];
 }) {
   const body = useRef<HTMLDivElement>(null);
+  const pointerHeld = useRef(false);
+  const pendingRestore = useRef<WindowAnchor | "tail" | null>(null);
   const scheduleUpdate = useRef<() => void>(() => {});
   const heights = useRef(new Map<string, number>());
   const details = useRef(new Map<string, boolean>());
@@ -76,10 +85,16 @@ export default function HistoryWindow({
   );
   const persistViewportAnchor = useRef<() => void>(() => {});
   const captureAnchorAfterUpdate = useRef(false);
+  const preserveUnseen = useRef<() => void>(() => {});
   const previousRows = useRef(rows);
+  const previousOffsets = useRef(offsets);
   const [requested, setRequested] = useState<string | null>(
     () => storedAnchor.current?.id || null,
   );
+  const getFollowRef = useRef(getFollow);
+  getFollowRef.current = getFollow;
+  const followTailRef = useRef(followTail);
+  followTailRef.current = followTail;
   const rememberLatest = useRef(rememberScroll);
   rememberLatest.current = rememberScroll;
   const [revealedMessage, setRevealedMessage] = useState<string>();
@@ -96,6 +111,7 @@ export default function HistoryWindow({
       [requested, viewportAnchor.current?.id],
     );
   }, [rows, visible, pinned, requested, requiredRows]);
+  const previousIndices = useRef(indices);
   const rowsById = useMemo(
     () => new Map(rows.map((row) => [row.id, row])),
     [rows],
@@ -108,6 +124,9 @@ export default function HistoryWindow({
     if (!root || !node) return;
     let frame = 0;
     let viewportRestoreFrame = 0;
+    let programmaticTop: number | null = null;
+    let inputTop: number | null = null;
+    let inputReach = 0;
     const resetAnchor = () => {
       if (viewportRestoreFrame) cancelAnimationFrame(viewportRestoreFrame);
       viewportRestoreFrame = 0;
@@ -130,12 +149,7 @@ export default function HistoryWindow({
     };
     root.addEventListener("studio-history-reveal", reveal);
     root.addEventListener("studio-history-reset-anchor", resetAnchor);
-    if (!active)
-      return () => {
-        root.removeEventListener("studio-history-reveal", reveal);
-        root.removeEventListener("studio-history-reset-anchor", resetAnchor);
-      };
-    const persistAnchor = () => {
+    const persistAnchor = (force = false) => {
       const bounds = root.getBoundingClientRect();
       const row = Array.from(
         node.querySelectorAll<HTMLElement>("[data-history-row]"),
@@ -144,8 +158,11 @@ export default function HistoryWindow({
         return box.bottom > bounds.top && box.top < bounds.bottom;
       });
       if (
-        root.scrollHeight - root.scrollTop - root.clientHeight <
-        FOLLOW_THRESHOLD_PX
+        !force &&
+        shouldFollowTranscriptTail(
+          root.scrollHeight - root.scrollTop - root.clientHeight,
+          followTailRef.current,
+        )
       ) {
         viewportAnchor.current = null;
         anchors.set(storageKey, null);
@@ -165,11 +182,34 @@ export default function HistoryWindow({
         const item = visible
           ? metadata.items.find((item) => item.id === visible.dataset.message)
           : metadata.items[0];
+        const paragraph =
+          visible &&
+          Array.from(visible.querySelectorAll<HTMLElement>("p, pre, li")).find(
+            (part) => {
+              const box = part.getBoundingClientRect();
+              return (
+                box.height > 0 &&
+                box.bottom > bounds.top &&
+                box.top < bounds.bottom
+              );
+            },
+          );
         const anchor: WindowAnchor = item
           ? {
               id: messageRenderKey(item),
               kind: visible ? "message" : "row",
-              offset: (visible || row).getBoundingClientRect().top - bounds.top,
+              offset:
+                (paragraph || visible || row).getBoundingClientRect().top -
+                bounds.top,
+              ...(paragraph
+                ? {
+                    paragraph: Array.from(
+                      visible!.querySelectorAll<HTMLElement>("p, pre, li"),
+                    ).indexOf(paragraph),
+                    fallbackOffset:
+                      (visible || row).getBoundingClientRect().top - bounds.top,
+                  }
+                : {}),
             }
           : {
               id: row.dataset.historyRow!,
@@ -178,6 +218,26 @@ export default function HistoryWindow({
             };
         viewportAnchor.current = anchor;
         anchors.set(storageKey, anchor);
+      } else if (force && latest.current.rows.length) {
+        const nodeTop = node.getBoundingClientRect().top - bounds.top;
+        const index = Math.min(
+          latest.current.rows.length - 1,
+          Math.max(
+            0,
+            latest.current.offsets.findLastIndex(
+              (offset) => offset <= -nodeTop,
+            ),
+          ),
+        );
+        const estimated = latest.current.rows[index]!;
+        const anchor: WindowAnchor = {
+          id: messageRenderKey(estimated.items[0]),
+          kind: "row",
+          offset: nodeTop + latest.current.offsets[index]!,
+        };
+        viewportAnchor.current = anchor;
+        anchors.set(storageKey, anchor);
+        setRequested(estimated.id);
       }
     };
     const update = () => {
@@ -204,7 +264,9 @@ export default function HistoryWindow({
       );
       if (captureAnchorAfterUpdate.current) {
         captureAnchorAfterUpdate.current = false;
-        requestAnimationFrame(() => persistViewportAnchor.current());
+        requestAnimationFrame(() => {
+          if (programmaticTop === null) persistViewportAnchor.current();
+        });
       }
     };
     const schedule = () => {
@@ -212,6 +274,11 @@ export default function HistoryWindow({
     };
     scheduleUpdate.current = schedule;
     const scrolled = () => {
+      if (programmaticTop === root.scrollTop) {
+        schedule();
+        return;
+      }
+      programmaticTop = null;
       if (hasRecentScrollInput?.()) {
         if (viewportRestoreFrame) cancelAnimationFrame(viewportRestoreFrame);
         viewportRestoreFrame = 0;
@@ -221,11 +288,73 @@ export default function HistoryWindow({
         // persistAnchor below writes the actual position. A provisional null
         // doubles durable writes and prevents identical-anchor deduplication.
       }
+      inputTop = null;
       captureAnchorAfterUpdate.current = true;
       schedule();
       persistAnchor();
+      if (
+        pointerHeld.current &&
+        pendingRestore.current &&
+        pendingRestore.current !== "tail"
+      )
+        pendingRestore.current = viewportAnchor.current;
     };
     persistViewportAnchor.current = persistAnchor;
+    const capturePageAnchor = (event: Event) => {
+      inputTop = null;
+      persistAnchor(true);
+      const anchor = viewportAnchor.current;
+      const detail = (
+        event as CustomEvent<{ id: string | null; endId: string | null }>
+      ).detail;
+      detail.id = anchor?.id || null;
+      const bounds = root.getBoundingClientRect();
+      const visible = Array.from(
+        node.querySelectorAll<HTMLElement>("[data-message]"),
+      ).filter((message) => {
+        const box = message.getBoundingClientRect();
+        return (
+          box.height > 0 && box.bottom > bounds.top && box.top < bounds.bottom
+        );
+      });
+      detail.endId = visible.at(-1)?.dataset.message || null;
+      if (anchor) {
+        restoringAnchor.current = anchor.id;
+      }
+    };
+    root.addEventListener("studio-history-page-anchor", capturePageAnchor);
+    const anchorId = (event: Event) => {
+      persistAnchor(true);
+      (event as CustomEvent<{ id: string | null }>).detail.id =
+        viewportAnchor.current?.id || null;
+    };
+    const follow = () => {
+      if (pointerHeld.current) {
+        pendingRestore.current = "tail";
+        return;
+      }
+      root.scrollTop = root.scrollHeight;
+      rememberLatest.current?.();
+      persistAnchor();
+    };
+    const position = (event: Event) => {
+      const { node: target, offset } = (
+        event as CustomEvent<{ node: HTMLElement; offset: number }>
+      ).detail;
+      if (!root.contains(target) || pointerHeld.current) return;
+      root.scrollTop +=
+        target.getBoundingClientRect().top -
+        root.getBoundingClientRect().top -
+        offset;
+      persistAnchor(true);
+    };
+    root.addEventListener("studio-history-anchor-id", anchorId);
+    root.addEventListener("studio-history-follow", follow);
+    root.addEventListener("studio-history-position", position);
+    const remember = () => {
+      if (programmaticTop === null) persistAnchor();
+    };
+    root.addEventListener("studio-history-remember", remember);
     let focusOwner: string | undefined;
     const pin = () => {
       const selection = document.getSelection();
@@ -264,18 +393,111 @@ export default function HistoryWindow({
           : ids;
       });
     };
+    const cancelRestoreOnInput = (event: Event) => {
+      if (event.type === "pointerdown") pointerHeld.current = true;
+      if (
+        event instanceof KeyboardEvent &&
+        (![
+          "ArrowUp",
+          "ArrowDown",
+          "PageUp",
+          "PageDown",
+          "Home",
+          "End",
+          " ",
+        ].includes(event.key) ||
+          (event.target as HTMLElement)?.closest(
+            "input, textarea, [contenteditable=true]",
+          ))
+      )
+        return;
+      programmaticTop = null;
+      persistAnchor(true);
+      inputTop = root.scrollTop;
+      inputReach =
+        event instanceof WheelEvent
+          ? Math.abs(event.deltaY) *
+            (event.deltaMode === 1
+              ? WHEEL_LINE_PX
+              : event.deltaMode === 2
+                ? root.clientHeight
+                : 1)
+          : Infinity;
+      if (!viewportRestoreFrame && !restoringAnchor.current) return;
+      if (pointerHeld.current) pendingRestore.current = viewportAnchor.current;
+      if (viewportRestoreFrame) cancelAnimationFrame(viewportRestoreFrame);
+      viewportRestoreFrame = 0;
+      restoringAnchor.current = null;
+      persistAnchor();
+      update();
+    };
+    const releasePointer = () => {
+      if (!pointerHeld.current) return;
+      pointerHeld.current = false;
+      const pending = pendingRestore.current;
+      pendingRestore.current = null;
+      const releasedTop = root.scrollTop;
+      viewportRestoreFrame = requestAnimationFrame(() => {
+        viewportRestoreFrame = 0;
+        if (root.scrollTop !== releasedTop) return;
+        if (pending === "tail") follow();
+        else if (pending) restoreViewportAnchor.current(pending);
+      });
+    };
+    window.addEventListener("pointerup", releasePointer);
+    window.addEventListener("pointercancel", releasePointer);
     root.addEventListener("scroll", scrolled, { passive: true });
+    for (const type of [
+      "wheel",
+      "touchstart",
+      "touchmove",
+      "keydown",
+      "pointerdown",
+    ])
+      root.addEventListener(type, cancelRestoreOnInput, { passive: true });
     document.addEventListener("selectionchange", pin);
     const focusChanged = () => queueMicrotask(pin);
     document.addEventListener("focusin", focusChanged);
     document.addEventListener("focusout", focusChanged);
-    const observer = new ResizeObserver(schedule);
+    const preserve = () => {
+      schedule();
+      if (
+        followTailRef.current &&
+        getFollowRef.current?.() &&
+        !restoringAnchor.current &&
+        !pendingRestore.current
+      )
+        follow();
+      else if (hasRecentScrollInput?.()) {
+        preserveUnseen.current();
+      } else if (viewportAnchor.current)
+        restoreViewportAnchor.current(viewportAnchor.current);
+    };
+    const content = node.closest(".message-content");
+    const observer = new ResizeObserver(preserve);
     observer.observe(root);
+    observer.observe(node);
+    if (content) observer.observe(content);
+    const mutations = new MutationObserver(preserve);
+    mutations.observe(node, { childList: true, subtree: true });
     const restoreAnchor = (anchor: WindowAnchor, afterRestore?: () => void) => {
+      if (pointerHeld.current) {
+        pendingRestore.current = anchor;
+        return;
+      }
       if (viewportRestoreFrame) cancelAnimationFrame(viewportRestoreFrame);
-      let previousTop: number | undefined;
       let attempts = 0;
+      const retryTop = root.scrollTop;
       const measure = () => {
+        if (pointerHeld.current) {
+          pendingRestore.current = anchor;
+          return;
+        }
+        if (viewportRestoreFrame && root.scrollTop !== retryTop) {
+          viewportRestoreFrame = 0;
+          afterRestore?.();
+          return;
+        }
         viewportRestoreFrame = 0;
         const resolved = historyWindowAnchor(latest.current.rows, anchor.id);
         const row = resolved
@@ -317,11 +539,20 @@ export default function HistoryWindow({
           viewportRestoreFrame = requestAnimationFrame(measure);
           return;
         }
-        const target =
-          anchor.kind === "message" && visibleMessage ? message : row;
+        const paragraph =
+          anchor.paragraph === undefined
+            ? undefined
+            : message?.querySelectorAll<HTMLElement>("p, pre, li")[
+                anchor.paragraph
+              ];
+        const target = paragraph?.getClientRects().length
+          ? paragraph
+          : anchor.kind === "message" && visibleMessage
+            ? message
+            : row;
         if (!target) {
           afterRestore?.();
-          update();
+          schedule();
           return;
         }
         if (anchor.kind === "message" && target === row && attempts++ < 20) {
@@ -330,19 +561,27 @@ export default function HistoryWindow({
         }
         const top =
           target.getBoundingClientRect().top - root.getBoundingClientRect().top;
-        if (previousTop === undefined || Math.abs(top - previousTop) > 0.5) {
-          previousTop = top;
-          if (attempts++ < 20) {
-            viewportRestoreFrame = requestAnimationFrame(measure);
-            return;
-          }
-        }
-        root.scrollTop += top - anchor.offset;
+        root.scrollTop +=
+          top -
+          (target === paragraph && !!paragraph
+            ? anchor.offset
+            : (anchor.fallbackOffset ?? anchor.offset));
+        programmaticTop = root.scrollTop;
         rememberLatest.current?.();
         afterRestore?.();
-        update();
+        schedule();
       };
-      viewportRestoreFrame = requestAnimationFrame(measure);
+      measure();
+    };
+    preserveUnseen.current = () => {
+      const anchor = viewportAnchor.current;
+      if (inputTop === null || !anchor) return;
+      const moved = root.scrollTop - inputTop;
+      if (Math.abs(moved) > inputReach + INPUT_SLACK_PX) return;
+      anchor.offset -= moved;
+      if (anchor.fallbackOffset !== undefined) anchor.fallbackOffset -= moved;
+      restoreAnchor(anchor);
+      inputTop = root.scrollTop;
     };
     restoreViewportAnchor.current = (anchor) =>
       restoreAnchor(anchor, () => {
@@ -360,39 +599,67 @@ export default function HistoryWindow({
       if (anchor.kind === "message" && match) setRevealedMessage(match.item.id);
       restoringAnchor.current = anchor.id;
       restoreViewportAnchor.current(anchor);
-    } else update();
+    } else {
+      if (followTailRef.current && getFollowRef.current?.()) follow();
+      update();
+    }
     return () => {
+      window.removeEventListener("pointerup", releasePointer);
+      window.removeEventListener("pointercancel", releasePointer);
+      pointerHeld.current = false;
+      pendingRestore.current = null;
+      preserveUnseen.current = () => {};
       scheduleUpdate.current = () => {};
       restoreViewportAnchor.current = () => {};
       persistViewportAnchor.current = () => {};
       if (frame) cancelAnimationFrame(frame);
       if (viewportRestoreFrame) cancelAnimationFrame(viewportRestoreFrame);
       observer.disconnect();
+      mutations.disconnect();
+      root.removeEventListener("studio-history-anchor-id", anchorId);
+      root.removeEventListener("studio-history-follow", follow);
+      root.removeEventListener("studio-history-position", position);
+      root.removeEventListener("studio-history-remember", remember);
       root.removeEventListener("scroll", scrolled);
+      root.removeEventListener("studio-history-page-anchor", capturePageAnchor);
+      for (const type of [
+        "wheel",
+        "touchstart",
+        "touchmove",
+        "keydown",
+        "pointerdown",
+      ])
+        root.removeEventListener(type, cancelRestoreOnInput);
       root.removeEventListener("studio-history-reveal", reveal);
       root.removeEventListener("studio-history-reset-anchor", resetAnchor);
       document.removeEventListener("selectionchange", pin);
       document.removeEventListener("focusin", focusChanged);
       document.removeEventListener("focusout", focusChanged);
     };
-  }, [active, hasRecentScrollInput, scrollContainer, storageKey]);
+  }, [hasRecentScrollInput, scrollContainer, storageKey]);
   useLayoutEffect(() => {
+    preserveUnseen.current();
     scheduleUpdate.current();
+    const offsetsChanged = previousOffsets.current !== offsets;
+    const indicesChanged = previousIndices.current !== indices;
+    previousIndices.current = indices;
+    previousOffsets.current = offsets;
     if (previousRows.current !== rows) {
       const previous = previousRows.current;
       previousRows.current = rows;
-      // With the conversation scroll hook, that hook keeps the reader in
-      // place when rows change. A second anchor here pins a row that can
-      // start above the viewport and undoes the hook's compensation for
-      // content that grows inside it.
       if (
         viewportAnchor.current &&
-        !rememberLatest.current &&
-        historyRowsCanRestoreAnchor(previous, rows)
+        (restoringAnchor.current === viewportAnchor.current.id ||
+          historyRowsCanRestoreAnchor(previous, rows))
       )
         restoreViewportAnchor.current(viewportAnchor.current);
-    }
-  }, [rows, offsets]);
+    } else if (
+      (offsetsChanged || indicesChanged) &&
+      viewportAnchor.current &&
+      !getFollowRef.current?.()
+    )
+      restoreViewportAnchor.current(viewportAnchor.current);
+  }, [rows, offsets, indices]);
   useLayoutEffect(() => {
     const node = body.current;
     if (!node) return;
@@ -453,7 +720,13 @@ export default function HistoryWindow({
     return (
       <div ref={body} className="history-window-static">
         {rows.map((row) => (
-          <Fragment key={row.id}>{render(row, revealedMessage)}</Fragment>
+          <div
+            key={row.id}
+            data-history-row={row.id}
+            className="history-window-row"
+          >
+            {render(row, revealedMessage)}
+          </div>
         ))}
       </div>
     );
