@@ -239,6 +239,7 @@ pub mod wakeups;
 pub mod web_push;
 pub mod work_assignment_runtime;
 pub mod work_policy;
+pub mod work_scope;
 pub mod work_write;
 pub mod workspace_cleanup_runtime;
 pub mod workspace_files;

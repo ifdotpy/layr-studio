@@ -20,7 +20,7 @@ use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 
 use crate::event_write::python_json_compact;
 pub use crate::multi_server_transport_limits::{MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES};
-use studio_runtime_schema::multi_server_protocol::MULTI_SERVER_SIGNING_DOMAIN;
+use studio_request_signing::header;
 use studio_runtime_store::{RemoteTransportRepository, RuntimeStore, StoreError, sha256_hex};
 
 pub const CLOCK_SKEW_SECONDS: i64 = 300;
@@ -303,17 +303,10 @@ struct StoredFederationIdentity {
     public_key: String,
 }
 
-/// Inputs for the Python multi-server signature byte format.
-pub struct MultiServerSigningInput<'a> {
-    pub method: &'a str,
-    pub target: &'a str,
-    pub server_id: &'a str,
-    pub client_id: &'a str,
-    pub timestamp: &'a str,
-    pub nonce: &'a str,
-    pub request_id: &'a str,
-    pub body: &'a [u8],
-}
+/// The multi-server signature bytes and the struct they take are owned by `studio-request-signing`.
+pub use studio_request_signing::{
+    SigningInput as MultiServerSigningInput, signing_bytes as multi_server_signing_bytes,
+};
 
 /// Fields used to sign one outgoing multi-server request.
 pub struct MultiServerRequest<'a> {
@@ -324,30 +317,6 @@ pub struct MultiServerRequest<'a> {
     pub timestamp: i64,
     pub nonce: &'a str,
     pub body: &'a [u8],
-}
-
-/// Python multi-server protocol: newline-delimited UTF-8 fields and a lowercase SHA-256 body hash.
-pub fn multi_server_signing_bytes(input: MultiServerSigningInput<'_>) -> Vec<u8> {
-    let method = input.method.to_ascii_uppercase();
-    multi_server_signing_bytes_normalized(MultiServerSigningInput {
-        method: &method,
-        ..input
-    })
-}
-
-fn multi_server_signing_bytes_normalized(input: MultiServerSigningInput<'_>) -> Vec<u8> {
-    let digest = sha256_hex(input.body);
-    format!(
-        "{MULTI_SERVER_SIGNING_DOMAIN}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{digest}",
-        input.method,
-        input.target,
-        input.server_id,
-        input.client_id,
-        input.timestamp,
-        input.nonce,
-        input.request_id,
-    )
-    .into_bytes()
 }
 
 /// Python multi-server's stable request journal fingerprint (method, path and raw body).
@@ -417,7 +386,8 @@ fn multi_server_signed_headers_normalized(
     validate_identifier(request.request_id)?;
     let timestamp = request.timestamp.to_string();
     let target = canonical_request_target(request.url)?;
-    let signature = identity.sign(&multi_server_signing_bytes_normalized(
+    let signature = studio_request_signing::sign(
+        &identity.key_pair,
         MultiServerSigningInput {
             method,
             target: &target,
@@ -428,17 +398,14 @@ fn multi_server_signed_headers_normalized(
             request_id: request.request_id,
             body: request.body,
         },
-    ));
+    );
     Ok(vec![
-        ("X-Studio-Client".to_owned(), identity.id.clone()),
-        ("X-Studio-Server".to_owned(), request.server_id.to_owned()),
-        ("X-Studio-Timestamp".to_owned(), timestamp),
-        ("X-Studio-Nonce".to_owned(), request.nonce.to_owned()),
-        (
-            "X-Studio-Request-Id".to_owned(),
-            request.request_id.to_owned(),
-        ),
-        ("X-Studio-Signature".to_owned(), signature),
+        (header::CLIENT.to_owned(), identity.id.clone()),
+        (header::SERVER.to_owned(), request.server_id.to_owned()),
+        (header::TIMESTAMP.to_owned(), timestamp),
+        (header::NONCE.to_owned(), request.nonce.to_owned()),
+        (header::REQUEST_ID.to_owned(), request.request_id.to_owned()),
+        (header::SIGNATURE.to_owned(), signature),
     ])
 }
 
@@ -602,7 +569,7 @@ fn verify_multi_server_identity(
     Ok(())
 }
 
-fn ed25519_public_key(public_key_pem: &str) -> RemoteTransportResult<Vec<u8>> {
+pub(crate) fn ed25519_public_key(public_key_pem: &str) -> RemoteTransportResult<Vec<u8>> {
     if public_key_pem.len() > 4096
         || !public_key_pem.starts_with("-----BEGIN PUBLIC KEY-----")
         || !public_key_pem
@@ -1845,6 +1812,50 @@ pub(crate) mod tests {
             spki_pem(),
         )
         .expect("fixed RFC Ed25519 fixture loads")
+    }
+
+    #[test]
+    fn multi_server_signed_headers_match_the_shared_golden_vector() {
+        let identity = identity();
+        let headers = multi_server_signed_headers(
+            &identity,
+            &MultiServerRequest {
+                server_id: "server",
+                method: "post",
+                url: "https://server.example/api/x?q=1",
+                request_id: "request-1",
+                timestamp: 1700000000,
+                nonce: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                body: b"{\"a\":1}",
+            },
+            1700000000,
+        )
+        .expect("signs");
+        let value = |name: &str| {
+            headers
+                .iter()
+                .find(|(header, _)| header == name)
+                .map(|(_, value)| value.as_str())
+                .expect("header is present")
+        };
+        assert_eq!(value("X-Studio-Client"), "test-identity");
+        assert_eq!(
+            value("X-Studio-Signature"),
+            "PfjrkGA/IwuIryihDJjgbfNY/NicDM3N3JicKu0yQMHvEE58pUjBK502a+n1/jr/ovXn4d9nwTi1Q6p1nfX2Dg=="
+        );
+        let input = MultiServerSigningInput {
+            method: "POST",
+            target: "/api/x?q=1",
+            server_id: "server",
+            client_id: "test-identity",
+            timestamp: "1700000000",
+            nonce: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            request_id: "request-1",
+            body: b"{\"a\":1}",
+        };
+        assert!(
+            studio_request_signing::verify(&PUBLIC, input, value("X-Studio-Signature")).is_ok()
+        );
     }
 
     pub(crate) async fn runtime_store_fixture() -> (tempfile::TempDir, PathBuf, Arc<RuntimeStore>) {
