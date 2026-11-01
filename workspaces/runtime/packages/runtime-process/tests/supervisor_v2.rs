@@ -391,6 +391,14 @@ fn restart_recovery_refuses_completion_when_live_leader_moves_group() {
         "GROUP_MOVE_DESTINATION".into(),
         destination.0.id().to_string(),
     );
+    // The copied test binary links the shared test dependency library, which
+    // the runner finds through this variable.
+    if let Some(path) = std::env::var_os("LD_LIBRARY_PATH") {
+        request.env.insert(
+            "LD_LIBRARY_PATH".into(),
+            path.to_string_lossy().into_owned(),
+        );
+    }
     let opened = client.open(request).unwrap();
     let _cleanup = MovingLeaderCleanup {
         pid: opened.pid,

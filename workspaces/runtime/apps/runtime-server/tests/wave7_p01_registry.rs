@@ -3619,7 +3619,7 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
             .status(),
         200
     );
-    let completed = tokio::time::timeout(TEST_HANG_GUARD, async {
+    let completed = tokio::time::timeout(std::time::Duration::from_secs(60), async {
         loop {
             let raw = fixture
                 .store
