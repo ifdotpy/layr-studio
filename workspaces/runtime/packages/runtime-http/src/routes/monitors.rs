@@ -8,9 +8,8 @@ use studio_runtime_store::path_identity::CanonicalPath;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{Response, StatusCode, header};
-use serde_json::Value;
 
-use super::extractors::{ApiHeaders, QueryParams};
+use super::extractors::{ApiHeaders, TypedQuery};
 use super::manifest::{OperationStatus, RouteGroup, get};
 use crate::error::ApiError;
 use crate::router::HttpState;
@@ -26,16 +25,18 @@ pub(crate) fn routes() -> RouteGroup {
     )])
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LogQuery {
+    id: String,
+}
+
 async fn log(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<LogQuery>,
     headers: ApiHeaders,
 ) -> Result<Response<Body>, ApiError> {
-    let id = query
-        .typed_value("id")
-        .and_then(Value::as_str)
-        .ok_or_else(ApiError::internal)?
-        .to_owned();
+    let id = query.id;
     let range = headers
         .one("range")?
         .filter(|range| !range.is_empty())
@@ -336,5 +337,23 @@ inventory::submit! {
         name: "monitors",
         routes: Some(routes),
         dependencies: &[],
+    }
+}
+
+#[cfg(test)]
+mod typed_query_tests {
+    use axum::extract::Query;
+    use serde::de::DeserializeOwned;
+
+    fn accepts<T: DeserializeOwned>(query: &str) -> bool {
+        let uri = format!("/?{query}").parse().unwrap();
+        Query::<T>::try_from_uri(&uri).is_ok()
+    }
+
+    #[test]
+    fn query_contracts() {
+        assert!(accepts::<super::LogQuery>("id=a"));
+        assert!(!accepts::<super::LogQuery>("extra=x"));
+        assert!(!accepts::<super::LogQuery>("id=a&unknown=x"));
     }
 }
