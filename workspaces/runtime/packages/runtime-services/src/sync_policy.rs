@@ -669,7 +669,7 @@ pub fn publish_entity_changes(
     for row in &changes.checked_agents {
         unread.remove(&row.id);
     }
-    let additional_agents = rows_by_id(transaction, "runtime_agents", &unread)?
+    let mut additional_agents = rows_by_id(transaction, "runtime_agents", &unread)?
         .into_iter()
         .map(|(rowid, id, raw)| {
             #[cfg(test)]
@@ -680,6 +680,51 @@ pub fn publish_entity_changes(
             serde_json::from_str::<Value>(&raw).map(|value| CheckedAgentRow { rowid, id, value })
         })
         .collect::<Result<Vec<_>, _>>()?;
+    // Ending an acknowledged interruption can make a pending transfer
+    // cancellable. Refresh only its owning lead, in this publication batch.
+    let mut transfer_leads = BTreeSet::new();
+    for row in additional_agents.iter().chain(&changes.checked_agents) {
+        if !changes.agents.contains(&row.id)
+            || row.value.get("inFlight").and_then(Value::as_bool) != Some(false)
+        {
+            continue;
+        }
+        let Some(root) = row
+            .value
+            .get("rootId")
+            .and_then(Value::as_str)
+            .filter(|root| *root != row.id)
+        else {
+            continue;
+        };
+        let was_in_flight: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection='agent' AND id=?1 AND deleted=0 AND json_extract(payload,'$.value.inFlight')=1)",
+            [&row.id], |row| row.get(0),
+        )?;
+        if !was_in_flight || !table_exists(transaction, "runtime_account_transfers")? {
+            continue;
+        }
+        let is_member: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM runtime_agents lead JOIN runtime_account_transfers op ON op.id=COALESCE(json_extract(lead.record,'$.accountTransferId'),json_extract(lead.record,'$.accountTransfer.id')) WHERE lead.id=?1 AND json_extract(op.record,'$.status')='pending' AND EXISTS(SELECT 1 FROM json_each(op.record,'$.members') member WHERE member.key=?2 AND json_extract(member.value,'$.interruptOutcome')='acknowledged'))",
+            rusqlite::params![root, row.id], |row| row.get(0),
+        )?;
+        if is_member && !agent_ids.contains(root) {
+            transfer_leads.insert(root.to_owned());
+        }
+    }
+    agent_ids.extend(transfer_leads.iter().cloned());
+    additional_agents.extend(
+        rows_by_id(transaction, "runtime_agents", &transfer_leads)?
+            .into_iter()
+            .map(|(rowid, id, raw)| {
+                serde_json::from_str::<Value>(&raw).map(|value| CheckedAgentRow {
+                    rowid,
+                    id,
+                    value,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+    );
     let mut ordered_agents = additional_agents
         .iter()
         .chain(&changes.checked_agents)
