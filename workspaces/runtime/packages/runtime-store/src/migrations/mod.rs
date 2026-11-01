@@ -69,6 +69,7 @@ pub use m2026_10_26_provider_identity::migrate_canvas_2026_10_26;
 pub(crate) use m2026_10_26_provider_identity::{
     ANALYTICS_PROVIDER_FORMAT_KEY, PROVIDER_IDENTITY_FORMAT,
 };
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) use m2026_10_30_approvals::approval_from_record;
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_30_branch_phase::apply as migrate_branch_phase;
