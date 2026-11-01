@@ -558,12 +558,15 @@ test("message delivery ui", async ({ browser: _browser }) => {
         clientMessageId: early.body.id,
         role: "user",
         text: earlyText,
+        deliveryStatus: "delivered" as const,
+        materialized: true,
       };
       await publish(a.id, [...earlyBase, earlyEcho]);
       await until(
         async () =>
-          (await row(earlyText).locator(".message-delivery-status").count()) ===
-          0,
+          (await row(earlyText)
+            .locator(".message-delivery-status")
+            .innerText()) === "Sent",
         `${mode}: history replaces pending display before POST returns`,
       );
       await accept(early);
@@ -632,8 +635,7 @@ test("message delivery ui", async ({ browser: _browser }) => {
       await accept(queued, "queued");
       await assertQueueGeometry("queued receipt");
       await until(
-        async () =>
-          (await row(queuedText).innerText()).includes("Waiting for agent"),
+        async () => (await row(queuedText).innerText()).includes("Queued"),
         "Server acceptance must stop showing an active network send",
       );
       const queueBase = required(history.get(a.id)).items;
@@ -682,7 +684,7 @@ test("message delivery ui", async ({ browser: _browser }) => {
           (await row(queuedText).count()) === 1 &&
           (await row(queuedText)
             .locator(".message-delivery-status")
-            .count()) === 0,
+            .innerText()) === "Sent",
         `${mode}: materialized queue row stays unique`,
       );
       assert.equal(await queueRow().count(), 0);
@@ -867,9 +869,7 @@ test("message delivery ui", async ({ browser: _browser }) => {
       await accept(materialized, "queued");
       await until(
         async () =>
-          (await row(materializedText).innerText()).includes(
-            "Waiting for agent",
-          ),
+          (await row(materializedText).innerText()).includes("Queued"),
         "Accepted input remains visible while the agent waits",
       );
       const silentBase = required(history.get(a.id));
@@ -896,8 +896,8 @@ test("message delivery ui", async ({ browser: _browser }) => {
           (await row(materializedText).count()) === 1 &&
           (await row(materializedText)
             .locator(".message-delivery-status")
-            .count()) === 0,
-        "A transcript resource update clears the delivered input status",
+            .innerText()) === "Sent",
+        "A transcript resource update shows the delivered input status",
       );
       assert.equal(
         posts.length,
