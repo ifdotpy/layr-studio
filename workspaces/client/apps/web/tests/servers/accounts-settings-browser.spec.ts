@@ -18,6 +18,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test, expect, apiSchemaHeaders } from "../playwright.ts";
 import { fixture } from "./multi-server-fixture.ts";
+import { projectedLimits } from "../../src/usage/accountLimits.fixture.ts";
 
 function waitForPost<Path extends ApiPostPath>(
   page: Page,
@@ -365,7 +366,8 @@ test("accounts settings show per-server state and provider choices", async ({
       const accountKey = account.id;
       const reading = sharedReadings[accountKey];
       const at = Date.now() / 1000 - (reading?.ageSeconds ?? 0);
-      server.snapshot.runtime.rateLimitsByAccount[accountKey] = {
+      const view = projectedLimits(accountKey, at, null);
+      view.observation = {
         accountKey,
         at,
         readAt: at,
@@ -385,6 +387,10 @@ test("accounts settings show per-server state and provider choices", async ({
             }
           : null,
       };
+      view.projection.buckets.current.remaining = reading
+        ? 100 - reading.usedPercent
+        : null;
+      server.snapshot.runtime.rateLimitsByAccount[accountKey] = view;
     }
   }
   const pageClockStart = new Date();

@@ -74,6 +74,11 @@ export async function fixture(
     ? {}
     : accountRowsOrOptions || {};
   const workspaceId = options.workspaceId || fixtureWorkspaceId(label);
+  const processListing = {
+    processes: [],
+    activities: [],
+    responseTarget: null,
+  } satisfies components["schemas"]["ProcessListing"];
   const accountRows = Array.isArray(accountRowsOrOptions)
     ? accountRowsOrOptions
     : options.accounts || null;
@@ -341,6 +346,7 @@ export async function fixture(
         discoverySnapshot: accessSnapshot,
         snapshot,
         workspaceId,
+        processSnapshot: () => processListing,
         subscriptionUpdate: bodyFor("/api/sync/subscriptions"),
         progress: (resource) =>
           resource.kind === "auth-progress"
@@ -515,6 +521,10 @@ export async function fixture(
     }
     if (url.pathname === "/api/state") {
       json(snapshot);
+      return;
+    }
+    if (url.pathname === "/api/processes") {
+      json(processListing);
       return;
     }
     if (url.pathname === "/api/accounts") {
