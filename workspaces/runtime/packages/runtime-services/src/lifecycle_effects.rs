@@ -1546,8 +1546,7 @@ fn needs_deleted_settlement(agent: &AgentRecord) -> bool {
         && (agent.in_flight == Some(true)
             || agent
                 .turn_id
-                .value()
-                .map(String::as_str)
+                .as_deref()
                 .is_some_and(|turn| !turn.is_empty())
             || agent
                 .start_attempt

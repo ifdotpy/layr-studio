@@ -106,7 +106,7 @@ mod tests {
             .filter_map(|line| {
                 let line = line.trim().strip_prefix("pub ")?;
                 let (name, ty) = line.split_once(": ")?;
-                if !ty.starts_with("Option<") || name == "compactions" {
+                if !ty.starts_with("Option<") || matches!(name, "compactions" | "turn_id") {
                     return None;
                 }
                 let mut parts = name.split('_');
@@ -152,7 +152,7 @@ mod tests {
         assert!(round_trip.get("name").is_none());
         assert!(round_trip.get("deletedAt").is_none());
         assert!(round_trip.get("turnEpoch").is_none());
-        assert!(round_trip.get("turnId").unwrap().is_null());
+        assert!(round_trip.get("turnId").is_none());
     }
 
     #[test]

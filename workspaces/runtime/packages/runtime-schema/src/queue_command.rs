@@ -6,8 +6,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Value, json};
 
 /// A nullable wire field whose omission must survive request signature serialization.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum Field<T> {
+    #[default]
     Missing,
     Null,
     Value(T),
@@ -24,12 +25,6 @@ impl<T: JsonSchema> JsonSchema for Field<T> {
 
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         <Option<T> as JsonSchema>::json_schema(generator)
-    }
-}
-
-impl<T> Default for Field<T> {
-    fn default() -> Self {
-        Self::Missing
     }
 }
 

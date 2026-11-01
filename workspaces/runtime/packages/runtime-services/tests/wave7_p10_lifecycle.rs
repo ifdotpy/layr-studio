@@ -838,8 +838,7 @@ impl InterruptFixture {
                         let needs_settlement = agent.in_flight == Some(true)
                             || agent
                                 .turn_id
-                                .value()
-                                .map(String::as_str)
+                                .as_deref()
                                 .is_some_and(|turn| !turn.is_empty())
                             || attempt.and_then(|value| value.active_at_reservation) == Some(true)
                             || matches!(

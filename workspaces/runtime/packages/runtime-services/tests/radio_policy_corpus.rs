@@ -207,8 +207,7 @@ fn radio_snapshot_refuses_malformed_consumed_records_with_locations() {
         agent_id.clone(),
         serde_json::to_string(&agent).expect("agent JSON"),
     );
-    let error = RadioAuthorizationSnapshot::from_records(&input).expect_err("null autoWake");
-    assert!(error.location.ends_with("/autoWake"), "{error}");
+    RadioAuthorizationSnapshot::from_records(&input).expect("null autoWake means absent");
 }
 
 #[test]

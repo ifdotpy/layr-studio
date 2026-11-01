@@ -226,7 +226,7 @@ fn running() -> AgentRecord {
         in_flight: Some(true),
         account_key: "acct".into(),
         thread_id: Some("thread".into()),
-        turn_id: studio_runtime_schema::queue_command::Field::Value(TURN.into()),
+        turn_id: Some(TURN.into()),
         auto_wake: Some(true),
         turn_epoch: Some(4),
         id: AgentId::from(AGENT),
@@ -321,7 +321,7 @@ fn terminal(connection: &mut Connection, unapplied: &[&str]) {
 
 fn retarget(connection: &Connection, turn: &str) {
     let mut record = agent(connection);
-    record.turn_id = studio_runtime_schema::queue_command::Field::Value(turn.to_string());
+    record.turn_id = Some(turn.to_string());
     record.start_attempt.as_mut().expect("attempt").turn_id = Some(turn.into());
     put_agent(connection, record);
 }

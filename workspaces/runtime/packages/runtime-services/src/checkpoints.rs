@@ -195,14 +195,14 @@ pub async fn capture(
     if !reserved {
         return Err(CheckpointsError::ActivityChanged);
     }
-    finish_reserved(
+    Box::pin(finish_reserved(
         store,
         snapshot,
         label,
         checkpoint_id,
         operation_id,
         CaptureKind::Manual,
-    )
+    ))
     .await
 }
 

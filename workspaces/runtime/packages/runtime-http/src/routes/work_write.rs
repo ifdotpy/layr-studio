@@ -1129,8 +1129,7 @@ mod managed_work_port_tests {
             .transaction(|tx| {
                 let mut agent = AgentRepository::get(tx, &"lead".into())?.expect("lead");
                 agent.thread_id = Some("thread".to_string());
-                agent.turn_id =
-                    studio_runtime_schema::queue_command::Field::Value("turn".to_string());
+                agent.turn_id = Some("turn".to_string());
                 AgentRepository::put(tx, &agent)?;
                 Ok(())
             })

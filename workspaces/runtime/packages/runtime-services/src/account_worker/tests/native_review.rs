@@ -208,7 +208,7 @@ async fn an_unbound_interrupted_review_completion_settles_instead_of_holding_the
 row.auto_wake = Some(false);
 row.turn_epoch = Some(epoch);
 row.thread_id = Some("review-thread".to_string());
-row.turn_id = studio_runtime_schema::queue_command::Field::Value("review-turn".to_string());
+row.turn_id = Some("review-turn".to_string());
 for (key, value) in [
 
 

@@ -1474,7 +1474,7 @@ async fn private_answer_waits_while_shared_turn_holds_floor() {
     state.bridge.run(move |store| async move {
         store.transaction_with(move |tx| {
             let record = AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
-            let turn = record.turn_id.value().map(String::as_str).unwrap();
+            let turn = record.turn_id.as_deref().unwrap();
             let thread = record.thread_id.as_deref().unwrap();
             let account = record.account_key.as_str();
             tx.execute("UPDATE runtime_events SET kind='followup' WHERE id=?1", [INPUT])?;

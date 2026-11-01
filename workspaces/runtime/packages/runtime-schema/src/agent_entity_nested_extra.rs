@@ -235,10 +235,10 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 11], Strin
     ] {
         let prop = property(&mut retry, name)?;
         title(prop, label)?;
-        if name == "updatedAt" {
-            if object(prop)?.remove("format") != Some(serde_json::json!("double")) {
-                return Err("updatedAt must use the double number format".into());
-            }
+        if name == "updatedAt"
+            && object(prop)?.remove("format") != Some(serde_json::json!("double"))
+        {
+            return Err("updatedAt must use the double number format".into());
         }
     }
     normalize_nullable_counter(&mut retry, "epoch", "Epoch", false)?;
@@ -287,10 +287,10 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 11], Strin
     ] {
         let prop = property(&mut resume, name)?;
         title(prop, label)?;
-        if name == "updatedAt" {
-            if object(prop)?.remove("format") != Some(serde_json::json!("double")) {
-                return Err("updatedAt must use the double number format".into());
-            }
+        if name == "updatedAt"
+            && object(prop)?.remove("format") != Some(serde_json::json!("double"))
+        {
+            return Err("updatedAt must use the double number format".into());
         }
     }
     let mut usage = ContextUsageDto::json_schema(&mut generator).to_value();

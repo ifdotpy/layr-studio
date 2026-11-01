@@ -110,16 +110,7 @@ async fn edit_actor(state: &State, changes: Value) {
                                     serde::Deserialize::deserialize(value.clone()).unwrap()
                             }
                             "threadId" => record.thread_id = value.as_str().map(str::to_owned),
-                            "turnId" => {
-                                record.turn_id = value.as_str().map_or(
-                                    studio_runtime_schema::queue_command::Field::Null,
-                                    |v| {
-                                        studio_runtime_schema::queue_command::Field::Value(
-                                            v.to_owned(),
-                                        )
-                                    },
-                                )
-                            }
+                            "turnId" => record.turn_id = value.as_str().map(str::to_owned),
                             "cwd" => record.cwd = value.as_str().map(str::to_owned),
                             "deletedAt" => record.deleted_at = value.as_f64(),
                             "startAttempt" => {
@@ -873,7 +864,7 @@ async fn existing_actor(paused: bool) -> (State, Arc<ExistingGuest>) {
 record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
 record.account_key = "default".to_string();
 record.thread_id = Some("fake-thread-0".to_string());
-record.turn_id = studio_runtime_schema::queue_command::Field::Value("vm-turn".to_string());
+record.turn_id = Some("vm-turn".to_string());
 record.workspace_mode = Some(studio_runtime_schema::records::WorkspaceMode::Layr);
 record.cwd = Some("/home/studio/project".into());
 record.layr_ready = Some(true);

@@ -341,11 +341,7 @@ fn receipt_events(id: &str, receipt: &SteerPayload) -> StoreResult<String> {
 
 /// The running turn and thread that may receive input, or `None`.
 fn steer_turn(agent: &AgentRecord) -> Option<(String, String)> {
-    let turn = agent
-        .turn_id
-        .value()
-        .map(String::as_str)
-        .filter(|turn| !turn.is_empty())?;
+    let turn = agent.turn_id.as_deref().filter(|turn| !turn.is_empty())?;
     let thread = agent
         .thread_id
         .as_deref()
@@ -779,7 +775,7 @@ impl SchedulerRepository {
         let requeued = release(tx, &id, &receipt)?;
         if let Some(mut agent) = load_agent(tx, agent_id)?
             && agent.epoch == receipt.epoch
-            && agent.turn_id.value().map(String::as_str) == Some(receipt.turn_id.as_str())
+            && agent.turn_id.as_deref() == Some(receipt.turn_id.as_str())
         {
             agent
                 .extra

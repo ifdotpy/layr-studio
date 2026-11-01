@@ -111,7 +111,7 @@ pub enum NativeStatusPhase {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum AgentNativeStatusError {
-    NativeProviderError(crate::provider_errors::NativeProviderError),
+    NativeProviderError(Box<crate::provider_errors::NativeProviderError>),
     String(String),
 }
 

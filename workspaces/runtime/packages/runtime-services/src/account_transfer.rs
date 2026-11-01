@@ -936,14 +936,14 @@ impl Snapshot {
         member.pending_settings =
             match known_transfer_object(&a.pending_settings, "pendingSettings")? {
                 Field::Missing => Field::Null,
-                value => value,
+                value @ (Field::Null | Field::Value(_)) => value,
             };
         member.pending_settings_account_key = match known_transfer_value(
             &a.pending_settings_account_key,
             "pendingSettingsAccountKey",
         )? {
             Field::Missing => Field::Null,
-            value => value,
+            value @ (Field::Null | Field::Value(_)) => value,
         };
         member.error = Field::Null;
         // The move has started; the card shows it as moving now.
@@ -1501,7 +1501,7 @@ impl Snapshot {
             .get_mut(agent)
             .ok_or(TransferError::Refused("Unknown transfer member"))?;
         a.thread_id = Some(target_thread.to_owned());
-        a.turn_id = Field::Null;
+        a.turn_id = None;
         a.execution_settings_account_key =
             Field::Value(self.operation.target_account_key.as_str().to_owned());
         let settings = &target_settings.settings;
@@ -1869,7 +1869,7 @@ fn restore_source_field<T: Clone>(
     match saved {
         Field::Missing if !exact => {}
         Field::Missing | Field::Null if !exact => *current = Field::Missing,
-        _ => *current = saved.clone(),
+        Field::Missing | Field::Null | Field::Value(_) => *current = saved.clone(),
     }
 }
 
@@ -2046,14 +2046,18 @@ pub fn typed_enroll(
         status: Field::Value(agent.status.clone()),
         error: agent.error.clone().try_map(|value| match value {
             studio_runtime_schema::provider_errors::AgentError::Message(value) => Ok(value),
-            _ => Err(invalid("transfer agent", "/error")),
+            studio_runtime_schema::provider_errors::AgentError::Provider(_) => {
+                Err(invalid("transfer agent", "/error"))
+            }
         })?,
         native_failure_hold: agent
             .native_failure_hold
             .clone()
             .try_map(|value| match value {
                 studio_runtime_store::NativeFailureHold::Boolean(value) => Ok(value),
-                _ => Err(invalid("transfer agent", "/nativeFailureHold")),
+                studio_runtime_store::NativeFailureHold::Unreadable(_) => {
+                    Err(invalid("transfer agent", "/nativeFailureHold"))
+                }
             })?,
     };
     agent.lazy_account_transfer =
@@ -2330,17 +2334,16 @@ impl Decision {
         if pointer.is_some_and(|value| value != operation.id) {
             return Ok(());
         }
-        if let Some(AgentTransferState::Summary(current)) = lead.account_transfer.value() {
-            if current.id.as_str() != operation.id
-                && pointer != Some(operation.id.as_str())
-                && (!matches!(
-                    current.status,
-                    TransferStatus::Completed | TransferStatus::Cancelled
-                ) || previous_created
-                    .is_some_and(|old| operation.created.as_f64().unwrap_or(0.0) <= old))
-            {
-                return Ok(());
-            }
+        if let Some(AgentTransferState::Summary(current)) = lead.account_transfer.value()
+            && current.id.as_str() != operation.id
+            && pointer != Some(operation.id.as_str())
+            && (!matches!(
+                current.status,
+                TransferStatus::Completed | TransferStatus::Cancelled
+            ) || previous_created
+                .is_some_and(|old| operation.created.as_f64().unwrap_or(0.0) <= old))
+        {
+            return Ok(());
         }
         lead.account_transfer = Field::Value(AgentTransferState::Summary(Box::new(
             summary_record(operation)?,

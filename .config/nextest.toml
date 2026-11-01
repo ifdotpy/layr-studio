@@ -97,6 +97,12 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & test(=transcript_seq_backfill::tests::copy_check_does_not_admit_a_writer_or_retire_copies)) |
     (package(=studio-runtime-services) & kind(lib) & test(=transcript_seq_backfill::tests::fresh_store_keeps_transcript_copies)) |
     (package(=studio-runtime-store) & test(=online_migration::driver_stops_resumes_and_reports_progress)) |
+    (package(=studio-runtime-http) & test(/terminal_bodies_use_only_typed_ingress|typed_create_preserves_receipt_identity_and_bounds|pending_restart_cleanup_returns_retryable_error_without_terminal_writes|identity_http_returns_workspace_and_protocol|blob_http_returns_text_and_utf8_byte_length|profile_input_is_closed_and_bounded|profile_http_accepts_omitted_and_rejects_null_fields|checkpoint_rewind_preview_and_restore_enforce_idle_and_preserve_before_tree|the_state_file_origin_admits_serve_requests_until_it_is_disabled/)) |
+    (package(=studio-runtime-schema) & kind(lib) & test(=multi_server_ingress::tests::accept_invite_expiry_schema_matches_ingress)) |
+    (package(=studio-runtime-http) & kind(test) & binary(=integration) & test(=multi_server_incoming::access_snapshot_projects_legacy_missing_fields_as_null)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=multi_server::tests::invitation_uses_injected_owner_identity_and_exact_retry_is_stable)) |
+    (package(=studio-runtime-services) & kind(test) & binary(=integration) & test(=multi_server_corpus::real_invite_snapshot_pair_and_revoke)) |
+    (package(=studio-runtime-http) & kind(test) & binary(=integration) & test(=multi_server_incoming::paired_fake_servers_create_and_recover_the_same_invitation)) |
     (package(=studio-runtime-store) & kind(lib) & test(=path::tests::missing_state_directory_is_created)) |
     (package(=studio-runtime-server) & (test(templates_use_the_shared_delivery_layout_and_escape_paths) | test(systemd_verifies_rendered_unit_with_specifiers_in_path))) |
     (package(=studio-runtime-services) & kind(lib) & test(/^account_driver::tests::vm_/)) |
@@ -251,6 +257,7 @@ default-filter = '''
     | (package(=studio-runtime-services) & kind(test) & binary(=integration) & test(codex_reviewer_under_yolo_is_read_only_on_start_resume_and_turn))
     | (package(=studio-runtime-services) & kind(lib) & (test(monitor_settings_match_turn_permission_and_sandbox_fallback) | test(native_review_without_a_role_is_a_reviewer)))
     | (package(=studio-runtime-schema) & kind(lib) & test(workspace_modes::tests::))
+    | (package(=studio-runtime-schema) & kind(lib) & test(sync_entity_payload::tests::))
     | (package(=studio-runtime-services) & kind(lib) & (test(legacy_image_workspace::tests::) | test(legacy_finished_worker_archives_without_a_native_executor) | test(native_child_requires_a_native_parent) | test(legacy_worker_archives_through_current_tool_without_losing_its_row) | test(review_regression_) | test(platform_defaults_require_the_native_linux_capability) | test(native_capability_)))
     | (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(legacy_image_rows_finish_without_provider_launch_or_row_loss) | test(review_regression_legacy_pending_recovery_does_not_start_provider))
     | ((package(=studio-runtime-server)) & ((kind(lib) | kind(bin) | kind(test))) & (test(operator_cli::)))
@@ -488,6 +495,12 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & test(=transcript_seq_backfill::tests::copy_check_does_not_admit_a_writer_or_retire_copies)) |
     (package(=studio-runtime-services) & kind(lib) & test(=transcript_seq_backfill::tests::fresh_store_keeps_transcript_copies)) |
     (package(=studio-runtime-store) & test(=online_migration::driver_stops_resumes_and_reports_progress)) |
+    (package(=studio-runtime-http) & test(/terminal_bodies_use_only_typed_ingress|typed_create_preserves_receipt_identity_and_bounds|pending_restart_cleanup_returns_retryable_error_without_terminal_writes|identity_http_returns_workspace_and_protocol|blob_http_returns_text_and_utf8_byte_length|profile_input_is_closed_and_bounded|profile_http_accepts_omitted_and_rejects_null_fields|checkpoint_rewind_preview_and_restore_enforce_idle_and_preserve_before_tree|the_state_file_origin_admits_serve_requests_until_it_is_disabled/)) |
+    (package(=studio-runtime-schema) & kind(lib) & test(=multi_server_ingress::tests::accept_invite_expiry_schema_matches_ingress)) |
+    (package(=studio-runtime-http) & kind(test) & binary(=integration) & test(=multi_server_incoming::access_snapshot_projects_legacy_missing_fields_as_null)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=multi_server::tests::invitation_uses_injected_owner_identity_and_exact_retry_is_stable)) |
+    (package(=studio-runtime-services) & kind(test) & binary(=integration) & test(=multi_server_corpus::real_invite_snapshot_pair_and_revoke)) |
+    (package(=studio-runtime-http) & kind(test) & binary(=integration) & test(=multi_server_incoming::paired_fake_servers_create_and_recover_the_same_invitation)) |
     (package(=studio-runtime-store) & kind(lib) & test(=path::tests::missing_state_directory_is_created)) |
     (package(=studio-runtime-server) & (test(templates_use_the_shared_delivery_layout_and_escape_paths) | test(systemd_verifies_rendered_unit_with_specifiers_in_path))) |
     (package(=studio-runtime-services) & kind(lib) & test(/^account_driver::tests::vm_/)) |
@@ -642,6 +655,7 @@ default-filter = '''
     | (package(=studio-runtime-services) & kind(test) & binary(=integration) & test(codex_reviewer_under_yolo_is_read_only_on_start_resume_and_turn))
     | (package(=studio-runtime-services) & kind(lib) & (test(monitor_settings_match_turn_permission_and_sandbox_fallback) | test(native_review_without_a_role_is_a_reviewer)))
     | (package(=studio-runtime-schema) & kind(lib) & test(workspace_modes::tests::))
+    | (package(=studio-runtime-schema) & kind(lib) & test(sync_entity_payload::tests::))
     | (package(=studio-runtime-services) & kind(lib) & (test(legacy_image_workspace::tests::) | test(legacy_finished_worker_archives_without_a_native_executor) | test(native_child_requires_a_native_parent) | test(legacy_worker_archives_through_current_tool_without_losing_its_row) | test(review_regression_) | test(platform_defaults_require_the_native_linux_capability) | test(native_capability_)))
     | (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(legacy_image_rows_finish_without_provider_launch_or_row_loss) | test(review_regression_legacy_pending_recovery_does_not_start_provider))
     | ((package(=studio-runtime-server)) & ((kind(lib) | kind(bin) | kind(test))) & (test(operator_cli::)))

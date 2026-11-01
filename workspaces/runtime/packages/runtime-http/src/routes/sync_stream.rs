@@ -1599,7 +1599,6 @@ async fn attach_transient_snapshots(
                 entry.discovery_snapshot = super::multi_server::read_snapshot(state)
                     .await
                     .ok()
-                    .and_then(|snapshot| serde_json::from_value(snapshot).ok())
                     .map(Some);
             }
             ResourceRef::VoiceResource(resource) => {

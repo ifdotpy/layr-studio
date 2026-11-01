@@ -232,7 +232,7 @@ fn running(tx: &rusqlite::Transaction<'_>, actor: &str, native: bool) -> Result<
     let mut record = AgentRepository::get(tx, &AgentId::from(actor))?.expect("actor");
     record.status = studio_runtime_store::AgentStatus::Running;
     record.thread_id = Some(format!("thread-{actor}"));
-    record.turn_id = studio_runtime_schema::queue_command::Field::Value("turn".to_string());
+    record.turn_id = Some("turn".to_string());
     record.in_flight = Some(true);
     if native {
         record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Host);

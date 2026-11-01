@@ -647,11 +647,8 @@ pub struct AgentRecord {
     pub account_key: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub turn_id: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_job: Option<StoredTitleJob>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3607,7 +3604,7 @@ mod tests {
         assert_eq!(record.turn_epoch, Some(2));
         assert_eq!(record.account_key, "account");
         assert_eq!(record.thread_id.as_deref(), Some("thread"));
-        assert_eq!(record.turn_id.value().map(String::as_str), Some("turn"));
+        assert_eq!(record.turn_id.as_deref(), Some("turn"));
         assert_eq!(record.value(), value);
     }
 
@@ -3623,7 +3620,14 @@ mod tests {
             if let Some(turn) = turn {
                 value["turnId"] = turn;
             }
-            assert_eq!(agent(value.clone()).into_value(), value);
+            if value.get("turnId").is_some_and(Value::is_null) {
+                value.as_object_mut().unwrap().remove("turnId");
+                let mut null = value.clone();
+                null["turnId"] = Value::Null;
+                assert_eq!(agent(null).into_value(), value);
+            } else {
+                assert_eq!(agent(value.clone()).into_value(), value);
+            }
         }
     }
 
@@ -3950,8 +3954,7 @@ mod tests {
             if let Some(super::StoredWorkerDefaults::Known(defaults)) =
                 record.worker_defaults.value()
             {
-                let transfer: crate::transfer_record::TransferWorkerDefaults =
-                    defaults.clone().into();
+                let transfer: crate::transfer_record::TransferWorkerDefaults = defaults.clone();
                 assert_eq!(serde_json::to_value(transfer).unwrap(), value);
             }
         }
@@ -4474,7 +4477,8 @@ mod agent_projection_tests {
 
     #[test]
     fn stored_agent_rejects_legacy_start_wait_shapes() {
-        for wait in [r#"{"reason":"slot","epoch":1,"runningTurns":null}"#] {
+        {
+            let wait = r#"{"reason":"slot","epoch":1,"runningTurns":null}"#;
             let raw = format!(
                 r#"{{"id":"a","rootId":"a","epoch":1,"status":"queued","accountKey":"default","compactions":0,"startWait":{wait}}}"#
             );

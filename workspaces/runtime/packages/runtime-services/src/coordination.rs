@@ -727,7 +727,7 @@ fn assert_native_thread_open(
                 .get("nativeTurnError")
                 .and_then(Value::as_object)
                 .is_some_and(|previous| {
-                    previous.get("turnId").and_then(Value::as_str) == agent.turn_id.value().map(String::as_str)
+                    previous.get("turnId").and_then(Value::as_str) == agent.turn_id.as_deref()
                         && previous
                             .get("error")
                             .is_some_and(is_misalignment_policy_violation)

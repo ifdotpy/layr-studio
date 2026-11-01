@@ -177,7 +177,7 @@ async fn fixture() -> (
 }
 #[tokio::test]
 async fn checkpoint_rewind_preview_and_restore_enforce_idle_and_preserve_before_tree() {
-    let (_root, cwd, store, app, provider) = fixture().await;
+    let (root, cwd, store, app, provider) = fixture().await;
     let (status, captured) = post(
         &app,
         "/api/checkpoint",
@@ -192,7 +192,29 @@ async fn checkpoint_rewind_preview_and_restore_enforce_idle_and_preserve_before_
     let (status, preview) = post(&app, "/api/checkpoint/preview", preview_body.clone()).await;
     assert_eq!(status, 200, "{preview}");
     assert_eq!(preview["canRestore"], true, "{preview}");
-    assert!(preview["restoreUnavailableReason"].is_null());
+    assert_eq!(preview.get("restoreUnavailableReason"), Some(&Value::Null));
+    let without_provider = router(HttpState::new(
+        "fixture-token".into(),
+        "fixture".into(),
+        root.path().to_string_lossy().into(),
+        49171,
+        None,
+        Some(store.clone()),
+        None,
+    ))
+    .unwrap();
+    let (status, unavailable) = post(
+        &without_provider,
+        "/api/checkpoint/preview",
+        preview_body.clone(),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(unavailable["canRestore"], false);
+    assert_eq!(
+        unavailable["restoreUnavailableReason"],
+        "The provider session service is unavailable."
+    );
     let restore_body =
         json!({"agent":"worker","checkpoint":checkpoint,"expectedTree":preview["expectedTree"]});
     // A stale preview must not fork a provider thread or overwrite later files.

@@ -29,7 +29,10 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                         )
                         .is_ok()
                     }
-                    _ => false,
+                    rusqlite::types::ValueRef::Null
+                    | rusqlite::types::ValueRef::Real(_)
+                    | rusqlite::types::ValueRef::Text(_)
+                    | rusqlite::types::ValueRef::Blob(_) => false,
                 };
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, valid))
             })?

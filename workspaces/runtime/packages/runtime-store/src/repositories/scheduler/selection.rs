@@ -1575,7 +1575,7 @@ impl SchedulerRepository {
                 agent,
                 record.status.as_str(),
                 record.in_flight == Some(true),
-                record.turn_id.value().map(String::as_str),
+                record.turn_id.as_deref(),
             )?;
         }
         Ok(())

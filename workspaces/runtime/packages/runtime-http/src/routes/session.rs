@@ -1,6 +1,5 @@
 use axum::Json;
 use axum::extract::State;
-use serde_json::json;
 
 use crate::router::HttpState;
 
@@ -14,8 +13,8 @@ pub(crate) fn routes() -> RouteGroup {
     )])
 }
 
-pub(crate) async fn get(State(state): State<HttpState>) -> Json<serde_json::Value> {
-    Json(json!({"token": state.token}))
+pub(crate) async fn get(State(state): State<HttpState>) -> Json<crate::generated::SessionResponse> {
+    Json(crate::generated::SessionResponse { token: state.token })
 }
 inventory::submit! {
     crate::routes::manifest::RouteModuleRegistration {
