@@ -631,6 +631,7 @@ pub fn check_schema_parity(openapi: &Value, account_transfer: &Value) -> Result<
     crate::project_record::check_schema_parity()?;
     crate::continuation_snapshot::check_capacity_schema_parity()?;
     crate::request_record::check_schema_parity()?;
+    crate::room_record::check_schema_parity()?;
     crate::workspace_operation::check_schema_parity()?;
     crate::task_record::check_schema_parity()?;
     crate::transcript_record::check_schema_parity()?;
@@ -1427,6 +1428,10 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-request-record.schema.json".into(),
             text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-request-record.schema.json", &serde_json::to_string_pretty(&crate::request_record::schema()).map_err(|error| error.to_string())?)?,
+        },
+        Rendered {
+            path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-room-record.schema.json".into(),
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-room-record.schema.json", &serde_json::to_string_pretty(&crate::room_record::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: web("persistence.ts"),

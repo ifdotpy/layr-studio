@@ -692,6 +692,100 @@ pub fn respond_to_complaint(
     })
 }
 
+<<<<<<< head
+||||||| base
+fn request(transaction: &Transaction<'_>, id: &str) -> Result<RequestRecord, QuestionsWriteError> {
+    Table::<RequestRecord>::new(transaction)
+        .get(&id.to_owned())?
+        .ok_or(QuestionsWriteError::InvalidRequest("Unknown question"))
+}
+
+fn put_request(
+    transaction: &Transaction<'_>,
+    id: &str,
+    record: &RequestRecord,
+) -> Result<(), QuestionsWriteError> {
+    Table::<RequestRecord>::new(transaction).put(record)?;
+    let view = crate::sync_views::project_persisted_record("request", &json!(record))
+        .ok_or_else(|| invalid_stored("runtime_requests", id))?;
+    SyncDocumentsRepository::put_entity(
+        transaction,
+        "request",
+        id,
+        view,
+        record.status != studio_runtime_schema::persistence::RequestCardStatus::Pending,
+    )?;
+    Ok(())
+}
+
+fn is_question(record: &RequestRecord) -> Result<bool, QuestionsWriteError> {
+    use studio_runtime_schema::request_record::RequestMethod;
+    Ok(match record.method {
+        RequestMethod::AsyncQuestion | RequestMethod::UserInput => true,
+        RequestMethod::Elicitation => {
+            #[derive(serde::Deserialize)]
+            struct Params {
+                mode: Option<String>,
+            }
+            let params: Params = serde_json::from_str(record.params.get())
+                .map_err(|_| invalid_stored("runtime_requests", &record.id))?;
+            params.mode.as_deref() == Some("form")
+        }
+        RequestMethod::BrowserOpen
+        | RequestMethod::MonitorApprove
+        | RequestMethod::CommandApproval
+        | RequestMethod::FileApproval
+        | RequestMethod::PermissionsApproval => false,
+    })
+}
+
+=======
+fn request(transaction: &Transaction<'_>, id: &str) -> Result<RequestRecord, QuestionsWriteError> {
+    Table::<RequestRecord>::new(transaction)
+        .get(&id.to_owned())?
+        .ok_or(QuestionsWriteError::InvalidRequest("Unknown question"))
+}
+
+fn put_request(
+    transaction: &Transaction<'_>,
+    id: &str,
+    record: &RequestRecord,
+) -> Result<(), QuestionsWriteError> {
+    Table::<RequestRecord>::new(transaction).put(record)?;
+    let view = crate::request_projection::project_request_record(record)
+        .map_err(|_| invalid_stored("runtime_requests", id))?;
+    SyncDocumentsRepository::put_entity(
+        transaction,
+        "request",
+        id,
+        view,
+        record.status != studio_runtime_schema::persistence::RequestCardStatus::Pending,
+    )?;
+    Ok(())
+}
+
+fn is_question(record: &RequestRecord) -> Result<bool, QuestionsWriteError> {
+    use studio_runtime_schema::request_record::RequestMethod;
+    Ok(match record.method {
+        RequestMethod::AsyncQuestion | RequestMethod::UserInput => true,
+        RequestMethod::Elicitation => {
+            #[derive(serde::Deserialize)]
+            struct Params {
+                mode: Option<String>,
+            }
+            let params: Params = serde_json::from_str(record.params.get())
+                .map_err(|_| invalid_stored("runtime_requests", &record.id))?;
+            params.mode.as_deref() == Some("form")
+        }
+        RequestMethod::BrowserOpen
+        | RequestMethod::MonitorApprove
+        | RequestMethod::CommandApproval
+        | RequestMethod::FileApproval
+        | RequestMethod::PermissionsApproval => false,
+    })
+}
+
+>>>>>>> origin/main
 fn complaint_message(record: &ComplaintRecord) -> String {
     let complaint = json!({
         "complaint_id": record.id,

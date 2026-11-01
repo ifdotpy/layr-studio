@@ -481,11 +481,21 @@ fn accounts_summary(snapshot: studio_runtime_services::account_policy::AccountsS
     json!({"accounts":snapshot.accounts,"archivedAccounts":snapshot.archived_accounts,"defaultAccountKey":snapshot.default_account_key,"defaultAccountGroups":snapshot.default_account_groups,"supportsDelete":true,"supportsDisconnect":true})
 }
 
+/// A scanner snapshot includes internal refresh metadata beside the public cost.
+#[derive(serde::Deserialize)]
+pub(crate) struct CostSnapshot<T> {
+    #[serde(rename = "_refreshDue")]
+    _refresh_due: Option<bool>,
+    #[serde(rename = "sourceFingerprint")]
+    _source_fingerprint: Option<String>,
+    #[serde(flatten)]
+    pub(crate) public: T,
+}
+
 fn cost_summary(value: Value) -> Result<Value, StoreError> {
-    // The scanner cache carries private bookkeeping. Its generated public DTO
-    // owns the field allowlist, as it does for the explicit HTTP cost read.
-    let summary: crate::generated::AccountCostEntityDto = serde_json::from_value(value)?;
-    Ok(serde_json::to_value(summary)?)
+    let snapshot: CostSnapshot<crate::generated::AccountCostEntityDto> =
+        serde_json::from_value(value)?;
+    Ok(serde_json::to_value(snapshot.public)?)
 }
 
 fn saved_cost(
@@ -2208,7 +2218,7 @@ mod tests {
         let mut snapshot = state.account_policy.as_ref().expect("policy").accounts();
         snapshot
             .logins
-            .push(json!({"url":"https://login.invalid/private-only","deviceCode":"private-code"}));
+            .push(serde_json::from_str(r#"{"requestId":"id","accountKey":"account","status":"pending","verificationUrl":"https://login.invalid/private-only","userCode":"private-code"}"#).unwrap());
         put(
             state.store.as_ref().expect("store"),
             "accounts",

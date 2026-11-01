@@ -24,11 +24,10 @@ pub(super) async fn auth_progress(state: &HttpState, request_id: &str) -> Option
         let receipt = studio_runtime_process::blocking_pool::spawn_blocking(
             "runtime-http/auth-progress",
             move || {
-                driver.snapshot().map(|snapshot| {
-                    snapshot
-                        .logins
+                driver.retained_progress().map(|receipts| {
+                    receipts
                         .into_iter()
-                        .find(|value| value.get("requestId").and_then(Value::as_str) == Some(&id))
+                        .find(|receipt| receipt.request_id == id)
                 })
             },
         )
@@ -36,7 +35,7 @@ pub(super) async fn auth_progress(state: &HttpState, request_id: &str) -> Option
         .ok()?
         .ok()?;
         if let Some(receipt) = receipt {
-            return Some(receipt);
+            return serde_json::to_value(receipt).ok();
         }
     }
     match &state.claude_login {
@@ -129,7 +128,7 @@ async fn transcript_initial(
     since: Option<SubscriptionCursor>,
 ) -> Result<ResourceRevisionEntry, ApiError> {
     let tail = match &resource {
-        ResourceRef::TranscriptResource(transcript) => transcript.tail,
+        ResourceRef::TranscriptResource(transcript) => transcript.tail.map(|tail| tail.get()),
         ResourceRef::AccountsResource(_)
         | ResourceRef::CostsResource(_)
         | ResourceRef::DesktopResource(_)
@@ -194,11 +193,11 @@ async fn view_value(
 ) -> Result<Value, ApiError> {
     use serde_json::json;
     match resource {
-        ResourceRef::ProcessesResource(r) => {
-            Ok(json!({"processes":super::process_controls::read_listing(state, r.agent_id).await?}))
-        }
+        ResourceRef::ProcessesResource(r) => Ok(
+            json!({"processes":super::process_controls::read_listing(state, r.agent_id.as_str().to_owned()).await?}),
+        ),
         ResourceRef::ComplaintResource(r) => Ok(
-            json!({"complaint":super::questions_reads::complaint_for_id(state, r.complaint_id).await?}),
+            json!({"complaint":super::questions_reads::complaint_for_id(state, r.complaint_id.as_str().to_owned()).await?}),
         ),
         ResourceRef::RoomResource(r) => {
             if r.legacy == Some(true) {
@@ -216,7 +215,7 @@ async fn view_value(
             let mut room = serde_json::to_value(
                 super::messages::room_snapshot(
                     state,
-                    r.room_id,
+                    r.room_id.as_str().to_owned(),
                     None,
                     None,
                     studio_runtime_schema::shared_values::SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS as i64,
@@ -354,7 +353,7 @@ pub(super) async fn attach_terminal_output_cursors(
             match initial_snapshot(
                 state.clone(),
                 resource.clone(),
-                cursors.get(&terminal.terminal_id).cloned(),
+                cursors.get(terminal.terminal_id.as_str()).cloned(),
             )
             .await
             {
@@ -363,14 +362,14 @@ pub(super) async fn attach_terminal_output_cursors(
                     *entry = snapshot;
                 }
                 Err(error) => {
-                    cursors.remove(&terminal.terminal_id);
+                    cursors.remove(terminal.terminal_id.as_str());
                     eprintln!("subscribed terminal interval unavailable: {error:?}");
                     continue;
                 }
             }
         }
         if let Some(cursor) = &entry.cursor {
-            cursors.insert(terminal.terminal_id.clone(), cursor.clone());
+            cursors.insert(terminal.terminal_id.as_str().to_owned(), cursor.clone());
         }
     }
 }
@@ -532,7 +531,7 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
             // A scoped stream hint may precede the next stored transcript flush.
             let publication = state
                 .resource_notifications
-                .published_revision(&resource)
+                .published_revision(&ResourceRef::TranscriptResource(resource.clone()))
                 .ok()?;
             let store = state.store?;
             store
@@ -555,8 +554,8 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
             .read_async("runtime-http/rename-progress", move |connection| {
                 let reply = studio_runtime_services::title_generation::progress(
                     connection,
-                    &resource.agent_id,
-                    &resource.request_id,
+                    resource.agent_id.as_str(),
+                    resource.request_id.as_str(),
                 )
                 .map_err(|_| studio_runtime_store::StoreError::RecordContract("rename progress"))?;
                 serde_json::to_vec(&reply).map_err(studio_runtime_store::StoreError::from)
@@ -564,17 +563,20 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
             .await
             .ok(),
         ResourceRef::AuthProgressResource(resource) => {
-            serde_json::to_vec(&auth_progress(&state, &resource.request_id).await?).ok()
+            serde_json::to_vec(&auth_progress(&state, resource.request_id.as_str()).await?).ok()
         }
         ResourceRef::VaultJobProgressResource(resource) => serde_json::to_vec(
-            &super::host_secrets::job_progress(&state, resource.job, &resource.request_id).await,
+            &super::host_secrets::job_progress(&state, resource.job, resource.request_id.as_str())
+                .await,
         )
         .ok(),
         ResourceRef::VaultReadinessResource(resource) => {
             let settings = super::host_secrets::settings_dir(&state.state_dir);
             studio_runtime_process::blocking_pool::spawn_blocking(
                 "runtime-http/vault-readiness",
-                move || studio_runtime_services::vault::keys_ready(&settings, &resource.prefix),
+                move || {
+                    studio_runtime_services::vault::keys_ready(&settings, resource.prefix.as_str())
+                },
             )
             .await
             .ok()?
@@ -671,19 +673,20 @@ mod tests {
             Some(store.clone()),
             None,
         );
-        let complaint = ResourceRef::ComplaintResource(crate::generated::ComplaintResource {
-            complaint_id: "c".into(),
-            kind: crate::generated::ComplaintResourceKind::Complaint,
-        });
-        let terminal =
-            ResourceRef::TerminalOutputResource(crate::generated::TerminalOutputResource {
-                terminal_id: "t".into(),
-                kind: crate::generated::TerminalOutputResourceKind::TerminalOutput,
+        let complaint = ResourceRef::ComplaintResource(
+            studio_runtime_schema::resource_ref::ComplaintResource {
+                complaint_id: "c".to_owned().try_into().expect("complaint id"),
+            },
+        );
+        let terminal = ResourceRef::TerminalOutputResource(
+            studio_runtime_schema::resource_ref::TerminalResource {
+                terminal_id: "t".to_owned().try_into().expect("terminal id"),
+            },
+        );
+        let voice =
+            ResourceRef::VoiceResource(studio_runtime_schema::resource_ref::AgentResource {
+                agent_id: "a".to_owned().try_into().expect("agent id"),
             });
-        let voice = ResourceRef::VoiceResource(crate::generated::VoiceResource {
-            agent_id: "a".into(),
-            kind: crate::generated::VoiceResourceKind::Voice,
-        });
         let before = [complaint.clone(), terminal.clone(), voice.clone()];
         let mut fingerprints = Vec::new();
         for resource in &before {

@@ -89,12 +89,6 @@ pub(super) struct SubscribedResource {
 }
 
 impl SubscribedResource {
-    fn from_validated_value(value: Value) -> Result<Self, serde_json::Error> {
-        let key = value.to_string();
-        let resource = serde_json::from_value(value)?;
-        Ok(Self { resource, key })
-    }
-
     pub(super) fn new(resource: ResourceRef) -> Result<Self, ApiError> {
         let key = serde_json::to_string(&resource).map_err(|_| ApiError::internal())?;
         Ok(Self { resource, key })
@@ -201,35 +195,29 @@ fn authorize_resource(
 
 fn progress_resource(
     selector: studio_runtime_schema::progress_selector::ProgressSelector,
-) -> ResourceRef {
-    use studio_runtime_schema::progress_selector::{ProgressSelector, VaultJob};
-    match selector {
+) -> Result<ResourceRef, ApiError> {
+    use studio_runtime_schema::progress_selector::ProgressSelector;
+    use studio_runtime_schema::resource_ref::{RenameResource, RequestResource, VaultJobResource};
+    Ok(match selector {
         ProgressSelector::Auth { request_id } => {
-            ResourceRef::AuthProgressResource(crate::generated::AuthProgressResource {
-                kind: Default::default(),
-                request_id,
+            ResourceRef::AuthProgressResource(RequestResource {
+                request_id: request_id.try_into().map_err(|_| ApiError::internal())?,
             })
         }
         ProgressSelector::Vault { request_id, job } => {
-            ResourceRef::VaultJobProgressResource(crate::generated::VaultJobProgressResource {
-                kind: Default::default(),
-                request_id,
-                job: match job {
-                    VaultJob::Setup => crate::generated::VaultJobProgressResourceJob::Setup,
-                    VaultJob::Login => crate::generated::VaultJobProgressResourceJob::Login,
-                    VaultJob::Pull => crate::generated::VaultJobProgressResourceJob::Pull,
-                },
+            ResourceRef::VaultJobProgressResource(VaultJobResource {
+                request_id: request_id.try_into().map_err(|_| ApiError::internal())?,
+                job,
             })
         }
         ProgressSelector::Rename {
             request_id,
             agent_id,
-        } => ResourceRef::RenameProgressResource(crate::generated::RenameProgressResource {
-            kind: Default::default(),
-            request_id,
-            agent_id,
+        } => ResourceRef::RenameProgressResource(RenameResource {
+            request_id: request_id.try_into().map_err(|_| ApiError::internal())?,
+            agent_id: agent_id.try_into().map_err(|_| ApiError::internal())?,
         }),
-    }
+    })
 }
 
 struct SubscriptionChange {
@@ -415,7 +403,7 @@ async fn sync_stream(
         );
     }
 
-    let resources = match parse_resources(&query, &state) {
+    let resources = match parse_resources(&query) {
         Ok(resources) => resources,
         Err(error) => return error.into_response(),
     };
@@ -501,7 +489,8 @@ async fn sync_stream(
     {
         match resource {
             ResourceRef::TranscriptResource(transcript) if entry.cursor.is_some() => {
-                transcript_sequences.insert(transcript.agent_id.clone(), entry.revision);
+                transcript_sequences
+                    .insert(transcript.agent_id.as_str().to_owned(), entry.revision);
             }
             ResourceRef::StateResource(_) if entry.cursor.is_some() => {
                 initial_entity_sequence = entry.revision
@@ -609,7 +598,7 @@ async fn sync_stream(
         }
         let resources = match selectors
             .into_iter()
-            .map(|selector| SubscribedResource::new(progress_resource(selector)))
+            .map(|selector| SubscribedResource::new(progress_resource(selector)?))
             .collect::<Result<Vec<_>, _>>()
         {
             Ok(resources) => resources,
@@ -723,7 +712,7 @@ pub(super) async fn append_progress_frames(
     for (resource, revision) in view.resources.iter().zip(&view.versions) {
         let value = match &resource.resource {
             ResourceRef::AuthProgressResource(r) => {
-                super::subscriptions::auth_progress(state, &r.request_id)
+                super::subscriptions::auth_progress(state, r.request_id.as_str())
                     .await
                     .unwrap_or(Value::Null)
             }
@@ -810,20 +799,17 @@ async fn append_auth_baseline(
     if let Some(driver) = state.account_driver.clone() {
         let snapshot = studio_runtime_process::blocking_pool::spawn_blocking(
             "runtime-http/retained-auth-progress",
-            move || driver.snapshot(),
+            move || driver.retained_progress(),
         )
         .await
         .map_err(|_| ApiError::internal())?
         .map_err(|_| ApiError::internal())?;
-        for value in snapshot.logins {
-            let id = value
-                .get("requestId")
-                .and_then(Value::as_str)
-                .ok_or_else(ApiError::internal)?
-                .to_owned();
+        for receipt in snapshot {
+            let id = receipt.request_id.clone();
+            let value = serde_json::to_value(receipt).map_err(|_| ApiError::internal())?;
             let resource = progress_resource(ProgressSelector::Auth {
                 request_id: id.clone(),
-            });
+            })?;
             seen.insert(id);
             append_progress_frame(state, cursor, cursor.revision, &resource, &value, frames);
         }
@@ -835,7 +821,7 @@ async fn append_auth_baseline(
             .map_err(|_| ApiError::internal())?
         {
             if seen.insert(id.clone()) {
-                let resource = progress_resource(ProgressSelector::Auth { request_id: id });
+                let resource = progress_resource(ProgressSelector::Auth { request_id: id })?;
                 append_progress_frame(state, cursor, cursor.revision, &resource, &value, frames);
             }
         }
@@ -966,7 +952,9 @@ async fn attach_recent_transcripts(state: &HttpState, event: &mut ResourceChange
         .resources
         .iter()
         .filter_map(|resource| match resource {
-            ResourceRef::TranscriptResource(transcript) => Some(transcript.agent_id.clone()),
+            ResourceRef::TranscriptResource(transcript) => {
+                Some(transcript.agent_id.as_str().to_owned())
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -1028,10 +1016,7 @@ async fn attach_initial_entries(
     Ok(())
 }
 
-fn parse_resources(
-    query: &QueryParams,
-    state: &HttpState,
-) -> Result<Vec<SubscribedResource>, ApiError> {
+fn parse_resources(query: &QueryParams) -> Result<Vec<SubscribedResource>, ApiError> {
     let invalid = || {
         ApiError::validation(vec![
             Value::String("query".to_owned()),
@@ -1045,20 +1030,14 @@ fn parse_resources(
     if raw.len() > MAX_SYNC_RESOURCE_QUERY_BYTES {
         return Err(invalid());
     }
-    let parsed: Value = serde_json::from_str(raw).map_err(|_| invalid())?;
-    let values = parsed.as_array().ok_or_else(invalid)?;
-    if values.len() > MAX_SYNC_RESOURCE_COUNT
-        || values
-            .iter()
-            .any(|resource| !state.validators.validate_component("ResourceRef", resource))
-    {
+    let values: Vec<ResourceRef> = serde_json::from_str(raw).map_err(|_| invalid())?;
+    if values.len() > MAX_SYNC_RESOURCE_COUNT {
         return Err(invalid());
     }
     let mut seen = BTreeSet::new();
     let mut resources = Vec::new();
     for value in values {
-        let resource =
-            SubscribedResource::from_validated_value(value.clone()).map_err(|_| invalid())?;
+        let resource = SubscribedResource::new(value).map_err(|_| invalid())?;
         let key = super::subscriptions::handler(&resource.resource)?.debug_key(&resource.resource);
         if seen.insert(key) {
             resources.push(resource);
@@ -1263,7 +1242,7 @@ async fn read_transcript_changes_typed(
         let ResourceRef::TranscriptResource(resource) = resource else {
             continue;
         };
-        let agent = resource.agent_id.clone();
+        let agent = resource.agent_id.as_str().to_owned();
         let scope = format!("transcript:{agent}");
         let after = if complete {
             sequences.get(&agent).copied()
@@ -1311,7 +1290,12 @@ async fn read_transcript_changes_typed(
                 .and_then(|document| {
                     serde_json::from_str::<TranscriptPageResponse>(&document.payload)
                         .ok()
-                        .map(|page| super::transcript::window_snapshot(page, resource.tail))
+                        .map(|page| {
+                            super::transcript::window_snapshot(
+                                page,
+                                resource.tail.map(|tail| tail.get()),
+                            )
+                        })
                 })
                 .map(Box::new);
             sequences.insert(agent.clone(), through);
@@ -1469,7 +1453,7 @@ fn attach_transcript_changes(
     let entries = std::mem::take(&mut event.resource_versions);
     for (resource, mut entry) in resources.into_iter().zip(entries) {
         if let ResourceRef::TranscriptResource(transcript) = &resource {
-            match updates.remove(&transcript.agent_id) {
+            match updates.remove(transcript.agent_id.as_str()) {
                 Some(TranscriptStreamUpdate::Unchanged) => continue,
                 Some(TranscriptStreamUpdate::Snapshot { revision, snapshot }) => {
                     entry.revision = revision;
@@ -1529,14 +1513,14 @@ async fn attach_transient_snapshots(
             ResourceRef::VoiceResource(resource) => {
                 let Some(store) = &state.store else { continue };
                 let after = voice_sequences
-                    .get(&resource.agent_id)
+                    .get(resource.agent_id.as_str())
                     .copied()
                     .unwrap_or_default();
                 if let Ok((cursor, payload)) =
                     studio_runtime_services::voice::stream_records(store, &resource.agent_id, after)
                         .await
                 {
-                    voice_sequences.insert(resource.agent_id.clone(), cursor);
+                    voice_sequences.insert(resource.agent_id.as_str().to_owned(), cursor);
                     entry.voice_records = payload
                         .and_then(|payload| serde_json::from_value(payload).ok())
                         .map(Some);
@@ -1642,19 +1626,19 @@ async fn subscription_frame(state: &mut ResourceStream, update: SubscriptionChan
         state
             .resources
             .iter()
-            .any(|resource| matches!(&resource.resource, ResourceRef::TerminalOutputResource(r) if r.terminal_id == *id))
+            .any(|resource| matches!(&resource.resource, ResourceRef::TerminalOutputResource(r) if r.terminal_id.as_str() == id))
     });
     state.voice_sequences.retain(|id, _| {
         state
             .resources
             .iter()
-            .any(|resource| matches!(&resource.resource, ResourceRef::VoiceResource(r) if r.agent_id == *id))
+            .any(|resource| matches!(&resource.resource, ResourceRef::VoiceResource(r) if r.agent_id.as_str() == id))
     });
     state.transcript_sequences.retain(|id, _| {
         state
             .resources
             .iter()
-            .any(|resource| matches!(&resource.resource, ResourceRef::TranscriptResource(r) if r.agent_id == *id))
+            .any(|resource| matches!(&resource.resource, ResourceRef::TranscriptResource(r) if r.agent_id.as_str() == id))
     });
     state.initial.push_back(sse_event(
         "subscriptions",
@@ -1728,7 +1712,7 @@ async fn subscription_frame(state: &mut ResourceStream, update: SubscriptionChan
             if let ResourceRef::TranscriptResource(transcript) = resource {
                 state
                     .transcript_sequences
-                    .insert(transcript.agent_id.clone(), entry.revision);
+                    .insert(transcript.agent_id.as_str().to_owned(), entry.revision);
             }
         }
         if !state.recent_tails_sent {
@@ -1764,7 +1748,7 @@ async fn next_live_delta(
         match live.recv().await {
             Ok(LiveEvent::Delta(delta))
                 if resources.iter().any(|resource| {
-                    matches!(&resource.resource, ResourceRef::TranscriptResource(transcript) if transcript.agent_id == delta.agent_id)
+                    matches!(&resource.resource, ResourceRef::TranscriptResource(transcript) if transcript.agent_id.as_str() == delta.agent_id)
                 }) =>
             {
                 return Some(LiveEvent::Delta(delta));
@@ -1790,7 +1774,7 @@ async fn live_frame(state: &ResourceStream, live: LiveEvent) -> Option<Event> {
         )),
         LiveEvent::Progress(selector) => {
             let (http, principal) = (state.http_state.as_ref()?, state.principal.as_ref()?);
-            let resource = progress_resource(selector);
+            let resource = progress_resource(selector).ok()?;
             authorize_resource(principal, &resource).ok()?;
             let resource = SubscribedResource::new(resource).ok()?;
             let cursor = http.sync_changes.snapshot();
@@ -5234,9 +5218,8 @@ mod tests {
             Some(store),
             None,
         );
-        let resource = ResourceRef::DraftsResource(crate::generated::DraftsResource {
-            kind: crate::generated::DraftsResourceKind::Drafts,
-        });
+        let resource =
+            ResourceRef::DraftsResource(studio_runtime_schema::resource_ref::EmptyResource {});
         let entry = draft_initial_snapshot(state, resource)
             .await
             .expect("snapshot");

@@ -18,6 +18,7 @@ import {
   createFixtureViteServer,
   expect,
   readApiSchemaHash,
+  syncSessionSse,
   test,
 } from "../../tests/playwright.ts";
 
@@ -115,7 +116,7 @@ test("switching chats changes subscriptions on one EventSource", async ({
               updates.push({ ...update, bytes: body.length });
               updateResponseBytes += Buffer.byteLength(ack + initial);
               hypotheticalReopenBytes += Buffer.byteLength(
-                sse("session", { sessionId: update.sessionId }) +
+                syncSessionSse(update.sessionId, workspaceId) +
                   apiSchemaHandshakeSse() +
                   frame(session.resources),
               );

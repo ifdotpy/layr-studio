@@ -2,12 +2,12 @@
 use crate::submit_gates::Deletion;
 use crate::{
     coordination::CoordinationError, event_write::truthy, sync_entity_context::RoomDirectory,
-    sync_views::room_entity_view,
 };
 use rusqlite::{OptionalExtension, Transaction};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use studio_runtime_schema::persistence::{DeliveryStatus, EventStatus, RecipientDelivery};
+use studio_runtime_schema::queue_command::Field;
 use studio_runtime_store::{SyncDocumentsRepository, system_reads as records};
 
 pub fn delivery_receipts(
@@ -86,10 +86,80 @@ pub fn delivery_receipts(
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatRead {
-    pub room: Value,
+    pub(crate) room: ChatRoom,
     pub messages: Vec<ChatMessage>,
     pub next_before: Option<i64>,
     pub next_after: Option<i64>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+pub(crate) enum ChatRoom {
+    Feed {
+        id: String,
+        name: Option<String>,
+        members: Vec<String>,
+    },
+    Room {
+        #[serde(flatten)]
+        view: Box<crate::room_projection::RoomProjection>,
+        #[serde(rename = "customName", skip_serializing_if = "Field::is_missing")]
+        custom_name: Field<String>,
+        #[serde(flatten)]
+        federation: Option<ChatFederation>,
+    },
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ChatFederation {
+    peer_id: Value,
+    local_participants: Value,
+    federated: bool,
+    remote_members: Vec<Value>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BriefChatRoom<'a> {
+    id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<studio_runtime_schema::room_record::RoomKind>,
+    #[serde(skip_serializing_if = "Field::is_missing")]
+    root_id: Field<&'a str>,
+    name: Option<&'a str>,
+}
+
+impl ChatRoom {
+    pub(crate) fn brief(&self) -> BriefChatRoom<'_> {
+        match self {
+            Self::Feed { id, name, .. } => BriefChatRoom {
+                id,
+                kind: None,
+                root_id: Field::Missing,
+                name: name.as_deref(),
+            },
+            Self::Room { view, .. } => BriefChatRoom {
+                id: &view.id,
+                kind: Some(view.kind),
+                root_id: match &view.root_id {
+                    Field::Missing => Field::Missing,
+                    Field::Null => Field::Null,
+                    Field::Value(root) => Field::Value(root.as_str()),
+                },
+                name: view.name.as_deref(),
+            },
+        }
+    }
+    fn remote_members(&self) -> &[Value] {
+        match self {
+            Self::Room {
+                federation: Some(federation),
+                ..
+            } => &federation.remote_members,
+            Self::Feed { .. } | Self::Room { .. } => &[],
+        }
+    }
 }
 
 #[derive(serde::Serialize)]
@@ -164,66 +234,65 @@ pub fn chat_read(
             )?
             .collect::<Result<Vec<_>, _>>()?;
         (
-            Value::Object(serde_json::Map::from_iter([
-                ("id".into(), Value::String(room_id.to_owned())),
-                (
-                    "name".into(),
-                    root.name
-                        .value_or(None)
-                        .cloned()
-                        .map_or(Value::Null, Value::String),
-                ),
-                (
-                    "members".into(),
-                    Value::Array(
-                        members
-                            .iter()
-                            .map(|id| Value::String((*id).to_owned()))
-                            .collect(),
-                    ),
-                ),
-            ])),
+            ChatRoom::Feed {
+                id: room_id.to_owned(),
+                name: root.name.value_or(None).cloned(),
+                members: members.iter().map(|id| (*id).to_owned()).collect(),
+            },
             ids,
         )
     } else {
-        let stored = records::get(connection, "runtime_rooms", room_id)?.ok_or(
-            CoordinationError::InvalidRequest("Chat is unavailable or you are not a participant"),
-        )?;
-        let ctx = context.for_room(connection, &stored, false)?;
-        let mut room = room_entity_view(&stored, &ctx)
-            .filter(|r| r["members"].as_array().is_some_and(|m| !m.is_empty()))
+        let stored =
+            studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(
+                connection,
+            )
+            .get(&room_id.to_owned())?
             .ok_or(CoordinationError::InvalidRequest(
                 "Chat is unavailable or you are not a participant",
             ))?;
-        if let Some(object) = room.as_object_mut() {
-            object.remove("lastMessage");
-        }
-        if let Some(name) = stored.get("customName") {
-            room["customName"] = name.clone();
-        }
-        if let Some(federation) = &ctx.federation {
-            for key in ["peerId", "localParticipants"] {
-                room[key] = federation[key].clone();
+        let ctx = context.for_room_identity(
+            connection,
+            &stored.id,
+            stored.kind == studio_runtime_schema::room_record::RoomKind::Federated,
+            false,
+        )?;
+        let mut room = crate::room_projection::project_room(&stored, &ctx)
+            .map_err(studio_runtime_store::StoreError::from)?
+            .filter(|r| !r.members.is_empty())
+            .ok_or(CoordinationError::InvalidRequest(
+                "Chat is unavailable or you are not a participant",
+            ))?;
+        room.omit_last_message();
+        let federation = ctx.federation.as_ref().map(|federation| {
+            let remote_members = federation["remoteMembers"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|person| {
+                    let mut p = person.clone();
+                    p["id"] = json!(format!(
+                        "remote:{}:{}",
+                        federation["peerId"].as_str().unwrap_or_default(),
+                        person["id"].as_str().unwrap_or_default()
+                    ));
+                    p
+                })
+                .collect::<Vec<_>>();
+            ChatFederation {
+                peer_id: federation["peerId"].clone(),
+                local_participants: federation["localParticipants"].clone(),
+                federated: true,
+                remote_members,
             }
-            room["federated"] = json!(true);
-            room["remoteMembers"] = json!(
-                federation["remoteMembers"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .map(|person| {
-                        let mut p = person.clone();
-                        p["id"] = json!(format!(
-                            "remote:{}:{}",
-                            federation["peerId"].as_str().unwrap_or_default(),
-                            person["id"].as_str().unwrap_or_default()
-                        ));
-                        p
-                    })
-                    .collect::<Vec<_>>()
-            );
-        }
-        (room, vec![room_id.to_owned()])
+        });
+        (
+            ChatRoom::Room {
+                view: Box::new(room),
+                custom_name: stored.custom_name,
+                federation,
+            },
+            vec![room_id.to_owned()],
+        )
     };
     let mut names = context
         .agents()
@@ -238,7 +307,7 @@ pub fn chat_read(
             ))
         })
         .collect::<BTreeMap<_, _>>();
-    for person in room["remoteMembers"].as_array().into_iter().flatten() {
+    for person in room.remote_members() {
         if let Some(id) = person["id"].as_str().filter(|_| truthy(person.get("name"))) {
             names.insert(id.to_owned(), person["name"].clone());
         }
@@ -336,32 +405,33 @@ pub fn chat_read(
 pub fn delete_room(
     tx: &Transaction<'_>,
     id: &str,
-    validate: impl Fn(&Value) -> bool,
+    _validate: impl Fn(&Value) -> bool,
 ) -> Result<Value, CoordinationError> {
-    let mut room = records::get(tx, "runtime_rooms", id)?
-        .ok_or(CoordinationError::InvalidRequest("Unknown agent chat"))?;
-    let changed = room["userHidden"] != true;
-    room["userHidden"] = json!(true);
-    records::validate("runtime_rooms", id, room.clone())?;
+    let mut room =
+        studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(tx)
+            .get(&id.to_owned())?
+            .ok_or(CoordinationError::InvalidRequest("Unknown agent chat"))?;
+    let changed = room.user_hidden != Field::Value(true);
+    room.user_hidden = Field::Value(true);
     let directory = RoomDirectory::load(tx)?;
-    let context = directory.for_room(tx, &room, true)?;
-    let projection = room_entity_view(&room, &context).filter(|v| {
-        v["members"]
-            .as_array()
-            .is_some_and(|members| !members.is_empty())
-    });
-    if projection.as_ref().is_some_and(|v| !validate(v)) {
-        return Err(records::invalid("runtime_rooms", id).into());
-    }
+    let context = directory.for_room_identity(
+        tx,
+        id,
+        room.kind == studio_runtime_schema::room_record::RoomKind::Federated,
+        true,
+    )?;
+    let projection = crate::room_projection::project_room(&room, &context)
+        .map_err(studio_runtime_store::StoreError::from)?
+        .filter(|v| !v.members.is_empty());
     if changed {
-        tx.execute(
-            "UPDATE runtime_rooms SET record=?1 WHERE id=?2",
-            rusqlite::params![room.to_string(), id],
-        )?;
+        studio_runtime_store::Table::new(tx).put(&room)?;
     }
     let deleted = projection.is_none();
     if !deleted || tx.query_row("SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection='room' AND id=?1 AND deleted=0)", [id], |r| r.get::<_,bool>(0))? {
-        SyncDocumentsRepository::put_entity(tx, "room", id, projection.unwrap_or(json!({})), deleted)?;
+        match projection {
+            Some(view) => { SyncDocumentsRepository::put_entity(tx, "room", id, view, false)?; }
+            None => { SyncDocumentsRepository::put_entity(tx, "room", id, json!({}), true)?; }
+        }
     }
     Ok(json!({"deleted":[id]}))
 }

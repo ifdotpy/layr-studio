@@ -540,18 +540,40 @@ fn receive_locked(
 pub(crate) fn save_room(tx: &Transaction<'_>, peer: &str, room: &Value) -> Result<()> {
     let id = room["id"].as_str().ok_or(Error::Invalid("room.id"))?;
     Repo::put(tx, Table::Room, id, peer, room)?;
-    let standard = json!({"id":id,"kind":"federated","members":room["localMembers"],"updated":room["updated"],"name":room["name"],"federation":true,"peerId":room["peerId"],"peerLabel":room["peerLabel"]});
-    tx.execute("INSERT INTO runtime_rooms(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![id,transport::canonical_json(&standard)?]).map_err(StoreError::from)?;
+    let mut standard = studio_runtime_schema::room_record::RoomRecord::new(
+        id.to_owned(),
+        studio_runtime_schema::room_record::RoomKind::Federated,
+    );
+    standard.members = room["localMembers"].as_array().map(|members| {
+        members
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect()
+    });
+    standard.updated = room["updated"].as_number().cloned().map_or(
+        studio_runtime_schema::queue_command::Field::Null,
+        studio_runtime_schema::queue_command::Field::Value,
+    );
+    standard.name = room["name"].as_str().map(str::to_owned);
+    standard.federation = Some(true);
+    standard.peer_id = room["peerId"].as_str().map(str::to_owned);
+    standard.peer_label = room["peerLabel"]
+        .as_str()
+        .map_or(studio_runtime_schema::queue_command::Field::Null, |s| {
+            studio_runtime_schema::queue_command::Field::Value(s.to_owned())
+        });
+    studio_runtime_store::Table::new(tx).put(&standard)?;
     let directory = crate::sync_entity_context::RoomDirectory::load(tx)?;
-    let context = directory.for_room(tx, &standard, true)?;
-    let view = crate::sync_views::room_entity_view(&standard, &context);
-    SyncDocumentsRepository::put_entity(
-        tx,
-        "room",
-        id,
-        view.clone().unwrap_or_else(|| json!({})),
-        view.is_none(),
-    )?;
+    let context = directory.for_room_identity(tx, id, true, true)?;
+    match crate::room_projection::project_room(&standard, &context).map_err(StoreError::from)? {
+        Some(view) => {
+            SyncDocumentsRepository::put_entity(tx, "room", id, view, false)?;
+        }
+        None => {
+            SyncDocumentsRepository::put_entity(tx, "room", id, json!({}), true)?;
+        }
+    }
     Ok(())
 }
 

@@ -1149,7 +1149,16 @@ pub enum AccountMutationError {
 
 pub enum LoginReservation {
     Dispatch(Value),
-    Replay(Value),
+    Replay(Box<studio_runtime_schema::account_registry::LoginReceipt>),
+}
+
+pub(crate) fn typed_login_receipt(
+    value: &Value,
+) -> Result<studio_runtime_schema::account_registry::LoginReceipt, AccountDriverError> {
+    let receipt: studio_runtime_schema::json_object::JsonObject<
+        studio_runtime_schema::account_registry::LoginReceipt,
+    > = Deserialize::deserialize(value).map_err(|_| AccountDriverError::InvalidRegistry)?;
+    Ok(receipt.0)
 }
 
 fn login_terminal(receipt: &Value) -> bool {
@@ -1219,25 +1228,25 @@ fn abandoned_login_account(value: &Value, key: &str) -> bool {
 }
 
 fn existing_login(
-    value: &Value,
+    state: &RegistryState,
     request: &CodexLoginRequest,
-) -> Result<Option<Value>, AccountMutationError> {
-    let Some(receipt) = value
-        .get("logins")
+) -> Result<Option<studio_runtime_schema::account_registry::LoginReceipt>, AccountMutationError> {
+    let Some(receipt) = state
+        .typed
+        .logins
+        .as_ref()
         .and_then(|logins| logins.get(&request.login_id))
     else {
         return Ok(None);
     };
-    for (field, expected) in [
-        ("reauthAccountKey", &request.account_key),
-        ("emailHint", &request.email),
-        ("requestedLabel", &request.label),
-    ] {
-        if receipt.get(field).and_then(Value::as_str) != expected.as_deref() {
-            return Err(AccountMutationError::Refused(
-                "This sign-in request belongs to a different account",
-            ));
-        }
+    let receipt = &receipt.0;
+    if receipt.reauth_account_key.as_ref().and_then(Option::as_ref) != request.account_key.as_ref()
+        || receipt.email_hint.as_ref().and_then(Option::as_ref) != request.email.as_ref()
+        || receipt.requested_label.as_ref().and_then(Option::as_ref) != request.label.as_ref()
+    {
+        return Err(AccountMutationError::Refused(
+            "This sign-in request belongs to a different account",
+        ));
     }
     Ok(Some(receipt.clone()))
 }
@@ -1248,12 +1257,13 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
     pub fn codex_login_receipt(
         &self,
         request: &CodexLoginRequest,
-    ) -> Result<Option<Value>, AccountMutationError> {
+    ) -> Result<Option<studio_runtime_schema::account_registry::LoginReceipt>, AccountMutationError>
+    {
         let state = self
             .state
             .lock()
             .map_err(|_| AccountDriverError::Poisoned)?;
-        existing_login(&state.value, request)
+        existing_login(&state, request)
     }
 
     /// Reconcile local Codex auth without sending a request. A still-pending
@@ -1374,8 +1384,8 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
             .state
             .lock()
             .map_err(|_| AccountDriverError::Poisoned)?;
-        if let Some(receipt) = existing_login(&state.value, request)? {
-            return Ok(LoginReservation::Replay(receipt));
+        if let Some(receipt) = existing_login(&state, request)? {
+            return Ok(LoginReservation::Replay(Box::new(receipt)));
         }
         let mut value = state.value.clone();
         let mut order = state.order.clone();
@@ -1532,13 +1542,17 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
             .and_then(|logins| logins.get_mut(request))
             .ok_or(AccountDriverError::UnknownLogin)?;
         if login_terminal(receipt) {
-            return Ok(LoginReservation::Replay(receipt.clone()));
+            return Ok(LoginReservation::Replay(Box::new(typed_login_receipt(
+                receipt,
+            )?)));
         }
         if !receipt.get("loginId").is_some_and(truthy_value) {
             return Err(AccountDriverError::LoginResponseUnknown.into());
         }
         if receipt["status"] == "uncertain" {
-            return Ok(LoginReservation::Replay(receipt.clone()));
+            return Ok(LoginReservation::Replay(Box::new(typed_login_receipt(
+                receipt,
+            )?)));
         }
         receipt["status"] = serde_json::json!("uncertain");
         receipt["error"] = serde_json::json!(
@@ -2072,6 +2086,19 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
             .lock()
             .map_err(|_| AccountDriverError::Poisoned)?;
         state.public_snapshot()
+    }
+
+    /// Login progress for reconnects, without projecting unrelated accounts.
+    pub fn retained_progress(
+        &self,
+    ) -> Result<Vec<studio_runtime_schema::account_registry::LoginReceipt>, AccountDriverError>
+    {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| AccountDriverError::Poisoned)?;
+        crate::account_policy::project_logins(&state.typed, &state.order)
+            .map_err(|_| AccountDriverError::InvalidRegistry)
     }
 
     /// Internal selected-account record, including the non-secret identity pin.
@@ -3601,7 +3628,7 @@ mod tests {
         else {
             panic!("retry never dispatches again");
         };
-        assert_eq!(replayed, receipt);
+        assert_eq!(*replayed, typed_login_receipt(&receipt).unwrap());
         assert_eq!(fs::read(path).expect("replay bytes"), persisted);
     }
 

@@ -57,8 +57,9 @@ where
             .raw_body
             .ok_or_else(ApiError::internal)?;
         let mut deserializer = serde_json::Deserializer::from_slice(&bytes);
-        let value = serde_path_to_error::deserialize(&mut deserializer)
-            .map_err(|error| ApiError::validation(serde_location("body", error.path())))?;
+        let studio_runtime_schema::http_ingress::Object(value) =
+            serde_path_to_error::deserialize(&mut deserializer)
+                .map_err(|error| ApiError::validation(serde_location("body", error.path())))?;
         deserializer
             .end()
             .map_err(|_| ApiError::validation(vec![Value::String("body".into())]))?;
@@ -245,6 +246,25 @@ mod tests {
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(value["error"], "Invalid request");
         assert_eq!(value["location"], json!(["body", "count"]));
+    }
+
+    #[tokio::test]
+    async fn json_handler_rejects_positional_struct_arrays() {
+        let app = with_validated(
+            Router::new().route("/items", post(json_handler)),
+            ValidatedRequest {
+                raw_body: Some(b"[2]".as_slice().into()),
+                ..ValidatedRequest::default()
+            },
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/items")
+            .body(Body::empty())
+            .expect("request builds");
+        let (status, value) = response(app, request).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(value["location"], json!(["body"]));
     }
 }
 inventory::submit! {

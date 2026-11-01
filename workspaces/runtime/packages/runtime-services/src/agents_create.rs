@@ -439,7 +439,7 @@ pub(crate) fn ensure_project(
         account_groups_revision: None,
         updated: None,
         sidebar_hidden: None,
-        peer_teams_revision: None,
+        peer_teams_revision: studio_runtime_schema::queue_command::Field::Missing,
         organization_revision: None,
         folders: vec![],
         worker_base_ref: None,
