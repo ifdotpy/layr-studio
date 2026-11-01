@@ -2830,6 +2830,23 @@
           {
             "additionalProperties": false,
             "properties": {
+              "kind": {
+                "const": "unreadable",
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "reason"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
               "actions": {
                 "$ref": "#/components/schemas/WaitingTransferActions"
               },

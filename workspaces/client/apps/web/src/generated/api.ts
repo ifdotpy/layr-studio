@@ -3444,6 +3444,11 @@ export interface components {
           kind: "none";
         }
       | {
+          /** @constant */
+          kind: "unreadable";
+          reason: string;
+        }
+      | {
           actions: components["schemas"]["WaitingTransferActions"];
           id: string;
           /** @constant */

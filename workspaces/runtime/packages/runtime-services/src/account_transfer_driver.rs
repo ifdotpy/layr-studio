@@ -109,15 +109,15 @@ pub fn load(tx: &Transaction<'_>, id: &str) -> Result<Snapshot, TransferError> {
             "store-bootstrap/account-transfer-schema",
         ));
     }
-    let (op, raw) = Repository::get_with_raw(tx, id)?
+    let (op, raw) = Repository::get_typed_with_raw(tx, id)?
         .ok_or(TransferError::Refused("Unknown account transfer"))?;
-    let mut ids = op["members"]
-        .as_object()
-        .map(|m| m.keys().cloned().collect::<Vec<_>>())
-        .unwrap_or_default();
-    let lead = op["leadId"]
-        .as_str()
-        .ok_or(TransferError::Refused("Invalid transfer lead"))?;
+    let mut ids = op
+        .members
+        .0
+        .iter()
+        .map(|(id, _)| id.clone())
+        .collect::<Vec<_>>();
+    let lead = op.lead_id.as_str();
     if !ids.iter().any(|id| id == lead) {
         ids.push(lead.into());
     }
@@ -126,7 +126,7 @@ pub fn load(tx: &Transaction<'_>, id: &str) -> Result<Snapshot, TransferError> {
             Repository::agent(tx, &id)?.ok_or(TransferError::Refused("Unknown transfer member"))?;
         Ok((id, raw))
     });
-    Snapshot::read_fallible(&raw, agents)
+    Snapshot::read_typed(op, raw.len(), agents)
 }
 
 /// The operation id of a lead summary that still claims an active transfer.
@@ -406,22 +406,46 @@ pub async fn request(
                     "This account is disabled for this chat",
                 ));
             }
-            if let Some(active) = actor.extra.get("accountTransfer").filter(|value| {
-                !matches!(value["status"].as_str(), Some("completed" | "cancelled"))
+            let summary = match actor.account_transfer.value() {
+                Some(studio_runtime_store::transfer_record::AgentTransferState::Unreadable(_)) => {
+                    return Err(TransferError::Refused(
+                        "Current transfer data is unreadable",
+                    ));
+                }
+                Some(studio_runtime_store::transfer_record::AgentTransferState::Summary(value)) => {
+                    Some(value)
+                }
+                None => None,
+            };
+            if let Some(active) = summary.filter(|value| {
+                !matches!(
+                    value.status.value(),
+                    Some(
+                        studio_runtime_store::transfer_record::TransferStatus::Completed
+                            | studio_runtime_store::transfer_record::TransferStatus::Cancelled
+                    )
+                )
             }) {
-                if active["targetAccountKey"] != target
-                    || active
-                        .get("scope")
-                        .and_then(Value::as_str)
-                        .unwrap_or("team")
-                        != scope
+                let active_scope = match active.scope.value() {
+                    Some(studio_runtime_store::transfer_record::TransferScope::Subagents) => {
+                        "subagents"
+                    }
+                    Some(studio_runtime_store::transfer_record::TransferScope::Team) | None => {
+                        "team"
+                    }
+                };
+                if active.target_account_key.value().map(|key| key.as_str())
+                    != Some(target.as_str())
+                    || active_scope != scope
                 {
                     return Err(TransferError::Refused(
                         "Finish or cancel the current transfer first",
                     ));
                 }
-                let active_id = active["id"]
-                    .as_str()
+                let active_id = active
+                    .id
+                    .value()
+                    .map(String::as_str)
                     .ok_or(TransferError::Refused("Invalid current transfer"))?;
                 let snapshot = load(tx, active_id)?;
                 let mut operation = snapshot.operation().clone();

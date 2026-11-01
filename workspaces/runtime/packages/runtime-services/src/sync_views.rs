@@ -429,7 +429,7 @@ fn unset(value: &Value) -> bool {
 #[derive(Clone, Debug, Default)]
 pub struct AgentViewContext {
     pub account_destinations: Vec<studio_runtime_schema::account_destination::AccountDestination>,
-    pub transfer_can_cancel: bool,
+    pub transfer: TransferObservation,
     pub project_server_id: Option<String>,
     pub launcher_alive: bool,
     pub empty_lead: bool,
@@ -438,6 +438,17 @@ pub struct AgentViewContext {
     pub latest_work_result_file: Option<String>,
     pub command_progress: Vec<studio_runtime_schema::agent_progress::AgentCommandProgress>,
     pub stall: Option<studio_runtime_schema::agent_progress::AgentStall>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub enum TransferObservation {
+    #[default]
+    Absent,
+    Cancellable,
+    Held,
+    Unreadable {
+        reason: String,
+    },
 }
 
 #[derive(serde::Deserialize)]
@@ -583,11 +594,18 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
     view.insert("id".to_owned(), Value::String(id.to_owned()));
     view.insert("kind".to_owned(), Value::String("agent".to_owned()));
     view.insert("source".to_owned(), Value::String("managed".to_owned()));
-    let progress = crate::account_transfer::progress_view(
-        record.get("accountTransfer"),
-        context.transfer_can_cancel,
-    )
-    .ok()?;
+    let progress = match &context.transfer {
+        TransferObservation::Unreadable { reason } => {
+            studio_runtime_schema::agent_progress::AccountTransferProgress::Unreadable {
+                reason: reason.clone(),
+            }
+        }
+        observation => crate::account_transfer::progress_view(
+            record.get("accountTransfer"),
+            matches!(observation, TransferObservation::Cancellable),
+        )
+        .ok()?,
+    };
     if let Some(summary) = view
         .get_mut("accountTransfer")
         .and_then(Value::as_object_mut)
@@ -627,6 +645,7 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
         studio_runtime_schema::agent_progress::AccountTransferProgress::Waiting { .. }
             | studio_runtime_schema::agent_progress::AccountTransferProgress::Moving { .. }
             | studio_runtime_schema::agent_progress::AccountTransferProgress::Blocked { .. }
+            | studio_runtime_schema::agent_progress::AccountTransferProgress::Unreadable { .. }
     ) {
         studio_runtime_schema::agent_progress::AccountChange::Unavailable {
             reason: "Finish or cancel the current transfer first".into(),
@@ -1115,7 +1134,7 @@ mod projection_plan_tests {
             "accountTransfer":{"id":"move","targetAccountKey":"target","status":"pending",
                 "blocked":[{"id":"lead","reason":"History unavailable"}],"canRetry":true,"canCancel":true,"movingNow":0}});
         let context = super::AgentViewContext {
-            transfer_can_cancel: true,
+            transfer: super::TransferObservation::Cancellable,
             ..Default::default()
         };
         let view = super::agent_entity_view(&lead, &context).unwrap();

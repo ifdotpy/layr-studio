@@ -379,8 +379,34 @@ impl Snapshot {
         let operation = read_record(raw, "PersistedAccountTransferRecord", "account transfer")?;
         let order: MemberOrder =
             serde_json::from_str(raw).map_err(|_| invalid("account transfer", "/members"))?;
+        Self::from_parts(operation, order.members, raw.len(), agents)
+    }
+
+    /// The store already decoded this operation; keep its ordered members.
+    pub(crate) fn read_typed(
+        record: studio_runtime_store::transfer_record::TransferRecord,
+        raw_len: usize,
+        agents: impl IntoIterator<Item = Result<(String, String), TransferError>>,
+    ) -> Result<Self, TransferError> {
+        let order = record.members.0.iter().map(|(id, _)| id.clone()).collect();
+        let operation =
+            serde_json::to_value(record).map_err(|_| invalid("account transfer", "/"))?;
+        validate(
+            "PersistedAccountTransferRecord",
+            "account transfer",
+            &operation,
+        )?;
+        Self::from_parts(operation, order, raw_len, agents)
+    }
+
+    fn from_parts(
+        operation: Value,
+        order: Vec<String>,
+        raw_len: usize,
+        agents: impl IntoIterator<Item = Result<(String, String), TransferError>>,
+    ) -> Result<Self, TransferError> {
         let mut records = BTreeMap::new();
-        let mut bytes = raw.len();
+        let mut bytes = raw_len;
         for record in agents {
             let (id, raw) = record?;
             bytes = bytes.saturating_add(raw.len());
@@ -397,7 +423,6 @@ impl Snapshot {
             }
         }
         for id in order
-            .members
             .iter()
             .map(String::as_str)
             .chain(operation["leadId"].as_str())
@@ -411,7 +436,7 @@ impl Snapshot {
         Ok(Self {
             identity,
             operation,
-            order: order.members,
+            order,
             agents: records,
         })
     }

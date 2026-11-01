@@ -451,6 +451,12 @@ pub struct AgentRecord {
         skip_serializing_if = "Option::is_none"
     )]
     pub creation_intent: Option<studio_runtime_schema::creation_intent::CreationIntent>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub account_transfer:
+        studio_runtime_schema::queue_command::Field<crate::transfer_record::AgentTransferState>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -770,6 +776,7 @@ impl AgentRecord {
             vm_auth_bootstrap: None,
             native_release: None,
             creation_intent: None,
+            account_transfer: studio_runtime_schema::queue_command::Field::Missing,
             extra: BTreeMap::new(),
         }
     }

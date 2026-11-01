@@ -38,3 +38,12 @@ test("shows nothing while a move runs or after it ends", () => {
   ] as const)
     expect(render(transfer)).not.toContain("account-transfer-chip");
 });
+
+test("shows an unreadable transfer and its reason", () => {
+  const markup = render({
+    kind: "unreadable",
+    reason: "Unknown transfer field",
+  });
+  expect(markup).toContain("Account move unreadable");
+  expect(markup).toContain("Unknown transfer field");
+});
