@@ -69,13 +69,15 @@ pub(crate) async fn preview(
     let result = studio_runtime_process::blocking_pool::spawn_blocking(
         "runtime-http/routes/checkpoints",
         move || {
-            let mut value = checkpoints::preview(&store, context).map_err(map_error)?;
-            if value["canRestore"] == true && !provider_available {
-                value["canRestore"] = json!(false);
-                value["restoreUnavailableReason"] =
-                    json!("The provider session service is unavailable.");
+            let mut result: crate::generated::CheckpointPreviewResponse =
+                super::generated_json(checkpoints::preview(&store, context).map_err(map_error)?)?;
+            if result.can_restore && !provider_available {
+                result.can_restore = false;
+                result.restore_unavailable_reason = Some(Some(
+                    "The provider session service is unavailable.".to_owned(),
+                ));
             }
-            super::generated_json::<crate::generated::CheckpointPreviewResponse>(value)
+            Ok::<_, ApiError>(result)
         },
     )
     .await
