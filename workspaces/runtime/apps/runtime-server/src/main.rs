@@ -2278,7 +2278,7 @@ mod exit_logging_tests {
     }
     fn put_tick_limits(
         tx: &studio_runtime_store::Transaction<'_>,
-        observation: serde_json::Value,
+        observation: &serde_json::Value,
     ) -> studio_runtime_store::StoreResult<()> {
         let raw = serde_json::value::RawValue::from_string(observation.to_string())?;
         let view =
@@ -2307,7 +2307,7 @@ mod exit_logging_tests {
                 }
                 if let Some(store) = &self.newer_rejection {
                     store.transaction_with(|tx| {
-                        put_tick_limits(tx,serde_json::json!({"accountKey":"default","at":1001.0,"data":{"rateLimits":{"primary":{"usedPercent":100.0,"resetsAt":2000.0}}}}))
+                        put_tick_limits(tx,&serde_json::json!({"accountKey":"default","at":1001.0,"data":{"rateLimits":{"primary":{"usedPercent":100.0,"resetsAt":2000.0}}}}))
                     }).await.expect("rate-limit fixture writes");
                 }
                 Ok(
@@ -2334,7 +2334,7 @@ mod exit_logging_tests {
                     tx.execute("INSERT INTO runtime_usage_resumes(id,agent,record) VALUES (?1,?1,?2)",[id,&resume.to_string()])?;
                 }
                 // A recent cache entry cannot replace the provider read at the due time.
-                put_tick_limits(tx,serde_json::json!({"accountKey":"default","at":999.0,"data":{"rateLimits":{"primary":{"usedPercent":0.0}}}}))?;
+                put_tick_limits(tx,&serde_json::json!({"accountKey":"default","at":999.0,"data":{"rateLimits":{"primary":{"usedPercent":0.0}}}}))?;
                 Ok::<_,studio_runtime_store::StoreError>(())
             }).await.expect("usage resume fixture writes");
             let port = TickLimits {

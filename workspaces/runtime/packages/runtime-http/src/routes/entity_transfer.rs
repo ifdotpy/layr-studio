@@ -293,11 +293,24 @@ mod tests {
         agent: &str,
         status: &str,
     ) -> studio_runtime_schema::process_controls::TaskProjection {
-        let record: studio_runtime_store::TaskRecord = serde_json::from_value(json!({
-            "id": id, "agent": agent, "created": 1, "itemId": id, "turnId": "turn",
-            "kind": "command", "status": status, "type": "commandExecution", "name": "commandExecution"
-        })).expect("typed task record");
-        studio_runtime_services::sync_views::project_task_record(&record).expect("task projection")
+        use studio_runtime_schema::task_record::{TaskStatus, TaskType};
+        let mut record = studio_runtime_store::TaskRecord::new(
+            agent.into(),
+            id.into(),
+            "turn".into(),
+            serde_json::from_str("1").expect("valid timestamp"),
+            TaskType::CommandExecution,
+            "commandExecution".into(),
+        );
+        record.set_status(match status {
+            "running" => TaskStatus::Running,
+            "completed" => TaskStatus::Completed,
+            _ => panic!("unsupported fixture status"),
+        });
+        let mut projection = studio_runtime_services::sync_views::project_task_record(&record)
+            .expect("task projection");
+        projection.id = id.into();
+        projection
     }
     fn event(state: &HttpState) -> ResourceChangeEvent {
         serde_json::from_value(json!({"protocol":studio_runtime_schema::SYNC_PROTOCOL_VERSION,"workspaceId":state.workspace_id,"epoch":"fixture","revision":1,"reason":"initial","resources":[],"resourceVersions":[]})).expect("event")

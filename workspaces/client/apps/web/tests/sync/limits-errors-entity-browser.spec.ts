@@ -155,7 +155,9 @@ test("limits and Studio errors update from entities with no idle HTTP refresh", 
           body += chunk;
         });
         req.on("end", () => {
-          const update = JSON.parse(body) as { gen: number };
+          const update: unknown = JSON.parse(body);
+          assert.ok(update && typeof update === "object" && "gen" in update);
+          assert.equal(typeof update.gen, "number");
           for (const stream of streams)
             stream.write(
               protocol3SseEvent("subscriptions", { gen: update.gen }),
