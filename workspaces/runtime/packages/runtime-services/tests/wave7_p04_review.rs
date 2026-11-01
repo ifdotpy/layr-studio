@@ -785,7 +785,17 @@ async fn non_radio_async_answer_is_steered_and_acknowledged() {
         record.thread_id = Some("thread-0".to_string());
 record.turn_id = Some("turn-0".to_string());
         record.is_lead = Some(true);
-        record.start_attempt = Some(serde_json::from_value(json!({"id":"start","epoch":3,"submitted":true,"turnId":"turn-0","threadId":"thread-0","accountKey":"default","events":["initial"],"connectionGeneration":7})).unwrap());
+        record.start_attempt = Some(Box::new(studio_runtime_store::StartAttemptView {
+            id: Some("start".into()),
+            epoch: Some(3),
+            submitted: Some(true),
+            turn_id: Some("turn-0".into()),
+            thread_id: Some("thread-0".into()),
+            account_key: Some("default".into()),
+            events: Some(vec!["initial".into()]),
+            connection_generation: Some(7),
+            ..Default::default()
+        }));
         AgentRepository::put(tx, &record)?;
         Ok(())
     }).await.unwrap();
