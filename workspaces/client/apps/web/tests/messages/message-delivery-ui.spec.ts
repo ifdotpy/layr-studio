@@ -3,7 +3,6 @@ import { responseJson } from "./helpers.ts";
 import { sendReply, sendRoute, sentMessage } from "./send-command.ts";
 import type { MessageDelivery } from "../../src/commands.ts";
 import type { Page, Route } from "@playwright/test";
-import type { Message } from "../../src/types.ts";
 import type { components } from "../../src/generated/api.ts";
 import type { MessageRequest } from "./helpers.ts";
 import type { TestInfo, BrowserContext } from "@playwright/test";
@@ -11,7 +10,9 @@ import {
   readTestState,
   stubEntityState,
   readFixtureSyncContract,
-  apiSchemaHandshakeEvent,
+  apiSchemaHandshakeSse,
+  syncSessionSse,
+  protocol3SseEvent,
   spawnFixture as spawn,
   waitForFixturePort,
   test,
@@ -19,6 +20,9 @@ import {
 } from "../playwright.ts";
 // Production renderer, isolated fixture, and controlled delivery acknowledgements.
 import assert from "node:assert/strict";
+import { createServer, type ServerResponse } from "node:http";
+import { randomUUID } from "node:crypto";
+import type { AddressInfo } from "node:net";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -146,6 +150,7 @@ test("message delivery ui", async ({ browser: _browser }) => {
   });
   let log = "",
     browser;
+  let stopStreamFixture: (() => Promise<void>) | undefined;
   required(fixture.stderr).on("data", (chunk) => {
     log += chunk;
   });
@@ -173,6 +178,7 @@ test("message delivery ui", async ({ browser: _browser }) => {
         ...agent,
         status: "running",
         inFlight: true,
+        canSend: true,
         turnId: "delivery-fixture-turn",
       })),
       runtime: { ...original.runtime, requests: [] },
@@ -212,90 +218,11 @@ test("message delivery ui", async ({ browser: _browser }) => {
       });
       const errors: string[] = [];
       page.on("pageerror", (error) => errors.push((error as Error).message));
-      await page.addInitScript(
-        ({ workspaceId, schemaHandshake }) => {
-          window.deliveryStreams = [];
-          (
-            window as {
-              EventSource: new (
-                url: Parameters<
-                  typeof import("../../src/servers/eventSource.ts").openServerEvents
-                >[0],
-              ) => Pick<EventSource, "url" | "close"> &
-                Pick<EventTarget, "addEventListener">;
-            }
-          ).EventSource = class extends EventTarget {
-            declare url: string;
-            constructor(url: string) {
-              super();
-              this.url = url;
-              window.deliveryStreams.push(this);
-              queueMicrotask(() => {
-                this.dispatchEvent(
-                  new MessageEvent("api-schema", {
-                    data: JSON.stringify(schemaHandshake),
-                  }),
-                );
-                window.publishDelivery("initial", 0);
-              });
-            }
-            close() {
-              window.deliveryStreams = window.deliveryStreams.filter(
-                (stream) => stream !== this,
-              );
-            }
-          };
-          let generation = Date.now();
-          window.publishDelivery = (_id, _revision) => {
-            const revision = ++generation;
-            for (const stream of window.deliveryStreams) {
-              const url = new URL(stream.url, location.href);
-              const scope = url.searchParams.get("scope");
-              if (scope?.startsWith("transcript:"))
-                stream.dispatchEvent(
-                  new MessageEvent("changes", {
-                    data: JSON.stringify({
-                      protocolVersion: 1,
-                      scope,
-                      workspaceId,
-                      documents: [],
-                      cursor: 0,
-                    }),
-                  }),
-                );
-              if (url.pathname === "/api/sync/stream" && !scope) {
-                const resources: components["schemas"]["ResourceRef"][] =
-                  JSON.parse(url.searchParams.get("resources") || "[]");
-                stream.dispatchEvent(
-                  new MessageEvent("resources", {
-                    data: JSON.stringify({
-                      protocol: 4,
-                      workspaceId,
-                      epoch: "fixture-epoch",
-                      revision,
-                      reason: "change",
-                      resources,
-                      resourceVersions: resources.map((resource) => ({
-                        resource,
-                        revision,
-                      })),
-                    }),
-                  }),
-                );
-              }
-            }
-          };
-        },
-        {
-          workspaceId: identity.workspaceId,
-          schemaHandshake: apiSchemaHandshakeEvent(),
-        },
-      );
       const history = new Map<
         string,
         {
           agent: import("../playwright.ts").TestAgent;
-          items: Message[];
+          items: components["schemas"]["TranscriptMessageRecord"][];
           replace: boolean;
           order?: string[];
         }
@@ -317,11 +244,137 @@ test("message delivery ui", async ({ browser: _browser }) => {
         [a.id, 100],
         [b.id, 100],
       ]);
+      const streams = new Map<
+        ServerResponse,
+        components["schemas"]["ResourceRef"][]
+      >();
+      const sessions = new Map<string, ServerResponse>();
+      let streamRevision = 0;
+      const frame = (
+        resources: components["schemas"]["ResourceRef"][],
+      ): components["schemas"]["ResourceChangeEvent"] => ({
+        protocol: 4,
+        workspaceId: identity.workspaceId,
+        epoch: "fixture-epoch",
+        revision: ++streamRevision,
+        reason: "change",
+        resources,
+        resourceVersions: resources.map(
+          (resource): components["schemas"]["ResourceRevisionEntry"] => {
+            if (resource.kind === "drafts")
+              return {
+                resource,
+                revision: streamRevision,
+                draftSnapshot: { complete: true, documents: [] },
+              };
+            if (resource.kind !== "transcript")
+              return { resource, revision: streamRevision };
+            const revision = revisions.get(resource.agentId) ?? 1;
+            const transcriptSnapshot: components["schemas"]["TranscriptPageResponse"] =
+              {
+                items: history.get(resource.agentId)?.items ?? [],
+                agent: history.get(resource.agentId)?.agent,
+                truncated: false,
+                historyVersion: String(revision),
+              };
+            return {
+              resource,
+              revision,
+              cursor: { workspaceId: identity.workspaceId, seq: revision },
+              replyKind: "snapshot",
+              transcriptSnapshot,
+            };
+          },
+        ),
+      });
+      const publishDelivery = () => {
+        for (const [stream, resources] of streams)
+          stream.write(protocol3SseEvent("resources", frame(resources)));
+      };
+      const streamServer = createServer(async (request, response) => {
+        if (request.method === "POST") {
+          let body = "";
+          for await (const chunk of request) body += chunk;
+          const update: components["schemas"]["SyncSubscriptionRequest"] =
+            JSON.parse(body);
+          const stream = sessions.get(update.sessionId);
+          if (!stream) {
+            response.writeHead(410).end();
+            return;
+          }
+          const resources = required(streams.get(stream));
+          const removed = new Set(
+            update.remove.map((resource) => JSON.stringify(resource)),
+          );
+          const next = resources.filter(
+            (resource) => !removed.has(JSON.stringify(resource)),
+          );
+          const added = update.add.map(({ resource }) => resource);
+          for (const resource of added)
+            if (
+              !next.some(
+                (current) =>
+                  JSON.stringify(current) === JSON.stringify(resource),
+              )
+            )
+              next.push(resource);
+          streams.set(stream, next);
+          const ack = {
+            gen: update.gen,
+            cachePolicies: [],
+          } satisfies components["schemas"]["SyncSubscriptionAck"];
+          stream.write(protocol3SseEvent("subscriptions", ack));
+          if (added.length)
+            stream.write(protocol3SseEvent("resources", frame(added)));
+          response.writeHead(200, {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          });
+          response.end(JSON.stringify(ack));
+          return;
+        }
+        const resources: components["schemas"]["ResourceRef"][] = JSON.parse(
+          new URL(required(request.url), "http://fixture").searchParams.get(
+            "resources",
+          ) || "[]",
+        );
+        response.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "Access-Control-Allow-Origin": "*",
+        });
+        const sessionId = randomUUID();
+        sessions.set(sessionId, response);
+        streams.set(response, resources);
+        response.write(syncSessionSse(sessionId, identity.workspaceId));
+        response.write(apiSchemaHandshakeSse());
+        response.write(protocol3SseEvent("resources", frame(resources)));
+        response.on("close", () => {
+          streams.delete(response);
+          sessions.delete(sessionId);
+        });
+      });
+      await new Promise<void>((resolve) =>
+        streamServer.listen(0, "127.0.0.1", resolve),
+      );
+      stopStreamFixture = async () => {
+        for (const stream of streams.keys()) stream.end();
+        await new Promise<void>((resolve) =>
+          streamServer.close(() => resolve()),
+        );
+      };
       const { update: updateEntityState } = await stubEntityState(
         page,
         state,
         await readFixtureSyncContract(origin),
       );
+      for (const path of ["stream?*", "subscriptions"]) {
+        await page.route(`**/api/sync/${path}`, (route) => {
+          const url = new URL(route.request().url());
+          url.port = String((streamServer.address() as AddressInfo).port);
+          return route.continue({ url: url.href });
+        });
+      }
       const queuedItems = new Map<
         string,
         Array<
@@ -335,40 +388,6 @@ test("message delivery ui", async ({ browser: _browser }) => {
           json: { items: queuedItems.get(required(id)) || [] },
         });
       });
-      await page.route("**/api/transcript?*", (route) =>
-        route.fulfill({
-          json: history.get(
-            required(new URL(route.request().url()).searchParams.get("id")),
-          ),
-        }),
-      );
-      let transcriptPulls = 0;
-      await page.route("**/api/sync/pull?*", (route) => {
-        const url = new URL(route.request().url());
-        const scope = url.searchParams.get("scope");
-        if (!required(scope).startsWith("transcript:")) return route.fallback();
-        const id = required(scope).slice("transcript:".length);
-        const seq = required(revisions.get(id));
-        const after = Number(url.searchParams.get("after") || 0);
-        if (required(scope).startsWith("transcript:")) transcriptPulls++;
-        return route.fulfill({
-          json: {
-            ...identity,
-            documents:
-              after < seq
-                ? [
-                    {
-                      id: scope,
-                      payload: JSON.stringify(required(history.get(id))),
-                      seq,
-                      _deleted: false,
-                    },
-                  ]
-                : [],
-            checkpoint: { seq: Math.max(after, seq) },
-          },
-        });
-      });
       const posts: Array<{ route: Route; body: MessageRequest }> = [];
       await page.route("**/api/commands", (route) => {
         const body = sentMessage(route.request());
@@ -378,7 +397,10 @@ test("message delivery ui", async ({ browser: _browser }) => {
         }
         posts.push({ route, body });
       });
-      const publish = async (id: string, items: Message[]) => {
+      const publish = async (
+        id: string,
+        items: components["schemas"]["TranscriptMessageRecord"][],
+      ) => {
         const payload = {
           ...required(history.get(id)),
           items,
@@ -387,10 +409,7 @@ test("message delivery ui", async ({ browser: _browser }) => {
         };
         history.set(id, payload);
         revisions.set(id, required(revisions.get(id)) + 1);
-        await page.evaluate(
-          ({ id, revision }) => window.publishDelivery(id, revision),
-          { id, revision: required(revisions.get(id)) },
-        );
+        publishDelivery();
       };
       const row = (text: string) =>
         page
@@ -456,10 +475,6 @@ test("message delivery ui", async ({ browser: _browser }) => {
       await page.goto(origin);
       await page.locator(`[data-chat="${a.id}"]`).click();
       await page.locator(`[data-message="${a.id}-history-35"]`).waitFor();
-      await until(
-        () => transcriptPulls > 0,
-        "Real RxDB transcript projection loads",
-      );
 
       // The HTTP response and the replicated history are separate acknowledgements.
       await page.locator("#messages").evaluate((element) => {
@@ -487,7 +502,7 @@ test("message delivery ui", async ({ browser: _browser }) => {
       assert.ok(
         Math.abs(required(pendingBox).height - required(acceptedBox).height) <=
           1,
-        `${mode}: receipt does not resize the sent message`,
+        `${mode}: receipt does not resize the sent message (${required(pendingBox).height} -> ${required(acceptedBox).height}px)`,
       );
       assert.ok(
         Math.abs(required(pendingBox).y - required(acceptedBox).y) <= 1,
@@ -627,10 +642,7 @@ test("message delivery ui", async ({ browser: _browser }) => {
         clientMessageId: queued.body.id,
         role: "user",
         text: queuedText,
-        deliveryStatus: {
-          source: "server" as const,
-          status: "queued" as const,
-        },
+        deliveryStatus: "queued" as const,
       };
       await publish(a.id, [...queueBase, queuedEcho]);
       await until(
@@ -662,7 +674,7 @@ test("message delivery ui", async ({ browser: _browser }) => {
         ...queueBase,
         {
           ...queuedEcho,
-          deliveryStatus: { source: "server", status: "delivered" },
+          deliveryStatus: "delivered",
         },
       ]);
       await until(
@@ -870,17 +882,14 @@ test("message delivery ui", async ({ browser: _browser }) => {
             clientMessageId: materialized.body.id,
             role: "user",
             text: materializedText,
-            deliveryStatus: { source: "server", status: "delivered" },
+            deliveryStatus: "delivered",
             materialized: true,
           },
         ],
       });
       revisions.set(a.id, required(revisions.get(a.id)) + 1);
       queuedItems.set(a.id, []);
-      await page.evaluate(
-        ({ id, revision }) => window.publishDelivery(id, revision),
-        { id: a.id, revision: required(revisions.get(a.id)) },
-      );
+      publishDelivery();
       const postsBeforeReconcile = posts.length;
       await until(
         async () =>
@@ -994,7 +1003,7 @@ test("message delivery ui", async ({ browser: _browser }) => {
         id: `${mode}-server-${status}`,
         role: "user",
         text: `${mode} server ${status} receipt`,
-        deliveryStatus: { source: "server" as const, status },
+        deliveryStatus: status,
         deliveryError: `Fixture ${status} receipt`,
       }));
       const retained = (
@@ -1003,7 +1012,7 @@ test("message delivery ui", async ({ browser: _browser }) => {
         id: `${mode}-server-${status}`,
         role: "user",
         text: `${mode} server ${status} receipt`,
-        deliveryStatus: { source: "server" as const, status },
+        deliveryStatus: status,
       }));
       await publish(a.id, [...serverBase, ...removable, ...retained]);
       for (const message of removable) {
@@ -1057,23 +1066,11 @@ test("message delivery ui", async ({ browser: _browser }) => {
         ...required(removable[0]),
         text: `${mode} same ID in another chat`,
       };
-      const refreshedOtherChat =
-        mode === "rxdb"
-          ? page.waitForResponse(async (response) => {
-              const url = new URL(response.url());
-              return (
-                url.pathname === "/api/sync/pull" &&
-                url.searchParams.get("scope") === `transcript:${b.id}` &&
-                (await response.text()).includes(otherChatReceipt.id)
-              );
-            })
-          : Promise.resolve();
       await publish(b.id, [
         ...required(history.get(b.id)).items,
         otherChatReceipt,
       ]);
       await page.locator(`[data-chat="${b.id}"]`).click();
-      await refreshedOtherChat;
       await row(otherChatReceipt.text).waitFor();
       assert.equal(
         await row(otherChatReceipt.text).count(),
@@ -1105,13 +1102,7 @@ test("message delivery ui", async ({ browser: _browser }) => {
     }
     console.log(`Evidence: ${evidence}`);
   } finally {
+    await stopStreamFixture?.();
     fixture.stdin?.end();
   }
 });
-
-declare global {
-  interface Window {
-    deliveryStreams: Array<Pick<EventSource, "url" | "dispatchEvent">>;
-    publishDelivery: (id: string, revision: number) => void;
-  }
-}
