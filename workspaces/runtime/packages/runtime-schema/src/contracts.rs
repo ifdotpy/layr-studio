@@ -1259,6 +1259,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         openapi["components"]["schemas"][name] = schema;
     }
     for name in [
+        "AgentResponse",
         "AgentEntityDto",
         "AgentSummaryEntityDto",
         "AgentDetailEntityDto",

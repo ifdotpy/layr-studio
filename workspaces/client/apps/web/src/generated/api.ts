@@ -5866,6 +5866,10 @@ export interface components {
      * @description Agent entity response that also accepts the HTTP sync envelope.
      */
     AgentResponse: {
+      accountChange?: components["schemas"]["AccountChange"] | undefined;
+      accountDestinations?:
+        | components["schemas"]["AccountDestination"][]
+        | undefined;
       /**
        * Accountkey
        * @default null
@@ -5881,6 +5885,9 @@ export interface components {
        * @default null
        */
       accountTransferId?: null | string | undefined;
+      accountTransferProgress?:
+        | components["schemas"]["AccountTransferProgress"]
+        | undefined;
       /** @default null */
       activity?: components["schemas"]["AgentActivity"] | null | undefined;
       /** @default null */

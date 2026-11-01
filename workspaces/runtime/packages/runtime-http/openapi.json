@@ -8607,6 +8607,15 @@
         "additionalProperties": false,
         "description": "Agent entity response that also accepts the HTTP sync envelope.",
         "properties": {
+          "accountChange": {
+            "$ref": "#/components/schemas/AccountChange"
+          },
+          "accountDestinations": {
+            "items": {
+              "$ref": "#/components/schemas/AccountDestination"
+            },
+            "type": "array"
+          },
           "accountKey": {
             "anyOf": [
               {
@@ -8641,6 +8650,9 @@
             ],
             "default": null,
             "title": "Accounttransferid"
+          },
+          "accountTransferProgress": {
+            "$ref": "#/components/schemas/AccountTransferProgress"
           },
           "activity": {
             "anyOf": [
