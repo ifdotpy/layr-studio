@@ -9,7 +9,11 @@ async fn change_agent(state: &State, key: &'static str, value: Value) {
             store
                 .transaction_with(move |tx| {
                     let mut row = AgentRepository::get(tx, &AgentId::from(id.as_str()))?.unwrap();
-                    row.extra.insert(key.into(), value);
+                    if key == "nativeRelease" {
+                        row.native_release = Some(serde::Deserialize::deserialize(value).unwrap());
+                    } else {
+                        row.extra.insert(key.into(), value);
+                    }
                     AgentRepository::put(tx, &row)?;
                     Ok::<_, WorkerError>(())
                 })

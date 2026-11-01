@@ -135,10 +135,17 @@ async fn seed(store: &RuntimeStore, records: Records) {
 
 // Frozen fixtures used numeric tickets before the current agent view stored strings.
 fn use_current_ticket_shape(row: &mut Value) {
-    row.as_object_mut()
-        .expect("agent fixture")
-        .entry("compactions")
-        .or_insert(json!(0));
+    let fields = row.as_object_mut().expect("agent fixture");
+    fields.entry("compactions").or_insert(json!(0));
+    fields
+        .entry("capacity")
+        .or_insert_with(|| json!(studio_runtime_store::AgentCapacity::default()));
+    fields
+        .entry("naming")
+        .or_insert_with(|| json!(studio_runtime_store::AgentNaming::default()));
+    if fields.get("maxAgentsExplicit") == Some(&json!(false)) {
+        fields.remove("maxAgentsExplicit");
+    }
     if row.get("accountKey").is_none_or(Value::is_null) {
         row["accountKey"] = json!("default");
     }
@@ -1138,6 +1145,7 @@ fn assert_records(store: &RuntimeStore, case: &Value) {
             if payload["value"].get("accountKey").is_none() {
                 payload["value"]["accountKey"] = json!("default");
             }
+            use_current_ticket_shape(payload.get_mut("value").expect("agent projection"));
             crate::normalize_agent_nulls(&mut payload);
             row[2] = json!(payload.to_string());
         }
@@ -1668,6 +1676,7 @@ async fn production_child_notification_matches_python_corpus() {
             if payload["value"].get("accountKey").is_none() {
                 payload["value"]["accountKey"] = json!("default");
             }
+            use_current_ticket_shape(payload.get_mut("value").expect("agent projection"));
             crate::normalize_agent_nulls(&mut payload);
             row[2] = json!(payload.to_string());
         }
@@ -2222,6 +2231,8 @@ async fn successful_adapter_cannot_replace_attempt_or_provider_identity() {
             let mut changed = effect.stopped().clone();
             changed[self.0] = if self.0 == "startAttempt" {
                 json!({"id":"replacement"})
+            } else if self.0 == "provider" {
+                json!(studio_runtime_schema::ProviderKind::Claude)
             } else {
                 json!("replacement")
             };

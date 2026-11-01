@@ -355,35 +355,7 @@ impl AgentNaming {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum AgentCapacity {
-    Automatic {
-        max: studio_runtime_schema::AgentCounter,
-    },
-    Explicit {
-        max: studio_runtime_schema::AgentCounter,
-    },
-}
-
-impl Default for AgentCapacity {
-    fn default() -> Self {
-        Self::Automatic {
-            max: serde_json::from_value(serde_json::json!(
-                studio_runtime_schema::agent_limits::DEFAULT_MAX_TEAM_AGENTS
-            ))
-            .expect("default team limit is valid"),
-        }
-    }
-}
-
-impl AgentCapacity {
-    pub fn max(&self) -> i64 {
-        match self {
-            Self::Automatic { max } | Self::Explicit { max } => max.as_i64(),
-        }
-    }
-}
+pub use studio_runtime_schema::agent_limits::AgentCapacity;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -328,7 +328,10 @@ fn replay_in(
 }
 
 fn excludes_account(agent: &studio_runtime_store::AgentRecord, target: &str) -> bool {
-    agent.excluded_account_keys.value().is_some_and(|keys| keys.iter().any(|key| key == target))
+    agent
+        .excluded_account_keys
+        .value()
+        .is_some_and(|keys| keys.iter().any(|key| key == target))
 }
 
 /// The single compatibility accessor for per-chat account exclusions.
@@ -1801,8 +1804,8 @@ mod request_tests {
             .expect("initial transfer succeeds");
         run_async(store.transaction_with_error(|tx| {
             let mut lead = AgentRepository::get(tx, &AgentId::from("lead"))?.unwrap();
-            lead.extra
-                .insert("excludedAccountKeys".into(), json!(["target"]));
+            lead.excluded_account_keys =
+                studio_runtime_schema::queue_command::Field::Value(vec!["target".into()]);
             AgentRepository::put(tx, &lead)?;
             Ok::<_, studio_runtime_store::StoreError>(())
         }))

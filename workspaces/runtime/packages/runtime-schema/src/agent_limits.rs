@@ -26,3 +26,46 @@ pub const MIN_GLOBAL_CONCURRENCY: i64 = 1;
 pub const DEFAULT_GLOBAL_CONCURRENCY: i64 = MAX_SUBAGENT_CONCURRENCY + LEAD_TEAM_RECORDS;
 /// Most agent records in one account transfer: one full team.
 pub const MAX_TRANSFER_AGENT_RECORDS: usize = MAX_TEAM_AGENTS;
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[schemars(deny_unknown_fields)]
+pub enum AgentCapacity {
+    Automatic {
+        #[schemars(schema_with = "capacity_max_schema")]
+        max: crate::AgentCounter,
+    },
+    Explicit {
+        #[schemars(schema_with = "capacity_max_schema")]
+        max: crate::AgentCounter,
+    },
+}
+
+impl Default for AgentCapacity {
+    fn default() -> Self {
+        Self::Automatic {
+            max: crate::AgentCounter::default_team_limit(),
+        }
+    }
+}
+
+impl AgentCapacity {
+    pub fn max(&self) -> i64 {
+        match self {
+            Self::Automatic { max } | Self::Explicit { max } => max.as_i64(),
+        }
+    }
+}
+
+fn capacity_max_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({"type":"integer", "minimum":0, "maximum":crate::shared_values::MAX_SAFE_INTEGER})
+}
+
+pub(crate) fn capacity_schema() -> serde_json::Value {
+    let mut generator = schemars::generate::SchemaSettings::openapi3()
+        .for_serialize()
+        .into_generator();
+    <AgentCapacity as schemars::JsonSchema>::json_schema(&mut generator).to_value()
+}

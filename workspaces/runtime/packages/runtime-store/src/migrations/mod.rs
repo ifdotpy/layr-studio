@@ -87,6 +87,15 @@ pub use m2026_10_31_project_record_kind::apply as migrate_project_record_kind;
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_31_room_record::apply as migrate_room_record;
 
+/// Normalize historical agent fixtures inserted after the database was opened.
+#[cfg(any(test, feature = "test-support"))]
+pub fn normalize_agent_fixtures(tx: &rusqlite::Transaction<'_>) -> crate::StoreResult<()> {
+    m2026_10_31_agent_core::apply(tx)?;
+    m2026_10_31_agent_batch_55::apply(tx)?;
+    m2026_11_01_agent_capacity::apply(tx)?;
+    m2026_11_01_agent_naming::apply(tx)
+}
+
 use std::path::Path;
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior};

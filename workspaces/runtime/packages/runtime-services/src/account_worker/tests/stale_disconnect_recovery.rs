@@ -186,6 +186,8 @@ async fn native_review_attempt_without_a_turn(shape: Shape) {
             ),
         ] {
             match key {
+                "status" => row.status = serde::Deserialize::deserialize(value).unwrap(),
+                "error" => row.error = serde::Deserialize::deserialize(value).unwrap(),
                 "startAttempt" => {
                     row.start_attempt = Some(serde::Deserialize::deserialize(value).unwrap())
                 }

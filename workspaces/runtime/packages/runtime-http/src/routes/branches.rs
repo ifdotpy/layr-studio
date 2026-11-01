@@ -1746,7 +1746,10 @@ mod tests {
         .await
         .expect("copy");
         assert_eq!(result["status"], "idle");
-        assert_eq!(result["needsTitle"], false);
+        assert_eq!(
+            result.get("naming").and_then(Value::as_str),
+            Some("automatic")
+        );
         assert_stored_status(&store, "child", "idle");
     }
 

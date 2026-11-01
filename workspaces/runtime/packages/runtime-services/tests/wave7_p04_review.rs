@@ -784,11 +784,8 @@ async fn non_radio_async_answer_is_steered_and_acknowledged() {
         record.auto_wake = Some(true);
         record.thread_id = Some("thread-0".to_string());
 record.turn_id = Some("turn-0".to_string());
-for (key, value) in [
-            ("isLead", json!(true)),
-
-            ("startAttempt", json!({"id":"start","epoch":3,"submitted":true,"turnId":"turn-0","threadId":"thread-0","accountKey":"default","events":["initial"],"connectionGeneration":7})),
-        ] { record.extra.insert(key.into(), value); }
+        record.is_lead = Some(true);
+        record.start_attempt = Some(serde_json::from_value(json!({"id":"start","epoch":3,"submitted":true,"turnId":"turn-0","threadId":"thread-0","accountKey":"default","events":["initial"],"connectionGeneration":7})).unwrap());
         AgentRepository::put(tx, &record)?;
         Ok(())
     }).await.unwrap();

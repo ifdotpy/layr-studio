@@ -1913,8 +1913,7 @@ mod title_http_tests {
             "cwd":"/fixture",
             "accountKey":"default",
             "isLead":false,
-            "needsTitle":true,
-            "manualName":false,
+            "naming":"pending_title",
             "autoWake":false
         }))
         .expect("valid persisted agent");
@@ -2019,8 +2018,7 @@ mod title_http_tests {
                     .expect("title agent exists");
                 let record: Value = serde_json::from_str(&record).expect("agent JSON");
                 if record["name"] == "Generated through HTTP"
-                    && record["needsTitle"] == false
-                    && record["manualName"] == true
+                    && record.get("naming").and_then(Value::as_str) == Some("manual")
                 {
                     break;
                 }

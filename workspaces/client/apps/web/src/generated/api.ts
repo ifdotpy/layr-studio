@@ -5775,6 +5775,7 @@ export interface components {
        * @default null
        */
       canSend?: boolean | null | undefined;
+      capacity?: components["schemas"]["AgentCapacity"] | undefined;
       /** @default null */
       capacityRetry?:
         | components["schemas"]["AgentEntityCapacityRetryDto"]
@@ -8807,6 +8808,7 @@ export interface components {
        * @default null
        */
       canSend?: boolean | null | undefined;
+      capacity?: components["schemas"]["AgentCapacity"] | undefined;
       /** @default null */
       capacityRetry?:
         | components["schemas"]["AgentEntityCapacityRetryDto"]

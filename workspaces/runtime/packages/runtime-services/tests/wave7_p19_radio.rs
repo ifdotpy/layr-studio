@@ -132,6 +132,20 @@ async fn corpus() -> RadioCorpus {
                         if payload["value"]["role"] == "lead" {
                             payload["value"]["role"] = json!("orchestrator");
                         }
+                        if side == "after" {
+                            let fields = payload
+                                .get_mut("value")
+                                .and_then(Value::as_object_mut)
+                                .expect("agent projection");
+                            fields.insert(
+                                "capacity".into(),
+                                json!(studio_runtime_store::AgentCapacity::default()),
+                            );
+                            fields.insert(
+                                "naming".into(),
+                                json!(studio_runtime_store::AgentNaming::default()),
+                            );
+                        }
                         row["payload"] = json!(payload.to_string());
                     }
                 }
@@ -149,7 +163,11 @@ async fn corpus() -> RadioCorpus {
                         .expect("agent object")
                         .entry("compactions")
                         .or_insert(json!(0));
-                    row["record"] = json!(record.to_string());
+                    let record = studio_runtime_store::AgentRecord::from_value(record)
+                        .expect("normalized agent fixture");
+                    row.as_object_mut()
+                        .expect("agent row")
+                        .insert("record".into(), json!(record.into_value().to_string()));
                 }
             }
             if let Some(rows) = case[side]["rules"].as_array_mut() {

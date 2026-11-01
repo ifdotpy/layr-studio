@@ -3893,7 +3893,8 @@
             "additionalProperties": false,
             "properties": {
               "kind": {
-                "const": "automatic"
+                "const": "automatic",
+                "type": "string"
               },
               "max": {
                 "maximum": 9007199254740991,
@@ -3911,7 +3912,8 @@
             "additionalProperties": false,
             "properties": {
               "kind": {
-                "const": "explicit"
+                "const": "explicit",
+                "type": "string"
               },
               "max": {
                 "maximum": 9007199254740991,
@@ -8479,6 +8481,9 @@
             ],
             "default": null,
             "title": "Cansend"
+          },
+          "capacity": {
+            "$ref": "#/components/schemas/AgentCapacity"
           },
           "capacityRetry": {
             "anyOf": [
@@ -16909,6 +16914,9 @@
             ],
             "default": null,
             "title": "Cansend"
+          },
+          "capacity": {
+            "$ref": "#/components/schemas/AgentCapacity"
           },
           "capacityRetry": {
             "anyOf": [

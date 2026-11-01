@@ -692,6 +692,7 @@ async fn legacy_start_absence_matches_python_writes_and_visible_wait() {
         let mut after = snapshot(&store).record().clone();
         assert!(after.get("startRecoveryCheck").is_none());
         let mut expected = case["after"].clone();
+        crate::agent_view_fixtures::materialize_agent_defaults(&mut expected);
         crate::normalize_agent_nulls(&mut expected);
         crate::normalize_agent_nulls(&mut after);
         if let Some(created) = expected
