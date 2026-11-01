@@ -442,7 +442,10 @@ mod bulk_read_tests {
 
     fn database() -> Connection {
         let connection = Connection::open_in_memory().expect("database");
-        connection.execute_batch("CREATE TABLE runtime_tasks(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE INDEX runtime_task_agent_created_id ON runtime_tasks(json_extract(record,'$.agent'),json_extract(record,'$.created') DESC,id DESC); CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL,root_id TEXT GENERATED ALWAYS AS (record->>'$.rootId') STORED,deleted_at GENERATED ALWAYS AS (record->>'$.deletedAt') STORED);").expect("tables");
+        connection.execute_batch("CREATE TABLE runtime_tasks(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL,root_id TEXT GENERATED ALWAYS AS (record->>'$.rootId') STORED,deleted_at GENERATED ALWAYS AS (record->>'$.deletedAt') STORED);").expect("tables");
+        for index in crate::TaskRepository::index_definitions() {
+            connection.execute_batch(&index.create_sql).expect("index");
+        }
         connection
             .execute_batch(crate::agent_volatile::agent_volatile_table_sql())
             .expect("volatile table");
