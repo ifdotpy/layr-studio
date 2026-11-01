@@ -9,7 +9,7 @@ use studio_runtime_schema::model_catalog::ModelCatalog;
 
 use crate::error::ApiError;
 use crate::router::HttpState;
-use crate::routes::extractors::QueryParams;
+use crate::routes::extractors::TypedQuery;
 use crate::routes::manifest::{OperationStatus, RouteGroup, get};
 use studio_runtime_services::account_policy::AccountsSnapshot;
 use studio_runtime_services::model_catalog::{CatalogRead, ModelCatalogService};
@@ -33,17 +33,33 @@ pub(crate) fn routes() -> RouteGroup {
     )])
 }
 
+#[derive(serde::Deserialize)]
+enum One {
+    #[serde(rename = "1")]
+    One,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModelsQuery {
+    account_key: Option<String>,
+    workers: Option<One>,
+    retry: Option<One>,
+    fresh: Option<One>,
+}
+
 async fn models(
     State(state): State<HttpState>,
-    params: QueryParams,
+    TypedQuery(params): TypedQuery<ModelsQuery>,
 ) -> Result<(StatusCode, Json<crate::generated::ModelCatalogResponse>), ApiError> {
     let account_key = params
-        .nonempty_str("account_key")
+        .account_key
+        .as_deref()
+        .filter(|value| !value.is_empty())
         .unwrap_or("default")
         .to_owned();
-    let workers = params.typed_value("workers").and_then(Value::as_str) == Some("1");
-    let retry = params.typed_value("retry").and_then(Value::as_str) == Some("1");
-    let fresh = params.typed_value("fresh").and_then(Value::as_str) == Some("1");
+    let workers = params.workers.is_some();
+    let retry = params.retry.is_some();
+    let fresh = params.fresh.is_some();
     let account_policy = state
         .account_policy
         .clone()
@@ -1173,5 +1189,19 @@ inventory::submit! {
         name: "models",
         routes: Some(routes),
         dependencies: &[],
+    }
+}
+
+#[cfg(test)]
+mod modelsquery_tests {
+    #[test]
+    fn query_contract() {
+        fn decode(query: &str) -> bool {
+            let uri: axum::http::Uri = format!("/?{query}").parse().unwrap();
+            axum::extract::Query::<super::ModelsQuery>::try_from_uri(&uri).is_ok()
+        }
+        assert!(decode("fresh=1"));
+        assert!(!decode("fresh=0"));
+        assert!(!decode("extra=x"));
     }
 }
