@@ -169,7 +169,7 @@ fn commit(
                     studio_runtime_schema::usage_limits::AccountLimitsStatus::Checking {
                         reset_at,
                     } => Some(reset_at),
-                    _ => None,
+                    studio_runtime_schema::usage_limits::AccountLimitsStatus::Current => None,
                 });
             if stamp.scope.as_ref() == Some(&scope) && stamp.cursor >= cursor {
                 return Ok((old, false));
@@ -287,7 +287,7 @@ pub(super) async fn recovery_deadline(
         Ok(value.projection.agents.values().filter_map(|agent| {
             match &agent.recovery.as_ref()?.timing {
                 RecoveryTiming::Waiting { reset_at } | RecoveryTiming::Unconfirmed { reset_at } => Some(*reset_at),
-                _ => None,
+                RecoveryTiming::Unknown | RecoveryTiming::Checking { .. } | RecoveryTiming::Confirmed { .. } => None,
             }
         }).filter(|reset| *reset > checked.max(attempted)).reduce(f64::min))
     }).await.ok().flatten()

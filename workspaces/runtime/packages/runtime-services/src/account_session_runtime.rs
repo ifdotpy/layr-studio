@@ -1114,9 +1114,9 @@ impl AccountSessionRuntime {
                 if let Ok(mut deadlines) = runtime.reset_deadlines.lock() { deadlines.remove(&key); }
                 return;
             }
-            let _ = read_limits_with_freshness(&runtime, &key, false).await;
+            if let Err(error) = read_limits_with_freshness(&runtime, &key, false).await { eprintln!("limits refresh for {key} failed: {error}"); }
             if let Some(store) = &runtime.store {
-                let _ = limits::persist(store.clone(), runtime.refreshed_limits.clone(), key.clone(), limits::LimitsWrite::Finish, runtime.continuation_wake.clone(), runtime.session.clone()).await;
+                if let Err(error) = limits::persist(store.clone(), runtime.refreshed_limits.clone(), key.clone(), limits::LimitsWrite::Finish, runtime.continuation_wake.clone(), runtime.session.clone()).await { eprintln!("limits completion for {key} failed: {error}"); }
             }
             if let Ok(mut deadlines) = runtime.reset_deadlines.lock() { deadlines.remove(&key); }
             runtime.schedule_reset_after(&key, at);
