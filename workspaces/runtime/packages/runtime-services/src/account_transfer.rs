@@ -1942,6 +1942,17 @@ fn validate_source_for_submission(member: &Value, agent: &Value) -> Result<(), T
 
 #[cfg(test)]
 mod provider_receipt_tests {
+    #[test]
+    fn spilled_provider_reply_has_stable_bytes_and_digest() {
+        let mut record = serde_json::json!({"result":{"kind":"reply","value":"x".repeat(65537)}});
+        let (digest, bytes) = super::spill_reply(&mut record).expect("large reply spills");
+        assert_eq!(
+            digest,
+            "7d695b80524fb81f4595aeb033d2661666a31db1feb18e1e3a8589cd6e7c2fe9"
+        );
+        assert_eq!(bytes, serde_json::to_vec(&"x".repeat(65537)).unwrap());
+        assert_eq!(record["result"]["valueBlob"]["sha256"], digest);
+    }
     use super::*;
     use crate::account_session_runtime::SessionOutcome;
     use studio_runtime_providers::{Method, RequestTicket};

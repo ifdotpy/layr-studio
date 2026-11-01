@@ -338,6 +338,10 @@ mod receipt_tests {
         }
         let conversion: Convert = serde_json::from_str(r#"{"action":"convert","path":"p","request_id":"r","member":"a","target":"b","expected_revision":1}"#).unwrap();
         let conversion_reordered: Convert = serde_json::from_str(r#"{"expected_revision":1,"target":"b","member":"a","request_id":"r","path":"p","action":"convert"}"#).unwrap();
+        assert_eq!(
+            signature(&conversion),
+            "f2a4d3ee3f7fb705439305bc89250ac9e340c380fb8eb4499f5626377a7ab103"
+        );
         assert_eq!(signature(&conversion), signature(&conversion_reordered));
         let team: TeamMutation = serde_json::from_str(r#"{"action":"delete","path":"p","request_id":"r","team_id":"t","expected_revision":1}"#).unwrap();
         let team_reordered: TeamMutation = serde_json::from_str(r#"{"expected_revision":1,"team_id":"t","request_id":"r","path":"p","action":"delete"}"#).unwrap();
