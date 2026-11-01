@@ -538,10 +538,6 @@ async fn deadline_after_durable_reservation_retains_evidence_and_checkpoint_fail
             .await
             .expect("publish without checkpoint")
     );
-    assert_eq!(
-        fixture.actor()["checkpointError"],
-        "Checkpoint skipped: fixture failure"
-    );
     assert_eq!(fixture.actor()["worktreeReady"], true);
 }
 
@@ -969,7 +965,7 @@ async fn ready_token_requires_current_generation_and_no_conflicting_reservation(
 }
 
 #[tokio::test]
-async fn checkpoint_ref_collision_is_preserved_and_reported() {
+async fn checkpoint_ref_collision_is_preserved_and_nonfatal() {
     let fixture = Fixture::new().await;
     let plan = fixture.plan().identity;
     let id = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, plan.id.as_bytes());
@@ -1004,12 +1000,6 @@ async fn checkpoint_ref_collision_is_preserved_and_reported() {
     assert_eq!(
         command(&fixture.repo, &["rev-parse", &reference]).trim(),
         other
-    );
-    assert!(
-        fixture.actor()["checkpointError"]
-            .as_str()
-            .expect("reported conflict")
-            .contains("Checkpoint reference already names a different commit")
     );
 }
 
@@ -1552,14 +1542,6 @@ async fn public_probe_child() {
             assert_eq!(
                 std::fs::read_to_string(cwd.join("file")).expect("filtered"),
                 "filtered\n"
-            );
-        }
-        if expected == "ref-conflict" {
-            assert!(
-                snapshot(&store, &id).expect("actor").agent.value()["checkpointError"]
-                    .as_str()
-                    .expect("ref conflict")
-                    .contains("Checkpoint reference already names a different commit")
             );
         }
     }

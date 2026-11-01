@@ -4828,11 +4828,6 @@ export interface components {
        */
       capacityRetryCount?: number | undefined;
       /**
-       * Checkpointerror
-       * @default null
-       */
-      checkpointError?: null | string | undefined;
-      /**
        * Checkpointhistoryhead
        * @default null
        */

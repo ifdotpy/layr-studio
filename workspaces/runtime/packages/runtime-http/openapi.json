@@ -7102,18 +7102,6 @@
             "title": "Capacityretrycount",
             "type": "integer"
           },
-          "checkpointError": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Checkpointerror"
-          },
           "checkpointHistoryHead": {
             "default": null,
             "title": "Checkpointhistoryhead",

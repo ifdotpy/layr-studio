@@ -464,31 +464,27 @@ impl WorkspaceReadyRepository {
             object.remove("worktreePreparation");
             object.remove("workspaceReservationId");
         }
-        match checkpoint {
-            Ok(value) => {
-                let mut value = value.clone();
-                let parent = actor.get("checkpointHistoryHead").and_then(Value::as_str);
-                let boundary = parent
-                    .map(|id| CheckpointsRepository::checkpoint(tx, id))
-                    .transpose()?
-                    .flatten()
-                    .and_then(|p| p.record["historyBoundary"].as_i64())
-                    .filter(|b| *b != 0);
-                let (delta, boundary) =
-                    CheckpointsRepository::history_delta(tx, &plan.agent, boundary)?;
-                value["historyParent"] = json!(parent);
-                value["historyDelta"] = json!(delta);
-                value["historyBoundary"] = json!(boundary);
-                value["turnId"] = actor
-                    .get("lastCompletedTurn")
-                    .cloned()
-                    .unwrap_or(Value::Null);
-                let record = CheckpointRecord::from_value(value.clone())?;
-                Table::<CheckpointRecord>::new(tx).put(&record)?;
-                actor["checkpointHistoryHead"] = value["id"].clone();
-                actor["checkpointError"] = Value::Null;
-            }
-            Err(error) => actor["checkpointError"] = json!(error),
+        if let Ok(value) = checkpoint {
+            let mut value = value.clone();
+            let parent = actor.get("checkpointHistoryHead").and_then(Value::as_str);
+            let boundary = parent
+                .map(|id| CheckpointsRepository::checkpoint(tx, id))
+                .transpose()?
+                .flatten()
+                .and_then(|p| p.record["historyBoundary"].as_i64())
+                .filter(|b| *b != 0);
+            let (delta, boundary) =
+                CheckpointsRepository::history_delta(tx, &plan.agent, boundary)?;
+            value["historyParent"] = json!(parent);
+            value["historyDelta"] = json!(delta);
+            value["historyBoundary"] = json!(boundary);
+            value["turnId"] = actor
+                .get("lastCompletedTurn")
+                .cloned()
+                .unwrap_or(Value::Null);
+            let record = CheckpointRecord::from_value(value.clone())?;
+            Table::<CheckpointRecord>::new(tx).put(&record)?;
+            actor["checkpointHistoryHead"] = value["id"].clone();
         }
         write_agent(
             tx,
@@ -502,7 +498,6 @@ impl WorkspaceReadyRepository {
                 "worktreePreparation",
                 "checkpointHistoryHead",
                 "lastCompletedTurn",
-                "checkpointError",
             ],
         )?;
         operation["phase"] = json!("completed");

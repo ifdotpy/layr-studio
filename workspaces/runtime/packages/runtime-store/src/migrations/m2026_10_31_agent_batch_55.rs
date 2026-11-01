@@ -8,6 +8,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         .join(",");
     // These legacy keys have no production readers or writers.
     const DROPPED: &[&str] = &[
+        "checkpointError",
         "compactionsObservedOnly",
         "complaintMisses",
         "completedWorkerTurns",
@@ -257,7 +258,7 @@ mod tests {
         }
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(r#"CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-        INSERT INTO runtime_agents VALUES('legacy','{"id":"legacy","provider":"future","created":-1,"complaintMisses":9,"compactionsObservedOnly":false,"turnRecovery":{"outcome":"idle"},"lastContextRepairWait":{"status":"superseded"},"lastContextRepairCheck":{"phase":"waiting"},"completedWorkerTurns":2,"supervisorRestore":{"status":"not_restored"},"countedWorkerTurn":true,"imageWorkspaceBaseError":"old","imageWorkspaceBaseRef":"main","imageWorkspaceCreatedAt":2,"imageWorkspaceError":"old","imageWorkspaceHasGit":true,"imageWorkspaceNoticeSent":true,"imageWorkspaceNoticeText":"old","imageWorkspaceRelative":".","imageWorkspaceStartCommit":"abc","imageWorkspaceSubpath":".","archived":"yes","pinned":[],"maxAgents":-1,"nativeEffort":42,"imageWorkspace":42,"projectFolder":42,"checkpointHistoryHead":42,"workspaceReservationId":42,"workspaceOperation":42,"excludedAccountKeys":["blocked",42],"layrReady":"bad","queueMutationRevision":-1,"authResumeAttempt":-1,"lastCompletedTurn":42,"hostProjectPath":42,"executionSettingsAccountKey":42,"lastCompletedTurnStatus":42,"error":{"error":{"message":"nested","code":42},"ignored":true},"lastCompletedTurnError":{"message":"previous","ignored":true}}');"#).unwrap();
+        INSERT INTO runtime_agents VALUES('legacy','{"id":"legacy","provider":"future","created":-1,"complaintMisses":9,"checkpointError":"legacy failure","compactionsObservedOnly":false,"turnRecovery":{"outcome":"idle"},"lastContextRepairWait":{"status":"superseded"},"lastContextRepairCheck":{"phase":"waiting"},"completedWorkerTurns":2,"supervisorRestore":{"status":"not_restored"},"countedWorkerTurn":true,"imageWorkspaceBaseError":"old","imageWorkspaceBaseRef":"main","imageWorkspaceCreatedAt":2,"imageWorkspaceError":"old","imageWorkspaceHasGit":true,"imageWorkspaceNoticeSent":true,"imageWorkspaceNoticeText":"old","imageWorkspaceRelative":".","imageWorkspaceStartCommit":"abc","imageWorkspaceSubpath":".","archived":"yes","pinned":[],"maxAgents":-1,"nativeEffort":42,"imageWorkspace":42,"projectFolder":42,"checkpointHistoryHead":42,"workspaceReservationId":42,"workspaceOperation":42,"excludedAccountKeys":["blocked",42],"layrReady":"bad","queueMutationRevision":-1,"authResumeAttempt":-1,"lastCompletedTurn":42,"hostProjectPath":42,"executionSettingsAccountKey":42,"lastCompletedTurnStatus":42,"error":{"error":{"message":"nested","code":42},"ignored":true},"lastCompletedTurnError":{"message":"previous","ignored":true}}');"#).unwrap();
         let tx = db.transaction().unwrap();
         super::apply(&tx).unwrap();
         super::apply(&tx).unwrap();

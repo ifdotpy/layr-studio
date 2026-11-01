@@ -461,7 +461,6 @@ impl CheckpointsRepository {
             Value::String(id.to_owned()),
         );
         object.insert("workspaceOperation".to_owned(), Value::Null);
-        object.insert("checkpointError".to_owned(), Value::Null);
         object.remove("workspaceReservationId");
         update_agent(
             transaction,
@@ -471,7 +470,6 @@ impl CheckpointsRepository {
                 ("checkpointHistoryHead", json!(id)),
                 ("workspaceOperation", Value::Null),
                 ("workspaceReservationId", Value::Null),
-                ("checkpointError", Value::Null),
             ],
         )?;
         let object = operation.record.as_object_mut().ok_or_else(|| {
@@ -576,12 +574,7 @@ impl CheckpointsRepository {
                 .as_object_mut()
                 .ok_or_else(|| StoreError::SchemaMismatch("invalid stored agent".to_owned()))?;
             object.insert("workspaceOperation".to_owned(), Value::Null);
-            object.insert(
-                "checkpointError".to_owned(),
-                error.map_or(Value::Null, |message| Value::String(message.to_owned())),
-            );
             object.remove("workspaceReservationId");
-            let checkpoint_error = error.map_or(Value::Null, |message| json!(message));
             update_agent(
                 transaction,
                 agent_id,
@@ -589,7 +582,6 @@ impl CheckpointsRepository {
                 &[
                     ("workspaceOperation", Value::Null),
                     ("workspaceReservationId", Value::Null),
-                    ("checkpointError", checkpoint_error),
                 ],
             )?;
         }
@@ -704,10 +696,6 @@ impl CheckpointsRepository {
                 .ok_or_else(|| invalid_record("runtime_agents", &agent_id))?;
             object.insert("workspaceOperation".to_owned(), Value::Null);
             object.remove("workspaceReservationId");
-            object.insert(
-                "checkpointError".to_owned(),
-                json!("Server restarted before checkpoint capture finished"),
-            );
             update_agent(
                 transaction,
                 &agent_id,
@@ -715,10 +703,6 @@ impl CheckpointsRepository {
                 &[
                     ("workspaceOperation", Value::Null),
                     ("workspaceReservationId", Value::Null),
-                    (
-                        "checkpointError",
-                        json!("Server restarted before checkpoint capture finished"),
-                    ),
                 ],
             )?;
         }
@@ -743,10 +727,6 @@ impl CheckpointsRepository {
                 .ok_or_else(|| invalid_record("runtime_agents", &agent.id))?;
             object.insert("workspaceOperation".to_owned(), Value::Null);
             object.remove("workspaceReservationId");
-            object.insert(
-                "checkpointError".to_owned(),
-                json!("Server restarted before checkpoint capture finished"),
-            );
             update_agent(
                 transaction,
                 &agent.id,
@@ -754,10 +734,6 @@ impl CheckpointsRepository {
                 &[
                     ("workspaceOperation", Value::Null),
                     ("workspaceReservationId", Value::Null),
-                    (
-                        "checkpointError",
-                        json!("Server restarted before checkpoint capture finished"),
-                    ),
                 ],
             )?;
         }
