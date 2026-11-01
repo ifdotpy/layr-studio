@@ -449,7 +449,10 @@ fn receipts(
                         id: id.clone(),
                     })?;
             entry["clientMessageId"] = json!(id);
-            entry["deliveryStatus"] = json!(status);
+            let send_status =
+                studio_runtime_schema::delivery::MessageSendStatus::from_persisted(&status)
+                    .ok_or_else(|| invalid("runtime_events", &id))?;
+            entry["deliveryStatus"] = json!(send_status);
             entry["requestedDelivery"] = json!(delivery);
             entry["deliveryError"] = json!(error);
             entry["pending"] = json!(status == "pending");

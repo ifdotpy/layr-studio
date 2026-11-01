@@ -11,16 +11,9 @@ use studio_runtime_schema::queue_command::Field;
 use studio_runtime_store::{SyncDocumentsRepository, system_reads as records};
 
 #[derive(serde::Serialize)]
-#[serde(untagged)]
-pub enum ReceiptStatus {
-    Event(EventStatus),
-    Delivery(DeliveryStatus),
-}
-
-#[derive(serde::Serialize)]
 pub struct MessageReceipt {
     pub id: String,
-    pub status: ReceiptStatus,
+    pub status: studio_runtime_schema::delivery::MessageSendStatus,
     pub error: Option<String>,
     pub materialized: bool,
 }
@@ -79,22 +72,12 @@ pub fn delivery_receipts(
                 &id,
                 json!({"id":id,"status":status,"error":error}),
             )?;
-            let status = status
-                .parse::<EventStatus>()
-                .map(ReceiptStatus::Event)
-                .or_else(|()| {
-                    status
-                        .parse::<DeliveryStatus>()
-                        .map(ReceiptStatus::Delivery)
-                })
-                .map_err(|()| {
-                    studio_runtime_store::StoreError::RecordContract(
-                        "invalid message receipt status",
-                    )
-                })?;
             if let Some(raw) = metadata {
                 records::decode("runtime_event_meta", &id, &raw)?;
             }
+            let status =
+                studio_runtime_schema::delivery::MessageSendStatus::from_persisted(&status)
+                    .ok_or_else(|| records::invalid("runtime_events", &id))?;
             let item = item_id
                 .zip(item)
                 .map(|(key, raw)| {
@@ -213,6 +196,7 @@ pub struct ChatMessage {
     pub sender: String,
     pub text: String,
     pub created: f64,
+    #[serde(serialize_with = "studio_runtime_schema::delivery::serialize_recipient_deliveries")]
     pub deliveries: BTreeMap<String, RecipientDelivery>,
     pub sender_name: Value,
 }
@@ -541,6 +525,53 @@ fn message_deliveries(
 #[cfg(test)]
 mod delivery_tests {
     use super::*;
+
+    #[test]
+    fn message_receipt_serializes_the_shared_status() {
+        use studio_runtime_schema::delivery::MessageSendStatus;
+        let receipt = MessageReceipt {
+            id: "one".into(),
+            status: MessageSendStatus::Sending,
+            error: None,
+            materialized: false,
+        };
+        assert_eq!(
+            serde_json::to_string(&receipt).expect("receipt serializes"),
+            r#"{"id":"one","status":"sending","error":null,"materialized":false}"#
+        );
+        for (stored, expected) in [
+            ("pending", MessageSendStatus::Queued),
+            ("reserved", MessageSendStatus::Sending),
+            ("dispatching", MessageSendStatus::Sending),
+            ("delivered", MessageSendStatus::Delivered),
+            ("uncertain", MessageSendStatus::Uncertain),
+            ("failed", MessageSendStatus::Failed),
+            ("cancelled", MessageSendStatus::Cancelled),
+            ("stored_only", MessageSendStatus::StoredOnly),
+        ] {
+            assert_eq!(MessageSendStatus::from_persisted(stored), Some(expected));
+        }
+        assert!(MessageSendStatus::from_persisted("future-status").is_none());
+        let message = ChatMessage {
+            seq: 1,
+            id: "one".into(),
+            room: "room".into(),
+            sender: "user".into(),
+            text: "hello".into(),
+            created: 1.0,
+            sender_name: Value::Null,
+            deliveries: BTreeMap::from([(
+                "agent".into(),
+                RecipientDelivery {
+                    status: DeliveryStatus::Pending,
+                    error: None,
+                },
+            )]),
+        };
+        let encoded = serde_json::to_string(&message).expect("message serializes");
+        let value: Value = serde_json::from_str(&encoded).expect("message JSON");
+        assert_eq!(value["deliveries"]["agent"]["status"], "queued");
+    }
 
     #[test]
     fn typed_deliveries_reconcile_terminal_errors_without_rewriting_active_events() {

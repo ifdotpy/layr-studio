@@ -1,6 +1,7 @@
+import { MessageSendStatus } from "../generated/api.ts";
 import { afterEach, expect, it, vi } from "vitest";
 import { createCommandClient } from "../commands";
-import { createOutbox } from "./send";
+import { createOutbox, matchesMessageDelivery } from "./send";
 
 class MemoryStorage implements Storage {
   private values = new Map<string, string>();
@@ -45,6 +46,18 @@ class MemoryBuffer {
 
 afterEach(() => vi.unstubAllGlobals());
 
+it("rejects unknown receipt status at the response boundary", () => {
+  expect(
+    matchesMessageDelivery({ id: "one", status: "future-status" }, "one"),
+  ).toBe(false);
+  expect(
+    matchesMessageDelivery(
+      { id: "one", status: MessageSendStatus.queued },
+      "one",
+    ),
+  ).toBe(true);
+});
+
 it("sends another message while an earlier request remains uncertain and retries the exact command", async () => {
   vi.stubGlobal("navigator", { onLine: true });
   const storage = new MemoryStorage();
@@ -88,7 +101,14 @@ it("continues sending when storage fails", async () => {
     ref_id: request.id,
     rev: 1,
     seq: 1,
-    rows: [],
+    rows: [
+      {
+        collection: "messageReceipt" as const,
+        id: request.id,
+        seq: 1,
+        payload: { id: request.id, status: MessageSendStatus.queued },
+      },
+    ],
   }));
   const outbox = createOutbox({
     api: {
@@ -152,13 +172,13 @@ it("removes a pending request when the stream confirms the matching workspace an
   await outbox.durableSend({ id: "pending", room: "chat", text: "hello" });
   await outbox.reconcileOutboxReceipts(
     "chat",
-    [{ id: "pending", status: "delivered" }],
+    [{ id: "pending", status: MessageSendStatus.delivered }],
     "other",
   );
   expect(buffer.values.size).toBe(1);
   await outbox.reconcileOutboxReceipts(
     "chat",
-    [{ id: "pending", status: "delivered" }],
+    [{ id: "pending", status: MessageSendStatus.delivered }],
     "workspace",
   );
   expect(storage.length).toBe(1);
@@ -283,7 +303,7 @@ it("accepts a command reply whose receipt projection precedes the flat receipt",
   expect(storage.length).toBe(1);
 });
 
-it("accepts an applied message reference even when the response omits receipt rows", async () => {
+it("keeps an applied message uncertain when the response omits its receipt", async () => {
   const storage = new MemoryStorage();
   const buffer = new MemoryBuffer();
   const post = vi.fn(async (request) => ({
@@ -309,9 +329,9 @@ it("accepts an applied message reference even when the response omits receipt ro
     text: "hello",
   });
   expect(result).toMatchObject({
-    kind: "server",
+    kind: "local",
     id: "one",
-    status: "pending",
+    status: MessageSendStatus.uncertain,
   });
   expect(storage.length).toBe(1);
 });
@@ -424,6 +444,43 @@ it("restores an uncertain command after reload and removes it on confirmation", 
   await createOutbox(options).changeOutbox("saved", "resume");
   expect(records.size).toBe(0);
   expect(post.mock.calls[1]?.[0]).toEqual(post.mock.calls[0]?.[0]);
+});
+
+it("resumes a legacy paused buffer with the original command identity", async () => {
+  const storage = new MemoryStorage();
+  const buffer = new MemoryBuffer();
+  const post = vi.fn(async (request) => ({
+    rows: [
+      {
+        collection: "messageReceipt",
+        payload: { id: request.id, status: "delivered" },
+      },
+    ],
+  }));
+  const command = createCommandClient(storage, post as never);
+  const request = command.make("send", "chat", { text: "hello" }, "saved");
+  await buffer.put(
+    JSON.stringify(["chat", "saved"]),
+    JSON.stringify({
+      body: { id: "saved", room: "chat", text: "hello" },
+      request,
+      workspaceId: "workspace",
+      status: "paused",
+      created: 1,
+    }),
+  );
+  const outbox = createOutbox({
+    api: {
+      command,
+      getStreamSession: () => ({ workspaceId: "workspace" }),
+    } as never,
+    storage,
+    buffer,
+    watchResourceConnection: () => () => {},
+  });
+  await outbox.changeOutbox("saved", "resume");
+  expect(post).toHaveBeenCalledWith(request, expect.anything());
+  expect(buffer.values.size).toBe(0);
 });
 
 it("dispatches immediately when the buffer write never finishes", async () => {

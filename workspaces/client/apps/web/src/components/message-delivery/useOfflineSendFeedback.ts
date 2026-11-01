@@ -1,3 +1,4 @@
+import { MessageSendStatus } from "../../generated/api.ts";
 import { useEffect, useState } from "react";
 import { useNetwork } from "@mantine/hooks";
 import type { OutgoingMessage } from "../../sync/send";
@@ -32,7 +33,7 @@ export function useOfflineSendFeedback(
       const next = entries
         .filter(
           (entry) =>
-            entry.status === "queued" &&
+            entry.status === MessageSendStatus.buffered &&
             (disconnected || previous.includes(entry.id)),
         )
         .map((entry) => entry.id);
@@ -44,7 +45,7 @@ export function useOfflineSendFeedback(
   const pending = entries.some(
     (entry) =>
       entry.body.room === room &&
-      entry.status === "queued" &&
+      entry.status === MessageSendStatus.buffered &&
       (disconnected || tracked.includes(entry.id)),
   );
   useEffect(() => {

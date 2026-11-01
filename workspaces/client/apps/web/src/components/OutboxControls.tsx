@@ -3,6 +3,7 @@ import { Button } from "@mantine/core";
 import { useState } from "react";
 import { errorText } from "../api";
 import type { OutgoingMessage } from "../sync/send";
+import { MessageSendStatus } from "../generated/api.ts";
 
 export default function OutboxControls({
   entry,
@@ -17,7 +18,9 @@ export default function OutboxControls({
   const [error, setError] = useState("");
   if (
     !entry ||
-    !["queued", "paused", "uncertain", "failed"].includes(entry.status)
+    (entry.status !== MessageSendStatus.buffered &&
+      entry.status !== MessageSendStatus.uncertain &&
+      entry.status !== MessageSendStatus.failed)
   )
     return null;
   const run = async (action: "resume" | "cancel") => {
@@ -28,7 +31,9 @@ export default function OutboxControls({
       const result = await changeOutbox(entry.id, action);
       if (
         action === "cancel" ||
-        (result && result.status !== "uncertain" && result.status !== "failed")
+        (result &&
+          result.status !== MessageSendStatus.uncertain &&
+          result.status !== MessageSendStatus.failed)
       )
         onResolved?.(entry.id);
     } catch (failure) {

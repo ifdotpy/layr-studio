@@ -1,5 +1,5 @@
+import { MessageSendStatus } from "./generated/api.ts";
 import {
-  DeliveryStatus,
   AgentStatus as GeneratedApiAgentStatus,
   AccountStatus,
   AgentSource as GeneratedApiAgentSource,
@@ -734,13 +734,13 @@ export default function App({ active = true }: { active?: boolean }) {
           if (receipt?.status === "failed")
             return {
               ...entry,
-              status: "failed",
+              status: MessageSendStatus.failed,
               error: receipt.error || undefined,
             } satisfies OutgoingMessage;
           if (receipt?.status === "uncertain")
             return {
               ...entry,
-              status: "uncertain",
+              status: MessageSendStatus.uncertain,
               error: receipt.error || undefined,
             } satisfies OutgoingMessage;
           return entry;
@@ -1689,7 +1689,7 @@ export default function App({ active = true }: { active?: boolean }) {
         const entry: OutgoingMessage = {
           id: request.id,
           body: request,
-          status: "sending",
+          status: MessageSendStatus.buffered,
           created: Date.now(),
           attachments: options?.attachments || [],
           displayPending: true,
@@ -1719,16 +1719,12 @@ export default function App({ active = true }: { active?: boolean }) {
           ...old,
           [entry.id]: {
             ...entry,
-            status: result.queued
-              ? "queued"
-              : result.status === "uncertain"
-                ? "uncertain"
-                : "accepted",
+            status: result.status,
             ...(result.kind === "server" ? { receipt: result } : {}),
             error: result.error || undefined,
           },
         }));
-        if (result.status === "cancelled") {
+        if (result.status === MessageSendStatus.cancelled) {
           if (sends.current[id]?.id === entry.id) {
             delete sends.current[id];
           }
@@ -1737,9 +1733,9 @@ export default function App({ active = true }: { active?: boolean }) {
             400,
           );
         }
-        if (result.status === "failed")
+        if (result.status === MessageSendStatus.failed)
           throw new ApiError(result.error || "The message was not sent.", 400);
-        if (result.status === "uncertain")
+        if (result.status === MessageSendStatus.uncertain)
           throw new Error(
             result.error ||
               "Delivery is uncertain. Inspect the conversation before sending again.",
@@ -1750,7 +1746,7 @@ export default function App({ active = true }: { active?: boolean }) {
         if (
           result.kind === "server" &&
           Object.values(result.deliveries || {}).some(
-            (v) => v.status !== DeliveryStatus.queued,
+            (v) => v.status !== MessageSendStatus.queued,
           )
         )
           notify("Message saved. Some deliveries are not confirmed.");

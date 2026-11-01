@@ -1,3 +1,4 @@
+import { MessageSendStatus } from "../generated/api.ts";
 import type {
   ConnectionActivity,
   ConnectionHealth,
@@ -127,7 +128,7 @@ const agent = {
 const saved: OutgoingMessage = {
   id: "message-1",
   body: { id: "message-1", room: "lead", text: "Hello" },
-  status: "queued",
+  status: MessageSendStatus.queued,
   attempted: false,
   created: 1,
 };

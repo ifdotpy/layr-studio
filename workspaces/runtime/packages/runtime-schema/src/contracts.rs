@@ -1270,8 +1270,31 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         .with(|settings| settings.definitions_path = "/components/schemas".into())
         .into_generator();
     delivery_generator.subschema_for::<crate::persistence::RecipientDelivery>();
+    delivery_generator.subschema_for::<crate::delivery::MessageRecipientDelivery<'_>>();
     for (name, schema) in delivery_generator.take_definitions(true) {
         openapi["components"]["schemas"][name] = schema;
+    }
+    openapi["components"]["schemas"]["MessageSendStatus"] = serde_json::json!({
+        "type": "string", "enum": <crate::delivery::MessageSendStatus as strum::VariantNames>::VARIANTS
+    });
+    for name in [
+        "MessageReceiptEntityDto",
+        "studio_api__work__models__MessageReceipt",
+    ] {
+        openapi["components"]["schemas"][name]["properties"]["status"] =
+            serde_json::json!({"$ref":"#/components/schemas/MessageSendStatus"});
+    }
+    openapi["components"]["schemas"]["QueueItem"]["properties"]["status"] =
+        serde_json::json!({"$ref":"#/components/schemas/MessageSendStatus"});
+    openapi["components"]["schemas"]["MessageRecord"]["properties"]["status"] = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/MessageSendStatus"},{"type":"null"}]});
+    for schema in openapi["components"]["schemas"]
+        .as_object_mut()
+        .ok_or("missing schemas")?
+        .values_mut()
+    {
+        if let Some(status) = schema.pointer_mut("/properties/deliveryStatus") {
+            *status = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/MessageSendStatus"},{"type":"null"}]});
+        }
     }
     for path in [
         "/components/schemas/ChatMessage/properties/deliveries/additionalProperties",
@@ -1281,7 +1304,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         *openapi
             .pointer_mut(path)
             .ok_or_else(|| format!("missing recipient delivery map {path}"))? =
-            serde_json::json!({"$ref":"#/components/schemas/RecipientDelivery"});
+            serde_json::json!({"$ref":"#/components/schemas/MessageRecipientDelivery"});
     }
     openapi["components"]["schemas"]["AdmittedRequest"] = admitted_request_schema();
     openapi["components"]["schemas"]["ServerOperationRequest"]["properties"]["action"] = serde_json::json!({"type":"string","enum":crate::persistence::ServerOperationKind::VARIANTS});

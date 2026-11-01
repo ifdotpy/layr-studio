@@ -465,6 +465,176 @@ async fn agent_projections_fresh_seed_and_upgrade_marker_are_complete() {
 }
 
 #[tokio::test]
+async fn message_send_projection_upgrade_rebuilds_receipts_and_queues() {
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    write(
+        &store,
+        "INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) VALUES(?1,?2,'user','Input','pending',1,1)",
+        vec!["upgrade-receipt".into(), CHAT.into()],
+    ).await;
+    store.transaction(|tx| {
+        tx.execute("UPDATE sync_entities SET payload=json_set(payload,'$.value.status','pending') WHERE collection='messageReceipt' AND id='upgrade-receipt'", [])?;
+        Ok(())
+    }).await.expect("install legacy projection");
+    let before = store
+        .test_read_transaction(|tx| {
+            tx.query_row("SELECT MAX(seq) FROM sync_entities", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .map_err(Into::into)
+        })
+        .expect("read old sequence");
+    store
+        .transaction(studio_runtime_store::migrations::migrate_message_send_projections)
+        .await
+        .expect("migrate projections");
+    assert!(
+        !store
+            .test_read_transaction(|tx| crate::sync_policy::has_complete_entity_seed(tx))
+            .expect("seed required")
+    );
+    store
+        .transaction(|tx| {
+            let rooms = crate::sync_entity_context::RoomDirectory::load(tx)?;
+            crate::sync_policy::maintain_entity_projections(
+                tx,
+                "",
+                &Default::default(),
+                &rooms,
+                |_, _, _, _| true,
+            )
+        })
+        .await
+        .expect("rebuild projections");
+    assert!(
+        store
+            .test_read_transaction(|tx| crate::sync_policy::has_complete_entity_seed(tx))
+            .expect("seed complete")
+    );
+    for collection in ["queue", "messageReceipt"] {
+        let id = if collection == "queue" {
+            CHAT
+        } else {
+            "upgrade-receipt"
+        };
+        let (sequence, payload) = store
+            .test_read_transaction(|tx| {
+                tx.query_row(
+                    "SELECT seq,payload FROM sync_entities WHERE collection=?1 AND id=?2",
+                    [collection, id],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                )
+                .map_err(Into::into)
+            })
+            .expect("rebuilt entity");
+        assert!(sequence > before);
+        assert!(!payload.contains("\"pending\""));
+    }
+    assert_eq!(
+        client_entity(&store, "messageReceipt", "upgrade-receipt")
+            .expect("receipt")
+            .1["status"],
+        "queued"
+    );
+    store
+        .transaction(studio_runtime_store::migrations::migrate_message_send_projections)
+        .await
+        .expect("replaying migration is harmless");
+    assert!(
+        store
+            .test_read_transaction(|tx| crate::sync_policy::has_complete_entity_seed(tx))
+            .expect("seed remains complete")
+    );
+}
+
+#[tokio::test]
+#[ignore = "manual verification on a disposable reflink copy"]
+async fn message_send_projection_upgrade_on_reflink_copy() {
+    let (source, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    write(
+        &store,
+        "INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) VALUES(?1,?2,'user','Input','pending',1,1)",
+        vec!["reflink-receipt".into(), CHAT.into()],
+    ).await;
+    store.transaction(|tx| {
+        tx.execute("UPDATE sync_entities SET payload=json_set(payload,'$.value.status','pending') WHERE collection='messageReceipt' AND id='reflink-receipt'", [])?;
+        tx.execute("DELETE FROM sync_entity_meta WHERE key='migration_catalog'", [])?;
+        Ok(())
+    }).await.expect("prepare legacy fixture");
+    let before = store
+        .test_read_transaction(|tx| {
+            tx.query_row("SELECT MAX(seq) FROM sync_entities", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .map_err(Into::into)
+        })
+        .expect("read old sequence");
+    drop(store);
+    let copy = tempfile::tempdir().expect("copy directory");
+    let source_path = source.path().join(".");
+    crate::bounded_child::run(crate::bounded_child::Request {
+        program: std::ffi::OsStr::new("cp"),
+        git_directory: None,
+        args: &[
+            "-a",
+            "--reflink=always",
+            source_path.to_str().expect("fixture path"),
+            copy.path().to_str().expect("copy path"),
+        ],
+        environment: &[],
+        input: None,
+        stdout_limit: 4096,
+        stderr_limit: 4096,
+        timeout: std::time::Duration::from_secs(30),
+    })
+    .expect("clone fixture");
+    let started = std::time::Instant::now();
+    let reopened = studio_runtime_store::RuntimeStore::open(Some(copy.path()))
+        .await
+        .expect("open copied state");
+    crate::entity_publication::install(&reopened)
+        .await
+        .expect("install publisher");
+    reopened
+        .transaction(|tx| {
+            let rooms = crate::sync_entity_context::RoomDirectory::load(tx)?;
+            crate::sync_policy::maintain_entity_projections(
+                tx,
+                "",
+                &Default::default(),
+                &rooms,
+                |_, _, _, _| true,
+            )
+        })
+        .await
+        .expect("rebuild copied projections");
+    println!(
+        "copied fixture startup and projection rebuild: {:?}",
+        started.elapsed()
+    );
+    for (collection, id) in [("queue", CHAT), ("messageReceipt", "reflink-receipt")] {
+        let (sequence, payload) = reopened
+            .test_read_transaction(|tx| {
+                tx.query_row(
+                    "SELECT seq,payload FROM sync_entities WHERE collection=?1 AND id=?2",
+                    [collection, id],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                )
+                .map_err(Into::into)
+            })
+            .expect("rebuilt copied entity");
+        assert!(sequence > before);
+        assert!(!payload.contains("\"pending\""));
+    }
+    let legacy = reopened.test_read_transaction(|tx| {
+        tx.query_row("SELECT COUNT(*) FROM sync_entities e WHERE e.deleted=0 AND ((e.collection='messageReceipt' AND json_extract(e.payload,'$.value.status') IN ('pending','reserved','dispatching','accepted','sent')) OR (e.collection='queue' AND EXISTS(SELECT 1 FROM json_each(e.payload,'$.value.items') item WHERE json_extract(item.value,'$.status')='pending')))", [], |row| row.get::<_, i64>(0)).map_err(Into::into)
+    }).expect("scan copied projections");
+    assert_eq!(legacy, 0);
+}
+
+#[tokio::test]
 async fn agent_projections_roll_back_with_the_source_if_detail_validation_fails() {
     let (_dir, store) = store().await;
     seed_chat(&store, chat(json!({"name":"Before"}))).await;
@@ -600,7 +770,7 @@ async fn summary_entities_publish_at_the_source_write() {
         .expect("receipt entity")
         .1;
     assert_eq!(receipt["agent"], CHAT);
-    assert_eq!(receipt["status"], "pending");
+    assert_eq!(receipt["status"], "queued");
     assert_eq!(receipt["materialized"], false);
     let item_id = format!("{CHAT}:receipt");
     let item = json!({"id":item_id,"role":"user","text":"Input","at":1});

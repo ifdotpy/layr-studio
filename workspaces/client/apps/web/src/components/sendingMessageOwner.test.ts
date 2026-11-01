@@ -1,3 +1,4 @@
+import { MessageSendStatus } from "../generated/api.ts";
 import { required } from "./componentTestFixtures";
 import { afterEach, expect, it, vi } from "vitest";
 vi.mock("../servers/ServerServicesContext", () => ({}));
@@ -34,7 +35,7 @@ it("retains cancellation and recoverable copies on the initiating server after a
     clientMessageId: "same",
     role: "user",
     text: "private-a",
-    deliveryStatus: "sending",
+    deliveryStatus: MessageSendStatus.sending,
   };
   const read = vi.fn().mockResolvedValue({
     items: [{ id: "same", kind: "user", text: "private-a" }],

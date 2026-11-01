@@ -22,6 +22,10 @@ buffer, and the thin remote subscription cache. Secret answer fields remain in
 memory only. Existing implementation descriptions below
 are migration targets where they conflict with this rule.
 
+Message send receipts and queue projections use the Rust-owned `MessageSendStatus`
+contract generated into the web API. `buffered` means the device holds a send
+before server acknowledgement; an uncertain result keeps its request identity.
+
 ## Routes and reconnect
 
 The web client keeps an ordered route list for each paired server. The paired

@@ -16,19 +16,13 @@ import {
 } from "../commands";
 import type { Attachment } from "../components/ComposerAttachments";
 import { watchResourceConnection } from "./subscriptions/events";
-import { DeliveryStatus } from "../generated/api";
+import { MessageSendStatus } from "../generated/api";
 import type { MessageReceipt } from "./messageReceipts";
 
 type SendCommand = Extract<CommandRequest, { kind: "send" }>;
 type Intention = {
   body: SendMessageBody;
-  status:
-    | "queued"
-    | "paused"
-    | "cancelled"
-    | "accepted"
-    | "uncertain"
-    | "failed";
+  status: MessageSendStatus;
   attempted?: boolean;
   error?: string | undefined;
   receipt?: MessageDelivery | undefined;
@@ -38,33 +32,18 @@ type Intention = {
   displayText?: string;
 };
 export type OutboxEntry = Intention & { id: string };
-export type OutgoingMessage = Omit<OutboxEntry, "status"> & {
-  status: OutboxEntry["status"] | "sending";
-};
+export type OutgoingMessage = OutboxEntry;
 type SavedSend = Intention & { request: SendCommand; workspaceId: string };
 type SendResult =
-  | (MessageDelivery & { kind: "server"; queued: boolean })
+  | (MessageDelivery & { kind: "server" })
   | {
       kind: "local";
       id: string;
-      queued: boolean;
       status: Intention["status"];
       error?: string | undefined;
     };
 
-const statuses = new Set([
-  "queued",
-  "pending",
-  "reserved",
-  "dispatching",
-  "delivered",
-  "accepted",
-  "sent",
-  "uncertain",
-  "failed",
-  "cancelled",
-  "stored_only",
-]);
+const statuses = new Set<string>(Object.values(MessageSendStatus));
 export function matchesMessageDelivery(value: unknown, id: string) {
   return (
     !!value &&
@@ -129,7 +108,7 @@ export function createOutbox(options: {
             : {
                 id,
                 body: { id, room, text: "Saved message could not be read." },
-                status: "failed" as const,
+                status: MessageSendStatus.failed,
                 error:
                   "This saved message cannot be read. Discard it to remove it.",
                 created: 0,
@@ -146,6 +125,12 @@ export function createOutbox(options: {
       const row: unknown = JSON.parse(raw);
       if (!row || typeof row !== "object") return;
       const value = row as SavedSend;
+      // Older saved commands used queued or paused for the device buffer.
+      if (
+        value.status === MessageSendStatus.queued ||
+        ("status" in row && row.status === "paused")
+      )
+        value.status = MessageSendStatus.buffered;
       if (
         value.body?.id !== id ||
         value.body.room !== room ||
@@ -157,7 +142,9 @@ export function createOutbox(options: {
         !Number.isSafeInteger(value.request.number) ||
         typeof value.workspaceId !== "string" ||
         typeof value.created !== "number" ||
-        !["queued", "paused", "uncertain", "failed"].includes(value.status)
+        (value.status !== MessageSendStatus.buffered &&
+          value.status !== MessageSendStatus.uncertain &&
+          value.status !== MessageSendStatus.failed)
       )
         return;
       const expected = {
@@ -212,7 +199,6 @@ export function createOutbox(options: {
     return {
       kind: "local",
       id: value.body.id,
-      queued: value.status === "queued" || value.status === "paused",
       status: value.status,
       error: value.error,
     };
@@ -239,7 +225,11 @@ export function createOutbox(options: {
       else notifyPersisted();
       try {
         if (!read(value.body.room, id))
-          return { kind: "local", id, queued: false, status: "cancelled" };
+          return {
+            kind: "local",
+            id,
+            status: MessageSendStatus.cancelled,
+          };
         const current = options.api.getStreamSession();
         if (!current) throw new Error("The server connection is not ready.");
         if (current.workspaceId !== value.workspaceId)
@@ -248,24 +238,25 @@ export function createOutbox(options: {
           );
         void write({ ...value, attempted: true });
         if (!read(value.body.room, id))
-          return { kind: "local", id, queued: false, status: "cancelled" };
+          return {
+            kind: "local",
+            id,
+            status: MessageSendStatus.cancelled,
+          };
         const response = await command.run(value.request, {
           workspaceId: value.workspaceId,
         });
-        const receipt =
-          messageReceipt(response) ??
-          (response.status === "applied" &&
-          response.ref_kind === "message" &&
-          response.ref_id === id
-            ? { id, status: DeliveryStatus.pending }
-            : undefined);
+        const receipt = messageReceipt(response);
         if (!receipt || !matchesMessageDelivery(receipt, id))
           throw new Error("The delivery response does not match this message.");
-        if (receipt.status === "failed" || receipt.status === "cancelled") {
+        if (
+          receipt.status === MessageSendStatus.failed ||
+          receipt.status === MessageSendStatus.cancelled
+        ) {
           refused = true;
           const failed = {
             ...value,
-            status: "failed" as const,
+            status: receipt.status,
             attempted: true,
             error: receipt.error || "The message was not sent.",
           };
@@ -278,7 +269,6 @@ export function createOutbox(options: {
         return {
           ...receipt,
           kind: "server",
-          queued: receipt.status === "queued",
         };
       } catch (error) {
         const definitive =
@@ -288,7 +278,9 @@ export function createOutbox(options: {
         const failed = {
           ...value,
           attempted: true,
-          status: definitive ? ("failed" as const) : ("uncertain" as const),
+          status: definitive
+            ? MessageSendStatus.failed
+            : MessageSendStatus.uncertain,
           error: errorText(error),
         };
         if (read(value.body.room, id)) {
@@ -334,7 +326,7 @@ export function createOutbox(options: {
         body,
         request,
         workspaceId,
-        status: "queued",
+        status: MessageSendStatus.buffered,
         attempted: false,
         created: Date.now(),
         displayPending: true,
@@ -412,7 +404,8 @@ export function createOutbox(options: {
             const value = read(entry.body.room, entry.id);
             if (
               value &&
-              (value.status === "queued" || value.status === "uncertain")
+              (value.status === MessageSendStatus.buffered ||
+                value.status === MessageSendStatus.uncertain)
             )
               void send(value).catch((failure) => setError(errorText(failure)));
           }

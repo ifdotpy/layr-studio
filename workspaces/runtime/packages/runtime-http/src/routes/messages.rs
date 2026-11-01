@@ -76,51 +76,20 @@ async fn messages(
     let result = store
         .read_async("runtime-http/routes/messages", move |connection| {
             let value = coordination::history(connection, &room).map_err(coordination_error)?;
-            Ok::<_, ApiError>(value.into_iter().map(message_record).collect())
+            value
+                .iter()
+                .map(message_record)
+                .collect::<Result<Vec<_>, _>>()
         })
         .await?;
     Ok(Json(result))
 }
 
-fn message_record(message: coordination::ValidatedMessage) -> crate::generated::MessageRecord {
-    use crate::generated::DeliveryStatus as Target;
-    use studio_runtime_schema::persistence::DeliveryStatus as Source;
-    let deliveries = message
-        .deliveries
-        .into_iter()
-        .map(|(id, delivery)| {
-            let status = match delivery.status {
-                Source::Queued => Target::Queued,
-                Source::StoredOnly => Target::StoredOnly,
-                Source::Accepted => Target::Accepted,
-                Source::Sent => Target::Sent,
-                Source::Cancelled => Target::Cancelled,
-                Source::Pending => Target::Pending,
-                Source::Delivered => Target::Delivered,
-                Source::Failed => Target::Failed,
-                Source::Uncertain => Target::Uncertain,
-            };
-            (
-                id,
-                crate::generated::RecipientDelivery {
-                    status,
-                    error: Some(delivery.error),
-                },
-            )
-        })
-        .collect();
-    crate::generated::MessageRecord {
-        id: message.id,
-        room: message.room,
-        author: message.author,
-        text: message.text,
-        at: crate::generated::MessageRecordAt::Number(message.at),
-        deliveries: crate::generated::MessageRecordDeliveries {
-            additional_properties: deliveries,
-        },
-        error: None,
-        status: None,
-    }
+fn message_record(
+    message: &coordination::ValidatedMessage,
+) -> Result<crate::generated::MessageRecord, ApiError> {
+    let encoded = serde_json::to_vec(message).map_err(ApiError::json)?;
+    serde_json::from_slice(&encoded).map_err(ApiError::json)
 }
 
 /// The send path of the `send` command and of the chat commands that send a message.
@@ -422,6 +391,28 @@ mod delivery_tests {
             let uri: axum::http::Uri = input.parse().unwrap();
             assert!(axum::extract::Query::<super::AgentChatQuery>::try_from_uri(&uri).is_err());
         }
+    }
+
+    #[test]
+    fn history_response_projects_recipient_status() {
+        let message = studio_runtime_services::coordination::ValidatedMessage {
+            id: "one".into(),
+            room: "chat".into(),
+            author: "user".into(),
+            text: "hello".into(),
+            at: 1.0,
+            deliveries: std::collections::BTreeMap::from([(
+                "agent".into(),
+                studio_runtime_schema::persistence::RecipientDelivery {
+                    status: studio_runtime_schema::persistence::DeliveryStatus::Pending,
+                    error: None,
+                },
+            )]),
+        };
+        let response = super::message_record(&message).expect("message response");
+        let encoded = serde_json::to_string(&response).expect("encode response");
+        let value: serde_json::Value = serde_json::from_str(&encoded).expect("response JSON");
+        assert_eq!(value["deliveries"]["agent"]["status"], "queued");
     }
 
     #[test]

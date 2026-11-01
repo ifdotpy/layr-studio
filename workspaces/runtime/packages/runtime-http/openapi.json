@@ -19124,7 +19124,7 @@
           },
           "deliveries": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/RecipientDelivery"
+              "$ref": "#/components/schemas/MessageRecipientDelivery"
             },
             "title": "Deliveries",
             "type": "object"
@@ -29965,21 +29965,7 @@
             "title": "Materialized"
           },
           "status": {
-            "enum": [
-              "queued",
-              "pending",
-              "reserved",
-              "dispatching",
-              "delivered",
-              "accepted",
-              "sent",
-              "uncertain",
-              "failed",
-              "cancelled",
-              "stored_only"
-            ],
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/MessageSendStatus"
           }
         },
         "required": [
@@ -30023,6 +30009,24 @@
         "title": "MessageReceipts",
         "type": "object"
       },
+      "MessageRecipientDelivery": {
+        "description": "Public projection of a persisted recipient delivery.",
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/MessageSendStatus"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
       "MessageRecord": {
         "additionalProperties": false,
         "properties": {
@@ -30045,7 +30049,7 @@
           },
           "deliveries": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/RecipientDelivery"
+              "$ref": "#/components/schemas/MessageRecipientDelivery"
             },
             "title": "Deliveries",
             "type": "object"
@@ -30073,20 +30077,12 @@
           "status": {
             "anyOf": [
               {
-                "enum": [
-                  "queued",
-                  "delivered",
-                  "failed",
-                  "uncertain"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/MessageSendStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "default": null,
-            "title": "Status"
+            ]
           },
           "text": {
             "title": "Text",
@@ -30124,6 +30120,19 @@
         ],
         "title": "MessageRequest",
         "type": "object"
+      },
+      "MessageSendStatus": {
+        "enum": [
+          "buffered",
+          "queued",
+          "sending",
+          "delivered",
+          "uncertain",
+          "failed",
+          "cancelled",
+          "stored_only"
+        ],
+        "type": "string"
       },
       "MigrationPhase": {
         "enum": [
@@ -40278,9 +40287,7 @@
             "default": "current_turn"
           },
           "status": {
-            "const": "pending",
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/MessageSendStatus"
           },
           "text": {
             "title": "Text",
@@ -46444,27 +46451,12 @@
           "deliveryStatus": {
             "anyOf": [
               {
-                "enum": [
-                  "pending",
-                  "reserved",
-                  "dispatching",
-                  "uncertain",
-                  "failed",
-                  "cancelled",
-                  "delivered",
-                  "stored_only",
-                  "queued",
-                  "accepted",
-                  "sent"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/MessageSendStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "default": null,
-            "title": "Deliverystatus"
+            ]
           },
           "dependencies": {
             "anyOf": [
@@ -56341,27 +56333,12 @@
           "deliveryStatus": {
             "anyOf": [
               {
-                "enum": [
-                  "pending",
-                  "reserved",
-                  "dispatching",
-                  "uncertain",
-                  "failed",
-                  "cancelled",
-                  "delivered",
-                  "stored_only",
-                  "queued",
-                  "accepted",
-                  "sent"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/MessageSendStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "default": null,
-            "title": "Deliverystatus"
+            ]
           },
           "id": {
             "anyOf": [
@@ -56531,27 +56508,12 @@
           "deliveryStatus": {
             "anyOf": [
               {
-                "enum": [
-                  "pending",
-                  "reserved",
-                  "dispatching",
-                  "uncertain",
-                  "failed",
-                  "cancelled",
-                  "delivered",
-                  "stored_only",
-                  "queued",
-                  "accepted",
-                  "sent"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/MessageSendStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "default": null,
-            "title": "Deliverystatus"
+            ]
           },
           "details": {
             "anyOf": [
@@ -57000,27 +56962,12 @@
           "deliveryStatus": {
             "anyOf": [
               {
-                "enum": [
-                  "pending",
-                  "reserved",
-                  "dispatching",
-                  "uncertain",
-                  "failed",
-                  "cancelled",
-                  "delivered",
-                  "stored_only",
-                  "queued",
-                  "accepted",
-                  "sent"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/MessageSendStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "default": null,
-            "title": "Deliverystatus"
+            ]
           },
           "details": {
             "anyOf": [
@@ -65230,7 +65177,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/RecipientDelivery"
+                  "$ref": "#/components/schemas/MessageRecipientDelivery"
                 },
                 "type": "object"
               },
@@ -65290,21 +65237,7 @@
             "title": "Room"
           },
           "status": {
-            "enum": [
-              "queued",
-              "pending",
-              "reserved",
-              "dispatching",
-              "delivered",
-              "accepted",
-              "sent",
-              "uncertain",
-              "failed",
-              "cancelled",
-              "stored_only"
-            ],
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/MessageSendStatus"
           },
           "text": {
             "anyOf": [

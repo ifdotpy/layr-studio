@@ -9860,7 +9860,7 @@ export interface components {
       created: number;
       /** Deliveries */
       deliveries: {
-        [key: string]: components["schemas"]["RecipientDelivery"];
+        [key: string]: components["schemas"]["MessageRecipientDelivery"];
       };
       /** Id */
       id: string;
@@ -14449,22 +14449,7 @@ export interface components {
        * @description The exact user input exists in the saved transcript.
        */
       materialized?: boolean | null | undefined;
-      /**
-       * Status
-       * @enum {string}
-       */
-      status:
-        | "queued"
-        | "pending"
-        | "reserved"
-        | "dispatching"
-        | "delivered"
-        | "accepted"
-        | "sent"
-        | "uncertain"
-        | "failed"
-        | "cancelled"
-        | "stored_only";
+      status: components["schemas"]["MessageSendStatus"];
     };
     /** MessageReceipts */
     MessageReceipts: {
@@ -14478,6 +14463,11 @@ export interface components {
        */
       workspaceId?: null | string | undefined;
     };
+    /** @description Public projection of a persisted recipient delivery. */
+    MessageRecipientDelivery: {
+      error?: string | null | undefined;
+      status: components["schemas"]["MessageSendStatus"];
+    };
     /** MessageRecord */
     MessageRecord: {
       /** At */
@@ -14486,7 +14476,7 @@ export interface components {
       author: string;
       /** Deliveries */
       deliveries: {
-        [key: string]: components["schemas"]["RecipientDelivery"];
+        [key: string]: components["schemas"]["MessageRecipientDelivery"];
       };
       /**
        * Error
@@ -14497,14 +14487,7 @@ export interface components {
       id: string;
       /** Room */
       room: string;
-      /**
-       * Status
-       * @default null
-       */
-      status?:
-        | ("queued" | "delivered" | "failed" | "uncertain")
-        | null
-        | undefined;
+      status?: components["schemas"]["MessageSendStatus"] | null | undefined;
       /** Text */
       text: string;
     };
@@ -14517,6 +14500,16 @@ export interface components {
        */
       protocol: 1;
     };
+    /** @enum {string} */
+    MessageSendStatus:
+      | "buffered"
+      | "queued"
+      | "sending"
+      | "delivered"
+      | "uncertain"
+      | "failed"
+      | "cancelled"
+      | "stored_only";
     /** @enum {string} */
     MigrationPhase: "validate" | "apply" | "commit" | "rollback";
     /**
@@ -18702,11 +18695,7 @@ export interface components {
       kind: "user" | "followup";
       /** @default current_turn */
       requestedDelivery?: components["schemas"]["DeliveryMoment"] | undefined;
-      /**
-       * Status
-       * @constant
-       */
-      status: "pending";
+      status: components["schemas"]["MessageSendStatus"];
       /** Text */
       text: string;
     };
@@ -21003,24 +20992,8 @@ export interface components {
        * @default null
        */
       deliveryError?: null | string | undefined;
-      /**
-       * Deliverystatus
-       * @default null
-       */
       deliveryStatus?:
-        | (
-            | "pending"
-            | "reserved"
-            | "dispatching"
-            | "uncertain"
-            | "failed"
-            | "cancelled"
-            | "delivered"
-            | "stored_only"
-            | "queued"
-            | "accepted"
-            | "sent"
-          )
+        | components["schemas"]["MessageSendStatus"]
         | null
         | undefined;
       /**
@@ -22479,7 +22452,7 @@ export interface components {
       /** Deliveries */
       deliveries?:
         | {
-            [key: string]: components["schemas"]["RecipientDelivery"];
+            [key: string]: components["schemas"]["MessageRecipientDelivery"];
           }
         | null
         | undefined;
@@ -22496,22 +22469,7 @@ export interface components {
       message?: null | string | undefined;
       /** Room */
       room?: null | string | undefined;
-      /**
-       * Status
-       * @enum {string}
-       */
-      status:
-        | "queued"
-        | "pending"
-        | "reserved"
-        | "dispatching"
-        | "delivered"
-        | "accepted"
-        | "sent"
-        | "uncertain"
-        | "failed"
-        | "cancelled"
-        | "stored_only";
+      status: components["schemas"]["MessageSendStatus"];
       /** Text */
       text?: null | string | undefined;
       /** Waitingfor */
@@ -24910,24 +24868,8 @@ export interface components {
        * @default null
        */
       deliveryError?: null | string | undefined;
-      /**
-       * Deliverystatus
-       * @default null
-       */
       deliveryStatus?:
-        | (
-            | "pending"
-            | "reserved"
-            | "dispatching"
-            | "uncertain"
-            | "failed"
-            | "cancelled"
-            | "delivered"
-            | "stored_only"
-            | "queued"
-            | "accepted"
-            | "sent"
-          )
+        | components["schemas"]["MessageSendStatus"]
         | null
         | undefined;
       /**
@@ -25002,24 +24944,8 @@ export interface components {
        * @default null
        */
       deliveryError?: null | string | undefined;
-      /**
-       * Deliverystatus
-       * @default null
-       */
       deliveryStatus?:
-        | (
-            | "pending"
-            | "reserved"
-            | "dispatching"
-            | "uncertain"
-            | "failed"
-            | "cancelled"
-            | "delivered"
-            | "stored_only"
-            | "queued"
-            | "accepted"
-            | "sent"
-          )
+        | components["schemas"]["MessageSendStatus"]
         | null
         | undefined;
       /** @default null */
@@ -25216,24 +25142,8 @@ export interface components {
        * @default null
        */
       deliveryError?: null | string | undefined;
-      /**
-       * Deliverystatus
-       * @default null
-       */
       deliveryStatus?:
-        | (
-            | "pending"
-            | "reserved"
-            | "dispatching"
-            | "uncertain"
-            | "failed"
-            | "cancelled"
-            | "delivered"
-            | "stored_only"
-            | "queued"
-            | "accepted"
-            | "sent"
-          )
+        | components["schemas"]["MessageSendStatus"]
         | null
         | undefined;
       /** @default null */
@@ -38956,6 +38866,17 @@ export const MessageKind = {
   "room-accept": "room-accept",
 } as const;
 export type MessageKind = components["schemas"]["MessageKind"];
+export const MessageSendStatus = {
+  buffered: "buffered",
+  queued: "queued",
+  sending: "sending",
+  delivered: "delivered",
+  uncertain: "uncertain",
+  failed: "failed",
+  cancelled: "cancelled",
+  stored_only: "stored_only",
+} as const;
+export type MessageSendStatus = components["schemas"]["MessageSendStatus"];
 export const MigrationPhase = {
   validate: "validate",
   apply: "apply",

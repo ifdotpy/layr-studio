@@ -1,3 +1,4 @@
+import { MessageSendStatus } from "../generated/api.ts";
 import { required } from "../components/componentTestFixtures.ts";
 import type { Message } from "../types";
 import type { OutgoingMessage } from "./send";
@@ -20,7 +21,13 @@ it("rejects receipt responses from another workspace", () => {
           {
             agent: "chat",
             workspaceId,
-            items: [{ id: "one", status: "delivered", materialized: true }],
+            items: [
+              {
+                id: "one",
+                status: MessageSendStatus.delivered,
+                materialized: true,
+              },
+            ],
           },
           "chat",
           ["one"],
@@ -31,14 +38,17 @@ it("rejects receipt responses from another workspace", () => {
 });
 
 it("joins outgoing messages to accepted and delivered receipts by identity", () => {
-  const delivered = { id: "sso", status: "delivered" } satisfies MessageReceipt;
+  const delivered = {
+    id: "sso",
+    status: MessageSendStatus.delivered,
+  } satisfies MessageReceipt;
   const accepted = {
     id: "sso",
-    body: { room: "chat", text: "sso done" },
+    body: { id: "sso", room: "chat", text: "sso done" },
     created: 1,
-    status: "accepted",
+    status: MessageSendStatus.delivered,
     receipt: { id: "sso", status: "queued" },
-  } as OutgoingMessage; // The accepted fixture omits the unused body.id.
+  } satisfies OutgoingMessage;
   assert.deepEqual(
     checkedMessageReceipts({ agent: "chat", items: [delivered] }, "chat", [
       "sso",
@@ -47,12 +57,12 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
   );
   for (const status of [
     "queued",
-    "pending",
-    "reserved",
-    "dispatching",
+    "queued",
+    "sending",
+    "sending",
     "delivered",
-    "accepted",
-    "sent",
+    "delivered",
+    "delivered",
     "uncertain",
     "failed",
     "cancelled",
@@ -74,7 +84,10 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
     { message: "The delivery receipts belong to another chat." },
   );
   for (const value of [
-    { agent: "chat", items: [{ id: "other", status: "delivered" }] },
+    {
+      agent: "chat",
+      items: [{ id: "other", status: MessageSendStatus.delivered }],
+    },
     { agent: "chat", items: [delivered, delivered] },
   ] satisfies Parameters<typeof checkedMessageReceipts>[0][])
     assert.throws(() => checkedMessageReceipts(value, "chat", ["sso"]), {
@@ -86,8 +99,8 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
         {
           agent: "chat",
           items: [
-            { id: "first", status: "pending" },
-            { id: "unexpected", status: "delivered" },
+            { id: "first", status: MessageSendStatus.queued },
+            { id: "unexpected", status: MessageSendStatus.delivered },
           ],
         },
         "chat",
@@ -100,15 +113,15 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
       {
         agent: "chat",
         items: [
-          { id: "first", status: "pending" },
-          { id: "second", status: "delivered" },
+          { id: "first", status: MessageSendStatus.queued },
+          { id: "second", status: MessageSendStatus.delivered },
         ],
       },
       "chat",
       ["first", "second"],
     ),
     [
-      { id: "first", status: "pending" },
+      { id: "first", status: "queued" },
       { id: "second", status: "delivered" },
     ],
   );
@@ -119,13 +132,16 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
   );
   assert.deepEqual(receiptOutgoing(accepted, delivered), {
     ...accepted,
-    status: "accepted",
+    status: "delivered",
     receipt: delivered,
     error: undefined,
   });
   assert.equal(
-    receiptOutgoing({ ...accepted, status: "uncertain" }, delivered).status,
-    "accepted",
+    receiptOutgoing(
+      { ...accepted, status: MessageSendStatus.uncertain },
+      delivered,
+    ).status,
+    "delivered",
     "A receipt resolves an uncertain send using the same message identity",
   );
   assert.equal(
@@ -137,21 +153,33 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
     "server rejected the message",
   );
   assert.equal(
-    receiptOutgoing({ ...accepted, status: "queued" }, delivered).status,
-    "queued",
-    "An unacknowledged HTTP outcome is not rewritten",
+    receiptOutgoing(
+      { ...accepted, status: MessageSendStatus.queued },
+      delivered,
+    ).status,
+    "delivered",
+    "A matching server receipt confirms delivery",
   );
   assert.equal(
-    latestMessageReceipt(delivered, { id: "sso", status: "pending" }),
+    latestMessageReceipt(delivered, {
+      id: "sso",
+      status: MessageSendStatus.queued,
+    }),
     delivered,
   );
-  const newerDelivered: MessageReceipt = { id: "sso", status: "delivered" };
+  const newerDelivered: MessageReceipt = {
+    id: "sso",
+    status: MessageSendStatus.delivered,
+  };
   assert.equal(
     latestMessageReceipt(delivered, newerDelivered),
     newerDelivered,
     "A later delivery receipt replaces the earlier confirmation",
   );
-  const firstPending: MessageReceipt = { id: "sso", status: "pending" };
+  const firstPending: MessageReceipt = {
+    id: "sso",
+    status: MessageSendStatus.queued,
+  };
   assert.equal(
     latestMessageReceipt(undefined, firstPending),
     firstPending,
@@ -171,7 +199,7 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
     new Map([["sso", delivered]]),
   )[0];
   assert.ok(shown);
-  assert.equal(shown.pending, false);
+  assert.equal(shown.deliveryStatus, "delivered");
 
   assert.equal(
     shown.materialized,
@@ -199,7 +227,6 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
     {
       ...fallbackId,
       deliveryStatus: "failed",
-      pending: false,
       deliveryError: "no",
     },
   );
@@ -212,12 +239,11 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
     receiptTranscript(
       [nonPrefixedId],
       "chat",
-      new Map([["legacy-id", { id: "legacy-id", status: "pending" }]]),
+      new Map([["legacy-id", { id: "legacy-id", status: "queued" }]]),
     )[0],
     {
       ...nonPrefixedId,
-      deliveryStatus: "pending",
-      pending: true,
+      deliveryStatus: "queued",
       deliveryError: undefined,
     },
   );
@@ -266,7 +292,7 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
   );
   const alreadyDelivered = {
     ...pending,
-    deliveryStatus: "delivered",
+    deliveryStatus: MessageSendStatus.delivered,
     pending: false,
     deliveryError: "stale",
   } satisfies Message;
@@ -274,7 +300,7 @@ it("joins outgoing messages to accepted and delivered receipts by identity", () 
     receiptTranscript(
       [alreadyDelivered],
       "chat",
-      new Map([["sso", { id: "sso", status: "pending", error: "old" }]]),
+      new Map([["sso", { id: "sso", status: "queued", error: "old" }]]),
     )[0],
     {
       ...alreadyDelivered,

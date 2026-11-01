@@ -238,7 +238,7 @@ it("projects bounded workspace summaries and receipts with deletes", () => {
         {
           id: "m",
           agent: "a",
-          status: "pending",
+          status: "queued",
           materialized: false,
         },
         1,

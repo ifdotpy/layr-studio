@@ -1,3 +1,4 @@
+import { MessageSendStatus } from "../generated/api.ts";
 import type { GetResult } from "../api";
 import type { Message } from "../types";
 import type { OutgoingMessage } from "./send";
@@ -35,7 +36,8 @@ export function latestMessageReceipt(
   previous: MessageReceipt | undefined,
   next: MessageReceipt,
 ) {
-  return previous?.status === "delivered" && next.status !== "delivered"
+  return previous?.status === MessageSendStatus.delivered &&
+    next.status !== MessageSendStatus.delivered
     ? previous
     : next;
 }
@@ -52,21 +54,11 @@ export function receiptOutgoing(
   entry: Omit<OutgoingMessage, "id">,
   receipt?: MessageReceipt,
 ): Omit<OutgoingMessage, "id"> {
-  // Only reconcile requests the server has already acknowledged. An unknown
-  // HTTP outcome still uses the original idempotent send path.
-  if (!receipt || !["accepted", "uncertain"].includes(entry.status))
-    return entry;
+  if (!receipt) return entry;
   const current = latestMessageReceipt(entry.receipt, receipt);
   return {
     ...entry,
-    status:
-      current.status === "uncertain"
-        ? "uncertain"
-        : current.status === "failed"
-          ? "failed"
-          : current.status === "cancelled"
-            ? "cancelled"
-            : "accepted",
+    status: current.status,
     receipt: current,
     error: current.error || undefined,
   };
@@ -87,13 +79,16 @@ export function receiptTranscript(
     const receipt = receipts.get(id);
     if (!receipt) return item;
     const status =
-      item.deliveryStatus === "delivered" ? "delivered" : receipt.status;
+      item.deliveryStatus === MessageSendStatus.delivered
+        ? MessageSendStatus.delivered
+        : receipt.status;
     return {
       ...item,
       deliveryStatus: status,
-      pending: status === "pending",
       deliveryError:
-        status === "delivered" ? undefined : receipt.error || undefined,
+        status === MessageSendStatus.delivered
+          ? undefined
+          : receipt.error || undefined,
     };
   });
 }

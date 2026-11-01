@@ -126,11 +126,7 @@ export type Message = Omit<
   "assets" | "deliveryStatus" | "nativeError" | "role" | "text" | "threadId"
 > & {
   assets?: Array<TranscriptAsset | LocalMessageAttachment> | null | undefined;
-  deliveryStatus?:
-    | TranscriptWireItem["deliveryStatus"]
-    | "sending"
-    | "paused"
-    | undefined;
+  deliveryStatus?: TranscriptWireItem["deliveryStatus"];
   nativeError?: DeepReadonly<JsonInput> | undefined;
   role: NonNullable<TranscriptWireItem["role"]>;
   text: NonNullable<TranscriptWireItem["text"]>;

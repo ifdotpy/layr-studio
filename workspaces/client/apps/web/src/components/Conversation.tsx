@@ -1,3 +1,4 @@
+import { MessageSendStatus } from "../generated/api.ts";
 import {
   AgentSource as GeneratedApiAgentSource,
   AgentStatus as GeneratedApiAgentStatus,
@@ -76,7 +77,6 @@ import { useDisplayPhase } from "./useDisplayPhase";
 import {
   outgoingTranscript,
   deliveryLabel,
-  applySendingOverlay,
   messageRenderKey,
   explicitQueue,
   dispatchedMessage,
@@ -438,8 +438,10 @@ export default function Conversation(p: {
       ...outgoing
         .filter(
           (entry) =>
-            ["accepted", "uncertain"].includes(entry.status) &&
-            (entry.receipt?.status !== "delivered" ||
+            (entry.status === MessageSendStatus.queued ||
+              entry.status === MessageSendStatus.sending ||
+              entry.status === MessageSendStatus.uncertain) &&
+            (entry.receipt?.status !== MessageSendStatus.delivered ||
               entry.receipt.materialized !== true),
         )
         .map((entry) => entry.id),
@@ -447,10 +449,9 @@ export default function Conversation(p: {
         .filter(
           (item) =>
             item.role === "user" &&
-            (item.pending ||
-              ["pending", "reserved", "dispatching", "uncertain"].includes(
-                item.deliveryStatus || "",
-              )),
+            (item.deliveryStatus === MessageSendStatus.queued ||
+              item.deliveryStatus === MessageSendStatus.sending ||
+              item.deliveryStatus === MessageSendStatus.uncertain),
         )
         .map(
           (item) =>
@@ -816,9 +817,6 @@ export default function Conversation(p: {
               item.role === "user" &&
               explicitQueue(item) &&
               !dispatchedMessage(item) &&
-              ["sending", "pending", "queued", "accepted"].includes(
-                item.deliveryStatus || (item.pending ? "pending" : ""),
-              ) &&
               !messageQueue.items.some(
                 (row) =>
                   row.id === item.clientMessageId ||
@@ -836,7 +834,7 @@ export default function Conversation(p: {
       ].filter(
         (entry) =>
           (("localDelivery" in entry && entry.localDelivery === true) ||
-            explicitQueue(entry)) &&
+            ("status" in entry && entry.status === MessageSendStatus.queued)) &&
           !items.some(
             (item) =>
               item.role === "user" &&
@@ -1202,11 +1200,7 @@ export default function Conversation(p: {
   const transcriptItems = useMemo(
     () =>
       [
-        ...items
-          .filter((item) => !queueEntry(item))
-          .map((item): Message =>
-            applySendingOverlay(item, Boolean(sendingEntry(item))),
-          ),
+        ...items.filter((item) => !queueEntry(item)),
         ...sending
           .filter(
             (entry) => !items.some((item) => sendingEntry(item) === entry),
@@ -1217,9 +1211,11 @@ export default function Conversation(p: {
             role: "user",
             text: entry.text,
             ...("assets" in entry ? { assets: entry.assets } : {}),
-            pending: true,
             localDelivery: true,
-            deliveryStatus: "sending",
+            deliveryStatus:
+              "localDelivery" in entry && entry.localDelivery
+                ? MessageSendStatus.buffered
+                : MessageSendStatus.queued,
           })),
       ].filter((message) => !removed.hidden(message)),
     [items, queue, sending, p.id, removed.hidden],
@@ -1321,9 +1317,8 @@ export default function Conversation(p: {
       data-found={highlighted === m.id || undefined}
       className={`message ${m.role === "user" ? "user" : "assistant"} ${p.room ? "bubble " + (m.sender !== first ? "outgoing" : "incoming") : ""}`}
     >
-      {["sending", "reserved", "dispatching"].includes(
-        m.deliveryStatus || "",
-      ) && (
+      {(m.deliveryStatus === MessageSendStatus.buffered ||
+        m.deliveryStatus === MessageSendStatus.sending) && (
         <span
           className="message-delivery-status message-delivery-inline"
           role="status"
@@ -1352,9 +1347,8 @@ export default function Conversation(p: {
         </span>
       )}
       {deliveryLabel(m) &&
-        !["sending", "reserved", "dispatching", "accepted"].includes(
-          m.deliveryStatus || "",
-        ) && (
+        m.deliveryStatus !== MessageSendStatus.buffered &&
+        m.deliveryStatus !== MessageSendStatus.sending && (
           <div className="message-delivery-heading">
             <span
               className="message-label message-delivery-status"
@@ -1363,12 +1357,9 @@ export default function Conversation(p: {
               {deliveryLabel(m)}
             </span>
             {m.role === "user" &&
-              (["uncertain", "failed", "cancelled"].includes(
-                m.deliveryStatus || "",
-              ) ||
-                (m.localDelivery &&
-                  m.deliveryStatus === "pending" &&
-                  !queueEntry(m))) && (
+              (m.deliveryStatus === MessageSendStatus.uncertain ||
+                m.deliveryStatus === MessageSendStatus.failed ||
+                m.deliveryStatus === MessageSendStatus.cancelled) && (
                 <ActionIcon
                   size="sm"
                   variant="subtle"
@@ -1415,12 +1406,14 @@ export default function Conversation(p: {
         !(
           p.offlineSendPending &&
           m.localDelivery &&
-          m.deliveryStatus === "queued"
+          m.deliveryStatus === MessageSendStatus.buffered
         ) &&
-        ["failed", "uncertain", "queued"].includes(m.deliveryStatus || "") && (
+        (m.deliveryStatus === MessageSendStatus.failed ||
+          m.deliveryStatus === MessageSendStatus.uncertain ||
+          m.deliveryStatus === MessageSendStatus.buffered) && (
           <div className="message-delivery-error">
             <p>{m.deliveryError}</p>
-            {m.deliveryStatus === "failed" && (
+            {m.deliveryStatus === MessageSendStatus.failed && (
               <Button
                 size="compact-xs"
                 variant="subtle"
@@ -1453,7 +1446,7 @@ export default function Conversation(p: {
         }
         onCopy={() => void copy(m.text)}
         onQuote={
-          !p.room && !m.pending
+          !p.room && !explicitQueue(m)
             ? () => {
                 const excerpt = selectedExcerpt(scroll.current);
                 quote(excerpt?.messageId === m.id ? excerpt.text : m.text);
@@ -1463,12 +1456,13 @@ export default function Conversation(p: {
         }
         onEdit={
           !p.room &&
-          !m.pending &&
+          !explicitQueue(m) &&
           managed &&
           m.role === "user" &&
           m.turnId &&
           m.turnStatus !== "uncertain" &&
-          (!m.deliveryStatus || m.deliveryStatus === "accepted")
+          (!m.deliveryStatus ||
+            m.deliveryStatus === MessageSendStatus.delivered)
             ? () => void editMessage(m)
             : undefined
         }
@@ -1476,7 +1470,7 @@ export default function Conversation(p: {
         editDisabled={branching || !!editLoading || m.turnId === agent?.turnId}
         onBranch={
           !p.room &&
-          !m.pending &&
+          !explicitQueue(m) &&
           managed &&
           m.role === "assistant" &&
           m.turnId &&
@@ -1489,7 +1483,7 @@ export default function Conversation(p: {
         branchDisabled={m.turnId === agent?.turnId && !!agent?.inFlight}
         onAnotherAnswer={
           !p.room &&
-          !m.pending &&
+          !explicitQueue(m) &&
           managed &&
           m.role === "assistant" &&
           m.turnId &&

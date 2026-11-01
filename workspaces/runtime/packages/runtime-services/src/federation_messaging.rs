@@ -73,9 +73,10 @@ pub struct FederationDeliveryReply {
 pub struct MessageSendReply {
     pub id: String,
     pub room: String,
+    #[serde(serialize_with = "studio_runtime_schema::delivery::serialize_recipient_deliveries")]
     pub deliveries:
         std::collections::BTreeMap<String, studio_runtime_schema::persistence::RecipientDelivery>,
-    pub status: studio_runtime_schema::persistence::DeliveryStatus,
+    pub status: studio_runtime_schema::delivery::MessageSendStatus,
 }
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

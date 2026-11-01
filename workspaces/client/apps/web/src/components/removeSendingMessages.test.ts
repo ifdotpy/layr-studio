@@ -1,3 +1,4 @@
+import { MessageSendStatus } from "../generated/api.ts";
 import { required } from "./componentTestFixtures";
 import type { GetResult } from "../apiTypes";
 import type { Message } from "../types";
@@ -67,7 +68,7 @@ const message: Message = {
   clientMessageId: "client-1",
   role: "user",
   text: "hello",
-  deliveryStatus: "sending",
+  deliveryStatus: MessageSendStatus.sending,
 };
 const key = `studio-remove-sending:${JSON.stringify([
   scope.stateDir,
@@ -94,6 +95,17 @@ function savedId(): unknown {
 afterEach(() => {
   storage.clear();
   vi.clearAllMocks();
+});
+
+it("removes a never-attempted buffered message without a server cancellation", async () => {
+  mocks.stopRemovedMessage.mockResolvedValue(true);
+  const buffered = { ...message, deliveryStatus: MessageSendStatus.buffered };
+  await removeSendingMessage(scope, { chat: "chat", message: buffered });
+  assert.equal(mocks.run.mock.calls.length, 0);
+  assert.deepEqual(mocks.removeMessageFromDevice.mock.calls[0]?.[3], {
+    ...buffered,
+    deliveryStatus: MessageSendStatus.cancelled,
+  });
 });
 
 it("sends the saved withdraw command with its identity", async () => {
