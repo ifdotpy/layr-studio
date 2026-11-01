@@ -426,6 +426,15 @@ mod delivery_tests {
 
     #[test]
     fn generated_closed_request_rejects_unknown_fields() {
+        assert!(
+            serde_json::from_str::<crate::generated::RoomDeleteBody>(r#"{"id":"room"}"#).is_ok()
+        );
+        assert!(
+            serde_json::from_str::<crate::generated::RoomDeleteBody>(
+                r#"{"id":"room","extra":true}"#
+            )
+            .is_err()
+        );
         let body = json!({"id":"00000000-0000-4000-8000-000000000001", "room":"agent", "text":"hello", "extra":true});
         assert!(serde_json::from_value::<ManagedMessageBody>(body).is_err());
     }
