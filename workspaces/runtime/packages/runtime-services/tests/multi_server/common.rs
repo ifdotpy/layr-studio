@@ -51,6 +51,8 @@ pub async fn store() -> (tempfile::TempDir, Arc<RuntimeStore>) {
     );
     store
         .transaction_with(|tx| {
+            // The frozen dump predates the drop of the old outbox tables, so its
+            // statements on them are skipped.
             // Receipt rows in the frozen snapshot predate the cutover. Tests
             // create current receipt owners through their caller or migrate
             // the individual legacy row they exercise.
@@ -61,6 +63,7 @@ pub async fn store() -> (tempfile::TempDir, Arc<RuntimeStore>) {
                     !line.contains("runtime_access_receipts")
                         && !line.starts_with("INSERT INTO \"runtime_server_inbox\"")
                         && !line.starts_with("INSERT INTO \"runtime_server_outbox\"")
+                        && !line.starts_with("DELETE FROM \"runtime_server_outbox\"")
                 })
                 .collect::<Vec<_>>()
                 .join("\n");

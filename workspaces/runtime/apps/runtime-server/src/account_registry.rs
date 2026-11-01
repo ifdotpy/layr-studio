@@ -105,14 +105,12 @@ mod registry_hints {
                             | ObservedTable::RequestResults
                             | ObservedTable::Monitors
                             | ObservedTable::Rules
-                            | ObservedTable::ServerOutbox
                             | ObservedTable::ServerLinks
                             | ObservedTable::FederationSettings
                             | ObservedTable::FederationIdentity
                             | ObservedTable::FederationPeers
                             | ObservedTable::FederationInvites
                             | ObservedTable::FederationRooms
-                            | ObservedTable::FederationOutbox
                             | ObservedTable::RuntimeOutbox
                             | ObservedTable::ErrorIncidents
                             | ObservedTable::AccountTransfers
