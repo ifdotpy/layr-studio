@@ -19,7 +19,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         {
             Ok(summary) => {
                 normalized += 1;
-                crate::transfer_record::AgentTransferState::Summary(summary)
+                crate::transfer_record::AgentTransferState::Summary(Box::new(summary))
             }
             Err(error) => {
                 if let Ok(existing) =

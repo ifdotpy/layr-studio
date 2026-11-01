@@ -565,7 +565,7 @@ impl TransferRecord {
                 self.requests = Field::Value(BTreeMap::new());
                 match &mut self.requests {
                     Field::Value(requests) => requests,
-                    _ => unreachable!(),
+                    Field::Missing | Field::Null => unreachable!(),
                 }
             }
         };
@@ -597,7 +597,7 @@ impl TransferRecord {
     ) -> Result<(), TransferRecordError> {
         let request = match &mut self.requests {
             Field::Value(requests) => requests.get_mut(request_id),
-            _ => None,
+            Field::Missing | Field::Null => None,
         }
         .ok_or(TransferRecordError::UnknownRequest)?;
         request.saved_response = Field::Value(saved);
@@ -609,7 +609,7 @@ impl TransferRecord {
 #[serde(untagged)]
 pub enum AgentTransferState {
     Unreadable(UnreadableTransferSummary),
-    Summary(AgentTransferSummary),
+    Summary(Box<AgentTransferSummary>),
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -710,7 +710,7 @@ impl TryFrom<String> for TransferId {
 #[serde(untagged)]
 pub enum LazyTransferState {
     Unreadable(UnreadableTransferSummary),
-    Pending(LazyTransfer),
+    Pending(Box<LazyTransfer>),
 }
 impl LazyTransferState {
     pub fn pending(&self) -> Option<&LazyTransfer> {

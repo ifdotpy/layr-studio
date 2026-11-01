@@ -39,7 +39,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         }
         if let Some(raw) = lazy.as_deref().filter(|raw| *raw != "null") {
             let value = match serde_json::from_str::<LazyTransfer>(raw) {
-                Ok(value) => LazyTransferState::Pending(value),
+                Ok(value) => LazyTransferState::Pending(Box::new(value)),
                 Err(error) => match serde_json::from_str::<UnreadableTransferSummary>(raw) {
                     Ok(value) => LazyTransferState::Unreadable(value),
                     Err(_) => {

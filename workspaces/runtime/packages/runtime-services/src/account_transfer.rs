@@ -660,10 +660,17 @@ impl Snapshot {
         agent: &str,
         reason: &str,
     ) -> Result<Decision, TransferError> {
-        let mut operation = self.operation.clone();
+        use studio_runtime_schema::queue_command::Field;
+        let mut operation = self.identity.clone();
         if self.pending() && matches!(self.phase(agent)?, Phase::Lazy | Phase::Waiting) {
-            operation["members"][agent]["waiting"] = json!(reason);
+            operation
+                .members
+                .get_mut(agent)
+                .ok_or(TransferError::Refused("Unknown transfer member"))?
+                .waiting = Field::Value(reason.into());
         }
+        let operation =
+            serde_json::to_value(operation).map_err(|_| invalid("account transfer", "/"))?;
         Ok(self.decision(operation, self.agents.clone(), vec![]))
     }
 
@@ -675,11 +682,22 @@ impl Snapshot {
         let Some(current) = self.agents.get(agent) else {
             return Ok(None);
         };
-        let member = &self.operation["members"][agent];
+        let Some(member) = self.identity.members.get(agent) else {
+            return Ok(None);
+        };
+        let submitted = member
+            .submitted_at
+            .value()
+            .and_then(serde_json::Number::as_f64)
+            .is_some_and(|n| n != 0.0);
+        let result = member
+            .result
+            .value()
+            .and_then(|raw| serde_json::from_str(raw.get()).ok())
+            .is_some_and(|value| studio_runtime_store::truthy(Some(&value)));
         if !self.pending()
-            || !member.is_object()
             || self.phase(agent)? != Phase::Waiting
-            || flag(member, "lazy")
+            || member.lazy.value() == Some(&true)
             || current["accountTransferId"] != self.identity.id
             || studio_runtime_store::truthy(current.get("lazyAccountTransfer"))
             || studio_runtime_store::truthy(current.get("deletedAt"))
@@ -688,14 +706,18 @@ impl Snapshot {
                 current["status"].as_str(),
                 Some("running" | "starting" | "approval")
             )
-            || ["submittedAt", "result", "transportTicket", "providerIntent"]
-                .iter()
-                .any(|key| studio_runtime_store::truthy(member.get(*key)))
+            || submitted
+            || result
+            || member.transport_ticket.is_some()
+            || member.provider_intent.is_some()
         {
             return Ok(None);
         }
-        let target_provider = self.operation["targetProvider"]
-            .as_str()
+        let target_provider = self
+            .identity
+            .target_provider
+            .value()
+            .copied()
             .ok_or_else(|| invalid("account transfer", "/targetProvider"))?;
         let mut agents = self.agents.clone();
         let value = agents
@@ -705,33 +727,54 @@ impl Snapshot {
             value,
             &self.identity.id,
             self.identity.target_account_key.as_str(),
-            target_provider,
+            target_provider.key(),
             agent == self.identity.lead_id,
         )?;
-        if enrolled["phase"] != "lazy" {
+        let enrolled: studio_runtime_store::transfer_record::TransferMember =
+            serde_json::from_value(enrolled)
+                .map_err(|_| invalid("account transfer", "/members"))?;
+        if enrolled.phase != Phase::Lazy {
             // Completed or blocked members hold no transfer pointer.
             remove(value, &["accountTransferId"])?;
         }
-        let mut op = self.operation.clone();
-        let saved = op["members"][agent]
-            .as_object_mut()
+        let mut op = self.identity.clone();
+        let saved = op
+            .members
+            .get_mut(agent)
             .ok_or_else(|| invalid("account transfer", "/members"))?;
-        for (key, field) in enrolled
-            .as_object()
-            .ok_or_else(|| invalid("account transfer", "/members"))?
+        saved.phase = enrolled.phase;
+        saved.source_account_key = enrolled.source_account_key;
+        saved.source_thread_id = enrolled.source_thread_id;
+        saved.provider = enrolled.provider;
+        saved.name = enrolled.name;
+        if !enrolled.reason.is_missing() {
+            saved.reason = enrolled.reason;
+        }
+        if !enrolled.lazy.is_missing() {
+            saved.lazy = enrolled.lazy;
+        }
+        if !enrolled.pending_settings.is_missing() {
+            saved.pending_settings = enrolled.pending_settings;
+        }
+        if !enrolled.source_pending_settings.is_missing() {
+            saved.source_pending_settings = enrolled.source_pending_settings;
+        }
+        if !enrolled.source_claude_options.is_missing() {
+            saved.source_claude_options = enrolled.source_claude_options;
+        }
+        if !enrolled.error.is_missing() {
+            saved.error = enrolled.error;
+        }
+        saved.waiting = enrolled.waiting;
+        if op
+            .members
+            .0
+            .iter()
+            .all(|(_, member)| member.phase.terminal())
         {
-            saved.insert(key.clone(), field.clone());
+            op.status = TransferStatus::Completed;
         }
-        if enrolled.get("waiting").is_none() {
-            saved.remove("waiting");
-        }
-        if op["members"].as_object().is_some_and(|members| {
-            members
-                .values()
-                .all(|m| matches!(m["phase"].as_str(), Some("completed" | "left")))
-        }) {
-            op["status"] = json!("completed");
-        }
+        let op = serde_json::to_value(op).map_err(|_| invalid("account transfer", "/"))?;
         Ok(Some(self.decision(op, agents, vec![])))
     }
 
