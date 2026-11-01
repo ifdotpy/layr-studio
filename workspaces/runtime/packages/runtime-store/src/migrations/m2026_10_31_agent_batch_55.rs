@@ -37,7 +37,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         .collect::<Vec<_>>()
         .join(",");
     let max_revision = studio_runtime_schema::shared_values::MAX_SAFE_INTEGER;
-    let mut query = tx.prepare(&format!("SELECT id,record FROM runtime_agents WHERE json_valid(record) AND EXISTS (SELECT 1 FROM json_each(record) j WHERE j.key IN ({dropped}) OR (j.key='excludedAccountKeys' AND (j.type NOT IN ('array','null') OR (j.type='array' AND EXISTS (SELECT 1 FROM json_each(j.value) item WHERE item.type != 'text')))) OR (j.key IN ('imageWorkspace','archived','pinned') AND j.type NOT IN ('true','false','null')) OR (j.key='maxAgents' AND (j.type NOT IN ('integer','real','null') OR (j.type IN ('integer','real') AND (j.atom < 0 OR j.atom > {max_revision} OR j.atom != CAST(j.atom AS INTEGER))))) OR (j.key IN ('error','lastCompletedTurnError') AND j.type NOT IN ('text','null')) OR (j.key='layrReady' AND j.type NOT IN ('true','false')) OR (j.key IN ('lastCompletedTurn','hostProjectPath','executionSettingsAccountKey','lastCompletedTurnStatus','nativeEffort','projectFolder','checkpointHistoryHead','workspaceReservationId','workspaceOperation') AND j.type NOT IN ('text','null')) OR (j.key='provider' AND (j.type NOT IN ('text','null') OR (j.type='text' AND j.value NOT IN ({providers})))) OR (j.key='created' AND (j.type NOT IN ('integer','real','null') OR j.atom < 0)) OR (j.key IN ('queueMutationRevision','authResumeAttempt') AND (j.type != 'integer' OR j.atom < 0 OR j.atom > {max_revision})) OR (j.key IN ('excludedAccountKeys','imageWorkspace','archived','pinned','maxAgents','error','lastCompletedTurnError','layrReady','lastCompletedTurn','hostProjectPath','executionSettingsAccountKey','lastCompletedTurnStatus','nativeEffort','projectFolder','checkpointHistoryHead','workspaceReservationId','workspaceOperation','provider','created','queueMutationRevision','authResumeAttempt') AND (SELECT count(*) FROM json_each(record) d WHERE d.key=j.key)>1))"))?;
+    let mut query = tx.prepare(&format!("SELECT id,record FROM runtime_agents WHERE json_valid(record) AND EXISTS (SELECT 1 FROM json_each(record) j WHERE j.key IN ({dropped}) OR (j.key='excludedAccountKeys' AND (j.type NOT IN ('array','null') OR (j.type='array' AND EXISTS (SELECT 1 FROM json_each(j.value) item WHERE item.type != 'text')))) OR (j.key IN ('imageWorkspace','archived','pinned') AND j.type NOT IN ('true','false','null')) OR (j.key='maxAgents' AND (j.type NOT IN ('integer','real','null') OR (j.type IN ('integer','real') AND (j.atom < 0 OR j.atom > {max_revision} OR j.atom != CAST(j.atom AS INTEGER))))) OR (j.key IN ('error','lastCompletedTurnError') AND j.type != 'null') OR (j.key='layrReady' AND j.type NOT IN ('true','false')) OR (j.key IN ('lastCompletedTurn','hostProjectPath','executionSettingsAccountKey','lastCompletedTurnStatus','nativeEffort','projectFolder','checkpointHistoryHead','workspaceReservationId','workspaceOperation') AND j.type NOT IN ('text','null')) OR (j.key='provider' AND (j.type NOT IN ('text','null') OR (j.type='text' AND j.value NOT IN ({providers})))) OR (j.key='created' AND (j.type NOT IN ('integer','real','null') OR j.atom < 0)) OR (j.key IN ('queueMutationRevision','authResumeAttempt') AND (j.type != 'integer' OR j.atom < 0 OR j.atom > {max_revision})) OR (j.key IN ('excludedAccountKeys','imageWorkspace','archived','pinned','maxAgents','error','lastCompletedTurnError','layrReady','lastCompletedTurn','hostProjectPath','executionSettingsAccountKey','lastCompletedTurnStatus','nativeEffort','projectFolder','checkpointHistoryHead','workspaceReservationId','workspaceOperation','provider','created','queueMutationRevision','authResumeAttempt') AND (SELECT count(*) FROM json_each(record) d WHERE d.key=j.key)>1))"))?;
     let rows = query.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
@@ -98,18 +98,16 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             record.remove("maxAgents");
         }
         for key in ["error", "lastCompletedTurnError"] {
-            if let Some(error) = record.get(key) {
-                if error.get().starts_with('{') {
-                    let normalized = normalize_provider_error(error.get())?;
-                    record.insert(
-                        key.into(),
-                        serde_json::value::RawValue::from_string(serde_json::to_string(
-                            &normalized,
-                        )?)?,
-                    );
-                } else if serde_json::from_str::<Option<String>>(error.get()).is_err() {
-                    record.remove(key);
-                }
+            if let Some(error) = record.get(key)
+                && error.get() != "null"
+            {
+                let value = serde_json::from_str(error.get())?;
+                let normalized =
+                    studio_runtime_schema::provider_errors::AgentError::from_receipt(value)?;
+                record.insert(
+                    key.into(),
+                    serde_json::value::RawValue::from_string(serde_json::to_string(&normalized)?)?,
+                );
             }
         }
         if record
@@ -180,66 +178,6 @@ fn clear_bad_workspace_value(
     }
 }
 
-fn normalize_provider_error(
-    raw: &str,
-) -> StoreResult<studio_runtime_schema::provider_errors::NativeProviderError> {
-    use serde_json::value::RawValue;
-    use std::collections::BTreeMap;
-    type Fields = BTreeMap<String, Box<RawValue>>;
-    let mut fields: Fields = serde_json::from_str(raw)?;
-    let nested_value = fields.remove("error");
-    if !fields.contains_key("message")
-        && let Some(value) = nested_value.as_ref()
-        && serde_json::from_str::<String>(value.get()).is_ok()
-    {
-        fields.insert("message".into(), value.clone());
-    }
-    let nested: Fields = nested_value
-        .and_then(|value| serde_json::from_str(value.get()).ok())
-        .unwrap_or_default();
-    for key in ["message", "code"] {
-        if !fields.contains_key(key)
-            && let Some(value) = nested.get(key)
-        {
-            fields.insert(key.to_owned(), value.clone());
-        }
-    }
-    let message = fields.remove("message").map_or_else(String::new, |value| {
-        serde_json::from_str::<String>(value.get()).unwrap_or_else(|_| {
-            if value.get().starts_with('{') {
-                value.get().to_owned()
-            } else {
-                String::new()
-            }
-        })
-    });
-    let code = fields.remove("code").and_then(|value| {
-        serde_json::from_str::<String>(value.get())
-            .ok()
-            .or_else(|| {
-                serde_json::from_str::<i64>(value.get())
-                    .ok()
-                    .map(|n| n.to_string())
-            })
-    });
-    let codex_error_info = fields
-        .remove("codexErrorInfo")
-        .and_then(|v| serde_json::from_str(v.get()).ok());
-    let claude_failure = fields
-        .remove("claudeFailure")
-        .and_then(|v| serde_json::from_str(v.get()).ok());
-    Ok(
-        studio_runtime_schema::provider_errors::NativeProviderError {
-            message,
-            code,
-            codex_error_info,
-            claude_failure,
-            data: fields.remove("data"),
-            additional_details: fields.remove("additionalDetails"),
-        },
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;
@@ -270,7 +208,25 @@ mod tests {
             .unwrap();
         assert_eq!(
             raw,
-            r#"{"archived":true,"error":{"message":"nested","code":"42"},"excludedAccountKeys":["blocked"],"id":"legacy","lastCompletedTurnError":{"message":"previous"},"pinned":false}"#
+            r#"{"archived":true,"error":{"message":"nested","code":"42","error":{"code":42,"message":"nested"},"ignored":true},"excludedAccountKeys":["blocked"],"id":"legacy","lastCompletedTurnError":{"message":"previous","ignored":true},"pinned":false}"#
+        );
+        tx.execute("INSERT INTO runtime_agents VALUES('encoded', ?1)", [r#"{"id":"encoded","error":"{\"error\":{\"message\":\"Write failed\",\"data\":{\"diskFull\":true}}}"}"#]).unwrap();
+        super::apply(&tx).unwrap();
+        let raw: String = tx
+            .query_row(
+                "SELECT record FROM runtime_agents WHERE id='encoded'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let record: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(
+            record.pointer("/error/message"),
+            Some(&serde_json::json!("Write failed"))
+        );
+        assert_eq!(
+            record.pointer("/error/data/diskFull"),
+            Some(&serde_json::json!(true))
         );
         tx.execute(
             "INSERT INTO runtime_agents VALUES('bad-list', ?1)",
@@ -297,7 +253,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             raw,
-            r#"{"error":{"message":"{\"reason\":\"blocked\"}","data":{"request":"one"},"additionalDetails":"detail"},"id":"details"}"#
+            r#"{"error":{"message":"{\"reason\":\"blocked\"}","data":{"request":"one"},"additionalDetails":"detail","ignored":true,"reason":"blocked"},"id":"details"}"#
         );
     }
 

@@ -15834,22 +15834,12 @@ export interface components {
       additionalDetails?: components["schemas"]["JsonValue"] | undefined;
       claudeFailure?: components["schemas"]["ClaudeFailure"] | undefined;
       code?: string | null | undefined;
-      codexErrorInfo?:
-        | (
-            | string
-            | {
-                [key: string]: {
-                  /** Format: uint16 */
-                  httpStatusCode?: number | null | undefined;
-                  turnKind?: string | null | undefined;
-                };
-              }
-          )
-        | null
-        | undefined;
+      codexErrorInfo?: components["schemas"]["JsonValue"] | undefined;
       data?: components["schemas"]["JsonValue"] | undefined;
       /** @default  */
       message?: string | undefined;
+    } & {
+      [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
     /**
      * NativeReleasePhase

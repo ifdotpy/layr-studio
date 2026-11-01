@@ -25,6 +25,8 @@ pub struct NativeProviderError {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<serde_json::Value>")]
     pub additional_details: Option<Box<serde_json::value::RawValue>>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
 }
 
 impl PartialEq for NativeProviderError {
@@ -33,6 +35,7 @@ impl PartialEq for NativeProviderError {
             && self.code == other.code
             && self.codex_error_info == other.codex_error_info
             && self.claude_failure == other.claude_failure
+            && self.extra == other.extra
             && self.data.as_deref().map(|value| value.get())
                 == other.data.as_deref().map(|value| value.get())
             && self.additional_details.as_deref().map(|value| value.get())
@@ -44,7 +47,15 @@ impl PartialEq for NativeProviderError {
 #[serde(untagged)]
 pub enum CodexErrorInfo {
     Text(String),
-    Structured(BTreeMap<String, CodexErrorDetail>),
+    Structured(BTreeMap<String, CodexErrorPayload>),
+    Other(Value),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum CodexErrorPayload {
+    Detail(CodexErrorDetail),
+    Other(Value),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -54,6 +65,8 @@ pub struct CodexErrorDetail {
     pub http_status_code: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_kind: Option<String>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
 }
 
 pub fn native_provider_error_schema() -> Value {
@@ -64,6 +77,8 @@ pub fn native_provider_error_schema() -> Value {
         .into_root_schema_for::<NativeProviderError>()
         .to_value();
     schema["properties"]["claudeFailure"] = json!({"$ref":"#/components/schemas/ClaudeFailure"});
+    schema["additionalProperties"] = json!({"$ref":"#/components/schemas/JsonValue"});
+    schema["properties"]["codexErrorInfo"] = json!({"$ref":"#/components/schemas/JsonValue"});
     schema["properties"]["data"] = json!({"$ref":"#/components/schemas/JsonValue"});
     schema["properties"]["additionalDetails"] = json!({"$ref":"#/components/schemas/JsonValue"});
     schema
@@ -124,37 +139,65 @@ impl AgentError {
             CodexErrorInfo::Structured(fields) if fields.len() == 1 => {
                 fields.keys().next()?.as_str()
             }
-            CodexErrorInfo::Structured(_) => return None,
+            CodexErrorInfo::Structured(_) | CodexErrorInfo::Other(_) => return None,
         };
         serde::Deserialize::deserialize(StrDeserializer::<Error>::new(kind)).ok()
     }
 
     /// Normalize a provider receipt at its existing JSON ingress boundary.
     pub fn from_receipt(value: Value) -> Result<Self, serde_json::Error> {
-        let mut fields = match value {
-            Value::String(message) => return Ok(Self::Message(message)),
-            Value::Object(fields) => fields,
-            Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) => {
-                return Err(serde::de::Error::custom(
-                    "expected an error string or object",
-                ));
+        fn normalize(value: Value, depth: usize) -> Value {
+            if depth >= 8 {
+                return value;
             }
-        };
-        match fields.remove("error") {
-            Some(Value::Object(mut nested)) => {
-                for key in ["message", "code"] {
-                    if !fields.contains_key(key)
-                        && let Some(value) = nested.remove(key)
-                    {
-                        fields.insert(key.to_owned(), value);
+            match value {
+                Value::String(ref text) => {
+                    let candidate = text.find('{').map(|i| &text[i..]).unwrap_or(text);
+                    match serde_json::from_str::<Value>(candidate) {
+                        Ok(parsed @ Value::Object(_)) => normalize(parsed, depth + 1),
+                        _ => value,
                     }
                 }
+                Value::Object(mut fields) => {
+                    for key in ["error", "message"] {
+                        if let Some(nested) = fields.get(key).cloned() {
+                            let normalized = normalize(nested, depth + 1);
+                            if let Value::Object(nested) = normalized {
+                                if key == "message" && nested.contains_key("message") {
+                                    fields.remove(key);
+                                }
+                                for (name, value) in nested {
+                                    if key != "error" || name != "error" {
+                                        fields.entry(name).or_insert(value);
+                                    }
+                                }
+                            } else if key == "error" && !fields.contains_key("message") {
+                                fields.insert("message".into(), normalized);
+                            }
+                        }
+                    }
+                    if !fields.contains_key("codexErrorInfo")
+                        && let Some(Value::Object(data)) = fields.get("data")
+                        && data.get("diskFull") == Some(&Value::Bool(true))
+                    {
+                        fields.insert("codexErrorInfo".into(), Value::String("diskFull".into()));
+                    }
+                    if !fields.contains_key("codexErrorInfo")
+                        && let Some(Value::Object(data)) = fields.get("data")
+                        && let Some(info) = data.get("codexErrorInfo").cloned()
+                    {
+                        fields.insert("codexErrorInfo".into(), info);
+                    }
+                    Value::Object(fields)
+                }
+                _ => value,
             }
-            Some(Value::String(message)) if !fields.contains_key("message") => {
-                fields.insert("message".into(), Value::String(message));
-            }
-            _ => {}
         }
+        let mut fields = match normalize(value, 0) {
+            Value::String(message) => return Ok(Self::Message(message)),
+            Value::Object(fields) => fields,
+            other => return Ok(Self::Message(other.to_string())),
+        };
         let message = match fields.remove("message") {
             Some(Value::String(message)) => message,
             Some(Value::Object(message)) => Value::Object(message).to_string(),
@@ -168,13 +211,11 @@ impl AgentError {
         let codex_error_info = fields
             .remove("codexErrorInfo")
             .filter(|v| !v.is_null())
-            .map(CodexErrorInfo::deserialize)
-            .transpose()?;
+            .and_then(|v| CodexErrorInfo::deserialize(v).ok());
         let claude_failure = fields
             .remove("claudeFailure")
             .filter(|v| !v.is_null())
-            .map(crate::claude_failure::ClaudeFailure::deserialize)
-            .transpose()?;
+            .and_then(|v| crate::claude_failure::ClaudeFailure::deserialize(v).ok());
         let raw = |value: Value| serde_json::value::RawValue::from_string(value.to_string());
         let data = fields
             .remove("data")
@@ -193,6 +234,7 @@ impl AgentError {
             claude_failure,
             data,
             additional_details,
+            extra: fields.into_iter().collect(),
         })))
     }
 }
@@ -313,6 +355,47 @@ mod tests {
     }
 
     #[test]
+    fn provider_errors_preserve_extensions_and_normalize_encoded_messages() {
+        for info in [
+            json!({"futureLimit":{"opaque":[1,null]}}),
+            json!({"futureLimit":[1,null]}),
+        ] {
+            let receipt = json!({"error":{"message":"no", "vendorNested":true}, "codexErrorInfo":info, "vendorExtension":[1,null]});
+            let normalized =
+                serde_json::to_value(AgentError::from_receipt(receipt.clone()).unwrap()).unwrap();
+            assert_eq!(
+                normalized.get("codexErrorInfo"),
+                receipt.get("codexErrorInfo")
+            );
+            assert_eq!(
+                normalized.get("vendorExtension"),
+                receipt.get("vendorExtension")
+            );
+            assert_eq!(normalized.get("error"), receipt.get("error"));
+        }
+        let encoded = json!(r#"{"error":{"message":"Write failed","data":{"diskFull":true}}}"#);
+        let normalized = serde_json::to_value(AgentError::from_receipt(encoded).unwrap()).unwrap();
+        assert_eq!(normalized.get("message"), Some(&json!("Write failed")));
+        assert_eq!(normalized.get("data"), Some(&json!({"diskFull":true})));
+        assert_eq!(normalized.get("codexErrorInfo"), Some(&json!("diskFull")));
+        for receipt in [
+            json!(r#"HTTP 503: {"error":{"message":"Unavailable"}}"#),
+            json!({"message":r#"{"error":{"message":"Unavailable"}}"#}),
+        ] {
+            let error = AgentError::from_receipt(receipt).unwrap();
+            assert_eq!(error.display_text(), "Unavailable");
+        }
+        let error = AgentError::from_receipt(
+            json!({"message":"overloaded","data":{"codexErrorInfo":"serverOverloaded"}}),
+        )
+        .unwrap();
+        assert_eq!(
+            error.known_kind(),
+            Some(KnownCodexErrorKind::ServerOverloaded)
+        );
+    }
+
+    #[test]
     fn provider_receipt_normalizes_and_keeps_details() {
         let receipt = json!({"error":{"message":{"detail":"no"},"code":429},"codexErrorInfo":"serverOverloaded","data":{"trace":"x"},"additionalDetails":"details","discarded":true});
         let error = AgentError::from_receipt(receipt).unwrap();
@@ -322,7 +405,7 @@ mod tests {
         assert_eq!(error.message, r#"{"detail":"no"}"#);
         assert_eq!(error.code.as_deref(), Some("429"));
         assert_eq!(error.data.as_deref().unwrap().get(), r#"{"trace":"x"}"#);
-        assert!(!serde_json::to_string(&error).unwrap().contains("discarded"));
+        assert!(serde_json::to_string(&error).unwrap().contains("discarded"));
     }
 
     #[test]

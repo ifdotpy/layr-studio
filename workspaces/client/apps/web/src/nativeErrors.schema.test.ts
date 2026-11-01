@@ -183,12 +183,14 @@ test("native error rendering reads normalized fields without recursion", () => {
   assert.equal(cyber.title, "Cybersecurity policy refusal");
   assert.match(cyber.hint, /narrower or rephrased task/);
   assert.ok(cyber.details.includes("Raw refusal detail"));
-  const raw = 'HTTP 503: {"error":{"message":"Unavailable"}}';
-  assert.equal(nativeErrorView(raw).message, raw);
-  assert.equal(nativeErrorView({ message: raw }).message, raw);
+  // Encoded and nested provider errors arrive normalized by the server.
   assert.equal(
-    nativeErrorView({ error: { message: "Nested failure" } }).message,
-    "Codex reported an error.",
+    nativeErrorView({ message: "Unavailable" }).message,
+    "Unavailable",
+  );
+  assert.equal(
+    nativeErrorView({ message: "Nested failure" }).message,
+    "Nested failure",
   );
 });
 

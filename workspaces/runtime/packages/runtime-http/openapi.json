@@ -33359,6 +33359,9 @@
       },
       "NativeProviderError": {
         "$schema": "https://spec.openapis.org/oas/3.0/schema/2024-10-18#/definitions/Schema",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/JsonValue"
+        },
         "description": "The provider-owned portion of an agent error that Studio displays or classifies.",
         "properties": {
           "additionalDetails": {
@@ -33372,40 +33375,7 @@
             "type": "string"
           },
           "codexErrorInfo": {
-            "anyOf": [
-              {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "additionalProperties": {
-                      "properties": {
-                        "httpStatusCode": {
-                          "format": "uint16",
-                          "maximum": 65535,
-                          "minimum": 0,
-                          "nullable": true,
-                          "type": "integer"
-                        },
-                        "turnKind": {
-                          "nullable": true,
-                          "type": "string"
-                        }
-                      },
-                      "type": "object"
-                    },
-                    "type": "object"
-                  }
-                ]
-              },
-              {
-                "enum": [
-                  null
-                ],
-                "nullable": true
-              }
-            ]
+            "$ref": "#/components/schemas/JsonValue"
           },
           "data": {
             "$ref": "#/components/schemas/JsonValue"

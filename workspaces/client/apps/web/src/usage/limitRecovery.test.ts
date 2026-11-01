@@ -72,7 +72,7 @@ test("the current decision is shown only for the matching agent identity", () =>
 test("future and ambiguous vendor errors do not invent a limit notice", () => {
   for (const codexErrorInfo of [
     "futureLimit",
-    { futureLimit: {} },
+    { futureLimit: { opaque: [1, null] } },
     { rateLimitExceeded: {}, futureLimit: {} },
   ]) {
     const error = { message: "Provider extension", codexErrorInfo };
