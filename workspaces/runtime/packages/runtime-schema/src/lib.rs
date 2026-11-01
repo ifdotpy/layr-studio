@@ -12,6 +12,7 @@ pub mod api_schema;
 pub mod approvals;
 pub mod bounded_integer;
 pub mod bounded_text;
+pub mod chat_operational_status;
 pub mod checkpoint_record;
 pub mod claude_controls;
 pub mod claude_failure;

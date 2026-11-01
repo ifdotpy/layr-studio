@@ -19619,6 +19619,32 @@
         "title": "ChatMessage",
         "type": "object"
       },
+      "ChatOperationalKind": {
+        "enum": [
+          "answer",
+          "error",
+          "working",
+          "paused",
+          "none"
+        ],
+        "type": "string"
+      },
+      "ChatOperationalStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ChatOperationalKind"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label"
+        ],
+        "type": "object"
+      },
       "ChatRead": {
         "additionalProperties": false,
         "properties": {

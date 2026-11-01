@@ -9960,6 +9960,12 @@ export interface components {
       /** Text */
       text: string;
     };
+    /** @enum {string} */
+    ChatOperationalKind: "answer" | "error" | "working" | "paused" | "none";
+    ChatOperationalStatus: {
+      kind: components["schemas"]["ChatOperationalKind"];
+      label: string;
+    };
     /** ChatRead */
     ChatRead: {
       /** Messages */
@@ -38845,6 +38851,14 @@ export const CapacityRetryStatus = {
   failed: "failed",
 } as const;
 export type CapacityRetryStatus = components["schemas"]["CapacityRetryStatus"];
+export const ChatOperationalKind = {
+  answer: "answer",
+  error: "error",
+  working: "working",
+  paused: "paused",
+  none: "none",
+} as const;
+export type ChatOperationalKind = components["schemas"]["ChatOperationalKind"];
 export const CommandErrorCode = { receipt_expired: "receipt_expired" } as const;
 export type CommandErrorCode = components["schemas"]["CommandErrorCode"];
 export const ComplaintResponseStatus = {

@@ -1390,6 +1390,9 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             .pointer_mut(&format!("/components/schemas/{name}"))
             .ok_or_else(|| format!("OpenAPI is missing Rust-owned {name}"))? = schema;
     }
+    for (name, schema) in crate::chat_operational_status::schemas() {
+        openapi["components"]["schemas"][name] = schema;
+    }
     for (name, schema) in crate::process_controls::schemas() {
         openapi["components"]["schemas"][name] = schema;
     }
