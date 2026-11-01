@@ -216,6 +216,11 @@ async fn python_constructor_and_rust_startup_match_requests_monitors_events_and_
     let store = RuntimeStore::open(Some(&rust_state))
         .await
         .expect("open Python-written state");
+    // The server installs the publisher before recovery, reseeding views whose
+    // display field was added by 23368829e.
+    studio_runtime_services::entity_publication::install(&store)
+        .await
+        .expect("install server publication");
     monitor_runtime::recover_on_startup(&store, NOW)
         .await
         .expect("Rust startup recovery");
@@ -224,6 +229,35 @@ async fn python_constructor_and_rust_startup_match_requests_monitors_events_and_
         .expect("existing account-worker startup recovery");
     let mut rust = rust_snapshot(&store);
     let mut python = python;
+    // Installing the server publisher seeds these additional existing views.
+    // Check their complete values separately from the older Python snapshot.
+    let rows = rust
+        .get_mut("sync_entities")
+        .and_then(Value::as_array_mut)
+        .unwrap();
+    let extra = rows
+        .iter()
+        .filter(|row| {
+            matches!(
+                row.get("collection").and_then(Value::as_str),
+                Some("queue" | "studioError")
+            )
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        extra,
+        vec![
+            json!({"collection":"queue","deleted":0,"id":"777c97c9-d1ee-4c3d-970d-ff0badc41e7c","payload":{"collection":"queue","id":"777c97c9-d1ee-4c3d-970d-ff0badc41e7c","value":{"capabilities":{"receipts":true,"reorder":true},"items":[],"revision":"909d98dd4653eadce82e7450f85f8d4b9ed42392d2e256847ac7606b3848d27a"}}}),
+            json!({"collection":"studioError","deleted":0,"id":"agent:777c97c9-d1ee-4c3d-970d-ff0badc41e7c:turn-2","payload":{"collection":"studioError","id":"agent:777c97c9-d1ee-4c3d-970d-ff0badc41e7c:turn-2","value":{"action":"resume","agentId":"777c97c9-d1ee-4c3d-970d-ff0badc41e7c","agentName":"Lead","at":2000000000.0,"detail":"The provider connection ended during the turn.","diagnostics":{"causes":[],"certainty":"unknown","context":{"epoch":0,"source":"agent","turnId":"turn-2"}},"id":"agent:777c97c9-d1ee-4c3d-970d-ff0badc41e7c:turn-2","kind":"turn_disconnected","level":"error","reason":"The provider connection ended during the turn.","subject":""}}}),
+        ]
+    );
+    rows.retain(|row| {
+        !matches!(
+            row.get("collection").and_then(Value::as_str),
+            Some("queue" | "studioError")
+        )
+    });
     for id in [
         "7476dd05-6094-5a65-9ba0-3007fab6be6b",
         "rule-linked-monitor",
