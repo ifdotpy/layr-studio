@@ -242,7 +242,7 @@ pub struct Decision {
     pub writes: Vec<RowWrite>,
     pub cancel_pending: Vec<String>,
     #[serde(skip)]
-    pub(crate) effects: Vec<LifecycleEffect>,
+    pub effects: Vec<LifecycleEffect>,
     #[serde(skip)]
     pub(crate) archive_release: Option<ArchiveRelease>,
 }
@@ -927,7 +927,8 @@ pub fn decide(
     Ok(decision)
 }
 
-pub(crate) fn decide_with_effects(
+/// Pure decide for replay tests and callers.
+pub fn decide_with_effects(
     snapshot: &ManagementSnapshot,
     action: &Action,
     now: f64,
