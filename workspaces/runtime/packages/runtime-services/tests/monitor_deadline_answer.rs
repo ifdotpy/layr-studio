@@ -218,14 +218,14 @@ async fn an_unanswered_check_of_a_rule_that_moved_on_still_settles() {
     fixtures::seed(&store, &case, fixtures::monitor(root.path())).await;
     let id = case["before"]["id"].as_str().expect("id");
     let operation: Operation =
-        serde_json::from_value(case["before"]["operation"].clone()).expect("operation");
+        serde_json::from_str(&case["before"]["operation"].to_string()).expect("operation");
     let mut seed: Value =
         serde_json::from_str(include_str!("rules_engine/seed.json")).expect("rule seed");
     seed["rule"]["agent"] = case["actor"]["id"].clone();
     seed["rule"]["epoch"] = case["actor"]["epoch"].clone();
     seed["rule"]["checks"] = json!(9);
     seed["rule"]["inFlight"] = json!(true);
-    let rule: RuleRecord = serde_json::from_value(seed["rule"].clone()).expect("rule");
+    let rule: RuleRecord = serde_json::from_str(&seed["rule"].to_string()).expect("rule");
     let selected = id.to_owned();
     store
         .transaction(move |tx| {

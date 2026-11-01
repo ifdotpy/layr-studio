@@ -1329,7 +1329,7 @@ mod replay_identity_tests {
             let key = call.key();
             let request = RecoveredRequest {
                 ticket: RequestTicket { generation: 4, id: RequestId::String(key.clone()), method: call.method },
-                operation_id: OperationId(key.clone()), thread_id: None, lightweight: true,
+                operation_id: OperationId(key), thread_id: None, lightweight: true,
                 deadline_ms: 1000, unknown: true, remote_id: None,
             };
             let reply = json!({"status":"notLoaded"});
