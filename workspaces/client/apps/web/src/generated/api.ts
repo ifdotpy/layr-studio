@@ -25776,16 +25776,6 @@ export interface components {
        * @default null
        */
       needsAttention?: boolean | null | undefined;
-      /**
-       * Requests
-       * @default null
-       */
-      requests?:
-        | {
-            [key: string]: components["schemas"]["TransferRequestReceipt"];
-          }
-        | null
-        | undefined;
       scope: components["schemas"]["TransferScope"];
       status: components["schemas"]["TransferStatus"];
       /** Targetaccountkey */

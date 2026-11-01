@@ -58024,21 +58024,6 @@
             "default": null,
             "title": "Needsattention"
           },
-          "requests": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/TransferRequestReceipt"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Requests"
-          },
           "scope": {
             "$ref": "#/components/schemas/TransferScope"
           },
