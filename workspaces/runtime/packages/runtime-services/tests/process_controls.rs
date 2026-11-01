@@ -240,19 +240,18 @@ async fn action_receipt_replays_without_dispatch_and_rejects_identity_reuse() {
             .is_err()
     );
     let connection = store.test_reader().unwrap();
-    let query = json!({"requestId":"request","agent":"owner","accountKey":"acct","epoch":3});
+    let query = process_controls::ReceiptIdentity {
+        request_id: "request".into(),
+        agent: "owner".into(),
+        account_key: "acct".into(),
+        epoch: 3,
+    };
     assert!(matches!(
         process_controls::receipt(&connection, &query).unwrap(),
         studio_runtime_schema::process_controls::ProcessReceipt::Found(_)
     ));
-    let mut decimal_epoch = query.clone();
-    decimal_epoch["epoch"] = json!(3.0);
-    assert!(matches!(
-        process_controls::receipt(&connection, &decimal_epoch).unwrap(),
-        studio_runtime_schema::process_controls::ProcessReceipt::Found(_)
-    ));
     let mut foreign = query;
-    foreign["accountKey"] = json!("foreign");
+    foreign.account_key = "foreign".into();
     assert!(!matches!(
         process_controls::receipt(&connection, &foreign).unwrap(),
         studio_runtime_schema::process_controls::ProcessReceipt::Found(_)

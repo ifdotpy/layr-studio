@@ -167,7 +167,24 @@ async fn receipt(
     State(state): State<HttpState>,
     params: QueryParams,
 ) -> Result<Json<ProcessReceipt>, ApiError> {
-    let query = Value::Object((*params.into_typed()).clone());
+    let query = controls::ReceiptIdentity {
+        request_id: params
+            .nonempty_str("requestId")
+            .ok_or_else(ApiError::internal)?
+            .to_owned(),
+        agent: params
+            .nonempty_str("agent")
+            .ok_or_else(ApiError::internal)?
+            .to_owned(),
+        account_key: params
+            .nonempty_str("accountKey")
+            .ok_or_else(ApiError::internal)?
+            .to_owned(),
+        epoch: params
+            .typed_value("epoch")
+            .and_then(Value::as_f64)
+            .ok_or_else(ApiError::internal)? as i64,
+    };
     let store = store(&state)?;
     let value = store
         .read_async("runtime-http/routes/process_controls", move |connection| {
