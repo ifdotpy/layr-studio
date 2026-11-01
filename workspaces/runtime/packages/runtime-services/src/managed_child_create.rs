@@ -839,7 +839,7 @@ pub(crate) async fn spawn_agents(
             .ok_or(crate::managed_host_tools::Error::Stale)?.value();
         event_write::assert_delegation(&current_root)
             .map_err(|_| crate::managed_host_tools::Error::Invalid("Delegation is disabled"))?;
-        let max = current_root.extra.get("maxAgents").and_then(Value::as_i64).unwrap_or(DEFAULT_MAX_TEAM_AGENTS);
+        let max = current_root.max_agents.as_ref().and_then(|value| value.as_number().as_i64()).unwrap_or(DEFAULT_MAX_TEAM_AGENTS);
         let existing = drafts.iter().map(|draft| AgentRepository::get(tx, &AgentId::from(draft.id.as_str())))
             .collect::<Result<Vec<_>, _>>()?;
         let new_count = existing.iter().filter(|item| item.is_none()).count() as i64;

@@ -384,6 +384,12 @@ pub struct AgentRecord {
     pub manual_name: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_agents_explicit: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub max_agents:
+        studio_runtime_schema::queue_command::Field<studio_runtime_schema::AgentCounter>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_mode_supported: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -855,6 +861,7 @@ impl AgentRecord {
             needs_title: None,
             manual_name: None,
             max_agents_explicit: None,
+            max_agents: Default::default(),
             agent_mode_supported: None,
             layr_ready: None,
             prompt: Default::default(),
@@ -2926,6 +2933,30 @@ mod tests {
         assert_eq!(decoded.value()["error"]["data"]["id"], 1);
         let via_value = AgentRecord::from_value(serde_json::from_str(raw).unwrap()).unwrap();
         assert_eq!(via_value.value()["error"]["data"]["id"], 1);
+    }
+
+    #[test]
+    fn agent_max_agents_is_a_nonnegative_safe_integer() {
+        for value in ["-1", "1.5", "9007199254740992", "\"1\""] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"maxAgents":{value}}}"#
+            );
+            assert!(
+                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                "{value}"
+            );
+        }
+        for value in ["null", "1", "1.0"] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"maxAgents":{value}}}"#
+            );
+            let agent: AgentRecord = serde_json::from_str(&raw).unwrap();
+            assert!(
+                serde_json::to_string(&agent)
+                    .unwrap()
+                    .contains(&format!("\"maxAgents\":{value}"))
+            );
+        }
     }
 
     #[test]
