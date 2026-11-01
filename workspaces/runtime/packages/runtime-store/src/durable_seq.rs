@@ -66,6 +66,10 @@ pub const DURABLE_TABLES: &[DurableTable] = &[
     DurableTable::new("runtime_work", "record"),
     // The owner of conversation items; transcript pages are built from it at read time.
     DurableTable::online("runtime_items", "record"),
+    // Work history entries, one row per entry (see work_history.rs).
+    DurableTable::new("runtime_work_results", "record"),
+    DurableTable::new("runtime_work_decisions", "record"),
+    DurableTable::new("runtime_work_releases", "record"),
 ];
 
 /// The next number of the shared counter. Owner of the allocation rule. The same text
@@ -166,6 +170,10 @@ pub(crate) fn install(tx: &Transaction<'_>) -> StoreResult<()> {
     tx.execute_batch(&view_log_sql())?;
     for table in DURABLE_TABLES {
         let name = table.name;
+        // A table created later by its own migration is numbered when it exists.
+        if !crate::schema::table_exists(tx, name)? {
+            continue;
+        }
         if !table.online_backfill {
             let base: i64 = tx.query_row(&format!("SELECT {NEXT}-1"), [], |r| r.get(0))?;
             tx.execute_batch(&format!(

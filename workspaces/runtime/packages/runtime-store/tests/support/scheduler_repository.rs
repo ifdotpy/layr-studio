@@ -269,7 +269,7 @@ fn malformed_complaint_and_work_policy_fields_name_the_table_and_id() {
         .expect("malformed complaint is not claimed");
 
     let mut work = database();
-    work.execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+    work.execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
             UPDATE runtime_events SET kind='work_review',text='{\"task\":\"task\",\"result\":{\"id\":\"result\"}}' WHERE id='first';
             INSERT INTO runtime_work VALUES('task','{\"rootId\":\"agent\",\"results\":\"invalid\",\"decisions\":[]}');")
             .expect("malformed work fixture writes");
@@ -289,7 +289,7 @@ fn resolved_complaint_and_decided_work_review_retire_before_claiming_the_remaini
     connection
         .execute_batch(
             "CREATE TABLE runtime_complaints(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-             CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+             CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
              UPDATE runtime_events SET kind='complaint',text='{\"complaints\":[{\"complaint_id\":\"closed\"}]}' WHERE id='first';
              UPDATE runtime_events SET kind='work_review',text='{\"task\":\"task\",\"result\":{\"id\":\"result\"}}' WHERE id='tie';
              INSERT INTO runtime_complaints VALUES('closed','{\"leadId\":\"agent\",\"status\":\"resolved\",\"recipient\":\"lead\",\"responses\":[]}');
@@ -457,7 +457,7 @@ fn deleted_agent_is_skipped_at_claim_and_refused_at_submission_recheck() {
 #[test]
 fn submission_recheck_retires_decided_work_review_and_keeps_reconciliation_fields() {
     let mut connection = database();
-    connection.execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+    connection.execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
             UPDATE runtime_events SET kind='work_review',text='{\"task\":\"task\",\"result\":{\"id\":\"result\"}}',status='reserved' WHERE id='first';
             INSERT INTO runtime_work VALUES('task','{\"rootId\":\"agent\",\"results\":[{\"id\":\"result\"}],\"decisions\":[{\"resultId\":\"result\"}]}');")
             .expect("work review becomes decided");
