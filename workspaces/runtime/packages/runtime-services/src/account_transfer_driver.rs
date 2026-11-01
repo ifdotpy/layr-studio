@@ -13,6 +13,106 @@ use studio_runtime_store::{
     AccountTransferRepository as Repository, AgentId, AgentRepository, RuntimeStore, Transaction,
 };
 
+use studio_runtime_schema::queue_command::Field;
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedNotice {
+    id: String,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    name: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    provider: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    reason: Field<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedMember {
+    phase: crate::account_transfer::Phase,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    source_account_key: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    source_thread_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    target_thread_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    provider: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    name: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    reason: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    error: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    waiting: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    lazy: Field<bool>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    interrupt_reason: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    interrupt_outcome: Field<SavedInterruptOutcome>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    continue_after_transfer: Field<bool>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum SavedInterruptOutcome {
+    Acknowledged,
+    Unknown,
+    Rejected,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum SavedScope {
+    Team,
+    Subagents,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedRequestIdentity {
+    lead_id: String,
+    target_account_key: String,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    scope: Field<SavedScope>,
+}
+
+/// The immutable response delivered for one transfer request.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedTransferResponse {
+    id: String,
+    lead_id: String,
+    target_account_key: String,
+    status: crate::account_transfer::TransferStatus,
+    created: f64,
+    scope: SavedScope,
+    members: std::collections::BTreeMap<String, SavedMember>,
+    requests: std::collections::BTreeMap<String, SavedRequestIdentity>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    target_provider: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    updated: Field<f64>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    finish_history: Field<bool>,
+    total: usize,
+    completed: usize,
+    moved: usize,
+    native_history_pending: usize,
+    moving_now: usize,
+    can_finish_history: bool,
+    waiting_count: usize,
+    needs_attention: bool,
+    can_retry: bool,
+    interrupted: Vec<SavedNotice>,
+    left_on_source: Vec<SavedNotice>,
+    blocked: Vec<SavedNotice>,
+}
+
 pub fn load(tx: &Transaction<'_>, id: &str) -> Result<Snapshot, TransferError> {
     if !Repository::available(tx)? {
         return Err(TransferError::Requires(
@@ -220,7 +320,17 @@ fn replay_in(
     };
     let snapshot = load(tx, &key)?;
     if snapshot.replay(id, lead, target, scope)? {
-        return snapshot.public_view().map(Some);
+        let saved = snapshot.operation()["requests"][id]
+            .get("savedResponse")
+            .ok_or(TransferError::Refused(
+                "The original transfer response is unavailable",
+            ))?;
+        let saved = SavedTransferResponse::deserialize(saved)
+            .map_err(|_| TransferError::Refused("The original transfer response is invalid"))?;
+        return saved
+            .serialize(serde_json::value::Serializer)
+            .map(Some)
+            .map_err(|_| TransferError::Refused("The original transfer response is invalid"));
     }
     Err(TransferError::Refused(
         "This transfer id has different content",
@@ -335,7 +445,7 @@ pub async fn request(
                 decision.operation = operation;
                 decision.agents = agents;
                 decision.changed = true;
-                return persist(tx, decision, now);
+                return persist_request(tx, decision, now, Some(&id));
             }
 
             // Only the chat itself moves. Its subagents keep their accounts.
@@ -383,7 +493,7 @@ pub async fn request(
             decision.operation = operation;
             decision.agents = agents;
             decision.changed = true;
-            persist(tx, decision, now)
+            persist_request(tx, decision, now, Some(&operation_id))
         })
         .await
 }
@@ -426,7 +536,16 @@ pub async fn receive(
         .await
 }
 
-fn persist(tx: &Transaction<'_>, mut decision: Decision, now: f64) -> Result<Value, TransferError> {
+fn persist(tx: &Transaction<'_>, decision: Decision, now: f64) -> Result<Value, TransferError> {
+    persist_request(tx, decision, now, None)
+}
+
+fn persist_request(
+    tx: &Transaction<'_>,
+    mut decision: Decision,
+    now: f64,
+    request_id: Option<&str>,
+) -> Result<Value, TransferError> {
     if !decision.changed {
         return decision.public_view();
     }
@@ -444,6 +563,14 @@ fn persist(tx: &Transaction<'_>, mut decision: Decision, now: f64) -> Result<Val
         .flatten()
         .and_then(|op| op["created"].as_f64());
     decision.stamp(now, previous_created)?;
+    if let Some(request_id) = request_id {
+        let response = decision.public_view()?;
+        let saved = SavedTransferResponse::deserialize(&response)
+            .map_err(|_| TransferError::Refused("Invalid transfer response"))?;
+        decision.operation["requests"][request_id]["savedResponse"] = saved
+            .serialize(serde_json::value::Serializer)
+            .map_err(|_| TransferError::Refused("Invalid transfer response"))?;
+    }
     let raw = decision.encoded()?;
     let id = decision.operation["id"]
         .as_str()
@@ -1477,6 +1604,41 @@ mod request_tests {
         let replay = request(&store, id, "lead", "target", "team", "codex", 11.0)
             .expect("test fixture operation succeeds");
         assert_eq!(replay, first);
+    }
+
+    #[test]
+    fn exact_retry_returns_original_result_after_transfer_changes() {
+        let (_root, store) = store_with_agents();
+        let id = "5a300f72-4ea6-4d30-8a0e-9b2c13c4226b";
+        let first = request(&store, id, "lead", "target", "team", "codex", 10.0).unwrap();
+        let cancelled = run_async(action(&store, id, Action::Cancel, 20.0)).unwrap();
+        assert_eq!(cancelled["status"], "cancelled");
+        let replay = request(&store, id, "lead", "target", "team", "codex", 30.0).unwrap();
+        assert_eq!(replay, first, "retry returns the original accepted result");
+    }
+
+    #[test]
+    fn legacy_request_without_original_result_fails_closed() {
+        let (_root, store) = store_with_agents();
+        let id = "5a300f72-4ea6-4d30-8a0e-9b2c13c4226c";
+        request(&store, id, "lead", "target", "team", "codex", 10.0).unwrap();
+        run_async(store.transaction(move |tx| {
+            let mut operation = Repository::get(tx, id)?.unwrap();
+            operation["requests"][id]
+                .as_object_mut()
+                .unwrap()
+                .remove("savedResponse");
+            Repository::put(tx, id, &operation.to_string())
+        }))
+        .unwrap();
+        let before = stored(&store, "lead");
+        assert!(matches!(
+            request(&store, id, "lead", "target", "team", "codex", 11.0),
+            Err(TransferError::Refused(
+                "The original transfer response is unavailable"
+            ))
+        ));
+        assert_eq!(stored(&store, "lead"), before);
     }
 
     #[test]
