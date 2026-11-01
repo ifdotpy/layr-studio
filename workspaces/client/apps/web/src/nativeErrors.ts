@@ -102,6 +102,7 @@ export function isDiskFullError(value: unknown): boolean {
   const data = value;
   const record = objectRecord(data);
   if (record?.codexErrorInfo === "diskFull") return true;
+  if (objectRecord(record?.data)?.diskFull === true) return true;
   const readable = readableError(data);
   return DISK_FULL_PATTERN.test(
     readable?.message ?? (typeof value === "string" ? value : ""),

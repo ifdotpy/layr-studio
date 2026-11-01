@@ -73,7 +73,7 @@ test("future and ambiguous vendor errors do not invent a limit notice", () => {
   for (const codexErrorInfo of [
     "futureLimit",
     { futureLimit: { opaque: [1, null] } },
-    { rateLimitExceeded: {}, futureLimit: {} },
+    { rateLimitExceeded: {}, futureLimit: { id: 42 } },
   ]) {
     const error = { message: "Provider extension", codexErrorInfo };
     const original = JSON.stringify(error);

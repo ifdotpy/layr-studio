@@ -235,11 +235,14 @@ pub(super) fn decide(
             }
             let label = provider_label(original);
             let fallback = json!({"message": format!("{label} reported an error.")});
-            let error = params
+            let raw_error = params
                 .get("error")
                 .filter(|v| !v.is_null() && **v != json!({}))
                 .unwrap_or(&fallback);
-            let error_kind = known_error_kind(error);
+            let typed: studio_runtime_schema::provider_errors::AgentError =
+                serde_json::from_value(raw_error.clone())?;
+            let error = serde_json::to_value(typed)?;
+            let error_kind = known_error_kind(&error);
             let policy = matches!(
                 error_kind,
                 Some(
@@ -248,12 +251,12 @@ pub(super) fn decide(
                 )
             );
             if params["willRetry"] == true && !policy {
-                agent["nativeStatus"] = json!({"phase":"retrying","error":error_message(error, label),"turnId":turn,"at":at});
+                agent["nativeStatus"] = json!({"phase":"retrying","error":error_message(&error, label),"turnId":turn,"at":at});
                 agent["activity"] = json!({"phase":"retrying","at":at});
             } else if error_kind == Some(KnownCodexErrorKind::ActiveTurnNotSteerable) {
                 decision.item = Some(notice(
                     format!("steer:{}", turn.as_str().unwrap_or_default()),
-                    error_message(error, label),
+                    error_message(&error, label),
                     "warning",
                     json!({"turnId":turn,"nativeError":error}),
                 ));
@@ -279,7 +282,7 @@ pub(super) fn decide(
                 agent["activity"] = json!({"phase":"error","at":at});
                 decision.item = Some(notice(
                     format!("error:{}", turn.as_str().unwrap_or_default()),
-                    error_message(error, label),
+                    error_message(&error, label),
                     "error",
                     json!({"turnId":turn,"nativeError":error,"cyberAccessProgram":agent["cyberAccessProgram"]}),
                 ));
@@ -690,5 +693,43 @@ mod provider_label_tests {
             error_message(&json!({"codexErrorInfo": "cyberPolicy"}), "Codex"),
             "Codex refused this turn under its cybersecurity policy."
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::notification_dispatch::snapshot::NotificationSnapshot;
+
+    #[test]
+    fn encoded_biological_error_is_normalized_in_published_notice() {
+        let snapshot = NotificationSnapshot::from_records(
+            json!({"id":"agent","rootId":"agent","epoch":1,"status":"running","threadId":"thread","accountKey":"default","provider":"codex","turnId":"turn","inFlight":true,"autoWake":false,"created":0,"compactions":0,"activeTools":[],"events":0}),
+            None,
+            None,
+        )
+        .unwrap();
+        let raw = json!({"message":r#"{"message":"This content was flagged for possible biological risk."}"#});
+        let params = json!({"threadId":"thread","turnId":"turn","error":raw});
+        let decision = decide(
+            &snapshot,
+            "error",
+            NoticeKind::Error,
+            &params,
+            "default",
+            1,
+            1.0,
+        )
+        .unwrap();
+        let metadata = decision.item.unwrap().metadata;
+        let error = metadata.get("nativeError").unwrap();
+        assert_eq!(
+            error.get("message"),
+            Some(&json!(
+                "This content was flagged for possible biological risk."
+            ))
+        );
+        assert_eq!(error.get("code"), Some(&json!("bio_policy")));
+        assert_eq!(error.get("studioRawEvidence"), Some(&raw));
     }
 }

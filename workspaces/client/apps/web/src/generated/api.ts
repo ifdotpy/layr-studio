@@ -10836,6 +10836,65 @@ export interface components {
         )
       | "legacy";
     /**
+     * CodexErrorInfo
+     * @description This translation layer make sure that we expose codex error code in camel case.
+     *
+     *     When an upstream HTTP status is available (for example, from the Responses API or a provider), it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant.
+     */
+    CodexErrorInfo:
+      | (
+          | "contextWindowExceeded"
+          | "sessionBudgetExceeded"
+          | "usageLimitExceeded"
+          | "rateLimitExceeded"
+          | "flexUnavailable"
+          | "serverOverloaded"
+          | "cyberPolicy"
+          | "misalignmentPolicyViolation"
+          | "tooManyDenials"
+          | "internalServerError"
+          | "unauthorized"
+          | "badRequest"
+          | "threadRollbackFailed"
+          | "sandboxError"
+          | "other"
+        )
+      | {
+          httpConnectionFailed: {
+            /** Format: uint16 */
+            httpStatusCode?: number | null | undefined;
+          };
+        }
+      | {
+          responseStreamConnectionFailed: {
+            /** Format: uint16 */
+            httpStatusCode?: number | null | undefined;
+          };
+        }
+      | {
+          responseStreamDisconnected: {
+            /** Format: uint16 */
+            httpStatusCode?: number | null | undefined;
+          };
+        }
+      | {
+          responseTooManyFailedAttempts: {
+            /** Format: uint16 */
+            httpStatusCode?: number | null | undefined;
+          };
+        }
+      | {
+          activeTurnNotSteerable: {
+            turnKind: components["schemas"]["NonSteerableTurnKind"];
+          };
+        }
+      | (
+          | string
+          | {
+              [key: string]: unknown;
+            }
+        );
+    /**
      * CodexLoginReceipt
      * @description Known fields; AccountStore.login_receipts() passes persisted receipts through.
      */
@@ -15834,7 +15893,7 @@ export interface components {
       additionalDetails?: components["schemas"]["JsonValue"] | undefined;
       claudeFailure?: components["schemas"]["ClaudeFailure"] | undefined;
       code?: string | null | undefined;
-      codexErrorInfo?: components["schemas"]["JsonValue"] | undefined;
+      codexErrorInfo?: components["schemas"]["CodexErrorInfo"] | undefined;
       data?: components["schemas"]["JsonValue"] | undefined;
       /** @default  */
       message?: string | undefined;
@@ -16383,6 +16442,8 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /** @enum {string} */
+    NonSteerableTurnKind: "review" | "compact";
     /**
      * OnlineMigration
      * @description Progress of one online migration: batch copy with a high-water mark.
@@ -39117,6 +39178,12 @@ export const NativeSafetyStage = {
   cancelled: "cancelled",
 } as const;
 export type NativeSafetyStage = components["schemas"]["NativeSafetyStage"];
+export const NonSteerableTurnKind = {
+  review: "review",
+  compact: "compact",
+} as const;
+export type NonSteerableTurnKind =
+  components["schemas"]["NonSteerableTurnKind"];
 export const ParticipantRole = { lead: "lead", agent: "agent" } as const;
 export type ParticipantRole = components["schemas"]["ParticipantRole"];
 export const PayloadMigrationName = {

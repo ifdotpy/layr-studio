@@ -207,8 +207,12 @@ mod tests {
             .query_row("SELECT record FROM runtime_agents", [], |row| row.get(0))
             .unwrap();
         assert_eq!(
-            raw,
-            r#"{"archived":true,"error":{"message":"nested","code":"42","error":{"code":42,"message":"nested"},"ignored":true},"excludedAccountKeys":["blocked"],"id":"legacy","lastCompletedTurnError":{"message":"previous","ignored":true},"pinned":false}"#
+            serde_json::from_str::<serde_json::Value>(&raw).unwrap(),
+            serde_json::json!({
+                "archived":true,"pinned":false,"id":"legacy","excludedAccountKeys":["blocked"],
+                "error":{"message":"nested","error":{"code":42,"message":"nested"},"ignored":true,"studioRawEvidence":{"error":{"code":42,"message":"nested"},"ignored":true}},
+                "lastCompletedTurnError":{"message":"previous","ignored":true,"studioRawEvidence":{"message":"previous","ignored":true}}
+            })
         );
         tx.execute("INSERT INTO runtime_agents VALUES('encoded', ?1)", [r#"{"id":"encoded","error":"{\"error\":{\"message\":\"Write failed\",\"data\":{\"diskFull\":true}}}"}"#]).unwrap();
         super::apply(&tx).unwrap();
@@ -225,8 +229,10 @@ mod tests {
             Some(&serde_json::json!("Write failed"))
         );
         assert_eq!(
-            record.pointer("/error/data/diskFull"),
-            Some(&serde_json::json!(true))
+            record.pointer("/error/studioRawEvidence"),
+            Some(&serde_json::json!(
+                r#"{"error":{"message":"Write failed","data":{"diskFull":true}}}"#
+            ))
         );
         tx.execute(
             "INSERT INTO runtime_agents VALUES('bad-list', ?1)",
@@ -252,8 +258,11 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            raw,
-            r#"{"error":{"message":"{\"reason\":\"blocked\"}","data":{"request":"one"},"additionalDetails":"detail","ignored":true,"rawEvidence":{"additionalDetails":"detail","data":{"request":"one"},"ignored":true,"message":{"reason":"blocked"}},"reason":"blocked"},"id":"details"}"#
+            serde_json::from_str::<serde_json::Value>(&raw).unwrap(),
+            serde_json::json!({
+                "id":"details", "error":{"message":"{\"reason\":\"blocked\"}","data":{"request":"one"},"additionalDetails":"detail","ignored":true,
+                    "studioRawEvidence":{"message":{"reason":"blocked"},"data":{"request":"one"},"additionalDetails":"detail","ignored":true}}
+            })
         );
     }
 

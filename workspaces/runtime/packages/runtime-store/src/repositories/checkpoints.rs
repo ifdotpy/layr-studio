@@ -734,9 +734,9 @@ impl CheckpointsRepository {
                 "agent": agent.id,
                 "phase": "failed",
                 "updated": now,
-                "result": {
-                    "checkpointError": "Server restarted with an orphaned checkpoint reservation",
-                    "reservationId": operation_id,
+                "result": super::workspace_ready::CheckpointDiagnostic {
+                    checkpoint_error: "Server restarted with an orphaned checkpoint reservation",
+                    reservation_id: Some(operation_id),
                 },
             });
             insert_object(

@@ -1399,6 +1399,10 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     openapi["components"]["schemas"]["ClaudeFailure"] = crate::claude_failure::schema();
     openapi["components"]["schemas"]["NativeProviderError"] =
         crate::provider_errors::native_provider_error_schema();
+    let provider_errors = crate::provider_errors::schemas()?;
+    for name in ["CodexErrorInfo", "NonSteerableTurnKind"] {
+        openapi["components"]["schemas"][name] = provider_errors[name].clone();
+    }
     check_schema_parity(&openapi, &read_json(root, ACCOUNT_TRANSFER_SCHEMA_PATH)?)?;
     for (name, fields) in [
         (

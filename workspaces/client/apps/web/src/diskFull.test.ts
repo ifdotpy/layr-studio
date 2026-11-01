@@ -47,6 +47,7 @@ it("recognizes disk-full errors from providers and Studio", () => {
     INCIDENT,
     JSON.stringify({ message: "database or disk is full" }),
     { message: "Write failed", codexErrorInfo: "diskFull" },
+    { message: "Disk is full.", data: { diskFull: true } },
     {
       message: "Write failed",
       codexErrorInfo: "diskFull",

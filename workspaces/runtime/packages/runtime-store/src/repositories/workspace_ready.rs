@@ -297,8 +297,10 @@ pub const ARCHIVED_PROVISION_RELEASE: &str =
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ProvisionResult<'a> {
-    checkpoint_error: &'a str,
+pub(super) struct CheckpointDiagnostic<'a> {
+    pub checkpoint_error: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reservation_id: Option<&'a str>,
 }
 
 pub struct WorkspaceReadyRepository;
@@ -510,8 +512,9 @@ impl WorkspaceReadyRepository {
         operation["updated"] = json!(now);
         operation["error"] = Value::Null;
         if let Err(reason) = checkpoint {
-            operation["result"] = serde_json::to_value(ProvisionResult {
+            operation["result"] = serde_json::to_value(CheckpointDiagnostic {
                 checkpoint_error: reason,
+                reservation_id: None,
             })?;
         }
         tx.execute(
