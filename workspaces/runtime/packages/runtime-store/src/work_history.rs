@@ -190,8 +190,11 @@ mod tests {
     use serde_json::json;
 
     fn work(results: Value, decisions: Value) -> Value {
-        json!({"id":"w","rootId":"lead","title":"t","status":"review","created":1,"updated":1,
-               "version":1,"dependencies":[],"results":results,"decisions":decisions,"releases":[]})
+        let mut value = json!({"id":"w","rootId":"lead","title":"t","status":"review","created":1,"updated":1,
+               "version":1,"dependencies":[],"results":[],"decisions":[],"releases":[]});
+        value["results"] = results;
+        value["decisions"] = decisions;
+        value
     }
 
     fn tombstones(db: &Connection, table: &str) -> Vec<String> {

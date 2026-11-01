@@ -164,7 +164,7 @@ impl WorkItemsRepository {
         }
         let inserted = Table::<WorkItemRecord>::new(connection).insert_new(&record)?;
         if inserted {
-            crate::work_history::reconcile(connection, id, &record.value_for_history()?)?;
+            crate::work_history::reconcile(connection, id, &record.history_value())?;
         }
         Ok(inserted)
     }
@@ -186,7 +186,7 @@ impl WorkItemsRepository {
             });
         }
         Table::<WorkItemRecord>::new(connection).update(record)?;
-        crate::work_history::reconcile(connection, id, &record.value_for_history()?)?;
+        crate::work_history::reconcile(connection, id, &record.history_value())?;
         Ok(())
     }
 

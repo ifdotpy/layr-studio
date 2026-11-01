@@ -1303,10 +1303,19 @@ pub(crate) fn reconcile_work_history(
     tx: &rusqlite::Transaction<'_>,
     id: &str,
 ) -> Result<(), StoreError> {
-    let raw: String = tx.query_row("SELECT record FROM runtime_work WHERE id=?1", [id], |row| {
-        row.get(0)
-    })?;
-    studio_runtime_store::work_history::reconcile(tx, id, &serde_json::from_str(&raw)?)
+    use rusqlite::OptionalExtension;
+    // A statement that deleted the row has no entries left to repair.
+    let raw: Option<String> = tx
+        .query_row("SELECT record FROM runtime_work WHERE id=?1", [id], |row| {
+            row.get(0)
+        })
+        .optional()?;
+    match raw {
+        Some(raw) => {
+            studio_runtime_store::work_history::reconcile(tx, id, &serde_json::from_str(&raw)?)
+        }
+        None => Ok(()),
+    }
 }
 
 async fn write(store: &studio_runtime_store::RuntimeStore, sql: &'static str, params: Vec<String>) {
