@@ -240,6 +240,8 @@ struct SummaryProgress {
     can_retry: bool,
     #[serde(default)]
     moving_now: u64,
+    #[serde(default)]
+    can_cancel: bool,
 }
 
 #[derive(Deserialize)]
@@ -267,6 +269,7 @@ pub fn progress_view(
         blocked,
         can_retry,
         moving_now,
+        can_cancel,
     } = summary;
     Ok(match status {
         TransferStatus::Completed => Progress::Completed {
@@ -282,7 +285,7 @@ pub fn progress_view(
             if can_retry {
                 actions.push(Action::Retry);
             }
-            if moving_now == 0 {
+            if can_cancel {
                 actions.push(Action::Cancel);
             }
             if let Some(block) = blocked.into_iter().next() {
@@ -563,49 +566,7 @@ impl Snapshot {
                 }
             }
             Command::Action(Action::Cancel) => {
-                for id in &self.order {
-                    let m = &op["members"][id];
-                    let phase = self.phase(id)?;
-                    // Only a native thread request moves history. Source and
-                    // catalog reads do not, so a member without one may return.
-                    let native_request =
-                        matches!(
-                            phase,
-                            Phase::Reading | Phase::Submitted | Phase::LazySubmitted | Phase::Ready
-                        ) || ["providerIntent", "transportTicket", "submittedAt", "result"]
-                            .iter()
-                            .any(|key| studio_runtime_store::truthy(m.get(*key)));
-                    if flag(m, "lazy")
-                        && !phase.terminal()
-                        && phase != Phase::Lazy
-                        && native_request
-                        && !(phase == Phase::Blocked
-                            && flag(m, "archiveInvalidated")
-                            && (!studio_runtime_store::truthy(m.get("submittedAt"))
-                                || studio_runtime_store::truthy(m.get("result"))))
-                    {
-                        return Err(TransferError::Refused(
-                            "A native history move has started. Resolve its receipt before cancelling.",
-                        ));
-                    }
-                }
-                if self.order.iter().any(|id| {
-                    let m = &op["members"][id];
-                    studio_runtime_store::truthy(m.get("interruptSubmittedAt"))
-                        && m["interruptOutcome"] != "acknowledged"
-                }) {
-                    return Err(TransferError::Refused(
-                        "Retry the unresolved turn interruption before cancelling this transfer",
-                    ));
-                }
-                if self.order.iter().any(|id| {
-                    op["members"][id]["interruptOutcome"] == "acknowledged"
-                        && flag(&agents[id], "inFlight")
-                }) {
-                    return Err(TransferError::Refused(
-                        "Wait for the active turn interruption to finish before cancelling this transfer",
-                    ));
-                }
+                check_cancel(&op, &self.order, &agents)?;
                 op["status"] = json!("cancelled");
                 for id in &self.order {
                     let a = agents
@@ -1642,6 +1603,58 @@ fn member_order<'de, D: serde::Deserializer<'de>>(
     deserializer.deserialize_map(Visitor)
 }
 
+fn phase(operation: &Value, id: &str) -> Result<Phase, TransferError> {
+    serde_json::from_value(operation["members"][id]["phase"].clone())
+        .map_err(|_| invalid("account transfer", "/members/phase"))
+}
+
+fn check_cancel(operation: &Value, order: &[String], agents: &BTreeMap<String, Value>) -> Result<(), TransferError> {
+                for id in order {
+                    let m = &operation["members"][id];
+                    let phase = phase(operation, id)?;
+                    // Only a native thread request moves history. Source and
+                    // catalog reads do not, so a member without one may return.
+                    let native_request =
+                        matches!(
+                            phase,
+                            Phase::Reading | Phase::Submitted | Phase::LazySubmitted | Phase::Ready
+                        ) || ["providerIntent", "transportTicket", "submittedAt", "result"]
+                            .iter()
+                            .any(|key| studio_runtime_store::truthy(m.get(*key)));
+                    if flag(m, "lazy")
+                        && !phase.terminal()
+                        && phase != Phase::Lazy
+                        && native_request
+                        && !(phase == Phase::Blocked
+                            && flag(m, "archiveInvalidated")
+                            && (!studio_runtime_store::truthy(m.get("submittedAt"))
+                                || studio_runtime_store::truthy(m.get("result"))))
+                    {
+                        return Err(TransferError::Refused(
+                            "A native history move has started. Resolve its receipt before cancelling.",
+                        ));
+                    }
+                }
+                if order.iter().any(|id| {
+                    let m = &operation["members"][id];
+                    studio_runtime_store::truthy(m.get("interruptSubmittedAt"))
+                        && m["interruptOutcome"] != "acknowledged"
+                }) {
+                    return Err(TransferError::Refused(
+                        "Retry the unresolved turn interruption before cancelling this transfer",
+                    ));
+                }
+                if order.iter().any(|id| {
+                    operation["members"][id]["interruptOutcome"] == "acknowledged"
+                        && flag(&agents[id], "inFlight")
+                }) {
+                    return Err(TransferError::Refused(
+                        "Wait for the active turn interruption to finish before cancelling this transfer",
+                    ));
+                }
+    Ok(())
+}
+
 impl Decision {
     /// Atomically maintained renderer summary; a newer operation owns its lead.
     pub fn stamp(&mut self, now: f64, previous_created: Option<f64>) -> Result<(), TransferError> {
@@ -1652,6 +1665,7 @@ impl Decision {
             return Err(TransferError::Refused("Invalid transfer timestamp"));
         }
         self.operation["updated"] = json!(now);
+        let can_cancel = check_cancel(&self.operation, &self.order, &self.agents).is_ok();
         let lead_id = self.operation["leadId"]
             .as_str()
             .ok_or_else(|| invalid("account transfer", "/leadId"))?;
@@ -1688,6 +1702,7 @@ impl Decision {
         let counts = progress(&self.operation, &self.order, false)?;
         extend(&mut summary, counts)?;
         summary["finishHistory"] = json!(true);
+        summary["canCancel"] = json!(can_cancel);
         summary["waiting"] = self
             .order
             .iter()
@@ -2130,6 +2145,27 @@ mod provider_receipt_tests {
             [("agent".into(), agent.to_string())],
         )
         .expect("test fixture operation succeeds")
+    }
+
+    #[test]
+    fn blocked_native_intent_does_not_offer_cancel() {
+        let snapshot = refused_during_source_reads(true);
+        let mut decision = Decision {
+            operation: snapshot.operation.clone(),
+            agents: snapshot.agents.clone(),
+            followups: vec![],
+            changed: true,
+            order: snapshot.order.clone(),
+        };
+        decision.stamp(2.0, None).unwrap();
+        let progress = progress_view(decision.agents["agent"].get("accountTransfer")).unwrap();
+        let encoded = serde_json::to_value(progress).unwrap();
+        assert!(
+            !encoded["actions"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("cancel"))
+        );
     }
 
     #[test]
