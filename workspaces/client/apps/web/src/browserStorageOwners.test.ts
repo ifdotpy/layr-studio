@@ -10,6 +10,8 @@ import { expect, it } from "vitest";
 // matches the source.
 const allowed: Record<string, string> = {
   "browserPersistence.ts": "allowed browser persistence and legacy cleanup",
+  "servers/excludedServers.ts":
+    "servers removed from this UI, so they stay out of the trusted list",
   "servers/routes.ts": "routes that a paired server reported, for each server",
   "servers/storage.ts":
     "server-scoped storage that drafts, queues, uploads, and caches use",

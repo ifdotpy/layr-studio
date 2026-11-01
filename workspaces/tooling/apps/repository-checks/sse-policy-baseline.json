@@ -236,6 +236,14 @@
     "callee": "adapter.fetch"
   },
   {
+    "file": "servers/excludedServers.ts",
+    "callee": "globalThis.localStorage"
+  },
+  {
+    "file": "servers/excludedServers.ts",
+    "callee": "globalThis.localStorage"
+  },
+  {
     "file": "servers/mutationIdentity.test.ts",
     "callee": "globalThis.fetch"
   },
