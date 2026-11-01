@@ -49,6 +49,20 @@ impl<T> Field<T> {
     pub fn is_some(&self) -> bool {
         matches!(self, Self::Value(_))
     }
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Field<U> {
+        match self {
+            Self::Missing => Field::Missing,
+            Self::Null => Field::Null,
+            Self::Value(value) => Field::Value(f(value)),
+        }
+    }
+    pub fn try_map<U, E>(self, f: impl FnOnce(T) -> Result<U, E>) -> Result<Field<U>, E> {
+        match self {
+            Self::Missing => Ok(Field::Missing),
+            Self::Null => Ok(Field::Null),
+            Self::Value(value) => f(value).map(Field::Value),
+        }
+    }
 }
 impl<'de, T: Deserialize<'de>> Deserialize<'de> for Field<T> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {

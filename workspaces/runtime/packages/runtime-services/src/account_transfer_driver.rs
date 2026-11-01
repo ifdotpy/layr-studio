@@ -157,7 +157,7 @@ pub fn owns_reading_member(
     {
         return Ok(false);
     }
-    let agent = snapshot.agent_record(member_id)?;
+    let agent = snapshot.agent(member_id)?;
     Ok(agent
         .account_transfer_id
         .value()
@@ -444,7 +444,7 @@ pub async fn request(
             )?;
             let mut decision = snapshot.decide(Command::Restart)?;
             decision.operation = operation;
-            decision.replace_agent_records(agents)?;
+            decision.agents = agents;
             decision.changed = true;
             persist_request(tx, decision, now, Some(&operation_id))
         })
@@ -517,16 +517,14 @@ fn persist_request(
         .map_err(|_| TransferError::Refused("Invalid transfer response"));
     }
     let operation = &decision.operation;
-    let agents = decision.agent_records()?;
-    let old =
-        agents
-            .get(&operation.lead_id)
-            .and_then(|agent| match agent.account_transfer.value() {
-                Some(studio_runtime_store::transfer_record::AgentTransferState::Summary(
-                    summary,
-                )) => Some(summary.id.as_str()),
-                _ => None,
-            });
+    let old = decision.agents.get(&operation.lead_id).and_then(|agent| {
+        match agent.account_transfer.value() {
+            Some(studio_runtime_store::transfer_record::AgentTransferState::Summary(summary)) => {
+                Some(summary.id.as_str())
+            }
+            _ => None,
+        }
+    });
     let previous_created = old
         .map(|id| Repository::get_typed_with_raw(tx, id))
         .transpose()?
@@ -540,7 +538,7 @@ fn persist_request(
     let raw = decision.encoded()?;
     let operation = &decision.operation;
     Repository::put(tx, &operation.id, &raw)?;
-    let mut agents = decision.agent_records()?;
+    let mut agents = std::mem::take(&mut decision.agents);
     for (id, agent) in &mut agents {
         let prior = AgentRepository::get(tx, &AgentId::from(id.as_str()))?;
         let prior_resume = prior
@@ -1195,7 +1193,7 @@ pub async fn execute_member(
             let decision = snapshot.begin_read(&transaction_agent_id)?;
             let input = TransferPreparation {
                 operation: decision.operation.clone(),
-                agent: snapshot.agent_record(&transaction_agent_id)?.value(),
+                agent: snapshot.agent(&transaction_agent_id)?.value(),
             };
             persist(tx, decision, now)?;
             Ok::<_, TransferError>(Ok(input))

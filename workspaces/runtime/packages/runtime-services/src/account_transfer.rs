@@ -473,12 +473,6 @@ impl Snapshot {
             .get(id)
             .ok_or(TransferError::Refused("Unknown transfer member"))
     }
-    pub fn agent_record(
-        &self,
-        id: &str,
-    ) -> Result<studio_runtime_store::AgentRecord, TransferError> {
-        Ok(self.agent(id)?.clone())
-    }
     fn phase(&self, id: &str) -> Result<Phase, TransferError> {
         self.operation
             .members
@@ -686,48 +680,53 @@ impl Snapshot {
                                 &mut a.daybreak_enabled,
                                 exact,
                             );
-                            let cyber = wrap_transfer_field(&source.cyber_access_program);
+                            let cyber = source
+                                .cyber_access_program
+                                .clone()
+                                .map(studio_runtime_store::StoredTransferValue::Known);
                             restore_source_field(&cyber, &mut a.cyber_access_program, exact);
-                            let defaults = wrap_worker_defaults(&source.worker_defaults);
+                            let defaults = source
+                                .worker_defaults
+                                .clone()
+                                .map(studio_runtime_store::StoredWorkerDefaults::Known);
                             restore_source_field(&defaults, &mut a.worker_defaults, exact);
-                            let claude_options = wrap_transfer_object(&source.claude_options);
+                            let claude_options = source
+                                .claude_options
+                                .clone()
+                                .map(studio_runtime_store::StoredTransferObject::Known);
                             restore_source_field(&claude_options, &mut a.claude_options, exact);
-                            let pending_account =
-                                wrap_transfer_field(&source.pending_settings_account_key);
+                            let pending_account = source
+                                .pending_settings_account_key
+                                .clone()
+                                .map(studio_runtime_store::StoredTransferValue::Known);
                             restore_source_field(
                                 &pending_account,
                                 &mut a.pending_settings_account_key,
                                 exact,
                             );
-                            let pending = wrap_transfer_object(&source.pending_settings);
+                            let pending = source
+                                .pending_settings
+                                .clone()
+                                .map(studio_runtime_store::StoredTransferObject::Known);
                             restore_source_field(&pending, &mut a.pending_settings, exact);
-                            let execution_account = match &source.execution_settings_account_key {
-                                Field::Missing => Field::Missing,
-                                Field::Null => Field::Null,
-                                Field::Value(key) => Field::Value(key.as_str().to_owned()),
-                            };
+                            let execution_account = source
+                                .execution_settings_account_key
+                                .clone()
+                                .map(|key| key.as_str().to_owned());
                             restore_source_field(
                                 &execution_account,
                                 &mut a.execution_settings_account_key,
                                 exact,
                             );
-                            let error = match &source.error {
-                                Field::Missing => Field::Missing,
-                                Field::Null => Field::Null,
-                                Field::Value(error) => Field::Value(
-                                    studio_runtime_schema::provider_errors::AgentError::Message(
-                                        error.clone(),
-                                    ),
-                                ),
-                            };
+                            let error = source
+                                .error
+                                .clone()
+                                .map(studio_runtime_schema::provider_errors::AgentError::Message);
                             restore_source_field(&error, &mut a.error, exact);
-                            let hold = match &source.native_failure_hold {
-                                Field::Missing => Field::Missing,
-                                Field::Null => Field::Null,
-                                Field::Value(value) => Field::Value(
-                                    studio_runtime_store::NativeFailureHold::Boolean(*value),
-                                ),
-                            };
+                            let hold = source
+                                .native_failure_hold
+                                .clone()
+                                .map(studio_runtime_store::NativeFailureHold::Boolean);
                             restore_source_field(&hold, &mut a.native_failure_hold, exact);
                             if let Some(status) = source.status.value() {
                                 a.status = status.clone();
@@ -1507,7 +1506,10 @@ impl Snapshot {
             a.account_key = account_key.clone();
         }
         restore_field(
-            &wrap_transfer_field(&settings.updated_at),
+            &settings
+                .updated_at
+                .clone()
+                .map(studio_runtime_store::StoredTransferValue::Known),
             &mut a.updated_at,
             false,
         );
@@ -1525,33 +1527,51 @@ impl Snapshot {
             false,
         );
         restore_field(
-            &wrap_transfer_field(&settings.cyber_access_program),
+            &settings
+                .cyber_access_program
+                .clone()
+                .map(studio_runtime_store::StoredTransferValue::Known),
             &mut a.cyber_access_program,
             false,
         );
         restore_field(
-            &wrap_worker_defaults(&settings.worker_defaults),
+            &settings
+                .worker_defaults
+                .clone()
+                .map(studio_runtime_store::StoredWorkerDefaults::Known),
             &mut a.worker_defaults,
             false,
         );
         restore_field(
-            &wrap_transfer_object(&settings.claude_options),
+            &settings
+                .claude_options
+                .clone()
+                .map(studio_runtime_store::StoredTransferObject::Known),
             &mut a.claude_options,
             false,
         );
         restore_field(&settings.portable_history, &mut a.portable_history, false);
         restore_field(
-            &wrap_transfer_field(&settings.yolo_mode),
+            &settings
+                .yolo_mode
+                .clone()
+                .map(studio_runtime_store::StoredTransferValue::Known),
             &mut a.yolo_mode,
             false,
         );
         restore_field(
-            &wrap_transfer_field(&target_settings.pending_settings_account_key),
+            &target_settings
+                .pending_settings_account_key
+                .clone()
+                .map(studio_runtime_store::StoredTransferValue::Known),
             &mut a.pending_settings_account_key,
             false,
         );
         restore_field(
-            &wrap_transfer_object(&target_settings.pending_settings),
+            &target_settings
+                .pending_settings
+                .clone()
+                .map(studio_runtime_store::StoredTransferObject::Known),
             &mut a.pending_settings,
             false,
         );
@@ -1870,48 +1890,17 @@ fn restore_source_field<T: Clone>(
     }
 }
 
-fn wrap_transfer_field<T: Clone>(
-    field: &studio_runtime_schema::queue_command::Field<T>,
-) -> studio_runtime_schema::queue_command::Field<studio_runtime_store::StoredTransferValue<T>> {
-    use studio_runtime_schema::queue_command::Field;
-    match field {
-        Field::Missing => Field::Missing,
-        Field::Null => Field::Null,
-        Field::Value(value) => Field::Value(studio_runtime_store::StoredTransferValue::Known(
-            value.clone(),
-        )),
-    }
-}
-
-fn wrap_transfer_object<T: Clone>(
-    field: &studio_runtime_schema::queue_command::Field<T>,
-) -> studio_runtime_schema::queue_command::Field<studio_runtime_store::StoredTransferObject<T>> {
-    use studio_runtime_schema::queue_command::Field;
-    match field {
-        Field::Missing => Field::Missing,
-        Field::Null => Field::Null,
-        Field::Value(value) => Field::Value(studio_runtime_store::StoredTransferObject::Known(
-            value.clone(),
-        )),
-    }
-}
-
 fn known_transfer_value<T: Clone>(
     field: &studio_runtime_schema::queue_command::Field<
         studio_runtime_store::StoredTransferValue<T>,
     >,
     key: &str,
 ) -> Result<studio_runtime_schema::queue_command::Field<T>, TransferError> {
-    use studio_runtime_schema::queue_command::Field;
     use studio_runtime_store::StoredTransferValue;
-    match field {
-        Field::Missing => Ok(Field::Missing),
-        Field::Null => Ok(Field::Null),
-        Field::Value(StoredTransferValue::Known(value)) => Ok(Field::Value(value.clone())),
-        Field::Value(StoredTransferValue::Unreadable(_)) => {
-            Err(invalid("transfer agent", format!("/{key}")))
-        }
-    }
+    field.clone().try_map(|value| match value {
+        StoredTransferValue::Known(value) => Ok(value),
+        StoredTransferValue::Unreadable(_) => Err(invalid("transfer agent", format!("/{key}"))),
+    })
 }
 
 fn known_transfer_object<T: Clone>(
@@ -1920,16 +1909,11 @@ fn known_transfer_object<T: Clone>(
     >,
     key: &str,
 ) -> Result<studio_runtime_schema::queue_command::Field<T>, TransferError> {
-    use studio_runtime_schema::queue_command::Field;
     use studio_runtime_store::StoredTransferObject;
-    match field {
-        Field::Missing => Ok(Field::Missing),
-        Field::Null => Ok(Field::Null),
-        Field::Value(StoredTransferObject::Known(value)) => Ok(Field::Value(value.clone())),
-        Field::Value(StoredTransferObject::Unreadable(_)) => {
-            Err(invalid("transfer agent", format!("/{key}")))
-        }
-    }
+    field.clone().try_map(|value| match value {
+        StoredTransferObject::Known(value) => Ok(value),
+        StoredTransferObject::Unreadable(_) => Err(invalid("transfer agent", format!("/{key}"))),
+    })
 }
 
 fn worker_defaults(
@@ -1940,29 +1924,11 @@ fn worker_defaults(
     >,
     TransferError,
 > {
-    use studio_runtime_schema::queue_command::Field;
     use studio_runtime_store::StoredWorkerDefaults;
-    match &agent.worker_defaults {
-        Field::Missing => Ok(Field::Missing),
-        Field::Null => Ok(Field::Null),
-        Field::Value(StoredWorkerDefaults::Known(value)) => Ok(Field::Value(value.clone())),
-        Field::Value(StoredWorkerDefaults::Unreadable(_)) => {
-            Err(invalid("transfer agent", "/workerDefaults"))
-        }
-    }
-}
-
-fn wrap_worker_defaults(
-    field: &studio_runtime_schema::queue_command::Field<
-        studio_runtime_store::transfer_record::TransferWorkerDefaults,
-    >,
-) -> studio_runtime_schema::queue_command::Field<studio_runtime_store::StoredWorkerDefaults> {
-    use studio_runtime_schema::queue_command::Field;
-    match field {
-        Field::Missing => Field::Missing,
-        Field::Null => Field::Null,
-        Field::Value(value) => Field::Value(value.clone().into()),
-    }
+    agent.worker_defaults.clone().try_map(|value| match value {
+        StoredWorkerDefaults::Known(value) => Ok(value),
+        StoredWorkerDefaults::Unreadable(_) => Err(invalid("transfer agent", "/workerDefaults")),
+    })
 }
 
 /// The transfer member record for one agent, as a request enrolls it, and the
@@ -2087,33 +2053,25 @@ pub fn typed_enroll(
         pending_settings: pending,
         pending_settings_account_key: pending_account,
         claude_options: known_transfer_object(&agent.claude_options, "claudeOptions")?,
-        execution_settings_account_key: match &agent.execution_settings_account_key {
-            Field::Missing => Field::Missing,
-            Field::Null => Field::Null,
-            Field::Value(value) => Field::Value(
+        execution_settings_account_key: agent.execution_settings_account_key.clone().try_map(
+            |value| {
                 value
-                    .clone()
                     .try_into()
-                    .map_err(|_| invalid("transfer agent", "/executionSettingsAccountKey"))?,
-            ),
-        },
+                    .map_err(|_| invalid("transfer agent", "/executionSettingsAccountKey"))
+            },
+        )?,
         status: Field::Value(agent.status.clone()),
-        error: match &agent.error {
-            Field::Missing => Field::Missing,
-            Field::Null => Field::Null,
-            Field::Value(studio_runtime_schema::provider_errors::AgentError::Message(value)) => {
-                Field::Value(value.clone())
-            }
-            Field::Value(_) => return Err(invalid("transfer agent", "/error")),
-        },
-        native_failure_hold: match &agent.native_failure_hold {
-            Field::Missing => Field::Missing,
-            Field::Null => Field::Null,
-            Field::Value(studio_runtime_store::NativeFailureHold::Boolean(value)) => {
-                Field::Value(*value)
-            }
-            Field::Value(_) => return Err(invalid("transfer agent", "/nativeFailureHold")),
-        },
+        error: agent.error.clone().try_map(|value| match value {
+            studio_runtime_schema::provider_errors::AgentError::Message(value) => Ok(value),
+            _ => Err(invalid("transfer agent", "/error")),
+        })?,
+        native_failure_hold: agent
+            .native_failure_hold
+            .clone()
+            .try_map(|value| match value {
+                studio_runtime_store::NativeFailureHold::Boolean(value) => Ok(value),
+                _ => Err(invalid("transfer agent", "/nativeFailureHold")),
+            })?,
     };
     agent.lazy_account_transfer =
         Field::Value(LazyTransferState::Pending(Box::new(LazyTransfer {
@@ -2361,21 +2319,6 @@ impl Decision {
         }
         admissions.insert(operation.to_owned(), admission);
         self.changed = true;
-        Ok(())
-    }
-
-    pub fn agent_records(
-        &self,
-    ) -> Result<BTreeMap<String, studio_runtime_store::AgentRecord>, TransferError> {
-        Ok(self.agents.clone())
-    }
-
-    pub fn replace_agent_records(
-        &mut self,
-        agents: BTreeMap<String, studio_runtime_store::AgentRecord>,
-    ) -> Result<(), TransferError> {
-        self.changed |= self.agents != agents;
-        self.agents = agents;
         Ok(())
     }
 
@@ -2946,7 +2889,7 @@ mod provider_receipt_tests {
         let agent = serde_json::json!({"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0});
         let snapshot = super::Snapshot::read(raw, [("agent".into(), agent.to_string())]).unwrap();
         assert_eq!(snapshot.typed_public_view().total, 1);
-        let mut agent = snapshot.agent_record("agent").unwrap();
+        let mut agent = snapshot.agent("agent").unwrap().clone();
         let id = "move".to_owned().try_into().unwrap();
         let target = "target".to_owned().try_into().unwrap();
         let member = super::typed_enroll(
@@ -2961,11 +2904,9 @@ mod provider_receipt_tests {
         assert_eq!(agent.account_transfer_id.value().unwrap().as_str(), "move");
         let mut decision = snapshot.decide(super::Command::Restart).unwrap();
         assert_eq!(decision.typed_public_view().total, 1);
-        let mut agents = decision.agent_records().unwrap();
-        agents.insert("agent".into(), agent);
-        decision.replace_agent_records(agents).unwrap();
+        decision.agents.insert("agent".into(), agent);
         assert_eq!(
-            decision.agent_records().unwrap()["agent"]
+            decision.agents["agent"]
                 .account_transfer_id
                 .value()
                 .unwrap()
