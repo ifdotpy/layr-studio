@@ -1,5 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import type { Message } from "../types";
+import { isMessagePending } from "../messageSendStatus.ts";
 
 // Recall text into the composer. The transcript's scroll position is independent.
 export function usePromptRecall(
@@ -28,7 +29,8 @@ export function usePromptRecall(
   latest.current = { scope, getDraft, setDraft };
   const eligible = (items: Message[]) =>
     items.filter(
-      (item) => item.role === "user" && !item.pending && item.text.trim(),
+      (item) =>
+        item.role === "user" && !isMessagePending(item) && item.text.trim(),
     );
   const reset = () => {
     cursor.current = null;

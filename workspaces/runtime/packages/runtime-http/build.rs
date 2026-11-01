@@ -102,6 +102,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     // The OpenAPI leaves own integer bounds. Preserve JSON number spellings
     // such as 7.0; the pull-output ingress validates them before typed decoding.
     for (name, owner) in [
+        (
+            "TeamCounts",
+            "studio_runtime_schema::agent_progress::TeamCounts",
+        ),
         ("VaultPullSequence", "serde_json::Number"),
         ("VaultPullFiles", "serde_json::Number"),
         ("VaultPullBytes", "serde_json::Number"),

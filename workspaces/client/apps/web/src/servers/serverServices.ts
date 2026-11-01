@@ -29,6 +29,7 @@ import type { StudioServer } from "./registry";
 import { createServerTransport } from "./serverTransport";
 import { serverCredentialAdapter } from "./transport";
 import { scopedSessionOutbox } from "../browserPersistence";
+import { indexedDb } from "../indexedDb";
 
 /** Services belong to a server, never to the currently visible chat. */
 export function createServerServices(server: StudioServer) {
@@ -45,6 +46,11 @@ export function createServerServices(server: StudioServer) {
     transport.owner.id === "local" && hasNativeClient();
   const sequences = createEntitySequenceScope();
   const activity = createServerActivity();
+  const cacheStorage = indexedDb(
+    `studio-subscription-cache:${transport.owner.id}`,
+    "subscriptions",
+    1,
+  );
   const api = createApiScope({
     origin: transport.owner.origin,
     fetch: transport.fetch,
@@ -83,6 +89,17 @@ export function createServerServices(server: StudioServer) {
       resources,
       sequences,
       transcripts,
+      onFreshReceipts: async (workspaceId, receipts) => {
+        for (const receipt of receipts) {
+          if (receipt.agent)
+            await outbox.reconcileOutboxReceipts(
+              receipt.agent,
+              [receipt],
+              workspaceId,
+            );
+        }
+      },
+      cacheStorage,
       databaseSuffix:
         transport.owner.id === "local"
           ? ""
@@ -98,13 +115,14 @@ export function createServerServices(server: StudioServer) {
   };
   const outbox = createOutbox({
     api,
+    serverId: transport.owner.id,
     watchResourceConnection: (...args) =>
       synchronization().resources.watchResourceConnection(...args),
-    storage,
   });
   let browserDrafts: ReturnType<typeof createBrowserDrafts> | undefined;
   const drafts = () => {
     return (browserDrafts ??= createBrowserDrafts({
+      serverId: transport.owner.id,
       api,
       resources: {
         watchResourceChanges: (...args) =>
@@ -148,7 +166,7 @@ export function createServerServices(server: StudioServer) {
     owner: transport.owner,
     audio,
     chatCreations: createChatCreationStore(storage),
-    recordings: createRecordingStorage(),
+    recordings: createRecordingStorage(transport.owner.id),
     localDrafts,
     uploads,
     storageEventKey: createStorageEventKey(
@@ -178,11 +196,13 @@ export function createServerServices(server: StudioServer) {
     api,
     storage,
     ready,
-    close() {
+    close(removeCache = false) {
       audio.close();
       stopName();
       runtime?.resources.dispose();
+      runtime?.sync.disposeCache();
       transport.close();
+      if (removeCache) void cacheStorage.destroy();
     },
   };
 }

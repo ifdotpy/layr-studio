@@ -2,9 +2,9 @@
 //! Tracking: https://github.com/ifdotpy/layr-studio/issues/630
 //!
 //! The edge only reads the principal and calls `studio_runtime_services::commands`.
-//! `withdraw` runs in one transaction. `send` and `stop` need I/O, so they run between
-//! two short transactions: `begin` (permission, id, replay) and `finish` (reference and
-//! watermark).
+//! `withdraw` and `stop` run in one transaction. `send` runs `begin` (permission, id,
+//! replay) before its I/O, and then posts its message and runs `finish` (reference and
+//! watermark) in one transaction, unless the message is federated.
 
 use base64::Engine;
 use std::sync::Arc;
@@ -35,7 +35,7 @@ pub(crate) fn command_error(error: CommandError) -> ApiError {
             StatusCode::FORBIDDEN,
             "This caller may not run this command",
         ),
-        CommandError::TooOld => ApiError::new(StatusCode::GONE, error.to_string()),
+        CommandError::TooOld => ApiError::receipt_expired(error.to_string()),
         CommandError::Invalid(message) => ApiError::new(StatusCode::BAD_REQUEST, message),
         CommandError::Conflict(message) => ApiError::new(StatusCode::CONFLICT, message),
         CommandError::NotFound => ApiError::new(StatusCode::NOT_FOUND, error.to_string()),
@@ -144,7 +144,12 @@ async fn command(
                         assets: Some(assets),
                         delivery: body.delivery,
                     };
-                    let Json(receipt) = super::messages::send_message(state.clone(), message)
+                    let id = request.id.as_str().to_owned();
+                    let (Json(receipt), finished) =
+                        super::messages::send_message_with(state.clone(), message, {
+                            let (begun, id) = (begun.clone(), id.clone());
+                            move |tx| finish_message(tx, &begun, &id)
+                        })
                         .await
                         .map_err(same_id_conflict)?;
                     // The delivery receipt of the message, in the shape of
@@ -155,14 +160,15 @@ async fn command(
                         seq: 0,
                         payload: serde_json::to_value(&receipt).map_err(ApiError::json)?,
                     });
-                    let id = request.id.as_str().to_owned();
-                    store
-                        .transaction_with_error(move |tx| {
-                            let reference = commands::message_reference(tx, &id)?;
-                            commands::finish(tx, &begun, &reference)
-                        })
-                        .await
-                        .map_err(command_error)?
+                    match finished {
+                        Some(reference) => reference,
+                        // The federated branch does not post here, so it finishes in its own
+                        // transaction.
+                        None => store
+                            .transaction_with_error(move |tx| finish_message(tx, &begun, &id))
+                            .await
+                            .map_err(command_error)?,
+                    }
                 }
             }
         }
@@ -175,6 +181,17 @@ async fn command(
         .map_err(command_error)?;
     response.rows.extend(extra_rows);
     Ok(Json(response))
+}
+
+/// Record the reference of a sent message and raise the watermark. Call in the transaction
+/// that posted the message.
+fn finish_message(
+    tx: &rusqlite::Transaction<'_>,
+    begun: &commands::Begun,
+    id: &str,
+) -> Result<studio_runtime_store::request_results::RequestReference, CommandError> {
+    let reference = commands::message_reference(tx, id)?;
+    commands::finish(tx, begun, &reference)
 }
 
 async fn begin(
@@ -569,6 +586,61 @@ mod tests {
         let (status, response) = post(&app, None, json!({"id":id,"client":"web-1","number":1,"kind":"send","target":"workspace","body":{"text":"hello"}})).await;
         assert_eq!(status, 200, "{response}");
         assert_eq!(response["ref_id"], id);
+    }
+
+    async fn message_count(store: &RuntimeStore, id: &str) -> i64 {
+        let id = id.to_owned();
+        store
+            .transaction(move |tx| {
+                Ok(tx.query_row(
+                    "SELECT COUNT(*) FROM runtime_events WHERE id=?1",
+                    [id.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )?)
+            })
+            .await
+            .expect("message count")
+    }
+
+    #[tokio::test]
+    async fn a_send_whose_record_fails_rolls_back_its_message_and_the_retry_succeeds_once() {
+        let (app, store, _directory) = app_with_queue().await;
+        let id = RequestIdentity::issue_root();
+        let send = json!({"id":id,"client":"web-1","number":1,"kind":"send","target":"workspace","body":{"text":"hello"}});
+        // Injected failure in `finish`: the watermark write fails after the message is posted.
+        store
+            .transaction(|tx| {
+                tx.execute_batch(
+                    "CREATE TRIGGER fail_send_record_insert BEFORE INSERT ON client_command_watermarks
+                     BEGIN SELECT RAISE(ABORT,'injected record failure'); END;
+                     CREATE TRIGGER fail_send_record_update BEFORE UPDATE ON client_command_watermarks
+                     BEGIN SELECT RAISE(ABORT,'injected record failure'); END;",
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("arm failure");
+        let (status, response) = post(&app, None, send.clone()).await;
+        assert!((500..600).contains(&status), "{status} {response}");
+        assert_eq!(message_count(&store, &id).await, 0);
+        store
+            .transaction(|tx| {
+                tx.execute_batch(
+                    "DROP TRIGGER fail_send_record_insert; DROP TRIGGER fail_send_record_update;",
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("disarm failure");
+        // The retry with the same id is not a conflict and posts the message once.
+        let (status, response) = post(&app, None, send.clone()).await;
+        assert_eq!(status, 200, "{response}");
+        assert_eq!(response["ref_id"], id);
+        assert_eq!(message_count(&store, &id).await, 1);
+        let (status, response) = post(&app, None, send).await;
+        assert_eq!(status, 200, "{response}");
+        assert_eq!(response["ref_id"], id);
+        assert_eq!(message_count(&store, &id).await, 1);
     }
 
     #[tokio::test]

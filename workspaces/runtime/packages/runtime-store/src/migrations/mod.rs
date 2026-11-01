@@ -44,6 +44,7 @@ mod m2026_10_31_agent_core;
 mod m2026_10_31_agent_permissions;
 mod m2026_10_31_current_checks;
 mod m2026_10_31_drop_old_outbox_tables;
+mod m2026_10_31_message_send_projections;
 mod m2026_10_31_native_status_error;
 mod m2026_10_31_project_record_kind;
 mod m2026_10_31_retired_start_indexes;
@@ -59,6 +60,9 @@ mod m2026_11_01_plan_record;
 mod m2026_11_01_project_context;
 mod m2026_11_01_project_revisions;
 mod m2026_11_01_rate_limit_view;
+mod m2026_11_01_transfer_operations;
+mod m2026_11_01_transfer_pointers;
+mod m2026_11_01_transfer_summary;
 mod m2026_11_01_work_detail_policy;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -79,6 +83,8 @@ pub use m2026_10_30_branch_phase::apply as migrate_branch_phase;
 pub use m2026_10_30_project_teams::apply as migrate_project_teams;
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_30_radio_room::apply as migrate_radio_room;
+#[cfg(any(test, feature = "test-support"))]
+pub use m2026_10_31_message_send_projections::apply as migrate_message_send_projections;
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_31_project_record_kind::apply as migrate_project_record_kind;
 #[cfg(any(test, feature = "test-support"))]
@@ -637,6 +643,16 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
+            id: "2026-10-31-message-send-projections",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Message receipt and queue projections before the shared send status",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_message_send_projections::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
             id: "2026-10-30-agent-volatile-complete",
             introduced: MigrationDate {
                 year: 2026,
@@ -931,6 +947,36 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_01_account_projection::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-typed-transfer-summary",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent account transfer summaries",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_transfer_summary::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-typed-transfer-pointers",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent account transfer pointers and lazy state",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_transfer_pointers::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-typed-transfer-operations",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Account transfer operation records",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_transfer_operations::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {

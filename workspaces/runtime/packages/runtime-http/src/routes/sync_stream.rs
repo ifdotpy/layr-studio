@@ -135,7 +135,21 @@ impl ResourceIdentity for SubscribedResource {
     }
 }
 
+fn cache_decisions(
+    resources: &[SubscribedResource],
+    locality: studio_runtime_schema::sync_protocol::FrontendLocality,
+) -> Vec<crate::generated::SubscriptionCacheDecision> {
+    resources
+        .iter()
+        .map(|resource| crate::generated::SubscriptionCacheDecision {
+            resource: resource.resource.clone(),
+            policy: super::subscriptions::cache_policy(&resource.resource, locality),
+        })
+        .collect()
+}
+
 struct SyncSession {
+    locality: studio_runtime_schema::sync_protocol::FrontendLocality,
     principal: studio_runtime_services::principal::Principal,
     resources: Vec<SubscribedResource>,
     generation: i64,
@@ -226,6 +240,7 @@ struct SubscriptionChange {
     added: Vec<SubscribedResource>,
     token_rates: Option<bool>,
     since: BTreeMap<String, SubscriptionCursor>,
+    cache_policies: Vec<crate::generated::SubscriptionCacheDecision>,
 }
 
 struct LiveSubscription {
@@ -337,6 +352,7 @@ async fn sync_subscriptions(
     {
         return Err(ApiError::validation(vec![json!("body"), json!("add")]));
     }
+    let cache_policies = cache_decisions(&added, session.locality);
     session
         .sender
         .try_send(SubscriptionChange {
@@ -345,6 +361,7 @@ async fn sync_subscriptions(
             added,
             token_rates: request.token_rates,
             since,
+            cache_policies: cache_policies.clone(),
         })
         .map_err(|_| {
             ApiError::new(
@@ -356,6 +373,7 @@ async fn sync_subscriptions(
     session.generation = request.r#gen;
     Ok(Json(crate::generated::SyncSubscriptionAck {
         r#gen: request.r#gen,
+        cache_policies,
     }))
 }
 
@@ -417,6 +435,7 @@ async fn sync_stream(
     Caller(principal): Caller,
     State(state): State<HttpState>,
 ) -> Response {
+    let locality = studio_runtime_services::principal::frontend_locality(&principal);
     let protocol = query.protocol.as_ref().map(|value| value.as_str());
     let header_protocol = match headers.one("x-codex-sync-protocol") {
         Ok(value) => value,
@@ -466,6 +485,7 @@ async fn sync_stream(
         Ok(since) => since,
         Err(error) => return error.into_response(),
     };
+    let cache_policies = cache_decisions(&resources, locality);
     let vault_readiness = match readiness_source(&state, &resources).await {
         Ok(source) => source,
         Err(error) => return error.into_response(),
@@ -609,6 +629,7 @@ async fn sync_stream(
             sessions.insert(
                 session_id.clone(),
                 SyncSession {
+                    locality,
                     principal: principal.clone(),
                     resources: resources.clone(),
                     generation: 0,
@@ -629,6 +650,15 @@ async fn sync_stream(
         // `routes` lists the origins this server answers on now. A client learns them.
         crate::generated::SyncSessionEvent {
             session_id,
+            locality: match locality {
+                studio_runtime_schema::sync_protocol::FrontendLocality::Local => {
+                    crate::generated::FrontendLocality::Local
+                }
+                studio_runtime_schema::sync_protocol::FrontendLocality::Remote => {
+                    crate::generated::FrontendLocality::Remote
+                }
+            },
+            cache_policies,
             routes: state.serve_origin().into_iter().collect(),
             workspace_id: state.workspace_id.clone(),
             token: matches!(
@@ -1707,6 +1737,7 @@ async fn subscription_frame(state: &mut ResourceStream, update: SubscriptionChan
         None,
         crate::generated::SyncSubscriptionAck {
             r#gen: update.generation,
+            cache_policies: update.cache_policies.clone(),
         },
     ));
     if !update.added.is_empty() {
@@ -4252,6 +4283,7 @@ mod tests {
             )
             .expect("JSON");
             assert_eq!(session["routes"], routes);
+            assert_eq!(session["locality"], "local");
         }
     }
 
@@ -4313,7 +4345,12 @@ mod tests {
         assert_eq!(initial["snapshot"], true);
         assert_eq!(initial["records"], rates["records"]);
         for (generation, interest) in [(1, false), (2, true)] {
-            let update = json!({"sessionId":session["sessionId"],"gen":generation,"add":[],"remove":[],"tokenRates":interest});
+            let add = if generation == 1 {
+                json!([{"resource":{"kind":"state"}}])
+            } else {
+                json!([])
+            };
+            let update = json!({"sessionId":session["sessionId"],"gen":generation,"add":add,"remove":[],"tokenRates":interest});
             let response = app
                 .clone()
                 .oneshot(request(
@@ -4326,8 +4363,12 @@ mod tests {
             assert_eq!(response.status(), StatusCode::OK);
             let ack = body.next().await.expect("ack").expect("bytes");
             assert!(String::from_utf8_lossy(&ack).starts_with("event: subscriptions\n"));
-            assert_eq!(document_bytes(&ack)["gen"], generation);
+            let ack = document_bytes(&ack);
+            assert_eq!(ack["gen"], generation);
             if !interest {
+                assert_eq!(ack["cachePolicies"][0]["policy"], "noCache");
+                let resource = body.next().await.expect("added resource").expect("bytes");
+                assert!(String::from_utf8_lossy(&resource).starts_with("event: resources\n"));
                 rates = floating_test_rates(2);
                 rates["records"]
                     .as_array_mut()
@@ -4361,7 +4402,7 @@ mod tests {
         let root = tempfile::tempdir().expect("isolated state");
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
         store.transaction(|tx| {
-            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('pull-count-fixture',?1)", [json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"pull-count-fixture","rootId":"pull-count-fixture","epoch":0,"status":"running","threadId":"thread","accountKey":"default","turnId":"turn","inFlight":true,"activeTools":[],"events":0}).to_string()])?;
+            studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"pull-count-fixture","rootId":"pull-count-fixture","epoch":0,"status":"running","threadId":"thread","accountKey":"default","turnId":"turn","inFlight":true,"activeTools":[],"events":0}))?)?;
             tx.execute("INSERT INTO runtime_items(id,agent,record,created) VALUES('count-item','pull-count-fixture',?1,1)", [json!({"id":"count-item","role":"assistant","text":"message"}).to_string()])?;
             Ok(())
         }).await.expect("transcript fixture");
@@ -4445,6 +4486,7 @@ mod tests {
                     added: fixture_resources(std::slice::from_ref(&resource)),
                     token_rates: None,
                     since,
+                    cache_policies: Vec::new(),
                 },
             )
             .await
@@ -4462,7 +4504,7 @@ mod tests {
         let root = tempfile::tempdir().expect("isolated resume state");
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
         store.transaction(|tx| {
-            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('recent',?1)", [json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"recent","rootId":"recent","epoch":0,"status":"running","threadId":"recent","accountKey":"default","turnId":"turn","inFlight":true,"activeTools":[],"events":0}).to_string()])?;
+            studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"recent","rootId":"recent","epoch":0,"status":"running","threadId":"recent","accountKey":"default","turnId":"turn","inFlight":true,"activeTools":[],"events":0}))?)?;
             for index in 0..20 {
                 let id = format!("recent:{index}");
                 tx.execute("INSERT INTO runtime_items(id,agent,record,created) VALUES(?1,'recent',?2,?3)", rusqlite::params![id,json!({"id":id,"role":"assistant","text":"message ".repeat(64)}).to_string(),index])?;
@@ -4574,7 +4616,7 @@ mod tests {
         store.transaction(|tx| {
             for index in 0..5 {
                 let agent = format!("chat{index}");
-                tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", rusqlite::params![agent, json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":agent,"rootId":agent,"epoch":0,"status":"idle","threadId":agent,"accountKey":"default"}).to_string()])?;
+                studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":agent,"rootId":agent,"epoch":0,"status":"idle","threadId":agent,"accountKey":"default"}))?)?;
                 let id = format!("{agent}:answer");
                 tx.execute("INSERT INTO runtime_items(id,agent,record,created) VALUES(?1,?2,?3,1)", rusqlite::params![id, agent, json!({"id":id,"role":"assistant","text":format!("tail of {agent}")}).to_string()])?;
             }
@@ -4607,6 +4649,7 @@ mod tests {
                     added: fixture_resources(std::slice::from_ref(&resource)),
                     token_rates: None,
                     since: BTreeMap::new(),
+                    cache_policies: Vec::new(),
                 },
             )
             .await
@@ -4642,7 +4685,7 @@ mod tests {
         let root = tempfile::tempdir().expect("isolated state");
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
         store.transaction(|tx| {
-            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('small',?1)", [json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"small","rootId":"small","epoch":0,"status":"running","threadId":"small","accountKey":"default","turnId":"turn","inFlight":true,"activeTools":[],"events":0}).to_string()])?;
+            studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"small","rootId":"small","epoch":0,"status":"running","threadId":"small","accountKey":"default","turnId":"turn","inFlight":true,"activeTools":[],"events":0}))?)?;
             for index in 0..120 {
                 let id = format!("small:{index:03}");
                 tx.execute("INSERT INTO runtime_items(id,agent,record,created) VALUES(?1,'small',?2,?3)", rusqlite::params![id, json!({"id":id,"role":"assistant","text":"Current answer".repeat(200),"created":index}).to_string(), index])?;
@@ -4685,6 +4728,7 @@ mod tests {
                     added: fixture_resources(std::slice::from_ref(&resource)),
                     token_rates: None,
                     since: BTreeMap::new(),
+                    cache_policies: Vec::new(),
                 },
             )
             .await
@@ -4871,7 +4915,7 @@ mod tests {
         let root = tempfile::tempdir().expect("isolated state");
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
         store.transaction(|tx| {
-            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('large',?1)", [json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"large","rootId":"large","epoch":0,"status":"running","threadId":"large","accountKey":"default","turnId":"turn","inFlight":true,"activeTools":[],"events":0}).to_string()])?;
+            studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"large","rootId":"large","epoch":0,"status":"running","threadId":"large","accountKey":"default","turnId":"turn","inFlight":true,"activeTools":[],"events":0}))?)?;
             for (id, text) in [("large:zlarge", "x".repeat(SYNC_STREAM_EVENT_MAX_BYTES + 1)), ("large:small", "before".to_owned())] {
                 tx.execute("INSERT INTO runtime_items(id,agent,record,created) VALUES(?1,'large',?2,1)", rusqlite::params![id, json!({"id":id,"role":"assistant","text":text}).to_string()])?;
             }
@@ -4961,8 +5005,7 @@ mod tests {
         let root = tempfile::tempdir().expect("isolated state");
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
         store.transaction(|tx| {
-            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('open',?1)",
-                [json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"open","rootId":"open","epoch":0,"status":"running","threadId":"thread","accountKey":"default","turnId":"turn","inFlight":true,"activeTools":[],"events":0}).to_string()])?;
+            studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"open","rootId":"open","epoch":0,"status":"running","threadId":"thread","accountKey":"default","turnId":"turn","inFlight":true,"activeTools":[],"events":0}))?)?;
             tx.execute("INSERT INTO runtime_items(id,agent,record,created) VALUES('open:answer','open',?1,1)",
                 [json!({"id":"open:answer","role":"assistant","text":"before"}).to_string()])?;
             Ok(())
@@ -5072,7 +5115,7 @@ mod tests {
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
         store.transaction(|tx| {
             for agent in ["first", "second", "last"] {
-                tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", rusqlite::params![agent, json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":agent,"rootId":agent,"epoch":0,"status":"running","threadId":agent,"accountKey":"default","turnId":"turn","inFlight":true,"activeTools":[],"events":0}).to_string()])?;
+                studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":agent,"rootId":agent,"epoch":0,"status":"running","threadId":agent,"accountKey":"default","turnId":"turn","inFlight":true,"activeTools":[],"events":0}))?)?;
                 tx.execute("INSERT INTO runtime_items(id,agent,record,created) VALUES(?1,?2,?3,1)", rusqlite::params![format!("{agent}:answer"), agent, json!({"id":format!("{agent}:answer"),"role":"assistant","text":"before"}).to_string()])?;
             }
             Ok(())
@@ -5116,8 +5159,7 @@ mod tests {
         let root = tempfile::tempdir().expect("isolated state");
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
         store.transaction(|tx| {
-            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('open',?1)",
-                [json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"open","rootId":"open","epoch":0,"status":"idle"}).to_string()])?;
+            studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"open","rootId":"open","epoch":0,"status":"idle"}))?)?;
             tx.execute("INSERT INTO runtime_items(id,agent,record,created) VALUES('answer','open',?1,1)",
                 [json!({"id":"answer","role":"assistant","text":"before"}).to_string()])?;
             Ok(())
@@ -5572,10 +5614,7 @@ mod tests {
         assert_eq!(baseline.resources, resources);
         store
             .transaction(|tx| {
-                tx.execute(
-                    "INSERT INTO runtime_agents(id,record) VALUES('other',?1)",
-                    [json!({"id":"other","status":"idle","provider":studio_runtime_schema::ProviderKind::Codex}).to_string()],
-                )?;
+                studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","id":"other","rootId":"other","epoch":0,"status":"idle","provider":studio_runtime_schema::ProviderKind::Codex}))?)?;
                 Ok(())
             })
             .await
@@ -5919,10 +5958,7 @@ mod tests {
             .expect("baseline");
         store
             .transaction(|tx| {
-                tx.execute(
-                    "INSERT INTO runtime_agents(id,record) VALUES('other',?1)",
-                    [json!({"id":"other","status":"idle","provider":studio_runtime_schema::ProviderKind::Codex}).to_string()],
-                )?;
+                studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","id":"other","rootId":"other","epoch":0,"status":"idle","provider":studio_runtime_schema::ProviderKind::Codex}))?)?;
                 Ok(())
             })
             .await
@@ -5941,10 +5977,7 @@ mod tests {
         );
         store
             .transaction(|tx| {
-                tx.execute(
-                    "INSERT INTO runtime_agents(id,record) VALUES('open',?1)",
-                    [json!({"id":"open","status":"running","provider":studio_runtime_schema::ProviderKind::Codex}).to_string()],
-                )?;
+                studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"id":"open","rootId":"open","epoch":0,"accountKey":"default","status":"running","provider":studio_runtime_schema::ProviderKind::Codex}))?)?;
                 Ok(())
             })
             .await
@@ -6495,6 +6528,7 @@ mod tests {
                 added: fixture_resources(std::slice::from_ref(&resource)),
                 token_rates: None,
                 since: BTreeMap::new(),
+                cache_policies: Vec::new(),
             },
         )
         .await
@@ -6559,8 +6593,7 @@ mod tests {
         let root = tempfile::tempdir().expect("isolated state");
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
         store.transaction(|tx| {
-            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('voice-chat',?1)",
-                [json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"voice-chat","rootId":"voice-chat","epoch":0,"status":"idle","isLead":true}).to_string()])?;
+            studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"voice-chat","rootId":"voice-chat","epoch":0,"status":"idle","isLead":true}))?)?;
             tx.execute("INSERT INTO voice_sessions(id,agent,created,state) VALUES('session','voice-chat',1,'ready')", [])?;
             tx.execute("INSERT INTO voice_records(id,agent,session,kind,text,item_id,previous_item_id,payload,created) VALUES('first','voice-chat','session','user','hello','','','{}',1)", [])?;
             Ok(())
@@ -6860,7 +6893,7 @@ mod tests {
         );
         store.transaction(|tx| {
             let owner = json!({"compactions":0,"id":"owner","rootId":"owner","epoch":1,"status":"interrupted","accountKey":"default","provider":"claude","threadId":"thread","turnId":"turn","inFlight":false,"autoWake":false,"nativeResponseTurn":"turn","restartRecovery":{"stage":"held","epoch":1,"accountKey":"default","threadId":"thread","turnId":null},"disconnectRecovery":{"source":"restart","epoch":1,"accountKey":"default","threadId":"thread"}});
-            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('owner',?1)", [owner.to_string()])?;
+            studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(owner)?)?;
             Ok(())
         }).await.expect("held owner");
         let port = Arc::new(GatedProvider {

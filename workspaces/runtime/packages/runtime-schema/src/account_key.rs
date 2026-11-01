@@ -25,3 +25,9 @@ impl AccountKey {
         self.0.as_str()
     }
 }
+impl TryFrom<String> for AccountKey {
+    type Error = &'static str;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Ok(Self(value.try_into()?))
+    }
+}

@@ -499,7 +499,7 @@ mod tests {
                     "attempt":1,"maxAttempts":4,"cwd":"/fixture","settings":{},"taskClaims":[],"updatedAt":800.0});
                 let agent = json!({"compactions":0,"provider":"codex","id":id,"rootId":id,"epoch":1,"status":"running",
                     "accountKey":"default","threadId":"thread","turnId":"turn","capacityRetry":retry});
-                tx.execute("INSERT INTO runtime_agents(id,record) VALUES (?1,?2)", rusqlite::params![id, agent.to_string()])?;
+                studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(agent)?)?;
                 tx.execute("INSERT INTO runtime_capacity_retries(id,agent,record) VALUES (?1,?1,?2)", rusqlite::params![id, retry.to_string()])?;
             }
             Ok::<_, studio_runtime_store::StoreError>(())
@@ -546,7 +546,7 @@ mod tests {
                 "dueAt":990.0,"taskClaims":[],"updatedAt":800.0});
             let agent = json!({"compactions":0,"provider":"codex","id":"a","rootId":"a","epoch":1,"status":"failed",
                 "accountKey":"default","threadId":"thread","usageResume":resume});
-            tx.execute("INSERT INTO runtime_agents(id,record) VALUES ('a',?1)", [agent.to_string()])?;
+            studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(agent)?)?;
             tx.execute("INSERT INTO runtime_usage_resumes(id,agent,record) VALUES ('resume','a',?1)", [resume.to_string()])?;
             Ok::<_, studio_runtime_store::StoreError>(())
         }).await.unwrap();

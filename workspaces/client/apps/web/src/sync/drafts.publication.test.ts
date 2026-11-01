@@ -14,7 +14,18 @@ vi.mock("react", () => ({
     return [typeof value === "function" ? value() : value, setter];
   },
 }));
-vi.mock("../api.ts", () => ({ syncPost: vi.fn() }));
+vi.mock("../api.ts", () => ({
+  syncPost: vi.fn(),
+  ApiError: class extends Error {},
+}));
+vi.mock("../unsent/store.ts", () => ({
+  UNSENT_FAILURE_EVENT: "studio-unsent-input-failure",
+  draftStore: () => ({
+    put: async () => {},
+    delete: async () => {},
+    loadAll: async () => [],
+  }),
+}));
 vi.mock("./subscriptions/events.ts", () => ({ watchResourceChanges: vi.fn() }));
 vi.mock("./resourceEvents.ts", () => ({ replaceStream: vi.fn() }));
 import { createBrowserDrafts } from "./drafts.ts";
@@ -171,4 +182,28 @@ it("reopens on a missing interval and keeps edits until the next baseline", asyn
   await vi.advanceTimersByTimeAsync(3000);
   expect(post).toHaveBeenCalledOnce();
   cleanup.forEach((dispose) => dispose());
+});
+
+it("shows the shared notice when another unsent input cannot be saved", () => {
+  const windowEvents = new EventTarget();
+  vi.stubGlobal("window", windowEvents);
+  const useDrafts = createBrowserDrafts({
+    api: { syncPost: vi.fn(async () => []) },
+    resources: { watchResourceChanges: () => () => {}, replaceStream: vi.fn() },
+  });
+  useDrafts();
+  const cleanup = mocks.effects
+    .map((effect) => effect())
+    .filter((value) => typeof value === "function");
+  windowEvents.dispatchEvent(new Event("studio-unsent-input-failure"));
+  expect(
+    mocks.setters.some((setter) =>
+      setter.mock.calls.some(
+        ([value]) =>
+          value === "Draft changes could not be saved. Keep this chat open.",
+      ),
+    ),
+  ).toBe(true);
+  cleanup.forEach((dispose) => dispose());
+  vi.unstubAllGlobals();
 });

@@ -23,7 +23,6 @@ use crate::{
         StoredField,
     },
 };
-use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
@@ -43,32 +42,6 @@ use studio_runtime_store::path_identity::CanonicalPath;
 const READ_DEADLINE: Duration = Duration::from_secs(120);
 const MUTATION_DEADLINE: Duration = Duration::from_secs(60);
 
-#[derive(Deserialize)]
-struct SavedRead {
-    receipt: SavedReadReceipt,
-    result: SavedReadResponse,
-}
-
-#[derive(Deserialize)]
-struct SavedReadReceipt {
-    operation: String,
-    scope: crate::account_session_runtime::ConnectionScope,
-    ticket: SavedReadTicket,
-}
-
-#[derive(Deserialize)]
-struct SavedReadTicket {
-    generation: u64,
-    id: studio_runtime_providers::RequestId,
-    method: String,
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
-enum SavedReadResponse {
-    Reply(Value),
-    Rejected(Value),
-}
 static NATIVE_IMPORT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 static NATIVE_IMPORT_LOCKS: LazyLock<Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -322,8 +295,15 @@ mod reconnect_read_tests {
             "ticket-generation" => saved["receipt"]["ticket"]["generation"] = json!(8),
             "ticket-method" => saved["receipt"]["ticket"]["method"] = json!("thread/start"),
             "ticket-id" => saved["receipt"]["ticket"]["id"] = Value::Null,
-            "unknown" => saved["certainty"] = json!("unknown"),
-            "not-sent" => saved["certainty"] = json!("not_sent"),
+            "unknown" | "not-sent" => {
+                let certainty = if change == "unknown" {
+                    "unknown"
+                } else {
+                    "not_sent"
+                };
+                saved["certainty"] = json!(certainty);
+                saved["receipt"]["certainty"] = json!(certainty);
+            }
             "rejected" => saved["result"]["kind"] = json!("rejected"),
             _ => {}
         }
@@ -338,7 +318,13 @@ mod reconnect_read_tests {
                     "providerReadIntents":{"read":{"operation":"read","account":"source","scope":old_scope,
                         "method":"thread/read","params":{"threadId":"source-thread","includeTurns":false}}},
                     "providerReadReceipts":{"read":saved}}},"requests":{}});
-            studio_runtime_store::AccountTransferRepository::put(tx, "move", &operation.to_string())
+            if change == "ticket-id" {
+                // Simulate a corrupt retained receipt that cannot pass typed writes.
+                tx.execute("INSERT INTO runtime_account_transfers(id,record) VALUES('move',?1)", [operation.to_string()])?;
+                Ok(())
+            } else {
+                studio_runtime_store::AccountTransferRepository::put(tx, "move", &operation.to_string())
+            }
         }).await.expect("written read");
         (root, store, expected)
     }
@@ -359,7 +345,7 @@ mod reconnect_read_tests {
         let session = ReconnectedSession(AtomicUsize::new(0));
         let before = store
             .read_async("before replay", |tx| {
-                driver::load(tx, "move").map(|s| s.operation().clone())
+                driver::load(tx, "move").map(|s| s.record().clone())
             })
             .await
             .expect("operation");
@@ -379,11 +365,14 @@ mod reconnect_read_tests {
         assert_eq!(session.0.load(Ordering::SeqCst), 0);
         let after = store
             .read_async("after replay", |tx| {
-                driver::load(tx, "move").map(|s| s.operation().clone())
+                driver::load(tx, "move").map(|s| s.record().clone())
             })
             .await
             .expect("operation");
-        assert_eq!(after, before);
+        assert_eq!(
+            serde_json::to_vec(&after).unwrap(),
+            serde_json::to_vec(&before).unwrap()
+        );
     }
 
     #[tokio::test]
@@ -439,7 +428,7 @@ mod reconnect_read_tests {
         let session = ReconnectedSession(AtomicUsize::new(0));
         let before = store
             .read_async("before unsubscribe replay", |tx| {
-                driver::load(tx, "move").map(|s| s.operation().clone())
+                driver::load(tx, "move").map(|s| s.record().clone())
             })
             .await
             .expect("operation");
@@ -474,20 +463,60 @@ mod reconnect_read_tests {
         assert_eq!(session.0.load(Ordering::SeqCst), 0);
         let after = store
             .read_async("after unsubscribe replay", |tx| {
-                driver::load(tx, "move").map(|s| s.operation().clone())
+                driver::load(tx, "move").map(|s| s.record().clone())
             })
             .await
             .expect("operation");
-        assert_eq!(after, before);
+        assert_eq!(
+            serde_json::to_vec(&after).unwrap(),
+            serde_json::to_vec(&before).unwrap()
+        );
+        store.transaction(|tx| {
+            let mut operation = studio_runtime_store::AccountTransferRepository::get(tx, "move")?.unwrap();
+            operation["members"]["member"]["providerReadReceipts"][OPERATION]["result"]["value"] = Value::Null;
+            studio_runtime_store::AccountTransferRepository::put(tx, "move", &operation.to_string())
+        }).await.unwrap();
+        let (_, null_reply) = session_reply(
+            &ProviderReadContext {
+                store: &store,
+                session: &session,
+                transfer: "move",
+                agent: "member",
+                account: "source",
+                now: 2.0,
+            },
+            ProviderReadCall {
+                actor: None,
+                transfer_source_thread: Some("source-thread".into()),
+                operation: OPERATION.into(),
+                method: Method::ThreadUnsubscribe,
+                params: json!({"threadId":"source-thread"}),
+                deadline: Duration::from_secs(1),
+            },
+        )
+        .await
+        .expect("null reply replays");
+        assert_eq!(null_reply, Value::Null);
+        assert_eq!(session.0.load(Ordering::SeqCst), 0);
         for field in ["sourceAccountKey", "sourceThreadId"] {
             let mut changed = before.clone();
-            changed["members"]["member"][field] = json!("another-source");
+            let member = changed.members.get_mut("member").unwrap();
+            match field {
+                "sourceAccountKey" => {
+                    member.source_account_key = "another-source".to_owned().try_into().unwrap()
+                }
+                "sourceThreadId" => {
+                    member.source_thread_id =
+                        studio_runtime_schema::queue_command::Field::Value("another-source".into())
+                }
+                _ => unreachable!("fixture field"),
+            }
             store
                 .transaction(move |tx| {
                     studio_runtime_store::AccountTransferRepository::put(
                         tx,
                         "move",
-                        &changed.to_string(),
+                        &serde_json::to_string(&changed).unwrap(),
                     )
                 })
                 .await
@@ -585,21 +614,38 @@ async fn session_reply(
     )
     .await?;
     if let Some(saved) = replay {
-        let saved: SavedRead = serde_json::from_value(saved)
-            .map_err(|_| TransferError::Refused("Invalid saved provider receipt"))?;
-        let value = match saved.result {
-            SavedReadResponse::Reply(value) => value,
-            SavedReadResponse::Rejected(value) => {
-                drop(value);
-                return Err(TransferError::Refused(
-                    "The provider rejected a transfer read",
-                ));
+        use studio_runtime_store::transfer_record::ResponseKind;
+        let result = saved
+            .result
+            .value()
+            .ok_or(TransferError::Refused("Invalid saved provider receipt"))?;
+        if matches!(result.kind(), ResponseKind::Rejected) {
+            return Err(TransferError::Refused(
+                "The provider rejected a transfer read",
+            ));
+        }
+        let value: Value = match result {
+            studio_runtime_store::transfer_record::ProviderResult::Inline {
+                value: None, ..
+            } => Value::Null,
+            studio_runtime_store::transfer_record::ProviderResult::Inline {
+                value: Some(value),
+                ..
+            } => serde_json::from_str(value.get())
+                .map_err(|_| TransferError::Refused("Invalid saved provider receipt"))?,
+            studio_runtime_store::transfer_record::ProviderResult::Blob { .. } => {
+                return Err(TransferError::Refused("Invalid saved provider receipt"));
             }
         };
+        let stored_ticket = saved
+            .receipt
+            .ticket
+            .value()
+            .ok_or(TransferError::Refused("Invalid saved provider ticket"))?;
         let ticket = studio_runtime_providers::RequestTicket {
-            generation: saved.receipt.ticket.generation,
-            id: saved.receipt.ticket.id,
-            method: Method::from_wire(&saved.receipt.ticket.method)
+            generation: stored_ticket.generation,
+            id: stored_ticket.id.clone(),
+            method: Method::from_wire(stored_ticket.method.as_str())
                 .ok_or(TransferError::Refused("Invalid saved provider ticket"))?,
         };
         return Ok((
@@ -626,7 +672,7 @@ async fn session_reply(
     } else {
         driver::ProviderAdmission {
             root_request_id: String::new(),
-            admitted_request: None,
+            admitted_request: studio_runtime_schema::queue_command::Field::Null,
         }
     };
     let mut last_receipt = None;
@@ -636,7 +682,7 @@ async fn session_reply(
                 .session
                 .transfer_provider_request(TransferProviderRequest {
                     root_request_id: admission.root_request_id.clone(),
-                    admitted_request: admission.admitted_request.clone(),
+                    admitted_request: admission.admitted_request.value().cloned(),
                     transfer_id: context.transfer.into(),
                     member: context.agent.into(),
                     source_account: context.account.into(),
@@ -653,7 +699,7 @@ async fn session_reply(
                 .session
                 .provider_request(ProviderRequest {
                     root_request_id: admission.root_request_id.clone(),
-                    admitted_request: admission.admitted_request.clone(),
+                    admitted_request: admission.admitted_request.value().cloned(),
                     account: context.account.into(),
                     operation: call.operation.clone(),
                     actor: call.actor.clone(),
@@ -980,25 +1026,29 @@ impl TransferExecutor for AccountTransferExecutor {
         Box::pin(async move {
             let operation = input.operation();
             let agent = input.agent();
-            let member = &operation["members"][agent["id"].as_str().unwrap_or_default()];
             let agent_id = agent["id"]
                 .as_str()
                 .ok_or(TransferError::Refused("Invalid transfer agent"))?;
+            let member = operation
+                .members
+                .get(agent_id)
+                .ok_or(TransferError::Refused("Unknown transfer member"))?;
             let epoch = agent["epoch"]
                 .as_i64()
                 .ok_or(TransferError::Refused("Invalid transfer epoch"))?;
-            let transfer_id = operation["id"]
-                .as_str()
-                .ok_or(TransferError::Refused("Invalid transfer id"))?;
-            let source_account = member["sourceAccountKey"].as_str().unwrap_or("default");
-            let target_account = operation["targetAccountKey"]
-                .as_str()
-                .ok_or(TransferError::Refused("Invalid transfer target"))?;
-            let source_provider = studio_runtime_providers::ProviderKind::of_record(member)
-                .map_err(|_| TransferError::Refused("Invalid transfer provider"))?;
-            let target_provider =
-                studio_runtime_providers::ProviderKind::of_field(operation.get("targetProvider"))
-                    .map_err(|_| TransferError::Refused("Invalid transfer provider"))?;
+            let transfer_id = operation.id.as_str();
+            let source_account = member.source_account_key.as_str();
+            let target_account = operation.target_account_key.as_str();
+            let source_provider = member
+                .provider
+                .value()
+                .copied()
+                .ok_or(TransferError::Refused("Invalid transfer provider"))?;
+            let target_provider = operation
+                .target_provider
+                .value()
+                .copied()
+                .ok_or(TransferError::Refused("Invalid transfer provider"))?;
             if let Some(accounts) = &self.preparation.account_driver {
                 // The registry snapshot is already validated and performs no auth refresh.
                 // Transfer preparation must not depend on an earlier HTTP model read.
@@ -1034,7 +1084,7 @@ impl TransferExecutor for AccountTransferExecutor {
             let mut portable = None;
             let mut history_text = None;
             let mut copied_history_path = None;
-            let source_thread = member["sourceThreadId"].as_str();
+            let source_thread = member.source_thread_id.value().map(String::as_str);
             if let Some(thread_id) = source_thread {
                 // No other agent may use the source account any more, so its
                 // worker can be stopped. Start it before the source reads.
@@ -1388,7 +1438,10 @@ impl TransferExecutor for AccountTransferExecutor {
                     operation: transfer_id.into(),
                     agent: agent_id.into(),
                     epoch,
-                    account: target_account.into(),
+                    account: target_account
+                        .to_owned()
+                        .try_into()
+                        .map_err(|_| TransferError::Refused("Invalid destination account"))?,
                     connection: scope.connection.clone(),
                     request: operation_id,
                 },
@@ -1422,8 +1475,8 @@ impl TransferTransport for AccountTransferExecutor {
             .await?;
             let request = ProviderRequest {
                 root_request_id: admission.root_request_id,
-                admitted_request: admission.admitted_request,
-                account: ticket.account.clone(),
+                admitted_request: admission.admitted_request.value().cloned(),
+                account: ticket.account.as_str().to_owned(),
                 operation: ticket.request.clone(),
                 actor: Some(crate::account_worker::retained::RequestActor {
                     agent: ticket.agent.clone(),
@@ -1463,19 +1516,21 @@ pub async fn before_start(
     now: f64,
 ) -> Result<Value, TransferError> {
     let mut agent = transfer_member(&store, agent_id).await?;
-    if studio_runtime_store::truthy(agent.get("accountTransferId"))
-        && !studio_runtime_store::truthy(agent.get("lazyAccountTransfer"))
+    if agent.account_transfer_id.value().is_some()
+        && agent.lazy_account_transfer.value().is_none()
         && driver::release_waiting(&store, agent_id, now).await?
     {
         agent = transfer_member(&store, agent_id).await?;
     }
-    let lazy = agent
-        .get("lazyAccountTransfer")
-        .filter(|value| !value.is_null());
+    let lazy = agent.lazy_account_transfer.value();
     if let Some(lazy) = lazy {
-        let operation = lazy["id"]
-            .as_str()
-            .ok_or(TransferError::Refused("Invalid lazy transfer identity"))?;
+        let operation = lazy
+            .pending()
+            .ok_or(TransferError::Refused(
+                "Current transfer data is unreadable",
+            ))?
+            .id
+            .as_str();
         let owner = operation.to_owned();
         let member = agent_id.to_owned();
         let reading = store
@@ -1484,7 +1539,7 @@ pub async fn before_start(
         if reading {
             // The executor already owns this read. Ordinary preparation keeps
             // its snapshot's AccountTransfer hold and cannot repeat the move.
-            return Ok(agent);
+            return Ok(agent.value());
         }
         let session = session.ok_or(TransferError::Requires("provider-session/account-worker"))?;
         let executor = AccountTransferExecutor {
@@ -1500,24 +1555,27 @@ pub async fn before_start(
             driver::adopt_receipt(store.as_ref(), operation, agent_id, now).await?;
         }
     } else {
-        let agent = match driver::active_summary_id(&agent) {
-            Some(_) => driver::drop_orphan_summary(store.as_ref(), agent_id)
+        let agent = if driver::active_summary_id(&agent).is_some() {
+            driver::drop_orphan_summary(store.as_ref(), agent_id)
                 .await?
-                .unwrap_or(agent),
-            None => agent,
+                .unwrap_or(agent)
+        } else {
+            agent
         };
         crate::account_transfer::before_start(&agent)?;
     }
-    transfer_member(&store, agent_id).await
+    Ok(transfer_member(&store, agent_id).await?.value())
 }
 
-async fn transfer_member(store: &RuntimeStore, agent_id: &str) -> Result<Value, TransferError> {
+async fn transfer_member(
+    store: &RuntimeStore,
+    agent_id: &str,
+) -> Result<studio_runtime_store::AgentRecord, TransferError> {
     let agent_id = studio_runtime_store::AgentId::from(agent_id);
     store
         .read_async("runtime-services/account_transfer_executor", move |tx| {
             studio_runtime_store::AgentRepository::get(tx, &agent_id)?
                 .ok_or(TransferError::Refused("Unknown transfer member"))
-                .map(|agent| agent.value())
         })
         .await
 }

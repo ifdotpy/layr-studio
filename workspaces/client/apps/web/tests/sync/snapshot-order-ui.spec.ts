@@ -135,7 +135,7 @@ async function runSnapshotOrderUi(
     return route.fulfill({
       json: sendReply({
         id: fixtureRequestId(route.request().postDataJSON()),
-        status: "sent",
+        status: "delivered",
       } satisfies MessageDelivery),
     });
   });

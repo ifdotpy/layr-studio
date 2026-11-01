@@ -60,10 +60,10 @@ async fn repair_report(
         return super::generated_json(json!({"status":"none","skippedRows":0,"invalidSequence":false,"scopeConfirmed":null,"nativeHistoryConfirmed":null})).map(Json);
     };
     let account = agent
-        .extra
-        .get("lazyAccountTransfer")
-        .and_then(|transfer| transfer.get("sourceAccountKey"))
-        .and_then(Value::as_str)
+        .lazy_account_transfer
+        .value()
+        .and_then(|transfer| transfer.pending())
+        .map(|transfer| transfer.source_account_key.as_str())
         .unwrap_or(&agent.account_key);
     let session = state
         .account_session
@@ -247,10 +247,10 @@ async fn session(
     .map_err(control_error)?;
     let account = if is_state {
         agent
-            .extra
-            .get("lazyAccountTransfer")
-            .and_then(|lazy| lazy.get("sourceAccountKey"))
-            .and_then(Value::as_str)
+            .lazy_account_transfer
+            .value()
+            .and_then(|lazy| lazy.pending())
+            .map(|lazy| lazy.source_account_key.as_str())
             .unwrap_or(&agent.account_key)
     } else {
         &agent.account_key
@@ -403,14 +403,12 @@ async fn require_claude_account(
 }
 
 fn state_thread(agent: &studio_runtime_store::AgentRecord) -> Option<&str> {
-    let transfer = agent
-        .extra
-        .get("lazyAccountTransfer")
-        .filter(|transfer| transfer.as_object().is_some_and(|value| !value.is_empty()));
+    let transfer = agent.lazy_account_transfer.value();
     if let Some(transfer) = transfer {
         transfer
-            .get("sourceThreadId")
-            .and_then(Value::as_str)
+            .pending()
+            .and_then(|transfer| transfer.source_thread_id.value())
+            .map(String::as_str)
             .filter(|thread| !thread.is_empty())
     } else {
         agent

@@ -1,0 +1,63 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useServerServices } from "../servers/ServerServicesContext.tsx";
+import { serverViewId } from "../servers/environment.ts";
+import { reportUnsentFailure, unsentStore, type TextFeature } from "./store.ts";
+
+/** Keep a text edit on this device until its caller clears it. */
+export function useUnsentText(feature: TextFeature, id: string) {
+  const server = useServerServices()?.owner.id ?? serverViewId ?? "local";
+  const identity = JSON.stringify([server, feature, id]);
+  const [value, setValue] = useState<string | null>(null);
+  const current = useRef<{
+    identity: string;
+    changed: boolean;
+    value: string | null;
+  }>({ identity, changed: false, value: null });
+  if (current.current.identity !== identity)
+    current.current = { identity, changed: false, value: null };
+  useEffect(() => {
+    let active = true;
+    const owner = current.current;
+    setValue(null);
+    void unsentStore(server, feature)
+      .get(id)
+      .then((saved) => {
+        if (active && !owner.changed && typeof saved === "string") {
+          owner.value = saved;
+          setValue(saved);
+        }
+      })
+      .catch(reportUnsentFailure);
+    return () => {
+      active = false;
+    };
+  }, [identity]);
+  const clear = useCallback(
+    (expected = current.current.value) => {
+      current.current.changed = true;
+      if (expected === null) return Promise.resolve();
+      return unsentStore(server, feature)
+        .deleteIfEqual(id, expected)
+        .catch((error: unknown) => {
+          reportUnsentFailure();
+          throw error;
+        });
+    },
+    [identity],
+  );
+  const update = useCallback(
+    (next: string | null) => {
+      const previous = current.current.value;
+      current.current.changed = true;
+      current.current.value = next;
+      setValue(next);
+      const operation =
+        next === null
+          ? clear(previous)
+          : unsentStore(server, feature).put(id, next);
+      void operation.catch(reportUnsentFailure);
+    },
+    [identity],
+  );
+  return [value, update, clear] as const;
+}

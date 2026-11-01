@@ -1,5 +1,6 @@
 import type { Message } from "../types";
 import { isQuestionToolItem } from "./questions/questionCardModel";
+import { isMessagePending } from "../messageSendStatus.ts";
 
 // Native turns can finish without a reply, for example after a worker event.
 // Retain their records for turn status, but do not draw an empty message.
@@ -24,7 +25,13 @@ export interface HistoryGroup {
 }
 
 function activityRow(item: Message): boolean {
-  if (item.pending || item.nativeNotice || item.nativeError) return false;
+  if (
+    isMessagePending(item) ||
+    item.streamPending ||
+    item.nativeNotice ||
+    item.nativeError
+  )
+    return false;
   if (item.role === "reasoning") return true;
   if (["tool", "output"].includes(item.role)) {
     if (item.title === "fileChange" || isQuestionToolItem(item)) return false;
@@ -104,7 +111,8 @@ export function historyGroups(
     if (
       last &&
       item.role !== "user" &&
-      !item.pending &&
+      !isMessagePending(item) &&
+      !item.streamPending &&
       last.items[0].role !== "user" &&
       last.items[0].turnId === item.turnId
     )
@@ -151,7 +159,10 @@ export function historyGroups(
       (!uncertain &&
         group.items.some(
           (item) =>
-            item.streaming || item.pending || item.toolStatus === "running",
+            item.streaming ||
+            item.streamPending ||
+            isMessagePending(item) ||
+            item.toolStatus === "running",
         ))
     )
       continue;

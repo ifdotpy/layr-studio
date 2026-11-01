@@ -221,6 +221,9 @@ fn put(db: &Transaction<'_>, table: &'static str, value: &Value) -> Result<(), P
     )?;
     Ok(())
 }
+fn transfer_involves(transfer: &studio_runtime_store::AccountTransferRecord, agent: &str) -> bool {
+    transfer.lead_id == agent || transfer.members.0.iter().any(|(id, _)| id == agent)
+}
 /// Shared idle gate for user actions that change a chat's owner or workspace.
 /// `uncertain_blocks` is true for a move to another owner, which must carry an
 /// unknown outcome (input or tool request); a switch in place keeps the thread
@@ -253,9 +256,18 @@ pub(crate) fn idle(
                 "Finish the pending workspace operation first",
             ));
         }
-        if truthy(a.get("accountTransferId"))
-            || truthy(a.get("lazyAccountTransfer"))
-            || a["accountTransfer"]["status"] == "pending"
+        let agent = studio_runtime_store::AgentRepository::get(
+            db,
+            &studio_runtime_store::AgentId::from(a["id"].as_str().unwrap_or_default()),
+        )?
+        .ok_or(ProjectsError::Invalid("stored agent missing"))?;
+        if agent.account_transfer_id.value().is_some()
+            || agent.lazy_account_transfer.value().is_some()
+            || matches!(
+                agent.account_transfer.value(),
+                Some(studio_runtime_store::transfer_record::AgentTransferState::Unreadable(_))
+            )
+            || matches!(agent.account_transfer.value(), Some(studio_runtime_store::transfer_record::AgentTransferState::Summary(summary)) if matches!(summary.status, studio_runtime_store::transfer_record::TransferStatus::Pending))
         {
             return Err(ProjectsError::Invalid("Finish the account transfer first"));
         }
@@ -267,13 +279,21 @@ pub(crate) fn idle(
         }
         if db.query_row("SELECT EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND (status IN ('pending','reserved','dispatching') OR (?2 AND status='uncertain')))",rusqlite::params![a["id"].as_str().unwrap_or_default(),uncertain_blocks],|r|r.get::<_,bool>(0))? {return Err(ProjectsError::Invalid("Finish pending input first"));}
     }
+    for id in studio_runtime_store::AccountTransferRepository::recovery_ids(db)? {
+        if let Some((transfer, _)) =
+            studio_runtime_store::AccountTransferRepository::get_typed_with_raw(db, &id)?
+            && transfer.status == studio_runtime_store::transfer_record::TransferStatus::Pending
+            && ids.iter().any(|id| transfer_involves(&transfer, id))
+        {
+            return Err(ProjectsError::Invalid("Finish pending operations first"));
+        }
+    }
     for table in [
         "runtime_tasks",
         "runtime_monitors",
         "runtime_tool_requests",
         "runtime_rules",
         "runtime_workspace_operations",
-        "runtime_account_transfers",
         "runtime_rooms",
     ] {
         let owners = ids.iter().copied().collect::<Vec<_>>();
@@ -300,13 +320,6 @@ pub(crate) fn idle(
                             r["phase"].as_str(),
                             Some("complete" | "completed" | "failed" | "cancelled")
                         )
-                }
-                "runtime_account_transfers" => {
-                    r["status"] == "pending"
-                        && (ids.contains(r["leadId"].as_str().unwrap_or_default())
-                            || r["members"]
-                                .as_object()
-                                .is_some_and(|m| m.keys().any(|id| ids.contains(id.as_str()))))
                 }
                 "runtime_rooms" => {
                     r["members"].as_array().is_some_and(|m| {
@@ -370,6 +383,24 @@ mod receipt_tests {
         )
         .unwrap();
         assert_eq!(signature(&radio), signature(&radio_reordered));
+    }
+
+    #[tokio::test]
+    async fn transfer_member_blocks_peer_conversion() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(dir.path()))
+            .await
+            .unwrap();
+        store.transaction(|db| {
+            let agent = studio_runtime_store::AgentRecord::from_value(serde_json::json!({
+                "id":"member", "rootId":"member", "epoch":1, "status":"idle", "compactions":0, "accountKey":"source", "provider":"codex", "model":"gpt-6-astra", "cwd":std::env::temp_dir()
+            })).unwrap();
+            studio_runtime_store::AgentRepository::put(db, &agent)?;
+            db.execute("INSERT INTO runtime_account_transfers(id,record) VALUES(?1,?2)", rusqlite::params!["transfer", r#"{"id":"transfer","leadId":"other","targetAccountKey":"target","status":"pending","created":1,"members":{"member":{"phase":"unknown","sourceAccountKey":"source"}}}"#])?;
+            let value = serde_json::json!({"id":"member", "status":"idle"});
+            assert!(matches!(super::idle(db, &[value], true), Err(super::ProjectsError::Invalid("Finish pending operations first"))));
+            Ok(())
+        }).await.unwrap();
     }
 
     #[test]

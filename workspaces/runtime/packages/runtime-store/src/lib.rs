@@ -22,7 +22,7 @@ mod fresh_state;
 pub use fresh_state::{TestStoreTemplate, test_canvas};
 
 /// Durable marker proving both view-scoped agent projections were seeded. Unit: metadata key.
-pub const AGENT_PROJECTIONS_SEED_MARKER: &str = "agent_projections_v1";
+pub const AGENT_PROJECTIONS_SEED_MARKER: &str = "agent_projections_v2";
 /// Durable marker proving bounded summary entities have been seeded. Unit: metadata key.
 pub const SUMMARY_ENTITIES_SEED_MARKER: &str = "summary_entities_v1";
 /// Durable marker for retained-folder and question-history projections. Unit: metadata key.
@@ -56,6 +56,7 @@ pub mod stored_text_dictionary;
 pub mod supervisor_journal;
 pub mod terminal_output;
 pub mod text_blobs;
+pub mod transfer_record;
 pub mod vm_work_intent;
 pub mod wal_backup;
 mod write_alert;

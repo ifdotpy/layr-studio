@@ -89,6 +89,7 @@ test("Background Current Browser", async ({
     );
     let holdAnswer = false,
       releaseAnswer: (() => void) | undefined;
+    let currentListing: components["schemas"]["ProcessListing"];
     await page.route("**/api/**", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
@@ -110,6 +111,8 @@ test("Background Current Browser", async ({
           status: 503,
           json: { error: "Fixture uses embedded task snapshots" },
         });
+      if (url.pathname === "/api/processes")
+        return route.fulfill({ json: currentListing });
       if (
         request.method() === "POST" &&
         url.pathname === "/api/answer" &&
@@ -256,6 +259,7 @@ test("Background Current Browser", async ({
         typeof import("../../src/components/shell/BackgroundTasks.tsx").default
       >["initialFocus"],
     ) => {
+      currentListing = leadId === "other" ? otherListing : listing;
       await page.evaluate<void, unknown>(
         (value) => {
           const args = value as {
@@ -273,7 +277,7 @@ test("Background Current Browser", async ({
         },
         {
           data,
-          listing: leadId === "other" ? otherListing : listing,
+          listing: currentListing,
           leadId,
           focus,
         },

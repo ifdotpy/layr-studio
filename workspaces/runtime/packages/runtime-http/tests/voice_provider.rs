@@ -104,19 +104,13 @@ async fn fixture() -> (tempfile::TempDir, Arc<RuntimeStore>, Arc<RecordingPort>)
         "threadId":"voice-http-thread", "accountKey":"voice-http-account"
     });
     store.transaction(move |tx| {
-        tx.execute(
-            "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
-            rusqlite::params!["voice-http-agent", actor.to_string()],
-        )?;
+        studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(actor)?)?;
         let start_actor = json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,
             "id":"voice-start-agent", "rootId":"voice-start-agent", "epoch":7,
             "status":"idle", "isLead":true, "autoWake":true,
             "threadId":"voice-http-thread", "accountKey":"voice-http-account"
         });
-        tx.execute(
-            "INSERT INTO runtime_agents(id,record) VALUES('voice-start-agent',?1)",
-            [start_actor.to_string()],
-        )?;
+        studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(start_actor)?)?;
         for (id, state, native) in [
             ("end-http", "ready", Some("voice-http-thread")),
             ("speech-http", "ready", Some("voice-http-thread")),

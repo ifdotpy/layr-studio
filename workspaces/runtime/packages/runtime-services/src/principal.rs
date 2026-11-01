@@ -135,6 +135,21 @@ pub fn access(principal: &Principal, class: CommandClass) -> Access {
     }
 }
 
+/// Only a paired device has a remote frontend cache.
+pub fn frontend_locality(
+    principal: &Principal,
+) -> studio_runtime_schema::sync_protocol::FrontendLocality {
+    use studio_runtime_schema::sync_protocol::FrontendLocality;
+    match principal {
+        Principal::Device { .. } => FrontendLocality::Remote,
+        Principal::Owner
+        | Principal::Peer { .. }
+        | Principal::Agent { .. }
+        | Principal::Federated { .. }
+        | Principal::Policy => FrontendLocality::Local,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,6 +160,18 @@ mod tests {
             id: "d".into(),
             grant,
         }
+    }
+
+    #[test]
+    fn paired_device_is_remote_and_owner_is_local() {
+        assert_eq!(
+            frontend_locality(&Principal::Owner),
+            studio_runtime_schema::sync_protocol::FrontendLocality::Local
+        );
+        assert_eq!(
+            frontend_locality(&device(Grant::Full)),
+            studio_runtime_schema::sync_protocol::FrontendLocality::Remote
+        );
     }
 
     #[test]

@@ -119,7 +119,7 @@ impl AgentRepository {
         incident: Option<&str>,
     ) -> StoreResult<()> {
         connection.execute_cached(
-            "UPDATE runtime_agents SET hold_status=?2,hold_incident=?3 WHERE id=?1",
+            "UPDATE runtime_agents SET hold_status=?2,hold_incident=?3 WHERE id=?1 AND (hold_status IS NOT ?2 OR hold_incident IS NOT ?3)",
             rusqlite::params![id, status, incident],
         )?;
         Ok(())

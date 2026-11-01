@@ -133,6 +133,23 @@ pub enum WorkerStatus {
     /// Starting, running, waiting, or awaiting approval.
     Running,
 }
+impl WorkerStatus {
+    /// Team progress treats every status except finished, paused and queued as working.
+    pub fn from_agent_status(status: &str) -> Self {
+        match status {
+            "completed" => Self::Completed,
+            "failed" => Self::Failed,
+            "interrupted" => Self::Interrupted,
+            "paused" => Self::Paused,
+            "queued" => Self::Queued,
+            _ => Self::Running,
+        }
+    }
+
+    pub fn working(&self, auto_wake: bool) -> bool {
+        matches!(self, Self::Running) || matches!(self, Self::Paused) && auto_wake
+    }
+}
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Worker {
     pub id: String,
@@ -989,13 +1006,16 @@ impl TeamProgress {
             .filter(|w| !w.deleted && w.parent_id.as_deref() == Some(s.actor.id.as_str()))
         {
             progress.total += 1;
+            if w.status.working(w.auto_wake) {
+                progress.running += 1;
+            }
             match w.status {
                 WorkerStatus::Completed => progress.completed += 1,
                 WorkerStatus::Paused if !w.auto_wake => progress.completed += 1,
                 WorkerStatus::Failed => progress.failed += 1,
                 WorkerStatus::Interrupted => progress.interrupted += 1,
                 WorkerStatus::Queued => progress.queued += 1,
-                WorkerStatus::Paused | WorkerStatus::Running => progress.running += 1,
+                WorkerStatus::Paused | WorkerStatus::Running => {}
             }
         }
         progress

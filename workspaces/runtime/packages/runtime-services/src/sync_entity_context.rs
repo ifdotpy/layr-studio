@@ -12,27 +12,46 @@ use studio_runtime_store::{StoreResult, system_reads as records};
 use crate::event_write::truthy;
 use crate::submit_gates::{AgentAuthorityRow, Deletion, ProjectAuthorityRow};
 use crate::sync_policy::table_exists;
-use crate::sync_views::{AgentViewContext, RoomViewContext};
+use crate::sync_views::{AgentViewContext, RoomViewContext, TransferObservation};
 
 /// Lead ids bound into one `IN (...)` lookup while building agent contexts,
 /// kept below SQLite's host-parameter limit. Unit: rows (ids) per statement.
 const LEAD_LOOKUP_CHUNK_ROWS: usize = 500;
 
-fn transfer_can_cancel(transaction: &Transaction<'_>, record: &Value) -> bool {
+fn transfer_observation(transaction: &Transaction<'_>, record: &Value) -> TransferObservation {
     if record.get("isLead").and_then(Value::as_bool) != Some(true) {
-        return false;
+        return TransferObservation::Absent;
     }
-    let Some(summary) = record.get("accountTransfer") else {
-        return false;
-    };
-    if summary.get("status").and_then(Value::as_str) != Some("pending") {
-        return false;
+    if let Some(summary) = record.get("accountTransfer")
+        && summary.get("kind").and_then(Value::as_str) == Some("unreadable")
+    {
+        return TransferObservation::Unreadable {
+            reason: summary
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("Transfer data is unreadable")
+                .to_owned(),
+        };
     }
-    let Some(id) = summary.get("id").and_then(Value::as_str) else {
-        return false;
+    let id = record
+        .get("accountTransferId")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            let summary = record.get("accountTransfer")?;
+            (summary.get("status").and_then(Value::as_str) == Some("pending"))
+                .then(|| summary.get("id").and_then(Value::as_str))
+                .flatten()
+        });
+    let Some(id) = id else {
+        return TransferObservation::Absent;
     };
-    crate::account_transfer_driver::load(transaction, id)
-        .is_ok_and(|snapshot| snapshot.can_cancel())
+    match crate::account_transfer_driver::load(transaction, id) {
+        Ok(snapshot) if snapshot.can_cancel() => TransferObservation::Cancellable,
+        Ok(_) => TransferObservation::Held,
+        Err(_) => TransferObservation::Unreadable {
+            reason: "Transfer data is unreadable".into(),
+        },
+    }
 }
 
 fn account_destinations(
@@ -256,7 +275,8 @@ pub(crate) fn agent_view_contexts(
             id.to_owned(),
             AgentViewContext {
                 account_destinations: destinations.clone(),
-                transfer_can_cancel: transfer_can_cancel(transaction, record),
+                transfer: transfer_observation(transaction, record),
+                team_counts: team_counts(transaction, id, record)?,
                 project_server_id: project_server_id.map(str::to_owned),
                 launcher_alive: true,
                 empty_lead,
@@ -338,7 +358,8 @@ pub(crate) fn agent_view_context(
     let attention = pending_attention(transaction, id, record)?;
     Ok(AgentViewContext {
         account_destinations: account_destinations(transaction)?,
-        transfer_can_cancel: transfer_can_cancel(transaction, record),
+        transfer: transfer_observation(transaction, record),
+        team_counts: team_counts(transaction, id, record)?,
         command_progress: progress.commands,
         stall: progress.stall,
         project_server_id: project_server_id.map(str::to_owned),
@@ -348,6 +369,38 @@ pub(crate) fn agent_view_context(
         has_approval: attention.1,
         latest_work_result_file: latest.map(|(_, path)| path),
     })
+}
+
+pub(crate) const TEAM_COUNT_INPUTS_SQL: &str = "SELECT status,json_extract(record,'$.autoWake') FROM runtime_agents INDEXED BY runtime_agent_live_root_v2 WHERE root_id=?1 AND deleted_at IS NULL AND id<>?1 AND COALESCE(json_extract(record,'$.isLead'),0)=0";
+
+fn team_counts(
+    transaction: &Transaction<'_>,
+    id: &str,
+    record: &Value,
+) -> StoreResult<Option<studio_runtime_schema::agent_progress::TeamCounts>> {
+    if !truthy(record.get("isLead")) {
+        return Ok(None);
+    }
+    let mut total = 0;
+    let mut working = 0;
+    let mut statement = transaction.prepare_cached(TEAM_COUNT_INPUTS_SQL)?;
+    let rows = statement.query_map([id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<bool>>(1)?.unwrap_or(false),
+        ))
+    })?;
+    for row in rows {
+        let (status, auto_wake) = row?;
+        total += 1;
+        if crate::turn_prepare::WorkerStatus::from_agent_status(&status).working(auto_wake) {
+            working += 1;
+        }
+    }
+    Ok(Some(studio_runtime_schema::agent_progress::TeamCounts {
+        working,
+        total,
+    }))
 }
 
 fn exists_for_agent(

@@ -134,6 +134,10 @@ type Version = ResourceVersion;
 type Listener = (version?: ResourceVersion) => void;
 
 export type ResourceEventsOptions = {
+  onCachePolicies?: (
+    decisions: components["schemas"]["SubscriptionCacheDecision"][],
+  ) => void;
+  onCachePoliciesReset?: () => void;
   /** Receives the origins the server answers on, once per connection. */
   onRoutes?: (routes: readonly string[]) => void;
   api: Pick<
@@ -1213,6 +1217,7 @@ export function createResourceEvents(options: ResourceEventsOptions) {
 
   /** Forgets the state of one server connection; a native source survives it. */
   function resetConnection() {
+    options.onCachePoliciesReset?.();
     if (sessionId) options.api.clearStreamSession?.(sessionId);
     clearTimeout(subscriptionTimer);
     subscriptionTimer = undefined;
@@ -1596,8 +1601,11 @@ export function createResourceEvents(options: ResourceEventsOptions) {
             sessionId
           )
             throw new TypeError("Invalid sync session");
+          if (!Array.isArray(event.cachePolicies))
+            throw new TypeError("Invalid cache policies");
           sessionId = event.sessionId;
           options.api.receiveStreamSession?.(event);
+          options.onCachePolicies?.(event.cachePolicies);
           if (Array.isArray(event.routes)) options.onRoutes?.(event.routes);
           scheduleStreamUpdate();
         } catch (error) {
@@ -1610,6 +1618,9 @@ export function createResourceEvents(options: ResourceEventsOptions) {
           const pending = pendingSubscription;
           if (!pending || ack.gen !== pending.gen)
             throw new TypeError("Unexpected subscription acknowledgement");
+          if (!Array.isArray(ack.cachePolicies))
+            throw new TypeError("Invalid cache policies");
+          options.onCachePolicies?.(ack.cachePolicies);
           clearTimeout(subscriptionAckTimer);
           subscriptionAckTimer = undefined;
           pendingSubscription = undefined;

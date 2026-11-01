@@ -1160,6 +1160,7 @@ pub(crate) fn publish_agent_projection(
     }
     let mut compatibility = view;
     if let Some(fields) = compatibility.as_object_mut() {
+        fields.remove("teamCounts");
         for field in crate::sync_views::AGENT_SUMMARY_ATTENTION_FIELDS {
             fields.remove(field);
         }

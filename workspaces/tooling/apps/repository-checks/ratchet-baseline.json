@@ -1,30 +1,6 @@
 {
   "from_value": [
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:2"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:3"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:4"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_executor.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/account_worker/callback.rs",
       "fingerprint": "ee40c0b3955a00b1c72314f8bfd405afb2ecae120f0e813e627e6b94304b9cea:0"
     },
@@ -1270,22 +1246,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
       "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:2"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:3"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer.rs",
-      "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:4"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/account_worker/preparation/snapshot.rs",
@@ -2648,10 +2608,6 @@
   "switch-default": [],
   "to_value": [
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_driver.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_executor.rs",
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
     },
@@ -2918,18 +2874,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-services/src/studio_errors.rs",
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:3"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/sync_views.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/sync_views.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/sync_views.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:2"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/terminal_driver.rs",
@@ -3470,10 +3414,6 @@
     {
       "file": "workspaces/client/apps/web/src/sync/resourceEvents.ts",
       "fingerprint": "d06ccee7f680cdc132fa8fa90fa8521626ec9d772a411d34ce3273fcc1cda6bf:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/sync/subscriptions/cursors.ts",
-      "fingerprint": "7f427fa136049c853c20d9c9c56a96e65c3d94236ff2cb52203e3e4e64873123:0"
     },
     {
       "file": "workspaces/client/apps/web/src/sync/syncBrowserFixture.ts",

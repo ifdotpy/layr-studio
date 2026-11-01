@@ -242,12 +242,15 @@ const localOutboxQueueRow: QueueItem = {
 const serverQueueRow: QueueItem = {
   id: "server-message",
   text: "queued",
-  status: "pending",
+  status: "queued",
   kind: "user",
   created: 1,
   localDelivery: false,
 };
-const localDeliveryStatus: Message["deliveryStatus"] = "paused";
+const localDeliveryStatus: Message["deliveryStatus"] = {
+  source: "device",
+  state: { kind: "stored" },
+};
 const localQueueRow: LocalQueueItem = localOutboxQueueRow;
 // @ts-expect-error local queue projections do not fabricate server `status`
 const localQueueStatus: string = localQueueRow.status;

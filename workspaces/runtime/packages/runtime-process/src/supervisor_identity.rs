@@ -731,11 +731,16 @@ mod tests {
             }
         }
 
+        // The leader waits for a foreground member. The member is a fresh
+        // shell that prints `member` after exec, so it has default TERM
+        // handling and is in the group. A TERM sent before the leader forks
+        // that member would be deferred until the member exits, and nothing
+        // would run the trap. The test sends TERM only after `member` is read.
         let mut child = Fixture(
             Command::new("/bin/sh")
                 .args([
                     "-c",
-                    "trap 'trap \"\" TERM; /bin/cat <&0 & echo $!; wait $!' TERM; echo ready; /bin/cat >/dev/null",
+                    "trap 'trap \"\" TERM; /bin/cat <&0 & echo $!; wait $!' TERM; echo ready; /bin/sh -c 'echo member; exec /bin/cat >/dev/null'",
                 ])
                 .process_group(0)
                 .stdin(Stdio::piped())
@@ -747,6 +752,9 @@ mod tests {
         let mut line = String::new();
         output.read_line(&mut line).expect("fixture ready");
         assert_eq!(line.trim(), "ready");
+        line.clear();
+        output.read_line(&mut line).expect("fixture member started");
+        assert_eq!(line.trim(), "member");
         let group = capture_groups(GroupScope::Group(child.0.id()))
             .expect("capture original members")
             .pop()

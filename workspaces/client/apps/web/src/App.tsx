@@ -1,5 +1,5 @@
+import { MessageSendStatus } from "./generated/api.ts";
 import {
-  DeliveryStatus,
   AgentStatus as GeneratedApiAgentStatus,
   AccountStatus,
   AgentSource as GeneratedApiAgentSource,
@@ -287,8 +287,7 @@ export default function App({ active = true }: { active?: boolean }) {
   const serverAliases = useServerAliases(readServerAliases);
   const { useServerActivity, serverActivityActive, subscribeServerActivity } =
     useServerActivityScope();
-  const { acknowledgeOutbox, editOutboxDisplay, durableSend, useOutbox } =
-    useServerOutbox();
+  const { editOutboxDisplay, durableSend, useOutbox } = useServerOutbox();
   const {
     get,
     post,
@@ -332,7 +331,6 @@ export default function App({ active = true }: { active?: boolean }) {
         Object.entries(old).filter(([id]) => !observedSends.current.has(id)),
       ),
     );
-    void acknowledgeOutbox(ids).catch(() => {});
   }, []);
   const editSend = useCallback((id: string, text: string) => {
     setOutgoing((old) =>
@@ -687,11 +685,6 @@ export default function App({ active = true }: { active?: boolean }) {
     if (data?.stateDir && saved(sharedCreationKey(data.stateDir), null))
       setSharedCreate({});
   }, [data?.stateDir]);
-  const receipts = useMemo(
-    () =>
-      new Map((data?.runtime?.events || []).map((event) => [event.id, event])),
-    [data?.runtime?.events],
-  );
   const prefetchData = useMemo(() => {
     if (
       !data ||
@@ -719,35 +712,7 @@ export default function App({ active = true }: { active?: boolean }) {
     if (tasksOpen) setTasksRendered(true);
     if (workspaceOpen) setWorkspaceRendered(true);
   }, [tasksOpen, workspaceOpen]);
-  const cancelledSends = outgoingMessages
-    .filter((entry) => receipts.get(entry.id)?.status === "cancelled")
-    .map((entry) => entry.id)
-    .join(",");
-  useEffect(() => {
-    if (cancelledSends) observeSends(cancelledSends.split(","));
-  }, [cancelledSends, observeSends]);
-  const visibleOutgoing = useMemo(
-    () =>
-      outgoingMessages
-        .filter((entry) => receipts.get(entry.id)?.status !== "cancelled")
-        .map((entry) => {
-          const receipt = receipts.get(entry.id);
-          if (receipt?.status === "failed")
-            return {
-              ...entry,
-              status: "failed",
-              error: receipt.error || undefined,
-            } satisfies OutgoingMessage;
-          if (receipt?.status === "uncertain")
-            return {
-              ...entry,
-              status: "uncertain",
-              error: receipt.error || undefined,
-            } satisfies OutgoingMessage;
-          return entry;
-        }),
-    [outgoingMessages, receipts],
-  );
+  const visibleOutgoing = outgoingMessages;
   const conversationOutgoing = useRetainedArray(
     visibleOutgoing.filter((entry) => entry.body.room === opened),
   );
@@ -1682,31 +1647,42 @@ export default function App({ active = true }: { active?: boolean }) {
             command.slice(1) as "compact" | "review",
           );
       } else {
+        const pending = outbox.entries.some(
+          (entry) =>
+            entry.id === sends.current[id]?.id &&
+            !(
+              entry.status.source === "device" &&
+              entry.status.state.kind === "receipt_expired"
+            ),
+        );
         if (
-          sends.current[id]?.text !== text ||
-          JSON.stringify(sends.current[id]?.assets || []) !==
-            JSON.stringify(options?.assets || []) ||
-          sends.current[id]?.delivery !==
-            (options?.delivery || DeliveryMoment.CurrentTurn) ||
-          !!sends.current[id]?.asTextFile !== !!options?.asTextFile
-        )
-          sends.current[id] = {
-            id: randomUUID(),
-            room: id,
-            text,
-            assets: options?.assets || [],
-            ...(options?.asTextFile ? { asTextFile: true } : {}),
-            // Enter delivers after the current tool call; Tab after the turn.
-            delivery: options?.delivery || DeliveryMoment.CurrentTurn,
-          };
+          pending &&
+          sends.current[id]?.text === text &&
+          JSON.stringify(sends.current[id]?.assets || []) ===
+            JSON.stringify(options?.assets || []) &&
+          sends.current[id]?.delivery ===
+            (options?.delivery || DeliveryMoment.CurrentTurn) &&
+          !!sends.current[id]?.asTextFile === !!options?.asTextFile
+        ) {
+          notify("This message is still pending on this device.");
+          return;
+        }
+        sends.current[id] = {
+          id: randomUUID(),
+          room: id,
+          text,
+          assets: options?.assets || [],
+          ...(options?.asTextFile ? { asTextFile: true } : {}),
+          // Enter delivers after the current tool call; Tab after the turn.
+          delivery: options?.delivery || DeliveryMoment.CurrentTurn,
+        };
         request = sends.current[id];
         const entry: OutgoingMessage = {
           id: request.id,
           body: request,
-          status: "sending",
+          status: { source: "device", state: { kind: "stored" } },
           created: Date.now(),
           attachments: options?.attachments || [],
-          displayPending: true,
         };
         setOutgoing((old) => ({ ...old, [entry.id]: entry }));
         const result = await durableSend(
@@ -1729,42 +1705,44 @@ export default function App({ active = true }: { active?: boolean }) {
             release();
           },
         );
-        setOutgoing((old) => ({
-          ...old,
-          [entry.id]: {
-            ...entry,
-            status: result.queued
-              ? "queued"
-              : result.status === "uncertain"
-                ? "uncertain"
-                : "accepted",
-            ...(result.kind === "server" ? { receipt: result } : {}),
-            error: result.error || undefined,
-          },
-        }));
-        if (result.status === "cancelled") {
-          if (sends.current[id]?.id === entry.id) {
-            delete sends.current[id];
-          }
-          throw new ApiError(
-            "This message was cancelled. Send it again to resume.",
-            400,
-          );
-        }
-        if (result.status === "failed")
-          throw new ApiError(result.error || "The message was not sent.", 400);
-        if (result.status === "uncertain")
-          throw new Error(
-            result.error ||
-              "Delivery is uncertain. Inspect the conversation before sending again.",
-          );
-        if (sends.current[id]?.id === entry.id) {
-          delete sends.current[id];
+        if (result.kind === "confirmed") {
+          setOutgoing((old) => {
+            const next = { ...old };
+            delete next[entry.id];
+            return next;
+          });
+        } else if (result.kind === "removed") {
+          throw new Error("This message was removed.");
+        } else if (result.kind === "server") {
+          setOutgoing((old) => ({
+            ...old,
+            [entry.id]: {
+              ...entry,
+              status: { source: "server", status: result.status },
+              receipt: result,
+            },
+          }));
+          if (
+            result.status === MessageSendStatus.cancelled ||
+            result.status === MessageSendStatus.failed
+          )
+            throw new ApiError(
+              result.error || "The message was not sent.",
+              400,
+            );
+        } else {
+          setOutgoing((old) => ({
+            ...old,
+            [entry.id]: {
+              ...entry,
+              status: { source: "device", state: result.state },
+            },
+          }));
         }
         if (
           result.kind === "server" &&
           Object.values(result.deliveries || {}).some(
-            (v) => v.status !== DeliveryStatus.queued,
+            (v) => v.status !== MessageSendStatus.queued,
           )
         )
           notify("Message saved. Some deliveries are not confirmed.");
@@ -1809,8 +1787,16 @@ export default function App({ active = true }: { active?: boolean }) {
                 ...old,
                 [key]: {
                   ...old[key],
-                  status: rejected ? "failed" : "uncertain",
-                  error: errorText(e),
+                  status:
+                    old[key].status.source === "server"
+                      ? old[key].status
+                      : {
+                          source: "device",
+                          state: {
+                            kind: "transport_failed",
+                            error: errorText(e),
+                          },
+                        },
                 },
               }
             : old,
@@ -2516,8 +2502,8 @@ export default function App({ active = true }: { active?: boolean }) {
           onClick={toggleTeam}
         >
           Team{" "}
-          {workers.filter((worker) => busy.has(worker.status ?? "")).length}/
-          {workers.length}
+          {lead?.teamCounts &&
+            `${lead.teamCounts.working}/${lead.teamCounts.total}`}
         </Menu.Item>
       )}
       {agent?.source === GeneratedApiAgentSource.managed && (
@@ -2788,19 +2774,13 @@ export default function App({ active = true }: { active?: boolean }) {
                   leftSection={<Users size={16} />}
                   id="team-toggle"
                   aria-label="Team"
-                  title={`Team: ${workers.filter((worker) => busy.has(worker.status ?? "")).length} working of ${workers.length}`}
                   aria-expanded={narrowTeam ? teamOpen : wideTeamOpen}
                   onClick={toggleTeam}
                 >
                   Team
-                  {workers.length > 0 && (
+                  {lead?.teamCounts && lead.teamCounts.total > 0 && (
                     <span className="team-button-count">
-                      {
-                        workers.filter((worker) =>
-                          busy.has(worker.status ?? ""),
-                        ).length
-                      }
-                      /{workers.length}
+                      {lead.teamCounts.working}/{lead.teamCounts.total}
                     </span>
                   )}
                 </Button>

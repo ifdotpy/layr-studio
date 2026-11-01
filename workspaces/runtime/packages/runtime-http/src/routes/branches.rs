@@ -1461,8 +1461,8 @@ mod tests {
         let source_identity = CheckpointsRepository::workspace_source(&source);
         let asset_path = root.path().join("file.txt");
         store.transaction(move |tx| {
-            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('source',?1)", [source.to_string()])?;
-            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('child',?1)", [child.to_string()])?;
+            studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(source)?)?;
+            studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(child)?)?;
             tx.execute("INSERT INTO runtime_workspace_operations(id,record) VALUES('op',?1)", [json!({"source":source_identity,"signature":"s","phase":"provider_ready"}).to_string()])?;
             tx.execute("INSERT INTO runtime_assets(id,record) VALUES('asset',?1)", [json!({"id":"asset","agent":"source","name":"file.txt","path":asset_path,"mime":"text/plain","image":false,"size":1,"hash":"h","created":1}).to_string()])?;
             tx.execute("INSERT INTO runtime_items(id,agent,record,created) VALUES('source:a','source',?1,1)", [r#"{"id":"source:a","role":"assistant","text":"first","turnId":"t","assets":[{"id":"asset"}],"inputs":[{"text":"second","created":null,"at":2,"assets":[{"id":"asset"}]}]}"#])?;

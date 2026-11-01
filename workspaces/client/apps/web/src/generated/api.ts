@@ -3450,6 +3450,11 @@ export interface components {
           kind: "none";
         }
       | {
+          /** @constant */
+          kind: "unreadable";
+          reason: string;
+        }
+      | {
           actions: components["schemas"]["WaitingTransferActions"];
           id: string;
           /** @constant */
@@ -4385,6 +4390,7 @@ export interface components {
       /** Tail */
       tail?: null | string | undefined;
       taskDefaultGate?: components["schemas"]["TaskAcceptanceGate"] | undefined;
+      teamCounts?: components["schemas"]["TeamCounts"] | undefined;
       /** Threadid */
       threadId?: null | string | undefined;
       /** Turnid */
@@ -6262,6 +6268,7 @@ export interface components {
        * @default null
        */
       tail?: null | string | undefined;
+      teamCounts?: components["schemas"]["TeamCounts"] | undefined;
       /**
        * Threadid
        * @default null
@@ -6494,6 +6501,7 @@ export interface components {
       source?: components["schemas"]["AgentSource"] | null | undefined;
       stall?: components["schemas"]["AgentStall"] | null | undefined;
       status?: components["schemas"]["AgentStatus"] | null | undefined;
+      teamCounts?: components["schemas"]["TeamCounts"] | undefined;
       /** Threadid */
       threadId?: null | string | undefined;
       /** Turnid */
@@ -9287,6 +9295,7 @@ export interface components {
        * @default null
        */
       tail?: null | string | undefined;
+      teamCounts?: components["schemas"]["TeamCounts"] | undefined;
       /**
        * Threadid
        * @default null
@@ -9981,7 +9990,7 @@ export interface components {
       created: number;
       /** Deliveries */
       deliveries: {
-        [key: string]: components["schemas"]["RecipientDelivery"];
+        [key: string]: components["schemas"]["MessageRecipientDelivery"];
       };
       /** Id */
       id: string;
@@ -10969,6 +10978,8 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /** @enum {string} */
+    CommandErrorCode: "receipt_expired";
     /** @description Identity of the outbox command that delivers an answer. */
     CommandId: string;
     /**
@@ -13896,6 +13907,8 @@ export interface components {
       result: components["schemas"]["ProcessActionResult"];
     };
     /** @enum {string} */
+    FrontendLocality: "local" | "remote";
+    /** @enum {string} */
     Grant: "full" | "observe";
     /** @description History stays: a hidden row is not shown in the default list. */
     Hidden: {
@@ -14619,22 +14632,7 @@ export interface components {
        * @description The exact user input exists in the saved transcript.
        */
       materialized?: boolean | null | undefined;
-      /**
-       * Status
-       * @enum {string}
-       */
-      status:
-        | "queued"
-        | "pending"
-        | "reserved"
-        | "dispatching"
-        | "delivered"
-        | "accepted"
-        | "sent"
-        | "uncertain"
-        | "failed"
-        | "cancelled"
-        | "stored_only";
+      status: components["schemas"]["MessageSendStatus"];
     };
     /** MessageReceipts */
     MessageReceipts: {
@@ -14648,6 +14646,11 @@ export interface components {
        */
       workspaceId?: null | string | undefined;
     };
+    /** @description Public projection of a persisted recipient delivery. */
+    MessageRecipientDelivery: {
+      error?: string | null | undefined;
+      status: components["schemas"]["MessageSendStatus"];
+    };
     /** MessageRecord */
     MessageRecord: {
       /** At */
@@ -14656,7 +14659,7 @@ export interface components {
       author: string;
       /** Deliveries */
       deliveries: {
-        [key: string]: components["schemas"]["RecipientDelivery"];
+        [key: string]: components["schemas"]["MessageRecipientDelivery"];
       };
       /**
        * Error
@@ -14667,14 +14670,7 @@ export interface components {
       id: string;
       /** Room */
       room: string;
-      /**
-       * Status
-       * @default null
-       */
-      status?:
-        | ("queued" | "delivered" | "failed" | "uncertain")
-        | null
-        | undefined;
+      status?: components["schemas"]["MessageSendStatus"] | null | undefined;
       /** Text */
       text: string;
     };
@@ -14687,6 +14683,15 @@ export interface components {
        */
       protocol: 1;
     };
+    /** @enum {string} */
+    MessageSendStatus:
+      | "queued"
+      | "sending"
+      | "delivered"
+      | "uncertain"
+      | "failed"
+      | "cancelled"
+      | "stored_only";
     /** @enum {string} */
     MigrationPhase: "validate" | "apply" | "commit" | "rollback";
     /**
@@ -18894,11 +18899,7 @@ export interface components {
       kind: "user" | "followup";
       /** @default current_turn */
       requestedDelivery?: components["schemas"]["DeliveryMoment"] | undefined;
-      /**
-       * Status
-       * @constant
-       */
-      status: "pending";
+      status: components["schemas"]["MessageSendStatus"];
       /** Text */
       text: string;
     };
@@ -21068,24 +21069,8 @@ export interface components {
        * @default null
        */
       deliveryError?: null | string | undefined;
-      /**
-       * Deliverystatus
-       * @default null
-       */
       deliveryStatus?:
-        | (
-            | "pending"
-            | "reserved"
-            | "dispatching"
-            | "uncertain"
-            | "failed"
-            | "cancelled"
-            | "delivered"
-            | "stored_only"
-            | "queued"
-            | "accepted"
-            | "sent"
-          )
+        | components["schemas"]["MessageSendStatus"]
         | null
         | undefined;
       /**
@@ -22544,7 +22529,7 @@ export interface components {
       /** Deliveries */
       deliveries?:
         | {
-            [key: string]: components["schemas"]["RecipientDelivery"];
+            [key: string]: components["schemas"]["MessageRecipientDelivery"];
           }
         | null
         | undefined;
@@ -22561,22 +22546,7 @@ export interface components {
       message?: null | string | undefined;
       /** Room */
       room?: null | string | undefined;
-      /**
-       * Status
-       * @enum {string}
-       */
-      status:
-        | "queued"
-        | "pending"
-        | "reserved"
-        | "dispatching"
-        | "delivered"
-        | "accepted"
-        | "sent"
-        | "uncertain"
-        | "failed"
-        | "cancelled"
-        | "stored_only";
+      status: components["schemas"]["MessageSendStatus"];
       /** Text */
       text?: null | string | undefined;
       /** Waitingfor */
@@ -22803,6 +22773,16 @@ export interface components {
       resource: components["schemas"]["ResourceRef"];
       since?: components["schemas"]["SubscriptionCursor"] | undefined;
     };
+    /** SubscriptionCacheDecision */
+    SubscriptionCacheDecision: {
+      policy: components["schemas"]["SubscriptionCachePolicy"];
+      resource: components["schemas"]["ResourceRef"];
+    };
+    /**
+     * SubscriptionCachePolicy
+     * @enum {string}
+     */
+    SubscriptionCachePolicy: "cache" | "noCache";
     /**
      * SubscriptionCursor
      * @description Last fully applied durable sequence for one resource ref. Workspace identity survives server restarts; a different identity requires a fresh snapshot.
@@ -23869,6 +23849,8 @@ export interface components {
     };
     /** SyncSessionEvent */
     SyncSessionEvent: {
+      cachePolicies: components["schemas"]["SubscriptionCacheDecision"][];
+      locality: components["schemas"]["FrontendLocality"];
       /** Routes */
       routes: string[];
       sessionId: string;
@@ -23888,6 +23870,7 @@ export interface components {
     };
     /** SyncSubscriptionAck */
     SyncSubscriptionAck: {
+      cachePolicies: components["schemas"]["SubscriptionCacheDecision"][];
       gen: number;
     };
     /** SyncSubscriptionRequest */
@@ -24337,6 +24320,13 @@ export interface components {
       /** @constant */
       limit: 3;
       retryAllowed: boolean;
+    };
+    /** @description Counts of live descendant workers. Working uses the team progress status definition. */
+    TeamCounts: {
+      /** Format: uint */
+      total: number;
+      /** Format: uint */
+      working: number;
     };
     /** TerminalClose */
     TerminalClose: {
@@ -24987,24 +24977,8 @@ export interface components {
        * @default null
        */
       deliveryError?: null | string | undefined;
-      /**
-       * Deliverystatus
-       * @default null
-       */
       deliveryStatus?:
-        | (
-            | "pending"
-            | "reserved"
-            | "dispatching"
-            | "uncertain"
-            | "failed"
-            | "cancelled"
-            | "delivered"
-            | "stored_only"
-            | "queued"
-            | "accepted"
-            | "sent"
-          )
+        | components["schemas"]["MessageSendStatus"]
         | null
         | undefined;
       /**
@@ -25079,24 +25053,8 @@ export interface components {
        * @default null
        */
       deliveryError?: null | string | undefined;
-      /**
-       * Deliverystatus
-       * @default null
-       */
       deliveryStatus?:
-        | (
-            | "pending"
-            | "reserved"
-            | "dispatching"
-            | "uncertain"
-            | "failed"
-            | "cancelled"
-            | "delivered"
-            | "stored_only"
-            | "queued"
-            | "accepted"
-            | "sent"
-          )
+        | components["schemas"]["MessageSendStatus"]
         | null
         | undefined;
       /** @default null */
@@ -25293,24 +25251,8 @@ export interface components {
        * @default null
        */
       deliveryError?: null | string | undefined;
-      /**
-       * Deliverystatus
-       * @default null
-       */
       deliveryStatus?:
-        | (
-            | "pending"
-            | "reserved"
-            | "dispatching"
-            | "uncertain"
-            | "failed"
-            | "cancelled"
-            | "delivered"
-            | "stored_only"
-            | "queued"
-            | "accepted"
-            | "sent"
-          )
+        | components["schemas"]["MessageSendStatus"]
         | null
         | undefined;
       /** @default null */
@@ -38923,6 +38865,8 @@ export const CapacityRetryStatus = {
   failed: "failed",
 } as const;
 export type CapacityRetryStatus = components["schemas"]["CapacityRetryStatus"];
+export const CommandErrorCode = { receipt_expired: "receipt_expired" } as const;
+export type CommandErrorCode = components["schemas"]["CommandErrorCode"];
 export const ComplaintResponseStatus = {
   in_progress: "in_progress",
   resolved: "resolved",
@@ -39018,6 +38962,8 @@ export const ExecutionStatus = {
   not_applied: "not_applied",
 } as const;
 export type ExecutionStatus = components["schemas"]["ExecutionStatus"];
+export const FrontendLocality = { local: "local", remote: "remote" } as const;
+export type FrontendLocality = components["schemas"]["FrontendLocality"];
 export const Grant = { full: "full", observe: "observe" } as const;
 export type Grant = components["schemas"]["Grant"];
 export const HttpErrorKind = {
@@ -39058,6 +39004,16 @@ export const MessageKind = {
   "room-accept": "room-accept",
 } as const;
 export type MessageKind = components["schemas"]["MessageKind"];
+export const MessageSendStatus = {
+  queued: "queued",
+  sending: "sending",
+  delivered: "delivered",
+  uncertain: "uncertain",
+  failed: "failed",
+  cancelled: "cancelled",
+  stored_only: "stored_only",
+} as const;
+export type MessageSendStatus = components["schemas"]["MessageSendStatus"];
 export const MigrationPhase = {
   validate: "validate",
   apply: "apply",
@@ -39483,6 +39439,12 @@ export const StudioErrorLevel = {
   log: "log",
 } as const;
 export type StudioErrorLevel = components["schemas"]["StudioErrorLevel"];
+export const SubscriptionCachePolicy = {
+  cache: "cache",
+  noCache: "noCache",
+} as const;
+export type SubscriptionCachePolicy =
+  components["schemas"]["SubscriptionCachePolicy"];
 export const SubscriptionReplyKind = {
   delta: "delta",
   snapshot: "snapshot",
