@@ -8,6 +8,30 @@ fn corpus() -> Value {
     serde_json::from_str(include_str!("fixtures/process-controls.json")).unwrap()
 }
 #[tokio::test]
+async fn listing_is_atomic_as_a_command_process_starts_and_ends() {
+    use studio_runtime_schema::process_controls::BackgroundTaskView;
+    use studio_runtime_store::SyncDocumentsRepository;
+    let root = tempfile::tempdir().unwrap();
+    let store = RuntimeStore::open(Some(root.path())).await.unwrap();
+    store.transaction_with(|tx| {
+        tx.execute("INSERT INTO runtime_agents(id,record) VALUES('owner',?1)", [r#"{"id":"owner","provider":"codex","epoch":1,"accountKey":"default","threadId":"thread","autoWake":true}"#]).map_err(StoreError::from)?;
+        for (with_process, expected_process) in [(false, false), (true, true), (false, false)] {
+            let process_field = if with_process { r#", "processId":"pid""# } else { "" };
+            let raw = format!(r#"{{"id":"task","agent":"owner","created":1,"itemId":"item","turnId":"turn","kind":"command","status":"running","type":"commandExecution","name":"commandExecution"{process_field}}}"#);
+            let task: studio_runtime_store::TaskRecord = serde_json::from_str(&raw).map_err(StoreError::from)?;
+            tx.execute("INSERT INTO runtime_tasks(id,record) VALUES('task',?1) ON CONFLICT(id) DO UPDATE SET record=excluded.record", [&raw]).map_err(StoreError::from)?;
+            let view = studio_runtime_services::sync_views::project_task_record(&task).unwrap();
+            SyncDocumentsRepository::put_entity(tx, "task", "task", view, false)?;
+            let owners = process_controls::owners(tx, "owner")?;
+            let rows = process_controls::process_rows(tx, &owners)?;
+            let listing = process_controls::listing(tx, &owners, &rows, &process_controls::Connections::default())?;
+            assert_eq!(listing.activities.len(), 1);
+            assert_eq!(matches!(&listing.activities[0], BackgroundTaskView::Process(_)), expected_process);
+        }
+        Ok::<_, process_controls::Error>(())
+    }).await.unwrap();
+}
+#[tokio::test]
 async fn leaf_listing_does_not_decode_unrelated_agents() {
     let root = tempfile::tempdir().unwrap();
     let store = RuntimeStore::open(Some(root.path())).await.unwrap();
@@ -31,7 +55,7 @@ async fn leaf_listing_does_not_decode_unrelated_agents() {
                 &rows,
                 &process_controls::Connections::default(),
             )?;
-            assert_eq!(result["processes"], json!([]));
+            assert!(result.processes.is_empty());
             Ok::<_, process_controls::Error>(())
         })
         .await
@@ -54,21 +78,59 @@ async fn owners_follow_live_descendants_once_even_in_a_cycle() {
 }
 #[test]
 fn python_process_identities_and_capabilities_match() {
-    for case in corpus()["processes"].as_array().unwrap() {
-        if case["source"] == "monitor" {
+    #[derive(serde::Deserialize)]
+    struct Cases {
+        processes: Vec<Case>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Case {
+        source: String,
+        raw: serde_json::Map<String, Value>,
+        owner: Value,
+        connection: Option<String>,
+        expected: Expected,
+    }
+    #[derive(serde::Deserialize)]
+    struct Expected {
+        id: String,
+        key: String,
+        generation: String,
+        agent: String,
+    }
+    let cases: Cases =
+        serde_json::from_str(include_str!("fixtures/process-controls.json")).unwrap();
+    for mut case in cases.processes {
+        if case.source == "monitor" {
             continue;
         }
-        let mut actual = process_controls::project(
-            case["source"].as_str().unwrap(),
-            &case["raw"],
-            &case["owner"],
-            case["connection"].as_str(),
+        let claude = case.source == "claude_task";
+        case.raw.insert(
+            "kind".into(),
+            json!(if claude { "tool" } else { "command" }),
         );
-        // These additive renderer fields have no legacy Python projection.
-        for field in ["outputWakeBudget", "outputPatterns", "outputFile"] {
-            actual.as_object_mut().unwrap().remove(field);
-        }
-        assert_eq!(actual, case["expected"], "{}", case["source"]);
+        case.raw.insert(
+            "type".into(),
+            json!(if claude {
+                "dynamicToolCall"
+            } else {
+                "commandExecution"
+            }),
+        );
+        case.raw.insert("name".into(), json!(""));
+        let typed: studio_runtime_store::TaskRecord =
+            serde::Deserialize::deserialize(Value::Object(case.raw)).unwrap();
+        let source = if claude {
+            studio_runtime_schema::process_controls::ProcessSourceKind::ClaudeTask
+        } else {
+            studio_runtime_schema::process_controls::ProcessSourceKind::CodexTask
+        };
+        let actual =
+            process_controls::project(source, &typed, &case.owner, case.connection.as_deref());
+        assert_eq!(actual.view.id, case.expected.id);
+        assert_eq!(actual.view.key, case.expected.key);
+        assert_eq!(actual.view.generation, case.expected.generation);
+        assert_eq!(actual.view.agent, case.expected.agent);
+        assert_eq!(actual.view.source, source);
     }
 }
 #[test]

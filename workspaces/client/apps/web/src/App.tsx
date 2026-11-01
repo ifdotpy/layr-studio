@@ -253,7 +253,6 @@ import "./hooks/viewport-surface.css";
 import TeamPanel from "./components/agents/TeamPanel";
 import FilePreview, { type PreviewTarget } from "./components/FilePreview";
 import { awaitingAnswerIds } from "./components/agents/WorkerOverview";
-import { activeTask, backgroundTasks } from "./components/backgroundTaskModel";
 const TerminalDock = lazy(() => import("./components/TerminalDock"));
 import Workspace from "./components/shell/DeferredWorkspace";
 const BackgroundTasks = lazy(
@@ -1016,7 +1015,10 @@ export default function App({ active = true }: { active?: boolean }) {
   chatWaitSource.set(conversationSnapshot);
   useLayoutEffect(() => chatWaitSource.publish(), [conversationSnapshot]);
   const attentionCount = messageAttentionCount(chatData);
-  const taskCount = backgroundTasks(chatData).filter(activeTask).length;
+  const taskCount =
+    useSubscription(
+      readableLeadId ? { kind: "processes", agentId: readableLeadId } : null,
+    ).data?.activities.length ?? 0;
   const setDraft = useCallback(
     (text: string | ((current: string) => string), id = opened || "new") =>
       setDrafts((old) => {

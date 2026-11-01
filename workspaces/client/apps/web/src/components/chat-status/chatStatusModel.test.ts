@@ -6,7 +6,7 @@ import {
   TaskKind,
   TaskStatus,
 } from "../../generated/api";
-import { required } from "../componentTestFixtures";
+import { backgroundDisplay, required } from "../componentTestFixtures";
 import type { Agent, Snapshot } from "../../types";
 import type { ChatActivity } from "./chatStatusModel";
 import { componentSnapshot } from "../componentTestFixtures";
@@ -443,6 +443,8 @@ it("classifies unread, work, answer, error and paused states from current runtim
     status: "running" as const,
     command: "find /Users/igor",
     created: 10,
+    kind: TaskKind.command,
+    display: backgroundDisplay(),
   };
   const activeSnapshot = snapshot([lead, pausedChild], { tasks: [command] });
   const reasons = chatActivities(activeSnapshot);
@@ -515,7 +517,18 @@ it("classifies unread, work, answer, error and paused states from current runtim
   assert.deepEqual(strip([{ ...command, turnId: "t1" }]), [command.id]);
   assert.deepEqual(strip([command], [], [lead, pausedChild]), [command.id]);
   assert.deepEqual(
-    strip([], [{ id: "watch", agent: child.id, status: TaskStatus.running }]),
+    strip(
+      [],
+      [
+        {
+          id: "watch",
+          agent: child.id,
+          created: 1,
+          status: TaskStatus.running,
+          display: backgroundDisplay({ kind: "monitor", kindLabel: "monitor" }),
+        },
+      ],
+    ),
     ["watch"],
   );
   assert.deepEqual(strip([]), []);
@@ -606,6 +619,8 @@ it("classifies unread, work, answer, error and paused states from current runtim
     agent: "lead",
     command: "watch build",
     status: TaskStatus.running,
+    created: 1,
+    display: backgroundDisplay({ kind: "monitor", kindLabel: "monitor" }),
   };
   for (const status of ["starting", "running", "approval"] as const) {
     assert.equal(
@@ -638,6 +653,7 @@ it("classifies unread, work, answer, error and paused states from current runtim
           ...ownCommand,
           command: undefined,
           kind: TaskKind.tool,
+          display: backgroundDisplay({ kind: "tool", kindLabel: "tool" }),
           query: "search",
         },
       ],
@@ -835,6 +851,9 @@ it("keeps a parent waiting for a child with current command or monitor work", ()
       agent: child.id,
       status: TaskStatus.running,
       command: "watch build",
+      created: 1,
+      kind: TaskKind.command,
+      display: backgroundDisplay(),
     };
     for (const status of ["starting", "running", "approval"] as const) {
       const snapshot = makeSnapshot([lead, child], {

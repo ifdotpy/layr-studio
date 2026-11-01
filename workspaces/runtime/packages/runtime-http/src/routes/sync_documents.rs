@@ -769,12 +769,16 @@ fn pull_entities(
             vault_snapshot,
             rooms,
             |collection, id, value, deleted| {
-                validate_entity_envelope(
-                    &json!({"collection":collection,"id":id,"value":value}),
-                    collection,
-                    id,
-                    deleted,
-                )
+                if collection == "workDetail" && !deleted {
+                    studio_runtime_schema::validate("WorkItem", value).unwrap_or(false)
+                } else {
+                    validate_entity_envelope(
+                        &json!({"collection":collection,"id":id,"value":value}),
+                        collection,
+                        id,
+                        deleted,
+                    )
+                }
             },
         )?;
     }

@@ -802,6 +802,27 @@ pub fn publish_entity_changes(
             publish_direct(transaction, "work", id, raw, validate)?;
         }
     }
+    // A dependency's status changes the published policy of each dependent,
+    // even when the dependent itself was not written in this transaction.
+    if !changes.work.is_empty() {
+        let mut query = transaction.prepare_cached(
+            "SELECT id,record FROM runtime_work WHERE EXISTS (SELECT 1 FROM json_each(record,'$.dependencies') dependency JOIN json_each(?1) changed ON dependency.value=changed.value)",
+        )?;
+        for row in query.query_map([serde_json::to_string(&changes.work)?], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })? {
+            let (id, raw) = row?;
+            if !changes.work.contains(&id) {
+                publish_work_metadata(
+                    transaction,
+                    &id,
+                    &serde_json::from_str(&raw)?,
+                    false,
+                    validate,
+                )?;
+            }
+        }
+    }
     let present_work: BTreeSet<_> = work.iter().map(|(id, _)| id).collect();
     for id in &changes.work {
         if !present_work.contains(id) {
@@ -1249,7 +1270,12 @@ fn publish_work_metadata(
                 "work detail source is not an object",
             ))?
             .iter()
-            .filter(|(field, _)| !matches!(field.as_str(), "results" | "decisions" | "releases"))
+            .filter(|(field, _)| {
+                !matches!(
+                    field.as_str(),
+                    "results" | "decisions" | "releases" | "policy"
+                )
+            })
             .map(|(field, value)| (field.clone(), value.clone()))
             .collect(),
     );
@@ -1278,7 +1304,34 @@ fn publish_work_metadata(
                 },
             )?,
         };
-    put_projection(transaction, "workDetail", id, detail, false, validate)
+    if !validate("workDetail", id, &detail, false) {
+        return Err(StoreError::InvalidSyncObject {
+            scope: "workDetail".to_owned(),
+            id: id.to_owned(),
+        });
+    }
+    let item = studio_runtime_store::WorkItemsRepository::work_record(transaction, id)?
+        .ok_or(StoreError::RecordContract("work detail source is missing"))?;
+    let mut statuses = BTreeMap::new();
+    for dependency in item.dependencies() {
+        if let Some(record) =
+            studio_runtime_store::WorkItemsRepository::work_record(transaction, dependency)?
+        {
+            statuses.insert(dependency.clone(), record.status());
+        }
+    }
+    #[derive(serde::Serialize)]
+    struct WorkDetail<'a> {
+        #[serde(flatten)]
+        metadata: &'a Value,
+        policy: studio_runtime_schema::task_gate::WorkDetailPolicy,
+    }
+    let projected = WorkDetail {
+        metadata: &detail,
+        policy: crate::work_policy::detail_policy(&item, &statuses),
+    };
+    SyncDocumentsRepository::put_entity(transaction, "workDetail", id, projected, false)?;
+    Ok(())
 }
 
 fn retire_work_history(
@@ -1386,6 +1439,8 @@ pub(crate) fn seed_work_details(transaction: &Transaction<'_>) -> StoreResult<()
         server.as_deref(),
         &|_, _, _, _| true,
     )?;
+    maintain_task_window(transaction, &|_, _, _, _| true)?;
+    maintain_monitor_window(transaction, &|_, _, _, _| true)?;
     transaction.execute("INSERT INTO sync_entity_meta(key,value) VALUES(?1,'1') ON CONFLICT(key) DO UPDATE SET value='1'", [WORK_DETAILS_SEED_MARKER])?;
     Ok(())
 }
@@ -1858,6 +1913,7 @@ pub(crate) fn maintain_task_window_after_write(
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MonitorProjection {
+    display: studio_runtime_schema::process_controls::BackgroundTaskDisplay,
     pub agent: String,
     bytes: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1912,6 +1968,7 @@ pub fn project_monitor_record(
     }
     let bound = |text: &str, field: &str| crate::sync_views::bound_sync_text(text, field);
     Ok(MonitorProjection {
+        display: crate::process_controls::monitor_record_display(record),
         agent: bound(&record.agent, "agent"),
         bytes: record.bytes.get(),
         cancel_requested: record.cancel_requested,

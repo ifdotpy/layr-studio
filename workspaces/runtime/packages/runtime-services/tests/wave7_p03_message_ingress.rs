@@ -495,7 +495,10 @@ fn assert_json(actual: &Value, expected: &Value, path: &str) {
             }
             if a.contains_key("rootId") && a.contains_key("epoch") {
                 if let Some(Value::Bool(yolo)) = b.remove("yoloMode") {
-                    b.insert("permissionMode".into(), json!(if yolo { "bypassPermissions" } else { "default" }));
+                    b.insert(
+                        "permissionMode".into(),
+                        json!(if yolo { "bypassPermissions" } else { "default" }),
+                    );
                 }
                 for key in studio_runtime_store::agent_volatile::AGENT_VOLATILE_FIELDS
                     .into_iter()

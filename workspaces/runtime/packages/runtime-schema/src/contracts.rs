@@ -1286,6 +1286,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     openapi["components"]["schemas"]["AdmittedRequest"] = admitted_request_schema();
     openapi["components"]["schemas"]["ServerOperationRequest"]["properties"]["action"] = serde_json::json!({"type":"string","enum":crate::persistence::ServerOperationKind::VARIANTS});
     crate::task_command::apply_api_contract(&mut openapi);
+    crate::task_gate::apply_api_contract(&mut openapi);
     for (name, schema) in crate::studio_errors::schemas()? {
         openapi["components"]["schemas"][name] = schema;
     }
@@ -1306,6 +1307,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     for (name, schema) in crate::process_controls::schemas() {
         openapi["components"]["schemas"][name] = schema;
     }
+    crate::process_controls::apply_background_views(&mut openapi);
     openapi["components"]["schemas"]["AnswerBody"]["properties"]["decision"] =
         crate::question_answers::answer_body_decision();
     for (name, schema) in crate::question_answers::schemas() {

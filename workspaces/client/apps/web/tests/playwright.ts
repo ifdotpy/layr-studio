@@ -1811,6 +1811,12 @@ function entityValuesFromSnapshot(
     id: row.id,
     value: {
       ...row,
+      policy: {
+        blockedBy: [],
+        displayStatus: row.status,
+        acceptAvailable: row.status === "review",
+        gateOverrideRequired: false,
+      },
       results: [],
       decisions: [],
       releases: [],
@@ -2195,6 +2201,7 @@ export function handleEntitySyncFixtureRequest(
       | import("../src/generated/api.ts").components["schemas"]["SyncSubscriptionRequest"]
       | undefined;
     progress?: (resource: ResourceRef) => ResourceProgress | undefined;
+    processSnapshot?: () => import("../src/generated/api.ts").components["schemas"]["ProcessListing"];
     onStreamReady?: (
       notify: (
         resources: ResourceRef[],
@@ -2317,6 +2324,14 @@ export function handleEntitySyncFixtureRequest(
               FixtureResourceVersions[number]["discoverySnapshot"]
             >,
           };
+        if (resource.kind === "processes" && fixture.processSnapshot) {
+          return {
+            resource,
+            revision: next || 1,
+            replyKind: "snapshot",
+            viewSnapshot: { processes: fixture.processSnapshot() },
+          };
+        }
         if (
           resource.kind === "state" &&
           fixture.snapshot.runtime.viewScopedAgents &&

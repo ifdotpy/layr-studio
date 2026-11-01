@@ -8590,6 +8590,71 @@ export interface components {
        */
       quietThresholdMs: number;
     };
+    /** @enum {string} */
+    BackgroundTaskAction:
+      | "stop"
+      | "approve"
+      | "input"
+      | "resize"
+      | "readOutput";
+    /** @description The server's presentation and action decisions for a task row. */
+    BackgroundTaskDisplay: {
+      actions: components["schemas"]["BackgroundTaskAction"][];
+      active: boolean;
+      inBackgroundList: boolean;
+      indicator: components["schemas"]["BackgroundTaskIndicator"];
+      kind: components["schemas"]["BackgroundTaskKind"];
+      kindLabel: components["schemas"]["BackgroundTaskKindLabel"];
+      label: components["schemas"]["BackgroundTaskLabel"];
+      stdinState?:
+        | components["schemas"]["ProcessStdinState"]
+        | null
+        | undefined;
+      title: string;
+    };
+    /** @enum {string} */
+    BackgroundTaskIndicator:
+      | "answer"
+      | "error"
+      | "working"
+      | "unread"
+      | "paused";
+    /**
+     * @description Renderer classification for an existing task or process.
+     * @enum {string}
+     */
+    BackgroundTaskKind: "monitor" | "command" | "tool" | "backgroundTask";
+    /** @enum {string} */
+    BackgroundTaskKindLabel:
+      | "monitor"
+      | "command"
+      | "backgroundCommand"
+      | "tool";
+    /** @enum {string} */
+    BackgroundTaskLabel:
+      | "running"
+      | "starting"
+      | "pending"
+      | "stopping"
+      | "approval"
+      | "completed"
+      | "failed"
+      | "cancelled"
+      | "interrupted"
+      | "lost"
+      | "waitingForExit"
+      | "unknown";
+    BackgroundTaskView:
+      | {
+          /** @constant */
+          source: "process";
+          value: components["schemas"]["ProcessView"];
+        }
+      | {
+          /** @constant */
+          source: "task";
+          value: components["schemas"]["TaskProjection"];
+        };
     /** BlockingPoolGroupMetrics */
     BlockingPoolGroupMetrics: {
       /** Closureavgms */
@@ -14344,94 +14409,7 @@ export interface components {
       /** Text */
       text: string;
     };
-    /** ManagedProcessRecord */
-    ManagedProcessRecord: {
-      /** Accountkey */
-      accountKey: string;
-      /** Agent */
-      agent: string;
-      /**
-       * Bytes
-       * @default 0
-       */
-      bytes?: number | undefined;
-      /**
-       * Cancelrequested
-       * @default false
-       */
-      cancelRequested?: boolean | undefined;
-      capabilities: components["schemas"]["ProcessCapabilities"];
-      /**
-       * Command
-       * @default null
-       */
-      command?: null | string | undefined;
-      /** Created */
-      created: number;
-      /**
-       * Cwd
-       * @default null
-       */
-      cwd?: null | string | undefined;
-      /** Epoch */
-      epoch: number;
-      /**
-       * Error
-       * @default null
-       */
-      error?: null | string | undefined;
-      /** Generation */
-      generation: string;
-      /** Id */
-      id: string;
-      /** Key */
-      key: string;
-      /**
-       * Log
-       * @default null
-       */
-      log?: null | string | undefined;
-      /** Name */
-      name: string;
-      /**
-       * Output
-       * @default null
-       */
-      output?: null | string | undefined;
-      outputFile?: string | null | undefined;
-      outputPatterns?: string[] | undefined;
-      /**
-       * Outputtruncated
-       * @default false
-       */
-      outputTruncated?: boolean | undefined;
-      outputWakeBudget?:
-        | components["schemas"]["MonitorOutputWakeBudget"]
-        | null
-        | undefined;
-      /**
-       * Source
-       * @enum {string}
-       */
-      source: "monitor" | "codex_task" | "claude_task";
-      /** Status */
-      status: string;
-      /**
-       * Stdinclosed
-       * @default false
-       */
-      stdinClosed?: boolean | undefined;
-      /**
-       * Stdincloserequested
-       * @default false
-       */
-      stdinCloseRequested?: boolean | undefined;
-      /**
-       * Stdinerror
-       * @default null
-       */
-      stdinError?: null | string | undefined;
-    };
+    ManagedProcessRecord: components["schemas"]["ProcessView"];
     McpReconnectRequest: {
       id: string;
       name: string;
@@ -14720,11 +14698,7 @@ export interface components {
     };
     /** MonitorEntityDto */
     MonitorEntityDto: {
-      /**
-       * Agent
-       * @default null
-       */
-      agent?: null | string | undefined;
+      agent: string;
       /**
        * Bytes
        * @default null
@@ -14740,16 +14714,13 @@ export interface components {
        * @default null
        */
       command?: null | string | undefined;
-      /**
-       * Created
-       * @default null
-       */
-      created?: null | number | undefined;
+      created: number;
       /**
        * Cwd
        * @default null
        */
       cwd?: null | string | undefined;
+      display: components["schemas"]["BackgroundTaskDisplay"];
       /**
        * Durationms
        * @default null
@@ -14787,6 +14758,7 @@ export interface components {
        * @default null
        */
       name?: null | string | undefined;
+      outputFile?: string | null | undefined;
       outputPatterns?: string[] | undefined;
       /**
        * Outputtruncated
@@ -14807,8 +14779,7 @@ export interface components {
        * @default null
        */
       ruleId?: null | string | undefined;
-      /** @default null */
-      status?: components["schemas"]["TaskStatus"] | null | undefined;
+      status: components["schemas"]["MonitorState"];
       /**
        * Stdinclosed
        * @default null
@@ -17226,15 +17197,10 @@ export interface components {
     };
     /** @enum {string} */
     ProcessActionStatus: "completed" | "partial" | "uncertain";
-    /** ProcessCapabilities */
     ProcessCapabilities: {
-      /** Readoutput */
       readOutput: boolean;
-      /** Resize */
       resize: boolean;
-      /** Sendinput */
       sendInput: boolean;
-      /** Stop */
       stop: boolean;
     };
     ProcessControlRequest:
@@ -17363,6 +17329,8 @@ export interface components {
        */
       kind: "processes";
     };
+    /** @description Numeric IDs remain numeric because process-control identities depend on their original shape. */
+    ProcessId: string | number;
     ProcessIdentity: {
       accountKey: string;
       agent: string;
@@ -17397,11 +17365,10 @@ export interface components {
       /** Rssmib */
       rssMiB: number;
     };
-    /** ProcessList */
-    ProcessList: {
-      /** Processes */
-      processes: components["schemas"]["ManagedProcessRecord"][];
-      /** @default null */
+    ProcessList: components["schemas"]["ProcessListing"];
+    ProcessListing: {
+      activities: components["schemas"]["BackgroundTaskView"][];
+      processes: components["schemas"]["ProcessView"][];
       responseTarget?:
         | components["schemas"]["ProcessResponseTarget"]
         | null
@@ -17435,6 +17402,13 @@ export interface components {
       threadId: string;
       turnId: string;
     };
+    /** @enum {string} */
+    ProcessSourceKind: "monitor" | "codex_task" | "claude_task";
+    ProcessStatus:
+      | components["schemas"]["TaskRecordStatus"]
+      | components["schemas"]["MonitorState"];
+    /** @enum {string} */
+    ProcessStdinState: "open" | "closeRequested" | "closed";
     /** ProcessTree */
     ProcessTree: {
       /** Kinds */
@@ -17447,6 +17421,54 @@ export interface components {
       rootPid: number;
       /** Totalrssmib */
       totalRssMiB: number;
+    };
+    /** @description Complete public process view; private native proof stays on the service record. */
+    ProcessView: {
+      accountKey: string;
+      agent: string;
+      /** Format: uint64 */
+      bytes: number;
+      cancelRequested: boolean;
+      command?: string | null | undefined;
+      /** Format: double */
+      created: number;
+      cwd?: string | null | undefined;
+      display: components["schemas"]["BackgroundTaskDisplay"];
+      /** Format: double */
+      durationMs?: number | null | undefined;
+      /** Format: uint64 */
+      epoch: number;
+      error?: string | null | undefined;
+      /** Format: int64 */
+      exitCode?: number | null | undefined;
+      /** Format: double */
+      finished?: number | null | undefined;
+      generation: string;
+      id: string;
+      key: string;
+      log?: string | null | undefined;
+      name: string;
+      outputFile?: string | null | undefined;
+      outputPatterns: string[];
+      outputTruncated: boolean;
+      outputWakeBudget?:
+        | components["schemas"]["ProcessWakeBudget"]
+        | null
+        | undefined;
+      processId?: components["schemas"]["ProcessId"] | null | undefined;
+      source: components["schemas"]["ProcessSourceKind"];
+      status: components["schemas"]["ProcessStatus"];
+      stdinError?: string | null | undefined;
+      tail: string;
+      /** Format: int64 */
+      timeout_ms?: number | null | undefined;
+    };
+    ProcessWakeBudget: {
+      paused: boolean;
+      /** Format: double */
+      tokens: number;
+      /** Format: uint64 */
+      totalSuppressedMatches: number;
     };
     /** ProfileBody */
     ProfileBody: {
@@ -23451,7 +23473,7 @@ export interface components {
           collection: "workDetail";
           /** @constant */
           op: "upsert";
-          value: components["schemas"]["WorkItem"];
+          value: components["schemas"]["WorkDetail"];
         }
       | {
           /** @constant */
@@ -23856,7 +23878,7 @@ export interface components {
       collection: "workDetail";
       /** Id */
       id: string;
-      value: components["schemas"]["WorkItem"];
+      value: components["schemas"]["WorkDetail"];
     };
     /** SyncWorkEntityPayload */
     SyncWorkEntityPayload: {
@@ -24067,18 +24089,17 @@ export interface components {
     };
     /** TaskEntityDto */
     TaskEntityDto: {
-      /** Agent */
-      agent?: null | string | undefined;
+      agent: string;
       /** Bytes */
       bytes?: number | null | undefined;
       /** Cancelrequested */
       cancelRequested?: boolean | null | undefined;
       /** Command */
       command?: null | string | undefined;
-      /** Created */
-      created?: null | number | undefined;
+      created: number;
       /** Cwd */
       cwd?: null | string | undefined;
+      display: components["schemas"]["BackgroundTaskDisplay"];
       /** Durationms */
       durationMs?: number | null | undefined;
       /**
@@ -24094,7 +24115,7 @@ export interface components {
       id: string;
       /** Interactive */
       interactive?: boolean | null | undefined;
-      kind?: components["schemas"]["TaskKind"] | null | undefined;
+      kind: components["schemas"]["TaskRecordKind"];
       /** Log */
       log?: null | string | undefined;
       /** Name */
@@ -24106,7 +24127,7 @@ export interface components {
       processId?: null | string | undefined;
       /** Query */
       query?: null | string | undefined;
-      status?: components["schemas"]["TaskStatus"] | null | undefined;
+      status: components["schemas"]["TaskRecordStatus"];
       /** Stdinclosed */
       stdinClosed?: boolean | null | undefined;
       /** Stdincloserequested */
@@ -24147,17 +24168,63 @@ export interface components {
       /** Id */
       id: string;
     };
-    /**
-     * TaskKind
-     * @enum {string}
-     */
-    TaskKind: "monitor" | "command" | "tool";
+    /** @enum {string} */
+    TaskKind: "command" | "tool";
     TaskOutputResponse: {
       id: string;
       outputFile: string;
       text: string;
       truncated: boolean;
     };
+    /** @description Bounded public task fields, serialized directly from the stored task. */
+    TaskProjection: {
+      agent: string;
+      command?: string | null | undefined;
+      /** Format: double */
+      created: number;
+      cwd?: string | null | undefined;
+      display: components["schemas"]["BackgroundTaskDisplay"];
+      /** Format: double */
+      durationMs?: number | null | undefined;
+      error?: string | null | undefined;
+      /** Format: int64 */
+      exitCode?: number | null | undefined;
+      /** Format: double */
+      finished?: number | null | undefined;
+      id: string;
+      interactive?: boolean | null | undefined;
+      kind: components["schemas"]["TaskKind"];
+      name: string;
+      outputFile?: string | null | undefined;
+      outputTruncated?: boolean | null | undefined;
+      processId?: components["schemas"]["ProcessId"] | null | undefined;
+      query?: string | null | undefined;
+      status: components["schemas"]["TaskStatus"];
+      tail?: string | null | undefined;
+      turnId: string;
+    };
+    /**
+     * TaskKind
+     * @enum {string}
+     */
+    TaskRecordKind: "command" | "tool";
+    /**
+     * TaskStatus
+     * @enum {string}
+     */
+    TaskRecordStatus:
+      | "starting"
+      | "approval"
+      | "pending"
+      | "unknown"
+      | "running"
+      | "completed"
+      | "failed"
+      | "interrupted"
+      | "lost";
+    TaskRecordView:
+      | components["schemas"]["TaskEntityDto"]
+      | components["schemas"]["MonitorEntityDto"];
     /** TaskResource */
     TaskResource: {
       /**
@@ -24178,22 +24245,17 @@ export interface components {
        */
       kind: "tasks";
     };
-    /**
-     * TaskStatus
-     * @enum {string}
-     */
+    /** @enum {string} */
     TaskStatus:
-      | "running"
       | "starting"
       | "approval"
-      | "queued"
-      | "waiting"
+      | "pending"
+      | "unknown"
+      | "running"
       | "completed"
       | "failed"
       | "interrupted"
-      | "cancelled"
-      | "lost"
-      | "unknown";
+      | "lost";
     TaskSubmissionRefusal: {
       errors: {
         message: string;
@@ -27438,6 +27500,16 @@ export interface components {
       resultId?: string | undefined;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
+    };
+    WorkDetail: components["schemas"]["WorkItem"] & {
+      policy: components["schemas"]["WorkDetailPolicy"];
+    };
+    /** @description Current server-owned dependency and acceptance policy for one work detail. */
+    WorkDetailPolicy: {
+      acceptAvailable: boolean;
+      blockedBy: string[];
+      displayStatus: components["schemas"]["WorkStatus"];
+      gateOverrideRequired: boolean;
     };
     /** WorkEntityDto */
     WorkEntityDto: {
@@ -38696,6 +38768,54 @@ export const AttributionOperation = {
 } as const;
 export type AttributionOperation =
   components["schemas"]["AttributionOperation"];
+export const BackgroundTaskAction = {
+  stop: "stop",
+  approve: "approve",
+  input: "input",
+  resize: "resize",
+  readOutput: "readOutput",
+} as const;
+export type BackgroundTaskAction =
+  components["schemas"]["BackgroundTaskAction"];
+export const BackgroundTaskIndicator = {
+  answer: "answer",
+  error: "error",
+  working: "working",
+  unread: "unread",
+  paused: "paused",
+} as const;
+export type BackgroundTaskIndicator =
+  components["schemas"]["BackgroundTaskIndicator"];
+export const BackgroundTaskKind = {
+  monitor: "monitor",
+  command: "command",
+  tool: "tool",
+  backgroundTask: "backgroundTask",
+} as const;
+export type BackgroundTaskKind = components["schemas"]["BackgroundTaskKind"];
+export const BackgroundTaskKindLabel = {
+  monitor: "monitor",
+  command: "command",
+  backgroundCommand: "backgroundCommand",
+  tool: "tool",
+} as const;
+export type BackgroundTaskKindLabel =
+  components["schemas"]["BackgroundTaskKindLabel"];
+export const BackgroundTaskLabel = {
+  running: "running",
+  starting: "starting",
+  pending: "pending",
+  stopping: "stopping",
+  approval: "approval",
+  completed: "completed",
+  failed: "failed",
+  cancelled: "cancelled",
+  interrupted: "interrupted",
+  lost: "lost",
+  waitingForExit: "waitingForExit",
+  unknown: "unknown",
+} as const;
+export type BackgroundTaskLabel = components["schemas"]["BackgroundTaskLabel"];
 export const CapacityRetryCause = {
   serverOverloaded: "serverOverloaded",
   internalServerError: "internalServerError",
@@ -39020,6 +39140,18 @@ export const ProcessKind = {
   other: "other",
 } as const;
 export type ProcessKind = components["schemas"]["ProcessKind"];
+export const ProcessSourceKind = {
+  monitor: "monitor",
+  codex_task: "codex_task",
+  claude_task: "claude_task",
+} as const;
+export type ProcessSourceKind = components["schemas"]["ProcessSourceKind"];
+export const ProcessStdinState = {
+  open: "open",
+  closeRequested: "closeRequested",
+  closed: "closed",
+} as const;
+export type ProcessStdinState = components["schemas"]["ProcessStdinState"];
 export const ProjectDeleteFailureCode = {
   project_not_found: "project_not_found",
   project_workspace_conflict: "project_workspace_conflict",
@@ -39257,24 +39389,32 @@ export const TailscaleStatus = {
   unavailable: "unavailable",
 } as const;
 export type TailscaleStatus = components["schemas"]["TailscaleStatus"];
-export const TaskKind = {
-  monitor: "monitor",
-  command: "command",
-  tool: "tool",
-} as const;
+export const TaskKind = { command: "command", tool: "tool" } as const;
 export type TaskKind = components["schemas"]["TaskKind"];
-export const TaskStatus = {
-  running: "running",
+export const TaskRecordKind = { command: "command", tool: "tool" } as const;
+export type TaskRecordKind = components["schemas"]["TaskRecordKind"];
+export const TaskRecordStatus = {
   starting: "starting",
   approval: "approval",
-  queued: "queued",
-  waiting: "waiting",
+  pending: "pending",
+  unknown: "unknown",
+  running: "running",
   completed: "completed",
   failed: "failed",
   interrupted: "interrupted",
-  cancelled: "cancelled",
   lost: "lost",
+} as const;
+export type TaskRecordStatus = components["schemas"]["TaskRecordStatus"];
+export const TaskStatus = {
+  starting: "starting",
+  approval: "approval",
+  pending: "pending",
   unknown: "unknown",
+  running: "running",
+  completed: "completed",
+  failed: "failed",
+  interrupted: "interrupted",
+  lost: "lost",
 } as const;
 export type TaskStatus = components["schemas"]["TaskStatus"];
 export const TerminalInputDelivery = {

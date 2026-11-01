@@ -428,7 +428,7 @@ fn record_values<T: serde::Serialize>(records: Vec<T>) -> Result<Vec<Value>, Api
 
 fn project_task_records(
     records: Vec<TaskRecord>,
-) -> Result<Vec<studio_runtime_services::sync_views::TaskProjection>, ApiError> {
+) -> Result<Vec<studio_runtime_schema::process_controls::TaskProjection>, ApiError> {
     records
         .into_iter()
         .map(|task| {

@@ -287,42 +287,7 @@ fn project_schema_value(
     }
 }
 
-/// Bounded public task fields, serialized directly from the stored task.
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TaskProjection {
-    id: String,
-    agent: String,
-    created: studio_runtime_schema::task_record::NonnegativeNumber,
-    kind: studio_runtime_schema::task_record::TaskKind,
-    status: studio_runtime_schema::task_record::TaskStatus,
-    turn_id: String,
-    name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    command: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cwd: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    duration_ms: Option<studio_runtime_schema::task_record::NonnegativeNumber>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    exit_code: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    finished: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    interactive: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    output_file: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    output_truncated: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    process_id: Option<studio_runtime_schema::task_record::ProcessId>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    query: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tail: Option<String>,
-}
+use studio_runtime_schema::process_controls::TaskProjection;
 
 pub fn project_task_record(record: &studio_runtime_store::TaskRecord) -> Option<TaskProjection> {
     use studio_runtime_schema::task_record::ProcessId;
@@ -344,6 +309,7 @@ pub fn project_task_record(record: &studio_runtime_store::TaskRecord) -> Option<
         }
     });
     Some(TaskProjection {
+        display: crate::process_controls::task_record_display(record),
         id: bounded(id, "id"),
         agent: bounded(record.agent(), "agent"),
         created: record.created_number().clone(),
@@ -868,6 +834,28 @@ mod projection_plan_tests {
     use serde_json::json;
 
     #[test]
+    fn task_entity_payload_hash_is_stable_after_projection_move() {
+        #[derive(serde::Serialize)]
+        struct Entity<T> {
+            collection: &'static str,
+            id: &'static str,
+            value: T,
+        }
+        let raw = r#"{"id":"a:i","agent":"a","created":1,"itemId":"i","turnId":"turn","kind":"command","status":"running","type":"commandExecution","name":"commandExecution"}"#;
+        let task: studio_runtime_store::TaskRecord = serde_json::from_str(raw).unwrap();
+        let payload = serde_json::to_string(&Entity {
+            collection: "task",
+            id: "a:i",
+            value: super::project_task_record(&task).unwrap(),
+        })
+        .unwrap();
+        assert_eq!(
+            studio_runtime_store::sha256_hex(payload.as_bytes()),
+            "706ea379b3087203fa2bd28bc462b8833b4ed5a61b6b1f36bf890de419b6a642"
+        );
+    }
+
+    #[test]
     fn complaint_projection_preserves_public_fields() {
         let context = super::ComplaintViewContext::default();
         for recipient in ["user", "lead"] {
@@ -928,7 +916,8 @@ mod projection_plan_tests {
                 serde::Deserialize::deserialize(&raw).unwrap();
             let encoded =
                 serde_json::to_string(&super::project_task_record(&task).unwrap()).unwrap();
-            let new: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            let mut new: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            new.as_object_mut().unwrap().remove("display");
             let limit = length.min(2_000);
             assert_eq!(
                 new,

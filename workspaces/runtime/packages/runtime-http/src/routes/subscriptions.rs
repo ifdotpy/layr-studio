@@ -193,9 +193,7 @@ async fn view_value(
 ) -> Result<Value, ApiError> {
     use serde_json::json;
     match resource {
-        ResourceRef::ProcessesResource(r) => Ok(
-            json!({"processes":super::process_controls::read_listing(state, r.agent_id.as_str().to_owned()).await?}),
-        ),
+        ResourceRef::ProcessesResource(_) => Err(ApiError::internal()),
         ResourceRef::ComplaintResource(r) => Ok(
             json!({"complaint":super::questions_reads::complaint_for_id(state, r.complaint_id.as_str().to_owned()).await?}),
         ),
@@ -300,6 +298,18 @@ async fn view_initial(
     resource: ResourceRef,
     since: Option<SubscriptionCursor>,
 ) -> Result<ResourceRevisionEntry, ApiError> {
+    if let ResourceRef::ProcessesResource(processes) = &resource {
+        let listing =
+            super::process_controls::read_listing(state, processes.agent_id.as_str().to_owned())
+                .await?;
+        let mut entry = empty_entry()?;
+        entry.resource = Some(Some(resource));
+        entry.view_snapshot = Some(crate::generated::SubscriptionViewSnapshot {
+            processes: Some(listing),
+            ..Default::default()
+        });
+        return Ok(entry);
+    }
     let mut snapshot = view_value(state.clone(), resource.clone(), since.clone()).await?;
     let generation = snapshot
         .as_object_mut()
@@ -508,6 +518,15 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
             })
             .await
             .ok()?;
+    }
+    if let ResourceRef::ProcessesResource(processes) = &resource {
+        return super::process_controls::read_listing(
+            state,
+            processes.agent_id.as_str().to_owned(),
+        )
+        .await
+        .ok()
+        .and_then(|value| serde_json::to_vec(&value).ok());
     }
     if is_view_resource(&resource) {
         return view_value(state, resource, None)

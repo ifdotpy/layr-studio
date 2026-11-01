@@ -54,6 +54,7 @@ mod m2026_11_01_plan_record;
 mod m2026_11_01_project_context;
 mod m2026_11_01_project_revisions;
 mod m2026_11_01_rate_limit_view;
+mod m2026_11_01_work_detail_policy;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -123,6 +124,11 @@ const OCTOBER_31: MigrationDate = MigrationDate {
     year: 2026,
     month: 10,
     day: 31,
+};
+const NOVEMBER_1: MigrationDate = MigrationDate {
+    year: 2026,
+    month: 11,
+    day: 1,
 };
 const OCTOBER_30: MigrationDate = MigrationDate {
     year: 2026,
@@ -1031,6 +1037,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_10_31_current_checks::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-work-detail-policy",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Work details without server policy",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_work_detail_policy::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {

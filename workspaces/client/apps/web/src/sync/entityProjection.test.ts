@@ -5,7 +5,10 @@ import {
   AgentStatus,
   StudioErrorEffectCertainty,
 } from "../generated/api";
-import { required } from "../components/componentTestFixtures.ts";
+import {
+  backgroundDisplay,
+  required,
+} from "../components/componentTestFixtures.ts";
 import type { EntityRow } from "./entityProjection.ts";
 import type { Agent, Message, Request, Snapshot } from "../types";
 import type { SyncEntityPayload } from "../generated/api";
@@ -1411,8 +1414,29 @@ it("maps all runtime collections and carries workspace and edge data into snapsh
     ["agent", "a", { id: "a" }],
     ["chat", "c", { id: "c" }],
     ["room", "r", { id: "r" }],
-    ["task", "t", { id: "t" }],
-    ["monitor", "m", { id: "m" }],
+    [
+      "task",
+      "t",
+      {
+        id: "t",
+        agent: "a",
+        created: 1,
+        kind: "command",
+        status: "running",
+        display: backgroundDisplay(),
+      },
+    ],
+    [
+      "monitor",
+      "m",
+      {
+        id: "m",
+        agent: "a",
+        created: 1,
+        status: "running",
+        display: backgroundDisplay({ kind: "monitor", kindLabel: "monitor" }),
+      },
+    ],
     ["complaint", "q", { id: "q" }],
     ["request", "u", { id: "u" }],
     ["rule", "l", { id: "l" }],
@@ -1449,7 +1473,7 @@ it("maps all runtime collections and carries workspace and edge data into snapsh
     ["work", "work"],
   ] as const)
     assert.deepEqual(snapshot.runtime[key], [
-      { id: (entries.find(([name]) => name === collection)![2] as Agent).id },
+      entries.find(([name]) => name === collection)![2],
     ]);
 });
 
