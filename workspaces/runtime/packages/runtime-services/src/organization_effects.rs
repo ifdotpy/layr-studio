@@ -349,7 +349,11 @@ mod tests {
         assert_eq!(view["projectFolder"], Value::Null);
         assert_eq!(view["projectFolderRevision"], 1);
 
-        organize(&store, r#"{"id":"organized-chat","archived":true,"pinned":true}"#).await;
+        organize(
+            &store,
+            r#"{"id":"organized-chat","archived":true,"pinned":true}"#,
+        )
+        .await;
         let view = client_view(&store);
         assert_eq!(view["archived"], true, "an archive reaches the client");
         assert_eq!(view["pinned"], true, "a pin reaches the client");
