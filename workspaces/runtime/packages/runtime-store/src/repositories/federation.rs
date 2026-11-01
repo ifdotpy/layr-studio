@@ -218,10 +218,13 @@ impl FederationRepository {
                 "UPDATE runtime_federation_rooms SET record=?1 WHERE id=?2",
                 params![room.to_string(), room_id],
             )?;
-            tx.execute(
-                "UPDATE runtime_rooms SET record=json_set(record,'$.status','revoked') WHERE id=?1",
-                [&room_id],
-            )?;
+            if let Some(mut local) =
+                crate::Table::<studio_runtime_schema::room_record::RoomRecord>::new(tx)
+                    .get(&room_id)?
+            {
+                local.status = Some(studio_runtime_schema::room_record::RoomStatus::Revoked);
+                crate::Table::new(tx).put(&local)?;
+            }
         }
         Ok(())
     }
@@ -438,8 +441,21 @@ impl FederationRepository {
         let room_id = room["id"].as_str().unwrap_or_default().to_owned();
         let peer_label = room["peerLabel"].as_str().unwrap_or_default();
         tx.execute("INSERT INTO runtime_federation_rooms(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![room_id,room.to_string()])?;
-        let local_room = json!({"id":room_id,"kind":"federated","members":unique,"updated":now,"name":room["name"],"federation":true,"peerId":peer_state,"peerLabel":peer_label});
-        tx.execute("INSERT INTO runtime_rooms(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![room_id,local_room.to_string()])?;
+        let mut local_room = studio_runtime_schema::room_record::RoomRecord::new(
+            room_id.clone(),
+            studio_runtime_schema::room_record::RoomKind::Federated,
+        );
+        local_room.members = Some(unique);
+        local_room.updated = serde_json::Number::from_f64(now).map_or(
+            studio_runtime_schema::queue_command::Field::Null,
+            studio_runtime_schema::queue_command::Field::Value,
+        );
+        local_room.name = room["name"].as_str().map(str::to_owned);
+        local_room.federation = Some(true);
+        local_room.peer_id = Some(peer_state.to_owned());
+        local_room.peer_label =
+            studio_runtime_schema::queue_command::Field::Value(peer_label.to_owned());
+        crate::Table::new(tx).put(&local_room)?;
         let key = if approve {
             format!("room-accept:{room_id}")
         } else {

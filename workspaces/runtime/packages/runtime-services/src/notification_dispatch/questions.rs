@@ -533,8 +533,8 @@ fn put_request(
 ) -> Result<(), NotificationDispatchError> {
     Table::new(tx).put(record)?;
     let id = record.id.as_str();
-    let view = crate::sync_views::project_persisted_record("request", &json!(record))
-        .ok_or_else(|| stored("runtime_requests", id))?;
+    let view = crate::request_projection::project_request_record(record)
+        .map_err(|_| stored("runtime_requests", id))?;
     SyncDocumentsRepository::put_entity(
         tx,
         "request",

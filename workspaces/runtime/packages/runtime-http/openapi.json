@@ -8441,6 +8441,30 @@
             ],
             "default": null
           },
+          "claudeOptions": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "permissionMode": {
+                    "enum": [
+                      "default",
+                      "acceptEdits",
+                      "auto",
+                      "plan",
+                      "bypassPermissions"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Claude permission mode for the worker launch preview. Other session options remain private."
+          },
           "commandProgress": {
             "default": [],
             "items": {
@@ -61247,6 +61271,7 @@
         "description": "One tagged owner consumed by both HTTP and agent mutation adapters.\n\n```compile_fail\nuse studio_runtime_schema::task_command::TaskCommand;\nlet command = TaskCommand::Cancel { task_id: \"task\".into(), version: None };\n// A cancellation always carries its reason.\n```\n\n```compile_fail\nuse studio_runtime_schema::task_command::Version;\nlet version = Version(-1); // Ingress validation cannot be bypassed.\n```",
         "oneOf": [
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "list",
@@ -61271,6 +61296,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "create",
@@ -61374,6 +61400,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "update",
@@ -61496,6 +61523,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "cancel",
@@ -61541,6 +61569,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "reject",
@@ -61586,6 +61615,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "claim",
@@ -61632,6 +61662,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "submit",
@@ -61694,6 +61725,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "accept",
@@ -61748,6 +61780,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "set_default_gate",

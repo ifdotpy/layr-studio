@@ -17,8 +17,7 @@ use crate::agent_lifecycle_runtime::LifecyclePorts;
 use crate::agent_management::Action;
 use rusqlite::{Connection, Transaction};
 use studio_runtime_schema::command::{
-    COMMAND_CLIENT_ID_MAX_CHARS, COMMAND_ROW_MAX_BYTES, Command, CommandRequest, CommandResponse,
-    CommandRow, CommandStatus,
+    COMMAND_ROW_MAX_BYTES, Command, CommandRequest, CommandResponse, CommandRow, CommandStatus,
 };
 use studio_runtime_schema::persistence::{
     RequestIdentity, RequestIdentityError, RequestReferenceKind,
@@ -154,23 +153,17 @@ pub fn begin(
     // An agent or the policy runs in this process and brings a tool call id, which is not a
     // UUIDv7. The server numbers its commands.
     let trusted = matches!(principal, Principal::Agent { .. } | Principal::Policy);
-    let client = format!("{who}/{}", request.client);
-    if request.client.is_empty() || request.client.chars().count() > COMMAND_CLIENT_ID_MAX_CHARS {
-        return Err(CommandError::Invalid("Invalid command client id"));
-    }
+    let client = format!("{who}/{}", request.client.as_str());
     let number = if trusted {
         CommandWatermarks::applied(tx, &client)? + 1
     } else {
-        i64::try_from(request.number)
-            .ok()
-            .filter(|number| *number >= 1)
-            .ok_or(CommandError::Invalid("Command numbers start at 1"))?
+        request.number.get()
     };
     let identity = if trusted {
         RequestIdentity::opaque(
             "command",
             &[who.as_str()],
-            &request.id,
+            request.id.as_str(),
             &[request.command.name()],
             now_ms,
         )
@@ -178,7 +171,7 @@ pub fn begin(
         RequestIdentity::new(
             "command",
             &[who.as_str()],
-            &request.id,
+            request.id.as_str(),
             &[request.command.name()],
         )
         .map_err(RequestResultError::from)?
@@ -480,8 +473,8 @@ pub fn execute_sync(
     let mut reply = serde_json::Value::Null;
     let reference = match &request.command {
         Command::Withdraw { target, body } => {
-            let input = read_withdraw(tx, target, &body.message)?;
-            let decision = decide_withdraw(&input, &body.message)?;
+            let input = read_withdraw(tx, target.as_str(), body.message.as_str())?;
+            let decision = decide_withdraw(&input, body.message.as_str())?;
             apply_withdraw(tx, &decision, now_ms)?
         }
         Command::Stop { target, body } => {
@@ -496,7 +489,7 @@ pub fn execute_sync(
             // A stop only interrupts the running turn; it does not pause the chat or
             // clear its queue.
             let action = Action::Stop {
-                target: target.clone(),
+                target: target.as_str().to_owned(),
                 descendants: body.descendants,
                 reason: None,
                 sender,
@@ -508,7 +501,7 @@ pub fn execute_sync(
                 }
                 None => crate::agent_management_store::execute_in_transaction(tx, &action, now)?,
             };
-            agent_reference(tx, target)?
+            agent_reference(tx, target.as_str())?
         }
         Command::Send { .. } => unreachable!("refused above"),
     };
@@ -546,27 +539,35 @@ pub fn execute_agent_send(
         crate::coordination::AgentFollowup {
             sender_id: id,
             sender_epoch: i64::try_from(*epoch).unwrap_or_default(),
-            recipient_id: target,
-            id: &request.id,
-            text: &body.text,
+            recipient_id: target.as_str(),
+            id: request.id.as_str(),
+            text: body.text.as_str(),
             delivery: body.delivery.unwrap_or_default(),
             now,
         },
         admission,
     )?;
-    let reference = finish(tx, &begun, &message_reference(tx, &request.id)?)?;
+    let reference = finish(tx, &begun, &message_reference(tx, request.id.as_str())?)?;
     Ok((reference, result))
 }
 
 /// Command identity of a tool call of `agent`: the call id is the command id.
-pub fn agent_request(agent: &str, id: &str, command: Command) -> CommandRequest {
-    CommandRequest {
-        id: id.to_owned(),
-        client: agent.to_owned(),
+pub fn agent_request(
+    agent: &str,
+    id: &str,
+    command: Command,
+) -> Result<CommandRequest, CommandError> {
+    Ok(CommandRequest {
+        id: studio_runtime_schema::command::CommandId::tool(id.to_owned()),
+        client: agent
+            .to_owned()
+            .try_into()
+            .map_err(|_| CommandError::Invalid("Invalid command client id"))?,
         // The server numbers the commands of an agent.
-        number: 1,
+        // One lies within the positive safe-integer range.
+        number: 1_i64.try_into().expect("one is a valid command number"),
         command,
-    }
+    })
 }
 
 #[cfg(test)]

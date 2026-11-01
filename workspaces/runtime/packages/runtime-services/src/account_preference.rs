@@ -10,12 +10,10 @@
 
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
-use std::sync::LazyLock;
 use studio_runtime_schema::ProviderKind;
 use studio_runtime_schema::project_record::ProjectAccountPreference;
 use studio_runtime_schema::shared_values::{
-    ACCOUNT_GROUP_PATTERN, ACCOUNT_GROUPS_MAX, DEFAULT_CLAUDE_LEAD_EFFORT,
-    DEFAULT_CLAUDE_LEAD_MODEL,
+    ACCOUNT_GROUPS_MAX, DEFAULT_CLAUDE_LEAD_EFFORT, DEFAULT_CLAUDE_LEAD_MODEL,
 };
 
 /// File beside `accounts/registry.json` that holds the account groups and the
@@ -170,13 +168,10 @@ pub const PROJECT_GROUPS_FIELD: &str = "accountGroups";
 /// Revision of a project's account order (unit: saved changes).
 pub const PROJECT_GROUPS_REVISION_FIELD: &str = "accountGroupsRevision";
 
-static GROUP_PATTERN: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(ACCOUNT_GROUP_PATTERN).expect("the group pattern compiles"));
-
-/// Whether `name` is a valid account group name.
+/// Whether a name conforms to the shared account group contract.
 #[must_use]
 pub fn valid_group(name: &str) -> bool {
-    GROUP_PATTERN.is_match(name)
+    studio_runtime_schema::project_ingress::AccountGroup::is_valid(name)
 }
 
 /// Validate an account order: valid names, no repeats, at most `ACCOUNT_GROUPS_MAX`.

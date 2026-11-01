@@ -121,8 +121,8 @@ fn recover_requests(tx: &Transaction<'_>) -> Result<usize, MonitorError> {
             .map_err(studio_runtime_store::StoreError::from)?;
         let apply = (|| {
             Table::<RequestRecord>::new(tx).put(&request)?;
-            let view = crate::sync_views::project_persisted_record("request", &json!(request))
-                .ok_or(MonitorError::Refused("Invalid request projection"))?;
+            let view = crate::request_projection::project_request_record(&request)
+                .map_err(|_| MonitorError::Refused("Invalid request projection"))?;
             SyncDocumentsRepository::put_entity(
                 tx,
                 "request",
@@ -1589,8 +1589,8 @@ pub fn create_in_transaction(
             params,
         );
         Table::new(tx).put(&approval)?;
-        let view = crate::sync_views::project_persisted_record("request", &json!(approval))
-            .ok_or_else(|| invalid(id, "request"))?;
+        let view = crate::request_projection::project_request_record(&approval)
+            .map_err(|_| invalid(id, "request"))?;
         SyncDocumentsRepository::put_entity(tx, "request", approval.id(), view, false)?;
     }
     let after = MonitorSnapshot::checked_stored(&record, actor_value)?;

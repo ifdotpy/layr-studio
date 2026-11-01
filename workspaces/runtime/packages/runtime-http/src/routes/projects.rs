@@ -11,6 +11,10 @@ use std::path::Path;
 use std::sync::Arc;
 use studio_runtime_schema::json_compat::python_json_compact as canonical_json;
 use studio_runtime_schema::model_catalog::ModelCatalog;
+use studio_runtime_schema::peer_team_ingress::{
+    PeerTeamRequest, RadioCreate, RadioManage, TeamMutation,
+};
+use studio_runtime_schema::project_ingress::ProjectRequest;
 use studio_runtime_services::agents_create::CreateError;
 use studio_runtime_services::host_worker_create::{
     AccountIdentity, CreationCatalog, ExecutionSettings,
@@ -192,21 +196,13 @@ impl CreationCatalog for RadioCreationAdapter {
 impl studio_runtime_services::radio_runtime::RadioCreation for RadioCreationAdapter {
     fn prepare(
         &mut self,
-        body: &Value,
+        body: &RadioCreate,
         path: &Path,
         ids: [studio_runtime_store::AgentId; 2],
     ) -> Result<[studio_runtime_store::AgentRecord; 2], ProjectsError> {
-        let participants = body
-            .get("participants")
-            .and_then(Value::as_array)
-            .ok_or(ProjectsError::Invalid("participants"))?;
         let identities = (0..2)
             .map(|index| {
-                let key = participants
-                    .get(index)
-                    .and_then(|p| p.get("account_key"))
-                    .and_then(Value::as_str)
-                    .ok_or(ProjectsError::Invalid("account_key"))?;
+                let key = body.participants[index].account_key.as_str();
                 let row = self
                     .rows
                     .iter()
@@ -258,15 +254,14 @@ impl studio_runtime_services::radio_runtime::RadioCreation for RadioCreationAdap
 /// so blocking preparation never waits on a future.
 async fn radio_model_lists(
     service: &studio_runtime_services::model_catalog::ModelCatalogService,
-    body: &Value,
+    body: &RadioCreate,
     rows: &[studio_runtime_services::account_policy::PublicAccount],
 ) -> std::collections::BTreeMap<String, ModelCatalog> {
     let mut lists = std::collections::BTreeMap::new();
-    let participants = body.get("participants").and_then(Value::as_array);
-    for key in participants
-        .into_iter()
-        .flatten()
-        .filter_map(|participant| participant.get("account_key").and_then(Value::as_str))
+    for key in body
+        .participants
+        .iter()
+        .map(|participant| participant.account_key.as_str())
     {
         let Some(row) = rows.iter().find(|row| {
             row.id.as_str() == Some(key)
@@ -425,9 +420,14 @@ async fn list_projects(
 
 async fn write_project(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Value>,
+    ApiJson(body): ApiJson<ProjectRequest>,
 ) -> Result<Response, ApiError> {
-    if state.store.is_none() && projects::write_dependency(&body).is_some() {
+    let dependency = match &body {
+        ProjectRequest::Project(body) => projects::write_dependency(body),
+        ProjectRequest::Location(_) => Some("cross-server-driver/project-location-write"),
+        ProjectRequest::Sidebar(_) => None,
+    };
+    if state.store.is_none() && dependency.is_some() {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "The server is not paired or is revoked",
@@ -452,7 +452,7 @@ async fn write_project(
         .as_str()
         .ok_or_else(ApiError::internal)?
         .to_owned();
-    if projects::write_dependency(&body).is_some() {
+    if dependency.is_some() {
         let credentials = Arc::clone(&state.credentials);
         let origin = state.public_origin.clone();
         let identity = credentials
@@ -469,25 +469,15 @@ async fn write_project(
             .and_then(Value::as_str)
             .ok_or_else(ApiError::internal)?
             .to_owned();
-        let requested_server = body
-            .get("server")
-            .and_then(Value::as_str)
-            .unwrap_or("local");
-        let is_registration = body
-            .get("action")
-            .and_then(Value::as_str)
-            .unwrap_or("register")
-            == "register";
+        let requested_server = body.server().unwrap_or("local");
+        let is_registration = body.action() == "register";
         if is_registration && (requested_server == "local" || requested_server == local) {
             let value =
                 local_project_registration(store.clone(), body, default, known, local.clone())
                     .await?;
             return Ok(Json(ProjectWriteResponse::RemoteRegistration(value)).into_response());
         }
-        let action = body
-            .get("action")
-            .and_then(Value::as_str)
-            .unwrap_or("register");
+        let action = body.action();
         // Project locations use the durable orchestration receipt path for a
         // local destination too. The driver executes local envelopes through
         // the same receiver used by paired servers, matching Python's
@@ -503,11 +493,7 @@ async fn write_project(
             })?;
             let now = studio_runtime_services::event_write::unix_time()
                 .map_err(|_| ApiError::internal())? as i64;
-            let is_registration = body
-                .get("action")
-                .and_then(Value::as_str)
-                .unwrap_or("register")
-                == "register";
+            let is_registration = body.action() == "register";
             let value =
                 remote_project_write(store.clone(), body, default, known, driver, now).await?;
             let response = if is_registration {
@@ -518,43 +504,47 @@ async fn write_project(
             return Ok(Json(response).into_response());
         }
     }
-    let mut body = body;
-    if body.get("server").is_some() {
-        body["server"] = Value::Null;
-    }
-    let is_remove = body.get("action").and_then(Value::as_str) == Some("remove");
-    let is_sidebar = body.get("action").and_then(Value::as_str) == Some("reorder");
-    let value = projects::write(store.clone(), body, default, known)
-        .await
-        .map_err(projects_error)?;
-    let value = if is_remove {
-        super::generated_json::<crate::generated::ProjectRemovalResponse>(value)
-            .map(ProjectWriteResponse::Removal)?
-    } else if is_sidebar {
-        super::generated_json::<crate::generated::SidebarOrderResponse>(value)
-            .map(ProjectWriteResponse::Sidebar)?
-    } else {
-        super::generated_json::<crate::generated::ProjectMutationRecord>(value)
-            .map(|value| ProjectWriteResponse::Mutation(Box::new(value)))?
+    let value = match body {
+        ProjectRequest::Project(mut body) => {
+            body.server = None;
+            let is_remove =
+                body.action == Some(studio_runtime_schema::project_ingress::ProjectAction::Remove);
+            let value = projects::write(store.clone(), body, default, known)
+                .await
+                .map_err(projects_error)?;
+            if is_remove {
+                super::generated_json::<crate::generated::ProjectRemovalResponse>(value)
+                    .map(ProjectWriteResponse::Removal)?
+            } else {
+                super::generated_json::<crate::generated::ProjectMutationRecord>(value)
+                    .map(|value| ProjectWriteResponse::Mutation(Box::new(value)))?
+            }
+        }
+        ProjectRequest::Sidebar(body) => {
+            let value = projects::reorder(&store, body)
+                .await
+                .map_err(projects_error)?;
+            super::generated_json::<crate::generated::SidebarOrderResponse>(value)
+                .map(ProjectWriteResponse::Sidebar)?
+        }
+        ProjectRequest::Location(_) => return Err(ApiError::internal()),
     };
     Ok(Json(value).into_response())
 }
 
 async fn local_project_registration(
     store: Arc<studio_runtime_store::RuntimeStore>,
-    body: Value,
+    body: ProjectRequest,
     default_account: String,
     known_accounts: Vec<studio_runtime_services::account_policy::PublicAccount>,
     local_server: String,
 ) -> Result<LocationResult, ApiError> {
     let path = body
-        .get("path")
-        .and_then(Value::as_str)
+        .path()
         .filter(|value| !value.is_empty() && value.len() <= 4096)
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "A location path is required"))?;
     let name = body
-        .get("name")
-        .and_then(Value::as_str)
+        .name()
         .filter(|value| !value.trim().is_empty() && value.chars().count() <= 255)
         .unwrap_or_else(|| {
             Path::new(path)
@@ -563,8 +553,7 @@ async fn local_project_registration(
                 .unwrap_or("Project")
         });
     let request_id = body
-        .get("request_id")
-        .and_then(Value::as_str)
+        .request_id()
         .filter(|value| !value.is_empty() && value.len() <= 128)
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "A request ID is required"))?;
     let project_id = format!(
@@ -619,7 +608,11 @@ async fn local_project_registration(
     };
     let registered = projects::write(
         store.clone(),
-        json!({"action":"register","path":path,"name":name}),
+        studio_runtime_schema::project_ingress::ProjectWrite::register(
+            path.to_owned(),
+            Some(name.to_owned()),
+        )
+        .map_err(|_| ApiError::internal())?,
         default_account,
         known_accounts,
     )
@@ -753,20 +746,16 @@ enum ProjectWriteResponse {
 
 async fn remote_project_write(
     store: Arc<studio_runtime_store::RuntimeStore>,
-    body: Value,
+    body: ProjectRequest,
     default_account: String,
     known_accounts: Vec<studio_runtime_services::account_policy::PublicAccount>,
     driver: Arc<studio_runtime_services::multi_server_orchestration::OrchestrationDriver>,
     now: i64,
 ) -> Result<LocationResult, ApiError> {
     use studio_runtime_services::multi_server_orchestration::ExchangeOutcome;
-    let action = body
-        .get("action")
-        .and_then(Value::as_str)
-        .unwrap_or("register");
+    let action = body.action();
     let request_id = body
-        .get("request_id")
-        .and_then(Value::as_str)
+        .request_id()
         .filter(|value| !value.is_empty() && value.len() <= 128)
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "A request ID is required"))?;
     let local_store = store.clone();
@@ -783,8 +772,7 @@ async fn remote_project_write(
         )
     })?;
     let requested_server = body
-        .get("server")
-        .and_then(Value::as_str)
+        .server()
         .filter(|value| !value.is_empty())
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "A paired server is required"))?;
     let server = if requested_server == "local" {
@@ -824,13 +812,11 @@ async fn remote_project_write(
         == "register"
     {
         let path = body
-            .get("path")
-            .and_then(Value::as_str)
+            .path()
             .filter(|value| !value.is_empty() && value.len() <= 4096)
             .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "A location path is required"))?;
         let name = body
-            .get("name")
-            .and_then(Value::as_str)
+            .name()
             .filter(|value| !value.trim().is_empty() && value.chars().count() <= 255)
             .unwrap_or_else(|| {
                 Path::new(path)
@@ -850,16 +836,14 @@ async fn remote_project_write(
         (id, op, signature_data, payload, Some(registration))
     } else if matches!(action, "add_location" | "remove_location") {
         let project = body
-            .get("project")
-            .or_else(|| body.get("path"))
-            .and_then(Value::as_str)
+            .project()
+            .or_else(|| body.path())
             .filter(|value| !value.is_empty())
             .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Select an existing project"))?;
         let operation = request_id.to_owned();
         let path = if action == "add_location" {
             Some(
-                body.get("path")
-                    .and_then(Value::as_str)
+                body.path()
                     .filter(|value| !value.is_empty() && value.len() <= 4096)
                     .ok_or_else(|| {
                         ApiError::new(StatusCode::BAD_REQUEST, "A location path is required")
@@ -1286,7 +1270,7 @@ fn remote_location_action(
 
 async fn peer_teams(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Value>,
+    ApiJson(body): ApiJson<PeerTeamRequest>,
 ) -> Result<Json<PeerTeamWriteResponse>, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let account_policy = state
@@ -1300,46 +1284,78 @@ async fn peer_teams(
         .as_str()
         .ok_or_else(ApiError::internal)?
         .to_owned();
-    if body.get("action").and_then(Value::as_str) == Some("radio")
-        && body.get("radio_action").and_then(Value::as_str) == Some("create")
-    {
-        let rows = state
-            .account_driver
-            .as_ref()
-            .ok_or_else(ApiError::internal)?
-            .snapshot()
-            .map_err(|_| ApiError::internal())?
-            .accounts;
-        let model_lists = radio_model_lists(&state.model_catalog, &body, &rows).await;
-        let creation = RadioCreationAdapter {
-            model_lists,
-            rows,
-            identities: None,
-        };
-        let value = studio_runtime_services::radio_runtime::create_with(
-            store.clone(),
-            &body,
-            Box::new(creation),
-        )
+    match body {
+        PeerTeamRequest::RadioCreate(body) => {
+            let rows = state
+                .account_driver
+                .as_ref()
+                .ok_or_else(ApiError::internal)?
+                .snapshot()
+                .map_err(|_| ApiError::internal())?
+                .accounts;
+            let model_lists = radio_model_lists(&state.model_catalog, &body, &rows).await;
+            let creation = RadioCreationAdapter {
+                model_lists,
+                rows,
+                identities: None,
+            };
+            let value = studio_runtime_services::radio_runtime::create_with(
+                store,
+                &body,
+                Box::new(creation),
+            )
+            .await
+            .map_err(projects_error)?;
+            state.event_wake.notify_one();
+            Ok(Json(PeerTeamWriteResponse::Radio(value)))
+        }
+        PeerTeamRequest::RadioOpen(body) => {
+            radio_manage(&state, store, RadioManage::Open(body)).await
+        }
+        PeerTeamRequest::RadioSend(body) => {
+            radio_manage(&state, store, RadioManage::Send(body)).await
+        }
+        PeerTeamRequest::RadioPass(body) => {
+            radio_manage(&state, store, RadioManage::Pass(body)).await
+        }
+        PeerTeamRequest::RadioStop(body) => {
+            radio_manage(&state, store, RadioManage::Stop(body)).await
+        }
+        PeerTeamRequest::Convert(body) => {
+            let reply = studio_runtime_services::peer_conversion::convert(store, &body)
+                .await
+                .map_err(projects_error)?;
+            Ok(Json(PeerTeamWriteResponse::Conversion(reply)))
+        }
+        PeerTeamRequest::Save(body) => {
+            peer_team_mutation(store, TeamMutation::Save(body), default_account, known).await
+        }
+        PeerTeamRequest::Delete(body) => {
+            peer_team_mutation(store, TeamMutation::Delete(body), default_account, known).await
+        }
+        PeerTeamRequest::Move(body) => {
+            peer_team_mutation(store, TeamMutation::Move(body), default_account, known).await
+        }
+    }
+}
+async fn radio_manage(
+    state: &HttpState,
+    store: Arc<studio_runtime_store::RuntimeStore>,
+    body: RadioManage,
+) -> Result<Json<PeerTeamWriteResponse>, ApiError> {
+    let result = studio_runtime_services::radio_runtime::manage(store, &body)
         .await
         .map_err(projects_error)?;
-        state.event_wake.notify_one();
-        return Ok(Json(PeerTeamWriteResponse::Radio(value)));
-    }
-    if body.get("action").and_then(Value::as_str) == Some("radio") {
-        let result = studio_runtime_services::radio_runtime::manage(store, &body)
-            .await
-            .map_err(projects_error)?;
-        state.event_wake.notify_one();
-        return Ok(Json(PeerTeamWriteResponse::Radio(result)));
-    }
-    if body.get("action").and_then(Value::as_str) == Some("convert") {
-        let reply = studio_runtime_services::peer_conversion::convert(store, &body)
-            .await
-            .map_err(projects_error)?;
-        return Ok(Json(PeerTeamWriteResponse::Conversion(reply)));
-    }
-    let value = projects::peer_team_write(store.clone(), body, default_account, known)
+    state.event_wake.notify_one();
+    Ok(Json(PeerTeamWriteResponse::Radio(result)))
+}
+async fn peer_team_mutation(
+    store: Arc<studio_runtime_store::RuntimeStore>,
+    body: TeamMutation,
+    default_account: String,
+    known: Vec<studio_runtime_services::account_policy::PublicAccount>,
+) -> Result<Json<PeerTeamWriteResponse>, ApiError> {
+    let value = projects::peer_team_write(store, body, default_account, known)
         .await
         .map_err(projects_error)?;
     let result = super::generated_json::<crate::generated::PeerProjectResponse>(value)
@@ -1388,6 +1404,61 @@ inventory::submit! {
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)]
 mod local_registration_tests {
+    #[test]
+    fn project_body_matches_committed_schema_examples() {
+        let document = crate::schema::openapi_document();
+        let schema = json!({
+            "$ref": "#/paths/~1api~1projects/post/requestBody/content/application~1json/schema",
+            "paths": document["paths"], "components": document["components"]
+        });
+        let validator = jsonschema::validator_for(&schema).expect("project schema");
+        for body in [
+            json!({"path":"/project"}),
+            json!({"action":"set_workspace_policy","path":"/project","workspace_policy":null,"expected_revision":1}),
+            json!({"action":"add_location","project":"p","server":"s","request_id":"r","path":"/project"}),
+            json!({"action":"reorder","request_id":"r","expected_revision":1,"groups":{"a":["p"]}}),
+            json!({"path":"/project","account_groups":["INVALID"]}),
+            json!({"path":"/project","extra":true}),
+            json!({"action":"remove","path":""}),
+            json!({"action":"reorder","request_id":"r","expected_revision":-1,"groups":{}}),
+        ] {
+            let valid = validator.is_valid(&body);
+            let decoded = serde_json::from_value::<super::ProjectRequest>(body.clone()).is_ok();
+            assert_eq!(decoded, valid, "{body}");
+        }
+    }
+
+    #[test]
+    fn peer_team_body_matches_committed_schema_examples() {
+        let document = crate::schema::openapi_document();
+        let schema = json!({"$ref":"#/paths/~1api~1peer-teams/post/requestBody/content/application~1json/schema", "paths":document["paths"], "components":document["components"]});
+        let validator = jsonschema::validator_for(&schema).expect("peer team schema");
+        let create = json!({"action":"radio","radio_action":"create","path":"/p","request_id":"r","name":"Pair","participants":[{"account_key":"a","model":"m"},{"account_key":"b","model":"m"}]});
+        let send = json!({"action":"radio","radio_action":"send","path":"p","team_id":"t","request_id":"r","expected_revision":1,"text":"hello"});
+        let mut bad_participant = create.clone();
+        bad_participant["participants"][0] = json!(["a", "m"]);
+        let mut bad_rounds = send.clone();
+        bad_rounds["rounds"] = json!(3);
+        for body in [
+            json!({"action":"save","path":"p","expected_revision":0,"request_id":"r","name":"team","members":["a","b"]}),
+            json!({"action":"delete","path":"p","expected_revision":0,"request_id":"r","team_id":"t"}),
+            json!({"action":"move","path":"p","expected_revision":0,"request_id":"r","member":"a","team_id":null}),
+            json!({"action":"convert","path":"p","expected_revision":0,"request_id":"r","member":"a","target":"b"}),
+            create,
+            send,
+            json!({"action":"radio","radio_action":"open","path":"p","team_id":"t","request_id":"r"}),
+            json!({"action":"radio","radio_action":"pass","path":"p","team_id":"t","request_id":"r","expected_revision":1,"target":"a"}),
+            json!({"action":"radio","radio_action":"stop","path":"p","team_id":"t","request_id":"r","expected_revision":1}),
+            bad_participant,
+            bad_rounds,
+            json!({"action":"move","path":"p","expected_revision":0,"request_id":"r","member":"a","extra":true}),
+        ] {
+            let valid = validator.is_valid(&body);
+            let decoded = serde_json::from_value::<super::PeerTeamRequest>(body.clone()).is_ok();
+            assert_eq!(decoded, valid, "{body}");
+        }
+    }
+
     #[test]
     fn remote_location_uses_typed_project_location() {
         let project = serde_json::from_str::<studio_runtime_schema::project_record::ProjectLive>(
@@ -1586,6 +1657,20 @@ mod local_registration_tests {
         let (status, updated) = post_project(&app, &json!({"action":"set_account", "path":project, "account_key":account["id"], "expected_revision":registered["accountRevision"]})).await;
         assert_eq!(status, axum::http::StatusCode::OK, "{updated}");
         assert_eq!(updated["accountKey"], account["id"]);
+
+        let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+        let peer = json!({"action":"delete", "path":project, "expected_revision":0,
+            "request_id":request_id, "team_id":"a8b5b7aa-6459-4023-b148-0ad5a4f0ba56"});
+        let (status, first) = post(&app, "/api/peer-teams", &peer).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{first}");
+        assert_eq!(first["peerTeamsRevision"], 1);
+        let (status, replay) = post(&app, "/api/peer-teams", &peer).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{replay}");
+        assert_eq!(replay, first);
+        let mut changed = peer;
+        changed["team_id"] = json!("27272727-2727-4272-8272-272727272727");
+        let (status, _) = post(&app, "/api/peer-teams", &changed).await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT);
     }
 
     impl PairedTransport for ProjectPeer {

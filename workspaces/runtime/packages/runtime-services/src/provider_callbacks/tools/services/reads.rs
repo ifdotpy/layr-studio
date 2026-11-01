@@ -39,12 +39,7 @@ struct BriefMessage<'a> {
 pub(crate) fn project_chat(
     page: &crate::coordination_reads::ChatRead,
 ) -> Result<Box<serde_json::value::RawValue>, CallbackError> {
-    let room = Value::Object(
-        ["id", "kind", "rootId", "name"]
-            .into_iter()
-            .filter_map(|k| page.room.get(k).map(|v| (k.into(), v.clone())))
-            .collect(),
-    );
+    let room = page.room.brief();
     let messages = &page.messages;
     let mut selected = Vec::new();
     for message in messages.iter().rev() {
@@ -102,14 +97,14 @@ pub(crate) fn project_chat(
 
 #[derive(serde::Serialize)]
 struct ChatPreview<'a> {
-    room: &'a Value,
+    room: &'a crate::coordination_reads::BriefChatRoom<'a>,
     messages: &'a [BriefMessage<'a>],
 }
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ChatProjection<'a> {
-    room: &'a Value,
+    room: &'a crate::coordination_reads::BriefChatRoom<'a>,
     messages: &'a [BriefMessage<'a>],
     next_before: Option<i64>,
 }
