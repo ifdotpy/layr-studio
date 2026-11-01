@@ -1363,32 +1363,18 @@ mod projection_plan_tests {
 
 #[cfg(test)]
 mod work_views_tests {
-    use super::{WorkView, work_views};
+    use super::work_views;
     use serde_json::{Value, json};
     use std::collections::BTreeMap;
 
     #[test]
     fn work_views_build_results_decisions_and_releases() {
-        let raw = json!({
-            "id": "w", "rootId": "lead", "title": "work", "status": "review",
-            "results": [{"id": "r0"}, {"id": "r1"}],
-            "decisions": [{"id": "d0"}],
-            "releases": [{"id": "x0"}],
-        });
-        let item: studio_runtime_store::WorkItemRecord =
-            serde_json::from_str(&raw.to_string()).unwrap();
+        let raw_text = r#"{"id":"w","rootId":"lead","title":"work","status":"review","results":[{"id":"r0"},{"id":"r1"}],"decisions":[{"id":"d0"}],"releases":[{"id":"x0"}]}"#;
+        let raw: Value = serde_json::from_str(raw_text).unwrap();
+        let item: studio_runtime_store::WorkItemRecord = serde_json::from_str(raw_text).unwrap();
         let refusal = json!({"reason": "none"});
-        let views = work_views(&item, &raw, refusal.clone(), &BTreeMap::new()).unwrap();
-        let rows: Vec<(&str, Value)> = views
-            .iter()
-            .map(|(collection, view)| {
-                (
-                    *collection,
-                    serde_json::from_str(&serde_json::to_string(view).unwrap()).unwrap(),
-                )
-            })
-            .collect();
-        let collections: Vec<&str> = rows.iter().map(|(collection, _)| *collection).collect();
+        let views = work_views(&item, &raw, refusal, &BTreeMap::new()).unwrap();
+        let collections: Vec<&str> = views.iter().map(|(collection, _)| *collection).collect();
         assert_eq!(
             collections,
             [
@@ -1400,20 +1386,34 @@ mod work_views_tests {
                 "workRelease"
             ]
         );
-        assert_eq!(rows[0].1["status"], "review");
-        let detail = &rows[1].1;
-        assert_eq!(detail["results"], json!([]));
-        assert_eq!(detail["decisions"], json!([]));
-        assert_eq!(detail["releases"], json!([]));
-        assert_eq!(detail["submissionRefusal"], refusal);
-        assert_eq!(detail["policy"]["acceptAvailable"], json!(true));
+        let texts: Vec<String> = views
+            .iter()
+            .map(|(_, view)| serde_json::to_string(view).unwrap())
+            .collect();
         assert_eq!(
-            rows[2].1,
-            json!({"id": "w:0", "taskId": "w", "rootId": "lead", "index": 0, "value": {"id": "r0"}})
+            texts[0],
+            r#"{"id":"w","rootId":"lead","status":"review","title":"work"}"#
         );
-        assert_eq!(rows[3].1["id"], "w:1");
-        assert_eq!(rows[4].1["value"], json!({"id": "d0"}));
-        assert_eq!(rows[5].1["value"], json!({"id": "x0"}));
-        assert!(matches!(views[1].1, WorkView::Detail(_)));
+        // Metadata keys sort first; the policy object is always last.
+        assert!(texts[1].starts_with(
+            r#"{"decisions":[],"id":"w","releases":[],"results":[],"rootId":"lead","status":"review","submissionRefusal":{"reason":"none"},"title":"work","policy":{"#
+        ));
+        assert!(texts[1].contains(r#""acceptAvailable":true"#));
+        assert_eq!(
+            texts[2],
+            r#"{"id":"w:0","index":0,"rootId":"lead","taskId":"w","value":{"id":"r0"}}"#
+        );
+        assert_eq!(
+            texts[3],
+            r#"{"id":"w:1","index":1,"rootId":"lead","taskId":"w","value":{"id":"r1"}}"#
+        );
+        assert_eq!(
+            texts[4],
+            r#"{"id":"w:0","index":0,"rootId":"lead","taskId":"w","value":{"id":"d0"}}"#
+        );
+        assert_eq!(
+            texts[5],
+            r#"{"id":"w:0","index":0,"rootId":"lead","taskId":"w","value":{"id":"x0"}}"#
+        );
     }
 }
