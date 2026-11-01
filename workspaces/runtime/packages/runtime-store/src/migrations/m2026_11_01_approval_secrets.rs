@@ -77,7 +77,10 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                         .get_mut("state")
                         .and_then(serde_json::Value::as_object_mut)
                         .ok_or(StoreError::RecordContract("invalid approval state"))?;
-                    state.insert("answer".into(), serde_json::to_value(&*answer)?);
+                    state.insert(
+                        "answer".into(),
+                        serde::Serialize::serialize(&*answer, serde_json::value::Serializer)?,
+                    );
                     SyncDocumentsRepository::put_entity(
                         tx,
                         collection,
