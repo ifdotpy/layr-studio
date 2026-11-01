@@ -68,7 +68,17 @@ export function createOutbox(options: {
   let initialization: Promise<void> | undefined;
   const ready = () =>
     (initialization ??= (async () => {
-      for (const [id, value] of await buffer.loadAll()) {
+      for (const [id, stored] of await buffer.loadAll()) {
+        const value: StoredSend =
+          stored.localState.kind === "in_flight"
+            ? {
+                ...stored,
+                localState: {
+                  kind: "transport_failed",
+                  error: "The server response was interrupted.",
+                },
+              }
+            : stored;
         if (!saved.has(id) && !removed.has(id)) {
           const body = {
             id: value.request.id,
