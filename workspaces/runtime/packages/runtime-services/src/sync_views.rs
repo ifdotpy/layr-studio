@@ -984,6 +984,24 @@ mod projection_plan_tests {
     }
 
     #[test]
+    fn legacy_image_metadata_does_not_change_agent_projection_hash() {
+        let before = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"countedWorkerTurn":true,"imageWorkspaceBaseError":"old","imageWorkspaceBaseRef":"main","imageWorkspaceCreatedAt":2,"imageWorkspaceError":"old","imageWorkspaceHasGit":true,"imageWorkspaceNoticeSent":true,"imageWorkspaceNoticeText":"old","imageWorkspaceRelative":".","imageWorkspaceStartCommit":"abc","imageWorkspaceSubpath":"."}"#;
+        let after = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0}"#;
+        let context = super::AgentViewContext::default();
+        let project = |raw: &str| {
+            let record = serde_json::from_str(raw).unwrap();
+            serde_json::to_vec(&super::agent_entity_view(&record, &context).unwrap()).unwrap()
+        };
+        let legacy = project(before);
+        let normalized = project(after);
+        assert_eq!(legacy, normalized);
+        assert_eq!(
+            studio_runtime_store::sha256_hex(&normalized),
+            "331e9f9d3338dd940d71775993842096c0457bcbcc1dfac427e79f0d7f826e20"
+        );
+    }
+
+    #[test]
     fn complaint_projection_preserves_public_fields() {
         let context = super::ComplaintViewContext::default();
         for recipient in ["user", "lead"] {
