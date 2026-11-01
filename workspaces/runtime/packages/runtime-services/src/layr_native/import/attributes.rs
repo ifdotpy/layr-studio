@@ -9,7 +9,7 @@ fn set_attribute(file: &File, name: &std::ffi::OsStr, value: &[u8]) -> std::io::
         Err(error)
             if std::io::Error::from(error).kind() == std::io::ErrorKind::PermissionDenied =>
         {
-            let mode = (file.metadata()?.mode() & 0o7777) as u16;
+            let mode = (file.metadata()?.mode() & 0o7777) as rustix::fs::RawMode;
             fchmod(file, Mode::from_raw_mode(mode | 0o200))?;
             let written = fsetxattr(file, name, value, XattrFlags::empty());
             fchmod(file, Mode::from_raw_mode(mode))?;
