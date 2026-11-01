@@ -1,6 +1,6 @@
 //! HTTP adapters for persisted questions, complaints, and checkpoint reads.
 
-use super::extractors::QueryParams;
+use super::extractors::TypedQuery;
 use super::manifest::{OperationStatus, RouteGroup, get};
 use axum::Json;
 use axum::extract::State;
@@ -25,15 +25,21 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ComplaintQuery {
+    id: Option<String>,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CheckpointsQuery {
+    agent: Option<String>,
+}
 pub(crate) async fn complaint(
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<ComplaintQuery>,
     State(state): State<HttpState>,
 ) -> Result<Json<Value>, ApiError> {
-    let id = query
-        .typed_value("id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
+    let id = query.id.unwrap_or_default();
     complaint_for_id(state, id).await.map(Json)
 }
 
@@ -49,14 +55,11 @@ pub(super) async fn complaint_for_id(state: HttpState, id: String) -> Result<Val
 }
 
 pub(crate) async fn checkpoints(
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<CheckpointsQuery>,
     State(state): State<HttpState>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    let agent_id = query
-        .typed_value("agent")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
+    let agent_id = query.agent;
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let (agents, records) = store
         .read_async("runtime-http/routes/questions_reads", |transaction| {
@@ -198,5 +201,30 @@ inventory::submit! {
         name: "questions_reads",
         routes: Some(routes),
         dependencies: &[],
+    }
+}
+
+#[cfg(test)]
+mod typed_query_contract_tests {
+    use super::*;
+    #[test]
+    fn complaintquery_decodes_and_rejects_invalid() {
+        fn decode(query: &str) -> bool {
+            let uri: axum::http::Uri = format!("/?{query}").parse().unwrap();
+            axum::extract::Query::<ComplaintQuery>::try_from_uri(&uri).is_ok()
+        }
+        assert!(decode("id=x"));
+        assert!(!decode("extra=x"));
+        assert!(!decode("extra=x"));
+    }
+    #[test]
+    fn checkpointsquery_decodes_and_rejects_invalid() {
+        fn decode(query: &str) -> bool {
+            let uri: axum::http::Uri = format!("/?{query}").parse().unwrap();
+            axum::extract::Query::<CheckpointsQuery>::try_from_uri(&uri).is_ok()
+        }
+        assert!(decode("agent=x"));
+        assert!(!decode("extra=x"));
+        assert!(!decode("extra=x"));
     }
 }

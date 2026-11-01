@@ -40,8 +40,8 @@ fn cleanup_intent_predicate(_exact: bool) -> String {
 
 /// SQL predicate: a deleted agent that may still hold an active turn, the
 /// rows whose deletion settlement a restart must finish.
-/// `exact` adds the reservation flag from the owner turn row, which an index
-/// predicate cannot read.
+/// `exact` adds the busy chat (an unfinished turn) and the reservation flag from
+/// the owner turn rows, which an index predicate cannot read.
 fn deleted_unsettled_predicate(exact: bool) -> String {
     let statuses = ACTIVE_AGENT_STATUSES
         .iter()
@@ -53,10 +53,15 @@ fn deleted_unsettled_predicate(exact: bool) -> String {
     } else {
         "0"
     };
+    let busy = if exact {
+        crate::domain::chat_busy_sql("runtime_agents.id")
+    } else {
+        "0".to_owned()
+    };
     format!(
         "{} AND ({} OR {} OR status IN ({statuses}) OR {})",
         nonfalsy("deleted_at"),
-        nonfalsy("in_flight"),
+        busy,
         nonfalsy("turn_id"),
         reservation,
     )
@@ -186,11 +191,6 @@ impl Selection {
             .collect::<Result<Vec<_>, _>>()
             .map_err(StoreError::from)
     }
-}
-
-/// The predicate of the unsettled-request partial index, for queries that must use it.
-pub(crate) fn unsettled_request_predicate() -> String {
-    REQUESTS.predicate()
 }
 
 /// The predicate of the active-monitor partial index.
@@ -482,6 +482,47 @@ mod tests {
                 assert!(rows.contains(&(id.as_str(), record.as_str())), "{id}");
             }
         }
+    }
+
+    #[test]
+    fn deleted_busy_chat_is_unsettled_without_the_agent_flag() {
+        let connection = Connection::open_in_memory().expect("memory SQLite opens");
+        connection
+            .execute_batch(crate::agent_columns::agent_table_sql())
+            .expect("table");
+        connection
+            .execute_batch(crate::agent_volatile::agent_volatile_table_sql())
+            .expect("volatile agent table creates");
+        StartupRecoveryRepository::prepare_indexes(&connection).expect("indexes");
+        for (id, record) in [
+            (
+                "busy",
+                r#"{"provider":"codex","deletedAt":5,"status":"idle"}"#,
+            ),
+            (
+                "idle",
+                r#"{"provider":"codex","deletedAt":5,"status":"idle","inFlight":true}"#,
+            ),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                    [id, record],
+                )
+                .expect("row");
+        }
+        connection
+            .execute(
+                "INSERT INTO turns(id,chat,state) VALUES('t1','busy','starting')",
+                [],
+            )
+            .expect("turn");
+        let ids = StartupRecoveryRepository::deleted_agents_maybe_unsettled(&connection)
+            .expect("rows")
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["busy"]);
     }
 
     #[test]

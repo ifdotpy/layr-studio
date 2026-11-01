@@ -130,10 +130,7 @@ impl From<&AgentRecord> for ClaimedAgent {
     fn from(agent: &AgentRecord) -> Self {
         Self {
             account_key: agent.account_key.clone(),
-            provider: studio_runtime_schema::provider_kind::ProviderKind::of_field(
-                agent.extra.get("provider"),
-            )
-            .ok(),
+            provider: agent.provider.value().copied(),
             thread_id: agent.thread_id.clone(),
             cwd: agent.cwd.clone(),
             model: agent.model.clone(),
@@ -273,8 +270,6 @@ mod tests {
         transaction
             .commit()
             .expect("candidate-index transaction commits");
-        let mut extra = BTreeMap::new();
-        extra.insert("provider".to_owned(), json!("codex"));
         AgentRepository::put(
             &connection,
             &AgentRecord {
@@ -285,7 +280,9 @@ mod tests {
                 root_id: AgentId::from("agent"),
                 epoch: 4,
                 status: AgentStatus::Queued,
-                extra,
+                provider: studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_schema::ProviderKind::Codex,
+                ),
                 ..AgentRecord::test_defaults()
             },
         )
@@ -787,8 +784,6 @@ mod tests {
                 [],
             )
             .expect("agent epoch advances");
-        let mut other_extra = BTreeMap::new();
-        other_extra.insert("provider".to_owned(), json!("codex"));
         AgentRepository::put(
             &transaction,
             &AgentRecord {
@@ -798,7 +793,9 @@ mod tests {
                 root_id: AgentId::from("other"),
                 epoch: 1,
                 status: AgentStatus::Queued,
-                extra: other_extra,
+                provider: studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_schema::ProviderKind::Codex,
+                ),
                 ..AgentRecord::test_defaults()
             },
         )
@@ -919,9 +916,7 @@ mod tests {
         let mut agent = AgentRepository::get(&transaction, &AgentId::from("agent"))
             .expect("agent reads")
             .expect("agent remains");
-        agent
-            .extra
-            .insert("nativeFailureHold".to_owned(), json!(true));
+        agent.set_native_failure_hold(true);
         AgentRepository::put(&transaction, &agent).expect("hold persists");
         assert!(
             !SchedulerRepository::mark_submitted_identity(

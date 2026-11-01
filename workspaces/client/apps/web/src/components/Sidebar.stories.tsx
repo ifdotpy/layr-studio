@@ -1,4 +1,5 @@
 import { AgentSource as GeneratedApiAgentSource } from "../generated/api.ts";
+import { simpleRequest } from "../approvalFixtures";
 import { useEffect, useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useMantineColorScheme } from "@mantine/core";
@@ -90,15 +91,17 @@ const data = {
     })),
     requests: threads
       .filter((_, index) => index % titles.length === 0)
-      .map((agent) => ({
-        id: `request-${agent.id}`,
-        agent: agent.id,
-        status: "pending",
-      })),
+      .map((agent) =>
+        simpleRequest({
+          id: `request-${agent.id}`,
+          agent: agent.id,
+        }),
+      ),
     rooms: [],
     tasks: [],
     monitors: [],
     complaints: [],
+    studioErrors: [],
     rules: [],
     peerTeams: [],
     events: [],
@@ -106,7 +109,7 @@ const data = {
     peerTeamsVersion: 1,
     projectOrganizationVersion: 1,
   },
-} as unknown as Snapshot;
+} as Snapshot;
 const values = new Map<string, string>();
 const backend: SidebarBackend = {
   ownerId: "local",

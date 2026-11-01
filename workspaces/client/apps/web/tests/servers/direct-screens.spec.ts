@@ -8,13 +8,10 @@ test("direct screens keep overlapping chat drafts and sends with their owner", a
   context,
 }, testInfo) => {
   const local = await fixture("Local");
-  const remote = await fixture("Remote", true);
+  // Versioned frames carry the drafts baseline that lets unsent edits post.
+  const remote = await fixture("Remote", true, { entityFrames: true });
   const errors: string[] = [];
-  let quotaFault = false;
-  page.on("pageerror", (error) => {
-    if (quotaFault && error.name === "QuotaExceededError") return;
-    errors.push(error.message);
-  });
+  page.on("pageerror", (error) => errors.push(error.message));
   try {
     await remoteNetwork(context, remote);
     await page.goto(local.origin);
@@ -59,32 +56,15 @@ test("direct screens keep overlapping chat drafts and sends with their owner", a
     await expect.poll(() => remote.writes.length).toBe(1);
     expect(required(remote.writes[0]).text).toBe("remote draft");
     expect(local.writes).toHaveLength(0);
-    quotaFault = true;
-    await page.evaluate(() => {
-      const original = Storage.prototype.setItem;
-      Storage.prototype.setItem = function (key, value) {
-        if (
-          key.includes("codex-chat-draft:") ||
-          (key.includes("codex-drafts:") && key.includes(":pending:"))
-        )
-          throw new DOMException("Full fixture storage", "QuotaExceededError");
-        original.call(this, key, value);
-      };
-      for (const method of ["put", "add"] as const) {
-        const originalMethod = IDBObjectStore.prototype[method];
-        IDBObjectStore.prototype[method] = function (
-          this: IDBObjectStore,
-          ...args: Parameters<IDBObjectStore[typeof method]>
-        ) {
-          if (this.name === "unsent")
-            throw new DOMException(
-              "Full fixture storage",
-              "QuotaExceededError",
-            );
-          return originalMethod.apply(this, args);
-        };
-      }
-    });
+    // Drafts are kept in the unsent input buffer and posted to the server. A
+    // failed post is the save failure the user must see.
+    await page.route("**/api/sync/drafts", (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: "{}",
+      }),
+    );
     await page.locator("#message").fill("unsaved remote draft");
     await expect(page.locator("[data-draft-sync-status]")).toContainText(
       "Keep this chat open",
@@ -111,7 +91,7 @@ test("direct screens keep overlapping chat drafts and sends with their owner", a
   }
 });
 
-test("direct screens automatically include paired servers on phones", async ({
+test("direct screens list a trusted server on phones without a manual step", async ({
   page,
   context,
 }, testInfo) => {
@@ -178,12 +158,15 @@ test("direct screens automatically include paired servers on phones", async ({
     };
     await page.goto(home);
     await openChats();
+    await expect(chat("Local")).toBeVisible();
+    // The local server trusts this phone's device key for Remote, so Remote is listed
+    // without a pairing request.
     await expect(chat("Remote")).toBeVisible();
     await expect(chat("Local")).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath("shared-phone-chats.png"),
     });
-    expect(remote.pairs).toHaveLength(1);
+    expect(remote.pairs).toHaveLength(0);
     expect(
       local.accessRequests.filter((row) => row.action === "discover"),
     ).toHaveLength(0);
@@ -213,7 +196,7 @@ test("direct screens automatically include paired servers on phones", async ({
     await expect(page.locator("#message")).toHaveValue(
       "keep local phone draft",
     );
-    expect(remote.pairs).toHaveLength(1);
+    expect(remote.pairs).toHaveLength(0);
   } finally {
     await Promise.all([local.close(), remote.close()]);
   }

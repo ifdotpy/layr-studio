@@ -195,10 +195,19 @@ impl NotificationPostCommitSink for RuntimeNotificationPostCommitSink {
     ) -> Pin<Box<dyn Future<Output = Result<(), NotificationDispatchError>> + Send + 'a>> {
         Box::pin(async move {
             self.resources
-                .publish_once(&serde_json::json!({
-                    "requestId": request_id,
-                    "resources": [{"kind":"state"}],
-                }))
+                .publish_once(
+                    &studio_runtime_schema::resource_notification::ResourceNotifyRequest::new(
+                        request_id.to_owned(),
+                        vec![
+                            studio_runtime_schema::resource_ref::ResourceRef::StateResource(
+                                studio_runtime_schema::resource_ref::EmptyResource {},
+                            ),
+                        ],
+                    )
+                    .map_err(|_| {
+                        NotificationDispatchError::Dependency("sync/resources/publication")
+                    })?,
+                )
                 .map_err(|_| NotificationDispatchError::Dependency("sync/resources/publication"))?;
             Ok(())
         })
@@ -213,10 +222,19 @@ impl RuntimeNotificationPostCommitSink {
         match effect {
             NotificationPostCommit::Recovered { identity, .. } => {
                 self.resources
-                    .publish_once(&serde_json::json!({
-                        "requestId": format!("recovered-provider-publication:{identity}"),
-                        "resources": [{"kind":"state"}],
-                    }))
+                    .publish_once(
+                        &studio_runtime_schema::resource_notification::ResourceNotifyRequest::new(
+                            format!("recovered-provider-publication:{identity}"),
+                            vec![
+                                studio_runtime_schema::resource_ref::ResourceRef::StateResource(
+                                    studio_runtime_schema::resource_ref::EmptyResource {},
+                                ),
+                            ],
+                        )
+                        .map_err(|_| {
+                            NotificationDispatchError::Dependency("sync/resources/publication")
+                        })?,
+                    )
                     .map_err(|_| {
                         NotificationDispatchError::Dependency("sync/resources/publication")
                     })?;

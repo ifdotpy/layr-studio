@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import type { AddressInfo } from "node:net";
 import { expect, test } from "../playwright";
 
-test("queue edits stay in memory and save on user action", async ({
+test("queue edits survive reload until the user saves them", async ({
   context,
 }) => {
   const { createFixtureViteServer } = await import("../playwright");
@@ -33,12 +33,10 @@ test("queue edits stay in memory and save on user action", async ({
     await page
       .getByRole("textbox", { name: "Edit queued message" })
       .fill("changed");
-    expect(await page.evaluate(() => localStorage.length)).toBe(0);
     await mount();
     await expect(
       page.getByRole("textbox", { name: "Edit queued message" }),
-    ).toHaveCount(0);
-    await page.getByRole("button", { name: "Edit queued message 1" }).click();
+    ).toHaveValue("changed");
     await page
       .getByRole("textbox", { name: "Edit queued message" })
       .fill("saved");

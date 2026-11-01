@@ -283,7 +283,9 @@ pub(crate) async fn run(
     runtime: &HostExecRuntime,
 ) -> DispatchedOperation {
     let record = actor.record();
-    if record.extra.get("role").and_then(Value::as_str) == Some("reviewer") {
+    if record.role.value().copied()
+        == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer)
+    {
         return refused(REVIEWER_REFUSAL.into());
     }
     let root_mode = if record.root_id == record.id {

@@ -89,24 +89,19 @@ test("Account Transfer Ui", async ({
   let defaultAccountKey = "default";
 
   const logins: AccountsState["logins"] = [];
-  type TransferAgent = Omit<
-    import("../../src/generated/api.ts").AgentEntityDto,
-    "accountTransfer"
-  > & {
-    accountTransfer?:
-      | (import("../../src/generated/api.ts").AgentEntityDto["accountTransfer"] & {
-          requestIds?: (string | undefined)[];
-        })
-      | null
-      | undefined;
-  };
+  type TransferAgent = import("../../src/generated/api.ts").AgentEntityDto;
   const makeLead = (
     id: string,
     name: string,
     accountKey: string,
     empty: boolean,
-  ): TransferAgent =>
-    fixtureLead(id, name, accountKey, empty, "/Users/igor/Projects/lumina");
+  ): TransferAgent => ({
+    ...fixtureLead(id, name, accountKey, empty, "/Users/igor/Projects/lumina"),
+    accountDestinations: accounts.map(({ id }) => ({
+      accountKey: id,
+      eligibility: { kind: "available" as const },
+    })),
+  });
   const agents = [
     makeLead("started", "Started conversation", "default", false),
     makeLead("empty", "New conversation", "default", true),
@@ -186,6 +181,30 @@ test("Account Transfer Ui", async ({
       tasks: [],
       work: [],
       rateLimitsByAccount: snapshotLimits,
+      accountsSummary: {
+        accounts,
+        archivedAccounts: [],
+        defaultAccountKey,
+        defaultAccountGroups: [],
+        supportsDelete: true,
+        supportsDisconnect: true,
+      },
+      modelsByAccount: Object.fromEntries(
+        accounts.map(({ id }) => [
+          id,
+          [
+            {
+              accountKey: id,
+              catalogPosition: 0,
+              provider: "codex",
+              model: "gpt-6-astra",
+              displayName: "Astra 6",
+              isDefault: true,
+              supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
+            },
+          ],
+        ]),
+      ),
     },
   });
   const stateListeners = new Set<NotifyResources>();
@@ -254,27 +273,29 @@ test("Account Transfer Ui", async ({
     if (url.pathname === "/api/agents/account-transfer") {
       const body = fixtureRequest("/api/agents/account-transfer", rawBody).body;
       const a = agents.find((a) => a.id === (body.id || "started"))!;
-      if (body.action === "cancel") a.accountTransfer!.status = "cancelled";
-      else if (body.action === "retry")
-        a.accountTransfer!.needsAttention = false;
-      else if (
-        a.accountTransfer?.status === "pending" &&
-        a.accountTransfer.targetAccountKey === body.account_key
-      )
-        a.accountTransfer.requestIds!.push(body.request_id);
-      else {
-        a.accountTransfer = {
+      if (body.action === "cancel") {
+        a.accountTransferProgress = {
+          kind: "cancelled",
           id: body.request_id,
-          status: "pending",
-          targetAccountKey: body.account_key,
-          completed: 0,
-          moved: 0,
-          total: 1,
-          requestIds: [body.request_id],
-          waiting: "Waiting for the current turn",
+          targetAccountKey: "work",
         };
+      } else if (body.action !== "retry") {
+        a.accountTransferProgress = {
+          kind: "waiting",
+          id: body.request_id,
+          targetAccountKey: body.account_key!,
+          reason: "Waiting for the current turn",
+          actions: "cancel",
+        };
+        a.accountDestinations = a.accountDestinations?.map((destination) => ({
+          ...destination,
+          eligibility:
+            destination.accountKey === body.account_key
+              ? { kind: "available" }
+              : { kind: "unavailable", reason: "Transfer in progress" },
+        }));
       }
-      return json(a.accountTransfer!);
+      return json({ id: body.request_id });
     }
     if (url.pathname === "/api/agents/account") {
       const body = fixtureRequest("/api/agents/account", rawBody).body;
@@ -391,16 +412,13 @@ test("Account Transfer Ui", async ({
     page.on("pageerror", (e) => errors.push(e.message));
     await page.goto(fixtureUrl(server));
     await page.locator('[data-chat="started"]').click();
-    await page
-      .getByRole("button", { name: "Chat settings", exact: true })
-      .click();
-    const more = page.locator(".chat-settings-more");
-    if ((await more.count()) && !(await more.getAttribute("open")))
-      await more.locator("summary").click();
-    await page
-      .getByRole("dialog", { name: "Chat settings", exact: true })
-      .getByRole("button", { name: "Main agent settings", exact: true })
-      .click();
+    const openExecution = async () => {
+      if (!(await page.locator(".execution-dropdown").isVisible()))
+        await page
+          .getByRole("button", { name: /^Execution settings:/ })
+          .click();
+    };
+    await openExecution();
     const accountGroup = accountTileGroup(page, "Main agent account");
     await accountTileButton(page, "Main agent account", "Work").click();
     const confirmation = page.getByRole("dialog", {
@@ -435,16 +453,7 @@ test("Account Transfer Ui", async ({
     await page.keyboard.press("Escape");
     await confirmation.waitFor({ state: "hidden" });
     await confirmation.waitFor({ state: "detached" });
-    await expect(page.locator(".mantine-Modal-overlay")).toHaveCount(1);
-    const chatSettingsAfterEscape = page.getByRole("dialog", {
-      name: "Chat settings",
-      exact: true,
-    });
-    await expect(chatSettingsAfterEscape).toBeVisible();
-    if (!(await page.locator(".execution-dropdown").isVisible()))
-      await chatSettingsAfterEscape
-        .getByRole("button", { name: "Main agent settings", exact: true })
-        .click();
+    await openExecution();
     await accountTileButton(page, "Main agent account", "Work").click();
     await confirmation.waitFor();
     assert.equal(
@@ -467,14 +476,16 @@ test("Account Transfer Ui", async ({
     assert.ok(notifySync, "the real fixture resource stream is connected");
     const syncedTransferWaiting =
       "Waiting for the current turn (fixture stream applied)";
-    agents[0]!.accountTransfer!.waiting = syncedTransferWaiting;
+    agents[0]!.accountTransferProgress = {
+      kind: "waiting",
+      id: "streamed-transfer",
+      targetAccountKey: "work",
+      reason: syncedTransferWaiting,
+      actions: "cancel",
+    };
     notifySync!([{ kind: "state" }]);
     const agentSettings = page.locator(".execution-dropdown");
-    if (!(await agentSettings.isVisible()))
-      await page
-        .getByRole("dialog", { name: "Chat settings", exact: true })
-        .getByRole("button", { name: "Main agent settings", exact: true })
-        .click();
+    await openExecution();
     await agentSettings.waitFor();
     notifySync!([{ kind: "state" }]);
     assert.equal(
@@ -509,38 +520,26 @@ test("Account Transfer Ui", async ({
       true,
     );
     await page.keyboard.press("Escape");
-    await expect(chatSettingsAfterEscape).toBeVisible();
+    await agentSettings.waitFor({ state: "hidden" });
     await page.screenshot({
       path: join(evidence, "transfer-pending.png"),
       animations: "disabled",
     });
     // A blocked transfer shows where errors show, with Cancel remaining.
-    agents[0]!.accountTransfer = {
+    agents[0]!.accountTransferProgress = {
+      kind: "blocked",
       id: "blocked-cancel-transfer",
-      scope: "team",
-      status: "pending",
       targetAccountKey: "work",
-      canRetry: true,
-      blocked: [
-        {
-          id: "started",
-          name: "Started conversation",
-          reason: "Source rollout is missing",
-        },
-      ],
+      reason: "Source rollout is missing",
+      actions: "retry_cancel",
     };
     notifySync!([{ kind: "state" }]);
-    const chatSettings = page.getByRole("dialog", {
-      name: "Chat settings",
-      exact: true,
-    });
-    if (!(await chatSettings.isVisible()))
-      await page
-        .getByRole("button", { name: "Chat settings", exact: true })
-        .click();
-    await chatSettings
-      .getByRole("button", { name: "Main agent settings", exact: true })
-      .click();
+    await expect(
+      page.getByRole("status", {
+        name: "Account move blocked. Source rollout is missing",
+      }),
+    ).toBeVisible();
+    await openExecution();
     await page.getByRole("button", { name: "View transfer status" }).click();
     const transferStatus = page
       .getByRole("dialog", { name: "Account transfer" })
@@ -562,32 +561,18 @@ test("Account Transfer Ui", async ({
     await transferStatus
       .getByRole("button", { name: "Cancel remaining", exact: true })
       .waitFor({ state: "hidden" });
-    assert.equal(agents[0]!.accountTransfer!.status, "cancelled");
+    assert.equal(agents[0]!.accountTransferProgress!.kind, "cancelled");
     assert.equal(agents[0]!.accountKey, "default");
-    agents[0]!.accountTransfer = {
+    agents[0]!.accountTransferProgress = {
+      kind: "blocked",
       id: "failed-team-transfer",
-      scope: "team",
-      status: "cancelled",
       targetAccountKey: "work",
-      canRetry: true,
-      waiting: "The destination rejected the transfer",
-      blocked: [
-        {
-          id: "worker-blocked",
-          name: "Blocked worker",
-          reason: "Native receipt unavailable",
-        },
-      ],
+      reason: "Blocked worker blocked: Native receipt unavailable",
+      actions: "retry",
     };
     await page.reload();
     await page.locator('[data-chat="started"]').click();
-    await page
-      .getByRole("button", { name: "Chat settings", exact: true })
-      .click();
-    await page
-      .getByRole("dialog", { name: "Chat settings", exact: true })
-      .getByRole("button", { name: "Main agent settings", exact: true })
-      .click();
+    await openExecution();
     await page.getByRole("button", { name: "View transfer status" }).click();
     const failedTransferStatus = page
       .getByRole("dialog", { name: "Account transfer" })
@@ -619,29 +604,16 @@ test("Account Transfer Ui", async ({
     );
     await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
-    agents[0]!.accountTransfer = {
+    agents[0]!.accountTransferProgress = {
+      kind: "blocked",
       id: "blocked-lead-transfer",
-      scope: "team",
-      status: "pending",
       targetAccountKey: "work",
-      canRetry: true,
-      blocked: [
-        {
-          id: "started",
-          name: "Started conversation",
-          reason: "Source rollout is missing",
-        },
-      ],
+      reason: "Source rollout is missing",
+      actions: "retry_cancel",
     };
     await page.reload();
     await page.locator('[data-chat="started"]').click();
-    await page
-      .getByRole("button", { name: "Chat settings", exact: true })
-      .click();
-    await page
-      .getByRole("dialog", { name: "Chat settings", exact: true })
-      .getByRole("button", { name: "Main agent settings", exact: true })
-      .click();
+    await openExecution();
     await page.getByRole("button", { name: "View transfer status" }).click();
     await page
       .getByRole("dialog", { name: "Account transfer" })
@@ -677,32 +649,16 @@ test("Account Transfer Ui", async ({
       "chat settings explicitly retries the saved team transfer receipt",
     );
     await page.keyboard.press("Escape");
-    agents[0]!.accountTransfer = {
+    agents[0]!.accountTransferProgress = {
+      kind: "blocked",
       id: "saved-request",
-      status: "pending",
       targetAccountKey: "work",
-      completed: 3,
-      total: 8,
-      needsAttention: true,
-      canRetry: true,
-      waiting: "The source account is offline",
-      blocked: [
-        {
-          id: "started",
-          name: "Started conversation",
-          reason: "The source account is offline",
-        },
-      ],
+      reason: "The source account is offline",
+      actions: "retry_cancel",
     };
     await page.reload();
     await page.locator('[data-chat="started"]').click();
-    await page
-      .getByRole("button", { name: "Chat settings", exact: true })
-      .click();
-    await page
-      .getByRole("dialog", { name: "Chat settings", exact: true })
-      .getByRole("button", { name: "Main agent settings", exact: true })
-      .click();
+    await openExecution();
     await page.getByRole("button", { name: "View transfer status" }).click();
     await page
       .getByRole("dialog", { name: "Account transfer" })
@@ -721,25 +677,15 @@ test("Account Transfer Ui", async ({
       ),
     );
     agents[0]!.accountKey = "work";
-    agents[0]!.accountTransfer = {
+    agents[0]!.accountTransferProgress = {
+      kind: "moving",
       id: "lazy-history-request",
-      status: "pending",
       targetAccountKey: "work",
-      completed: 0,
-      moved: 1,
-      total: 1,
-      nativeHistoryPending: 1,
-      canFinishHistory: true,
+      actions: "none",
     };
     await page.reload();
     await page.locator('[data-chat="started"]').click();
-    await page
-      .getByRole("button", { name: "Chat settings", exact: true })
-      .click();
-    await page
-      .getByRole("dialog", { name: "Chat settings", exact: true })
-      .getByRole("button", { name: "Main agent settings", exact: true })
-      .click();
+    await openExecution();
     await expect(page.getByText("History transfer in progress")).toHaveCount(0);
     await expect(
       page.getByRole("dialog", { name: "Account transfer" }),
@@ -750,11 +696,10 @@ test("Account Transfer Ui", async ({
         .count(),
       0,
     );
-    agents[0]!.accountTransfer = {
-      ...agents[0]!.accountTransfer,
-      status: "completed",
-      completed: 1,
-      nativeHistoryPending: 0,
+    agents[0]!.accountTransferProgress = {
+      kind: "completed",
+      id: "lazy-history-request",
+      targetAccountKey: "work",
     };
     notifySync!([{ kind: "state" }]);
     assert.equal(
@@ -766,32 +711,16 @@ test("Account Transfer Ui", async ({
       0,
       "history needs no extra action",
     );
-    assert.equal(agents[0]!.accountTransfer!.status, "completed");
+    assert.equal(agents[0]!.accountTransferProgress!.kind, "completed");
     agents[0]!.accountKey = "work";
-    agents[0]!.accountTransfer = {
-      ...agents[0]!.accountTransfer,
-      status: "completed",
-      completed: 8,
-      moved: 7,
-      waitingCount: 0,
-      leftOnSource: [
-        {
-          id: "worker-claude",
-          name: "Claude worker",
-          provider: "claude",
-          reason: "Uses claude; the destination account uses codex",
-        },
-      ],
+    agents[0]!.accountTransferProgress = {
+      kind: "completed",
+      id: "lazy-history-request",
+      targetAccountKey: "work",
     };
     await page.reload();
     await page.locator('[data-chat="started"]').click();
-    await page
-      .getByRole("button", { name: "Chat settings", exact: true })
-      .click();
-    await page
-      .getByRole("dialog", { name: "Chat settings", exact: true })
-      .getByRole("button", { name: "Main agent settings", exact: true })
-      .click();
+    await openExecution();
     await expect(
       page.getByRole("button", { name: "View transfer status" }),
     ).toHaveCount(0);
@@ -800,18 +729,9 @@ test("Account Transfer Ui", async ({
     ).toHaveCount(0);
     await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
-    await page
-      .getByRole("dialog", { name: "Chat settings", exact: true })
-      .waitFor({ state: "hidden" });
     await expect(page.locator(".mantine-Modal-overlay")).toHaveCount(0);
     await page.locator('[data-chat="empty"]').click();
-    await page
-      .getByRole("button", { name: "Chat settings", exact: true })
-      .click();
-    await page
-      .getByRole("dialog", { name: "Chat settings", exact: true })
-      .getByRole("button", { name: "Main agent settings", exact: true })
-      .click();
+    await openExecution();
     await accountTileButton(page, "Main agent account", "Work").click();
     await expect(accountGroup).toHaveAttribute("data-value", "work");
     assert.ok(
@@ -823,6 +743,13 @@ test("Account Transfer Ui", async ({
       defaultAccountKey,
       "default",
       "changing an empty lead does not change the application default",
+    );
+    assert.equal(
+      bodies.filter(
+        (b) => b.path === "/api/agents/account-transfer" && !b.body.action,
+      ).length,
+      1,
+      "stream updates and reloads do not repeat the transfer",
     );
     await page.setViewportSize({ width: 390, height: 844 });
     await page.reload();

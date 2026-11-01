@@ -90,13 +90,13 @@ test("after the reset time a waiting chat says that Studio checks the account", 
   vi.setSystemTime((RESET + 1) * 1000);
   const waiting = render({ agentId: "a", usageResume: scheduled });
   expect(waiting).toContain(
-    "The limit has reset. Studio is checking the account.",
+    "The reset time passed. Studio is checking the account.",
   );
   hidesDetails(waiting);
   // A chat without automatic resume asks for a refresh instead.
   const manual = render({});
   expect(manual).toContain(
-    "The limit has reset. Refresh to check the account.",
+    "The reset time passed. Refresh to check the account.",
   );
   expect(manual).toContain("Refresh");
 });

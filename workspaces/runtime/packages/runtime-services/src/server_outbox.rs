@@ -6,7 +6,7 @@
 //! retry sends the same request id and the same bytes. A settled request leaves the table.
 use rusqlite::{Connection, Transaction, params};
 use serde::{Deserialize, Serialize};
-use studio_runtime_schema::persistence::{OutboxStatus, ServerDeliveryState};
+use studio_runtime_schema::persistence::{OutboxStatus, ServerDeliveryState, ServerOperationKind};
 use studio_runtime_store::StoreError;
 use studio_runtime_store::outbox::OutboxError;
 use studio_runtime_store::remote_outbox::{RemoteEffect, RemoteEntry, RemoteOutbox};
@@ -20,6 +20,14 @@ const EFFECT: RemoteEffect = RemoteEffect::ServerRequest;
 const FAMILY: &str = "kind='remote_delivery' AND json_extract(payload,'$.effect')='server_request'";
 /// The action inside the stored envelope body.
 const ACTION: &str = "json_extract(json_extract(payload,'$.record.body'),'$.action')";
+
+fn known_action_sql_values() -> String {
+    ServerOperationKind::wire_names()
+        .iter()
+        .map(|action| format!("'{}'", action.replace('\'', "''")))
+        .collect::<Vec<_>>()
+        .join(",")
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -143,18 +151,19 @@ pub(crate) fn delete(tx: &Transaction<'_>, entry: &Entry) -> Result<(), AccessEr
     Ok(())
 }
 
-/// Requests that are due at `now` (Unix seconds): queued ones, and claimed ones whose action
-/// the receiver can replay. `retry_actions` is an SQL list of quoted action names.
+/// Requests due at `now` (Unix seconds): queued requests, replayable claimed requests,
+/// and unsupported claimed requests that must be retired. `retry_actions` is an SQL list.
 pub(crate) fn due(
     db: &Connection,
     now: i64,
     limit: i64,
     retry_actions: &str,
-) -> rusqlite::Result<Vec<(String, String, ServerDeliveryState)>> {
+) -> rusqlite::Result<Vec<(String, String, String, ServerDeliveryState)>> {
+    let known = known_action_sql_values();
     let sql = format!(
-        "SELECT target,json_extract(payload,'$.record.body'),status FROM runtime_outbox \
+        "SELECT request_id,target,json_extract(payload,'$.record.body'),status FROM runtime_outbox \
          WHERE {FAMILY} AND next_at<=?1 \
-           AND (status='pending' OR (status='submitted' AND {ACTION} IN ({retry_actions}))) \
+           AND (status='pending' OR (status='submitted' AND ({ACTION} IN ({retry_actions}) OR {ACTION} NOT IN ({known})))) \
          ORDER BY rowid LIMIT ?2"
     );
     let mut statement = db.prepare(&sql)?;
@@ -162,18 +171,20 @@ pub(crate) fn due(
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
-            state(row.get::<_, OutboxStatus>(2)?),
+            row.get::<_, String>(2)?,
+            state(row.get::<_, OutboxStatus>(3)?),
         ))
     })?;
     rows.collect()
 }
 
-/// The earliest next attempt of a request that the pump may send, in whole Unix seconds
+/// The earliest next attempt of a request that the pump may process, in whole Unix seconds
 /// rounded up, so the scheduler never wakes before the entry is due.
 pub(crate) fn next_due_at(db: &Connection, retry_actions: &str) -> rusqlite::Result<Option<i64>> {
+    let known = known_action_sql_values();
     let sql = format!(
         "SELECT MIN(next_at) FROM runtime_outbox WHERE {FAMILY} \
-         AND (status='pending' OR (status='submitted' AND {ACTION} IN ({retry_actions})))"
+         AND (status='pending' OR (status='submitted' AND ({ACTION} IN ({retry_actions}) OR {ACTION} NOT IN ({known}))))"
     );
     db.query_row(&sql, [], |row| row.get::<_, Option<i64>>(0))
         .map(|at| at.map(|at| (at + 999).div_euclid(1000)))
@@ -293,21 +304,36 @@ mod tests {
         for (key, action, state) in [
             ("queued-event", "event", ServerDeliveryState::Queued),
             ("claimed-event", "event", ServerDeliveryState::Running),
-            (
-                "claimed-stop-turn",
-                "interrupt",
-                ServerDeliveryState::Running,
-            ),
-            ("queued-interrupt", "interrupt", ServerDeliveryState::Queued),
+            ("claimed-input", "exec_input", ServerDeliveryState::Running),
+            ("queued-cancel", "exec_cancel", ServerDeliveryState::Queued),
         ] {
             insert(&tx, "peer", key, key, state, 1.0, &record(action), 10).unwrap();
         }
         let due_keys = |tx: &Transaction<'_>| due(tx, 5, 10, "'event'").unwrap().len();
-        // queued-event, claimed-event and queued-interrupt are due.
+        // queued-event, claimed-event and queued-cancel are due.
         assert_eq!(due_keys(&tx), 3);
         assert_eq!(hold_unclean(&tx, "'event'").unwrap(), 1);
-        // queued-interrupt is now claimed and its action is not replayable.
+        // queued-cancel is now claimed and its action is not replayable.
         assert_eq!(due_keys(&tx), 2);
+        assert_eq!(next_due_at(&tx, "'event'").unwrap(), Some(1));
+    }
+
+    #[test]
+    fn submitted_unknown_actions_are_due_for_retirement() {
+        let mut db = database();
+        let tx = db.transaction().unwrap();
+        insert(
+            &tx,
+            "peer",
+            "old",
+            "old",
+            ServerDeliveryState::Running,
+            1.0,
+            &record("task"),
+            10,
+        )
+        .unwrap();
+        assert_eq!(due(&tx, 5, 10, "'event'").unwrap().len(), 1);
         assert_eq!(next_due_at(&tx, "'event'").unwrap(), Some(1));
     }
 }

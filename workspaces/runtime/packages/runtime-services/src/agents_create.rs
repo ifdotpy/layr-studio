@@ -192,15 +192,35 @@ pub fn mode_fields(record: &mut Value) {
     if record.get("agentModeRevision").is_none() {
         record["agentModeRevision"] = json!(0);
     }
-    if record.get("maxAgentsExplicit").is_none() {
-        record["maxAgentsExplicit"] = json!(
-            record
-                .get("maxAgents")
-                .and_then(Value::as_i64)
-                .unwrap_or(64)
-                != 64
+}
+
+pub(crate) fn capacity_max(record: &Value) -> i64 {
+    agent_capacity(record).max()
+}
+
+pub(crate) fn agent_capacity(record: &Value) -> studio_runtime_store::AgentCapacity {
+    record
+        .get("capacity")
+        .and_then(|value| studio_runtime_store::AgentCapacity::deserialize(value).ok())
+        .unwrap_or_default()
+}
+
+pub(crate) fn set_capacity(record: &mut Value, max: i64, explicit: bool) -> Result<(), StoreError> {
+    let max = studio_runtime_schema::AgentCounter::from_i64(max)
+        .ok_or(StoreError::RecordContract("invalid agent capacity"))?;
+    let capacity = if explicit {
+        studio_runtime_store::AgentCapacity::Explicit { max }
+    } else {
+        studio_runtime_store::AgentCapacity::Automatic { max }
+    };
+    record
+        .as_object_mut()
+        .ok_or(StoreError::RecordContract("invalid agent record"))?
+        .insert(
+            "capacity".into(),
+            serde::Serialize::serialize(&capacity, serde_json::value::Serializer)?,
         );
-    }
+    Ok(())
 }
 
 /// Use the shared canonical renderer builder for every agent publication.
@@ -416,40 +436,43 @@ pub(crate) fn ensure_project(
         .unwrap_or(path);
     let created = crate::event_write::unix_time()
         .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
+    use studio_runtime_schema::queue_command::Field;
     let project = studio_runtime_schema::project_record::ProjectLive {
         id: path.to_owned(),
         path: path.to_owned(),
-        name: Some(name.to_owned()),
-        created: serde_json::Number::from_f64(created),
-        account_key: Some(account.to_owned()),
-        account_revision: Some(1),
-        home_server_id: Some(server.to_owned()),
-        locations: vec![studio_runtime_schema::project_record::ProjectLocation {
-            server_id: server.to_owned(),
-            path: path.to_owned(),
-            project_id: path.to_owned(),
-            git_origin: None,
-            requested_path: None,
-        }],
-        locations_revision: Some(0),
-        peer_teams: vec![],
-        account_groups: vec![],
-        account_keys: vec![],
-        project_aliases: vec![],
-        account_groups_revision: None,
-        updated: None,
-        sidebar_hidden: None,
-        peer_teams_revision: None,
-        organization_revision: None,
-        folders: vec![],
-        worker_base_ref: None,
-        worker_base_revision: None,
-        worker_environment: None,
-        worker_environment_revision: None,
-        workspace_policy: None,
-        workspace_policy_revision: None,
-        location_intents: Default::default(),
-        registration: None,
+        name: Field::Value(name.to_owned()),
+        created: serde_json::Number::from_f64(created).map_or(Field::Missing, Field::Value),
+        account_key: Field::Value(account.to_owned()),
+        account_revision: Field::Value(1),
+        home_server_id: Field::Value(server.to_owned()),
+        locations: Field::Value(vec![
+            studio_runtime_schema::project_record::ProjectLocation {
+                server_id: server.to_owned(),
+                path: path.to_owned(),
+                project_id: path.to_owned(),
+                git_origin: Field::Missing,
+                requested_path: Field::Missing,
+            },
+        ]),
+        locations_revision: Field::Value(0),
+        peer_teams: Field::Value(vec![]),
+        account_groups: Field::Missing,
+        account_keys: Field::Missing,
+        project_aliases: Field::Missing,
+        account_groups_revision: Field::Missing,
+        updated: Field::Missing,
+        sidebar_hidden: Field::Missing,
+        peer_teams_revision: studio_runtime_schema::queue_command::Field::Missing,
+        organization_revision: Field::Missing,
+        folders: Field::Missing,
+        worker_base_ref: Field::Missing,
+        worker_base_revision: Field::Missing,
+        worker_environment: Field::Missing,
+        worker_environment_revision: Field::Missing,
+        workspace_policy: Field::Missing,
+        workspace_policy_revision: Field::Missing,
+        location_intents: Field::Missing,
+        registration: Field::Missing,
     };
     let stored =
         studio_runtime_schema::project_record::ProjectRecord::Live(Box::new(project.clone()));
@@ -532,7 +555,7 @@ fn create_agent_with_identity(
             id: id.to_owned(),
         });
     }
-    let draft = record.get("needsTitle").and_then(Value::as_bool) == Some(true);
+    let draft = record["naming"] == "pending_title";
     let expected_status = if draft {
         AgentStatus::Idle
     } else {
@@ -641,8 +664,7 @@ fn configure_limits(
         return Err(SettingsError::LeadRequired);
     }
     mode_fields(&mut root_value);
-    let team_max_agents =
-        max_agents.or_else(|| root_value.get("maxAgents").and_then(Value::as_i64));
+    let team_max_agents = max_agents.unwrap_or_else(|| capacity_max(&root_value));
     let mut statement = transaction
         .prepare("SELECT id,record FROM runtime_agents")
         .map_err(StoreError::from)?;
@@ -669,10 +691,8 @@ fn configure_limits(
         if agent_id == id {
             record = root_value.clone();
             if let Some(max_agents) = max_agents {
-                record["maxAgents"] = json!(max_agents);
-                if record.get("isLead").and_then(Value::as_bool) == Some(true) {
-                    record["maxAgentsExplicit"] = json!(true);
-                }
+                let explicit = record.get("isLead").and_then(Value::as_bool) == Some(true);
+                set_capacity(&mut record, max_agents, explicit)?;
             }
         } else {
             record
@@ -682,9 +702,7 @@ fn configure_limits(
                     id: agent_id.clone(),
                 })?
                 .remove("concurrency");
-            if let Some(max_agents) = team_max_agents {
-                record["maxAgents"] = json!(max_agents);
-            }
+            set_capacity(&mut record, team_max_agents, false)?;
         }
         save_agent(transaction, &record, &validate)?;
         if agent_id == id {
@@ -696,7 +714,7 @@ fn configure_limits(
         "concurrency": root_value.get("concurrency").cloned().unwrap_or(json!(0)),
         "agentMode": if root_value.get("concurrency").and_then(Value::as_i64).unwrap_or(0) == 0 { "single" } else { "multi" },
         "agentModeRevision": root_value.get("agentModeRevision").cloned().unwrap_or(json!(0)),
-        "maxAgents": root_value.get("maxAgents").cloned().unwrap_or(Value::Null),
+        "maxAgents": capacity_max(&root_value),
     }))
 }
 
@@ -746,8 +764,7 @@ fn rename(
     };
 
     record["name"] = json!(name);
-    record["manualName"] = json!(true);
-    record["needsTitle"] = json!(false);
+    record["naming"] = json!("manual");
     save_agent(transaction, &record, &validate)?;
 
     let result = RenameReply {
@@ -765,6 +782,14 @@ fn rename(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn capacity_access_uses_the_typed_kind() {
+        let record = serde_json::json!({"capacity":{"kind":"future","max":8}});
+        assert_eq!(
+            super::capacity_max(&record),
+            studio_runtime_schema::agent_limits::DEFAULT_MAX_TEAM_AGENTS
+        );
+    }
     use super::{create_agent, ensure_project, replay_agent};
     use rusqlite::Connection;
     use serde_json::{Value, json};
@@ -785,7 +810,7 @@ mod tests {
                  CREATE TABLE runtime_projects(id TEXT PRIMARY KEY,record TEXT NOT NULL);
                  CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT,record TEXT);
                  CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0);
-                 CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+                 CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
                  CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
                  CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
                  CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);"),

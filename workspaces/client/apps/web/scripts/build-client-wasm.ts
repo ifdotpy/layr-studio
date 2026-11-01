@@ -21,6 +21,11 @@ if (!bindingVersion)
   throw new Error("client-wasm must pin one exact wasm-bindgen version.");
 const executable =
   process.platform === "win32" ? "wasm-bindgen.exe" : "wasm-bindgen";
+const cache = resolve(
+  process.env.XDG_CACHE_HOME || resolve(homedir(), ".cache"),
+  "codex-studio-rust-ui",
+  `wasm-bindgen-${bindingVersion}`,
+);
 // Accept only the crate's exact ABI, whether installed by Cargo or in Studio's
 // versioned UI tool cache. A different CLI on PATH never substitutes for it.
 const candidates = [
@@ -30,13 +35,7 @@ const candidates = [
     "bin",
     executable,
   ),
-  resolve(
-    process.env.XDG_CACHE_HOME || resolve(homedir(), ".cache"),
-    "codex-studio-rust-ui",
-    `wasm-bindgen-${bindingVersion}`,
-    "bin",
-    executable,
-  ),
+  resolve(cache, "bin", executable),
 ];
 const bindingCli = candidates.find((candidate) => {
   const version = spawnSync(candidate, ["--version"], { encoding: "utf8" });
@@ -45,11 +44,16 @@ const bindingCli = candidates.find((candidate) => {
     version.stdout?.trim() === `wasm-bindgen ${bindingVersion}`
   );
 });
-if (!bindingCli) {
-  throw new Error(
-    `Install the matching binding generator: cargo install wasm-bindgen-cli --version ${bindingVersion} --locked`,
-  );
-}
+if (!bindingCli)
+  run("cargo", [
+    "install",
+    "wasm-bindgen-cli",
+    "--version",
+    bindingVersion,
+    "--locked",
+    "--root",
+    cache,
+  ]);
 run("cargo", [
   "build",
   "-p",
@@ -62,7 +66,7 @@ run("cargo", [
 const target = process.env.CARGO_TARGET_DIR
   ? resolve(root, process.env.CARGO_TARGET_DIR)
   : resolve(root, "target");
-run(bindingCli, [
+run(bindingCli ?? resolve(cache, "bin", executable), [
   resolve(target, "wasm32-unknown-unknown/release/studio_client_wasm.wasm"),
   "--target",
   "web",

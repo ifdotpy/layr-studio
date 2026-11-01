@@ -1,3 +1,4 @@
+import { FrontendLocality } from "../generated/api";
 import type { components } from "../generated/api";
 import type { ResourceRef } from "./resourceEvents";
 import { initializeSubscriptions } from "./liveSubscriptions.browser.fixture.ts";
@@ -18,6 +19,7 @@ import {
   createFixtureViteServer,
   expect,
   readApiSchemaHash,
+  syncSessionSse,
   test,
 } from "../../tests/playwright.ts";
 
@@ -82,7 +84,13 @@ test("switching chats changes subscriptions on one EventSource", async ({
               response.on("close", () => sessions.delete(sessionId));
               response.setHeader("Content-Type", "text/event-stream");
               response.write(
-                sse("session", { sessionId, workspaceId, routes: [] }),
+                sse("session", {
+                  sessionId,
+                  workspaceId,
+                  routes: [],
+                  locality: FrontendLocality.local,
+                  cachePolicies: [],
+                }),
               );
               response.write(apiSchemaHandshakeSse());
               response.write(frame(resources));
@@ -110,12 +118,13 @@ test("switching chats changes subscriptions on one EventSource", async ({
               session.resources.push(...added);
               const ack = sse("subscriptions", {
                 gen: update.gen,
+                cachePolicies: [],
               } satisfies components["schemas"]["SyncSubscriptionAck"]);
               const initial = frame(added);
               updates.push({ ...update, bytes: body.length });
               updateResponseBytes += Buffer.byteLength(ack + initial);
               hypotheticalReopenBytes += Buffer.byteLength(
-                sse("session", { sessionId: update.sessionId }) +
+                syncSessionSse(update.sessionId, workspaceId) +
                   apiSchemaHandshakeSse() +
                   frame(session.resources),
               );
@@ -134,6 +143,7 @@ test("switching chats changes subscriptions on one EventSource", async ({
               response.end(
                 JSON.stringify({
                   gen: update.gen,
+                  cachePolicies: [],
                 } satisfies components["schemas"]["SyncSubscriptionAck"]),
               );
               return;
@@ -193,6 +203,7 @@ test("switching chats changes subscriptions on one EventSource", async ({
               Buffer.byteLength(
                 JSON.stringify({
                   gen: update.gen,
+                  cachePolicies: [],
                 } satisfies components["schemas"]["SyncSubscriptionAck"]),
               ),
             0,

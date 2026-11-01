@@ -418,7 +418,20 @@ async fn stored_control_replay_and_unknown_never_repeat_native_write() {
             ("stop_task", json!("thread")),
         ] {
             let agent = json!({"compactions":0,"id":"agent","rootId":"agent","epoch":2,"cwd":"/fixture","provider":"claude","accountKey":"account","threadId":thread,"status":"paused"});
-            let body = json!({"id":"agent","action":action,"task_id":"task","request_id":studio_runtime_schema::persistence::RequestIdentity::issue_root()});
+            use studio_runtime_schema::claude_controls::ClaudeSessionRead;
+            let id = || "agent".to_owned().try_into().expect("agent id");
+            let body = match action {
+                "state" => ClaudeSessionRead::State { id: id() },
+                "commands" => ClaudeSessionRead::Commands { id: id() },
+                "stop_task" => ClaudeSessionRead::StopTask {
+                    id: id(),
+                    task_id: "task".to_owned().try_into().expect("task id"),
+                    request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root()
+                        .try_into()
+                        .expect("request id"),
+                },
+                _ => unreachable!(),
+            };
             service
                 .read_or_stop(&agent, &body, None)
                 .await
@@ -1026,7 +1039,7 @@ async fn live_permissions_claude_control_applies_while_running_and_pending_witho
             seed_state(&state, &cwd).await;
             let store = Arc::new(RuntimeStore::open(Some(&state)).await.expect("store"));
             store.transaction(move |tx| {
-                tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.status',?1,'$.inFlight',json('true'),'$.claudeOptions',json('{\"permissionMode\":\"default\"}')) WHERE id='agent'", [status])?;
+                tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.status',?1,'$.inFlight',json('true'),'$.permissionMode','default') WHERE id='agent'", [status])?;
                 Ok(())
             }).await.expect("running state");
             let native = Arc::new(LivePermissionsNative {
@@ -1068,7 +1081,7 @@ async fn live_permissions_claude_control_applies_while_running_and_pending_witho
             .expect("agent")
             .into_value();
             assert_eq!(
-                agent["claudeOptions"]["permissionMode"],
+                agent["permissionMode"],
                 if fail { "default" } else { "bypassPermissions" }
             );
             assert_eq!(agent["status"], status);

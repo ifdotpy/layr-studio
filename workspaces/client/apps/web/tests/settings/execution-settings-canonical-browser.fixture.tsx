@@ -23,7 +23,7 @@ export type CanonicalReset = {
       | "pendingSettingsAccountKey"
       | "isLead"
       | "provider"
-      | "yoloMode"
+      | "permissionMode"
     >
   > & { workerDefaults?: Partial<NonNullable<Agent["workerDefaults"]>> | null };
   defaults?: boolean;
@@ -94,7 +94,7 @@ const initial: Agent = {
   isLead: true,
   status: "idle",
   created: 1,
-  yoloMode: false,
+  permissionMode: "default",
   nextTurnSettingsSupported: true,
 };
 // Partial fixture view: the base fixture omits inherited worker model, effort and fastMode.

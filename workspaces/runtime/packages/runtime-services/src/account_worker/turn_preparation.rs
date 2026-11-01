@@ -444,11 +444,7 @@ async fn advance_transfer(wake: &Wake) -> Result<bool, WorkerError> {
                     let Some(agent) = AgentRepository::get(db, &AgentId::from(g.as_str()))? else {
                         return Ok::<_, WorkerError>(None);
                     };
-                    let Some(operation) = agent
-                        .extra
-                        .get("accountTransferId")
-                        .and_then(Value::as_str)
-                        .filter(|id| !id.is_empty())
+                    let Some(operation) = agent.account_transfer_id.value().map(|id| id.as_str())
                     else {
                         return Ok(None);
                     };
@@ -460,9 +456,12 @@ async fn advance_transfer(wake: &Wake) -> Result<bool, WorkerError> {
                                     .map(str::to_owned)
                             })
                             .unwrap_or_default();
-                    let lazy_here =
-                        studio_runtime_store::truthy(agent.extra.get("lazyAccountTransfer"))
-                            && agent.account_key.as_str() == a;
+                    let lazy_here = agent
+                        .lazy_account_transfer
+                        .value()
+                        .and_then(|v| v.pending())
+                        .is_some()
+                        && agent.account_key.as_str() == a;
                     Ok(Some((phase, lazy_here)))
                 })
                 .await

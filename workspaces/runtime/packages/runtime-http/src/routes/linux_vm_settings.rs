@@ -2,13 +2,14 @@
 
 use axum::{Json, extract::State, http::StatusCode};
 use serde_json::{Value, json};
+use studio_runtime_schema::http_bounded_ingress as bounds;
 use studio_runtime_services::{linux_vm_guest::UnixVmControlRpc, linux_vm_settings};
 
 use super::{
     extractors::ApiJson,
     manifest::{OperationStatus, RouteGroup, get, post},
 };
-use crate::{error::ApiError, generated, router::HttpState};
+use crate::{error::ApiError, router::HttpState};
 
 pub(crate) fn routes() -> RouteGroup {
     RouteGroup::new(vec![
@@ -36,14 +37,37 @@ async fn get_settings(State(state): State<HttpState>) -> Result<Json<Value>, Api
     .map(Json)
 }
 
+/// VM CPU count accepted by the HTTP contract.
+const VM_CPU_MAX: u64 = studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64;
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SettingsInput {
+    cpus: studio_runtime_schema::bounded_integer::BoundedInteger<1, VM_CPU_MAX>,
+    memory_bytes: studio_runtime_schema::bounded_integer::BoundedInteger<
+        { bounds::VM_MEMORY_MIN_BYTES },
+        { bounds::VM_MEMORY_MAX_BYTES },
+    >,
+    system_disk_bytes: studio_runtime_schema::bounded_integer::BoundedInteger<
+        { bounds::VM_SYSTEM_DISK_MIN_BYTES },
+        { bounds::VM_SYSTEM_DISK_MAX_BYTES },
+    >,
+    data_disk_bytes: studio_runtime_schema::bounded_integer::BoundedInteger<
+        { bounds::VM_DATA_DISK_MIN_BYTES },
+        { bounds::VM_DATA_DISK_MAX_BYTES },
+    >,
+}
+
 async fn set_settings(
     State(state): State<HttpState>,
-    ApiJson(settings): ApiJson<generated::LinuxVMSettings>,
+    ApiJson(settings): ApiJson<SettingsInput>,
 ) -> Result<Json<Value>, ApiError> {
     let vm_dir = state.vm_state_dir;
-    let requested: linux_vm_settings::VmSettings =
-        serde_json::from_value(serde_json::to_value(settings).map_err(|_| ApiError::internal())?)
-            .map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "Invalid VM settings"))?;
+    let requested = linux_vm_settings::VmSettings {
+        cpus: settings.cpus.get() as u64,
+        memory_bytes: settings.memory_bytes.get() as u64,
+        system_disk_bytes: settings.system_disk_bytes.get() as u64,
+        data_disk_bytes: settings.data_disk_bytes.get() as u64,
+    };
     studio_runtime_process::blocking_pool::spawn_blocking(
         "runtime-http/routes/linux_vm_settings",
         move || settings_response(&vm_dir, Some(requested)),
@@ -317,5 +341,26 @@ mod tests {
             .map(|entry| entry.expect("readable entry").file_name())
             .collect::<Vec<_>>();
         assert_eq!(entries, [std::ffi::OsString::from("settings.json")]);
+    }
+}
+
+#[cfg(test)]
+mod strict_settings_tests {
+    #[test]
+    fn settings_are_closed_and_bounded() {
+        let valid = r#"{"cpus":1,"memoryBytes":1073741824,"systemDiskBytes":8589934592,"dataDiskBytes":8589934592}"#;
+        assert!(serde_json::from_str::<super::SettingsInput>(valid).is_ok());
+        assert!(
+            serde_json::from_str::<super::SettingsInput>(
+                &valid.replace("1073741824", "1073741823")
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<super::SettingsInput>(
+                &valid.replace(r#""cpus""#, r#""extra":1,"cpus""#)
+            )
+            .is_err()
+        );
     }
 }

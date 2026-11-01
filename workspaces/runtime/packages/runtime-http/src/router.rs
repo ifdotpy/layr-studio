@@ -442,6 +442,13 @@ impl HttpState {
         self
     }
 
+    /// The retained provider callback runtime, when the host attached one.
+    pub fn callback_runtime(
+        &self,
+    ) -> Option<Arc<studio_runtime_services::callback_runtime::CallbackRuntime>> {
+        self.callback_runtime.clone()
+    }
+
     /// Attach the retained account refresh driver used by account admission.
     pub fn with_account_driver(
         mut self,
@@ -702,10 +709,17 @@ impl HttpState {
                     request_id: request_id.to_owned(),
                 },
             );
-            if let Err(error) = notifications.publish_once(&serde_json::json!({
-                "requestId": format!("claude-login:{}", uuid::Uuid::new_v4()),
-                "resources": [{"kind":"accounts"}],
-            })) {
+            let result = studio_runtime_schema::resource_notification::ResourceNotifyRequest::new(
+                format!("claude-login:{}", uuid::Uuid::new_v4()),
+                vec![
+                    studio_runtime_schema::resource_ref::ResourceRef::AccountsResource(
+                        studio_runtime_schema::resource_ref::EmptyResource {},
+                    ),
+                ],
+            )
+            .map_err(|_| studio_runtime_services::resource_notify::ResourceNotifyError::Invalid)
+            .and_then(|request| notifications.publish_once(&request));
+            if let Err(error) = result {
                 eprintln!("Claude login resource publication failed: {error}");
             }
             // A completed login can also change models, costs, and desktop status.
@@ -792,10 +806,14 @@ pub(crate) fn validation_probe_router(
             .pointer("/requestBody/required")
             .and_then(serde_json::Value::as_bool)
             == Some(true);
-        let handler = match (body_schema.is_some(), required) {
-            (true, true) => probe_required_body as ProbeHandler,
-            (true, false) => probe_without_body as ProbeHandler,
-            (false, _) => probe_without_body as ProbeHandler,
+        let handler = if method == "GET" && path == "/api/sync/stream" {
+            probe_typed_sync_query as ProbeHandler
+        } else {
+            match (body_schema.is_some(), required) {
+                (true, true) => probe_required_body as ProbeHandler,
+                (true, false) => probe_without_body as ProbeHandler,
+                (false, _) => probe_without_body as ProbeHandler,
+            }
         };
         let status = crate::routes::manifest::OperationStatus::Implemented;
         let registration = match method {
@@ -832,6 +850,22 @@ type ProbeHandler = fn(
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>>;
 
 #[cfg(test)]
+fn probe_typed_sync_query(
+    state: axum::extract::State<HttpState>,
+    request: Request<Body>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>> {
+    Box::pin(async move {
+        use axum::extract::FromRequestParts;
+        use axum::response::IntoResponse;
+        let (mut parts, body) = request.into_parts();
+        if let Err(error) = crate::routes::extractors::TypedQuery::<crate::routes::SyncStreamQuery>::from_request_parts(&mut parts, &state.0).await {
+            return error.into_response();
+        }
+        probe_echo(state.0, Request::from_parts(parts, body), 0).await
+    })
+}
+
+#[cfg(test)]
 fn probe_required_body(
     state: axum::extract::State<HttpState>,
     request: Request<Body>,
@@ -860,11 +894,11 @@ async fn probe_echo(state: HttpState, request: Request<Body>, body_kind: u8) -> 
         Ok(query) => query,
         Err(error) => return error.into_response(),
     };
-    let headers =
-        match crate::routes::extractors::ApiHeaders::from_request_parts(&mut parts, &state).await {
-            Ok(headers) => headers,
-            Err(error) => return error.into_response(),
-        };
+    let headers = parts
+        .extensions
+        .get::<crate::validation::ValidatedRequest>()
+        .map(|validated| validated.headers.clone())
+        .unwrap_or_default();
     let request = Request::from_parts(parts, body);
     let body_value: Option<Value> = match body_kind {
         1 => match crate::routes::extractors::ApiJson::<Value>::from_request(request, &state).await
@@ -882,7 +916,7 @@ async fn probe_echo(state: HttpState, request: Request<Body>, body_kind: u8) -> 
         "query".to_owned(),
         Value::Object((*query.into_typed()).clone()),
     );
-    value.insert("headers".to_owned(), Value::Object((*headers.0).clone()));
+    value.insert("headers".to_owned(), Value::Object((*headers).clone()));
     axum::Json(Value::Object(value)).into_response()
 }
 
@@ -1450,10 +1484,17 @@ mod tests {
 
         let notifications = state.resource_notifications_handle();
         notifications
-            .publish_once(&serde_json::json!({
-                "requestId": "named-resource",
-                "resources": [{"kind": "multi-server"}],
-            }))
+            .publish_once(
+                &studio_runtime_schema::resource_notification::ResourceNotifyRequest::new(
+                    "named-resource".to_owned(),
+                    vec![
+                        studio_runtime_schema::resource_ref::ResourceRef::MultiServerResource(
+                            studio_runtime_schema::resource_ref::EmptyResource {},
+                        ),
+                    ],
+                )
+                .unwrap(),
+            )
             .expect("named resource publication succeeds");
         let view = notifications
             .changes_since(&[serde_json::json!({"kind": "multi-server"})], Some(0))
@@ -1782,7 +1823,7 @@ mod tests {
 
     #[tokio::test]
     async fn huge_integer_body_and_query_return_located_client_errors() {
-        let (app, _directory) = probe_app(&[("POST", "/api/agents"), ("GET", "/api/agent-chat")]);
+        let (app, _directory) = probe_app(&[("POST", "/api/agents"), ("GET", "/api/sync/stream")]);
         let peer = ConnectInfo(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 12345));
         let huge = "9".repeat(401);
         let body = format!("{{\"prompt\":\"x\",\"concurrency\":{huge}}}");
@@ -1812,7 +1853,7 @@ mod tests {
 
         let request = Request::builder()
             .method("GET")
-            .uri(format!("/api/agent-chat?before={huge}"))
+            .uri(format!("/api/sync/stream?after={huge}"))
             .header("host", "127.0.0.1:4620")
             .extension(peer)
             .body(Body::empty())
@@ -1826,7 +1867,7 @@ mod tests {
         )
         .expect("error is JSON");
         assert_eq!(body["error"], "Invalid request");
-        assert_eq!(body["location"], serde_json::json!(["query", "before"]));
+        assert_eq!(body["location"], serde_json::json!(["query"]));
     }
 
     #[tokio::test]
@@ -2087,11 +2128,11 @@ mod tests {
 
     #[tokio::test]
     async fn encoded_repeated_scalar_query_parameter_is_refused_by_router() {
-        let (app, _directory) = probe_app(&[("GET", "/api/agent-chat")]);
+        let (app, _directory) = probe_app(&[("GET", "/api/sync/stream")]);
         let peer = ConnectInfo(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 12345));
         let request = Request::builder()
             .method("GET")
-            .uri("/api/agent-chat?%62efore=1&before=1")
+            .uri("/api/sync/stream?%61fter=1&after=1")
             .header("host", "127.0.0.1:4620")
             .extension(peer)
             .body(Body::empty())
@@ -2104,7 +2145,7 @@ mod tests {
                 .expect("body reads"),
         )
         .expect("error envelope parses");
-        assert_eq!(body["location"], serde_json::json!(["query", "before"]));
+        assert_eq!(body["location"], serde_json::json!(["query"]));
     }
 
     #[tokio::test]

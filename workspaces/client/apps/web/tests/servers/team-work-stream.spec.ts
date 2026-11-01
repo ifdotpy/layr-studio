@@ -73,6 +73,7 @@ test("team, task assignments and projects render typed stream changes without ex
   });
   const lead = backend.snapshot.runtime.agents[0];
   assert.ok(lead);
+  lead.teamCounts = { working: 2, total: 5 };
 
   backend.snapshot.runtime.viewScopedAgents = true;
   const worker: TestAgent = {
@@ -121,6 +122,7 @@ test("team, task assignments and projects render typed stream changes without ex
     await page.setViewportSize({ width: 1440, height: 960 });
     await page.goto(fixtureOrigin(vite));
     await expect(page.locator("#message")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator("#team-toggle")).toContainText("2/5");
     await page.locator("#team-toggle").click();
     const team = page.locator("#team");
     await expect(team.locator('[data-team-count="all"] strong')).toHaveText(
@@ -156,6 +158,7 @@ test("team, task assignments and projects render typed stream changes without ex
     worker.inFlight = false;
     worker.error = "Stream regression failure";
     worker.commandProgress = [];
+    lead.teamCounts = { working: 1, total: 5 };
     Object.assign(task, { status: "review", version: 2, updated: 2 });
     const gate = { command: "verify", timeout_ms: 1234 };
     task.gate = gate;
@@ -194,6 +197,7 @@ test("team, task assignments and projects render typed stream changes without ex
       { kind: "work", agentId: lead.id },
       { kind: "agentDetail", agentId: worker.id },
     ]);
+    await expect(page.locator("#team-toggle")).toContainText("1/5");
     await expect(
       tasks.getByRole("button", { name: /Inspect stream delivery/ }),
     ).toContainText("review");
@@ -212,7 +216,10 @@ test("team, task assignments and projects render typed stream changes without ex
     await expect(detail.getByLabel("Decision 1")).toContainText(
       "Streamed review decision",
     );
-    await page.locator(".workspace-drawer .mantine-Drawer-close").click();
+    await page
+      .getByRole("complementary", { name: "Workspace" })
+      .getByRole("button", { name: "Close", exact: true })
+      .click();
     await expect(team.locator('[data-team-count="all"] strong')).toHaveText(
       "2",
     );

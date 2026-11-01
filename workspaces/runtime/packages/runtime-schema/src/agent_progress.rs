@@ -2,6 +2,122 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Account changes available to this chat.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AccountChange {
+    Select,
+    Transfer,
+    Unavailable { reason: String },
+}
+
+/// Whether an account can be selected for a new turn.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AccountEligibility {
+    Available,
+    Unavailable { reason: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountTransferActions {
+    None,
+    Retry,
+    Cancel,
+    RetryCancel,
+}
+
+/// A waiting transfer may only be cancelled.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WaitingTransferActions {
+    None,
+    Cancel,
+}
+
+/// A moving transfer cannot be cancelled or retried.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MovingTransferActions {
+    None,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum AccountTransferProgress {
+    None,
+    Unreadable {
+        reason: String,
+    },
+    Waiting {
+        id: String,
+        target_account_key: crate::account_key::AccountKey,
+        reason: String,
+        actions: WaitingTransferActions,
+    },
+    Moving {
+        id: String,
+        target_account_key: crate::account_key::AccountKey,
+        actions: MovingTransferActions,
+    },
+    Blocked {
+        id: String,
+        target_account_key: crate::account_key::AccountKey,
+        reason: String,
+        actions: AccountTransferActions,
+    },
+    Completed {
+        id: String,
+        target_account_key: crate::account_key::AccountKey,
+    },
+    Cancelled {
+        id: String,
+        target_account_key: crate::account_key::AccountKey,
+    },
+}
+
+pub(crate) fn account_change_schemas() -> [(&'static str, serde_json::Value); 7] {
+    let mut generator = schemars::generate::SchemaSettings::openapi3()
+        .for_serialize()
+        .into_generator();
+    [
+        (
+            "AccountChange",
+            AccountChange::json_schema(&mut generator).to_value(),
+        ),
+        (
+            "AccountEligibility",
+            AccountEligibility::json_schema(&mut generator).to_value(),
+        ),
+        (
+            "AccountDestination",
+            crate::account_destination::AccountDestination::json_schema(&mut generator).to_value(),
+        ),
+        (
+            "AccountTransferActions",
+            AccountTransferActions::json_schema(&mut generator).to_value(),
+        ),
+        (
+            "MovingTransferActions",
+            MovingTransferActions::json_schema(&mut generator).to_value(),
+        ),
+        (
+            "WaitingTransferActions",
+            WaitingTransferActions::json_schema(&mut generator).to_value(),
+        ),
+        (
+            "AccountTransferProgress",
+            AccountTransferProgress::json_schema(&mut generator).to_value(),
+        ),
+    ]
+}
+
 /// Persisted wait field shared by admission owners, status, and sync.
 pub const START_WAIT_FIELD: &str = "startWait";
 
@@ -142,8 +258,17 @@ fn reason_schema(generator: &mut schemars::SchemaGenerator) -> serde_json::Value
     serde_json::json!({"type": "string", "enum": values})
 }
 
+/// Counts of live descendant workers. Working uses the team progress status definition.
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct TeamCounts {
+    pub working: usize,
+    pub total: usize,
+}
+
 /// Schemas consumed by OpenAPI and its generated renderer contract.
-pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 5] {
+pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 6] {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
@@ -165,6 +290,10 @@ pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 5] {
             "AgentStall",
             AgentStall::json_schema(&mut generator).to_value(),
         ),
+        (
+            "TeamCounts",
+            TeamCounts::json_schema(&mut generator).to_value(),
+        ),
     ]
 }
 
@@ -174,6 +303,19 @@ pub(crate) fn check_schema_parity(openapi: &serde_json::Value) -> Result<(), Str
             return Err(format!(
                 "{name} must match runtime-schema/src/agent_progress.rs"
             ));
+        }
+    }
+    for consumer in [
+        "AgentEntityDto",
+        "AgentSummaryEntityDto",
+        "AgentResponse",
+        "BranchResponse",
+    ] {
+        if openapi.pointer(&format!(
+            "/components/schemas/{consumer}/properties/teamCounts"
+        )) != Some(&serde_json::json!({"$ref":"#/components/schemas/TeamCounts"}))
+        {
+            return Err(format!("{consumer}.teamCounts must reference TeamCounts"));
         }
     }
     for (field, schema) in [
@@ -213,6 +355,24 @@ pub(crate) fn check_schema_parity(openapi: &serde_json::Value) -> Result<(), Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn transfer_progress_rejects_invalid_account_key() {
+        let json = r#"{"kind":"completed","id":"t","targetAccountKey":""}"#;
+        assert!(serde_json::from_str::<AccountTransferProgress>(json).is_err());
+    }
+    #[test]
+    fn transfer_actions_reject_duplicates_and_invalid_moving_cancel() {
+        for json in [
+            r#"{"kind":"blocked","id":"t","targetAccountKey":"a","reason":"hold","actions":["cancel","cancel"]}"#,
+            r#"{"kind":"moving","id":"t","targetAccountKey":"a","actions":["cancel"]}"#,
+            r#"{"kind":"moving","id":"t","targetAccountKey":"a","actions":"cancel"}"#,
+            r#"{"kind":"waiting","id":"t","targetAccountKey":"a","reason":"hold","actions":"retry"}"#,
+        ] {
+            assert!(serde_json::from_str::<AccountTransferProgress>(json).is_err());
+        }
+        let valid = r#"{"kind":"blocked","id":"t","targetAccountKey":"a","reason":"hold","actions":"retry_cancel"}"#;
+        assert!(serde_json::from_str::<AccountTransferProgress>(valid).is_ok());
+    }
     #[test]
     fn agent_progress_openapi_fragments_derive_from_serde_owners() {
         fn fragment<T: schemars::JsonSchema>() -> serde_json::Value {

@@ -9,7 +9,9 @@
 //! cause `diskFull`. The full state ends at or above `DISK_FULL_EXIT_FREE_BYTES`.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -515,14 +517,14 @@ async fn hold_agent_turn_with_gate(
             {
                 return Ok(true);
             }
-            let previous = agent.extra.get("error").and_then(Value::as_str);
+            let previous = agent.error_text();
             let changed = match &reason {
                 Some(reason) if previous != Some(reason.as_str()) => {
-                    agent.extra.insert("error".into(), json!(reason));
+                    agent.error = studio_runtime_schema::queue_command::Field::Value(studio_runtime_schema::provider_errors::AgentError::Message((reason).to_string()));
                     true
                 }
                 None if previous.is_some_and(|reason| reason.starts_with(STORAGE_HOLD_PREFIX)) => {
-                    agent.extra.remove("error");
+                    agent.error = studio_runtime_schema::queue_command::Field::Missing;
                     true
                 }
                 _ => false,
@@ -792,8 +794,8 @@ mod tests {
             Some(studio_runtime_schema::agent_progress::AgentStartWait::Disk { epoch: 1 })
         );
         assert!(
-            agent.extra["error"]
-                .as_str()
+            agent
+                .error_text()
                 .expect("visible reason")
                 .starts_with(STORAGE_HOLD_PREFIX)
         );
@@ -817,7 +819,7 @@ mod tests {
             .await
             .expect("read")
             .expect("worker");
-        assert!(!agent.extra.contains_key("error"));
+        assert!(agent.error.is_missing());
         assert!(agent.start_wait.is_none());
         assert_eq!(agent.status, studio_runtime_store::AgentStatus::Queued);
         let after = store

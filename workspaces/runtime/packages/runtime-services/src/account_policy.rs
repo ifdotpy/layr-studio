@@ -349,6 +349,26 @@ pub struct PublicAccount {
 }
 
 impl PublicAccount {
+    /// Selection policy shared by account summaries and transfer admission.
+    pub fn eligibility(&self) -> studio_runtime_schema::agent_progress::AccountEligibility {
+        use studio_runtime_schema::agent_progress::AccountEligibility;
+        if self.deleted.truthy() || self.disconnected.truthy() {
+            return AccountEligibility::Unavailable {
+                reason: "Reconnect this account before selecting it".into(),
+            };
+        }
+        if self.status.as_str() == Some("ready")
+            || (self.provider.as_str() == Some("claude")
+                && self.status.as_str() == Some("error")
+                && self.can_attempt_native_proof.truthy())
+        {
+            AccountEligibility::Available
+        } else {
+            AccountEligibility::Unavailable {
+                reason: "This account is not ready".into(),
+            }
+        }
+    }
     pub fn provider(
         &self,
     ) -> Result<ProviderKind, studio_runtime_schema::provider_kind::UnknownProvider> {

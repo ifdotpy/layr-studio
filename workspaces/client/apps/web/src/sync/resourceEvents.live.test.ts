@@ -221,7 +221,7 @@ async function fixture(
   await vi.advanceTimersByTimeAsync(0);
   const source = follower ? ({ emit: peer } as Source) : sources[0]!;
   if (!follower && session)
-    source.emit("session", { sessionId: "session-one" });
+    source.emit("session", { sessionId: "session-one", cachePolicies: [] });
   if (!follower) source.emit("api-schema", { hash: API_SCHEMA_HASH });
   if (baseline)
     source.emit("resources", {
@@ -401,7 +401,10 @@ it("an independent page owns its stream without Web Locks or a BroadcastChannel"
 
 it("publishes and clears the current stream session as the source changes", async () => {
   const f = await fixture();
-  expect(f.receiveSession).toHaveBeenCalledWith({ sessionId: "session-one" });
+  expect(f.receiveSession).toHaveBeenCalledWith({
+    sessionId: "session-one",
+    cachePolicies: [],
+  });
   f.source.onerror?.();
   expect(f.clearSession).toHaveBeenCalledWith("session-one");
 });
@@ -606,7 +609,7 @@ it("applies split reconnect data beside passive hints without repeating its dura
   const passive = { kind: "transcripts" } as const;
   f.transport.watchResourceChanges(passive, vi.fn());
   await vi.advanceTimersByTimeAsync(50);
-  f.source.emit("subscriptions", { gen: 1 });
+  f.source.emit("subscriptions", { gen: 1, cachePolicies: [] });
   let durableSequence = 1;
   f.readCursor.mockImplementation(async (ref) =>
     ref.kind === "state"
@@ -718,7 +721,7 @@ it("delivers subscribed auth progress without sending its URL to the entity pers
   const listener = vi.fn();
   f.transport.watchResourceChanges(resource, listener);
   await vi.advanceTimersByTimeAsync(50);
-  f.source.emit("subscriptions", { gen: 1 });
+  f.source.emit("subscriptions", { gen: 1, cachePolicies: [] });
   listener.mockClear();
   f.persist.mockClear();
   const value = {
@@ -753,7 +756,7 @@ it("delivers vault job codes only through transient subscribed frames", async ()
   const listener = vi.fn();
   f.transport.watchResourceChanges(resource, listener);
   await vi.advanceTimersByTimeAsync(50);
-  f.source.emit("subscriptions", { gen: 1 });
+  f.source.emit("subscriptions", { gen: 1, cachePolicies: [] });
   f.persist.mockClear();
   const value = {
     requestId: "vault-one",
@@ -815,7 +818,7 @@ it("queues interests on an opening stream until its session arrives", async () =
     false,
   );
 
-  f.source.emit("session", { sessionId: "session-one" });
+  f.source.emit("session", { sessionId: "session-one", cachePolicies: [] });
   await vi.advanceTimersToNextTimerAsync();
   expect(f.source.closed).toBe(false);
   expect(f.sources).toHaveLength(1);
@@ -860,7 +863,7 @@ it("drops removed data and waits for acknowledgement before accepting a re-added
   const oldListener = vi.fn();
   const stop = f.transport.watchResourceChanges(resource, oldListener);
   await vi.advanceTimersByTimeAsync(50);
-  f.source.emit("subscriptions", { gen: 1 });
+  f.source.emit("subscriptions", { gen: 1, cachePolicies: [] });
   const frame = (revision: number) => ({
     protocol: SYNC_PROTOCOL_VERSION,
     workspaceId: "workspace",
@@ -881,12 +884,12 @@ it("drops removed data and waits for acknowledgement before accepting a re-added
   f.source.emit("resources", frame(3));
   await vi.advanceTimersByTimeAsync(25);
   expect(listener).not.toHaveBeenCalled();
-  f.source.emit("subscriptions", { gen: 2 });
+  f.source.emit("subscriptions", { gen: 2, cachePolicies: [] });
   await vi.advanceTimersByTimeAsync(50);
   f.source.emit("resources", frame(4));
   await vi.advanceTimersByTimeAsync(25);
   expect(listener).not.toHaveBeenCalled();
-  f.source.emit("subscriptions", { gen: 3 });
+  f.source.emit("subscriptions", { gen: 3, cachePolicies: [] });
   f.source.emit("resources", frame(5));
   await vi.advanceTimersByTimeAsync(25);
   expect(listener).toHaveBeenCalledTimes(1);
@@ -918,7 +921,7 @@ it("cancels queued data on removal even if persistence finishes after re-add ack
   const resource = { kind: "transcript", agentId: "slow" } as const;
   const stop = f.transport.watchResourceChanges(resource, vi.fn());
   await vi.advanceTimersByTimeAsync(50);
-  f.source.emit("subscriptions", { gen: 1 });
+  f.source.emit("subscriptions", { gen: 1, cachePolicies: [] });
   f.persist.mockClear();
   let finish!: () => void;
   f.persist.mockImplementationOnce(
@@ -950,11 +953,11 @@ it("cancels queued data on removal even if persistence finishes after re-add ack
   expect(f.persist).toHaveBeenCalledTimes(1);
   stop();
   await vi.advanceTimersByTimeAsync(50);
-  f.source.emit("subscriptions", { gen: 2 });
+  f.source.emit("subscriptions", { gen: 2, cachePolicies: [] });
   const listener = vi.fn();
   f.transport.watchResourceChanges(resource, listener);
   await vi.advanceTimersByTimeAsync(50);
-  f.source.emit("subscriptions", { gen: 3 });
+  f.source.emit("subscriptions", { gen: 3, cachePolicies: [] });
   listener.mockClear();
   finish();
   await vi.advanceTimersByTimeAsync(25);
@@ -971,7 +974,7 @@ it("drops initial data for an addition removed before its acknowledgement", asyn
   const stop = f.transport.watchResourceChanges(resource, vi.fn());
   await vi.advanceTimersByTimeAsync(50);
   stop();
-  f.source.emit("subscriptions", { gen: 1 });
+  f.source.emit("subscriptions", { gen: 1, cachePolicies: [] });
   f.source.emit("resources", {
     protocol: SYNC_PROTOCOL_VERSION,
     workspaceId: "workspace",
@@ -1071,10 +1074,10 @@ it("sends applied ref cursors on re-add and reconnect with zero pulls", async ()
     expect.objectContaining({ add: [{ resource, since: cursor }] }),
     expect.anything(),
   );
-  f.source.emit("subscriptions", { gen: 1 });
+  f.source.emit("subscriptions", { gen: 1, cachePolicies: [] });
   stop();
   await vi.advanceTimersByTimeAsync(50);
-  f.source.emit("subscriptions", { gen: 2 });
+  f.source.emit("subscriptions", { gen: 2, cachePolicies: [] });
   f.transport.watchResourceChanges(resource, vi.fn());
   await vi.advanceTimersByTimeAsync(50);
   expect(f.post).toHaveBeenLastCalledWith(
@@ -1107,7 +1110,7 @@ it.each([false, true])(
     f.readCursor.mockResolvedValue(cursor);
     let stop = store.watchResourceChanges(resource, vi.fn());
     await vi.advanceTimersByTimeAsync(50);
-    f.source.emit("subscriptions", { gen: 1 });
+    f.source.emit("subscriptions", { gen: 1, cachePolicies: [] });
     const baseline = {
       protocol: SYNC_PROTOCOL_VERSION,
       workspaceId: "workspace",
@@ -1170,7 +1173,7 @@ it("T28 recently viewed chat switching sends no subscription changes within grac
       const request = f.post.mock.calls.at(-1)?.[1];
       if (request && request.gen > acknowledgedGeneration) {
         acknowledgedGeneration = request.gen;
-        f.source.emit("subscriptions", { gen: request.gen });
+        f.source.emit("subscriptions", { gen: request.gen, cachePolicies: [] });
       }
       await vi.advanceTimersByTimeAsync(50);
     };
@@ -1277,7 +1280,7 @@ it.each(["interval", "transfer"])(
     const removed = { kind: "work", agentId: "removed" } as const;
     const stop = f.transport.watchResourceChanges(removed, vi.fn());
     await vi.advanceTimersByTimeAsync(50);
-    f.source.emit("subscriptions", { gen: 1 });
+    f.source.emit("subscriptions", { gen: 1, cachePolicies: [] });
     let finish!: () => void;
     let current!: () => boolean;
     const persist = kind === "transfer" ? f.staged : f.persist;
@@ -1326,10 +1329,10 @@ it.each(["interval", "transfer"])(
     const readded = vi.fn();
     if (kind === "transfer") {
       await vi.advanceTimersByTimeAsync(50);
-      f.source.emit("subscriptions", { gen: 2 });
+      f.source.emit("subscriptions", { gen: 2, cachePolicies: [] });
       f.transport.watchResourceChanges(removed, readded);
       await vi.advanceTimersByTimeAsync(50);
-      f.source.emit("subscriptions", { gen: 3 });
+      f.source.emit("subscriptions", { gen: 3, cachePolicies: [] });
     }
     finish();
     await vi.advanceTimersByTimeAsync(0);
@@ -1388,7 +1391,7 @@ it("reopens a terminal from its durable cursor after its reset write fails", asy
   );
   let stop = f.transport.watchResourceChanges(resource, vi.fn());
   await vi.advanceTimersByTimeAsync(50);
-  f.source.emit("subscriptions", { gen: 1 });
+  f.source.emit("subscriptions", { gen: 1, cachePolicies: [] });
   const frame = (revision: number, text: string, offset: number) => ({
     protocol: SYNC_PROTOCOL_VERSION,
     workspaceId: "workspace",
@@ -1424,7 +1427,7 @@ it("reopens a terminal from its durable cursor after its reset write fails", asy
     since: cursor,
   });
   const resumed = f.sources.at(-1)!;
-  resumed.emit("session", { sessionId: "session-two" });
+  resumed.emit("session", { sessionId: "session-two", cachePolicies: [] });
   resumed.emit("api-schema", { hash: API_SCHEMA_HASH });
   resumed.emit("resources", { ...frame(12, "new", 3), reason: "reconnect" });
   await vi.advanceTimersByTimeAsync(0);
@@ -1459,7 +1462,7 @@ it("a failed Work write drops its queued terminal reset and resumes durable curs
   f.transport.watchResourceChanges(terminal, vi.fn());
   f.transport.watchResourceChanges(work, vi.fn());
   await vi.advanceTimersByTimeAsync(50);
-  f.source.emit("subscriptions", { gen: 1 });
+  f.source.emit("subscriptions", { gen: 1, cachePolicies: [] });
   const snapshot = (revision: number, text: string, offset: number) => ({
     protocol: SYNC_PROTOCOL_VERSION,
     workspaceId: "workspace",
@@ -1789,7 +1792,7 @@ it("connection: a subscription diff uses a full baseline after bounded cursor pr
     add: [{ resource: chat }],
     remove: [],
   });
-  f.source.emit("subscriptions", { gen: 1 });
+  f.source.emit("subscriptions", { gen: 1, cachePolicies: [] });
   finish();
   await vi.advanceTimersByTimeAsync(0);
   expect(f.post).toHaveBeenCalledOnce();
@@ -1943,7 +1946,7 @@ it("connection: foreign, stale and invalid progress cannot heal a replacement st
   const resource = { kind: "vault-readiness", prefix: "vault" } as const;
   f.transport.watchResourceChanges(resource, vi.fn());
   await vi.advanceTimersByTimeAsync(50);
-  f.source.emit("subscriptions", { gen: 1 });
+  f.source.emit("subscriptions", { gen: 1, cachePolicies: [] });
   const progress = {
     protocol: SYNC_PROTOCOL_VERSION,
     workspaceId: "workspace",

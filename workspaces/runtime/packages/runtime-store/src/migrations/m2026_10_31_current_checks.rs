@@ -1,16 +1,15 @@
 use crate::{StoreError, StoreResult};
-use rusqlite::{Connection, ToSql, Transaction};
+use rusqlite::{OptionalExtension, ToSql, Transaction};
 use studio_runtime_schema::persistence::{IdleEpisodeOutcome, ServerOperationKind, enum_check};
 
 const LEGACY_IDLE_OUTCOME: &str = "not_one_hour";
 
-fn outbox_schema(db: &Connection) -> StoreResult<String> {
-    Ok(db.query_row(
-        "SELECT json_extract(value,'$.sql') FROM json_each(?1,'$.\"canvas.sqlite3\".sqlite_master') WHERE json_extract(value,'$.name')='runtime_server_outbox'",
-        [crate::fresh_state::SNAPSHOT],
-        |row| row.get(0),
-    )?)
-}
+/// The canonical server outbox table. The snapshot no longer lists it, so this
+/// frozen copy is the source for rebuilding an older table.
+const SERVER_OUTBOX_DDL: &str = r#"CREATE TABLE runtime_server_outbox (
+                    id TEXT PRIMARY KEY, server TEXT NOT NULL, body TEXT NOT NULL,
+                    state TEXT NOT NULL, result TEXT, attempts INTEGER NOT NULL DEFAULT 0,
+                    next_at REAL NOT NULL DEFAULT 0, error TEXT, created_at REAL NOT NULL DEFAULT 0, completed_at REAL NOT NULL DEFAULT 0, fingerprint TEXT, admission TEXT, receipt_state TEXT GENERATED ALWAYS AS (state) VIRTUAL NOT NULL CHECK("receipt_state" IN ('queued','running','waiting','complete')), receipt_kind TEXT GENERATED ALWAYS AS (json_extract(body,'$.action')) VIRTUAL NOT NULL CHECK("receipt_kind" IN ('event','input','message','move_send','move_status','location_info','location_matches','stop','exec_event','projects','projects.changed','folders','git','export','chunk','exec_read','exec_input','exec_cancel','release','update.offer','update.export','update.chunk','update.release','backup.put','task','complaint','context','directory','chat_read','move_manage','move_interrupt','move_spawn','exec','exec_receipt','browser_callback','add_location','remove_location','move_validate','move_begin','device_trust')))"#;
 
 fn rebuild(
     tx: &Transaction<'_>,
@@ -61,14 +60,19 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             ],
         )?;
     }
-    let outbox_sql: String = tx.query_row(
-        "SELECT sql FROM sqlite_schema WHERE type='table' AND name='runtime_server_outbox'",
-        [],
-        |row| row.get(0),
-    )?;
-    if !outbox_sql.contains(&enum_check::<ServerOperationKind>("receipt_kind")) {
-        let canonical = outbox_schema(tx)?;
-        let tail = canonical
+    // A fresh store has no server outbox table, and the step has nothing to repair.
+    // Later migrations drop the table once it is empty.
+    let outbox_sql: Option<String> = tx
+        .query_row(
+            "SELECT sql FROM sqlite_schema WHERE type='table' AND name='runtime_server_outbox'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(outbox_sql) = outbox_sql
+        && !outbox_sql.contains(&enum_check::<ServerOperationKind>("receipt_kind"))
+    {
+        let tail = SERVER_OUTBOX_DDL
             .strip_prefix("CREATE TABLE runtime_server_outbox")
             .ok_or(StoreError::RecordContract(
                 "fresh server outbox schema is invalid",
@@ -96,7 +100,7 @@ mod tests {
         let agent_sql = crate::agent_columns::table_sql("runtime_agents")
             .replace("'ttl_changed'", "'not_one_hour'");
         db.execute_batch(&agent_sql).unwrap();
-        let outbox_sql = super::outbox_schema(&db).unwrap();
+        let outbox_sql = super::SERVER_OUTBOX_DDL;
         let old_sql = outbox_sql
             .replace(",'projects.changed'", "")
             .replace(",'backup.put'", "")

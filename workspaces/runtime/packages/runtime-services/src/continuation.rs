@@ -94,7 +94,11 @@ impl Snapshot {
         snapshot.record = (!raw_record.is_null()).then_some(raw_record);
         if let (Some(key), Some(value)) = (reuse, embedded) {
             snapshot.agent[key] = value.clone();
-            snapshot.identity.extra.insert(key.to_owned(), value);
+            if key == "usageResume" {
+                snapshot.identity.set_usage_resume(value);
+            } else {
+                snapshot.identity.extra.insert(key.to_owned(), value);
+            }
         }
         let typed = &mut Arc::get_mut(&mut snapshot.typed)
             .expect("new snapshot is uniquely owned")
@@ -613,14 +617,21 @@ impl ProposedAgent {
     fn set_extra(&mut self, key: &str, value: Value) {
         self.evidence[key] = value.clone();
         if let Some(agent) = &mut self.identity {
-            agent.extra.insert(key.to_owned(), value);
+            if key == "usageResume" {
+                agent.set_usage_resume(value);
+            } else {
+                agent.extra.insert(key.to_owned(), value);
+            }
         }
     }
     pub(crate) fn continuation(&mut self, key: &str, value: Value) {
         self.set_extra(key, value);
     }
     pub(crate) fn auth_attempt(&mut self, value: u64) {
-        self.set_extra("authResumeAttempt", json!(value));
+        self.evidence["authResumeAttempt"] = json!(value);
+        if let Some(agent) = &mut self.identity {
+            agent.auth_resume_attempt = Some(value);
+        }
     }
     pub(crate) fn enable_usage(&mut self) {
         self.evidence["usageResumeEnabled"] = json!(true);
@@ -634,7 +645,7 @@ impl ProposedAgent {
     pub(crate) fn clear_hold(&mut self) {
         remove(&mut self.evidence, "nativeFailureHold");
         if let Some(agent) = &mut self.identity {
-            agent.extra.remove("nativeFailureHold");
+            agent.clear_native_failure_hold();
         }
     }
     pub(crate) fn queued(&mut self) {
@@ -642,7 +653,10 @@ impl ProposedAgent {
         if let Some(agent) = &mut self.identity {
             agent.set_status(studio_runtime_store::AgentStatus::Queued);
         }
-        self.set_extra("error", Value::Null);
+        self.evidence["error"] = Value::Null;
+        if let Some(agent) = &mut self.identity {
+            agent.error = studio_runtime_schema::queue_command::Field::Null;
+        }
     }
     pub(crate) fn failed(&mut self, reason: &str) {
         self.evidence["status"] = json!("failed");
@@ -653,7 +667,12 @@ impl ProposedAgent {
         if let Some(agent) = &mut self.identity {
             agent.in_flight = Some(false);
         }
-        self.set_extra("error", json!(reason));
+        self.evidence["error"] = json!(reason);
+        if let Some(agent) = &mut self.identity {
+            agent.error = studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_schema::provider_errors::AgentError::Message(reason.to_owned()),
+            );
+        }
     }
 }
 
@@ -744,7 +763,7 @@ mod tests {
         assert_eq!(proposal.value()["titleJob"], Value::Null);
         assert_eq!(proposal.value()["nativeRelease"], Value::Null);
         assert_eq!(proposal.value()["firedEvents"], json!([]));
-        assert_eq!(proposal.checked().unwrap().extra["authResumeAttempt"], 0);
+        assert_eq!(proposal.checked().unwrap().auth_resume_attempt, Some(0));
         assert_eq!(proposal.checked().unwrap().status.as_str(), "future-state");
     }
 
@@ -795,7 +814,14 @@ mod tests {
             assert_eq!(snapshot.agent, raw["agent"]);
             assert_eq!(snapshot.record, Some(record.clone()));
             assert_eq!(json!(snapshot.checked_record().unwrap()), record);
-            assert_eq!(snapshot.identity.extra.get(key), Some(&record));
+            if key == "usageResume" {
+                assert_eq!(
+                    snapshot.identity.usage_resume_value().unwrap(),
+                    Some(record.clone())
+                );
+            } else {
+                assert_eq!(snapshot.identity.extra.get(key), Some(&record));
+            }
             assert_eq!(
                 match key {
                     "usageResume" => json!(snapshot.agent_view().usage_resume.as_ref().unwrap()),

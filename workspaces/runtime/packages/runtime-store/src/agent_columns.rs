@@ -101,7 +101,7 @@ const PROVIDER_COLUMN: AgentColumn =
 
 /// The indexed agent fields; see the module documentation. Changing this list
 /// changes the table and needs a new dated migration.
-pub const AGENT_COLUMNS: [AgentColumn; 35] = [
+pub const AGENT_COLUMNS: [AgentColumn; 34] = [
     column("root_id", "TEXT", "record->>'$.rootId'", ""),
     column("parent_id", "TEXT", "record->>'$.parentId'", ""),
     column("status", "TEXT", "record->>'$.status'", ""),
@@ -114,7 +114,6 @@ pub const AGENT_COLUMNS: [AgentColumn; 35] = [
     PROVIDER_COLUMN,
     column("role", "TEXT", "record->>'$.role'", ""),
     column("deleted_at", "", "record->>'$.deletedAt'", ""),
-    column("thread_id", "TEXT", "record->>'$.threadId'", ""),
     column("turn_id", "TEXT", "record->>'$.turnId'", ""),
     column("cwd", "TEXT", "record->>'$.cwd'", ""),
     column(
@@ -330,7 +329,12 @@ pub fn fixture_sql(batch: &str) -> String {
     let end = batch[start..]
         .find(';')
         .map_or(batch.len(), |offset| start + offset);
-    format!("{}{}{}", &batch[..start], agent_table_sql(), &batch[end..])
+    format!(
+        "{}{}; CREATE INDEX IF NOT EXISTS runtime_agent_live_root_v2 ON runtime_agents(root_id,id) WHERE deleted_at IS NULL{}",
+        &batch[..start],
+        agent_table_sql(),
+        &batch[end..]
+    )
 }
 
 /// `SELECT` of the declared (not generated) columns of `table`, for test
@@ -447,14 +451,16 @@ mod tests {
             .expect("store opens");
         store.transaction(|tx| {
             for agent in agents() {
+                let agent = crate::AgentRecord::from_value(agent)?.into_value();
                 tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
-                    rusqlite::params![agent["id"].as_str(), agent.to_string()])?;
+                    rusqlite::params![agent.get("id").and_then(Value::as_str), agent.to_string()])?;
             }
             let triggers = tx.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND tbl_name='runtime_agents'")?
                 .query_map([], |row| row.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
             let old_table = table_sql("runtime_agents_legacy_start_fixture").replace(
                 "record TEXT NOT NULL",
                 "auto_wake AS (record->>'$.autoWake') STORED,\
+                 thread_id AS (record->>'$.threadId') STORED,\
                  start_attempt_submitted AS (record->>'$.startAttempt.submitted') STORED,\
                  start_attempt_connection_generation AS (record->>'$.startAttempt.connectionGeneration') STORED,\
                  start_attempt_active_at_reservation AS (record->>'$.startAttempt.activeAtReservation') STORED,record TEXT NOT NULL",

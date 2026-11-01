@@ -11,11 +11,11 @@
 //! while a stale projection is repaired through the sequenced entity writer.
 
 use rusqlite::{Connection, OptionalExtension, Transaction};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
+use studio_runtime_schema::room_record::RoomRecord;
 use studio_runtime_store::{
-    AgentRecord, AgentRepository, JsonRecord, RecordKeyMode, RecordQueryShape, RuntimeStore,
-    StoreResult, SyncDocumentsRepository, Table,
+    AgentRecord, AgentRepository, RuntimeStore, StoreResult, SyncDocumentsRepository, Table,
 };
 
 /// Counts rows changed by the retired-review cleanup.
@@ -52,7 +52,7 @@ fn remove_review_assignments_in_transaction(
     }
     if table_exists(transaction, "runtime_rooms")? {
         let mut statement = transaction.prepare(
-            "SELECT id,record FROM runtime_rooms WHERE CASE WHEN json_valid(record) THEN json_type(record,'$.reviewTargets') IS NOT NULL ELSE 0 END ORDER BY id",
+            "SELECT id,json_remove(record,'$.reviewTargets') FROM runtime_rooms WHERE CASE WHEN json_valid(record) THEN json_type(record,'$.reviewTargets') IS NOT NULL ELSE 0 END ORDER BY id",
         )?;
         let rows = statement
             .query_map([], |row| {
@@ -61,16 +61,26 @@ fn remove_review_assignments_in_transaction(
             .collect::<Result<Vec<_>, _>>()?;
         drop(statement);
         for (id, raw) in rows {
-            let record: MaintenanceRoomRecord = match serde_json::from_str(&raw) {
-                Ok(record) if record_id_matches(&record, &id) => record,
+            let record: RoomRecord = match serde_json::from_str::<RoomRecord>(&raw) {
+                Ok(record) if record.id == id => record,
                 _ => {
                     eprintln!("Skipping invalid room {id} in retired review cleanup");
                     continue;
                 }
             };
-            Table::<MaintenanceRoomRecord>::new(transaction).put(&record)?;
-            remove_projection_field(transaction, "room", record.id.as_ref(), "reviewTargets")?;
+            Table::<RoomRecord>::new(transaction).put(&record)?;
+            remove_projection_field(transaction, "room", &record.id, "reviewTargets")?;
             counts.rooms += 1;
+        }
+    }
+    if table_exists(transaction, "sync_entities")? {
+        let mut statement = transaction.prepare("SELECT id FROM sync_entities WHERE collection='room' AND deleted=0 AND CASE WHEN json_valid(payload) THEN json_type(payload,'$.value.reviewTargets') IS NOT NULL ELSE 0 END")?;
+        let ids = statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(statement);
+        for id in ids {
+            remove_projection_field(transaction, "room", &id, "reviewTargets")?;
         }
     }
     if table_exists(transaction, "runtime_events")? {
@@ -82,10 +92,6 @@ fn remove_review_assignments_in_transaction(
         )? as u64;
     }
     Ok(counts)
-}
-
-fn record_id_matches(record: &MaintenanceRoomRecord, id: &str) -> bool {
-    record.id.as_ref() == id
 }
 
 fn remove_projection_field(
@@ -145,69 +151,6 @@ fn records_with_field(
         .collect()
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(transparent)]
-struct MaintenanceRoomId(String);
-
-impl AsRef<str> for MaintenanceRoomId {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<String> for MaintenanceRoomId {
-    fn from(value: String) -> Self {
-        Self(value)
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MaintenanceRoomRecord {
-    id: MaintenanceRoomId,
-    kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    custom_name: Option<String>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    members: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    project_path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    radio: Option<crate::radio_runtime::state::Radio>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    root_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    updated: Option<serde_json::Number>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    user_hidden: Option<bool>,
-    #[serde(default, rename = "reviewTargets", skip_serializing)]
-    _review_targets: Option<serde::de::IgnoredAny>,
-}
-
-fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
-    deserializer: D,
-) -> Result<Option<T>, D::Error> {
-    T::deserialize(deserializer).map(Some)
-}
-
-impl JsonRecord for MaintenanceRoomRecord {
-    type Id = MaintenanceRoomId;
-
-    const TABLE: &'static str = "runtime_rooms";
-    const SCHEMA: &'static str = "PersistedRoomRecord";
-    const KEY_MODE: RecordKeyMode = RecordKeyMode::PayloadId;
-    const QUERY_SHAPE: RecordQueryShape = RecordQueryShape::None;
-    const TYPED_SHAPE: bool = true;
-
-    fn record_key(&self) -> Option<&Self::Id> {
-        Some(&self.id)
-    }
-}
-
 fn table_exists(transaction: &Transaction<'_>, table: &str) -> StoreResult<bool> {
     Ok(transaction.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
@@ -221,32 +164,26 @@ mod tests {
     use super::*;
     use rusqlite::Connection;
     use serde_json::{Value, json};
+    use studio_runtime_store::JsonRecord;
 
     #[test]
     fn room_record_rejects_unknown_and_malformed_fields() {
         assert!(
-            serde_json::from_str::<MaintenanceRoomRecord>(
-                r#"{"id":"room","kind":"private","unexpected":1}"#
-            )
-            .is_err()
+            serde_json::from_str::<RoomRecord>(r#"{"id":"room","kind":"private","unexpected":1}"#)
+                .is_err()
         );
         assert!(
-            serde_json::from_str::<MaintenanceRoomRecord>(
-                r#"{"id":"room","kind":"private","members":false}"#
-            )
-            .is_err()
+            serde_json::from_str::<RoomRecord>(r#"{"id":"room","kind":"private","members":false}"#)
+                .is_err()
         );
-        assert!(serde_json::from_str::<MaintenanceRoomRecord>(r#"{"id":"room","kind":"private","members":["agent"],"updated":1,"userHidden":false}"#).is_ok());
+        assert!(serde_json::from_str::<RoomRecord>(r#"{"id":"room","kind":"private","members":["agent"],"updated":1,"userHidden":false}"#).is_ok());
     }
 
     #[test]
     fn open_room_encoder_still_validates_schema() {
         let connection = Connection::open_in_memory().unwrap();
-        assert!(
-            serde_json::from_str::<MaintenanceRoomRecord>(r#"{"id":"r","kind":false}"#).is_err()
-        );
-        let valid: MaintenanceRoomRecord =
-            serde_json::from_str(r#"{"id":"r","kind":"private"}"#).unwrap();
+        assert!(serde_json::from_str::<RoomRecord>(r#"{"id":"r","kind":false}"#).is_err());
+        let valid: RoomRecord = serde_json::from_str(r#"{"id":"r","kind":"private"}"#).unwrap();
         assert!(valid.encode_stored(&connection, "r").is_ok());
     }
 
@@ -273,6 +210,32 @@ mod tests {
             )
             .unwrap();
         assert_eq!(stored, raw);
+    }
+
+    #[test]
+    fn cleanup_removes_stale_projection_after_room_migration() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        seed(&connection);
+        let tx = connection.transaction().unwrap();
+        tx.execute("UPDATE runtime_rooms SET record=json_remove(record,'$.reviewTargets') WHERE id='room-a'", []).unwrap();
+        SyncDocumentsRepository::put_entity(
+            &tx,
+            "room",
+            "room-a",
+            json!({"id":"room-a","reviewTargets":[]}),
+            false,
+        )
+        .unwrap();
+        remove_review_assignments_in_transaction(&tx).unwrap();
+        let payload: String = tx
+            .query_row(
+                "SELECT payload FROM sync_entities WHERE collection='room' AND id='room-a'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let value: Value = serde_json::from_str(&payload).unwrap();
+        assert!(value["value"].get("reviewTargets").is_none());
     }
 
     fn seed(connection: &Connection) {
@@ -469,6 +432,8 @@ mod tests {
         assert_eq!(event(&after, "pending"), cancelled);
         let mut expected_agents = before["agents"].clone();
         expected_agents[0]["record"]["accountKey"] = json!("default");
+        expected_agents[0]["record"]["capacity"] = json!({"kind":"automatic","max":64});
+        expected_agents[0]["record"]["naming"] = json!("automatic");
         expected_agents[0]["record"]
             .as_object_mut()
             .expect("agent record object")

@@ -1,14 +1,23 @@
 //! Compiled persisted-state validators and the Rust owners of the shared
 //! runtime contracts (`contracts` renders their copies in other languages).
 
+pub mod account_destination;
+pub mod account_key;
 pub mod account_registry;
+pub mod agent_entity_native;
+pub mod agent_entity_nested;
+pub mod agent_entity_nested_extra;
+pub mod agent_entity_remote;
+pub mod agent_entity_transfer;
 pub mod agent_limits;
 pub mod agent_progress;
 pub mod annotation_command;
 pub mod annotation_record;
 pub mod api_schema;
+pub mod approvals;
 pub mod bounded_integer;
 pub mod bounded_text;
+pub mod chat_operational_status;
 pub mod checkpoint_record;
 pub mod claude_controls;
 pub mod claude_failure;
@@ -24,20 +33,29 @@ pub mod creation_intent;
 pub mod delivery;
 pub mod desktop;
 pub mod event_metadata;
+pub mod federation_ingress;
 pub mod federation_limits;
+pub mod http_bounded_ingress;
+pub mod http_ingress;
 pub mod idle_compaction;
 pub mod json_compat;
 pub mod json_object;
 pub mod layr_evidence;
+pub mod limit_reset_request;
 pub mod model_catalog;
 pub mod monitor_record;
+pub mod multi_server_access;
+pub mod multi_server_ingress;
 pub mod multi_server_protocol;
 pub mod notification_text;
+pub mod peer_team_ingress;
 pub mod persistence;
 pub mod plan_record;
 pub mod pricing;
 pub mod process_controls;
 pub mod progress_selector;
+pub mod project_ingress;
+pub mod project_projection;
 pub mod project_record;
 pub mod provider_call_contract;
 pub mod provider_diagnostics;
@@ -49,17 +67,23 @@ pub mod provider_method_policy;
 pub mod provider_rate_limits;
 pub mod question_answers;
 pub mod queue_command;
+pub mod radio_controls;
 pub mod raw_json;
 pub mod raw_object;
 pub mod records;
 pub mod recovery_record;
+pub mod request_projection;
 pub mod request_record;
+pub mod resource_notification;
+pub mod resource_ref;
+pub mod room_record;
 pub mod rule_record;
 pub mod shared_values;
 pub mod shell_policy;
 pub mod start_attempt;
 mod stored_record;
 pub use stored_record::AgentCounter;
+pub use stored_record::NonnegativeNumber;
 pub mod tool_result;
 pub use stored_record::StoredJsonInteger;
 pub mod string_enum;
@@ -68,6 +92,7 @@ pub mod supervisor_contract;
 pub mod task_command;
 pub mod task_record;
 pub mod task_results;
+pub mod terminal_ingress;
 pub mod terminal_record;
 pub mod transcript_asset;
 pub mod transcript_record;
@@ -88,6 +113,7 @@ pub use jsonschema::{
 };
 use serde_json::{Value, json};
 
+pub mod sync_entity_payload;
 pub mod sync_protocol;
 pub use sync_protocol::{SYNC_ENTITY_SCOPE, SYNC_PROTOCOL_VERSION, SYNC_PROTOCOL_VERSION_TEXT};
 mod token_rate_limits;
@@ -502,7 +528,6 @@ pub fn table_schema(table: &str) -> Option<&'static str> {
         "runtime_execution_effects" => "PersistedExecutionRecord",
         "runtime_execution_runs" => "PersistedExecutionRunRecord",
         "runtime_federation_inbox" => "PersistedFederationInbox",
-        "runtime_federation_outbox" => "PersistedFederationOutbox",
         "runtime_federation_peers" => "PersistedFederationPeer",
         "runtime_federation_rooms" => "PersistedFederationRoom",
         "runtime_federation_settings" => "PersistedFederationSettings",
@@ -514,6 +539,7 @@ pub fn table_schema(table: &str) -> Option<&'static str> {
         "runtime_requests" => "PersistedRequestRecord",
         "runtime_rooms" => "PersistedRoomRecord",
         "runtime_rules" => "PersistedRuleRecord",
+        // Shared row shape of the server request rows in runtime_outbox (project locations decode it).
         "runtime_server_inbox" | "runtime_server_outbox" => "PersistedServerDelivery",
         "runtime_tasks" => "PersistedTaskRecord",
         "runtime_tool_request_aliases" => "PersistedToolAlias",
@@ -632,6 +658,12 @@ pub fn validate_sync_entity_payload_strict(
             .get("value")
             .and_then(Value::as_object)
             .is_some_and(serde_json::Map::is_empty));
+    }
+    if matches!(collection, "edge" | "chat" | "workRelease") {
+        return Ok(
+            serde_json::from_value::<sync_entity_payload::SyncEntityPayload>(payload.clone())
+                .is_ok(),
+        );
     }
     Ok(first_error("SyncEntityPayload", payload)?.is_none())
 }
@@ -800,7 +832,6 @@ fn prepare_schemas() -> SchemaResult<CompiledSchemas> {
         "ModelChoices",
         "ProjectEntityDto",
         "ProjectMutationRecord",
-        "RequestEntityDto",
         "ResourceRef",
         "SubscriptionAdd",
         "SubscriptionCursor",
@@ -831,7 +862,6 @@ fn prepare_schemas() -> SchemaResult<CompiledSchemas> {
         "AutoPairRequest",
         "DevicePairRequest",
         "AgentRecordResponse",
-        "AgentRequest",
         "AppearancePreferences",
         "AnnotationReceipt",
         "CheckpointSummary",
@@ -850,8 +880,6 @@ fn prepare_schemas() -> SchemaResult<CompiledSchemas> {
         "PullRequest",
         "PullResult",
         "RenameServer",
-        "QuestionEntry",
-        "QuestionHistory",
         "QueueItem",
         "RequestRecordResponse",
         "RuleRecordResponse",
@@ -1559,7 +1587,7 @@ mod tests {
             "collection":"task",
             "id":"task-1",
             "legacyEnvelopeField":true,
-            "value":{"id":"task-1","legacyField":true}
+            "value":{"id":"task-1","agent":"agent-1","created":1,"kind":"command","status":"running","turnId":"turn-1","name":"command","display":{"kind":"command","kindLabel":"command","title":"command","active":true,"indicator":"working","label":"running","inBackgroundList":true,"actions":[]},"legacyField":true}
         });
         assert_eq!(
             normalize_sync_entity_payload("task", "task-1", false, &mut valid_task)
@@ -1571,7 +1599,7 @@ mod tests {
             json!({
                 "collection":"task",
                 "id":"task-1",
-                "value":{"id":"task-1"}
+                "value":{"id":"task-1","agent":"agent-1","created":1,"kind":"command","status":"running","turnId":"turn-1","name":"command","display":{"kind":"command","kindLabel":"command","title":"command","active":true,"indicator":"working","label":"running","inBackgroundList":true,"actions":[]}}
             })
         );
 

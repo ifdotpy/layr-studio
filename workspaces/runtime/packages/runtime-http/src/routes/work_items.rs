@@ -1,6 +1,6 @@
 //! HTTP handlers for persisted work-item, plan and queue reads.
 
-use super::extractors::{ApiJson, QueryParams};
+use super::extractors::{ApiJson, TypedQuery};
 use super::manifest::{OperationStatus, RouteGroup, get, post};
 use axum::Json;
 use axum::extract::State;
@@ -39,11 +39,19 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WorkQuery {
+    agent: Option<String>,
+}
+
 pub(crate) async fn work(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<WorkQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let agent_id = query_string(&query, "agent")?;
+    let agent_id = query
+        .agent
+        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid request"))?;
     work_for_agent(state, agent_id).await.map(Json)
 }
 
@@ -83,9 +91,11 @@ pub(crate) async fn work_for_agent(state: HttpState, agent_id: String) -> Result
 
 pub(crate) async fn queue(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<WorkQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let agent_id = query_string(&query, "agent")?;
+    let agent_id = query
+        .agent
+        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid request"))?;
     queue_for_agent(state, agent_id).await.map(Json)
 }
 
@@ -124,14 +134,6 @@ where
         .await
 }
 
-fn query_string(query: &QueryParams, name: &str) -> Result<String, ApiError> {
-    query
-        .typed_value(name)
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid request"))
-}
-
 fn invalid_stored(object: &'static str, id: &str) -> ApiError {
     stored_error(WorkPolicyError::InvalidStoredObject {
         object,
@@ -147,25 +149,51 @@ fn stored_error(error: WorkPolicyError) -> ApiError {
     }
 }
 
+const ANNOTATION_PATH_MAX_CODEPOINTS: usize = 4096;
+const ANNOTATION_TEXT_MAX_CODEPOINTS: usize = 32000;
+const ANNOTATION_TURN_ID_MAX_CODEPOINTS: usize = 200;
+const ANNOTATION_LINE_MAX: u64 = studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64;
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AnnotationBody {
+    #[serde(default)]
+    agent: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    id: studio_runtime_schema::queue_command::Field<String>,
+    path: studio_runtime_schema::bounded_text::BoundedText<0, ANNOTATION_PATH_MAX_CODEPOINTS>,
+    line: studio_runtime_schema::bounded_integer::BoundedInteger<1, ANNOTATION_LINE_MAX>,
+    text: studio_runtime_schema::bounded_text::BoundedText<1, ANNOTATION_TEXT_MAX_CODEPOINTS>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    turn_id: studio_runtime_schema::queue_command::Field<
+        studio_runtime_schema::bounded_text::BoundedText<0, ANNOTATION_TURN_ID_MAX_CODEPOINTS>,
+    >,
+}
+
 pub(crate) async fn annotation(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Value>,
+    ApiJson(body): ApiJson<AnnotationBody>,
 ) -> Result<Json<AnnotationCommandResponse>, ApiError> {
-    let agent_id = optional_string(&body, "agent")
-        .map(str::to_owned)
-        .unwrap_or_else(|| state.workspace_id.clone());
-    let line = body
-        .get("line")
-        .and_then(Value::as_i64)
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid request"))?;
-    let signature = python_operation_signature(&body)?;
+    let signature = studio_runtime_schema::json_compat::python_json_serialized(&body)
+        .map(|canonical| studio_runtime_store::sha256_hex(canonical.as_bytes()))
+        .map_err(|_| ApiError::internal())?;
     let input = AnnotationWrite {
-        agent_id,
-        id: optional_string(&body, "id").map(str::to_owned),
-        path: required_string(&body, "path")?.to_owned(),
-        line,
-        text: required_string(&body, "text")?.to_owned(),
-        turn_id: optional_string(&body, "turnId").map(str::to_owned),
+        agent_id: body
+            .agent
+            .value()
+            .cloned()
+            .unwrap_or_else(|| state.workspace_id.clone()),
+        id: body.id.value().cloned(),
+        path: body.path.as_str().to_owned(),
+        line: body.line.get(),
+        text: body.text.as_str().to_owned(),
+        turn_id: body.turn_id.value().map(|v| v.as_str().to_owned()),
         signature,
     };
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
@@ -207,7 +235,7 @@ pub(crate) async fn annotation(
 }
 pub(crate) async fn organization(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Value>,
+    ApiJson(body): ApiJson<studio_runtime_services::organization_effects::OrganizationRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let result = store
@@ -219,31 +247,13 @@ pub(crate) async fn organization(
     Ok(Json(result))
 }
 
-fn optional_string<'a>(body: &'a Value, field: &str) -> Option<&'a str> {
-    body.get(field).and_then(Value::as_str)
-}
-
-fn required_string<'a>(body: &'a Value, field: &str) -> Result<&'a str, ApiError> {
-    optional_string(body, field)
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid request"))
-}
-
-pub(crate) fn python_operation_signature(body: &Value) -> Result<String, ApiError> {
-    let mut value = body.clone();
-    let object = value.as_object_mut().ok_or_else(ApiError::internal)?;
-    object.entry("agent").or_insert(Value::Null);
-    let canonical = studio_runtime_services::event_write::python_json(&value);
-    Ok(studio_runtime_store::sha256_hex(canonical.as_bytes()))
-}
-
-pub(crate) fn work_request_signature(
+pub(crate) fn work_request_signature<T: serde::Serialize>(
     agent: &str,
     actor: Option<&str>,
-    body: &Value,
+    body: &T,
 ) -> Result<String, ApiError> {
-    let value = json!({"agent": agent, "actor": actor, "body": body});
-    let canonical = event_write::python_json(&value);
-    Ok(studio_runtime_store::sha256_hex(canonical.as_bytes()))
+    let canonical = serde_json::to_vec(&(agent, actor, body)).map_err(ApiError::json)?;
+    Ok(studio_runtime_store::sha256_hex(&canonical))
 }
 
 pub(crate) fn write_error(error: EventWriteError) -> ApiError {
@@ -273,5 +283,79 @@ inventory::submit! {
         name: "work_items",
         routes: Some(routes),
         dependencies: &["event-driver/work-items"],
+    }
+}
+
+#[cfg(test)]
+mod annotation_body_tests {
+    use super::AnnotationBody;
+    use serde_json::{Value, json};
+
+    #[test]
+    fn annotation_limits_match_openapi() {
+        let doc: Value = serde_json::from_str(include_str!("../../openapi.json")).unwrap();
+        let properties = &doc["components"]["schemas"]["AnnotationBody"]["properties"];
+        assert_eq!(
+            properties["path"]["maxLength"],
+            super::ANNOTATION_PATH_MAX_CODEPOINTS
+        );
+        assert_eq!(
+            properties["text"]["maxLength"],
+            super::ANNOTATION_TEXT_MAX_CODEPOINTS
+        );
+        assert_eq!(
+            properties["turnId"]["anyOf"][0]["maxLength"],
+            super::ANNOTATION_TURN_ID_MAX_CODEPOINTS
+        );
+        assert_eq!(properties["line"]["maximum"], super::ANNOTATION_LINE_MAX);
+    }
+
+    #[test]
+    fn annotation_identity_preserves_nullable_field_presence() {
+        for mut value in [
+            json!({"path":"é", "line":1, "text":"hello"}),
+            json!({"agent":null, "id":null, "path":"p", "line":2, "text":"x", "turnId":null}),
+            json!({"agent":"a", "id":"i", "path":"p", "line":3, "text":"x", "turnId":"t"}),
+        ] {
+            let body: AnnotationBody = serde_json::from_value(value.clone()).unwrap();
+            value
+                .as_object_mut()
+                .unwrap()
+                .entry("agent")
+                .or_insert(Value::Null);
+            assert_eq!(
+                studio_runtime_schema::json_compat::python_json_serialized(&body).unwrap(),
+                studio_runtime_schema::json_compat::python_json(&value)
+            );
+        }
+    }
+
+    #[test]
+    fn annotation_body_enforces_schema_bounds_and_unknown_fields() {
+        for value in [
+            json!({"path":"p", "line":0, "text":"x"}),
+            json!({"path":"p", "line":1, "text":""}),
+            json!({"path":"p", "line":1, "text":"x", "extra":true}),
+        ] {
+            assert!(serde_json::from_value::<AnnotationBody>(value).is_err());
+        }
+    }
+}
+
+#[cfg(test)]
+mod typed_query_tests {
+    use axum::extract::Query;
+    use serde::de::DeserializeOwned;
+
+    fn accepts<T: DeserializeOwned>(query: &str) -> bool {
+        let uri = format!("/?{query}").parse().unwrap();
+        Query::<T>::try_from_uri(&uri).is_ok()
+    }
+
+    #[test]
+    fn query_contracts() {
+        assert!(accepts::<super::WorkQuery>("agent=a"));
+        assert!(!accepts::<super::WorkQuery>("extra=x"));
+        assert!(!accepts::<super::WorkQuery>("agent=a&unknown=x"));
     }
 }

@@ -78,7 +78,7 @@ fn optional_bool(
     default: bool,
 ) -> Result<bool, RadioSnapshotError> {
     match object.get(field) {
-        None => Ok(default),
+        None | Some(Value::Null) => Ok(default),
         Some(Value::Bool(value)) => Ok(*value),
         _ => Err(invalid(format!("{location}/{field}"))),
     }
@@ -327,18 +327,7 @@ impl RadioAuthorizationSnapshot {
                     auto_wake: optional_bool(&row, "autoWake", &location, false)?,
                     thread_id: optional_string(&row, "threadId", &location)?,
                     epoch: optional_u64(&row, "epoch", &location)?,
-                    compactions: match row.get("compactions") {
-                        Some(Value::Null) => None,
-                        Some(Value::Number(value)) => Some(
-                            value
-                                .as_u64()
-                                .ok_or_else(|| invalid(format!("{location}/compactions")))?,
-                        ),
-                        None
-                        | Some(
-                            Value::Bool(_) | Value::String(_) | Value::Array(_) | Value::Object(_),
-                        ) => return Err(invalid(format!("{location}/compactions"))),
-                    },
+                    compactions: optional_u64(&row, "compactions", &location)?,
                     start_attempt,
                 },
             );
@@ -409,7 +398,14 @@ impl RadioAuthorizationSnapshot {
                 continue;
             }
             let mut teams = Vec::new();
-            for (index, team) in row.peer_teams.into_iter().enumerate() {
+            for (index, team) in row
+                .peer_teams
+                .value()
+                .into_iter()
+                .flatten()
+                .cloned()
+                .enumerate()
+            {
                 if team.id.is_empty()
                     || team.name.is_empty()
                     || team.members.iter().any(String::is_empty)
@@ -609,6 +605,41 @@ pub enum RadioTurnDecision {
 #[cfg(test)]
 mod project_contract_tests {
     use super::*;
+
+    #[test]
+    fn optional_flags_accept_null_and_reject_malformed() {
+        for field in ["isLead", "autoWake"] {
+            assert!(
+                !optional_bool(&serde_json::json!({(field):null}), field, "agent", false).unwrap()
+            );
+            assert!(
+                optional_bool(
+                    &serde_json::json!({(field):"invalid"}),
+                    field,
+                    "agent",
+                    false
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn absent_compactions_are_unknown_like_null() {
+        let mut records = RadioAuthorizationRecords {
+            recipient_id: "a".into(),
+            rooms: BTreeMap::new(),
+            agents: BTreeMap::new(),
+            projects: BTreeMap::new(),
+            resolved_paths: BTreeMap::new(),
+        };
+        records
+            .agents
+            .insert("a".into(), r#"{"id":"a","compactions":null}"#.into());
+        assert!(RadioAuthorizationSnapshot::from_records(&records).is_ok());
+        records.agents.insert("a".into(), r#"{"id":"a"}"#.into());
+        assert!(RadioAuthorizationSnapshot::from_records(&records).is_ok());
+    }
 
     #[test]
     fn project_team_projection_matches_stored_schema() {

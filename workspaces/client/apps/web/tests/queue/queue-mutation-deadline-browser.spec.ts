@@ -271,7 +271,7 @@ test("queue-mutation-deadline-browser @performance", async ({
           clientMessageId: "remove-1",
           role: "user",
           text: "Exact removal",
-          deliveryStatus: "sending",
+          deliveryStatus: { source: "server", status: "sending" },
         },
       };
       window.outcome = "pending";

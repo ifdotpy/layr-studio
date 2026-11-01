@@ -90,7 +90,7 @@ test("Skill autocomplete", async ({ browser: testBrowser }) => {
       sendRoute(async (_route, message, reply) => {
         sends.push(message);
         sendHandled.resolve();
-        await reply({ id: message.id, status: "accepted" });
+        await reply({ id: message.id, status: "delivered" });
       }),
     );
     await page.route("**/api/queue", async (route) => {
@@ -525,7 +525,7 @@ test("Skill autocomplete", async ({ browser: testBrowser }) => {
       sendRoute(async (_route, message, reply) => {
         failureSends.push(message);
         failureSendHandled.resolve();
-        await reply({ id: message.id, status: "accepted" });
+        await reply({ id: message.id, status: "delivered" });
       }),
     );
     await failurePage.route("**/api/queue", async (route) => {
@@ -653,7 +653,7 @@ test("Skill autocomplete", async ({ browser: testBrowser }) => {
       sendRoute(async (_route, message, reply) => {
         emptySends.push(message);
         emptySendHandled.resolve();
-        await reply({ id: message.id, status: "accepted" });
+        await reply({ id: message.id, status: "delivered" });
       }),
     );
     await emptyPage.route("**/api/queue", async (route) => {

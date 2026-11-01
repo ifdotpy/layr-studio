@@ -134,7 +134,7 @@ impl TaskRecoveryEffects for TaskRecoveryStore {
                 tx.execute("UPDATE runtime_items SET record=json_set(record,'$.toolStatus','lost') WHERE id=?1 AND agent=?2 AND json_extract(record,'$.turnId')=?3",
                     rusqlite::params![id, agent, t.turn_id()])?;
             }
-            let projection = crate::sync_views::project_persisted_record("task", &studio_runtime_store::projection_value(&updated))
+            let projection = crate::sync_views::project_task_record(&updated)
                 .ok_or(RecoveryError::CommitFailed)?;
             studio_runtime_store::SyncDocumentsRepository::put_entity(
                 tx, "task", id, projection, false,
@@ -327,7 +327,7 @@ impl TaskCompletionWriter for RuntimeTaskCompletionWriter {
                         clean.remove_error();
                     }
                     TaskRepository::put(tx, &clean)?;
-                    let projection = crate::sync_views::project_persisted_record("task", &studio_runtime_store::projection_value(&clean))
+                    let projection = crate::sync_views::project_task_record(&clean)
                         .ok_or(RecoveryError::CommitFailed)?;
                     studio_runtime_store::SyncDocumentsRepository::put_entity(
                         tx, "task", id, projection, false,

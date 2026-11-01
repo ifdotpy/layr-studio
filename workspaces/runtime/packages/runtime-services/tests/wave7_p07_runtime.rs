@@ -66,6 +66,12 @@ fn normalize_agent_records(value: &mut Value) {
                     .entry("accountKey")
                     .or_insert_with(|| json!("default"));
                 fields.entry("compactions").or_insert_with(|| json!(0));
+                fields
+                    .entry("capacity")
+                    .or_insert_with(|| json!(studio_runtime_store::AgentCapacity::default()));
+                fields
+                    .entry("naming")
+                    .or_insert_with(|| json!(studio_runtime_store::AgentNaming::default()));
                 for key in [
                     "threadId",
                     "turnId",

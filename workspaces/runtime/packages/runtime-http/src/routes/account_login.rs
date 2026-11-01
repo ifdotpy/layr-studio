@@ -8,6 +8,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use serde::Deserialize;
 use std::sync::Arc;
+use studio_runtime_schema::http_bounded_ingress as bounds;
 use studio_runtime_services::account_driver::{AccountDriver, AccountDriverError};
 use studio_runtime_services::account_session_runtime::{
     AccountSessionError, LoginRequest, ProfileRequest,
@@ -82,57 +83,156 @@ pub(crate) fn routes() -> RouteGroup {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AccountKeyBody {
     account_key: Option<String>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RequiredAccountKeyBody {
     account_key: String,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AccountNameBody {
     account_key: String,
-    label: String,
+    label: studio_runtime_schema::bounded_text::BoundedText<0, { bounds::ACCOUNT_NAME_MAX_CHARS }>,
+    #[serde(deserialize_with = "account_mutation_id")]
     request_id: String,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AccountGroupBody {
     account_key: String,
-    group: Option<String>,
+    #[serde(deserialize_with = "account_group")]
+    group: Option<studio_runtime_schema::project_ingress::AccountGroup>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DefaultGroupsBody {
-    groups: Vec<String>,
+    #[serde(deserialize_with = "account_groups")]
+    groups: Vec<studio_runtime_schema::project_ingress::AccountGroup>,
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StartThrottleBody {
     #[serde(rename = "account_key")]
     account_key: String,
-    burst: u64,
-    pause_seconds: u64,
-    max_running_turns: u64,
+    burst: studio_runtime_schema::bounded_integer::BoundedInteger<
+        1,
+        { studio_runtime_schema::shared_values::ACCOUNT_START_BURST_MAX },
+    >,
+    pause_seconds: studio_runtime_schema::bounded_integer::BoundedInteger<
+        0,
+        { studio_runtime_schema::shared_values::ACCOUNT_START_PAUSE_MAX_SECONDS },
+    >,
+    max_running_turns: studio_runtime_schema::bounded_integer::BoundedInteger<
+        1,
+        { studio_runtime_schema::shared_values::ACCOUNT_RUNNING_TURNS_MAX },
+    >,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DeleteAccountBody {
     account_key: String,
+    #[serde(deserialize_with = "account_mutation_id")]
     request_id: String,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RegisterAccountBody {
-    home: String,
+    home: studio_runtime_schema::bounded_text::BoundedText<1, { usize::MAX }>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CancelLoginBody {
+    #[serde(deserialize_with = "account_login_id")]
     login_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LoginBody {
+    #[serde(deserialize_with = "account_login_id")]
+    login_id: String,
+    account_key: Option<String>,
+    #[serde(default, deserialize_with = "login_email")]
+    email: Option<String>,
+    #[serde(default, deserialize_with = "login_label")]
+    label: Option<String>,
+}
+fn login_text<'de, D: serde::Deserializer<'de>, const MIN: usize, const MAX: usize>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let value = Option::<studio_runtime_schema::bounded_text::BoundedText<MIN, MAX>>::deserialize(
+        deserializer,
+    )?;
+    value
+        .map(|value| {
+            let text = value.as_str();
+            if text.chars().any(|character| !character.is_whitespace()) {
+                Ok(text.to_owned())
+            } else {
+                Err(serde::de::Error::custom("text must contain non-whitespace"))
+            }
+        })
+        .transpose()
+}
+fn login_email<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    login_text::<D, 0, { bounds::LOGIN_EMAIL_MAX_CHARS }>(deserializer)
+}
+fn login_label<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    login_text::<D, 1, { bounds::LOGIN_LABEL_MAX_CHARS }>(deserializer)
+}
+
+fn uuid_text<'de, D: serde::Deserializer<'de>, const LENGTH: usize>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    let text = String::deserialize(deserializer)?;
+    if text.len() != LENGTH
+        || [8, 13, 18, 23]
+            .iter()
+            .any(|index| text.as_bytes()[*index] != b'-')
+        || uuid::Uuid::parse_str(&text).is_err()
+    {
+        return Err(serde::de::Error::custom("invalid request identifier"));
+    }
+    Ok(text)
+}
+
+fn account_mutation_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    uuid_text::<D, { bounds::ACCOUNT_MUTATION_ID_BYTES }>(d)
+}
+fn account_login_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    uuid_text::<D, { bounds::ACCOUNT_LOGIN_ID_BYTES }>(d)
+}
+
+fn account_group<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<studio_runtime_schema::project_ingress::AccountGroup>, D::Error> {
+    Option::deserialize(deserializer)
+}
+fn account_groups<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<studio_runtime_schema::project_ingress::AccountGroup>, D::Error> {
+    let groups =
+        Vec::<studio_runtime_schema::project_ingress::AccountGroup>::deserialize(deserializer)?;
+    if groups.len() > studio_runtime_schema::shared_values::ACCOUNT_GROUPS_MAX {
+        return Err(serde::de::Error::custom("too many account groups"));
+    }
+    Ok(groups)
 }
 
 async fn set_default(
@@ -150,7 +250,7 @@ async fn set_name(
     ApiJson(body): ApiJson<AccountNameBody>,
 ) -> Result<Json<crate::generated::AccountsResponse>, ApiError> {
     run_mutation(state, move |driver| {
-        driver.set_name(&body.account_key, &body.label, &body.request_id)
+        driver.set_name(&body.account_key, body.label.as_str(), &body.request_id)
     })
     .await
 }
@@ -160,7 +260,10 @@ async fn set_group(
     ApiJson(body): ApiJson<AccountGroupBody>,
 ) -> Result<Json<crate::generated::AccountsResponse>, ApiError> {
     run_mutation(state, move |driver| {
-        driver.set_group(&body.account_key, body.group.as_deref())
+        driver.set_group(
+            &body.account_key,
+            body.group.map(|group| group.into_string()).as_deref(),
+        )
     })
     .await
 }
@@ -169,7 +272,12 @@ async fn set_default_groups(
     State(state): State<HttpState>,
     ApiJson(body): ApiJson<DefaultGroupsBody>,
 ) -> Result<Json<crate::generated::AccountsResponse>, ApiError> {
-    run_mutation(state, move |driver| driver.set_default_groups(&body.groups)).await
+    let groups: Vec<_> = body
+        .groups
+        .into_iter()
+        .map(|group| group.into_string())
+        .collect();
+    run_mutation(state, move |driver| driver.set_default_groups(&groups)).await
 }
 
 async fn set_start_throttle(
@@ -179,9 +287,9 @@ async fn set_start_throttle(
     // The boundary validated the bounds against the schema; this is the same
     // check by the runtime owner.
     let throttle = studio_runtime_services::account_start_gate::StartThrottle::new(
-        body.burst,
-        body.pause_seconds,
-        body.max_running_turns,
+        body.burst.get() as u64,
+        body.pause_seconds.get() as u64,
+        body.max_running_turns.get() as u64,
     )
     .ok_or_else(|| ApiError::validation(vec![serde_json::json!("body")]))?;
     run_mutation(state, move |driver| {
@@ -222,7 +330,7 @@ async fn register(
         return Err(runtime_availability("account-driver/runtime"));
     };
     let (snapshot, key) = run_account_operation(&state, driver.clone(), move |driver| {
-        driver.register_with_key(&body.home)
+        driver.register_with_key(body.home.as_str())
     })
     .await?;
     let catalog_state = state.clone();
@@ -391,13 +499,21 @@ enum LoginResponse {
 
 async fn codex_login(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<LoginRequest>,
+    ApiJson(body): ApiJson<LoginBody>,
 ) -> Result<Json<LoginResponse>, ApiError> {
     let port = state
         .account_session
         .clone()
         .ok_or_else(|| unavailable(CODEX_LOGIN[0]))?;
-    let result = port.login(body).await.map_err(session_error)?;
+    let result = port
+        .login(LoginRequest {
+            login_id: body.login_id,
+            account_key: body.account_key,
+            email: body.email,
+            label: body.label,
+        })
+        .await
+        .map_err(session_error)?;
     state.event_wake.notify_one();
     Ok(Json(LoginResponse::Typed(result)))
 }
@@ -613,7 +729,7 @@ mod tests {
         );
         let result = super::codex_login(
             axum::extract::State(state),
-            super::ApiJson(super::LoginRequest {
+            super::ApiJson(super::LoginBody {
                 login_id: "9b06d4c4-0b71-49b5-b984-927d6fdcde01".into(),
                 account_key: None,
                 email: None,
@@ -707,5 +823,97 @@ inventory::submit! {
         "provider-session/claude-profile-auth",
         "provider-session/codex-login",
         ],
+    }
+}
+
+#[cfg(test)]
+mod strict_account_body_tests {
+    use serde::de::DeserializeOwned;
+
+    fn valid<T: DeserializeOwned>(body: &str) -> bool {
+        serde_json::from_str::<T>(body).is_ok()
+    }
+
+    #[test]
+    fn account_bodies_reject_extra_fields_and_invalid_bounds() {
+        assert!(!valid::<super::DeleteAccountBody>(
+            r#"{"account_key":"a","request_id":"01234567-89ab-cdef-0123-456789abcdef","extra":true}"#
+        ));
+        assert!(!valid::<super::CancelLoginBody>(
+            r#"{"login_id":"01234567-89ab-cdef-0123-456789abcdef","extra":true}"#
+        ));
+        assert!(!valid::<super::AccountNameBody>(
+            r#"{"account_key":"a","request_id":"01234567-89ab-cdef-0123-456789abcdef","label":"a","extra":true}"#
+        ));
+        assert!(!valid::<super::AccountGroupBody>(
+            r#"{"account_key":"a","group":null,"extra":true}"#
+        ));
+        assert!(!valid::<super::DefaultGroupsBody>(
+            r#"{"groups":[],"extra":true}"#
+        ));
+        assert!(!valid::<super::RegisterAccountBody>(
+            r#"{"home":"a","extra":true}"#
+        ));
+
+        assert!(valid::<super::LoginBody>(
+            r#"{"login_id":"01234567-89ab-cdef-0123-456789abcdef","email":"a"}"#
+        ));
+        assert!(!valid::<super::LoginBody>(
+            r#"{"login_id":"01234567-89ab-cdef-0123-456789abcdef","email":" "}"#
+        ));
+        assert!(!valid::<super::LoginBody>(
+            r#"{"login_id":"01234567-89ab-cdef-0123-456789abcdef","extra":1}"#
+        ));
+        assert!(valid::<super::AccountKeyBody>(r#"{"account_key":null}"#));
+        assert!(!valid::<super::AccountKeyBody>(r#"{"extra":true}"#));
+        assert!(valid::<super::RequiredAccountKeyBody>(
+            r#"{"account_key":"a"}"#
+        ));
+        assert!(!valid::<super::RequiredAccountKeyBody>(
+            r#"{"account_key":"a","extra":true}"#
+        ));
+        let id = "01234567-89ab-cdef-0123-456789abcdef";
+        for id in [id, "ABCDEF01-89ab-cdef-0123-456789abcdef"] {
+            assert!(valid::<super::DeleteAccountBody>(&format!(
+                r#"{{"account_key":"a","request_id":"{id}"}}"#
+            )));
+            assert!(valid::<super::CancelLoginBody>(&format!(
+                r#"{{"login_id":"{id}"}}"#
+            )));
+            assert!(valid::<super::AccountNameBody>(&format!(
+                r#"{{"account_key":"a","request_id":"{id}","label":"ok"}}"#
+            )));
+        }
+        assert!(!valid::<super::DeleteAccountBody>(
+            r#"{"account_key":"a","request_id":"bad"}"#
+        ));
+        assert!(!valid::<super::CancelLoginBody>(r#"{"login_id":"bad"}"#));
+        assert!(!valid::<super::AccountNameBody>(&format!(
+            r#"{{"account_key":"a","request_id":"{id}","label":"{}"}}"#,
+            "x".repeat(33)
+        )));
+        assert!(valid::<super::AccountGroupBody>(
+            r#"{"account_key":"a","group":null}"#
+        ));
+        assert!(!valid::<super::AccountGroupBody>(r#"{"account_key":"a"}"#));
+        assert!(!valid::<super::AccountGroupBody>(
+            r#"{"account_key":"a","group":"BAD"}"#
+        ));
+        assert!(valid::<super::DefaultGroupsBody>(r#"{"groups":["a"]}"#));
+        assert!(!valid::<super::DefaultGroupsBody>(&format!(
+            r#"{{"groups":[{}]}}"#,
+            vec!["\"a\""; 17].join(",")
+        )));
+        assert!(valid::<super::StartThrottleBody>(
+            r#"{"account_key":"a","burst":1,"pauseSeconds":0,"maxRunningTurns":512}"#
+        ));
+        assert!(!valid::<super::StartThrottleBody>(
+            r#"{"account_key":"a","burst":513,"pauseSeconds":0,"maxRunningTurns":1}"#
+        ));
+        assert!(!valid::<super::StartThrottleBody>(
+            r#"{"account_key":"a","burst":1,"pauseSeconds":0,"maxRunningTurns":1,"extra":true}"#
+        ));
+        assert!(valid::<super::RegisterAccountBody>(r#"{"home":"x"}"#));
+        assert!(!valid::<super::RegisterAccountBody>(r#"{"home":""}"#));
     }
 }

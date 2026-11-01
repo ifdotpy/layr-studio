@@ -1,5 +1,5 @@
 //! Native Claude sign-in with durable request identities and code delivery latches.
-use super::extractors::{ApiJson, QueryParams};
+use super::extractors::{ApiJson, TypedQuery};
 use super::manifest::{OperationStatus, RouteGroup, get, post};
 use crate::{error::ApiError, router::HttpState};
 use axum::{Json, extract::State, http::StatusCode};
@@ -79,12 +79,19 @@ fn error(error: LoginError) -> ApiError {
         }
     }
 }
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LoginStatusQuery {
+    request_id: Option<String>,
+}
 async fn status(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<LoginStatusQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let id = query
-        .nonempty_str("request_id")
+        .request_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
         .ok_or_else(|| error(LoginError::InvalidIdentity))?;
     service(&state)?.status(id).await.map(Json).map_err(error)
 }
@@ -183,5 +190,20 @@ mod tests {
             serde_json::from_slice::<Value>(&body).expect("JSON body")["error"],
             "Not implemented: requires provider-session/claude-login"
         );
+    }
+}
+
+#[cfg(test)]
+mod typed_query_contract_tests {
+    use super::*;
+    #[test]
+    fn loginstatusquery_decodes_and_rejects_invalid() {
+        fn decode(query: &str) -> bool {
+            let uri: axum::http::Uri = format!("/?{query}").parse().unwrap();
+            axum::extract::Query::<LoginStatusQuery>::try_from_uri(&uri).is_ok()
+        }
+        assert!(decode("request_id=x"));
+        assert!(!decode("extra=x"));
+        assert!(!decode("extra=x"));
     }
 }

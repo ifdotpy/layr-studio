@@ -17,6 +17,7 @@ members = [
     "workspaces/runtime/packages/runtime-process",
     "workspaces/runtime/packages/runtime-http",
     "workspaces/runtime/packages/runtime-services",
+    "workspaces/runtime/packages/request-signing",
     "workspaces/runtime/packages/runtime-schema",
     "workspaces/runtime/packages/runtime-store",
     "workspaces/runtime/packages/test-deps",
@@ -85,6 +86,7 @@ tokio-rusqlite = "=0.8.0"
 sysinfo = { version = "=0.39.6", default-features = false, features = ["system"] }
 sha2 = "=0.11.1"
 strum = { version = "=0.28.0", default-features = false, features = ["derive"] }
+unicode-general-category = "=1.1.0"
 thiserror = "=2.0.21"
 zstd-safe = { version = "=8.0.0", default-features = false, features = ["std", "zdict_builder"] }
 
@@ -96,11 +98,20 @@ tokio = { version = "=1.54.1", features = ["fs", "io-util", "macros", "net", "pr
 tokio-util = { version = "=0.7.20", default-features = false }
 tower = { version = "=0.5.3", features = ["util"] }
 tower-http = { version = "=0.7.1", default-features = false }
+regex = "=1.13.1"
 ring = "=0.17.14"
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pki-types = { version = "=1.15.1", features = ["std"] }
 spki = { version = "=0.8.1", features = ["std"] }
 ureq = { version = "=3.5.0", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
+
+# Live set for `layr retest sweep` (docs/retest.md, "Live set"). The `sweep` list must equal
+# RUST_WORKSPACE_BUILD_ARGS in workspaces/tooling/apps/repository-checks/gate-config.ts (test:
+# tests/layr-sweep-parity.test.ts). The env is the gate's: CARGO_INCREMENTAL=0 (studio-ops
+# layr-test-fast.sh and main-warm.sh). It changes the unit hashes.
+[workspace.metadata.layr-retest]
+env = { CARGO_INCREMENTAL = "0" }
+sweep = [["build", "--workspace", "--exclude", "studio-native-client", "--tests", "--bins", "--examples", "--locked"]]
 
 # The server hashes its own executable at startup, a file of up to a gigabyte in
 # a debug build; unoptimized hashing delayed readiness by about 20 seconds.

@@ -83,7 +83,7 @@ fn empty_entry() -> Result<ResourceRevisionEntry, ApiError> {
 }
 
 macro_rules! resource_handlers {
-    ($( $handler:ident => $variant:ident, $initial:ident; )+) => {
+    ($( $handler:ident => $variant:ident, $initial:ident, $policy:ident; )+) => {
         $(
             struct $handler;
             impl ResourceKindHandler for $handler {
@@ -103,6 +103,9 @@ macro_rules! resource_handlers {
             }
         )+
         static REGISTRY: &[&dyn ResourceKindHandler] = &[$(&$handler),+];
+        fn registered_cache_policy(resource: &ResourceRef) -> crate::generated::SubscriptionCachePolicy {
+            match resource { $(ResourceRef::$variant(_) => crate::generated::SubscriptionCachePolicy::$policy),+ }
+        }
     };
 }
 
@@ -128,7 +131,7 @@ async fn transcript_initial(
     since: Option<SubscriptionCursor>,
 ) -> Result<ResourceRevisionEntry, ApiError> {
     let tail = match &resource {
-        ResourceRef::TranscriptResource(transcript) => transcript.tail,
+        ResourceRef::TranscriptResource(transcript) => transcript.tail.map(|tail| tail.get()),
         ResourceRef::AccountsResource(_)
         | ResourceRef::CostsResource(_)
         | ResourceRef::DesktopResource(_)
@@ -193,11 +196,9 @@ async fn view_value(
 ) -> Result<Value, ApiError> {
     use serde_json::json;
     match resource {
-        ResourceRef::ProcessesResource(r) => {
-            Ok(json!({"processes":super::process_controls::read_listing(state, r.agent_id).await?}))
-        }
+        ResourceRef::ProcessesResource(_) => Err(ApiError::internal()),
         ResourceRef::ComplaintResource(r) => Ok(
-            json!({"complaint":super::questions_reads::complaint_for_id(state, r.complaint_id).await?}),
+            json!({"complaint":super::questions_reads::complaint_for_id(state, r.complaint_id.as_str().to_owned()).await?}),
         ),
         ResourceRef::RoomResource(r) => {
             if r.legacy == Some(true) {
@@ -215,7 +216,7 @@ async fn view_value(
             let mut room = serde_json::to_value(
                 super::messages::room_snapshot(
                     state,
-                    r.room_id,
+                    r.room_id.as_str().to_owned(),
                     None,
                     None,
                     studio_runtime_schema::shared_values::SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS as i64,
@@ -300,6 +301,18 @@ async fn view_initial(
     resource: ResourceRef,
     since: Option<SubscriptionCursor>,
 ) -> Result<ResourceRevisionEntry, ApiError> {
+    if let ResourceRef::ProcessesResource(processes) = &resource {
+        let listing =
+            super::process_controls::read_listing(state, processes.agent_id.as_str().to_owned())
+                .await?;
+        let mut entry = empty_entry()?;
+        entry.resource = Some(Some(resource));
+        entry.view_snapshot = Some(crate::generated::SubscriptionViewSnapshot {
+            processes: Some(listing),
+            ..Default::default()
+        });
+        return Ok(entry);
+    }
     let mut snapshot = view_value(state.clone(), resource.clone(), since.clone()).await?;
     let generation = snapshot
         .as_object_mut()
@@ -353,7 +366,7 @@ pub(super) async fn attach_terminal_output_cursors(
             match initial_snapshot(
                 state.clone(),
                 resource.clone(),
-                cursors.get(&terminal.terminal_id).cloned(),
+                cursors.get(terminal.terminal_id.as_str()).cloned(),
             )
             .await
             {
@@ -362,14 +375,14 @@ pub(super) async fn attach_terminal_output_cursors(
                     *entry = snapshot;
                 }
                 Err(error) => {
-                    cursors.remove(&terminal.terminal_id);
+                    cursors.remove(terminal.terminal_id.as_str());
                     eprintln!("subscribed terminal interval unavailable: {error:?}");
                     continue;
                 }
             }
         }
         if let Some(cursor) = &entry.cursor {
-            cursors.insert(terminal.terminal_id.clone(), cursor.clone());
+            cursors.insert(terminal.terminal_id.as_str().to_owned(), cursor.clone());
         }
     }
 }
@@ -396,36 +409,51 @@ pub(super) async fn attach_view_snapshots(
 // This is the only resource-kind registration list. The parity witness compares
 // its complete set against the generated OpenAPI ResourceRef discriminator.
 resource_handlers! {
-    ProcessesResourceHandler => ProcessesResource, view_initial;
-    ComplaintResourceHandler => ComplaintResource, view_initial;
-    TerminalOutputResourceHandler => TerminalOutputResource, view_initial;
-    AgentDetailResourceHandler => AgentDetailResource, entity_initial;
-    MonitorsResourceHandler => MonitorsResource, entity_initial;
-    AccountsResourceHandler => AccountsResource, passive_initial;
-    AuthProgressResourceHandler => AuthProgressResource, passive_initial;
-    CostsResourceHandler => CostsResource, entity_initial;
-    DesktopResourceHandler => DesktopResource, entity_initial;
-    DraftsResourceHandler => DraftsResource, draft_initial;
-    LimitsResourceHandler => LimitsResource, passive_initial;
-    ModelsResourceHandler => ModelsResource, passive_initial;
-    MultiServerResourceHandler => MultiServerResource, passive_initial;
-    QueueResourceHandler => QueueResource, passive_initial;
-    ReceiptsResourceHandler => ReceiptsResource, passive_initial;
-    RenameProgressResourceHandler => RenameProgressResource, passive_initial;
-    RoomResourceHandler => RoomResource, view_initial;
-    SessionCostResourceHandler => SessionCostResource, entity_initial;
-    StateResourceHandler => StateResource, entity_initial;
-    TaskResourceHandler => TaskResource, entity_initial;
-    TasksResourceHandler => TasksResource, entity_initial;
-    TerminalResourceHandler => TerminalResource, entity_initial;
-    TerminalsResourceHandler => TerminalsResource, entity_initial;
-    TranscriptResourceHandler => TranscriptResource, transcript_initial;
-    TranscriptsResourceHandler => TranscriptsResource, passive_initial;
-    VaultJobProgressResourceHandler => VaultJobProgressResource, passive_initial;
-    VaultReadinessResourceHandler => VaultReadinessResource, passive_initial;
-    VoiceResourceHandler => VoiceResource, passive_initial;
-    WorkResourceHandler => WorkResource, entity_initial;
-    WorkspaceResourceHandler => WorkspaceResource, passive_initial;
+    ProcessesResourceHandler => ProcessesResource, view_initial, NoCache;
+    ComplaintResourceHandler => ComplaintResource, view_initial, NoCache;
+    TerminalOutputResourceHandler => TerminalOutputResource, view_initial, NoCache;
+    AgentDetailResourceHandler => AgentDetailResource, entity_initial, Cache;
+    MonitorsResourceHandler => MonitorsResource, entity_initial, NoCache;
+    AccountsResourceHandler => AccountsResource, passive_initial, NoCache;
+    AuthProgressResourceHandler => AuthProgressResource, passive_initial, NoCache;
+    CostsResourceHandler => CostsResource, entity_initial, Cache;
+    DesktopResourceHandler => DesktopResource, entity_initial, Cache;
+    DraftsResourceHandler => DraftsResource, draft_initial, NoCache;
+    LimitsResourceHandler => LimitsResource, passive_initial, NoCache;
+    ModelsResourceHandler => ModelsResource, passive_initial, NoCache;
+    MultiServerResourceHandler => MultiServerResource, passive_initial, NoCache;
+    QueueResourceHandler => QueueResource, passive_initial, NoCache;
+    ReceiptsResourceHandler => ReceiptsResource, passive_initial, NoCache;
+    RenameProgressResourceHandler => RenameProgressResource, passive_initial, NoCache;
+    RoomResourceHandler => RoomResource, view_initial, NoCache;
+    SessionCostResourceHandler => SessionCostResource, entity_initial, Cache;
+    StateResourceHandler => StateResource, entity_initial, Cache;
+    TaskResourceHandler => TaskResource, entity_initial, Cache;
+    TasksResourceHandler => TasksResource, entity_initial, NoCache;
+    // A terminal detail overlaps the terminal list; only the list owns a cache.
+    TerminalResourceHandler => TerminalResource, entity_initial, NoCache;
+    TerminalsResourceHandler => TerminalsResource, entity_initial, Cache;
+    TranscriptResourceHandler => TranscriptResource, transcript_initial, Cache;
+    TranscriptsResourceHandler => TranscriptsResource, passive_initial, NoCache;
+    VaultJobProgressResourceHandler => VaultJobProgressResource, passive_initial, NoCache;
+    VaultReadinessResourceHandler => VaultReadinessResource, passive_initial, NoCache;
+    VoiceResourceHandler => VoiceResource, passive_initial, NoCache;
+    WorkResourceHandler => WorkResource, entity_initial, NoCache;
+    WorkspaceResourceHandler => WorkspaceResource, passive_initial, NoCache;
+}
+
+/// Only subscriptions whose projection rows are owned by their cursor can resume.
+pub(super) fn cache_policy(
+    resource: &ResourceRef,
+    locality: studio_runtime_schema::sync_protocol::FrontendLocality,
+) -> crate::generated::SubscriptionCachePolicy {
+    use crate::generated::SubscriptionCachePolicy;
+    use studio_runtime_schema::sync_protocol::FrontendLocality;
+    if matches!(locality, FrontendLocality::Remote) {
+        registered_cache_policy(resource)
+    } else {
+        SubscriptionCachePolicy::NoCache
+    }
 }
 
 pub(super) fn handler(
@@ -509,6 +537,15 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
             .await
             .ok()?;
     }
+    if let ResourceRef::ProcessesResource(processes) = &resource {
+        return super::process_controls::read_listing(
+            state,
+            processes.agent_id.as_str().to_owned(),
+        )
+        .await
+        .ok()
+        .and_then(|value| serde_json::to_vec(&value).ok());
+    }
     if is_view_resource(&resource) {
         return view_value(state, resource, None)
             .await
@@ -531,7 +568,7 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
             // A scoped stream hint may precede the next stored transcript flush.
             let publication = state
                 .resource_notifications
-                .published_revision(&resource)
+                .published_revision(&ResourceRef::TranscriptResource(resource.clone()))
                 .ok()?;
             let store = state.store?;
             store
@@ -554,8 +591,8 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
             .read_async("runtime-http/rename-progress", move |connection| {
                 let reply = studio_runtime_services::title_generation::progress(
                     connection,
-                    &resource.agent_id,
-                    &resource.request_id,
+                    resource.agent_id.as_str(),
+                    resource.request_id.as_str(),
                 )
                 .map_err(|_| studio_runtime_store::StoreError::RecordContract("rename progress"))?;
                 serde_json::to_vec(&reply).map_err(studio_runtime_store::StoreError::from)
@@ -563,17 +600,20 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
             .await
             .ok(),
         ResourceRef::AuthProgressResource(resource) => {
-            serde_json::to_vec(&auth_progress(&state, &resource.request_id).await?).ok()
+            serde_json::to_vec(&auth_progress(&state, resource.request_id.as_str()).await?).ok()
         }
         ResourceRef::VaultJobProgressResource(resource) => serde_json::to_vec(
-            &super::host_secrets::job_progress(&state, resource.job, &resource.request_id).await,
+            &super::host_secrets::job_progress(&state, resource.job, resource.request_id.as_str())
+                .await,
         )
         .ok(),
         ResourceRef::VaultReadinessResource(resource) => {
             let settings = super::host_secrets::settings_dir(&state.state_dir);
             studio_runtime_process::blocking_pool::spawn_blocking(
                 "runtime-http/vault-readiness",
-                move || studio_runtime_services::vault::keys_ready(&settings, &resource.prefix),
+                move || {
+                    studio_runtime_services::vault::keys_ready(&settings, resource.prefix.as_str())
+                },
             )
             .await
             .ok()?
@@ -645,6 +685,29 @@ mod tests {
     use serde_json::json;
     use std::collections::BTreeSet;
 
+    #[test]
+    fn cache_policy_excludes_overlapping_terminal_detail() {
+        use crate::generated::SubscriptionCachePolicy;
+        use studio_runtime_schema::resource_ref::{EmptyResource, TerminalResource};
+        use studio_runtime_schema::sync_protocol::FrontendLocality;
+        let detail = ResourceRef::TerminalResource(TerminalResource {
+            terminal_id: "one".to_owned().try_into().expect("nonempty id"),
+        });
+        let list = ResourceRef::TerminalsResource(EmptyResource {});
+        assert_eq!(
+            cache_policy(&detail, FrontendLocality::Remote),
+            SubscriptionCachePolicy::NoCache
+        );
+        assert_eq!(
+            cache_policy(&list, FrontendLocality::Remote),
+            SubscriptionCachePolicy::Cache
+        );
+        assert_eq!(
+            cache_policy(&list, FrontendLocality::Local),
+            SubscriptionCachePolicy::NoCache
+        );
+    }
+
     #[tokio::test]
     async fn stored_fingerprints_follow_edits_metadata_and_deletion() {
         use std::sync::Arc;
@@ -670,19 +733,20 @@ mod tests {
             Some(store.clone()),
             None,
         );
-        let complaint = ResourceRef::ComplaintResource(crate::generated::ComplaintResource {
-            complaint_id: "c".into(),
-            kind: crate::generated::ComplaintResourceKind::Complaint,
-        });
-        let terminal =
-            ResourceRef::TerminalOutputResource(crate::generated::TerminalOutputResource {
-                terminal_id: "t".into(),
-                kind: crate::generated::TerminalOutputResourceKind::TerminalOutput,
+        let complaint = ResourceRef::ComplaintResource(
+            studio_runtime_schema::resource_ref::ComplaintResource {
+                complaint_id: "c".to_owned().try_into().expect("complaint id"),
+            },
+        );
+        let terminal = ResourceRef::TerminalOutputResource(
+            studio_runtime_schema::resource_ref::TerminalResource {
+                terminal_id: "t".to_owned().try_into().expect("terminal id"),
+            },
+        );
+        let voice =
+            ResourceRef::VoiceResource(studio_runtime_schema::resource_ref::AgentResource {
+                agent_id: "a".to_owned().try_into().expect("agent id"),
             });
-        let voice = ResourceRef::VoiceResource(crate::generated::VoiceResource {
-            agent_id: "a".into(),
-            kind: crate::generated::VoiceResourceKind::Voice,
-        });
         let before = [complaint.clone(), terminal.clone(), voice.clone()];
         let mut fingerprints = Vec::new();
         for resource in &before {
@@ -745,10 +809,10 @@ mod tests {
                 .expect("store"),
         );
         store.transaction_with(|tx| {
-            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('lead',?1)", [json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"lead","rootId":"lead","isLead":true,"epoch":1,"status":"idle","name":"Lead","threadId":"thread"}).to_string()])?;
+            studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"lead","rootId":"lead","isLead":true,"epoch":1,"status":"idle","name":"Lead","threadId":"thread"}))?)?;
             tx.execute("INSERT INTO runtime_rooms(id,record) VALUES('room',?1)", [json!({"id":"room","kind":"broadcast","rootId":"lead","members":["lead"],"name":"Team"}).to_string()])?;
             for i in 0..40 {
-                tx.execute("INSERT INTO runtime_chat_messages(id,room,sender,text,created,deliveries) VALUES(?1,'room','lead',?2,?3,'{}')", rusqlite::params![format!("message-{i}"), "x".repeat(10_000), i])?;
+                tx.execute("INSERT INTO runtime_chat_messages(id,room,sender,text,created,deliveries) VALUES(?1,'room','lead',?2,?3,'{}')", rusqlite::params![format!("message-{i}"), "\\".repeat(SYNC_STREAM_EVENT_MAX_BYTES * 3 / 160), i])?;
             }
             Ok::<_, StoreError>(())
         }).await.expect("room fixture");
@@ -763,26 +827,58 @@ mod tests {
         );
         let resource =
             serde_json::from_value(json!({"kind":"room","roomId":"room"})).expect("room resource");
+        let initial =
+            super::super::messages::room_snapshot(state.clone(), "room".into(), None, None, 40)
+                .await
+                .expect("untrimmed room snapshot");
+        let initial = serde_json::to_value(initial).expect("initial value");
+        let initial_count = initial["messages"]
+            .as_array()
+            .expect("initial messages")
+            .len();
         let value = view_value(state.clone(), resource, None)
             .await
             .expect("room tail");
         let room = &value["room"];
         let messages = room["messages"].as_array().expect("messages");
-        assert_eq!(messages.len(), 10);
+        assert!(!messages.is_empty() && messages.len() < initial_count);
         assert_eq!(room["nextBefore"], messages[0]["seq"]);
-        let before = room["nextBefore"].as_i64().expect("history boundary");
-        let history =
-            super::super::messages::room_snapshot(state, "room".into(), Some(before), None, 40)
-                .await
-                .expect("history");
-        let history = serde_json::to_value(history).expect("history value");
-        assert_eq!(
-            history["messages"]
-                .as_array()
-                .expect("history messages")
-                .len(),
-            30
-        );
+        let tail_ids: Vec<String> = messages
+            .iter()
+            .map(|v| v["id"].as_str().expect("id").to_owned())
+            .collect();
+        let mut all_ids = tail_ids.clone();
+        let mut cursor = room["nextBefore"].as_i64();
+        while let Some(before) = cursor {
+            let history = super::super::messages::room_snapshot(
+                state.clone(),
+                "room".into(),
+                Some(before),
+                None,
+                40,
+            )
+            .await
+            .expect("history");
+            let history = serde_json::to_value(history).expect("history value");
+            let rows = history["messages"].as_array().expect("history messages");
+            assert!(
+                rows.iter()
+                    .all(|message| message["seq"].as_i64().is_some_and(|seq| seq < before))
+            );
+            all_ids.extend(
+                rows.iter()
+                    .map(|v| v["id"].as_str().expect("id").to_owned()),
+            );
+            cursor = history["nextBefore"].as_i64();
+        }
+        all_ids.sort();
+        let mut expected: Vec<String> = (0..40).map(|i| format!("message-{i}")).collect();
+        expected.sort();
+        assert_eq!(all_ids, expected);
+        let expected_tail: Vec<String> = (40 - tail_ids.len()..40)
+            .map(|i| format!("message-{i}"))
+            .collect();
+        assert_eq!(tail_ids, expected_tail);
         assert!(
             serde_json::to_vec(room).expect("serialized tail").len()
                 <= SYNC_STREAM_EVENT_MAX_BYTES / 2
@@ -804,7 +900,9 @@ mod tests {
             .expect("install production entity publisher");
         store.transaction_with(|tx| {
             AgentRepository::put(tx, &AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"lead","rootId":"lead","isLead":true,"epoch":1,"status":"idle","name":"Lead","threadId":"thread"}))?)?;
-            tx.execute("INSERT INTO runtime_work(id,record) VALUES('assignment',?1)",[json!({"id":"assignment","rootId":"lead","title":"Published assignment","status":"running","created":1,"updated":1,"version":1,"results":[{"id":"evidence","agent":"lead","text":"Existing evidence","checks":"fixture","revision":"abc","files":[],"created":1}]}).to_string()])?;
+            let assignment = json!({"id":"assignment","rootId":"lead","title":"Published assignment","status":"running","created":1,"updated":1,"version":1,"results":[{"id":"evidence","agent":"lead","text":"Existing evidence","checks":"fixture","revision":"abc","files":[],"created":1}]});
+            tx.execute("INSERT INTO runtime_work(id,record) VALUES('assignment',?1)",[assignment.to_string()])?;
+            studio_runtime_store::work_history::reconcile(tx, "assignment", &assignment)?;
             tx.execute("INSERT INTO runtime_complaints(id,record) VALUES('message',?1)", [json!({"id":"message","leadId":"lead","recipient":"lead","status":"open","responses":[],"author":"lead","text":"Initial complaint","created":1,"updated":1,"readAt":null,"version":1}).to_string()])?;
             tx.execute("INSERT INTO runtime_rooms(id,record) VALUES('broadcast:lead',?1)", [json!({"id":"broadcast:lead","kind":"broadcast","rootId":"lead","members":["lead"],"name":"Team"}).to_string()])?;
             tx.execute("INSERT INTO runtime_chat_messages(id,room,sender,text,created,deliveries) VALUES('first','broadcast:lead','lead','First message',1,'{}')", [])?;

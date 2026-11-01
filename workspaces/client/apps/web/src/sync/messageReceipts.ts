@@ -1,3 +1,4 @@
+import { MessageSendStatus } from "../generated/api.ts";
 import type { GetResult } from "../api";
 import type { Message } from "../types";
 import type { OutgoingMessage } from "./send";
@@ -31,15 +32,6 @@ export function checkedMessageReceipts(
   return receipts;
 }
 
-export function latestMessageReceipt(
-  previous: MessageReceipt | undefined,
-  next: MessageReceipt,
-) {
-  return previous?.status === "delivered" && next.status !== "delivered"
-    ? previous
-    : next;
-}
-
 export function receiptOutgoing(
   entry: OutgoingMessage,
   receipt?: MessageReceipt,
@@ -52,23 +44,12 @@ export function receiptOutgoing(
   entry: Omit<OutgoingMessage, "id">,
   receipt?: MessageReceipt,
 ): Omit<OutgoingMessage, "id"> {
-  // Only reconcile requests the server has already acknowledged. An unknown
-  // HTTP outcome still uses the original idempotent send path.
-  if (!receipt || !["accepted", "uncertain"].includes(entry.status))
-    return entry;
-  const current = latestMessageReceipt(entry.receipt, receipt);
+  if (!receipt) return entry;
+  const current = receipt;
   return {
     ...entry,
-    status:
-      current.status === "uncertain"
-        ? "uncertain"
-        : current.status === "failed"
-          ? "failed"
-          : current.status === "cancelled"
-            ? "cancelled"
-            : "accepted",
+    status: { source: "server", status: current.status },
     receipt: current,
-    error: current.error || undefined,
   };
 }
 
@@ -86,14 +67,17 @@ export function receiptTranscript(
         : item.id);
     const receipt = receipts.get(id);
     if (!receipt) return item;
-    const status =
-      item.deliveryStatus === "delivered" ? "delivered" : receipt.status;
+    const status = receipt.status;
+    const legacy: Message & { pending?: unknown } = item;
+    const { pending: legacyPending, ...message } = legacy;
+    void legacyPending;
     return {
-      ...item,
-      deliveryStatus: status,
-      pending: status === "pending",
+      ...message,
+      deliveryStatus: { source: "server" as const, status },
       deliveryError:
-        status === "delivered" ? undefined : receipt.error || undefined,
+        status === MessageSendStatus.delivered
+          ? undefined
+          : receipt.error || undefined,
     };
   });
 }

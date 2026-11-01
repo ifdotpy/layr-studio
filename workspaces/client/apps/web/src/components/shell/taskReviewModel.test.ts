@@ -1,5 +1,4 @@
 import { WorkStatus as GeneratedApiWorkStatus } from "../../generated/api.ts";
-import { required } from "../componentTestFixtures.ts";
 import { expect, test } from "vitest";
 import type { PostBody } from "../../api";
 import {
@@ -24,18 +23,14 @@ const task = {
   updated: 1,
   version: 1,
   status: GeneratedApiWorkStatus.review,
+  policy: {
+    blockedBy: [],
+    displayStatus: GeneratedApiWorkStatus.review,
+    acceptAvailable: true,
+    gateOverrideRequired: false,
+  },
   gate: { command: "check", timeout_ms: DEFAULT_GATE_TIMEOUT_MS },
 } satisfies ReviewTask;
-const result = {
-  id: "result",
-  agent: "worker",
-  text: "done",
-  checks: "checked",
-  revision: "abc",
-  files: [],
-  created: 2,
-};
-
 test("generated task commands require their action payloads", () => {
   const create = {
     action: "create",
@@ -56,63 +51,6 @@ test("generated task commands require their action payloads", () => {
   expect(create.action).toBe("create");
   expect(submit.result).toEqual({ answer: null });
   expect(incomplete.action).toBe("cancel");
-});
-
-test("acceptance requires an override for missing, failed, running, and unknown gate evidence", () => {
-  expect(requiresGateOverride({ ...task, gate: null })).toBe(false);
-  expect(requiresGateOverride(task)).toBe(true);
-  for (const status of ["not_run", "failed", "running", "unknown"] as const)
-    expect(
-      requiresGateOverride({
-        ...task,
-        results: [
-          {
-            ...result,
-            gate: {
-              status,
-              config: task.gate,
-              revision: "abc",
-              cwd: null,
-              monitorId: "monitor" as string | null,
-              exitCode: 1,
-              output: "",
-              log: null,
-            },
-          },
-        ],
-      }),
-    ).toBe(true);
-});
-
-test("only a successful gate for the current configuration permits normal acceptance", () => {
-  const passed = {
-    ...task,
-    results: [
-      {
-        ...result,
-        gate: {
-          status: "passed",
-          config: { command: "check" },
-          revision: "abc",
-          cwd: null,
-          monitorId: "monitor" as string | null,
-          exitCode: 0,
-          output: "ok",
-          log: null,
-        },
-      },
-    ],
-  } satisfies ReviewTask;
-  expect(requiresGateOverride(passed)).toBe(false);
-  expect(requiresGateOverride({ ...passed, gate: "another check" })).toBe(true);
-  expect(
-    requiresGateOverride({
-      ...passed,
-      gate: { command: "check", timeout_ms: 1 },
-    }),
-  ).toBe(true);
-  required(passed.results![0]).gate!.monitorId = null;
-  expect(requiresGateOverride(passed)).toBe(true);
 });
 
 test("gate input validates the Rust-owned timeout bounds and supports disable", () => {
@@ -145,7 +83,21 @@ test("the list uses dependency blocking in preference to the persisted ready sta
     taskStatus({
       ...task,
       status: GeneratedApiWorkStatus.ready,
-      displayStatus: "blocked",
+      policy: { ...task.policy, displayStatus: GeneratedApiWorkStatus.blocked },
     }),
   ).toBe("blocked");
+});
+
+test("uses the server's gate override decision", () => {
+  const serverTask = {
+    ...task,
+    policy: { ...task.policy, gateOverrideRequired: false },
+  };
+  expect(requiresGateOverride(serverTask)).toBe(false);
+  expect(
+    requiresGateOverride({
+      ...serverTask,
+      policy: { ...serverTask.policy, gateOverrideRequired: true },
+    }),
+  ).toBe(true);
 });

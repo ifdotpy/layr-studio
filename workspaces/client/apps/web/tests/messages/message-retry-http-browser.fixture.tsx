@@ -1,5 +1,10 @@
 const initialize = async () => {
   const send = await import("../../src/sync/send.ts");
+  const { watchResourceChanges } =
+    await import("../../src/sync/subscriptions/events.ts");
+  const { waitForStreamSession } = await import("../../src/api.ts");
+  watchResourceChanges({ kind: "state" }, () => {});
+  await waitForStreamSession();
   window.retrySendSend = send.durableSend;
   const r = await import("react"),
     d = await import("react-dom/client");

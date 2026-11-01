@@ -148,21 +148,6 @@ const TABLES: &[TableRequirement] = &[
             "admission",
         ],
     },
-    TableRequirement {
-        name: "runtime_server_outbox",
-        columns: &[
-            "id",
-            "server",
-            "body",
-            "state",
-            "result",
-            "created_at",
-            "completed_at",
-            "fingerprint",
-            "attempts",
-            "admission",
-        ],
-    },
 ];
 pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     tables: &[],

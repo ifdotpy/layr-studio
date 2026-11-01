@@ -312,7 +312,8 @@ pub fn reserve(
     {
         return Err(NativeError::Changed);
     }
-    child["yoloMode"] = json!(false);
+    child["permissionMode"] =
+        json!(studio_runtime_schema::claude_permissions::PermissionMode::Default);
     child["worktree"] = json!(false);
     let brief = ["id", "name", "status", "model", "effort", "fastMode"]
         .into_iter()

@@ -44,6 +44,12 @@ it("assembles ordered canonical histories, isolates roots, and keeps unchanged a
       rootId,
       title: id,
       status: GeneratedApiWorkStatus.review,
+      policy: {
+        blockedBy: [],
+        displayStatus: GeneratedApiWorkStatus.review,
+        acceptAvailable: true,
+        gateOverrideRequired: false,
+      },
       created: 1,
       updated: 1,
       version: 1,
@@ -104,6 +110,12 @@ it("renders live typed assignment changes and preserves dependency blocking with
     created: 1,
     updated: 1,
     dependencies: ["prerequisite"],
+    policy: {
+      blockedBy: ["prerequisite"],
+      displayStatus: "blocked",
+      acceptAvailable: false,
+      gateOverrideRequired: false,
+    },
   };
   const prerequisite = {
     ...task,
@@ -111,6 +123,12 @@ it("renders live typed assignment changes and preserves dependency blocking with
     title: "Prepare evidence",
     status: "ready",
     dependencies: [],
+    policy: {
+      blockedBy: [],
+      displayStatus: "ready",
+      acceptAvailable: false,
+      gateOverrideRequired: false,
+    },
   };
   const selectWork = createWorkDataSelector();
   const setWork = (items: unknown[]) =>
@@ -147,8 +165,22 @@ it("renders live typed assignment changes and preserves dependency blocking with
   expect(render()).toContain("blocked");
   expect(render()).toContain("check");
   setWork([
-    { ...task, status: "review", version: 2 },
-    { ...prerequisite, status: "accepted" },
+    {
+      ...task,
+      status: "review",
+      version: 2,
+      policy: {
+        ...task.policy,
+        blockedBy: [],
+        displayStatus: GeneratedApiWorkStatus.review,
+        acceptAvailable: true,
+      },
+    },
+    {
+      ...prerequisite,
+      status: "accepted",
+      policy: { ...prerequisite.policy, displayStatus: "accepted" },
+    },
   ]);
   expect(render()).toContain("review");
   expect(render()).toContain("accepted");

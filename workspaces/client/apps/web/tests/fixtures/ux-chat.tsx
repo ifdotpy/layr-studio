@@ -157,9 +157,11 @@ function Fixture() {
                       assets: [],
                       delivery: "queue",
                     },
-                    status: "failed",
+                    status: {
+                      source: "device",
+                      state: { kind: "transport_failed", error: failure },
+                    },
                     created: Date.now(),
-                    error: failure,
                   },
                 ]);
                 throw new Error(failure);

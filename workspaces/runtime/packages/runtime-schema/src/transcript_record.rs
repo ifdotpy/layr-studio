@@ -161,6 +161,20 @@ pub struct TranscriptItemRecord {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<Vec<Value>>")]
     assets: Field<Vec<Box<RawValue>>>,
+    #[serde(
+        rename = "nativeError",
+        default,
+        skip_serializing_if = "Field::is_missing"
+    )]
+    #[schemars(with = "Option<crate::provider_errors::AgentError>")]
+    native_error: Field<crate::provider_errors::AgentError>,
+    #[serde(
+        rename = "turnError",
+        default,
+        skip_serializing_if = "Field::is_missing"
+    )]
+    #[schemars(with = "Option<crate::provider_errors::AgentError>")]
+    turn_error: Field<crate::provider_errors::AgentError>,
     #[serde(flatten)]
     #[schemars(with = "BTreeMap<String, Value>")]
     extra: BTreeMap<String, Box<RawValue>>,
@@ -192,6 +206,8 @@ struct ItemFields {
     turn_id: Option<Field<String>>,
     client_message_id: Option<Field<String>>,
     assets: Option<Field<Vec<Box<RawValue>>>>,
+    native_error: Option<Field<crate::provider_errors::AgentError>>,
+    turn_error: Option<Field<crate::provider_errors::AgentError>>,
 }
 impl<'de> crate::raw_object::RawObjectFields<'de> for ItemFields {
     type Output = TranscriptItemRecord;
@@ -212,6 +228,8 @@ impl<'de> crate::raw_object::RawObjectFields<'de> for ItemFields {
         read_field!(name, map, self, "turnId", turn_id);
         read_field!(name, map, self, "clientMessageId", client_message_id);
         read_field!(name, map, self, "assets", assets);
+        read_field!(name, map, self, "nativeError", native_error);
+        read_field!(name, map, self, "turnError", turn_error);
         Ok(false)
     }
     fn finish<E: serde::de::Error>(
@@ -231,6 +249,8 @@ impl<'de> crate::raw_object::RawObjectFields<'de> for ItemFields {
             turn_id: self.turn_id.unwrap_or_default(),
             client_message_id: self.client_message_id.unwrap_or_default(),
             assets: self.assets.unwrap_or_default(),
+            native_error: self.native_error.unwrap_or_default(),
+            turn_error: self.turn_error.unwrap_or_default(),
             extra,
         })
     }
@@ -522,6 +542,21 @@ mod tests {
             if let Ok(parsed) = parsed {
                 assert_eq!(parsed.into_value(), value);
             }
+        }
+    }
+    #[test]
+    fn transcript_error_fields_use_typed_normalization() {
+        for field in ["nativeError", "turnError"] {
+            let raw = json!({"message":r#"{"message":"This content was flagged for possible biological risk."}"#});
+            let mut item = json!({"id":"i", "role":"system"});
+            item.as_object_mut()
+                .unwrap()
+                .insert(field.to_owned(), raw.clone());
+            let parsed: TranscriptItemRecord = serde_json::from_value(item).unwrap();
+            let value = parsed.into_value();
+            let error = value.get(field).unwrap();
+            assert_eq!(error.get("code"), Some(&json!("bio_policy")));
+            assert_eq!(error.get("studioRawEvidence"), Some(&raw));
         }
     }
 }

@@ -9,8 +9,13 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 #[cfg(any(test, feature = "test-support"))]
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
 use sha2::{Digest, Sha256};
+use studio_runtime_schema::{
+    resource_notification::ResourceNotifyRequest, resource_ref::ResourceRef,
+};
 use studio_runtime_store::ResourceChange;
 use thiserror::Error;
 
@@ -215,19 +220,28 @@ impl ResourceNotifications {
 
     /// Publish an authenticated, schema-valid external writer's post-commit hint.
     /// No I/O or durable mutation occurs here; a lost ACK can safely be replayed.
-    pub fn publish_once(&self, request: &Value) -> Result<bool, ResourceNotifyError> {
-        validate(request)?;
-        let request_id = request["requestId"]
-            .as_str()
-            .ok_or(ResourceNotifyError::Invalid)?;
-        let resources = request["resources"]
-            .as_array()
-            .ok_or(ResourceNotifyError::Invalid)?;
-        // serde_json maps are sorted; invalidation is a set operation.
-        let resource_keys = resources
+    pub fn publish_once(
+        &self,
+        request: &ResourceNotifyRequest,
+    ) -> Result<bool, ResourceNotifyError> {
+        if serde_json::to_vec(request)
+            .map_err(|_| ResourceNotifyError::Invalid)?
+            .len()
+            > MAX_PUBLICATION_BYTES
+        {
+            return Err(ResourceNotifyError::Invalid);
+        }
+        let request_id = request.request_id.as_str();
+        let resources = request.resources.as_slice();
+        let keys = resources
             .iter()
-            .map(Value::to_string)
-            .collect::<BTreeSet<_>>();
+            .map(|resource| {
+                serde_json::to_string(resource)
+                    .map(|key| (matches!(resource, ResourceRef::StateResource(_)), key))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| ResourceNotifyError::Invalid)?;
+        let resource_keys = keys.iter().map(|(_, key)| key).collect::<BTreeSet<_>>();
         let signature: [u8; 32] = Sha256::digest(
             serde_json::to_vec(&resource_keys).map_err(|_| ResourceNotifyError::Invalid)?,
         )
@@ -240,8 +254,12 @@ impl ResourceNotifications {
         if replay.is_some_and(|index| state.receipts[index].1 != signature) {
             return Err(ResourceNotifyError::Conflict);
         }
-        let has_state = resources.iter().any(|value| value["kind"] == "state");
-        let has_others = resources.iter().any(|value| value["kind"] != "state");
+        let has_state = resources
+            .iter()
+            .any(|value| matches!(value, ResourceRef::StateResource(_)));
+        let has_others = resources
+            .iter()
+            .any(|value| !matches!(value, ResourceRef::StateResource(_)));
         let steps = if replay.is_some() {
             0
         } else {
@@ -252,12 +270,11 @@ impl ResourceNotifications {
             if let Some(index) = replay {
                 state.receipts.remove(index);
             } else {
-                for resource in resources {
-                    if resource["kind"] == "state" {
+                for (is_state, key) in keys {
+                    if is_state {
                         state.entity_reset_revision = cursor.revision;
                         continue;
                     }
-                    let key = resource.to_string();
                     state.versions.retain(|(existing, _)| *existing != key);
                     if state.versions.len() == MAX_RESOURCE_VERSIONS
                         && let Some((_, revision)) = state.versions.pop_front()
@@ -442,20 +459,6 @@ impl ResourceNotifications {
             .map(|state| state.resource_revision(&key))
             .map_err(|_| ResourceNotifyError::Unavailable)
     }
-}
-
-fn validate(value: &Value) -> Result<(), ResourceNotifyError> {
-    static VALIDATOR: OnceLock<Result<jsonschema::Validator, String>> = OnceLock::new();
-    let validator = VALIDATOR.get_or_init(|| {
-        let registry = studio_runtime_schema::registry_for_document(crate::sync_views::openapi_document())?;
-        jsonschema::options().with_registry(&registry).build(&json!({
-            "$ref": format!("{}#/components/schemas/ResourceNotifyRequest", studio_runtime_schema::OPENAPI_URI)
-        })).map_err(|error| error.to_string())
-    }).as_ref().map_err(|_| ResourceNotifyError::Unavailable)?;
-    if value.to_string().len() > MAX_PUBLICATION_BYTES || !validator.is_valid(value) {
-        return Err(ResourceNotifyError::Invalid);
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -643,7 +646,12 @@ mod tests {
             "subscribers share the projection"
         );
         notifications
-            .publish_once(&json!({"requestId":"changed-account","resources":[{"kind":"accounts"}]}))
+            .publish_once(
+                &serde_json::from_str(
+                    r#"{"requestId":"changed-account","resources":[{"kind":"accounts"}]}"#,
+                )
+                .expect("notification fixture"),
+            )
             .expect("publish");
         let changed = notifications
             .changes_since_with_content(&resources, Some(42), |resource| {
@@ -788,7 +796,12 @@ mod tests {
                 )
             }));
         notifications
-            .publish_once(&json!({"requestId":"boundary","resources":[{"kind":"accounts"}]}))
+            .publish_once(
+                &serde_json::from_str(
+                    r#"{"requestId":"boundary","resources":[{"kind":"accounts"}]}"#,
+                )
+                .expect("notification fixture"),
+            )
             .expect("publish");
         assert_eq!(
             notifications
@@ -821,10 +834,15 @@ mod tests {
             .expect("multi-server revision after unrelated commit");
         assert!(broad_commit.resources.is_empty());
 
-        let request = json!({
-            "requestId": "multi-server-change",
-            "resources": [multi_server.clone()],
-        });
+        let request = studio_runtime_schema::resource_notification::ResourceNotifyRequest::new(
+            "multi-server-change".to_owned(),
+            vec![
+                studio_runtime_schema::resource_ref::ResourceRef::MultiServerResource(
+                    studio_runtime_schema::resource_ref::EmptyResource {},
+                ),
+            ],
+        )
+        .unwrap();
         assert!(notifications.publish_once(&request).expect("publish"));
 
         let state = json!({"kind": "state"});
@@ -857,8 +875,12 @@ mod tests {
             let notifications = notifications.clone();
             std::thread::spawn(move || {
                 entered.send(()).expect("admitted");
-                notifications
-                    .publish_once(&json!({"requestId":"race","resources":[{"kind":"accounts"}]}))
+                notifications.publish_once(
+                    &serde_json::from_str(
+                        r#"{"requestId":"race","resources":[{"kind":"accounts"}]}"#,
+                    )
+                    .expect("notification fixture"),
+                )
             })
         };
         admission.recv().expect("request admitted");

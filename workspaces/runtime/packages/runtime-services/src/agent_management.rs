@@ -242,7 +242,7 @@ pub struct Decision {
     pub writes: Vec<RowWrite>,
     pub cancel_pending: Vec<String>,
     #[serde(skip)]
-    pub(crate) effects: Vec<LifecycleEffect>,
+    pub effects: Vec<LifecycleEffect>,
     #[serde(skip)]
     pub(crate) archive_release: Option<ArchiveRelease>,
 }
@@ -664,9 +664,9 @@ impl ManagementSnapshot {
         );
         add(
             ArchiveBlockerKind::Questions,
-            self.owned("runtime_requests", "agent", agent.id())
+            self.owned("approvals", "agent", agent.id())
                 .into_iter()
-                .filter(|r| is_status(r, &["pending"]))
+                .filter(|r| is_pending_approval(r))
                 .map(|r| r["id"].clone())
                 .collect(),
         );
@@ -855,6 +855,11 @@ pub(crate) fn archived_cleanup_result(record: &Value) -> (Value, Value) {
     (worktree, workspace)
 }
 
+/// An approval row in its JSON form that waits for an answer.
+fn is_pending_approval(row: &Value) -> bool {
+    row["state"]["kind"] == "pending"
+}
+
 fn is_status(row: &Value, statuses: &[&str]) -> bool {
     row.get("status")
         .and_then(Value::as_str)
@@ -922,7 +927,8 @@ pub fn decide(
     Ok(decision)
 }
 
-pub(crate) fn decide_with_effects(
+/// Pure decide for replay tests and callers.
+pub fn decide_with_effects(
     snapshot: &ManagementSnapshot,
     action: &Action,
     now: f64,
@@ -1311,18 +1317,31 @@ fn stop(
         decision.write("runtime_agents", record);
         decision.cancel_pending.push(agent.id().to_owned());
     }
-    for request in snapshot.rows("runtime_requests") {
-        if request
+    for request in snapshot.rows("approvals") {
+        if !request
             .get("agent")
             .and_then(Value::as_str)
             .is_some_and(|id| ids.iter().any(|a| a == id))
-            && is_status(request, &["pending"])
-            && request.get("method").and_then(Value::as_str) != Some("monitor/approve")
+            || request["request"]["kind"] == "monitor_start"
         {
-            let mut request = request.clone();
-            request["status"] = json!("expired");
-            decision.write("runtime_requests", request);
+            continue;
         }
+        let mut request = request.clone();
+        if is_pending_approval(&request) {
+            let reason = if delete {
+                "chat_deleted"
+            } else {
+                "session_lost"
+            };
+            request["state"] = json!({"kind":"closed","reason":reason,"at":now});
+        } else if delete && request["state"]["kind"] == "answering" {
+            // The answer was sent but its delivery is not confirmed: unknown.
+            request["state"] =
+                json!({"kind":"unknown","answer":request["state"]["answer"],"since":now});
+        } else {
+            continue;
+        }
+        decision.write("approvals", request);
     }
     Ok(decision)
 }
@@ -1481,7 +1500,8 @@ fn restore(snapshot: &ManagementSnapshot, agent: &Agent) -> Result<Decision, Man
         ));
     }
     let archive = &agent.record["agentArchive"];
-    if agent.record.get("deletedAt") != archive.get("at")
+    if agent.record.get("deletedAt").filter(|v| !v.is_null())
+        != archive.get("at").filter(|v| !v.is_null())
         || archive.get("epoch").and_then(Value::as_i64) != Some(agent.identity.epoch)
     {
         return Err(ManagementError::Invalid(
@@ -1576,6 +1596,50 @@ mod lifecycle_scope_parity_tests {
                 })
             })
             .collect()
+    }
+
+    #[test]
+    fn deleting_a_chat_closes_its_pending_approvals_and_marks_answering_unknown() {
+        let records = Records {
+            tables: BTreeMap::from([
+                (
+                    "runtime_agents".to_owned(),
+                    vec![agent("lead", "lead", None, true)],
+                ),
+                (
+                    "approvals".to_owned(),
+                    vec![
+                        json!({"id":"pending","agent":"lead","state":{"kind":"pending"},"request":{"kind":"question"}}),
+                        json!({"id":"answering","agent":"lead","state":{"kind":"answering","answer":{"kind":"decision","decision":"accept"},"command":"c"},"request":{"kind":"question"}}),
+                    ],
+                ),
+            ]),
+        };
+        let snapshot = ManagementSnapshot::from_records(records).expect("snapshot");
+        let delete = decide_with_effects(
+            &snapshot,
+            &Action::Delete {
+                target: "lead".to_owned(),
+            },
+            10.0,
+        )
+        .expect("delete");
+        let state = |id: &str| {
+            delete
+                .writes
+                .iter()
+                .find(|write| write.table == "approvals" && write.record["id"] == id)
+                .map(|write| write.record["state"].clone())
+                .expect("approval write")
+        };
+        assert_eq!(
+            state("pending"),
+            json!({"kind":"closed","reason":"chat_deleted","at":10.0})
+        );
+        assert_eq!(
+            state("answering"),
+            json!({"kind":"unknown","answer":{"kind":"decision","decision":"accept"},"since":10.0})
+        );
     }
 
     #[test]
@@ -1679,11 +1743,11 @@ mod lifecycle_scope_parity_tests {
                     ],
                 ),
                 (
-                    "runtime_requests".to_owned(),
+                    "approvals".to_owned(),
                     vec![
-                        json!({"id":"worker-request","agent":"worker","status":"pending","method":"item/tool/requestUserInput","createdAt":1,"params":{}}),
-                        json!({"id":"approval-request","agent":"nested","status":"pending","method":"monitor/approve","createdAt":1,"params":{}}),
-                        json!({"id":"unrelated-request","agent":"other-lead","status":"pending","method":"item/tool/requestUserInput","createdAt":1,"params":{}}),
+                        json!({"id":"worker-request","agent":"worker","state":{"kind":"pending"},"request":{"kind":"question"}}),
+                        json!({"id":"approval-request","agent":"nested","state":{"kind":"pending"},"request":{"kind":"monitor_start"}}),
+                        json!({"id":"unrelated-request","agent":"other-lead","state":{"kind":"pending"},"request":{"kind":"question"}}),
                     ],
                 ),
                 (

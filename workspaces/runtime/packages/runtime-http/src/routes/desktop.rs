@@ -364,9 +364,9 @@ mod tests {
                 .expect("desktop source publication");
             super::super::subscription_entities::initial_snapshot(
                 state.clone(),
-                crate::generated::ResourceRef::DesktopResource(crate::generated::DesktopResource {
-                    kind: crate::generated::DesktopResourceKind::Desktop,
-                }),
+                crate::generated::ResourceRef::DesktopResource(
+                    studio_runtime_schema::resource_ref::EmptyResource {},
+                ),
                 since,
             )
             .await

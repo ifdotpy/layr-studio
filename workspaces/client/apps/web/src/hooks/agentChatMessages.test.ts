@@ -1,4 +1,4 @@
-import { DeliveryStatus } from "../generated/api.ts";
+import { MessageSendStatus } from "../generated/api.ts";
 import { describe, expect, it } from "vitest";
 import type { GetResult } from "../api";
 import { agentChatMessages } from "./agentChatMessages";
@@ -16,7 +16,7 @@ describe("agent chat API normalization", () => {
         seq: 17,
         text: "A room reply",
         created: 1234,
-        deliveries: { lead: { status: DeliveryStatus.delivered } },
+        deliveries: { lead: { status: MessageSendStatus.delivered } },
       },
     ];
 

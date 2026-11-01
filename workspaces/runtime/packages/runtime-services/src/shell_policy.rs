@@ -746,7 +746,10 @@ mod receipt_tests {
         );
         assert_eq!(
             partial.account_transfer_id,
-            owner.extra.get("accountTransferId").cloned()
+            owner
+                .account_transfer_id
+                .value()
+                .map(|id| json!(id.as_str()))
         );
         assert_eq!(
             partial.remote_worker,

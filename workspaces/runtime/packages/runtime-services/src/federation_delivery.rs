@@ -784,7 +784,7 @@ pub fn send_message_in_transaction(
         id: message_id,
         room: room_id.to_owned(),
         deliveries,
-        status: studio_runtime_schema::persistence::DeliveryStatus::Queued,
+        status: studio_runtime_schema::delivery::MessageSendStatus::Queued,
     };
     crate::event_write::settle_request(tx, &admitted, Some(sender), &reply)?;
     serde_json::value::to_raw_value(&reply).map_err(|error| StoreError::from(error).into())

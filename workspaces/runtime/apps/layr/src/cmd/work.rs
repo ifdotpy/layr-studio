@@ -49,8 +49,6 @@ pub fn status(ctx: &Ctx, args: &[String]) -> Result<i32> {
         .flag("--json");
     let a = parse(&spec, args)?;
     let h = here(ctx)?;
-    #[cfg(target_os = "macos")]
-    let lock = h.repo.p.lock()?;
     let line = h.line()?.clone();
     #[cfg(target_os = "macos")]
     let line = h.repo.line(&line.id)?;
@@ -59,14 +57,24 @@ pub fn status(ctx: &Ctx, args: &[String]) -> Result<i32> {
     #[cfg(target_os = "macos")]
     let mut st = {
         let _t = crate::trace::span("status compare");
-        if filtered.is_some() { h.repo.snapshot_status(ctx, &line)? } else { h.repo.status_report(&line)? }
+        if filtered.is_some() {
+            h.repo.snapshot_status(ctx, &line)?
+        } else {
+            // The comparison runs without the store lock, as on Linux: it can last many seconds
+            // and the saved status is published by an atomic rename. A save, add or reset that
+            // swaps the staging folder meanwhile makes it fail; then it runs again under the lock.
+            match h.repo.status_report(&line) {
+                Ok(st) => st,
+                Err(_) => {
+                    let _lock = h.repo.p.lock()?;
+                    let line = h.repo.line(&line.id)?;
+                    h.repo.status_report(&line)?
+                }
+            }
+        }
     };
     #[cfg(not(target_os = "macos"))]
     let mut st = if filtered.is_some() { h.repo.snapshot_status(ctx, &line)? } else { h.repo.status(&line)?.0 };
-    // The lock keeps the index still while the working folder is compared. The rest only reads
-    // immutable states, so other commands must not wait for it.
-    #[cfg(target_os = "macos")]
-    drop(lock);
     // The files of quiet overlays are not shown (docs/cache-overlays.md, section 4.1).
     let quiet = {
         let _t = crate::trace::span("status quiet paths");
@@ -414,6 +422,39 @@ fn select_add(
     Ok((paths, ignored_named))
 }
 
+/// The paths that `add` with these pathspecs can touch, with the ignore files that decide
+/// their state: every parent folder's. `None` (the whole tree) when a spec names the root.
+#[cfg(target_os = "macos")]
+fn add_scan_limit(specs: &[String]) -> Option<BTreeSet<String>> {
+    let mut out = BTreeSet::new();
+    for s in specs {
+        // A pattern is read from its last literal folder.
+        let lit = match s.find(['*', '?', '[']) {
+            Some(i) => s[..i].rfind('/').map(|j| &s[..j]).unwrap_or(""),
+            None => s.as_str(),
+        };
+        if lit.is_empty() {
+            return None;
+        }
+        out.insert(lit.to_string());
+        let mut dir = String::new();
+        let mut parts: Vec<&str> = lit.split('/').collect();
+        parts.pop();
+        for name in std::iter::once("").chain(parts.into_iter()) {
+            if !name.is_empty() {
+                if !dir.is_empty() {
+                    dir.push('/');
+                }
+                dir.push_str(name);
+            }
+            for f in [".gitignore", ".layrignore"] {
+                out.insert(if dir.is_empty() { f.to_string() } else { format!("{dir}/{f}") });
+            }
+        }
+    }
+    Some(out)
+}
+
 pub fn add(ctx: &Ctx, args: &[String]) -> Result<i32> {
     let spec = Spec::new()
         .flag("-A|--all")
@@ -446,6 +487,8 @@ pub fn add(ctx: &Ctx, args: &[String]) -> Result<i32> {
     // large line. They run before the store lock; under it the copy is used when the head and
     // the staging content did not change, else the read runs again under the lock.
     #[cfg(target_os = "macos")]
+    let limit = add_scan_limit(&specs);
+    #[cfg(target_os = "macos")]
     let read = |line: &Line| -> Result<Option<(crate::repo::Temp, BTreeSet<String>, Vec<String>)>> {
         let quiet = h.repo.quiet_paths(line)?;
         let work = h.repo.working(line);
@@ -454,18 +497,22 @@ pub fn add(ctx: &Ctx, args: &[String]) -> Result<i32> {
         if let Some(s) = &stage {
             roots.push(s.as_path());
         }
-        crate::storage::stable_read(&roots, || {
-            let st = h.repo.status_for_add(line, &work, &index)?;
+        let read = || {
+            let st = h.repo.status_for_add(line, &work, &index, limit.as_ref())?;
             let (paths, ignored) = select_add(&h, &a, &specs, &st, &work, &index, &quiet)?;
             let scan = crate::repo::Temp { path: h.repo.p.scan_dir().join(ids::new_id()) };
             crate::storage::create_subvolume(&scan.path)?;
             crate::storage::copy_selected(&work, &scan.path, &paths)?;
             Ok((scan, paths, ignored))
-        })
+        };
+        match &limit {
+            Some(l) => crate::storage::stable_read_paths(&roots, l, read),
+            None => crate::storage::stable_read(&roots, read),
+        }
     };
     #[cfg(target_os = "macos")]
     let early = {
-        let token = add_token(&h.repo, &line)?;
+        let token = h.repo.index_token(&line)?;
         read(&line)?.map(|r| (token, r))
     };
     let _lock = h.repo.p.lock()?;
@@ -473,7 +520,7 @@ pub fn add(ctx: &Ctx, args: &[String]) -> Result<i32> {
     let quiet = h.repo.quiet_paths(&line)?;
     #[cfg(target_os = "macos")]
     let prepared = match early {
-        Some((token, r)) if token == add_token(&h.repo, &line)? => Some(r),
+        Some((token, r)) if token == h.repo.index_token(&line)? => Some(r),
         _ => read(&line)?,
     };
     #[cfg(not(target_os = "macos"))]
@@ -481,7 +528,7 @@ pub fn add(ctx: &Ctx, args: &[String]) -> Result<i32> {
     let (scan, paths, ignored_named) = match prepared {
         Some(v) => v,
         None => {
-            let (st, scan, _it, index) = h.repo.status(&line)?;
+            let (st, scan, _it, index) = h.repo.status_light(&line)?;
             let (paths, ignored) = select_add(&h, &a, &specs, &st, &scan.path, &index, &quiet)?;
             (scan, paths, ignored)
         }
@@ -512,21 +559,6 @@ pub fn add(ctx: &Ctx, args: &[String]) -> Result<i32> {
         return Err(exit(1, m));
     }
     Ok(0)
-}
-
-/// What an `add` read depends on besides the working folder: the head and the staging content.
-/// The head and the index content of a line: a read before the lock is still valid under it
-/// when this did not change.
-#[cfg(target_os = "macos")]
-pub type AddToken = (String, Option<Vec<(String, crate::storage::Fingerprint)>>);
-
-#[cfg(target_os = "macos")]
-pub fn add_token(repo: &Repo, line: &Line) -> Result<AddToken> {
-    let stage = match repo.current_stage(line)? {
-        Some(s) => Some(crate::storage::scan_with_data(&s, true)?.into_iter().map(|(k, v)| (k, v.fingerprint)).collect()),
-        None => None,
-    };
-    Ok((line.head.clone(), stage))
 }
 
 pub fn rm(ctx: &Ctx, args: &[String]) -> Result<i32> {
@@ -583,6 +615,30 @@ pub fn rm(ctx: &Ctx, args: &[String]) -> Result<i32> {
             files.push(s.clone());
         }
         plan.push((s.clone(), files));
+    }
+    // Git's rule: a staged version that differs from both the head and the working file exists
+    // nowhere else, so removing it needs -f.
+    if !a.has("-f") {
+        let head = h.repo.head_src(&line)?;
+        let mut lost = Vec::new();
+        for (_, files) in &plan {
+            for f in files {
+                if fsutil::lmeta(index, f).is_some()
+                    && !fsutil::same_entry(index, f, &head, f, None)?
+                    && !fsutil::same_entry(index, f, &w, f, None)?
+                {
+                    lost.push(h.rel(f));
+                }
+            }
+        }
+        if !lost.is_empty() {
+            let list: String = lost.iter().map(|f| format!("    {f}\n")).collect();
+            let many = if lost.len() == 1 { "file has" } else { "files have" };
+            return Err(exit(
+                1,
+                format!("error: the following {many} staged content different from both the\nfile and the HEAD:\n{list}(use -f to force removal)"),
+            ));
+        }
     }
     let mut removed = Vec::new();
     if a.has("-n") {
@@ -906,7 +962,7 @@ pub fn commit(ctx: &Ctx, args: &[String]) -> Result<i32> {
     crate::gitbridge::check_git_head(&h.repo, &line)?;
     crate::repo::recover_cache_replacements(&h.repo.working(&line))?;
     if a.has("-a") && !stacked && !cfg!(target_os = "macos") {
-        let (st, scan, _it, _index) = h.repo.status(&line)?;
+        let (st, scan, _it, _index) = h.repo.status_light(&line)?;
         let paths: BTreeSet<String> = st.unstaged.iter().map(|c| c.path.clone()).collect();
         if !paths.is_empty() {
             stage_paths(&h.repo, &line, &scan.path, &paths)?;
@@ -966,13 +1022,19 @@ pub fn commit(ctx: &Ctx, args: &[String]) -> Result<i32> {
             return Err(e);
         }
     };
-    let staged: Vec<Change> = match changes::file_changes(&head_root, &new_root) {
-        Ok(v) => v.into_iter().filter(|c| !skip_path(&c.path)).collect(),
+    // An attribute-only change that `add` staged is a change of the state.
+    #[cfg(target_os = "macos")]
+    let compared = crate::storage::with_stored_compare(|| changes::file_changes(&head_root, &new_root));
+    #[cfg(not(target_os = "macos"))]
+    let compared = changes::file_changes(&head_root, &new_root);
+    let all_changes: Vec<Change> = match compared {
+        Ok(v) => v,
         Err(e) => {
             h.repo.discard_states(std::slice::from_ref(&state));
             return Err(e);
         }
     };
+    let staged: Vec<Change> = all_changes.iter().filter(|c| !skip_path(&c.path)).cloned().collect();
     if staged.is_empty() && !a.has("--allow-empty") && !a.has("--amend") {
         h.repo.discard_states(std::slice::from_ref(&state));
         #[cfg(target_os = "macos")]
@@ -1019,7 +1081,7 @@ pub fn commit(ctx: &Ctx, args: &[String]) -> Result<i32> {
         }
     }
     let secrets = crate::trace::span("secret check");
-    let checked = crate::secrets::check_between(ctx, &h.repo, &head_root, &new_root, &line.head);
+    let checked = crate::secrets::check_changes(ctx, &h.repo, &head_root, &new_root, &line.head, &all_changes);
     drop(secrets);
     if let Err(e) = checked {
         h.repo.discard_states(std::slice::from_ref(&state));
@@ -1164,6 +1226,8 @@ fn restore_paths(
     specs: &[String],
     known: Option<&Snap>,
 ) -> Result<Vec<String>> {
+    // The index keeps the times of the state; the working folder gets the current time.
+    let to_work = known.is_some();
     let own = repo.own(line);
     let mut done = Vec::new();
     for c in changes::without_moves(changes::file_changes(target_view, source)?) {
@@ -1178,7 +1242,11 @@ fn restore_paths(
             }
             fsutil::remove_entry(target, &c.path)?;
         } else {
-            fsutil::copy_entry(source, &c.path, target, &c.path, own)?;
+            if to_work {
+                fsutil::copy_work_entry(source, &c.path, target, &c.path, own)?;
+            } else {
+                fsutil::copy_entry(source, &c.path, target, &c.path, own)?;
+            }
         }
         done.push(c.path.clone());
     }
@@ -1245,7 +1313,7 @@ pub fn restore_impl(
             };
             let root = repo.state_src(&sid)?;
             if fsutil::lmeta(&root, &c.path).is_some() {
-                fsutil::copy_entry(&root, &c.path, &wdir, &c.path, repo.own(&line))?;
+                fsutil::copy_work_entry(&root, &c.path, &wdir, &c.path, repo.own(&line))?;
             } else {
                 fsutil::remove_entry(&wdir, &c.path)?;
             }
@@ -1406,7 +1474,7 @@ pub fn reset(ctx: &Ctx, args: &[String]) -> Result<i32> {
                     .map(|c| c.path.as_str())
                     .collect();
                 let write: Vec<&str> = list.iter().filter(|c| c.new.is_some()).map(|c| c.path.as_str()).collect();
-                fsutil::replace_entries(&target_root, &wdir, &gone, &write, own)?;
+                fsutil::replace_work_entries(&target_root, &wdir, &gone, &write, own)?;
             }
         }
         _ => {
@@ -1423,6 +1491,23 @@ pub fn reset(ctx: &Ctx, args: &[String]) -> Result<i32> {
     if mode == "hard" && !a.has("-q") {
         let s = repo.state(&target)?;
         outln!(ctx, "head is now at {} {}", ids::short(&target), s.message.lines().next().unwrap_or(""));
+    }
+    // A mixed reset keeps the files: name the ones that now differ from the new head, as git
+    // does, and the command that changes them.
+    if mode == "mixed" && !a.has("-q") && target != line.head {
+        drop(_lock);
+        let (st, _scan, _it, _idx) = repo.status(&repo.line(&line.id)?)?;
+        if !st.unstaged.is_empty() {
+            outln!(ctx, "Unstaged changes after reset:");
+            for c in st.unstaged.iter().take(20) {
+                outln!(ctx, "{}\t{}", if c.new.is_none() { 'D' } else { 'M' }, c.path);
+            }
+            if st.unstaged.len() > 20 {
+                outln!(ctx, "... and {} more", st.unstaged.len() - 20);
+            }
+            let rev = pos.first().map(String::as_str).unwrap_or("head");
+            eprintln!("hint: reset without --hard keeps the files; 'layr reset --hard {rev}' changes them");
+        }
     }
     Ok(0)
 }
@@ -1539,7 +1624,7 @@ pub fn stash(ctx: &Ctx, args: &[String]) -> Result<i32> {
                 if c.new.is_none() {
                     fsutil::remove_entry(&wdir, &c.path)?;
                 } else {
-                    fsutil::copy_entry(&result.path, &c.path, &wdir, &c.path, own)?;
+                    fsutil::copy_work_entry(&result.path, &c.path, &wdir, &c.path, own)?;
                 }
             }
             for m in &out.messages {
@@ -1566,81 +1651,131 @@ pub fn stash(ctx: &Ctx, args: &[String]) -> Result<i32> {
                 .flag("-q|--quiet")
                 .flag("-k|--keep-index");
             let a = parse(&spec, &rest)?;
-            let (_lock, w) = begin_change(ctx, repo, &line)?;
-            let line = repo.line(&line.id)?;
-            let (st, scan, _it, index) = repo.status(&line)?;
             let untracked = a.has("-u") || a.has("-a");
             let ignored = a.has("-a");
-            if st.clean() && (!untracked || st.untracked.is_empty()) && (!ignored || st.ignored.is_empty()) {
-                outln!(ctx, "No local changes to save");
-                return Ok(0);
-            }
-            let head = repo.state(&line.head)?;
-            let head_root = repo.head_src(&line)?;
-            let work = Temp { path: repo.p.work_dir().join(ids::new_id()) };
-            repo.snapshot_state(&line.head, &work.path, false)?;
-            let own = repo.own(&line);
-            let mut paths: BTreeSet<String> = BTreeSet::new();
-            for c in st.staged.iter().chain(st.unstaged.iter()) {
-                paths.insert(c.path.clone());
-                if let Some(o) = &c.old_path {
-                    paths.insert(o.clone());
+            // APFS: the status, the park tree and its snapshot copy go before the store lock
+            // (copies of the working folder and of the head took minutes under it). Under the
+            // lock they hold when the head and the index did not change.
+            #[cfg(target_os = "macos")]
+            let pre = (|| -> Result<_> {
+                let token = repo.index_token(&line)?;
+                let (st, scan, _, _) = repo.status(&line)?;
+                let (work, paths) = park_tree(repo, &line, &st, &scan.path, untracked, ignored)?;
+                crate::storage::prepare_snapshot(&work.path, &repo.p.work_dir(), true)?;
+                Ok((token, st, scan, work, paths))
+            })()
+            .ok();
+            let r = (|| -> Result<i32> {
+                let (_lock, w) = begin_change(ctx, repo, &line)?;
+                let line = repo.line(&line.id)?;
+                #[cfg(target_os = "macos")]
+                let pre = match pre {
+                    Some((token, st, scan, work, paths)) if token == repo.index_token(&line)? => Some((st, scan, work, paths)),
+                    _ => None,
+                };
+                #[cfg(not(target_os = "macos"))]
+                let pre: Option<(Status, Temp, Temp, BTreeSet<String>)> = None;
+                let (st, scan, prepared) = match pre {
+                    Some((st, scan, work, paths)) => (st, scan, Some((work, paths))),
+                    None => {
+                        let (st, scan, _, _) = repo.status(&line)?;
+                        (st, scan, None)
+                    }
+                };
+                let (index, _it) = repo.index_view(&line)?;
+                if st.clean() && (!untracked || st.untracked.is_empty()) && (!ignored || st.ignored.is_empty()) {
+                    outln!(ctx, "No local changes to save");
+                    return Ok(0);
                 }
-            }
-            if untracked {
-                paths.extend(st.untracked.iter().cloned());
-            }
-            if ignored {
-                paths.extend(st.ignored.iter().cloned());
-            }
-            for p in &paths {
-                if fsutil::lmeta(&scan.path, p).is_some() {
-                    fsutil::copy_entry(&scan.path, p, &work.path, p, own)?;
-                } else {
-                    fsutil::remove_entry(&work.path, p)?;
+                let head = repo.state(&line.head)?;
+                let head_root = repo.head_src(&line)?;
+                let own = repo.own(&line);
+                let (work, paths) = match prepared {
+                    Some(p) => p,
+                    None => park_tree(repo, &line, &st, &scan.path, untracked, ignored)?,
+                };
+                let msg = match a.get("-m") {
+                    Some(m) => format!("On {}: {m}", line.name),
+                    None => {
+                        format!("WIP on {}: {} {}", line.name, ids::short(&line.head), head.message.lines().next().unwrap_or(""))
+                    }
+                };
+                let state = repo.new_state(ctx, &work.path, StateKind::Stash, vec![line.head.clone()], &msg, Some(&line))?;
+                // Back to the head content, or with --keep-index to the index content (the index
+                // stays). New files that went into the stash leave the working folder.
+                let keep_index = a.has("-k");
+                let target: &Snap = if keep_index { &index } else { &head_root };
+                let wdir = repo.working(&line);
+                let wtree = crate::tree::Tree::open(&wdir)?;
+                for p in &paths {
+                    if fsutil::lmeta(target, p).is_some() {
+                        fsutil::copy_work_entry(target, p, &wdir, p, own)?;
+                    } else if fsutil::lmeta(&index, p).is_some() || fsutil::lmeta(&head_root, p).is_some() || untracked {
+                        fsutil::remove_entry(&wdir, p)?;
+                        prune_empty_in(&wtree, p);
+                    }
                 }
-            }
-            let msg = match a.get("-m") {
-                Some(m) => format!("On {}: {m}", line.name),
-                None => format!("WIP on {}: {} {}", line.name, ids::short(&line.head), head.message.lines().next().unwrap_or("")),
-            };
-            let state = repo.new_state(ctx, &work.path, StateKind::Stash, vec![line.head.clone()], &msg, Some(&line))?;
-            // Back to the head content, or with --keep-index to the index content (the index
-            // stays). New files that went into the stash leave the working folder.
-            let keep_index = a.has("-k");
-            let target: &Snap = if keep_index { &index } else { &head_root };
-            let wdir = repo.working(&line);
-            let wtree = crate::tree::Tree::open(&wdir)?;
-            for p in &paths {
-                if fsutil::lmeta(target, p).is_some() {
-                    fsutil::copy_entry(target, p, &wdir, p, own)?;
-                } else if fsutil::lmeta(&index, p).is_some() || fsutil::lmeta(&head_root, p).is_some() || untracked {
-                    fsutil::remove_entry(&wdir, p)?;
-                    prune_empty_in(&wtree, p);
+                if !keep_index {
+                    repo.drop_stage(&line)?;
                 }
-            }
-            if !keep_index {
-                repo.drop_stage(&line)?;
-            }
-            let mut rec = Record::new("stash");
-            rec.states.push(state.clone());
-            let working_after = repo.after_state(ctx, &line, "stash", &mut rec)?;
-            rec.lines.insert(
-                line.id.clone(),
-                crate::model::LineChange {
-                    before: Some(repo.line_state(&line, &line.head)),
-                    after: Some(repo.line_state(&line, &line.head)),
-                    working_before: w,
-                    working_after,
-                },
-            );
-            repo.commit_record(ctx, rec)?;
-            if !a.has("-q") {
-                outln!(ctx, "Saved working directory and index state {msg}");
-            }
-            Ok(0)
+                let mut rec = Record::new("stash");
+                rec.states.push(state.clone());
+                let working_after = repo.after_state(ctx, &line, "stash", &mut rec)?;
+                rec.lines.insert(
+                    line.id.clone(),
+                    crate::model::LineChange {
+                        before: Some(repo.line_state(&line, &line.head)),
+                        after: Some(repo.line_state(&line, &line.head)),
+                        working_before: w,
+                        working_after,
+                    },
+                );
+                repo.commit_record(ctx, rec)?;
+                if !a.has("-q") {
+                    outln!(ctx, "Saved working directory and index state {msg}");
+                }
+                Ok(0)
+            })();
+            repo.discard_prepared();
+            r
         }
     }
+}
+
+/// The tree of a park entry: the head with the changed paths of the status (and the untracked
+/// or ignored ones when asked) from the scan of the working folder. Returns it with the paths.
+fn park_tree(
+    repo: &Repo,
+    line: &Line,
+    st: &Status,
+    scan: &Path,
+    untracked: bool,
+    ignored: bool,
+) -> Result<(Temp, BTreeSet<String>)> {
+    let work = Temp { path: repo.p.work_dir().join(ids::new_id()) };
+    repo.snapshot_state(&line.head, &work.path, false)?;
+    let own = repo.own(line);
+    let mut paths: BTreeSet<String> = BTreeSet::new();
+    for c in st.staged.iter().chain(st.unstaged.iter()) {
+        paths.insert(c.path.clone());
+        if let Some(o) = &c.old_path {
+            paths.insert(o.clone());
+        }
+    }
+    if untracked {
+        paths.extend(st.untracked.iter().cloned());
+    }
+    if ignored {
+        paths.extend(st.ignored.iter().cloned());
+    }
+    for p in &paths {
+        if fsutil::lmeta(scan, p).is_some() {
+            fsutil::copy_entry(scan, p, &work.path, p, own)?;
+        } else {
+            fsutil::remove_entry(&work.path, p)?;
+        }
+    }
+    Ok((work, paths))
 }
 
 pub fn clean(ctx: &Ctx, args: &[String]) -> Result<i32> {
@@ -1659,27 +1794,45 @@ pub fn clean(ctx: &Ctx, args: &[String]) -> Result<i32> {
     let h = here(ctx)?;
     let line = h.line()?.clone();
     let specs = h.specs(&a.rest())?;
-    let (_lock, w) = if a.has("-n") { (h.repo.p.lock()?, None) } else { begin_change(ctx, &h.repo, &line)? };
-    let line = h.repo.line(&line.id)?;
-    let (st, scan, _it, index) = h.repo.status(&line)?;
-    let targets = clean_targets(&st, &scan.path, &index, a.has("-d"), a.has("-x"), a.has("-X"));
-    let mut targets: Vec<String> = targets.into_iter().filter(|t| matches(&specs, t.trim_end_matches('/'))).collect();
-    targets.sort();
-    let wdir = h.repo.working(&line);
-    for t in &targets {
-        if a.has("-n") {
-            outln!(ctx, "Would remove {}", h.rel(t));
-        } else {
-            fsutil::remove_entry(&wdir, t.trim_end_matches('/'))?;
+    let targets = |st: &Status, scan: &Path, index: &Snap| -> Vec<String> {
+        let t = clean_targets(st, scan, index, a.has("-d"), a.has("-x"), a.has("-X"));
+        let mut t: Vec<String> = t.into_iter().filter(|t| matches(&specs, t.trim_end_matches('/'))).collect();
+        t.sort();
+        t
+    };
+    // A dry run only reads the folder: it takes no store lock.
+    if a.has("-n") {
+        let (st, scan, _it, index) = h.repo.status(&line)?;
+        for t in targets(&st, &scan.path, &index) {
+            outln!(ctx, "Would remove {}", h.rel(&t));
+        }
+        return Ok(0);
+    }
+    h.repo.prepare_status(&line)?;
+    let r = (|| -> Result<i32> {
+        let (_lock, w) = begin_change(ctx, &h.repo, &line)?;
+        let line = h.repo.line(&line.id)?;
+        let (st, scan, _it, index) = h.repo.locked_status(&line)?;
+        let targets = targets(&st, &scan.path, &index);
+        let wdir = h.repo.working(&line);
+        for t in &targets {
+            let rel = t.trim_end_matches('/');
+            // A folder (build output) goes to the trash, which is emptied after the lock.
+            match fsutil::safe_join(&wdir, rel) {
+                Ok(full) if full.symlink_metadata().is_ok_and(|m| m.is_dir()) && h.repo.p.trash(&full).is_ok() => {}
+                _ => fsutil::remove_entry(&wdir, rel)?,
+            }
             if !a.has("-q") {
                 outln!(ctx, "Removing {}", h.rel(t));
             }
         }
-    }
-    if !a.has("-n") && !targets.is_empty() {
-        record_working(ctx, &h.repo, &line, "clean", w)?;
-    }
-    Ok(0)
+        if !targets.is_empty() {
+            record_working(ctx, &h.repo, &line, "clean", w)?;
+        }
+        Ok(0)
+    })();
+    h.repo.discard_prepared();
+    r
 }
 
 /// What `clean` removes, as git does. A folder goes whole only when nothing in it is in the

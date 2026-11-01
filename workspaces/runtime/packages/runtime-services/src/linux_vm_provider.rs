@@ -74,8 +74,10 @@ pub fn vm_actor_matches(
     Ok(record.epoch == epoch
         && record.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
         && provider.is_none_or(|provider| {
-            studio_runtime_providers::ProviderKind::of_field(record.extra.get("provider"))
-                .is_ok_and(|kind| kind.key() == provider)
+            record
+                .provider
+                .value()
+                .is_some_and(|kind| kind.key() == provider)
         })
         && record.account_key.as_str() == account_key
         && !record.deleted_at.is_some()
@@ -3498,7 +3500,9 @@ mod tests {
             .transaction(|tx| {
                 let mut record =
                     AgentRepository::get(tx, &AgentId::from("agent-1"))?.expect("fixture agent");
-                record.extra.insert("provider".into(), json!("claude"));
+                record.provider = studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_schema::ProviderKind::Claude,
+                );
                 AgentRepository::put(tx, &record)
             })
             .await

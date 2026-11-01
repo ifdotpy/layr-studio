@@ -2,7 +2,7 @@
 use crate::{StoreError, StoreResult};
 use rusqlite::{OptionalExtension, Transaction};
 
-pub(super) const RETIRED: [&str; 9] = [
+pub(super) const RETIRED: [&str; 10] = [
     "native_reset_pending",
     "capacity_retry_id",
     "capacity_retry_status",
@@ -15,10 +15,16 @@ pub(super) const RETIRED: [&str; 9] = [
     // Auto-wake and execution mode live on the chat row (`domain`).
     "auto_wake",
     "execution_mode",
+    // The thread id lives on the session row (`domain`).
+    "thread_id",
 ];
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
-    tx.execute_batch("DROP INDEX IF EXISTS runtime_agent_account_wake_candidates_v4")?;
+    // Older builds indexed the retired columns; the scheduler recreates its current index.
+    tx.execute_batch(
+        "DROP INDEX IF EXISTS runtime_agent_account_wake_candidates_v4;\
+         DROP INDEX IF EXISTS runtime_agent_account_wake_candidates_v5;",
+    )?;
     for column in RETIRED {
         let kind: Option<i64> = tx
             .query_row(
@@ -30,6 +36,16 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         match kind {
             None => {}
             Some(3) => {
+                // Indexes of older builds that read the column would block the drop.
+                let stale: Vec<String> = tx
+                    .prepare(
+                        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='runtime_agents' AND sql LIKE '%' || ?1 || '%'",
+                    )?
+                    .query_map([column], |row| row.get(0))?
+                    .collect::<Result<_, _>>()?;
+                for index in stale {
+                    tx.execute_batch(&format!("DROP INDEX IF EXISTS \"{index}\""))?;
+                }
                 tx.execute_batch(&format!("ALTER TABLE runtime_agents DROP COLUMN {column}"))?
             }
             Some(_) => {
@@ -90,6 +106,39 @@ mod tests {
                 .unwrap(),
             1
         );
+    }
+
+    #[test]
+    fn index_on_retired_column_is_dropped_before_the_column() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL,\
+             capacity_retry_id GENERATED ALWAYS AS (json_extract(record,'$.capacityRetry.id')) STORED,\
+             start_attempt_submitted GENERATED ALWAYS AS (json_extract(record,'$.startAttempt.submitted')) STORED);\
+             CREATE INDEX runtime_agent_account_wake_candidates_v5 ON runtime_agents(capacity_retry_id);\
+             CREATE INDEX runtime_agent_submitted ON runtime_agents(start_attempt_submitted);\
+             INSERT INTO runtime_agents(id,record) VALUES('a','{}');",
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        super::apply(&tx).unwrap();
+        tx.commit().unwrap();
+        let columns: i64 = db
+            .query_row(
+                "SELECT count(*) FROM pragma_table_xinfo('runtime_agents') WHERE name IN ('capacity_retry_id','start_attempt_submitted')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(columns, 0);
+        let indexes: i64 = db
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' AND name IN ('runtime_agent_account_wake_candidates_v5','runtime_agent_submitted')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(indexes, 0);
     }
 
     #[test]

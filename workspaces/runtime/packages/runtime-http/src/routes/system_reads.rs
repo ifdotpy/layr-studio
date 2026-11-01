@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use serde_json::Value;
 use studio_runtime_services::system_reads::{self, SystemReadError};
 
-use super::extractors::QueryParams;
+use super::extractors::TypedQuery;
 use super::manifest::{Dependency, OperationStatus, RouteGroup, get};
 use crate::error::ApiError;
 use crate::router::HttpState;
@@ -55,14 +55,22 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
+/// Maximum directory request ID length in Unicode code points.
+const DIRECTORY_REQUEST_ID_MAX_CHARS: usize = 128;
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DirectoriesQuery {
+    path: Option<String>,
+    server: Option<String>,
+    request_id:
+        Option<studio_runtime_schema::bounded_text::BoundedText<1, DIRECTORY_REQUEST_ID_MAX_CHARS>>,
+}
 async fn directories(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<DirectoriesQuery>,
 ) -> Result<Json<system_reads::DirectoryListing>, ApiError> {
-    let server = query
-        .typed_value("server")
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    let server = query.server.as_deref().unwrap_or("");
     let local = if server.is_empty() || server == "local" {
         true
     } else {
@@ -123,11 +131,8 @@ async fn directories(
                 "The remote server transport is unavailable",
             )
         })?;
-        let path = query
-            .typed_value("path")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        let request_id = match query.typed_value("request_id").and_then(Value::as_str) {
+        let path = query.path;
+        let request_id = match query.request_id.as_ref().map(|id| id.as_str()) {
             Some(id) => id.to_owned(),
             None => studio_runtime_services::remote_transport::new_nonce()
                 .map_err(|_| ApiError::internal())?,
@@ -138,8 +143,14 @@ async fn directories(
         let result = driver
             .exchange(
                 &server,
-                "folders",
-                &serde_json::json!({"cwd":path}),
+                studio_runtime_services::orchestration_wire::OrchestrationCommand::Folders(
+                    studio_runtime_services::orchestration_worker::FoldersPayload {
+                        cwd: path.map_or(
+                            studio_runtime_schema::queue_command::Field::Null,
+                            studio_runtime_schema::queue_command::Field::Value,
+                        ),
+                    },
+                ),
                 &request_id,
                 now,
             )
@@ -169,10 +180,7 @@ async fn directories(
             .map(Json)
             .map_err(ApiError::json);
     }
-    let path = query
-        .typed_value("path")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
+    let path = query.path;
     let result = studio_runtime_process::blocking_pool::spawn_blocking(
         "runtime-http/routes/system_reads",
         move || system_reads::directories(path.as_deref()),
@@ -1123,5 +1131,21 @@ inventory::submit! {
         name:"system_reads", routes:Some(routes), dependencies:&[
             "runtime-process/process-tree","provider-session/native-accounts","runtime-process/studio-loaded-threads","runtime-process/supervisor-status",
         ],
+    }
+}
+
+#[cfg(test)]
+mod typed_query_contract_tests {
+    use super::*;
+    #[test]
+    fn directoriesquery_decodes_and_rejects_invalid() {
+        fn decode(query: &str) -> bool {
+            let uri: axum::http::Uri = format!("/?{query}").parse().unwrap();
+            axum::extract::Query::<DirectoriesQuery>::try_from_uri(&uri).is_ok()
+        }
+        assert!(decode("path=x&request_id=a"));
+        assert!(!decode("request_id="));
+        assert!(!decode(&format!("request_id={}", "x".repeat(129))));
+        assert!(!decode("extra=x"));
     }
 }

@@ -22,20 +22,30 @@ export function parseAppliedCursor(
   workspaceId: string,
 ): SubscriptionCursor | undefined {
   try {
-    const cursor = JSON.parse(payload ?? "null") as SubscriptionCursor | null;
+    const cursor: unknown = JSON.parse(payload ?? "null");
     if (
-      cursor?.workspaceId === workspaceId &&
+      cursor &&
+      typeof cursor === "object" &&
+      "workspaceId" in cursor &&
+      cursor.workspaceId === workspaceId &&
+      "seq" in cursor &&
+      typeof cursor.seq === "number" &&
       Number.isSafeInteger(cursor.seq) &&
       cursor.seq >= 0
-    )
-      return {
-        workspaceId,
-        seq: cursor.seq,
-        ...(Number.isSafeInteger(cursor.terminalGeneration) &&
-        cursor.terminalGeneration! >= 0
-          ? { terminalGeneration: cursor.terminalGeneration }
-          : {}),
-      };
+    ) {
+      if (!("terminalGeneration" in cursor))
+        return { workspaceId, seq: cursor.seq };
+      if (
+        typeof cursor.terminalGeneration === "number" &&
+        Number.isSafeInteger(cursor.terminalGeneration) &&
+        cursor.terminalGeneration >= 0
+      )
+        return {
+          workspaceId,
+          seq: cursor.seq,
+          terminalGeneration: cursor.terminalGeneration,
+        };
+    }
   } catch {
     /* A damaged cache has no resumable projection. */
   }

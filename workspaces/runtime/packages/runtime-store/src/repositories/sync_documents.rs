@@ -103,6 +103,16 @@ pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     bootstrap_connection_functions: &["sync_entity_hash", "sync_entity_payload"],
 };
 
+/// Collections of the work documents. Their rows come from the main tables
+/// (`runtime_work` and the history tables), not from `sync_entities`.
+pub const WORK_COLLECTIONS: &[&str] = &[
+    "work",
+    "workDetail",
+    "workResult",
+    "workDecision",
+    "workRelease",
+];
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SyncDocument {
     pub id: String,
@@ -388,6 +398,50 @@ impl SyncDocumentsRepository {
         let reset = interval.reset;
         let tombstone_floor = interval.tombstone_floor;
         let limit = limit.clamp(1, SYNC_ENTITY_STREAM_MAX_DOCUMENTS);
+        let mut rows = Self::scope_rows(
+            transaction,
+            after,
+            max_sequence,
+            reset,
+            collections_json,
+            id,
+            agent,
+            include_team_members,
+            limit + 1,
+            false,
+        )?;
+        let checkpoint = if rows.len() as i64 > limit {
+            rows.truncate(limit as usize);
+            rows.last().map_or(after, |row| row.sequence)
+        } else {
+            max_sequence
+        };
+        Ok(EntityPage {
+            rows,
+            max_sequence,
+            tombstone_floor,
+            initial_high: if reset { max_sequence } else { 0 },
+            checkpoint,
+            reset,
+        })
+    }
+
+    /// Raw scoped rows of `sync_entities` in `(after, through]`, at most `fetch` rows, in
+    /// `seq` order. `exclude_work` drops [`WORK_COLLECTIONS`] for readers that build them
+    /// from the main tables. Shared by every scoped reader.
+    #[allow(clippy::too_many_arguments)]
+    pub fn scope_rows(
+        transaction: &Transaction<'_>,
+        after: i64,
+        through: i64,
+        snapshot: bool,
+        collections_json: Option<&str>,
+        id: Option<&str>,
+        agent: Option<&str>,
+        include_team_members: bool,
+        fetch: i64,
+        exclude_work: bool,
+    ) -> StoreResult<Vec<EntityRow>> {
         let collections = if collections_json.is_some() {
             "collection IN (SELECT value FROM json_each(:collections))"
         } else {
@@ -403,41 +457,35 @@ impl SyncDocumentsRepository {
         } else {
             ""
         };
+        let work = WORK_COLLECTIONS
+            .iter()
+            .map(|c| format!("'{c}'"))
+            .collect::<Vec<_>>()
+            .join(",");
         let mut statement = transaction.prepare_cached(&format!(
             "SELECT collection,id,seq,payload,deleted FROM sync_entities AS entity{index} \
              WHERE collection NOT LIKE 'transcript:%' AND {collections} AND {identity} \
                AND {ENTITY_SCOPE_AGENT_PREDICATE} AND seq>:after AND seq<=:through \
-               AND (:snapshot=0 OR deleted=0) ORDER BY seq LIMIT :limit"
+               AND (:snapshot=0 OR deleted=0) \
+               AND (:exclude_work=0 OR collection NOT IN ({work})) ORDER BY seq LIMIT :limit"
         ))?;
-        let mut rows = statement
+        let rows = statement
             .query_map(
                 named_params! {
                     ":after": after,
-                    ":through": max_sequence,
+                    ":through": through,
                     ":collections": collections_json,
                     ":id": id,
-                    ":snapshot": i64::from(reset),
-                    ":limit": limit + 1,
+                    ":snapshot": i64::from(snapshot),
+                    ":exclude_work": i64::from(exclude_work),
+                    ":limit": fetch,
                     ":agent": agent,
                     ":include_team_members": include_team_members,
                 },
                 entity_row,
             )?
             .collect::<Result<Vec<_>, _>>()?;
-        let checkpoint = if rows.len() as i64 > limit {
-            rows.truncate(limit as usize);
-            rows.last().map_or(after, |row| row.sequence)
-        } else {
-            max_sequence
-        };
-        Ok(EntityPage {
-            rows,
-            max_sequence,
-            tombstone_floor,
-            initial_high: if reset { max_sequence } else { 0 },
-            checkpoint,
-            reset,
-        })
+        Ok(rows)
     }
 
     /// Latest relevant predicate movement; this is a bounded indexed metadata

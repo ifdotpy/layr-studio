@@ -11,7 +11,7 @@ use std::time::Instant;
 use studio_runtime_services::analytics::{self, AnalyticsOptions};
 use studio_runtime_services::costs::{self, CostsError};
 
-use super::extractors::QueryParams;
+use super::extractors::TypedQuery;
 use super::manifest::{Dependency, OperationStatus, RouteGroup, get};
 use crate::error::{ApiError, InternalErrorKind};
 use crate::router::HttpState;
@@ -38,13 +38,87 @@ enum ReadBody {
     Export(Vec<u8>),
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SessionCostQuery {
+    agent: Option<String>,
+}
+/// Analytics time in nonnegative finite seconds.
+struct AnalyticsTime(f64);
+impl<'de> serde::Deserialize<'de> for AnalyticsTime {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = <f64 as serde::Deserialize>::deserialize(deserializer)?;
+        if value.is_finite() && value >= 0.0 {
+            Ok(Self(value))
+        } else {
+            Err(serde::de::Error::custom("invalid analytics time"))
+        }
+    }
+}
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum AnalyticsScope {
+    Agent,
+    Team,
+    All,
+}
+#[derive(serde::Deserialize)]
+enum ExportFlag {
+    #[serde(rename = "1")]
+    One,
+}
+type AnalyticsLimit = studio_runtime_schema::bounded_integer::BoundedInteger<
+    0,
+    { studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64 },
+>;
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AnalyticsQuery {
+    agent: Option<String>,
+    scope: Option<AnalyticsScope>,
+    from_time: Option<AnalyticsTime>,
+    to_time: Option<AnalyticsTime>,
+    limit: Option<AnalyticsLimit>,
+    offset: Option<AnalyticsLimit>,
+    export: Option<ExportFlag>,
+    tool: Option<String>,
+    timing: Option<String>,
+    view: Option<String>,
+    detail: Option<String>,
+    item: Option<String>,
+    turn: Option<String>,
+    thread: Option<String>,
+    turns: Option<String>,
+}
+
 async fn analytics_read(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<AnalyticsQuery>,
 ) -> Result<Response, ApiError> {
-    let options: AnalyticsOptions =
-        serde_json::from_value(Value::Object((*query.into_typed()).clone()))
-            .map_err(|_| ApiError::internal())?;
+    let options = AnalyticsOptions {
+        agent: query.agent,
+        scope: query.scope.map(|scope| {
+            match scope {
+                AnalyticsScope::Agent => "agent",
+                AnalyticsScope::Team => "team",
+                AnalyticsScope::All => "all",
+            }
+            .to_owned()
+        }),
+        from: query.from_time.map(|value| value.0),
+        to: query.to_time.map(|value| value.0),
+        limit: query.limit.map(|value| value.get()),
+        offset: query.offset.map(|value| value.get()),
+        export: query.export.is_some(),
+        tool: query.tool,
+        timing: query.timing,
+        view: query.view,
+        detail: query.detail,
+        item: query.item,
+        turn: query.turn,
+        thread: query.thread,
+        turns: query.turns,
+    };
     let export = options.export;
     let timing = options.timing.as_deref() == Some("1") && !export;
     let started = Instant::now();
@@ -100,9 +174,9 @@ async fn analytics_read(
 
 async fn session_cost(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<SessionCostQuery>,
 ) -> Result<Json<costs::SessionCost>, ApiError> {
-    let agent = query.nonempty_str("agent").unwrap_or_default().to_owned();
+    let agent = query.agent.unwrap_or_default();
     session_cost_for_agent(state, agent).await
 }
 
@@ -297,5 +371,39 @@ mod tests {
         assert_eq!(value["summary"]["usageSamples"], json!(1), "{value}");
         assert_eq!(value["summary"]["tokens"]["totalTokens"], json!(25668.0));
         assert_eq!(value["summary"]["provisionalUsageSamples"], json!(1));
+    }
+}
+
+#[cfg(test)]
+mod typed_query_contract_tests {
+    use super::*;
+    #[test]
+    fn sessioncostquery_decodes_and_rejects_invalid() {
+        fn decode(query: &str) -> bool {
+            let uri: axum::http::Uri = format!("/?{query}").parse().unwrap();
+            axum::extract::Query::<SessionCostQuery>::try_from_uri(&uri).is_ok()
+        }
+        assert!(decode("agent=x"));
+        assert!(!decode("extra=x"));
+        assert!(!decode("extra=x"));
+    }
+}
+
+#[cfg(test)]
+mod analyticsquery_tests {
+    #[test]
+    fn query_contract() {
+        fn decode(query: &str) -> bool {
+            let uri: axum::http::Uri = format!("/?{query}").parse().unwrap();
+            axum::extract::Query::<super::AnalyticsQuery>::try_from_uri(&uri).is_ok()
+        }
+        assert!(decode("limit=1&from_time=0"));
+        assert!(!decode("limit=-1"));
+        assert!(!decode("limit=9007199254740992"));
+        assert!(!decode("from_time=-1"));
+        assert!(!decode("from_time=NaN"));
+        assert!(!decode("scope=invalid"));
+        assert!(!decode("export=0"));
+        assert!(!decode("extra=x"));
     }
 }

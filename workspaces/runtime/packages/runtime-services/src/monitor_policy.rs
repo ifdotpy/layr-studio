@@ -727,6 +727,28 @@ pub fn input_effect_ticket<'a>(monitor: &str, identity: &'a str) -> Option<&'a s
         .filter(|ticket| !ticket.is_empty())
 }
 
+/// Actions available for a monitor with a currently proven owner.
+pub fn input_actions(
+    record: &studio_runtime_store::MonitorRecord,
+    owner_active: bool,
+) -> Vec<studio_runtime_schema::process_controls::BackgroundTaskAction> {
+    use studio_runtime_schema::process_controls::BackgroundTaskAction;
+    if !owner_active
+        || record.status != MonitorStatus::Running
+        || record.cancel_requested == Some(true)
+        || !record.interactive
+        || record.input_attempt.is_some()
+    {
+        return Vec::new();
+    }
+    let mut actions = Vec::new();
+    if record.stdin_closed != Some(true) && record.stdin_close_requested.is_none() {
+        actions.push(BackgroundTaskAction::Input);
+    }
+    actions.push(BackgroundTaskAction::Resize);
+    actions
+}
+
 pub fn begin_input(
     snapshot: &MonitorSnapshot,
     operation: &Operation,
@@ -749,20 +771,6 @@ pub fn begin_input(
         return Err(MonitorError::Refused("Invalid monitor input"));
     }
     let f = &snapshot.record;
-    if f.status != MonitorStatus::Running
-        || !snapshot.active_owner()
-        || f.cancel_requested == Some(true)
-        || !f.interactive
-    {
-        return Err(MonitorError::Refused(
-            "This interactive monitor is not active",
-        ));
-    }
-    if f.input_attempt.is_some() {
-        return Err(MonitorError::Refused(
-            "The previous monitor input outcome is unknown; do not repeat it",
-        ));
-    }
     if snapshot
         .record
         .last_input_attempt
@@ -774,6 +782,20 @@ pub fn begin_input(
         ));
     }
     let resize = input.rows.is_some() || input.cols.is_some();
+    let required = if resize {
+        studio_runtime_schema::process_controls::BackgroundTaskAction::Resize
+    } else {
+        studio_runtime_schema::process_controls::BackgroundTaskAction::Input
+    };
+    if !input_actions(f, snapshot.active_owner()).contains(&required) {
+        return Err(MonitorError::Refused(if f.input_attempt.is_some() {
+            "The previous monitor input outcome is unknown; do not repeat it"
+        } else if !resize && (f.stdin_closed == Some(true) || f.stdin_close_requested.is_some()) {
+            "This monitor stdin is closed or its close acknowledgement is pending"
+        } else {
+            "This interactive monitor is not active"
+        }));
+    }
     let (method, params, input_method) = if resize {
         (
             "command/exec/resize",
@@ -789,11 +811,6 @@ pub fn begin_input(
             ),
         )
     } else {
-        if f.stdin_closed == Some(true) || f.stdin_close_requested.is_some() {
-            return Err(MonitorError::Refused(
-                "This monitor stdin is closed or its close acknowledgement is pending",
-            ));
-        }
         (
             "command/exec/write",
             json!({"processId": f.id, "deltaBase64": base64::engine::general_purpose::STANDARD.encode(input.text.as_bytes()), "closeStdin": input.close_stdin}),

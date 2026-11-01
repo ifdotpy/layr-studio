@@ -51,6 +51,7 @@ let root: {
 };
 let documentMock: EventTarget & {
   documentElement: typeof root;
+  visibilityState: DocumentVisibilityState;
   activeElement: unknown;
   querySelectorAll: ReturnType<typeof vi.fn>;
   getElementById: ReturnType<typeof vi.fn>;
@@ -82,6 +83,7 @@ beforeEach(() => {
   };
   documentMock = Object.assign(new EventTarget(), {
     documentElement: root,
+    visibilityState: "visible" as DocumentVisibilityState,
     activeElement: null,
     querySelectorAll: vi.fn(() => []),
     getElementById: vi.fn(() => null),
@@ -628,4 +630,19 @@ it("leaves composer touches native in the native shell, which removes the keyboa
   expect(gesture(textarea, "touchstart").defaultPrevented).toBe(false);
   expect(textarea.blur).not.toHaveBeenCalled();
   expect(textarea.focus).not.toHaveBeenCalled();
+});
+
+it("re-measures the visual offset when the page is shown again", () => {
+  mount();
+  // The browser can move the visual viewport while the page is hidden.
+  viewport.offsetTop = 170;
+  documentMock.visibilityState = "hidden";
+  documentMock.dispatchEvent(new Event("visibilitychange"));
+  expect(root.style.get("--mobile-viewport-top")).toBe("0px");
+  documentMock.visibilityState = "visible";
+  documentMock.dispatchEvent(new Event("visibilitychange"));
+  expect(root.style.get("--mobile-viewport-top")).toBe("170px");
+  viewport.offsetTop = 0;
+  windowMock.dispatchEvent(new Event("pageshow"));
+  expect(root.style.get("--mobile-viewport-top")).toBe("0px");
 });

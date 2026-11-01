@@ -106,7 +106,10 @@ impl Fixture {
                     record["accountKey"] = json!("default");
                     record["compactions"] = json!(0);
                     record["status"] = json!("queued");
-                    studio_runtime_store::AgentRecord::from_value(record).expect("fixture agent")
+                    Box::new(
+                        studio_runtime_store::AgentRecord::from_value(record)
+                            .expect("fixture agent"),
+                    )
                 },
                 parent_checkpoint: None,
                 agents: Vec::new(),
@@ -538,8 +541,14 @@ async fn deadline_after_durable_reservation_retains_evidence_and_checkpoint_fail
             .await
             .expect("publish without checkpoint")
     );
+    let journal = WorkspaceReadyRepository::journal(
+        &fixture.store.test_reader().expect("read"),
+        &plan.identity.id,
+    )
+    .expect("journal")
+    .expect("row");
     assert_eq!(
-        fixture.actor()["checkpointError"],
+        journal["result"]["checkpointError"],
         "Checkpoint skipped: fixture failure"
     );
     assert_eq!(fixture.actor()["worktreeReady"], true);
@@ -1005,8 +1014,12 @@ async fn checkpoint_ref_collision_is_preserved_and_reported() {
         command(&fixture.repo, &["rev-parse", &reference]).trim(),
         other
     );
+    let journal =
+        WorkspaceReadyRepository::journal(&fixture.store.test_reader().expect("read"), &plan.id)
+            .expect("journal")
+            .expect("row");
     assert!(
-        fixture.actor()["checkpointError"]
+        journal["result"]["checkpointError"]
             .as_str()
             .expect("reported conflict")
             .contains("Checkpoint reference already names a different commit")
@@ -1548,18 +1561,21 @@ async fn public_probe_child() {
             .await
             .expect("transaction")
             .expect("validated cwd");
+        if expected == "ref-conflict" {
+            let db = store.test_reader().expect("read");
+            let journal: String = db.query_row("SELECT record FROM runtime_workspace_operations WHERE json_extract(record,'$.agent')=?1 AND json_extract(record,'$.kind')='provision'", [&id], |row| row.get(0)).expect("journal");
+            let journal: Value = serde_json::from_str(&journal).expect("json");
+            assert!(
+                journal["result"]["checkpointError"]
+                    .as_str()
+                    .expect("ref conflict")
+                    .contains("Checkpoint reference already names a different commit")
+            );
+        }
         if expected == "filtered" {
             assert_eq!(
                 std::fs::read_to_string(cwd.join("file")).expect("filtered"),
                 "filtered\n"
-            );
-        }
-        if expected == "ref-conflict" {
-            assert!(
-                snapshot(&store, &id).expect("actor").agent.value()["checkpointError"]
-                    .as_str()
-                    .expect("ref conflict")
-                    .contains("Checkpoint reference already names a different commit")
             );
         }
     }
@@ -2041,9 +2057,8 @@ async fn unrelated_reservation_started_after_path_capture_does_not_refuse_ready_
                 &studio_runtime_store::AgentId::from("unrelated"),
             )?
             .expect("unrelated agent");
-            agent
-                .extra
-                .insert("workspaceOperation".into(), json!("checkpoint"));
+            agent.workspace_operation =
+                studio_runtime_schema::queue_command::Field::Value("checkpoint".into());
             studio_runtime_store::AgentRepository::put(tx, &agent)?;
             assert!(
                 token.validate(tx)?.is_ok(),

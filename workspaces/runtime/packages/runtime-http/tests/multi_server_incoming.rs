@@ -260,6 +260,45 @@ async fn paired_receiver() -> PairedReceiver {
 }
 
 #[tokio::test]
+async fn access_snapshot_projects_legacy_missing_fields_as_null() {
+    let receiver = paired_receiver().await;
+    receiver.receiver_store.transaction(|tx| {
+        tx.execute("INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2)",
+            rusqlite::params!["legacy", serde_json::json!({"id":"legacy","clientId":"legacy","kind":"ui","status":"paired","label":"Legacy","created":1,"publicKey":"key"}).to_string()])?;
+        Ok(())
+    }).await.unwrap();
+    let mut request = Request::builder()
+        .uri("/api/multi-server")
+        .header("host", "127.0.0.1:4000")
+        .body(Body::empty())
+        .unwrap();
+    request.extensions_mut().insert(ConnectInfo(
+        "127.0.0.1:4321".parse::<std::net::SocketAddr>().unwrap(),
+    ));
+    let response = receiver.app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), 65536).await.unwrap();
+    let _: studio_runtime_http::generated::AccessSnapshot = serde_json::from_slice(&bytes).unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    let client = body["clients"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["id"] == "legacy")
+        .unwrap();
+    for key in [
+        "serverId",
+        "origin",
+        "tailscaleUser",
+        "lastAccess",
+        "revoked",
+    ] {
+        assert_eq!(client.get(key), Some(&Value::Null), "{key}");
+    }
+    assert!(client.get("lastSeen").is_none());
+}
+
+#[tokio::test]
 async fn paired_fake_servers_create_and_recover_the_same_invitation() {
     let PairedReceiver {
         _caller_root,
@@ -337,6 +376,16 @@ async fn paired_fake_servers_create_and_recover_the_same_invitation() {
     serde_json::from_slice::<studio_runtime_http::generated::InvitationResponse>(&first_body)
         .expect("signed invitation response matches the generated contract");
     let first: Value = serde_json::from_slice(&first_body).expect("first invitation JSON");
+    let mut fractional = first.clone();
+    fractional["expires"] = serde_json::json!(1234.5);
+    fractional["invitation"]["expires"] = serde_json::json!(1234.5);
+    serde_json::from_value::<studio_runtime_http::generated::InvitationResponse>(fractional)
+        .expect("fractional Unix-second expiry matches the generated HTTP contract");
+    let snapshot =
+        studio_runtime_services::multi_server::snapshot(&receiver_store, &receiver_identity)
+            .await
+            .expect("new invite is visible in snapshot");
+    let _: studio_runtime_http::generated::AccessSnapshot = snapshot;
     assert_eq!(
         first["invitation"]["serverId"],
         receiver_identity["serverId"]
@@ -550,6 +599,19 @@ async fn phone_owner_session_may_request_ui_access_and_signed_principals_may_not
             );
         }
     }
+    let malformed = serde_json::json!({"action":"ui_invite", "requestId":"malformed-restricted"});
+    assert_eq!(
+        send(request(
+            &malformed,
+            Some("defghijklmnopqrstuvwxyz012345678"),
+            ""
+        ))
+        .await,
+        (
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({"error":"Invalid multi-server request", "code":"invalid_request"})
+        )
+    );
     assert_eq!(audit_rows(), before, "no refused request writes state");
 }
 
@@ -825,7 +887,7 @@ async fn signed_remote_event_crosses_http_boundary_and_persists_once() {
         in_flight: None,
         account_key: "default".into(),
         thread_id: None,
-        turn_id: None,
+        turn_id: Default::default(),
         auto_wake: None,
         usage_resume_enabled: None,
         execution_mode: None,
@@ -842,10 +904,9 @@ async fn signed_remote_event_crosses_http_boundary_and_persists_once() {
         root_id: AgentId::from("event-parent"),
         epoch: 3,
         status: AgentStatus::Idle,
-        extra: std::collections::BTreeMap::from([(
-            "provider".into(),
-            serde_json::json!(studio_runtime_schema::ProviderKind::Codex),
-        )]),
+        provider: studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::ProviderKind::Codex,
+        ),
         ..AgentRecord::test_defaults()
     };
     parent.auto_wake = Some(true);
@@ -1279,6 +1340,131 @@ async fn a_paired_window_reaches_the_ordinary_api_with_signed_requests() {
         .await
         .expect("body");
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    // The same signed device receives a cacheable stream and resumes its cursor.
+    use futures_util::StreamExt;
+    async fn stream_frames(response: axum::response::Response) -> Vec<(String, Value)> {
+        let mut stream = response.into_body().into_data_stream();
+        let mut frames = Vec::new();
+        for _ in 0..8 {
+            let bytes = tokio::time::timeout(std::time::Duration::from_secs(5), stream.next())
+                .await
+                .expect("stream frame timeout")
+                .expect("stream remains open")
+                .expect("frame bytes");
+            let text = std::str::from_utf8(&bytes).expect("UTF-8");
+            for frame in text.split("\n\n") {
+                let event = frame.lines().find_map(|line| line.strip_prefix("event: "));
+                let data = frame.lines().find_map(|line| line.strip_prefix("data: "));
+                if let (Some(event), Some(data)) = (event, data) {
+                    frames.push((
+                        event.to_owned(),
+                        serde_json::from_str(data).expect("frame JSON"),
+                    ));
+                }
+            }
+            if frames.iter().any(|(event, _)| event == "resources") {
+                return frames;
+            }
+        }
+        panic!("missing resource frame");
+    }
+    let resources = serde_json::json!([{"kind":"state"}]);
+    let query = |since: Option<Value>| {
+        let mut query = form_urlencoded::Serializer::new(String::new());
+        query
+            .append_pair("protocol", "4")
+            .append_pair("resources", &resources.to_string());
+        if let Some(since) = since {
+            query.append_pair("since", &since.to_string());
+        }
+        format!("/api/sync/stream?{}", query.finish())
+    };
+    let first = app
+        .clone()
+        .oneshot(signed_api_request(
+            &window_signing,
+            &receiver_identity,
+            origin,
+            "GET",
+            &query(None),
+            b"",
+            "windowstreamnonce000000000000001",
+        ))
+        .await
+        .expect("stream");
+    assert_eq!(first.status(), StatusCode::OK);
+    let first = stream_frames(first).await;
+    let session = &first
+        .iter()
+        .find(|(event, _)| event == "session")
+        .expect("session")
+        .1;
+    assert_eq!(session["locality"], "remote");
+    assert_eq!(session["cachePolicies"][0]["policy"], "cache");
+    let entry = &first
+        .iter()
+        .find(|(event, _)| event == "resources")
+        .expect("resources")
+        .1["resourceVersions"][0];
+    let cursor = entry["cursor"].clone();
+    assert!(cursor.is_object(), "snapshot cursor: {entry}");
+    let since = serde_json::json!([{"resource":{"kind":"state"},"since":cursor}]);
+    let second = app
+        .clone()
+        .oneshot(signed_api_request(
+            &window_signing,
+            &receiver_identity,
+            origin,
+            "GET",
+            &query(Some(since.clone())),
+            b"",
+            "windowstreamnonce000000000000002",
+        ))
+        .await
+        .expect("resume");
+    assert_eq!(second.status(), StatusCode::OK);
+    let second = stream_frames(second).await;
+    let entry = &second
+        .iter()
+        .find(|(event, _)| event == "resources")
+        .expect("resources")
+        .1["resourceVersions"][0];
+    assert_eq!(entry["replyKind"], "delta", "{entry}");
+    let owner = Request::builder()
+        .uri(query(Some(since)))
+        .header("host", "127.0.0.1:4000")
+        .extension(ConnectInfo(
+            "127.0.0.1:4321"
+                .parse::<std::net::SocketAddr>()
+                .expect("peer"),
+        ))
+        .body(Body::empty())
+        .expect("owner request");
+    let owner = stream_frames(app.clone().oneshot(owner).await.expect("owner stream")).await;
+    let session = &owner
+        .iter()
+        .find(|(event, _)| event == "session")
+        .expect("session")
+        .1;
+    assert_eq!(session["locality"], "local");
+    assert_eq!(session["cachePolicies"][0]["policy"], "noCache");
+    let entry = &owner
+        .iter()
+        .find(|(event, _)| event == "resources")
+        .expect("resources")
+        .1["resourceVersions"][0];
+    assert_eq!(
+        *entry,
+        serde_json::json!({
+            "resource": {"kind": "state"},
+            "revision": cursor["seq"],
+            "cursor": cursor,
+            "replyKind": "delta",
+            "entityChanges": {"after": cursor["seq"], "through": cursor["seq"], "documents": []},
+        }),
+        "a local owner resumes the same workspace cursor without persisting a cache"
+    );
+
     // A forged signature and a revoked window reach no route.
     let mut forged = signed_api_request(
         &window_signing,

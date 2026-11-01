@@ -30,7 +30,7 @@ const SOURCE_FIELDS: &[&str] = &[
     "effort",
     "nativeEffort",
     "fastMode",
-    "yoloMode",
+    "permissionMode",
     "compactions",
 ];
 

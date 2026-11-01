@@ -27,9 +27,8 @@ async fn seeded_state() -> TempDir {
     }
     let mut seed: Seed =
         serde_json::from_str(include_str!("rules_engine/seed.json")).expect("frozen rule seed");
-    seed.owner.extra.insert(
-        "provider".into(),
-        json!(studio_runtime_schema::ProviderKind::Codex),
+    seed.owner.provider = studio_runtime_schema::queue_command::Field::Value(
+        studio_runtime_schema::ProviderKind::Codex,
     );
     let root = temporary_state();
     let store = RuntimeStore::open(Some(root.path()))

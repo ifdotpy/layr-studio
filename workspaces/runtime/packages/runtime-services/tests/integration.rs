@@ -24,6 +24,7 @@ mod claude_login;
 mod claude_login_actor;
 mod claude_usage_limits;
 mod codex_login_completion;
+mod command_replay;
 mod context_repair_corpus;
 mod continuation_corpus;
 mod continuation_recovery;

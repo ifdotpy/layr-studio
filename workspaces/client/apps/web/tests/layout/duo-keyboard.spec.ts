@@ -1,3 +1,4 @@
+import { backgroundDisplay } from "../fixtures/background.ts";
 import type { KeyboardPatch } from "./keyboardSequences.ts";
 import { test, expect, entityPullFixtureForRequest } from "../playwright.ts";
 import { fixtureWorkspaceId } from "../servers/multi-server-fixture.ts";
@@ -33,6 +34,7 @@ for (const count of [1, 8]) {
     };
     fixture.local.snapshot.runtime.monitors = [
       {
+        display: backgroundDisplay("monitor", "Duo monitor"),
         id: "duo-monitor",
         agent: "overlap",
         name: "Duo monitor",

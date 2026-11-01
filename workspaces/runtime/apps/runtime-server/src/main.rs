@@ -1056,6 +1056,11 @@ async fn run(
             ))
         })
         .collect();
+    // Declines the approvals whose expiry timer fired: a Claude agent in full access
+    // mode asks nobody who watches. The timers are rows, so a restart keeps them.
+    let approval_expiry_task = state
+        .callback_runtime()
+        .map(|runtime| tokio::spawn(runtime.run_expiry(monitor_shutdown.subscribe())));
     // Links that agents give for a sign-in (docs/vm-browser-bridge.md, section 7): the
     // `orchestration_sign_in` tool and sign-in links in completed messages reach the same
     // bridges and cards.
@@ -1465,6 +1470,9 @@ async fn run(
         shutdown_join("held turn release task", auth_release_task).await??;
         for task in browser_card_tasks {
             shutdown_join("browser card poll", task).await??;
+        }
+        if let Some(task) = approval_expiry_task {
+            shutdown_join("approval expiry", task).await??;
         }
         shutdown_join("sign-in message links", sign_in_task).await??;
         shutdown_join("web push", web_push_task).await??;
@@ -2276,6 +2284,22 @@ mod exit_logging_tests {
         allowed: bool,
         newer_rejection: Option<Arc<studio_runtime_store::RuntimeStore>>,
     }
+    fn put_tick_limits(
+        tx: &studio_runtime_store::Transaction<'_>,
+        observation: &serde_json::Value,
+    ) -> studio_runtime_store::StoreResult<()> {
+        let raw = serde_json::value::RawValue::from_string(observation.to_string())?;
+        let view =
+            studio_runtime_schema::usage_limits::RateLimitView::read(&raw, "default", 1000.0)?;
+        studio_runtime_store::SyncDocumentsRepository::put_entity(
+            tx,
+            "rateLimit",
+            "default",
+            view,
+            false,
+        )?;
+        Ok(())
+    }
     impl studio_runtime_services::account_session_runtime::AccountSessionPort for TickLimits {
         fn read_limits<'a>(
             &'a self,
@@ -2291,7 +2315,7 @@ mod exit_logging_tests {
                 }
                 if let Some(store) = &self.newer_rejection {
                     store.transaction_with(|tx| {
-                        studio_runtime_store::SyncDocumentsRepository::put_entity(tx,"rateLimit","default",serde_json::json!({"accountKey":"default","at":1001.0,"data":{"rateLimits":{"primary":{"usedPercent":100.0,"resetsAt":2000.0}}}}),false)
+                        put_tick_limits(tx,&serde_json::json!({"accountKey":"default","at":1001.0,"data":{"rateLimits":{"primary":{"usedPercent":100.0,"resetsAt":2000.0}}}}))
                     }).await.expect("rate-limit fixture writes");
                 }
                 Ok(
@@ -2318,7 +2342,7 @@ mod exit_logging_tests {
                     tx.execute("INSERT INTO runtime_usage_resumes(id,agent,record) VALUES (?1,?1,?2)",[id,&resume.to_string()])?;
                 }
                 // A recent cache entry cannot replace the provider read at the due time.
-                studio_runtime_store::SyncDocumentsRepository::put_entity(tx,"rateLimit","default",serde_json::json!({"accountKey":"default","at":999.0,"data":{"rateLimits":{"primary":{"usedPercent":0.0}}}}),false)?;
+                put_tick_limits(tx,&serde_json::json!({"accountKey":"default","at":999.0,"data":{"rateLimits":{"primary":{"usedPercent":0.0}}}}))?;
                 Ok::<_,studio_runtime_store::StoreError>(())
             }).await.expect("usage resume fixture writes");
             let port = TickLimits {
@@ -2407,7 +2431,7 @@ mod exit_logging_tests {
                     ("b-valid", serde_json::json!({"afterId":"","proofAt":1.0})),
                 ] {
                     let record = serde_json::json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
-                        "id":id, "rootId":id, "role":"main", "status":"idle", "epoch":1,
+                        "id":id, "rootId":id, "role":"orchestrator", "status":"idle", "epoch":1,
                         "authResumeProofPending":{"default":pending},
                     });
                     tx.execute(
@@ -2468,7 +2492,7 @@ mod exit_logging_tests {
                         serde_json::json!({"afterId":"", "proofAt":1.0})
                     };
                     let record = serde_json::json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
-                        "id":id, "rootId":id, "role":"main", "status":"idle", "epoch":1,
+                        "id":id, "rootId":id, "role":"orchestrator", "status":"idle", "epoch":1,
                         "authResumeProofPending":{"default":pending},
                     });
                     tx.execute(

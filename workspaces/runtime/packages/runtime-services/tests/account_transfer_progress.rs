@@ -102,7 +102,9 @@ async fn unknown_transfer_operation_keeps_the_native_admission_hold() {
     store
         .transaction(|tx| {
             let mut row = AgentRepository::get(tx, &AgentId::from("lead"))?.expect("lead");
-            row.extra.insert("accountTransferId".into(), json!(OP));
+            row.account_transfer_id = studio_runtime_schema::queue_command::Field::Value(
+                OP.to_owned().try_into().unwrap(),
+            );
             AgentRepository::put(tx, &row)
         })
         .await
@@ -358,9 +360,11 @@ async fn lazy_history_receipt_is_adopted_before_ordinary_preparation_returns() {
     store
         .transaction(|tx| {
             let mut row = AgentRepository::get(tx, &AgentId::from("lead"))?.expect("lead");
-            row.extra.insert("provider".into(), json!("codex"));
+            row.provider = studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_schema::ProviderKind::Codex,
+            );
             row.model = Some("gpt-6-astra".into());
-            row.extra.insert("nativeEffort".into(), Value::Null);
+            row.native_effort = studio_runtime_schema::queue_command::Field::Null;
             AgentRepository::put(tx, &row)
         })
         .await
@@ -428,6 +432,7 @@ async fn lazy_first_native_thread_preparation_moves_history_or_reports_error() {
     let view = studio_runtime_services::sync_views::agent_entity_view(
         &agent(&store),
         &studio_runtime_services::sync_views::AgentViewContext {
+            team_counts: None,
             project_server_id: None,
             launcher_alive: true,
             empty_lead: false,
@@ -436,6 +441,7 @@ async fn lazy_first_native_thread_preparation_moves_history_or_reports_error() {
             latest_work_result_file: None,
             command_progress: vec![],
             stall: None,
+            ..Default::default()
         },
     )
     .expect("agent view");
@@ -626,9 +632,12 @@ async fn cancel_restores_source_fields_with_null_and_absent_values_exactly() {
         .transaction(|tx| {
             let mut row = AgentRepository::get(tx, &AgentId::from("lead"))?.expect("lead");
             row.status = AgentStatus::Failed;
-            row.extra
-                .insert("error".into(), json!("Transfer history is unavailable"));
-            row.extra.insert("nativeFailureHold".into(), json!(true));
+            row.error = studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_schema::provider_errors::AgentError::Message(
+                    "Transfer history is unavailable".into(),
+                ),
+            );
+            row.set_native_failure_hold(true);
             AgentRepository::put(tx, &row)
         })
         .await

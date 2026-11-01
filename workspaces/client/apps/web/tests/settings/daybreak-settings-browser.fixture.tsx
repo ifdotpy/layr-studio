@@ -70,7 +70,7 @@ const initial: Agent = {
   isLead: true,
   status: "idle",
   created: 1,
-  yoloMode: false,
+  permissionMode: "default",
   nextTurnSettingsSupported: true,
 };
 const row = (

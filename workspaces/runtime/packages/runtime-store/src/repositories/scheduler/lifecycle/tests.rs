@@ -141,6 +141,64 @@ fn with<T>(connection: &mut Connection, change: impl FnOnce(&Transaction<'_>) ->
 }
 
 #[test]
+fn quarantined_input_publishes_typed_agent_error() {
+    let mut connection = database();
+    put(&connection, json!({"status":"idle"}));
+    connection.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('agent',?1,1,'h',?2,0)", params![AGENT, json!({"collection":"agent","id":AGENT,"value":{"id":AGENT}}).to_string()]).unwrap();
+    with(&mut connection, |tx| {
+        SchedulerRepository::quarantine_pending_events(
+            tx,
+            AGENT,
+            0,
+            &Default::default(),
+            "invalid",
+        )
+        .expect("quarantine publishes");
+    });
+    assert_eq!(
+        stored(&connection)["error"],
+        "Queued input could not be delivered: invalid"
+    );
+}
+
+#[test]
+fn authentication_repair_requires_the_exact_stored_error() {
+    let mut connection = database();
+    put(
+        &connection,
+        json!({"status":"failed","autoWake":true,"inFlight":false}),
+    );
+    assert!(!with(&mut connection, |tx| {
+        SchedulerRepository::repair_authenticated_failure(tx, AGENT, 0, ACCOUNT, &Value::Null)
+            .unwrap()
+    }));
+    put(
+        &connection,
+        json!({"status":"failed","autoWake":true,"inFlight":false,"error":{"message":"expired","data":{"a":1,"b":2}}}),
+    );
+    assert!(!with(&mut connection, |tx| {
+        SchedulerRepository::repair_authenticated_failure(
+            tx,
+            AGENT,
+            0,
+            ACCOUNT,
+            &json!({"message":"expired","data":{"a":1,"b":2},"unexpected":true}),
+        )
+        .unwrap()
+    }));
+    assert!(with(&mut connection, |tx| {
+        SchedulerRepository::repair_authenticated_failure(
+            tx,
+            AGENT,
+            0,
+            ACCOUNT,
+            &json!({"message":"expired","data":{"b":2,"a":1},"studioRawEvidence":{"message":"expired","data":{"a":1,"b":2}}}),
+        )
+        .unwrap()
+    }));
+}
+
+#[test]
 fn same_thread_host_and_vm_attempts_resolve_only_for_the_exact_actor() {
     let connection = database();
     for (id, mode) in [("host", "native"), ("guest", "vm")] {
@@ -259,7 +317,11 @@ fn terminal_error_records_keep_unknown_extensions_and_only_known_policy_blocks()
             .expect("terminal settlement")
         }));
         let agent = stored(&connection);
-        assert_eq!(agent["error"], error);
+        assert_eq!(agent["error"]["message"], "Provider refusal");
+        assert_eq!(
+            agent["error"].get("vendorExtension"),
+            error.get("vendorExtension")
+        );
         assert_eq!(agent.get("nativeThreadBlock").is_some(), blocked);
         if blocked {
             assert_eq!(agent["nativeThreadBlock"]["error"], error);
@@ -1203,4 +1265,54 @@ fn terminal_claude_error_keeps_only_bounded_failure_metadata() {
     assert_eq!(receipt.input["nativeError"]["claudeFailure"], metadata);
     assert!(!receipt.input.to_string().contains("secret"));
     assert!(!saved.to_string().contains("secret"));
+}
+
+#[test]
+fn a_start_accepted_after_its_turn_completed_settles_and_frees_the_queue() {
+    // Live 2026-11-01, agent 8f26b9fe: a very short turn completed before the
+    // `turn/start` response bound it. The attempt stayed open and its input
+    // stayed `dispatching`, so a queued message never started.
+    let mut connection = database();
+    put(
+        &connection,
+        json!({
+            "status":"queued","autoWake":true,"inFlight":false,"turnId":null,"turnEpoch":0,
+            "lastCompletedTurn":"turn-1","lastCompletedTurnStatus":"completed",
+            "startAttempt":{"id":"now","epoch":0,"submitted":true,"observedTurnId":"turn-1",
+                "threadId":"thread","accountKey":ACCOUNT,"events":["message"],
+                "connectionGeneration":1,"requestTicket":"ticket"}
+        }),
+    );
+    connection
+        .execute_batch(
+            "INSERT INTO runtime_events VALUES('message','agent','user','message','dispatching',2,0,NULL,NULL);\
+             INSERT INTO runtime_events VALUES('queued','agent','user','queued','pending',3,0,NULL,NULL);",
+        )
+        .expect("events write");
+    with(&mut connection, |tx| {
+        crate::domain::complete_turn(tx, AGENT, "turn-1").expect("turn completes");
+    });
+    with(&mut connection, |tx| {
+        SchedulerRepository::settle_started_provider(
+            tx, AGENT, 0, "now", "ticket", ACCOUNT, 1, "thread", "turn-1",
+        )
+        .expect("acceptance runs");
+    });
+    let status: String = connection
+        .query_row(
+            "SELECT status FROM runtime_events WHERE id='message'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("event status");
+    assert_eq!(status, "delivered");
+    let agent = stored(&connection);
+    assert_eq!(agent["inFlight"], false);
+    assert_eq!(agent["status"], "queued");
+    let next = with(&mut connection, |tx| {
+        SchedulerRepository::claim(tx, AGENT, 0, "next", 11.0, 1)
+            .expect("claim")
+            .expect("the queued message is claimed")
+    });
+    assert_eq!(next.events[0].id.0, "queued");
 }

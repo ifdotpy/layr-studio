@@ -515,7 +515,7 @@ async fn enabled_native_backend_serves_success_and_null_refusal() {
                     }
                 );
                 assert_eq!(physical_snapshot(&store), before);
-                assert_eq!(stored(&store, &id), value);
+                assert_eq!(stored(&store, &id)["status"], "pending");
                 assert_eq!(port.calls.lock().unwrap().len(), index);
             } else {
                 assert_eq!(body["status"], "answered");
@@ -556,7 +556,7 @@ async fn pending_codex_approval(
 ) -> (String, studio_runtime_providers::Frame) {
     let actor = context.agent.clone();
     store.transaction(move |tx| {
-        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.yoloMode',json('false'),'$.inFlight',json('true')) WHERE id=?1", [&actor])?;
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.permissionMode','default','$.inFlight',json('true')) WHERE id=?1", [&actor])?;
         Ok(())
     }).await.unwrap();
     let frame = studio_runtime_providers::Frame::Request(studio_runtime_providers::RequestFrame {
@@ -596,7 +596,7 @@ async fn live_permissions_codex_switch_settles_pending_once_and_ask_prompts_agai
     );
     let (status, value) = call(&app, "/api/conversation", body.clone(), "token").await;
     assert_eq!(status, 200, "{value}");
-    assert_eq!(value["yoloMode"], true);
+    assert_eq!(value["permissionMode"], "bypassPermissions");
     assert_eq!(stored(&store, &id)["status"], "answered");
     assert_eq!(port.calls.lock().unwrap().len(), 1);
     assert_eq!(
@@ -620,10 +620,10 @@ async fn live_permissions_codex_switch_settles_pending_once_and_ask_prompts_agai
     assert_eq!(call(&app, "/api/conversation", ask, "token").await.0, 200);
     // Replay returns the original response without overriding the later Ask save.
     assert_eq!(
-        call(&app, "/api/conversation", body, "token").await.1["yoloMode"],
-        true
+        call(&app, "/api/conversation", body, "token").await.1["permissionMode"],
+        "bypassPermissions"
     );
-    assert_eq!(actor(&store, &context)["yoloMode"], false);
+    assert_eq!(actor(&store, &context)["permissionMode"], "default");
     if let studio_runtime_providers::Frame::Request(ref mut request) = later {
         request.id = studio_runtime_providers::RequestId::Number(89);
     }
@@ -641,7 +641,7 @@ async fn live_permissions_archived_previous_uses_new_chat_defaults() {
     let (root, store, context) = fixture().await;
     let actor = context.agent.clone();
     store.transaction(move |tx| {
-        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.agentArchive',json('{\"at\":10,\"epoch\":3}'),'$.deletedAt',10,'$.yoloMode',json('false'),'$.approvalPolicy','on-request') WHERE id=?1", [&actor])?;
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.agentArchive',json('{\"at\":10,\"epoch\":3}'),'$.deletedAt',10,'$.permissionMode','default','$.approvalPolicy','on-request') WHERE id=?1", [&actor])?;
         Ok(())
     }).await.unwrap();
     let app = permission_app(root.path(), store, Arc::new(Port::default())).await;
@@ -653,7 +653,7 @@ async fn live_permissions_archived_previous_uses_new_chat_defaults() {
     )
     .await;
     assert_eq!(status, 200, "{value}");
-    assert_eq!(value["yoloMode"], true);
+    assert_eq!(value["permissionMode"], "bypassPermissions");
     assert_ne!(value["approvalPolicy"], "on-request");
 }
 
@@ -662,7 +662,7 @@ async fn live_permissions_live_previous_still_donates_settings() {
     let (root, store, context) = fixture().await;
     let actor = context.agent.clone();
     store.transaction(move |tx| {
-        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.yoloMode',json('false')) WHERE id=?1", [&actor])?;
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.permissionMode','default') WHERE id=?1", [&actor])?;
         Ok(())
     }).await.unwrap();
     let app = permission_app(root.path(), store, Arc::new(Port::default())).await;
@@ -674,7 +674,7 @@ async fn live_permissions_live_previous_still_donates_settings() {
     )
     .await;
     assert_eq!(status, 200, "{value}");
-    assert_eq!(value["yoloMode"], false);
+    assert_eq!(value["permissionMode"], "default");
 }
 
 #[tokio::test]
@@ -687,7 +687,7 @@ async fn live_permissions_failed_auto_answer_stays_pending_for_the_user() {
     let full = json!({"id":context.agent,"yolo_mode":true,"request_id":studio_runtime_schema::persistence::RequestIdentity::issue_root(),"expected_account_key":"default"});
     let (status, value) = call(&app, "/api/conversation", full, "token").await;
     assert_eq!(status, 200, "{value}");
-    assert_eq!(value["yoloMode"], true);
+    assert_eq!(value["permissionMode"], "bypassPermissions");
     assert_eq!(stored(&store, &id)["status"], "pending");
     assert_eq!(port.calls.lock().unwrap().len(), 1);
 }

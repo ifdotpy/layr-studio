@@ -250,7 +250,7 @@ pub(super) fn apply(
                 }) && let Some(task) =
                     items::task_transition(snapshot.agent(), method, p, snapshot.task(), true, at)?
                 {
-                    put_checked_task(tx, &task, &studio_runtime_store::projection_value(&task))?;
+                    put_checked_task(tx, &task)?;
                     write_historical_item(tx, &id, p, &task, at)?;
                 }
                 return Ok(Some(DispatchOutcome::Ignored {
@@ -290,7 +290,7 @@ pub(super) fn apply(
                         .transpose()
                         .map_err(|_| NotificationDispatchError::invalid())?;
                 }
-                put_checked_task(tx, &task, &studio_runtime_store::projection_value(&task))?;
+                put_checked_task(tx, &task)?;
             }
             if decision.compacted {
                 let deferred = p["item"]["idleCompactionOnReturn"] == true
@@ -424,12 +424,11 @@ pub(super) fn put_task(
 ) -> Result<(), NotificationDispatchError> {
     let task_record: TaskRecord = serde_json::from_str(&task.to_string())
         .map_err(|_| super::stored("runtime_tasks", task["id"].as_str().unwrap_or("<missing>")))?;
-    put_checked_task(tx, &task_record, task)
+    put_checked_task(tx, &task_record)
 }
 pub(super) fn put_checked_task(
     tx: &Transaction<'_>,
     task_record: &TaskRecord,
-    task: &Value,
 ) -> Result<(), NotificationDispatchError> {
     let migrated: bool = tx
         .query_row_cached(
@@ -466,7 +465,7 @@ pub(super) fn put_checked_task(
         crate::sync_policy::maintain_task_window_after_write(
             tx,
             previous.as_ref(),
-            task,
+            task_record,
             &|_, _, _, _| true,
         )?;
     }
@@ -572,7 +571,7 @@ pub(super) fn flush_command(
                     .to_owned(),
             );
             task.set_output_truncated(truncated);
-            put_checked_task(tx, task, &studio_runtime_store::projection_value(task))?;
+            put_checked_task(tx, task)?;
         }
         if !stale {
             agent["events"] = json!(

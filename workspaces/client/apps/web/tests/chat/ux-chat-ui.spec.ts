@@ -3,7 +3,12 @@ import type { AddressInfo } from "node:net";
 import type { Server, ServerResponse } from "node:http";
 import type { ViteDevServer } from "vite";
 import type { Route } from "@playwright/test";
-import type { TranscriptPageResponse } from "../playwright.ts";
+import type {
+  ResourceChangeEvent,
+  ResourceRef,
+  TranscriptPageResponse,
+} from "../playwright.ts";
+import type { components } from "../../src/generated/api.ts";
 import type { JsonInputOf, PostBody, PostResult } from "../../src/apiTypes.ts";
 import type { UxChatFixtureSendBody } from "../fixtures/ux-chat.tsx";
 import { fixturePostBody, fixtureResourceRefs } from "./http.ts";
@@ -20,6 +25,7 @@ import {
   apiSchemaHandshakeSse,
   apiSchemaHeaders,
   readApiSchemaHash,
+  protocol3SseEvent,
   syncIdentityFixture,
   syncProtocolFixture,
   test,
@@ -52,23 +58,49 @@ test("Ux Chat Ui", async ({
   const syncStreams = new Set<ServerResponse>();
   let syncRevision = 0;
   let transcriptSeq = 1;
-  const publishTranscriptChange = () => {
-    const resource = { kind: "transcript", agentId: "lead" };
-    const revision = ++syncRevision;
-    for (const stream of syncStreams)
-      stream.write(
-        `event: resources\ndata: ${JSON.stringify({
-          epoch: "ux-chat-epoch",
-          protocol: 4,
-          reason: "change",
-          resources: [resource],
-          resourceVersions: [],
-          revision,
-          workspaceId,
-        })}\n\n`,
-      );
-  };
   try {
+    const frame = (
+      resources: ResourceRef[],
+      reason: ResourceChangeEvent["reason"],
+      delta?: JsonInputOf<components["schemas"]["TranscriptStreamDelta"]>,
+    ): JsonInputOf<ResourceChangeEvent> => ({
+      epoch: "ux-chat-epoch",
+      protocol: 4,
+      reason,
+      resources,
+      resourceVersions: resources.map((resource) => ({
+        resource,
+        revision: transcriptSeq,
+        ...(resource.kind === "transcript"
+          ? {
+              cursor: { workspaceId, seq: transcriptSeq },
+              replyKind: delta ? "delta" : "snapshot",
+              ...(delta
+                ? {
+                    transcriptChanges: {
+                      after: transcriptSeq - 1,
+                      through: transcriptSeq,
+                      delta,
+                    },
+                  }
+                : { transcriptSnapshot: snapshot(resource.agentId) }),
+            }
+          : {}),
+      })),
+      revision: ++syncRevision,
+      workspaceId,
+    });
+    const publishTranscriptChange = (
+      delta?: JsonInputOf<components["schemas"]["TranscriptStreamDelta"]>,
+    ) => {
+      const event = frame(
+        [{ kind: "transcript", agentId: "lead" }],
+        "change",
+        delta,
+      );
+      for (const stream of syncStreams)
+        stream.write(protocol3SseEvent("resources", event));
+    };
     vite = await createViteServer({
       configFile: false,
       root: webRoot,
@@ -106,15 +138,7 @@ test("Ux Chat Ui", async ({
           syncStreams.add(response);
           response.on("close", () => syncStreams.delete(response));
           response.write(
-            `event: resources\ndata: ${JSON.stringify({
-              epoch: "ux-chat-epoch",
-              protocol: 4,
-              reason: "initial",
-              resources,
-              resourceVersions: [],
-              revision: ++syncRevision,
-              workspaceId,
-            })}\n\n`,
+            protocol3SseEvent("resources", frame(resources, "initial")),
           );
           return;
         }
@@ -134,7 +158,14 @@ test("Ux Chat Ui", async ({
               : item,
           );
           transcriptSeq++;
-          publishTranscriptChange();
+          publishTranscriptChange({
+            delta: true,
+            items: [
+              required(latestItems.find((item) => item.id === "item-13")),
+            ],
+            removed: [],
+            truncated: true,
+          });
           response.statusCode = 204;
           response.end();
           return;
@@ -149,34 +180,6 @@ test("Ux Chat Ui", async ({
           response.setHeader(API_SCHEMA_HASH_HEADER, readApiSchemaHash());
           response.setHeader("Content-Type", "application/json");
           response.end(JSON.stringify(syncProtocolFixture()));
-          return;
-        }
-        if (path === "/api/sync/pull") {
-          const scope = requestUrl.searchParams.get("scope");
-          const after = Number(requestUrl.searchParams.get("after") || 0);
-          const document = {
-            id: scope,
-            seq: transcriptSeq,
-            payload: JSON.stringify(
-              snapshot(scope?.slice("transcript:".length)),
-            ),
-            _deleted: false,
-          };
-          response.setHeader(API_SCHEMA_HASH_HEADER, readApiSchemaHash());
-          response.setHeader("Content-Type", "application/json");
-          response.end(
-            JSON.stringify({
-              workspaceId,
-              generation: 1,
-              documents:
-                scope?.startsWith("transcript:") && after < document.seq
-                  ? [document]
-                  : [],
-              checkpoint: { seq: after < document.seq ? document.seq : after },
-              maxSeq: transcriptSeq,
-              initialHigh: transcriptSeq,
-            }),
-          );
           return;
         }
         if (path === "/") {
@@ -256,19 +259,11 @@ test("Ux Chat Ui", async ({
       const request = route.request();
       const url = new URL(request.url());
       const path = url.pathname;
-      const id = url.searchParams.get("id");
       if (path.startsWith("/api/sync/")) return route.continue();
       if (path === "/api/fixture-restore") return route.continue();
       if (path === "/api/fixture-live-update") return route.continue();
       if (request.method() === "POST")
         writes.push({ path, body: readFixtureWrite(request.postDataJSON()) });
-      if (path === "/api/transcript/stream")
-        return fulfillApi(route, {
-          status: 503,
-          json: { error: "Use fixture polling" },
-        });
-      if (path === "/api/transcript")
-        return fulfillApi(route, { json: snapshot(id) });
       if (path === "/api/transcript/item")
         return fulfillApi(route, {
           json: {
@@ -409,16 +404,21 @@ test("Ux Chat Ui", async ({
     assert.equal(writes.length, 2);
     assert.equal(required(writes[1]).body.delivery, "current_turn");
     assert.equal(required(writes[1]).body.text, "Send from button");
-    const longDraft = "L".repeat(12050);
+    const longDraft = "L".repeat(32001);
     await composer.fill(longDraft);
     assert.equal(await composer.inputValue(), longDraft);
     await page.locator("#draft-length-error").waitFor();
-    assert.equal(await page.locator("#send").isDisabled(), true);
+    assert.equal(await page.locator("#send").isEnabled(), true);
+    const longSend = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/api/fixture-send",
+    );
     await composer.press("Enter");
+    await longSend;
     assert.equal(
       writes.filter((write) => write.path === "/api/fixture-send").length,
-      2,
+      3,
     );
+    await composer.fill(longDraft);
     const attach = page.getByRole("button", {
       name: "Attach text as a file",
       exact: true,
@@ -433,19 +433,7 @@ test("Ux Chat Ui", async ({
       () =>
         document.querySelector<HTMLTextAreaElement>("#message")!.value === "",
     );
-    await page
-      .getByRole("button", { name: "Remove pending message.txt", exact: true })
-      .waitFor();
-    // Pending files live in memory only; the page writes no upload database.
-    assert.deepEqual(
-      (await page.evaluate(() => indexedDB.databases())).filter(
-        (database) => database.name === "codex-studio-uploads",
-      ),
-      [],
-    );
-    await page
-      .getByRole("button", { name: "Remove pending message.txt", exact: true })
-      .click();
+    assert.equal(required(writes.at(-1)).body.asTextFile, true);
 
     await page.locator("#earlier-messages").click();
     await page.locator('[data-message="item-6"]').waitFor();
@@ -620,6 +608,8 @@ test("Ux Chat Ui", async ({
       [
         "Draft must remain unsent",
         "Send from button",
+        longDraft,
+        longDraft,
         "Send while history loads",
       ],
       "branch creation never sends the reviewed draft",
@@ -654,6 +644,8 @@ test("Ux Chat Ui", async ({
       [
         "Draft must remain unsent",
         "Send from button",
+        longDraft,
+        longDraft,
         "Send while history loads",
       ],
     );

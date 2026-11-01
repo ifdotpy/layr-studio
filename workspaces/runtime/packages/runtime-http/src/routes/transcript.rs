@@ -3,11 +3,10 @@
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use serde_json::Value;
 use studio_runtime_services::transcript::{self, TranscriptError};
 use studio_runtime_services::transcript_runtime::{self, PageRequest};
 
-use super::extractors::QueryParams;
+use super::extractors::TypedQuery;
 use super::manifest::{Dependency, OperationStatus, RouteGroup, get};
 use crate::error::ApiError;
 use crate::router::HttpState;
@@ -78,39 +77,88 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
+/// Maximum length of a transcript agent ID, in Unicode code points.
+const TRANSCRIPT_AGENT_ID_MAX_CHARS: usize = 4096;
+/// Maximum length of a transcript cursor, in Unicode code points.
+const TRANSCRIPT_CURSOR_MAX_CHARS: usize = 4096;
+/// Maximum search query length, in Unicode code points.
+const TRANSCRIPT_SEARCH_MAX_CHARS: usize = 500;
+type QueryId = studio_runtime_schema::bounded_text::BoundedText<0, TRANSCRIPT_AGENT_ID_MAX_CHARS>;
+type QueryLimit = studio_runtime_schema::bounded_integer::BoundedInteger<
+    0,
+    { studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64 },
+>;
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TranscriptItemQuery {
+    id: Option<QueryId>,
+    message_id: Option<QueryId>,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TranscriptBlobQuery {
+    hash: Option<QueryId>,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TranscriptSearchQuery {
+    id: Option<QueryId>,
+    q: studio_runtime_schema::bounded_text::BoundedText<1, TRANSCRIPT_SEARCH_MAX_CHARS>,
+    limit: Option<QueryLimit>,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SearchQuery {
+    q: studio_runtime_schema::bounded_text::BoundedText<1, TRANSCRIPT_SEARCH_MAX_CHARS>,
+    limit: Option<QueryLimit>,
+}
+
+fn query_id(value: Option<QueryId>) -> String {
+    value.map_or_else(String::new, |value| value.as_str().to_owned())
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TranscriptPageQuery {
+    id: Option<studio_runtime_schema::bounded_text::BoundedText<0, TRANSCRIPT_AGENT_ID_MAX_CHARS>>,
+    before:
+        Option<studio_runtime_schema::bounded_text::BoundedText<0, TRANSCRIPT_CURSOR_MAX_CHARS>>,
+    around:
+        Option<studio_runtime_schema::bounded_text::BoundedText<0, TRANSCRIPT_CURSOR_MAX_CHARS>>,
+    after: Option<studio_runtime_schema::bounded_text::BoundedText<0, TRANSCRIPT_CURSOR_MAX_CHARS>>,
+    limit: Option<
+        studio_runtime_schema::bounded_integer::BoundedInteger<
+            0,
+            { studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64 },
+        >,
+    >,
+}
+
 async fn transcript_page(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<TranscriptPageQuery>,
 ) -> Result<Json<crate::generated::TranscriptPageResponse>, ApiError> {
     let request = PageRequest {
-        before: query
-            .typed_value("before")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        around: query
-            .typed_value("around")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        after: query
-            .typed_value("after")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        limit: query.typed_value("limit").and_then(Value::as_i64),
+        before: query.before.as_ref().map(|value| value.as_str().to_owned()),
+        around: query.around.as_ref().map(|value| value.as_str().to_owned()),
+        after: query.after.as_ref().map(|value| value.as_str().to_owned()),
+        limit: query.limit.map(|value| value.get()),
     };
-    read_page(state, query, request, false).await
+    let agent = query
+        .id
+        .as_ref()
+        .map_or("", |value| value.as_str())
+        .to_owned();
+    read_page(state, agent, request, false).await
 }
 
 async fn read_page(
     state: HttpState,
-    query: QueryParams,
+    agent: String,
     request: PageRequest,
     native_fallback: bool,
 ) -> Result<Json<crate::generated::TranscriptPageResponse>, ApiError> {
-    let agent = query
-        .typed_value("id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let value = match transcript_runtime::page(&store, agent, request).await {
         Err(TranscriptError::UnknownMessage) if native_fallback => Err(
@@ -126,18 +174,10 @@ async fn read_page(
 
 async fn transcript_item(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<TranscriptItemQuery>,
 ) -> Result<Json<crate::generated::TranscriptItemResponse>, ApiError> {
-    let agent = query
-        .typed_value("id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let identity = query
-        .typed_value("message_id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
+    let agent = query_id(query.id);
+    let identity = query_id(query.message_id);
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let value = transcript::item(&store, agent, identity)
         .await
@@ -152,13 +192,9 @@ async fn transcript_item(
 #[allow(clippy::wildcard_enum_match_arm)]
 async fn transcript_blob(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<TranscriptBlobQuery>,
 ) -> Result<Json<crate::generated::TextBlobResponse>, ApiError> {
-    let hash = query
-        .typed_value("hash")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
+    let hash = query_id(query.hash);
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let text = store
         .read_async("runtime-http/transcript_blob", {
@@ -177,31 +213,20 @@ async fn transcript_blob(
             }
             other => ApiError::stored(other),
         })?;
-    Ok(Json(super::generated_json::<
-        crate::generated::TextBlobResponse,
-    >(
-        serde_json::json!({"hash": hash, "size": text.len(), "text": text}),
-    )?))
+    Ok(Json(crate::generated::TextBlobResponse {
+        hash,
+        size: i64::try_from(text.len()).map_err(|_| ApiError::internal())?,
+        text,
+    }))
 }
 
 async fn transcript_search(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<TranscriptSearchQuery>,
 ) -> Result<Json<crate::generated::TranscriptSearchResponse>, ApiError> {
-    let agent = query
-        .typed_value("id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let search = query
-        .typed_value("q")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let limit = query
-        .typed_value("limit")
-        .and_then(Value::as_i64)
-        .unwrap_or(100);
+    let agent = query_id(query.id);
+    let search = query.q.as_str().to_owned();
+    let limit = query.limit.map_or(100, |value| value.get());
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let value = transcript::search(&store, agent, search, limit)
         .await
@@ -213,13 +238,9 @@ async fn transcript_search(
 
 async fn search_item(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<TranscriptItemQuery>,
 ) -> Result<Json<crate::generated::SearchItemResponse>, ApiError> {
-    let identity = query
-        .typed_value("id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
+    let identity = query_id(query.id);
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let value = transcript::search_item(&store, identity)
         .await
@@ -231,17 +252,10 @@ async fn search_item(
 
 async fn search(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<SearchQuery>,
 ) -> Result<Json<crate::generated::SearchResponse>, ApiError> {
-    let search = query
-        .typed_value("q")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let limit = query
-        .typed_value("limit")
-        .and_then(Value::as_i64)
-        .unwrap_or(50);
+    let search = query.q.as_str().to_owned();
+    let limit = query.limit.map_or(50, |value| value.get());
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let value = transcript::search_work(&store, search, None, limit)
         .await
@@ -253,9 +267,10 @@ async fn search(
 
 async fn canvas_transcript(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<TranscriptPageQuery>,
 ) -> Result<Json<crate::generated::TranscriptPageResponse>, ApiError> {
-    read_page(state, query, PageRequest::default(), true).await
+    let agent = query_id(query.id);
+    read_page(state, agent, PageRequest::default(), true).await
 }
 
 pub(crate) fn map_transcript_error(error: TranscriptError) -> ApiError {
@@ -314,6 +329,70 @@ inventory::submit! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn blob_http_returns_text_and_utf8_byte_length() {
+        use axum::{body::Body, extract::ConnectInfo, http::Request};
+        use tower::ServiceExt;
+        let root = tempfile::tempdir().expect("state");
+        let store = std::sync::Arc::new(
+            studio_runtime_store::RuntimeStore::open(Some(root.path()))
+                .await
+                .expect("store"),
+        );
+        let text = "hello 世界";
+        let (blob, bytes) = studio_runtime_store::text_blobs::encode_blob(text);
+        let path = studio_runtime_store::text_blobs::layout(&root.path().join("blobs"), &blob.hash);
+        tokio::fs::create_dir_all(path.parent().expect("parent"))
+            .await
+            .expect("blob directory");
+        tokio::fs::write(path, bytes).await.expect("blob");
+        let state = HttpState::new(
+            "token".into(),
+            "workspace".into(),
+            root.path().to_string_lossy().into_owned(),
+            4620,
+            None,
+            Some(store),
+            None,
+        );
+        let request = Request::builder()
+            .uri(format!("/api/transcript/blob?hash={}", blob.hash))
+            .header("host", "127.0.0.1:4620")
+            .header("x-canvas-token", "token")
+            .header(crate::API_SCHEMA_HASH_HEADER, crate::api_schema_hash())
+            .extension(ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                12345,
+            ))))
+            .body(Body::empty())
+            .expect("request");
+        let response = crate::router(state)
+            .expect("router")
+            .oneshot(request)
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("body");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON");
+        assert_eq!(
+            value,
+            serde_json::json!({"hash":blob.hash,"size":text.len(),"text":text})
+        );
+    }
+    #[test]
+    fn transcript_queries_reject_unknown_and_out_of_range_inputs() {
+        fn decode<T: serde::de::DeserializeOwned>(query: &str) -> bool {
+            let uri: axum::http::Uri = format!("/api/transcript/search?{query}").parse().unwrap();
+            axum::extract::Query::<T>::try_from_uri(&uri).is_ok()
+        }
+        assert!(decode::<TranscriptSearchQuery>("id=agent&q=hello&limit=5"));
+        assert!(!decode::<TranscriptSearchQuery>("q=hello&limit=-1"));
+        assert!(!decode::<TranscriptSearchQuery>("q=hello&unknown=1"));
+        assert!(!decode::<TranscriptSearchQuery>("id=agent"));
+        assert!(decode::<TranscriptItemQuery>("id=agent&message_id=item"));
+    }
     #[test]
     fn transcript_window_reasoning_boundary_retains_a_resolvable_older_cursor() {
         let page = serde_json::from_value(serde_json::json!({"items":[

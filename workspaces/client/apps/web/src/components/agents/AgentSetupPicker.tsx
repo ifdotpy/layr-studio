@@ -5,6 +5,7 @@ import { ModelField } from "../models/ModelField";
 import { EffortField } from "../models/EffortField";
 import { ModeToggles } from "../models/ModeToggles";
 import type { ModelOption } from "../models/modelOption";
+import { providerSupports } from "../../generated/providerKind.ts";
 
 export type SetupRole = "orchestrator" | "worker" | "review";
 export type AgentSetupPickerProps = {
@@ -13,6 +14,8 @@ export type AgentSetupPickerProps = {
   roleSwitchId?: string;
   readOnlyReason?: string | undefined;
   provider: string;
+  // Provider whose capabilities gate the model and effort fields. Defaults to provider.
+  capabilityProvider?: string | undefined;
   onProvider: (provider: string) => void;
   providers: string[];
   accounts: Account[];
@@ -21,6 +24,9 @@ export type AgentSetupPickerProps = {
   onAccount: (key: string | null) => void;
   automaticAccount?: boolean;
   isAccountDisabled?: (account: Account) => boolean;
+  accountUnavailableReason?:
+    | ((account: Account) => string | undefined)
+    | undefined;
   models: ModelOption[];
   model: string;
   onModel: (model: string) => void;
@@ -42,6 +48,10 @@ export type AgentSetupPickerProps = {
   onDaybreak: () => void;
 };
 export function AgentSetupPicker(p: AgentSetupPickerProps) {
+  // No provider picked yet (empty) keeps both fields visible.
+  const capabilityProvider = p.capabilityProvider || p.provider;
+  const gated = (capability: "model_change" | "effort") =>
+    !capabilityProvider || providerSupports(capabilityProvider, capability);
   return (
     <Stack gap="sm" className="execution-profile">
       <SegmentedControl
@@ -82,25 +92,30 @@ export function AgentSetupPicker(p: AgentSetupPickerProps) {
           providers={p.providers.length > 1 ? p.providers : []}
           disabled={!!p.readOnlyReason || p.accountDisabled}
           accountDisabled={p.isAccountDisabled}
+          accountUnavailableReason={p.accountUnavailableReason}
           automatic={p.automaticAccount}
         />
       )}
-      <ModelField
-        retainCurrent={p.retainCurrentModel}
-        id={p.modelId || (p.role === "review" ? "review-model" : "model")}
-        label={p.modelLabel}
-        options={p.models}
-        value={p.model}
-        onChange={p.onModel}
-        disabled={!!p.readOnlyReason || p.disabled}
-      />
-      <EffortField
-        label={p.effortLabel}
-        options={p.efforts}
-        value={p.effort}
-        onChange={p.onEffort}
-        disabled={!!p.readOnlyReason || p.disabled || p.effortDisabled}
-      />
+      {gated("model_change") && (
+        <ModelField
+          retainCurrent={p.retainCurrentModel}
+          id={p.modelId || (p.role === "review" ? "review-model" : "model")}
+          label={p.modelLabel}
+          options={p.models}
+          value={p.model}
+          onChange={p.onModel}
+          disabled={!!p.readOnlyReason || p.disabled}
+        />
+      )}
+      {gated("effort") && (
+        <EffortField
+          label={p.effortLabel}
+          options={p.efforts}
+          value={p.effort}
+          onChange={p.onEffort}
+          disabled={!!p.readOnlyReason || p.disabled || p.effortDisabled}
+        />
+      )}
       <ModeToggles
         {...p}
         daybreakAvailable={p.role !== "review" && p.daybreakAvailable}

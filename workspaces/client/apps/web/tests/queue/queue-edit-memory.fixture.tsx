@@ -10,7 +10,7 @@ export function mount() {
     id: "one",
     text: "original",
     created: 1,
-    status: "pending",
+    status: "queued",
     kind: "user",
   } as QueueItemDto;
   createRoot(node).render(

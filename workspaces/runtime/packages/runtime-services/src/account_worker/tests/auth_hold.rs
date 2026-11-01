@@ -130,11 +130,14 @@ pub(super) async fn agents(state: &State, kind: ProviderKind, others: usize) -> 
                 let mut template =
                     AgentRepository::get(tx, &AgentId::from(first.as_str()))?.unwrap();
                 if kind == ProviderKind::Claude {
-                    template.extra.insert("provider".into(), json!("claude"));
-                    template
-                        .extra
-                        .insert("nativeEffort".into(), json!("medium"));
-                    template.extra.insert("claudeOptions".into(), json!({}));
+                    template.provider = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_schema::ProviderKind::Claude,
+                    );
+                    template.native_effort =
+                        studio_runtime_schema::queue_command::Field::Value("medium".into());
+                    template.claude_options = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_store::StoredTransferObject::Known(Default::default()),
+                    );
                 }
                 AgentRepository::put(tx, &template)?;
                 for (offset, id) in rows.iter().enumerate() {
@@ -378,7 +381,20 @@ async fn held_claude_start_survives_restart_and_starts_once() {
         // Keep the disposable directory while releasing its only store owner.
         state.retained = true;
         drop(state);
-        let store = RuntimeStore::open(Some(&root)).await.unwrap();
+        // A cancelled writer job keeps the state lease until its thread has run it,
+        // so the new owner waits for the lease as a restarted server does.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
+        let store = loop {
+            match RuntimeStore::open(Some(&root)).await {
+                Ok(store) => break store,
+                Err(studio_runtime_store::StoreError::AlreadyOwned)
+                    if tokio::time::Instant::now() < deadline =>
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+                Err(error) => panic!("the state did not open again: {error}"),
+            }
+        };
         State {
             bridge: test_bridge(Arc::new(store)).await,
             agent,
@@ -523,7 +539,11 @@ async fn held_start_wakes_nothing_until_an_account_change() {
                     let mut row =
                         AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
                     row.status = studio_runtime_store::AgentStatus::Failed;
-                    row.extra.insert("error".into(), json!(reason));
+                    row.error = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_schema::provider_errors::AgentError::Message(
+                            (reason).to_string(),
+                        ),
+                    );
                     Ok(AgentRepository::put(tx, &row)?)
                 })
                 .await

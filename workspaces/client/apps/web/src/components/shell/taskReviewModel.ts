@@ -64,23 +64,6 @@ export function parseResultSchema(
   return value as TaskConfiguration["result_schema"];
 }
 
-export function requiresGateOverride(task: ReviewTask): boolean {
-  if (!task.gate) return false;
-  const gate = task.results?.at(-1)?.gate;
-  if (
-    !gate ||
-    gate.status !== "passed" ||
-    gate.exitCode !== 0 ||
-    !gate.monitorId
-  )
-    return true;
-  const expected = gateFields(task.gate);
-  const actual = gateFields(gate.config);
-  return (
-    expected.command !== actual.command || expected.timeout !== actual.timeout
-  );
-}
-
-export function taskStatus(task: ReviewTask) {
-  return task.displayStatus || task.status;
-}
+export const requiresGateOverride = (task: ReviewTask) =>
+  task.policy.gateOverrideRequired;
+export const taskStatus = (task: ReviewTask) => task.policy.displayStatus;

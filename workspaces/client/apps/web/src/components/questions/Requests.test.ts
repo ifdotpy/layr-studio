@@ -1,4 +1,6 @@
-import { QuestionDecision, RequestStatus } from "../../generated/api";
+import { QuestionDecision } from "../../generated/api";
+import { approval, question } from "../../approvalFixtures";
+import type { Approval } from "../../approvals";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { components } from "../../generated/api";
@@ -31,6 +33,10 @@ vi.mock("react", async (original) => ({
     return h.cells[index];
   },
   useEffect: () => {},
+  useCallback: <T>(callback: T) => callback,
+}));
+vi.mock("../../unsent/useUnsentText", () => ({
+  useUnsentText: () => [null, vi.fn(), vi.fn(async () => {})],
 }));
 vi.mock("../../servers/ServerServicesContext", () => ({
   useServerApi: () => ({ post: h.post }),
@@ -56,7 +62,7 @@ function nodes(node: ReactNode): ReactElement<NodeProps>[] {
 const refresh = vi.fn(async () => {});
 const notify = vi.fn();
 function render(
-  request: components["schemas"]["RequestEntityDto"],
+  request: Approval,
   agents: Parameters<typeof RequestCard>[0]["agents"] = [],
 ) {
   h.cursor = 0;
@@ -70,13 +76,13 @@ afterEach(() => {
 });
 
 it("Answer expands and hides the editor inside the same request card", () => {
-  const request = {
+  const request = approval({
     id: "question",
-    agent: "lead",
-    method: "agent/asyncQuestion",
-    status: RequestStatus.pending,
-    params: { questions: [{ id: "choice", question: "Continue?" }] },
-  } satisfies components["schemas"]["RequestEntityDto"];
+    request: {
+      kind: "agent_question",
+      questions: [question("choice", "Continue?")],
+    },
+  });
   const closed = render(request);
   const answer = required(
     nodes(closed).find((node) => node.props["data-answer"] === request.id),
@@ -110,13 +116,10 @@ it("Answer expands and hides the editor inside the same request card", () => {
 
 for (const decision of ["accept", "decline"] as const) {
   it(`approval ${decision} retains its card and sends the exact request once`, async () => {
-    const request = {
+    const request = approval({
       id: "approval",
-      agent: "lead",
-      method: "item/commandExecution/requestApproval",
-      status: RequestStatus.pending,
-      params: { command: "pwd" },
-    } satisfies components["schemas"]["RequestEntityDto"];
+      request: { kind: "exec", command: "pwd", cwd: "/", reason: null },
+    });
     const before = render(request);
     const action = required(
       nodes(before).find(
@@ -165,13 +168,11 @@ void questionAnswerConstructionWitness;
 
 for (const threadId of [null, "thread-1"]) {
   it(`keeps the native thread refusal scoped to a real matching thread (${threadId})`, () => {
-    const request = {
+    const request = approval({
       id: "approval",
-      agent: "lead",
-      method: "item/commandExecution/requestApproval",
-      status: RequestStatus.pending,
-      params: { threadId, command: "pwd" },
-    } satisfies components["schemas"]["RequestEntityDto"];
+      request: { kind: "exec", command: "pwd", cwd: "/", reason: null },
+      params: { threadId },
+    });
     const card = render(request, [
       {
         id: "lead",
@@ -193,11 +194,8 @@ for (const threadId of [null, "thread-1"]) {
   });
 }
 
-for (const method of [
-  "agent/asyncQuestion",
-  "item/tool/requestUserInput",
-] as const) {
-  it(`sends only the answer data for ${method}`, () => {
+for (const kind of ["agent_question", "question"] as const) {
+  it(`sends only the answer data for ${kind}`, () => {
     h.cells = [{ value: { q: "Chosen" } }];
     h.cursor = 0;
     const post = vi.fn(async () => true);
@@ -207,11 +205,10 @@ for (const method of [
       post,
       close: vi.fn(),
       notify,
-      request: {
+      request: approval({
         id: "q",
-        method,
-        params: { questions: [{ id: "q", question: "Choose" }] },
-      },
+        request: { kind, questions: [question("q", "Choose")] },
+      }),
     });
     if (
       !isValidElement<{
@@ -220,9 +217,10 @@ for (const method of [
     )
       throw new Error("Expected answer form");
     form.props.onSubmit({ preventDefault() {} });
-    expect(post).toHaveBeenCalledWith({
-      answers: { q: { answers: ["Chosen"] } },
-    });
+    expect(post).toHaveBeenCalledWith(
+      { answers: { q: { answers: ["Chosen"] } } },
+      JSON.stringify({ q: "Chosen" }),
+    );
   });
 }
 
@@ -236,16 +234,17 @@ it("sends elicitation content through its generated answer variant", () => {
     post,
     close: vi.fn(),
     notify,
-    request: {
+    request: approval({
       id: "form",
-      method: "mcpServer/elicitation/request",
-      params: {
-        requestedSchema: {
+      request: {
+        kind: "elicitation",
+        schema: {
           properties: { count: { type: "integer" }, flag: { type: "boolean" } },
           required: ["count", "flag"],
         },
       },
-    },
+      params: { mode: "form" },
+    }),
   });
   if (
     !isValidElement<{ onSubmit: (event: { preventDefault(): void }) => void }>(
@@ -254,8 +253,48 @@ it("sends elicitation content through its generated answer variant", () => {
   )
     throw new Error("Expected answer form");
   form.props.onSubmit({ preventDefault() {} });
-  expect(post).toHaveBeenCalledWith({
-    decision: "accept",
-    content: { count: 7, flag: true },
-  });
+  expect(post).toHaveBeenCalledWith(
+    { decision: "accept", content: { count: 7, flag: true } },
+    JSON.stringify({ count: "7", flag: "true" }),
+  );
 });
+
+const question1: Approval["request"] = {
+  kind: "agent_question",
+  questions: [question("q", "Continue?")],
+};
+const sent: Extract<Approval["state"], { kind: "answered" }>["answer"] = {
+  kind: "answers",
+  answers: [{ id: "q", answer: ["Yes"] }],
+};
+const stateCases: [Approval["state"], boolean][] = [
+  [{ kind: "pending" }, true],
+  [{ kind: "answering", answer: sent, command: "command" }, false],
+  [{ kind: "answered", answer: sent, by: { kind: "owner" }, at: 2 }, false],
+  [{ kind: "unknown", answer: sent, since: 2 }, false],
+  [{ kind: "closed", reason: "expired", at: 2 }, false],
+];
+for (const [state, controls] of stateCases) {
+  it(`shows answer controls only while a question is pending (${state.kind})`, () => {
+    const card = render(approval({ request: question1, state }));
+    expect(
+      nodes(card).some((node) => node.props["data-answer"] === "approval"),
+    ).toBe(controls);
+  });
+}
+
+const approvalCases: Approval["request"][] = [
+  { kind: "patch", item: "item", files: ["a.ts"], reason: null },
+  { kind: "permissions", requested: ["network"] },
+  { kind: "tool_use", tool: "Bash", input: {} },
+  { kind: "monitor_start", monitor: "m", command: "tail -f log" },
+];
+for (const request of approvalCases) {
+  it(`offers approve and decline for a ${request.kind} request`, () => {
+    const labels = nodes(render(approval({ request }))).map(
+      (node) => node.props.children,
+    );
+    expect(labels).toContain("Approve");
+    expect(labels).toContain("Decline");
+  });
+}

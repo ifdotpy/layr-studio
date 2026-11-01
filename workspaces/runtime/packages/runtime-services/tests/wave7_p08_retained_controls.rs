@@ -327,7 +327,11 @@ async fn controls_caller_supplies_scope_and_bounds_the_retained_request_deadline
         let result = controls
             .read_or_stop(
                 &agent,
-                &json!({"action":"stop_task","task_id":"task","request_id":request_id}),
+                &studio_runtime_schema::claude_controls::ClaudeSessionRead::StopTask {
+                    id: "agent".to_owned().try_into().unwrap(),
+                    task_id: "task".to_owned().try_into().unwrap(),
+                    request_id: request_id.clone().try_into().unwrap(),
+                },
                 None,
             )
             .await;
@@ -360,7 +364,11 @@ async fn opaque_stop_ids_have_distinct_stable_request_identities() {
         ("a:b", "c", &third),
     ] {
         let agent = json!({"compactions":0,"id":"agent","rootId":"agent","provider":"claude","epoch":2,"accountKey":"account","cwd":"/fixture","status":"paused","threadId":thread});
-        let body = json!({"action":"stop_task","task_id":task,"request_id":request});
+        let body = studio_runtime_schema::claude_controls::ClaudeSessionRead::StopTask {
+            id: "agent".to_owned().try_into().unwrap(),
+            task_id: task.to_owned().try_into().unwrap(),
+            request_id: request.to_owned().try_into().unwrap(),
+        };
         controls
             .read_or_stop(&agent, &body, None)
             .await

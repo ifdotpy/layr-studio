@@ -26,6 +26,12 @@ export function fixtureAccount(
       provider: "codex",
       source: "Codex",
       status: "ready",
+      eligibility:
+        value.disconnected ||
+        value.deleted ||
+        (value.status && value.status !== "ready")
+          ? { kind: "unavailable", reason: "Account unavailable" }
+          : { kind: "available" },
     } satisfies Account,
     value,
   );
@@ -56,6 +62,8 @@ export function fixtureLead(
     name,
     accountKey,
     empty,
+    accountChange: { kind: empty ? "select" : "transfer" },
+    accountTransferProgress: { kind: "none" },
     threadId: empty ? null : `thread-${id}`,
     isLead: true,
     source: "managed",

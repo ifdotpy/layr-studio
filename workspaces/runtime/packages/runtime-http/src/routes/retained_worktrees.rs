@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use studio_runtime_store::{AgentId, AgentIndexedReads, AgentRepository};
 
 use super::{
-    extractors::QueryParams,
+    extractors::TypedQuery,
     manifest::{OperationStatus, RouteGroup, get},
 };
 use crate::{error::ApiError, router::HttpState};
@@ -17,14 +17,17 @@ pub(crate) fn routes() -> RouteGroup {
     )])
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RetainedQuery {
+    agent: studio_runtime_schema::bounded_text::BoundedText<1, 200>,
+}
+
 async fn retained_worktrees(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<RetainedQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let id = query
-        .nonempty_str("agent")
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Supply an agent ID"))?
-        .to_owned();
+    let id = query.agent.as_str().to_owned();
     let store = state.store.ok_or_else(ApiError::internal)?;
     let result = store
         .read_async("runtime-http/retained-worktrees", move |connection| {
@@ -57,5 +60,23 @@ inventory::submit! {
         name: "retained_worktrees",
         routes: Some(routes),
         dependencies: &[],
+    }
+}
+
+#[cfg(test)]
+mod typed_query_tests {
+    use axum::extract::Query;
+    use serde::de::DeserializeOwned;
+
+    fn accepts<T: DeserializeOwned>(query: &str) -> bool {
+        let uri = format!("/?{query}").parse().unwrap();
+        Query::<T>::try_from_uri(&uri).is_ok()
+    }
+
+    #[test]
+    fn query_contracts() {
+        assert!(accepts::<super::RetainedQuery>("agent=a"));
+        assert!(!accepts::<super::RetainedQuery>("agent="));
+        assert!(!accepts::<super::RetainedQuery>("agent=a&unknown=x"));
     }
 }

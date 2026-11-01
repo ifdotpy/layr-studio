@@ -117,7 +117,7 @@ async fn voice_accepts_unrelated_operation_started_after_preparation() {
     };
     assert_eq!(
         receipt.status,
-        studio_runtime_schema::persistence::DeliveryStatus::Queued
+        studio_runtime_schema::delivery::MessageSendStatus::Queued
     );
     assert!(
         receipt.waiting_for.is_none(),

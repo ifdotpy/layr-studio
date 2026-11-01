@@ -85,7 +85,7 @@ const initial = {
   isLead: true,
   status: "idle",
   created: 1,
-  yoloMode: false,
+  permissionMode: "default",
   subagentConcurrencyVersion: 2,
   concurrency: 8,
   agentModeRevision: 1,
@@ -93,6 +93,7 @@ const initial = {
     model: "gpt-6-luna",
     effort: "high",
     delegationDepth: 1,
+    fastMode: false,
   },
   reviewDefaults: { model: null, effort: null },
 } as Agent;
@@ -151,7 +152,8 @@ window.fetch = async (input, options) => {
     else if ("subagent_concurrency" in body) {
       next.concurrency = body.subagent_concurrency;
       next.agentModeRevision!++;
-    } else if ("yolo_mode" in body) next.yoloMode = body.yolo_mode;
+    } else if ("yolo_mode" in body)
+      next.permissionMode = body.yolo_mode ? "bypassPermissions" : "default";
     else
       Object.assign(next, {
         model: body.model,

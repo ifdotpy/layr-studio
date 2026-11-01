@@ -120,7 +120,7 @@ const initial: Agent = {
   isLead: true,
   status: "idle",
   created: 1,
-  yoloMode: false,
+  permissionMode: "default",
   nextTurnSettingsSupported: true,
   workerDefaults: { model: "gpt-6-luna", effort: "high", fastMode: false },
   reviewDefaults: { model: null, effort: null },

@@ -435,7 +435,8 @@ test("execution settings ui", async ({ browser: _browser }) => {
     await closeChangeStatus();
     await waitFor(
       async () =>
-        (await state()).find((a) => a.id === lead.id)!.yoloMode === false,
+        (await state()).find((a) => a.id === lead.id)!.permissionMode ===
+        "default",
     );
     const fullSaved = settingsResponse(
       lead.id,
@@ -449,7 +450,8 @@ test("execution settings ui", async ({ browser: _browser }) => {
     await closeChangeStatus();
     await waitFor(
       async () =>
-        (await state()).find((a) => a.id === lead.id)!.yoloMode === true,
+        (await state()).find((a) => a.id === lead.id)!.permissionMode ===
+        "bypassPermissions",
     );
     await waitFor(() => yolo.isChecked());
     await waitFor(() => yolo.isEnabled());
@@ -803,7 +805,8 @@ test("execution settings ui", async ({ browser: _browser }) => {
     await closeChangeStatus();
     await waitFor(
       async () =>
-        (await state()).find((a) => a.id === fresh.id)!.yoloMode === false,
+        (await state()).find((a) => a.id === fresh.id)!.permissionMode ===
+        "default",
     );
     await waitFor(async () => !(await freshYolo.isDisabled()));
     await waitFor(async () => !(await freshYolo.isChecked()));
@@ -819,7 +822,8 @@ test("execution settings ui", async ({ browser: _browser }) => {
     await closeChangeStatus();
     await waitFor(
       async () =>
-        (await state()).find((a) => a.id === fresh.id)!.yoloMode === true,
+        (await state()).find((a) => a.id === fresh.id)!.permissionMode ===
+        "bypassPermissions",
     );
     await waitFor(async () => !(await freshYolo.isDisabled()));
     await page.keyboard.press("Escape");

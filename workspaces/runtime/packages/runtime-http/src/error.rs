@@ -18,6 +18,7 @@ pub struct ApiError {
     status: StatusCode,
     message: String,
     location: Option<serde_json::Value>,
+    code: Option<studio_runtime_schema::command::CommandErrorCode>,
     outcome: Option<crate::generated::ErrorResponseOutcome>,
     content_type: Option<&'static str>,
     internal_cause: Option<InternalErrorKind>,
@@ -36,11 +37,18 @@ impl ApiError {
             status,
             message: message.into(),
             location: None,
+            code: None,
             outcome: None,
             content_type: None,
             internal_cause: None,
             diagnostic_causes: Vec::new(),
         }
+    }
+
+    pub(crate) fn receipt_expired(message: impl Into<String>) -> Self {
+        let mut error = Self::new(StatusCode::GONE, message);
+        error.code = Some(studio_runtime_schema::command::CommandErrorCode::ReceiptExpired);
+        error
     }
 
     /// Mark a rejected preflight as safely retryable; callers must use this
@@ -64,6 +72,7 @@ impl ApiError {
             status: StatusCode::BAD_REQUEST,
             message: "Invalid request".to_owned(),
             location: Some(serde_json::Value::Array(location)),
+            code: None,
             outcome: None,
             content_type: None,
             internal_cause: None,
@@ -133,12 +142,10 @@ impl From<studio_runtime_store::request_results::RequestResultError> for ApiErro
                 StatusCode::CONFLICT,
                 "This request ID has different content",
             ),
-            RequestResultError::Expired => {
-                Self::new(StatusCode::GONE, "This request ID has expired")
-            }
+            RequestResultError::Expired => Self::receipt_expired("This request ID has expired"),
             RequestResultError::Identity(
                 RequestIdentityError::Expired { .. } | RequestIdentityError::InvalidUuidV7(_),
-            ) => Self::new(StatusCode::GONE, "This request ID has expired"),
+            ) => Self::receipt_expired("This request ID has expired"),
             RequestResultError::Identity(RequestIdentityError::FutureTimestamp { .. }) => {
                 Self::new(
                     StatusCode::BAD_REQUEST,
@@ -228,6 +235,9 @@ impl IntoResponse for ApiError {
             && let Ok(outcome) = serde_json::to_value(outcome)
         {
             body["outcome"] = outcome;
+        }
+        if let Some(code) = self.code {
+            body["code"] = serde_json::json!(code);
         }
         if let Some(location) = self.location {
             body["location"] = location;

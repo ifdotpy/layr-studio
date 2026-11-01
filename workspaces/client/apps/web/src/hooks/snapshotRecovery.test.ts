@@ -31,6 +31,7 @@ vi.mock("react", () => ({
   useCallback: (fn: unknown) => fn,
 }));
 vi.mock("../servers/ServerServicesContext", () => ({
+  useServerServices: () => null,
   useServerApi: () => ({
     refreshSession: h.session,
     saved: (_: string, value: unknown) => value,

@@ -1,3 +1,4 @@
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_schema::TOKEN_RATE_MAX_ENTRIES;
@@ -7,8 +8,16 @@ use studio_runtime_services::resource_notify::{
 };
 use studio_runtime_services::token_rate::TokenRateHub;
 
-fn request(id: &str, resources: Value) -> Value {
-    json!({"requestId": id, "resources": resources})
+fn request(
+    id: &str,
+    resources: Value,
+) -> studio_runtime_schema::resource_notification::ResourceNotifyRequest {
+    let resources = Vec::deserialize(resources).expect("resource fixtures");
+    studio_runtime_schema::resource_notification::ResourceNotifyRequest::new(
+        id.to_owned(),
+        resources,
+    )
+    .expect("notification fixture")
 }
 
 fn rates(index: usize) -> Value {
@@ -52,13 +61,15 @@ fn normalized_resource_replay_and_conflict_preserve_the_publication() {
         Err(ResourceNotifyError::Conflict)
     );
     for body in [
-        request("", json!([{"kind":"accounts"}])),
-        request("empty", json!([])),
-        request("unknown", json!([{"kind":"unknown"}])),
+        r#"{"requestId":"", "resources":[{"kind":"accounts"}]}"#,
+        r#"{"requestId":"empty", "resources":[]}"#,
+        r#"{"requestId":"unknown", "resources":[{"kind":"unknown"}]}"#,
     ] {
-        assert_eq!(
-            publisher.publish_once(&body),
-            Err(ResourceNotifyError::Invalid)
+        assert!(
+            serde_json::from_str::<
+                studio_runtime_schema::resource_notification::ResourceNotifyRequest,
+            >(body)
+            .is_err()
         );
     }
     // State reset and targeted resources each advance the broad cursor once.

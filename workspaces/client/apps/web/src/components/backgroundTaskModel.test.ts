@@ -1,55 +1,67 @@
 import {
-  TaskStatus as GeneratedApiTaskStatus,
-  TaskKind as GeneratedApiTaskKind,
-} from "../generated/api.ts";
-import { componentSnapshot } from "./componentTestFixtures";
-import type { BackgroundTask, Monitor } from "../types";
+  BackgroundTaskIndicator,
+  BackgroundTaskKind,
+  BackgroundTaskKindLabel,
+  BackgroundTaskLabel,
+  ProcessSourceKind,
+} from "../generated/api";
+import { TaskKind, TaskStatus } from "../generated/api";
 import type { components } from "../generated/api";
-import assert from "node:assert/strict";
-import { expectTypeOf, it } from "vitest";
+import type { DeepReadonly } from "../deepReadonly";
+import { expectTypeOf, it, expect } from "vitest";
 import {
   activeTask,
-  backgroundTasks,
-  displayProcess,
+  isCommandTask,
   processIdentity,
-  projectTaskForRenderer,
-  type DisplayLegacyTask,
+  type DisplayBackgroundTask,
   type DisplayProcessTask,
-  type RendererTaskKind,
-} from "./backgroundTaskModel.ts";
+} from "./backgroundTaskModel";
 
-it("projects generated monitor and task payloads for renderer use", () => {
-  const tasks = backgroundTasks(
-    componentSnapshot([], {
-      monitors: [
-        { id: "incomplete", status: null },
-        {
-          id: "monitor",
-          agent: "lead",
-          created: 1,
-          status: GeneratedApiTaskStatus.completed,
-        },
-      ],
-      tasks: [
-        {
-          id: "task",
-          agent: "lead",
-          created: 2,
-          status: GeneratedApiTaskStatus.running,
-          kind: GeneratedApiTaskKind.command,
-        },
-      ],
-    }),
-  );
-  const [monitor, task] = tasks;
-  assert.ok(monitor);
-  assert.ok(task);
-  assert.equal(monitor.kind, "monitor");
-  assert.equal(activeTask(monitor), false);
-  assert.equal(activeTask(task), true);
+const display = {
+  kind: BackgroundTaskKind.command,
+  kindLabel: BackgroundTaskKindLabel.command,
+  title: "Command",
+  active: true,
+  indicator: BackgroundTaskIndicator.working,
+  label: BackgroundTaskLabel.running,
+  inBackgroundList: true,
+  actions: ["readOutput"],
+} satisfies components["schemas"]["BackgroundTaskDisplay"];
+
+it("uses the server's task-list membership and activity", () => {
+  const task = {
+    id: "task",
+    agent: "lead",
+    created: 1,
+    status: TaskStatus.running,
+    kind: TaskKind.tool,
+    display,
+  } satisfies components["schemas"]["TaskEntityDto"];
+  const hidden = {
+    ...task,
+    id: "hidden",
+    display: { ...display, inBackgroundList: false },
+  };
+  const monitor = {
+    id: "monitor",
+    agent: "lead",
+    created: 1,
+    status: TaskStatus.completed,
+    display: {
+      ...display,
+      kind: BackgroundTaskKind.monitor,
+      kindLabel: BackgroundTaskKindLabel.monitor,
+      active: false,
+      indicator: BackgroundTaskIndicator.unread,
+      label: BackgroundTaskLabel.completed,
+    },
+  } satisfies components["schemas"]["MonitorEntityDto"];
+  expect([monitor, task].map(activeTask)).toEqual([false, true]);
+  expect(hidden.display.inBackgroundList).toBe(false);
+  expect(isCommandTask(task)).toBe(true);
 });
 
-it("keeps generated process identity, capabilities, and open status through every source", () => {
+it("preserves a server-provided process identity and presentation", () => {
   const process = {
     id: "process / arbitrary:identifier",
     key: "process:key / 1",
@@ -57,122 +69,31 @@ it("keeps generated process identity, capabilities, and open status through ever
     agent: "agent / 3",
     accountKey: "account / 4",
     epoch: 0,
-    name: "arbitrary tool name",
-    command: "printf 'a command with spaces'",
+    name: "name",
     created: 1,
-    status: "future process status",
-    source: "monitor",
-    output: "arbitrary output\n",
-    capabilities: {
-      readOutput: false,
-      sendInput: true,
-      resize: false,
-      stop: true,
+    status: TaskStatus.running,
+    source: ProcessSourceKind.monitor,
+    tail: "output",
+    bytes: 6,
+    cancelRequested: false,
+    outputTruncated: false,
+    outputPatterns: [],
+    display: {
+      ...display,
+      kind: BackgroundTaskKind.backgroundTask,
+      kindLabel: BackgroundTaskKindLabel.tool,
+      title: "Server title",
     },
-  } satisfies components["schemas"]["ManagedProcessRecord"];
-  const sources = [
-    ["monitor", "monitor"],
-    ["codex_task", "command"],
-    ["claude_task", "backgroundTask"],
-  ] as const satisfies ReadonlyArray<
-    readonly [DisplayProcessTask["source"], RendererTaskKind]
-  >;
-  for (const [source, kind] of sources) {
-    const task = displayProcess({ ...process, source });
-    assert.equal(task.kind, kind);
-    assert.equal(task.id, process.id);
-    assert.equal(task.command, process.command);
-    assert.equal(task.status, process.status);
-    assert.equal(task.tail, process.output);
-    assert.equal(task.interactive, process.capabilities.sendInput);
-    assert.equal(task.capabilities, process.capabilities);
-    assert.deepEqual(processIdentity(task), {
-      key: process.key,
-      generation: process.generation,
-      agent: process.agent,
-      accountKey: process.accountKey,
-      epoch: process.epoch,
-    });
-  }
-});
-
-it("requires generated process identity for controls and retains closed task kinds", () => {
-  expectTypeOf<DisplayProcessTask["status"]>().toEqualTypeOf<string>();
-  expectTypeOf<DisplayProcessTask["capabilities"]>().toEqualTypeOf<
-    components["schemas"]["ProcessCapabilities"]
+  } satisfies DisplayProcessTask;
+  expect(process.display.kind).toBe("backgroundTask");
+  expect(processIdentity(process)).toEqual({
+    key: process.key,
+    generation: process.generation,
+    agent: process.agent,
+    accountKey: process.accountKey,
+    epoch: process.epoch,
+  });
+  expectTypeOf<DisplayBackgroundTask>().toEqualTypeOf<
+    DeepReadonly<components["schemas"]["BackgroundTaskView"]["value"]>
   >();
-  expectTypeOf<
-    Parameters<typeof processIdentity>[0]
-  >().toEqualTypeOf<DisplayProcessTask>();
-  expectTypeOf<ReturnType<typeof processIdentity>>().toEqualTypeOf<
-    components["schemas"]["ProcessIdentity"]
-  >();
-  expectTypeOf<BackgroundTask>().not.toExtend<DisplayProcessTask>();
-  expectTypeOf<Monitor>().not.toExtend<DisplayProcessTask>();
-  expectTypeOf<DisplayLegacyTask>().not.toExtend<DisplayProcessTask>();
-  expectTypeOf<
-    Omit<DisplayProcessTask, "key">
-  >().not.toExtend<DisplayProcessTask>();
-  expectTypeOf<
-    Omit<DisplayProcessTask, "generation">
-  >().not.toExtend<DisplayProcessTask>();
-  expectTypeOf<
-    Omit<DisplayProcessTask, "accountKey">
-  >().not.toExtend<DisplayProcessTask>();
-  expectTypeOf<
-    Omit<DisplayProcessTask, "epoch">
-  >().not.toExtend<DisplayProcessTask>();
-  expectTypeOf<string>().not.toExtend<RendererTaskKind>();
-  expectTypeOf<DisplayLegacyTask["status"]>().toEqualTypeOf<
-    components["schemas"]["TaskStatus"]
-  >();
-});
-
-it("keeps a task entity visible when its optional kind is absent", () => {
-  const task = projectTaskForRenderer(
-    {
-      id: "task-without-kind",
-      agent: "lead",
-      created: 1,
-      status: "running",
-    },
-    "task",
-  );
-  assert.equal(task?.kind, "tool");
-  assert.equal(task?.id, "task-without-kind");
-});
-
-it("lists commands and monitors without tool calls", () => {
-  const common: Partial<BackgroundTask> = {
-    agent: "lead",
-    created: 1,
-    status: GeneratedApiTaskStatus.running,
-  };
-  const tasks = backgroundTasks(
-    componentSnapshot([], {
-      monitors: [{ ...common, id: "watch" }],
-      tasks: [
-        { ...common, id: "command", kind: GeneratedApiTaskKind.command },
-        { ...common, id: "legacy-command", command: "pwd" },
-        {
-          ...common,
-          id: "question",
-          kind: GeneratedApiTaskKind.tool,
-          name: "AskUserQuestion",
-        },
-        { ...common, id: "named-tool", name: "fileChange" },
-        {
-          ...common,
-          id: "tool-with-command",
-          kind: GeneratedApiTaskKind.tool,
-          command: "pwd",
-        },
-      ],
-    }),
-  );
-  assert.deepEqual(
-    tasks.map((task) => task.id),
-    ["watch", "command", "legacy-command"],
-  );
-  assert(tasks.every(activeTask));
 });

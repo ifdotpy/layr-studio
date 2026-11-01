@@ -5,6 +5,7 @@ use rusqlite::{Connection, Transaction, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use studio_runtime_providers::{Frame, ResponseBody, encode_line};
+use studio_runtime_schema::approvals::{ApprovalId, ApprovalState, Hidden, Principal, Timestamp};
 use studio_runtime_schema::persistence::{
     OutboxKind, OutboxStatus, OwnerKind, RequestIdentity, ToolRequestStatus,
 };
@@ -51,6 +52,14 @@ impl From<CallbackBody> for ResponseBody {
     }
 }
 
+/// A reply the provider connection refused before it left puts its approval
+/// back to pending. Only the answer of a card carries this.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Reopen {
+    /// The expiry timer the approval had before the answer, in Unix seconds.
+    pub fire_at: Option<Timestamp>,
+}
+
 /// One canonical response body; retained-frame delivery uses this same row.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CallbackResponse {
@@ -58,7 +67,7 @@ pub struct CallbackResponse {
     pub body: CallbackBody,
     pub card: Option<String>,
     pub tool_request: Option<String>,
-    pub unanswered: Option<Value>,
+    pub reopen: Option<Reopen>,
     pub delete_requested_at: Option<f64>,
     pub frame_fingerprint: Option<String>,
 }
@@ -127,22 +136,14 @@ pub(crate) fn settle_supervisor_written(
     Ok(Some((row.owner_id, row.id, fingerprint)))
 }
 
-pub(crate) fn hold_unclean_responses(tx: &Transaction<'_>) -> Result<(), CallbackError> {
-    let mut query = tx.prepare("SELECT id FROM runtime_outbox WHERE kind=?1 AND status=?2")?;
-    let ids = query
-        .query_map(
-            params![OutboxKind::ProviderCallback, OutboxStatus::Pending],
-            |row| row.get::<_, String>(0),
-        )?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(query);
-    for id in ids {
-        let mut row: Response = Outbox::get(tx, &id)?.ok_or(CallbackError::Unknown)?;
-        row.status = OutboxStatus::Submitted;
-        row.next_at = None;
-        put_response(tx, &row)?;
-        delivery_in(tx, &row.payload.identity, DeliveryOutcome::Unknown)?;
-    }
+/// Entity hook of the unclean-stop pass for one held callback. It keeps `Submitted`, not
+/// `Unknown`: the connection-loss settlement in `recovery.rs` reads only `Submitted` rows.
+pub(crate) fn hold_response(tx: &Transaction<'_>, id: &str) -> Result<(), CallbackError> {
+    let mut row: Response = Outbox::get(tx, id)?.ok_or(CallbackError::Unknown)?;
+    row.status = OutboxStatus::Submitted;
+    row.next_at = None;
+    put_response(tx, &row)?;
+    delivery_in(tx, &row.payload.identity, DeliveryOutcome::Unknown)?;
     Ok(())
 }
 
@@ -163,7 +164,9 @@ pub(super) fn save_actor(tx: &Transaction<'_>, actor: &Value) -> Result<(), Call
         .as_str()
         .ok_or(CallbackError::Stored("runtime_agents/id".into()))?;
     records::validate("runtime_agents", id, actor.clone())?;
-    if !studio_runtime_store::agent_volatile::update(tx, id, actor)? {
+    let typed = studio_runtime_store::AgentRecord::from_value(actor.clone())
+        .map_err(|_| CallbackError::Stored("runtime_agents".into()))?;
+    if !studio_runtime_store::Table::<studio_runtime_store::AgentRecord>::new(tx).update(&typed)? {
         return Err(CallbackError::Stale);
     }
     crate::agents_create::publish_agent(tx, actor)?;
@@ -257,7 +260,16 @@ pub(super) fn save_reply(
     reply: &Reply,
 ) -> Result<(), CallbackError> {
     input.check_context(&reply.identity.context)?;
-    let mut owner = admit_owner(tx, &reply.identity, &input.signature())?;
+    save_reply_signed(tx, &input.signature(), reply)
+}
+/// Save a reply of a request whose owner is stored: the owner keeps the
+/// signature of the original provider request.
+pub(super) fn save_reply_signed(
+    tx: &Transaction<'_>,
+    signature: &str,
+    reply: &Reply,
+) -> Result<(), CallbackError> {
+    let mut owner = admit_owner(tx, &reply.identity, signature)?;
     if let Some(previous) = response(tx, &reply.identity)? {
         if previous.payload.identity != reply.identity
             || previous.payload.body != CallbackBody::from(&reply.body)
@@ -287,7 +299,7 @@ pub(super) fn save_reply(
                 .admission
                 .as_ref()
                 .map(|admission| admission.id().into()),
-            signature: input.signature(),
+            signature: signature.to_owned(),
             status: OutboxStatus::Pending,
             account: Some(reply.identity.context.account.clone()),
             stream_id: Some(reply.identity.context.stream_id.clone()),
@@ -303,7 +315,7 @@ pub(super) fn save_reply(
                 body: CallbackBody::from(&reply.body),
                 card: owner.payload.card,
                 tool_request: None,
-                unanswered: None,
+                reopen: None,
                 delete_requested_at: None,
                 frame_fingerprint: None,
             },
@@ -316,10 +328,18 @@ pub(super) fn saved_reply(
     input: &Input,
 ) -> Result<Option<Reply>, CallbackError> {
     input.check_context(&identity.context)?;
+    saved_reply_signed(tx, identity, &input.signature())
+}
+/// Read the saved reply of a request whose owner is stored.
+pub(super) fn saved_reply_signed(
+    tx: &Transaction<'_>,
+    identity: &ReplyIdentity,
+    signature: &str,
+) -> Result<Option<Reply>, CallbackError> {
     let Some(owner) = owner(tx, identity)? else {
         return Ok(None);
     };
-    check_origin(&owner, identity, &input.signature())?;
+    check_origin(&owner, identity, signature)?;
     if owner.status == ToolRequestStatus::Completed {
         let admission = owner
             .payload
@@ -347,7 +367,7 @@ pub(super) fn saved_reply(
     if saved.status == OutboxStatus::Pending {
         rebind_prepared(tx, &mut saved, &identity.context)?;
     }
-    if saved.signature != input.signature() || saved.payload.identity.key() != identity.key() {
+    if saved.signature != signature || saved.payload.identity.key() != identity.key() {
         return Err(CallbackError::Conflict);
     }
     match saved.status {
@@ -386,13 +406,10 @@ pub async fn submission_ready(store: &RuntimeStore, reply: &Reply) -> Result<boo
             if saved.payload.card.is_some() || saved.payload.tool_request.is_some() {
                 snapshot(tx, &reply.identity.context)?.active()?;
                 if let Some(id) = saved.payload.card {
-                    let card =
-                        studio_runtime_store::Table::<studio_runtime_store::RequestRecord>::new(tx)
-                            .get(&id)?
-                            .ok_or(CallbackError::Stale)?;
-                    if card.status
-                        != studio_runtime_schema::persistence::RequestCardStatus::Answering
-                        || card.deleted_at.is_some_and(|at| at != 0.0)
+                    let card = studio_runtime_store::approvals::get(tx, &ApprovalId(id))?
+                        .ok_or(CallbackError::Stale)?;
+                    if !matches!(card.state, ApprovalState::Answering { .. })
+                        || card.hidden.is_some()
                     {
                         return Ok(false);
                     }
@@ -468,8 +485,10 @@ fn delivery_in(
     saved.next_at = (saved.status == OutboxStatus::Pending).then_some(0);
     if saved.status == OutboxStatus::Pending {
         saved.payload.frame_fingerprint = None;
-        if let Some(unanswered) = &saved.payload.unanswered {
-            super::cards::save_historical(tx, unanswered)?;
+        if let Some(reopen) = &saved.payload.reopen {
+            if let Some(card) = &saved.payload.card {
+                super::cards::reopen(tx, card, reopen.fire_at)?;
+            }
             owner.status = ToolRequestStatus::Queued;
             owner.payload.reply_identity = None;
             put_owner(tx, &owner)?;
@@ -511,26 +530,39 @@ fn delivery_in(
         }
     }
     if let Some(card_id) = &saved.payload.card {
-        let mut card = studio_runtime_store::Table::<studio_runtime_store::RequestRecord>::new(tx)
-            .get(card_id)?
-            .ok_or(CallbackError::Stale)?;
-        use studio_runtime_schema::persistence::RequestCardStatus;
-        card.status = if saved.status == OutboxStatus::Committed {
-            RequestCardStatus::Answered
-        } else if saved.status == OutboxStatus::Unknown {
-            RequestCardStatus::Uncertain
-        } else {
-            RequestCardStatus::Answering
-        };
-        if saved.status == OutboxStatus::Unknown {
-            card.answer_error = Some("Answer delivery could not be confirmed. Inspect the agent conversation before taking further action.".into());
+        let id = ApprovalId(card_id.clone());
+        let mut card =
+            studio_runtime_store::approvals::get(tx, &id)?.ok_or(CallbackError::Stale)?;
+        let now = Timestamp(super::cards::clock());
+        if saved.status == OutboxStatus::Unknown
+            && matches!(card.state, ApprovalState::Answering { .. })
+        {
+            card = studio_runtime_store::approvals::delivery_lost(tx, &id, now)?;
+            card.detail.answer_error = Some(
+                "Answer delivery could not be confirmed. Inspect the agent conversation before taking further action."
+                    .into(),
+            );
         }
         if saved.status == OutboxStatus::Committed {
+            if matches!(
+                card.state,
+                ApprovalState::Answering { .. } | ApprovalState::Unknown { .. }
+            ) {
+                card = studio_runtime_store::approvals::confirm_delivery(
+                    tx,
+                    &id,
+                    Principal::Owner,
+                    now,
+                )?;
+            }
             if let Some(at) = saved.payload.delete_requested_at {
-                card.status = RequestCardStatus::Deleted;
-                card.deleted_at = Some(at);
-                card.deleted_by = Some("user".into());
-                card.deferred = Some(false);
+                card.hidden = Some(Hidden {
+                    at: Timestamp(at),
+                    by: Principal::Owner,
+                });
+                if let Some(deferral) = card.deferral.as_mut() {
+                    deferral.active = false;
+                }
             }
             let mut actor = records::get(tx, "runtime_agents", &identity.context.agent)?
                 .ok_or(CallbackError::Stale)?;
@@ -1000,7 +1032,7 @@ mod tests {
         )
         .expect("reply");
         save_reply(&tx, &input, &reply).expect("save");
-        hold_unclean_responses(&tx).expect("unclean hold");
+        crate::unclean_recovery::hold_entities(&tx).expect("unclean hold");
         assert_eq!(
             held_supervisor_operations(&tx, "account", 4).expect("operations"),
             vec![reply.identity.operation_id()]

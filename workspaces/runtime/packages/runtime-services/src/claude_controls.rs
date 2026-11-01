@@ -326,12 +326,14 @@ impl ControlSnapshot {
             .ok_or(ControlError::Unknown)?;
         let mut agent = self.raw.clone();
         let ControlRequest::Settings { settings, .. } = request;
-        agent["claudeOptions"] = json!(settings);
+        let mut options = json!(settings);
+        options
+            .as_object_mut()
+            .ok_or(ControlError::Unknown)?
+            .remove("permissionMode");
+        agent["claudeOptions"] = options;
         if let Some(mode) = settings.permission_mode {
-            agent["yoloMode"] = json!(
-                mode
-                    == studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
-            );
+            agent["permissionMode"] = json!(mode);
         }
         if agent["workspaceOperation"] == "branch_recovery" {
             agent["status"] = json!("paused");

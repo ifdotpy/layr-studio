@@ -5,27 +5,19 @@ use crate::{
     Table,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction};
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde::Serialize;
+use serde_json::Value;
 
-#[derive(Deserialize, Serialize)]
-pub struct AccountTransferRecord {
-    id: String,
-    #[serde(flatten)]
-    fields: Map<String, Value>,
-}
+pub type AccountTransferRecord = crate::transfer_record::TransferRecord;
 impl JsonRecord for AccountTransferRecord {
     type Id = String;
     const TABLE: &'static str = "runtime_account_transfers";
     const SCHEMA: &'static str = "PersistedAccountTransferRecord";
     const KEY_MODE: RecordKeyMode = RecordKeyMode::PayloadId;
     const QUERY_SHAPE: RecordQueryShape = RecordQueryShape::None;
+    const TYPED_SHAPE: bool = true;
     fn record_key(&self) -> Option<&String> {
         Some(&self.id)
-    }
-    // Remove this override once the record is closed and typed.
-    fn encode_stored(&self, _: &rusqlite::Connection, row_id: &str) -> crate::StoreResult<String> {
-        crate::records::encode_open_record(self, row_id)
     }
 }
 pub const MAX_TRANSFER_RECORD_BYTES: usize = 8 * 1024 * 1024;
@@ -57,12 +49,32 @@ impl AccountTransferRepository {
 
     /// Keep the original text for the ordered transfer snapshot decoder.
     pub fn get_with_raw(db: &Connection, id: &str) -> StoreResult<Option<(Value, String)>> {
+        Self::get_typed_with_raw(db, id)?
+            .map(|(record, raw)| {
+                let value = record.serialize(serde_json::value::Serializer)?;
+                if !studio_runtime_schema::validate("PersistedAccountTransferRecord", &value)
+                    .map_err(StoreError::SchemaValidation)?
+                {
+                    return Err(StoreError::InvalidStoredObject {
+                        table: "runtime_account_transfers",
+                        id: id.into(),
+                    });
+                }
+                Ok((value, raw))
+            })
+            .transpose()
+    }
+
+    /// Decode a bounded operation once while retaining its original bytes.
+    pub fn get_typed_with_raw(
+        db: &Connection,
+        id: &str,
+    ) -> StoreResult<Option<(AccountTransferRecord, String)>> {
         bounded_record(db, "runtime_account_transfers", id)?
             .map(|raw| {
-                let record = Table::<AccountTransferRecord>::new(db).decode_stored(id, &raw)?;
-                let mut fields = record.fields;
-                fields.insert("id".to_owned(), Value::String(record.id));
-                Ok((Value::Object(fields), raw))
+                Table::<AccountTransferRecord>::new(db)
+                    .decode_stored(id, &raw)
+                    .map(|record| (record, raw))
             })
             .transpose()
     }
@@ -72,7 +84,8 @@ impl AccountTransferRepository {
         let mut statement = db.prepare_cached(
             "SELECT id FROM runtime_account_transfers
              WHERE json_extract(record,'$.status') IS NOT 'completed'
-             AND json_extract(record,'$.status') IS NOT 'cancelled' ORDER BY rowid",
+             AND json_extract(record,'$.status') IS NOT 'cancelled'
+             AND json_extract(record,'$.kind') IS NOT 'unreadable' ORDER BY rowid",
         )?;
         Ok(statement
             .query_map([], |row| row.get::<_, String>(0))?
@@ -129,7 +142,12 @@ impl AccountTransferRepository {
                 id: id.into(),
             });
         }
-        let value: Value = serde_json::from_str(raw)?;
+        let typed: AccountTransferRecord =
+            serde_json::from_str(raw).map_err(|_| StoreError::InvalidStoredObject {
+                table: "runtime_account_transfers",
+                id: id.into(),
+            })?;
+        let value = typed.serialize(serde_json::value::Serializer)?;
         if value["id"] != id
             || !studio_runtime_schema::validate("PersistedAccountTransferRecord", &value)
                 .map_err(StoreError::SchemaValidation)?

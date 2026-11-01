@@ -467,6 +467,16 @@
         "collection": "monitor",
         "id": "7476dd05-6094-5a65-9ba0-3007fab6be6b",
         "value": {
+          "display": {
+            "kind": "monitor",
+            "kindLabel": "monitor",
+            "title": "printf running",
+            "active": true,
+            "indicator": "working",
+            "label": "running",
+            "inBackgroundList": true,
+            "actions": ["readOutput"]
+          },
           "agent": "777c97c9-d1ee-4c3d-970d-ff0badc41e7c",
           "bytes": 0,
           "command": "printf running",
@@ -492,6 +502,16 @@
         "collection": "monitor",
         "id": "ef833e85-ebe4-5750-a66f-ccf85ea2043c",
         "value": {
+          "display": {
+            "kind": "monitor",
+            "kindLabel": "monitor",
+            "title": "printf needs approval",
+            "active": true,
+            "indicator": "answer",
+            "label": "approval",
+            "inBackgroundList": true,
+            "actions": ["readOutput", "approve"]
+          },
           "agent": "777c97c9-d1ee-4c3d-970d-ff0badc41e7c",
           "bytes": 0,
           "command": "printf needs approval",
@@ -516,6 +536,16 @@
         "collection": "monitor",
         "id": "rule-linked-monitor",
         "value": {
+          "display": {
+            "kind": "monitor",
+            "kindLabel": "monitor",
+            "title": "printf running",
+            "active": true,
+            "indicator": "working",
+            "label": "running",
+            "inBackgroundList": true,
+            "actions": ["readOutput"]
+          },
           "agent": "777c97c9-d1ee-4c3d-970d-ff0badc41e7c",
           "bytes": 0,
           "command": "printf running",

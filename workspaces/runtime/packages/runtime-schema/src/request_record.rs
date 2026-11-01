@@ -120,7 +120,11 @@ pub struct RequestRecord {
     pub rpc_id: Option<RequestId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supervisor: Option<RequestSupervisor>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "request_preview",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[schemars(with = "Option<Value>")]
     pub preview: Option<Box<RawValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -173,8 +177,18 @@ fn request_params<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Box<RawValue>, D::Error> {
     let raw = Box::<RawValue>::deserialize(deserializer)?;
-    if !raw.get().trim_start().starts_with('{') {
-        return Err(serde::de::Error::custom("request params must be an object"));
+    serde_json::from_str::<crate::request_projection::RequestParams>(raw.get())
+        .map_err(serde::de::Error::custom)?;
+    Ok(raw)
+}
+
+fn request_preview<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Box<RawValue>>, D::Error> {
+    let raw = Option::<Box<RawValue>>::deserialize(deserializer)?;
+    if let Some(value) = &raw {
+        serde_json::from_str::<crate::request_projection::RequestPreview>(value.get())
+            .map_err(serde::de::Error::custom)?;
     }
     Ok(raw)
 }
@@ -249,6 +263,16 @@ mod tests {
         assert!(serde_json::from_str::<RequestRecord>(r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{},"unknown":1}"#).is_err());
         assert!(serde_json::from_str::<RequestRecord>(r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":false}"#).is_err());
         assert!(serde_json::from_str::<RequestRecord>(r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{},"decision":"future"}"#).is_err());
+    }
+
+    #[test]
+    fn known_request_fields_are_checked_at_decode() {
+        let invalid = r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{"command":42}}"#;
+        assert!(serde_json::from_str::<RequestRecord>(invalid).is_err());
+        let valid = r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{"command":["git","status"],"providerExtra":{"opaque":true}}}"#;
+        assert!(serde_json::from_str::<RequestRecord>(valid).is_ok());
+        let duplicate = r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{"questions":[{"id":"q","id":"other","question":"Continue?"}]}}"#;
+        assert!(serde_json::from_str::<RequestRecord>(duplicate).is_err());
     }
 
     #[test]

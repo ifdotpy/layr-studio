@@ -1,12 +1,13 @@
+import { MessageSendStatus } from "./generated/api.ts";
 import {
-  DeliveryStatus,
   AgentStatus as GeneratedApiAgentStatus,
+  AccountStatus,
   AgentSource as GeneratedApiAgentSource,
-  RequestStatus as GeneratedApiRequestStatus,
   AgentRole as GeneratedApiAgentRole,
   WorkspaceMode as GeneratedApiWorkspaceMode,
 } from "./generated/api.ts";
 import { useSubscription } from "./sync/subscriptions";
+import { isDeferred, isPending } from "./approvals";
 import { ProviderKind } from "./generated/providerKind.ts";
 import { submitRename, watchRenameResult } from "./renameRequest";
 import { randomUUID } from "./uuid";
@@ -20,7 +21,7 @@ import { useWorkspacePanelWidth } from "./components/shell/workspacePanelWidth";
 import { useWorkspaceLayout } from "./layout/useWorkspaceLayout";
 import { layoutQueries } from "./layout/layout-contract.generated";
 import { restoreSidebarFocus } from "./components/sidebar/SidebarFrame";
-import type { SendMessageBody } from "./commands";
+import { sendsTextFile, type SendMessageBody } from "./commands";
 import {
   StudioErrorsScope,
   useStudioErrorsState,
@@ -39,7 +40,6 @@ import {
   useServerStorageEventKey,
   useServerChatCreations,
   useServerResources,
-  useServerAccountLimits,
   useServerOutbox,
   useServerActivityScope,
   useServerSidebarServices,
@@ -67,7 +67,7 @@ import {
   DEFAULT_LOCAL_SERVER_ALIAS,
 } from "./servers/serverAliases";
 import { serverLocalStorage as localStorage } from "./servers/storage";
-import { ACCOUNT_LIMITS_WINDOW_FRESH_SECONDS } from "./generated/sharedValues";
+import { MAX_DRAFT_TEXT_CODEPOINTS } from "./generated/sharedValues";
 import SearchOverlay from "./components/shell/SearchOverlay";
 import { SettingsRow } from "./components/ui/primitives";
 import { modalSizes } from "./theme";
@@ -77,22 +77,9 @@ import { useNativeAction } from "./useNativeAction";
 import { useChatPrefetch } from "./hooks/chatPrefetch";
 import { useProjectDelete } from "./useProjectDelete";
 import { ProjectDeleteDialog } from "./components/ProjectDeleteDialog";
-import {
-  beginConversationDelete,
-  claimConversationDeletePost,
-  confirmedConversationDeleteIds,
-  conversationDeleteReadback,
-  definiteDeleteRejection,
-  withoutAgentDeleteScope,
-  type PendingConversationDelete,
-} from "./chatDeleteScope";
+import { deleteConversation, definiteDeleteRejection } from "./chatDeleteScope";
 import { useTeamTokenRateStream } from "./hooks/useTeamTokenRateStream";
-import {
-  accountLimits,
-  limitsReadSucceeded,
-  shouldReplaceLimitsSnapshot,
-} from "./usage/accountUsage";
-import type { AccountLimitsSnapshot } from "./usage/accountUsage";
+import { accountLimits, limitsReadSucceeded } from "./usage/accountUsage";
 import {
   useMobileViewport,
   focusSelectedComposer,
@@ -259,7 +246,6 @@ import "./hooks/viewport-surface.css";
 import TeamPanel from "./components/agents/TeamPanel";
 import FilePreview, { type PreviewTarget } from "./components/FilePreview";
 import { awaitingAnswerIds } from "./components/agents/WorkerOverview";
-import { activeTask, backgroundTasks } from "./components/backgroundTaskModel";
 const TerminalDock = lazy(() => import("./components/TerminalDock"));
 import Workspace from "./components/shell/DeferredWorkspace";
 const BackgroundTasks = lazy(
@@ -291,16 +277,9 @@ export default function App({ active = true }: { active?: boolean }) {
   const { watchResourceConnection } = renameEvents;
   const sidebarServices = useServerSidebarServices();
   const serverAliases = useServerAliases(readServerAliases);
-  const {
-    configureLimitsCache,
-    cachedLimitsByAccount,
-    cacheAccountLimits,
-    subscribeLimitsCache,
-  } = useServerAccountLimits();
   const { useServerActivity, serverActivityActive, subscribeServerActivity } =
     useServerActivityScope();
-  const { acknowledgeOutbox, editOutboxDisplay, durableSend, useOutbox } =
-    useServerOutbox();
+  const { editOutboxDisplay, durableSend, useOutbox } = useServerOutbox();
   const {
     get,
     post,
@@ -344,7 +323,6 @@ export default function App({ active = true }: { active?: boolean }) {
         Object.entries(old).filter(([id]) => !observedSends.current.has(id)),
       ),
     );
-    void acknowledgeOutbox(ids).catch(() => {});
   }, []);
   const editSend = useCallback((id: string, text: string) => {
     setOutgoing((old) =>
@@ -679,107 +657,40 @@ export default function App({ active = true }: { active?: boolean }) {
   const narrowTeam =
     !(teamHasSidebar ? teamFitsWithSidebar : teamFitsWithoutSidebar) ||
     !rowLayout.teamCanInline;
-  const dataRef = useRef(data);
-  dataRef.current = data;
-  const [pendingConversationDelete, setPendingConversationDelete] =
-    useState<PendingConversationDelete | null>(null);
-  const pendingConversationDeleteRef = useRef<PendingConversationDelete | null>(
-    null,
+  const [pendingConversationDelete, setPendingConversationDelete] = useState<
+    ReadonlySet<string>
+  >(new Set());
+  const pendingConversationDeletesRef = useRef(
+    new Map<string, AbortController>(),
   );
-  const conversationDeleteLock = useRef(false);
   const [projectDeleteScope, setProjectDeleteScope] = useState<
     ReadonlySet<string>
   >(new Set());
-  const startedConversationDeletes = useRef(
-    new WeakSet<PendingConversationDelete>(),
-  );
+  useEffect(() => {
+    if (!data) return;
+    const pending = pendingConversationDeletesRef.current;
+    let changed = false;
+    for (const [id, controller] of pending) {
+      if (!data.threads.some((thread) => thread.id === id)) {
+        pending.delete(id);
+        controller.abort();
+        changed = true;
+      }
+    }
+    if (changed) setPendingConversationDelete(new Set(pending.keys()));
+  }, [data]);
   const openedRef = useRef(opened);
   openedRef.current = opened;
-  if (data?.stateDir) configureLimitsCache(data.stateDir);
-  const limitsByAccount = useSyncExternalStore(
-    subscribeLimitsCache,
-    cachedLimitsByAccount,
-    cachedLimitsByAccount,
-  );
-  const setLimitsByAccount = useCallback(
-    (
-      update:
-        | Record<string, AccountLimitsSnapshot>
-        | ((
-            old: Record<string, AccountLimitsSnapshot>,
-          ) => Record<string, AccountLimitsSnapshot>),
-    ) => {
-      const next =
-        typeof update === "function" ? update(cachedLimitsByAccount()) : update;
-      for (const snapshot of Object.values(next)) cacheAccountLimits(snapshot);
-    },
-    [cachedLimitsByAccount, cacheAccountLimits],
-  );
   useEffect(() => {
     if (data?.stateDir && saved(sharedCreationKey(data.stateDir), null))
       setSharedCreate({});
   }, [data?.stateDir]);
-  const receipts = useMemo(
-    () =>
-      new Map((data?.runtime?.events || []).map((event) => [event.id, event])),
-    [data?.runtime?.events],
-  );
-  const prefetchData = useMemo(() => {
-    if (
-      !data ||
-      (!pendingConversationDelete?.scope.size && !projectDeleteScope.size)
-    )
-      return data;
-    return {
-      ...data,
-      threads: withoutAgentDeleteScope(
-        data.threads,
-        new Set([
-          ...(pendingConversationDelete?.scope || []),
-          ...projectDeleteScope,
-        ]),
-      ),
-    };
-  }, [data, pendingConversationDelete, projectDeleteScope]);
-  const prepareChat = useChatPrefetch(
-    prefetchData,
-    opened,
-    workspaceId,
-    active,
-  );
+  const prepareChat = useChatPrefetch(data, opened, workspaceId, active);
   useEffect(() => {
     if (tasksOpen) setTasksRendered(true);
     if (workspaceOpen) setWorkspaceRendered(true);
   }, [tasksOpen, workspaceOpen]);
-  const cancelledSends = outgoingMessages
-    .filter((entry) => receipts.get(entry.id)?.status === "cancelled")
-    .map((entry) => entry.id)
-    .join(",");
-  useEffect(() => {
-    if (cancelledSends) observeSends(cancelledSends.split(","));
-  }, [cancelledSends, observeSends]);
-  const visibleOutgoing = useMemo(
-    () =>
-      outgoingMessages
-        .filter((entry) => receipts.get(entry.id)?.status !== "cancelled")
-        .map((entry) => {
-          const receipt = receipts.get(entry.id);
-          if (receipt?.status === "failed")
-            return {
-              ...entry,
-              status: "failed",
-              error: receipt.error || undefined,
-            } satisfies OutgoingMessage;
-          if (receipt?.status === "uncertain")
-            return {
-              ...entry,
-              status: "uncertain",
-              error: receipt.error || undefined,
-            } satisfies OutgoingMessage;
-          return entry;
-        }),
-    [outgoingMessages, receipts],
-  );
+  const visibleOutgoing = outgoingMessages;
   const conversationOutgoing = useRetainedArray(
     visibleOutgoing.filter((entry) => entry.body.room === opened),
   );
@@ -930,7 +841,7 @@ export default function App({ active = true }: { active?: boolean }) {
   const railGeometry = useEdgeRail(undefined, active && !!data && !room?.radio);
   const [railTools] = useState(createConversationMenuTools);
   const legacy = data?.chats.find((c) => c.id === opened);
-  const roomRoots = room ? roomLeadIds(room, agents) : [];
+  const roomRoots = room ? roomLeadIds(room) : [];
   const lead = room?.radio
     ? undefined
     : catalog.byId.get(
@@ -950,7 +861,7 @@ export default function App({ active = true }: { active?: boolean }) {
     lead?.id,
     Boolean(
       workers.length &&
-      !team.some((member) => pendingConversationDelete?.scope.has(member.id)) &&
+      !team.some((member) => pendingConversationDelete.has(member.id)) &&
       !team.some((member) => projectDeleteScope.has(member.id)) &&
       (narrowTeam ? teamOpen : wideTeamOpen),
     ),
@@ -999,7 +910,7 @@ export default function App({ active = true }: { active?: boolean }) {
         provider: account.provider,
         email: account.email || null,
         plan: account.plan || null,
-        status: account.disconnected ? "signedOut" : account.status,
+        status: account.status,
         label: account.label,
         isDefault: account.id === accounts.data.defaultAccountKey,
       })),
@@ -1023,20 +934,15 @@ export default function App({ active = true }: { active?: boolean }) {
     accounts.data.accounts.find((a) => a.id === accountKey) ||
     accounts.data.archivedAccounts?.find((a) => a.id === accountKey);
   const accountId = selectedAccount?.accountId;
-  const cachedLimits = accountLimits(
-    limitsByAccount[accountKey],
-    accountKey,
-    accountId,
-  );
   const snapshotLimits =
     data?.runtime?.rateLimitsByAccount?.[accountKey] ||
     (accountKey === "default" ? data?.runtime?.rateLimits : null);
-  const matchingSnapshot = accountLimits(snapshotLimits, accountKey, accountId);
-  const visibleLimits =
-    matchingSnapshot &&
-    (!cachedLimits || (matchingSnapshot.at || 0) > (cachedLimits.at || 0))
-      ? matchingSnapshot
-      : cachedLimits || null;
+  const matchingSnapshot = accountLimits(
+    snapshotLimits?.observation,
+    accountKey,
+    accountId,
+  );
+  const visibleLimits = matchingSnapshot;
   const readableLeadId =
     lead?.id && !projectDeleteScope.has(lead.id) ? lead.id : undefined;
   const chatData = useChatSnapshot(data, readableLeadId);
@@ -1053,17 +959,27 @@ export default function App({ active = true }: { active?: boolean }) {
   chatWaitSource.set(conversationSnapshot);
   useLayoutEffect(() => chatWaitSource.publish(), [conversationSnapshot]);
   const attentionCount = messageAttentionCount(chatData);
-  const taskCount = backgroundTasks(chatData).filter(activeTask).length;
+  const taskCount =
+    useSubscription(
+      readableLeadId ? { kind: "processes", agentId: readableLeadId } : null,
+    ).data?.activities.length ?? 0;
   const setDraft = useCallback(
     (text: string | ((current: string) => string), id = opened || "new") =>
       setDrafts((old) => {
+        const value = typeof text === "function" ? text(old[id] || "") : text;
+        if (Array.from(value).length > MAX_DRAFT_TEXT_CODEPOINTS) {
+          notify(
+            `Drafts can contain at most ${MAX_DRAFT_TEXT_CODEPOINTS.toLocaleString()} characters. Previous text was kept.`,
+          );
+          return old;
+        }
         const next = {
           ...old,
-          [id]: typeof text === "function" ? text(old[id] || "") : text,
+          [id]: value,
         };
         return next;
       }),
-    [opened, setDrafts],
+    [opened, setDrafts, notify],
   );
   const finishConversationDelete = useCallback(
     (deleted: string[]) => {
@@ -1085,11 +1001,9 @@ export default function App({ active = true }: { active?: boolean }) {
     workspaceId,
     services: sidebarServices,
     onSuspend: (scope) => {
-      prepareChat.suspend(scope);
       setProjectDeleteScope(scope);
     },
-    onResume: (scope) => {
-      prepareChat.resume(scope);
+    onResume: () => {
       setProjectDeleteScope(new Set());
     },
     onFinish: finishConversationDelete,
@@ -1229,75 +1143,19 @@ export default function App({ active = true }: { active?: boolean }) {
     }
     setNavigationTarget(undefined);
   }, [navigationTarget, data, agents, notify]);
-  const limitsCache = useRef(limitsByAccount);
-  limitsCache.current = limitsByAccount;
   const accountsForLimits = useRef(accounts.data.accounts);
   accountsForLimits.current = accounts.data.accounts;
   const reloadLimitsFor = useCallback(
-    (key: string, force = false) => {
-      const selected = accounts.data.accounts.find((item) => item.id === key);
-      const selectedId = selected?.accountId;
+    (key: string) => {
       const pending = limitsRequests.current.get(key);
       if (pending) return pending;
-      const cached = accountLimits(limitsCache.current[key], key, selectedId);
-      if (
-        !force &&
-        cached?.data &&
-        !cached.error &&
-        Date.now() / 1000 - (cached.at || 0) <
-          ACCOUNT_LIMITS_WINDOW_FRESH_SECONDS
-      )
-        return Promise.resolve(true);
-      const requestStartedAt = Date.now() / 1000;
       setLimitsLoading((old) => ({ ...old, [key]: true }));
       const request = get("/api/limits", {
         query: key === "default" ? undefined : { account_key: key },
         timeoutMs: 25000,
       })
-        .then((result) => {
-          const responseSnapshot = accountLimits(result, key, selectedId);
-          if (!responseSnapshot)
-            throw new Error("Codex returned limits for another account.");
-          const snapshot =
-            responseSnapshot.data === null && limitsReadSucceeded(result)
-              ? { ...responseSnapshot, at: requestStartedAt }
-              : responseSnapshot;
-          const currentSnapshot = accountLimits(
-            limitsCache.current[key],
-            key,
-            selectedId,
-          );
-          if (shouldReplaceLimitsSnapshot(currentSnapshot, snapshot))
-            limitsCache.current = {
-              ...limitsCache.current,
-              [key]: { ...snapshot, accountKey: key },
-            };
-          setLimitsByAccount((old) => {
-            const previous = accountLimits(old[key], key, selectedId);
-            if (!shouldReplaceLimitsSnapshot(previous, snapshot)) return old;
-            return { ...old, [key]: { ...snapshot, accountKey: key } };
-          });
-          return limitsReadSucceeded(result);
-        })
-        .catch((error) => {
-          limitsCache.current = {
-            ...limitsCache.current,
-            [key]: {
-              ...(limitsCache.current[key] || { data: null }),
-              error: errorText(error),
-              accountKey: key,
-            },
-          };
-          setLimitsByAccount((old) => ({
-            ...old,
-            [key]: {
-              ...(old[key] || { data: null }),
-              error: errorText(error),
-              accountKey: key,
-            },
-          }));
-          return false;
-        })
+        .then(limitsReadSucceeded)
+        .catch(() => false)
         .finally(() => {
           limitsRequests.current.delete(key);
           setLimitsLoading((old) => ({ ...old, [key]: false }));
@@ -1305,18 +1163,11 @@ export default function App({ active = true }: { active?: boolean }) {
       limitsRequests.current.set(key, request);
       return request;
     },
-    [accounts.data.accounts],
+    [get],
   );
-  const reloadLimits = useCallback(
-    async (force = false) => {
-      await reloadLimitsFor(accountKey, force);
-    },
-    [accountKey, reloadLimitsFor],
-  );
-  const forceReloadLimits = useCallback(
-    () => reloadLimits(true),
-    [reloadLimits],
-  );
+  const forceReloadLimits = useCallback(async () => {
+    await reloadLimitsFor(accountKey);
+  }, [accountKey, reloadLimitsFor]);
   const reloadLimitsForRef = useRef(reloadLimitsFor);
   reloadLimitsForRef.current = reloadLimitsFor;
   const usageTeamIndicators = team
@@ -1360,19 +1211,15 @@ export default function App({ active = true }: { active?: boolean }) {
       )
       .map((key) => {
         const account = accounts.data.accounts.find((item) => item.id === key);
-        const cached = accountLimits(
-          limitsByAccount[key],
-          key,
-          account?.accountId,
-        );
         const snapshot =
           data?.runtime?.rateLimitsByAccount?.[key] ||
           (key === "default" ? data?.runtime?.rateLimits : null);
-        const matching = accountLimits(snapshot, key, account?.accountId);
-        const limits =
-          matching && (!cached || (matching.at || 0) > (cached.at || 0))
-            ? matching
-            : cached || null;
+        const matching = accountLimits(
+          snapshot?.observation,
+          key,
+          account?.accountId,
+        );
+        const limits = matching;
         return {
           key,
           label: account?.label || key,
@@ -1380,12 +1227,16 @@ export default function App({ active = true }: { active?: boolean }) {
           provider: account?.provider ?? undefined,
           plan: account?.plan,
           accountId: account?.accountId,
-          signedOut: !!account?.disconnected,
+          signedOut: !!account && account.status !== AccountStatus.ready,
+          runway: limits === matching ? snapshot?.projection.runway : undefined,
+          reset: limits === matching ? snapshot?.projection.reset : undefined,
+          buckets:
+            limits === matching ? snapshot?.projection.buckets : undefined,
           limits,
           loading: !!limitsLoading[key],
           // Reads the latest loader, so an equal account keeps its old closure.
-          reload: async (force = false) => {
-            await reloadLimitsForRef.current(key, force);
+          reload: async () => {
+            await reloadLimitsForRef.current(key);
           },
         };
       });
@@ -1394,29 +1245,12 @@ export default function App({ active = true }: { active?: boolean }) {
     team,
     usageTeamIndicators,
     accounts.data.accounts,
-    limitsByAccount,
     data?.runtime?.rateLimitsByAccount,
     data?.runtime?.rateLimits,
     limitsLoading,
     reloadLimitsFor,
   ]);
   const usageAccounts = useRetainedUsageAccounts(nextUsageAccounts);
-  useEffect(() => {
-    // Keep each account's latest snapshot for immediate return navigation.
-    const incoming = { ...data?.runtime?.rateLimitsByAccount };
-    if (data?.runtime?.rateLimits && !incoming.default)
-      incoming.default = data.runtime.rateLimits;
-    setLimitsByAccount((old) => {
-      let next = old;
-      for (const [key, value] of Object.entries(incoming)) {
-        if (!value?.at || (value.accountKey || "default") !== key) continue;
-        if (!old[key] || value.at > (old[key].at || 0)) {
-          next = { ...next, [key]: { ...value, accountKey: key } };
-        }
-      }
-      return next;
-    });
-  }, [data?.runtime?.rateLimits, data?.runtime?.rateLimitsByAccount]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (!activeScreen.current) return;
@@ -1711,6 +1545,7 @@ export default function App({ active = true }: { active?: boolean }) {
     }
   };
   const send = async (options?: {
+    asTextFile?: boolean;
     assets?: string[];
     attachments?: Attachment[];
     onPersist?: () => void | Promise<void>;
@@ -1718,7 +1553,9 @@ export default function App({ active = true }: { active?: boolean }) {
   }) => {
     if (schemaMismatch || isApiSchemaMismatch()) return;
     const draftKey = opened || "new",
-      text = getDraft(draftKey).trim();
+      draft = getDraft(draftKey),
+      fileSend = sendsTextFile(draft, options?.asTextFile),
+      text = fileSend ? draft : draft.trim();
     if ((!text && !options?.assets?.length) || sendingLock.current) return;
     const attempt = Symbol();
     sendingLock.current = attempt;
@@ -1731,12 +1568,13 @@ export default function App({ active = true }: { active?: boolean }) {
     };
     let request: SendMessageBody | undefined;
     try {
-      if (renameCommand(text) !== undefined && !opened)
+      if (!fileSend && renameCommand(text) !== undefined && !opened)
         throw new Error("Open a chat before using /rename.");
       const id = opened || (await newChat());
       if (!id) return;
       latestSend.current[id] = attempt;
       if (
+        !fileSend &&
         agent?.source === GeneratedApiAgentSource.managed &&
         studioCommand(text, agent.provider ?? undefined)
       ) {
@@ -1785,29 +1623,42 @@ export default function App({ active = true }: { active?: boolean }) {
             command.slice(1) as "compact" | "review",
           );
       } else {
+        const pending = outbox.entries.some(
+          (entry) =>
+            entry.id === sends.current[id]?.id &&
+            !(
+              entry.status.source === "device" &&
+              entry.status.state.kind === "receipt_expired"
+            ),
+        );
         if (
-          sends.current[id]?.text !== text ||
-          JSON.stringify(sends.current[id]?.assets || []) !==
-            JSON.stringify(options?.assets || []) ||
-          sends.current[id]?.delivery !==
-            (options?.delivery || DeliveryMoment.CurrentTurn)
-        )
-          sends.current[id] = {
-            id: randomUUID(),
-            room: id,
-            text,
-            assets: options?.assets || [],
-            // Enter delivers after the current tool call; Tab after the turn.
-            delivery: options?.delivery || DeliveryMoment.CurrentTurn,
-          };
+          pending &&
+          sends.current[id]?.text === text &&
+          JSON.stringify(sends.current[id]?.assets || []) ===
+            JSON.stringify(options?.assets || []) &&
+          sends.current[id]?.delivery ===
+            (options?.delivery || DeliveryMoment.CurrentTurn) &&
+          !!sends.current[id]?.asTextFile === !!options?.asTextFile
+        ) {
+          notify("This message is still pending on this device.");
+          return;
+        }
+        sends.current[id] = {
+          id: randomUUID(),
+          room: id,
+          text,
+          assets: options?.assets || [],
+          ...(options?.asTextFile ? { asTextFile: true } : {}),
+          // Enter delivers after the current tool call; Tab after the turn.
+          delivery: options?.delivery || DeliveryMoment.CurrentTurn,
+        };
         request = sends.current[id];
         const entry: OutgoingMessage = {
           id: request.id,
           body: request,
-          status: "sending",
+          status: { source: "device", state: { kind: "stored" } },
           created: Date.now(),
           attachments: options?.attachments || [],
-          displayPending: true,
         };
         setOutgoing((old) => ({ ...old, [entry.id]: entry }));
         const result = await durableSend(
@@ -1817,8 +1668,8 @@ export default function App({ active = true }: { active?: boolean }) {
             // Keep the draft until the request is saved.
             setDrafts((old) => {
               const next = { ...old };
-              if (next[draftKey]?.trim() === text) delete next[draftKey];
-              if (next[id]?.trim() === text) delete next[id];
+              if (next[draftKey] === draft) delete next[draftKey];
+              if (next[id] === draft) delete next[id];
               return next;
             });
             // The saved command owns this message. A new user submission,
@@ -1830,42 +1681,44 @@ export default function App({ active = true }: { active?: boolean }) {
             release();
           },
         );
-        setOutgoing((old) => ({
-          ...old,
-          [entry.id]: {
-            ...entry,
-            status: result.queued
-              ? "queued"
-              : result.status === "uncertain"
-                ? "uncertain"
-                : "accepted",
-            ...(result.kind === "server" ? { receipt: result } : {}),
-            error: result.error || undefined,
-          },
-        }));
-        if (result.status === "cancelled") {
-          if (sends.current[id]?.id === entry.id) {
-            delete sends.current[id];
-          }
-          throw new ApiError(
-            "This message was cancelled. Send it again to resume.",
-            400,
-          );
-        }
-        if (result.status === "failed")
-          throw new ApiError(result.error || "The message was not sent.", 400);
-        if (result.status === "uncertain")
-          throw new Error(
-            result.error ||
-              "Delivery is uncertain. Inspect the conversation before sending again.",
-          );
-        if (sends.current[id]?.id === entry.id) {
-          delete sends.current[id];
+        if (result.kind === "confirmed") {
+          setOutgoing((old) => {
+            const next = { ...old };
+            delete next[entry.id];
+            return next;
+          });
+        } else if (result.kind === "removed") {
+          throw new Error("This message was removed.");
+        } else if (result.kind === "server") {
+          setOutgoing((old) => ({
+            ...old,
+            [entry.id]: {
+              ...entry,
+              status: { source: "server", status: result.status },
+              receipt: result,
+            },
+          }));
+          if (
+            result.status === MessageSendStatus.cancelled ||
+            result.status === MessageSendStatus.failed
+          )
+            throw new ApiError(
+              result.error || "The message was not sent.",
+              400,
+            );
+        } else {
+          setOutgoing((old) => ({
+            ...old,
+            [entry.id]: {
+              ...entry,
+              status: { source: "device", state: result.state },
+            },
+          }));
         }
         if (
           result.kind === "server" &&
           Object.values(result.deliveries || {}).some(
-            (v) => v.status !== DeliveryStatus.queued,
+            (v) => v.status !== MessageSendStatus.queued,
           )
         )
           notify("Message saved. Some deliveries are not confirmed.");
@@ -1910,8 +1763,16 @@ export default function App({ active = true }: { active?: boolean }) {
                 ...old,
                 [key]: {
                   ...old[key],
-                  status: rejected ? "failed" : "uncertain",
-                  error: errorText(e),
+                  status:
+                    old[key].status.source === "server"
+                      ? old[key].status
+                      : {
+                          source: "device",
+                          state: {
+                            kind: "transport_failed",
+                            error: errorText(e),
+                          },
+                        },
                 },
               }
             : old,
@@ -1955,159 +1816,7 @@ export default function App({ active = true }: { active?: boolean }) {
       throw e;
     }
   };
-  const checkConversationDelete = useCallback(
-    (targetId: string) => {
-      const current = pendingConversationDeleteRef.current;
-      if (
-        !current ||
-        current.targetId !== targetId ||
-        current.phase === "checking"
-      )
-        return;
-      const checking = {
-        ...current,
-        phase: "checking" as const,
-      };
-      pendingConversationDeleteRef.current = checking;
-      setPendingConversationDelete(checking);
-      setModal({
-        title: "Delete result unconfirmed",
-        body: (
-          <p role="status">
-            Checking current chat state. Studio will not resend this delete.
-          </p>
-        ),
-      });
-      const keepUnconfirmed = () => {
-        const latest = pendingConversationDeleteRef.current;
-        if (latest?.targetId !== targetId || latest.phase !== "checking")
-          return;
-        const readback = { ...latest, phase: "readback" as const };
-        pendingConversationDeleteRef.current = readback;
-        setPendingConversationDelete(readback);
-        setModal({
-          title: "Delete result unconfirmed",
-          body: (
-            <>
-              <p role="status">
-                Delete result unconfirmed. Check server state before trying
-                again.
-              </p>
-              <Button onClick={() => checkConversationDelete(targetId)}>
-                Check server state
-              </Button>
-            </>
-          ),
-        });
-      };
-      void refresh(false, (projection, projectionWorkspaceId) => {
-        const latest = pendingConversationDeleteRef.current;
-        if (latest?.targetId !== targetId || latest.phase !== "checking")
-          return;
-        const result = conversationDeleteReadback(
-          projection.threads,
-          latest.scope,
-          latest,
-          projection.stateDir,
-          projectionWorkspaceId,
-        );
-        if (result === "confirmed") {
-          pendingConversationDeleteRef.current = null;
-          conversationDeleteLock.current = false;
-          setPendingConversationDelete(null);
-          setModal(null);
-          finishConversationDelete([...latest.scope]);
-          notify(
-            "The delete completed. Studio confirmed it from the refreshed chat list.",
-          );
-          return;
-        }
-        keepUnconfirmed();
-      }).finally(keepUnconfirmed);
-    },
-    [finishConversationDelete, notify, refresh],
-  );
-  useEffect(() => {
-    const pending = pendingConversationDelete;
-    if (!pending || pending.phase !== "submitting") return;
-    if (
-      !claimConversationDeletePost(pending, startedConversationDeletes.current)
-    )
-      return;
-    // This effect runs after the pending render commits and React has cleaned
-    // up the selected conversation's resource readers.
-    void (async () => {
-      try {
-        const result = await post("/api/conversation/delete", {
-          id: pending.targetId,
-        });
-        const confirmed = confirmedConversationDeleteIds(
-          result.deleted,
-          pending.targetId,
-          pending.scope,
-        );
-        if (!confirmed) {
-          notify(
-            "Delete result unconfirmed. Checking server state without resending.",
-          );
-          checkConversationDelete(pending.targetId);
-          return;
-        }
-        finishConversationDelete(confirmed);
-        pendingConversationDeleteRef.current = null;
-        conversationDeleteLock.current = false;
-        setPendingConversationDelete(null);
-        setModal(null);
-        void refresh().catch((error) => notify(errorText(error)));
-      } catch (error) {
-        if (definiteDeleteRejection(error)) {
-          prepareChat.resume(pending.scope);
-          pendingConversationDeleteRef.current = null;
-          conversationDeleteLock.current = false;
-          setPendingConversationDelete(null);
-          setModal(null);
-          notify(errorText(error));
-          return;
-        }
-        notify(
-          "Delete result unconfirmed. Checking server state without resending.",
-        );
-        checkConversationDelete(pending.targetId);
-      }
-    })();
-  }, [
-    checkConversationDelete,
-    finishConversationDelete,
-    notify,
-    pendingConversationDelete,
-    prepareChat,
-    refresh,
-  ]);
   const remove = (id: string, isRoom: boolean, isWorker = false) => {
-    const uncertain = pendingConversationDeleteRef.current;
-    if (uncertain) {
-      setModal({
-        title: "Delete result unconfirmed",
-        body: (
-          <>
-            <p role="status">
-              Another chat delete is in progress or unconfirmed. Studio will not
-              send a second delete.
-            </p>
-            <Button
-              disabled={
-                uncertain.phase === "submitting" ||
-                uncertain.phase === "checking"
-              }
-              onClick={() => checkConversationDelete(uncertain.targetId)}
-            >
-              Check server state
-            </Button>
-          </>
-        ),
-      });
-      return;
-    }
     setModal({
       title: isWorker ? "Delete?" : "Delete chat?",
       body: (
@@ -2121,7 +1830,7 @@ export default function App({ active = true }: { active?: boolean }) {
             color="red"
             variant="filled"
             data-delete-chat={id}
-            onClick={() => {
+            onClick={(event) => {
               if (isRoom) {
                 void run(async () => {
                   const r = await post("/api/room/delete", { id });
@@ -2144,21 +1853,38 @@ export default function App({ active = true }: { active?: boolean }) {
                 });
                 return;
               }
-              if (conversationDeleteLock.current) return;
-              conversationDeleteLock.current = true;
-              const pending = beginConversationDelete(
-                id,
-                dataRef.current?.threads || [],
-                dataRef.current?.stateDir || "",
-                workspaceId,
-                prepareChat.suspend,
+              if (pendingConversationDeletesRef.current.has(id)) return;
+              event.currentTarget.disabled = true;
+              const controller = new AbortController();
+              pendingConversationDeletesRef.current.set(id, controller);
+              setPendingConversationDelete(
+                new Set(pendingConversationDeletesRef.current.keys()),
               );
-              pendingConversationDeleteRef.current = pending;
-              setPendingConversationDelete(pending);
-              setModal({
-                title: "Deleting chat",
-                body: <p role="status">Deleting chat…</p>,
-              });
+              setModal(null);
+              void deleteConversation(
+                post,
+                id,
+                finishConversationDelete,
+                controller.signal,
+              )
+                .catch((error: unknown) => {
+                  if (controller.signal.aborted) return;
+                  notify(
+                    definiteDeleteRejection(error)
+                      ? errorText(error)
+                      : "Delete may not have completed. Check the chat list before trying again.",
+                  );
+                })
+                .finally(() => {
+                  if (
+                    pendingConversationDeletesRef.current.get(id) !== controller
+                  )
+                    return;
+                  pendingConversationDeletesRef.current.delete(id);
+                  setPendingConversationDelete(
+                    new Set(pendingConversationDeletesRef.current.keys()),
+                  );
+                });
             }}
           >
             {isWorker ? "Delete" : "Delete chat"}
@@ -2427,13 +2153,8 @@ export default function App({ active = true }: { active?: boolean }) {
   const answerIds = awaitingAnswerIds(chatData?.runtime?.requests || []);
   const deferredIds = new Set<string>(
     (chatData?.runtime?.requests || [])
-      .filter(
-        (request) =>
-          request.deferred &&
-          request.status === GeneratedApiRequestStatus.pending,
-      )
-      .map((request) => request.agent)
-      .filter((agentId): agentId is string => typeof agentId === "string"),
+      .filter((request) => isPending(request) && isDeferred(request))
+      .map((request) => request.agent),
   );
   const teamPanel = (
     <TeamPanel
@@ -2622,8 +2343,8 @@ export default function App({ active = true }: { active?: boolean }) {
           onClick={toggleTeam}
         >
           Team{" "}
-          {workers.filter((worker) => busy.has(worker.status ?? "")).length}/
-          {workers.length}
+          {lead?.teamCounts &&
+            `${lead.teamCounts.working}/${lead.teamCounts.total}`}
         </Menu.Item>
       )}
       {agent?.source === GeneratedApiAgentSource.managed && (
@@ -2894,19 +2615,13 @@ export default function App({ active = true }: { active?: boolean }) {
                   leftSection={<Users size={16} />}
                   id="team-toggle"
                   aria-label="Team"
-                  title={`Team: ${workers.filter((worker) => busy.has(worker.status ?? "")).length} working of ${workers.length}`}
                   aria-expanded={narrowTeam ? teamOpen : wideTeamOpen}
                   onClick={toggleTeam}
                 >
                   Team
-                  {workers.length > 0 && (
+                  {lead?.teamCounts && lead.teamCounts.total > 0 && (
                     <span className="team-button-count">
-                      {
-                        workers.filter((worker) =>
-                          busy.has(worker.status ?? ""),
-                        ).length
-                      }
-                      /{workers.length}
+                      {lead.teamCounts.working}/{lead.teamCounts.total}
                     </span>
                   )}
                 </Button>
@@ -3128,11 +2843,9 @@ export default function App({ active = true }: { active?: boolean }) {
               <div className="chat-empty-state" role="status">
                 Project deletion in progress or unconfirmed.
               </div>
-            ) : opened && pendingConversationDelete?.scope.has(opened) ? (
+            ) : opened && pendingConversationDelete.has(opened) ? (
               <div className="chat-empty-state" role="status">
-                {pendingConversationDelete.phase === "submitting"
-                  ? "Deleting chat…"
-                  : "Delete result unconfirmed. Check server state."}
+                Deleting chat…
               </div>
             ) : room?.radio ? (
               <RadioChat

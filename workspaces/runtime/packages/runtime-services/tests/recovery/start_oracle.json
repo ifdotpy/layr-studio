@@ -2191,14 +2191,7 @@
       "autoWake": true,
       "error": null,
       "activity": null,
-      "activeTools": [],
-      "turnRecovery": {
-        "at": 1000.0,
-        "turnId": null,
-        "outcome": "input_absent",
-        "source": "replaced_native_child",
-        "attemptId": "attempt"
-      }
+      "activeTools": []
     },
     "events": [["event", "agent", 0, "pending", null, null]],
     "stopped": [],

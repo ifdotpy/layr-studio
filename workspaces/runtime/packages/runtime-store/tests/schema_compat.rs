@@ -11,6 +11,26 @@ use studio_runtime_store::{
 
 const LIVE_SCHEMA: &str = include_str!("fixtures/live-state-schema.json");
 
+#[tokio::test]
+async fn agent_repository_rejects_typed_extra_collision() {
+    let root = tempfile::tempdir().expect("state");
+    let store = RuntimeStore::open(Some(root.path())).await.expect("open");
+    let mut agent = studio_runtime_store::AgentRecord::from_value(json!({
+        "id":"agent", "rootId":"agent", "epoch":1, "status":"idle",
+        "accountKey":"default", "compactions":0
+    }))
+    .expect("agent");
+    agent.extra.insert("error".into(), Value::Null);
+    let error = store
+        .transaction_with(move |tx| studio_runtime_store::AgentRepository::put(tx, &agent))
+        .await
+        .expect_err("typed extra collision is rejected");
+    assert!(
+        matches!(error, StoreError::InvalidSyncObjectField { pointer, reason, .. }
+        if pointer == "/error" && reason.contains("extra_field_collision"))
+    );
+}
+
 fn usage_rows(db: &Connection) -> Vec<Value> {
     db.prepare("SELECT seq,id,agent,root,thread,turn,at,record FROM analytics_usage ORDER BY seq")
         .expect("usage snapshot")

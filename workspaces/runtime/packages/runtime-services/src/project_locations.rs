@@ -5,6 +5,7 @@ use crate::relocation::{invalid, timestamp, validate};
 use rusqlite::{OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+#[cfg(test)]
 use studio_runtime_schema::json_compat::python_json_compact as canonical_json;
 pub use studio_runtime_schema::persistence::RemoteOutcome as LocationOutcome;
 use studio_runtime_store::sha256_hex;
@@ -70,6 +71,51 @@ mod receipt_tests {
     use super::*;
     use studio_runtime_schema::persistence::RequestIdentity;
     use studio_runtime_store::request_results::{Admission, RequestResults};
+
+    #[test]
+    fn location_wire_retains_existing_receipt_signature_bytes() {
+        let wire = LocationWire {
+            action: LocationAction::AddLocation,
+            path: Some("/München/新".into()),
+            project: "/München".into(),
+            server: "peer".into(),
+        };
+        let original = json!({"action":"add_location","path":"/München/新","project":"/München","server":"peer"});
+        assert_eq!(
+            serde_json::to_string(&wire).unwrap(),
+            canonical_json(&original)
+        );
+    }
+
+    #[test]
+    fn location_signature_keeps_legacy_unicode_bytes() {
+        let request = LocationRequest {
+            project: "/雪".into(),
+            server: "peer".into(),
+            op: LocationOp::Add {
+                path: "/新".into()
+            },
+        };
+        assert_eq!(
+            request.signature().unwrap(),
+            "82e0a5a4c8179509249c19d704209ec60975f703cdd9393fa92253fbbe08f786"
+        );
+    }
+
+    #[test]
+    fn location_payload_rejects_unknown_fields_and_non_objects() {
+        let request =
+            r#"{"action":"add_location","path":"/remote","project":"/home","server":"peer"}"#;
+        let valid = format!(r#"{{"project":"/home","request":{request},"location":null}}"#);
+        assert!(serde_json::from_str::<LocationPayload>(&valid).is_ok());
+        let extra = format!(r#"{{"project":"/home","request":{request},"extra":true}}"#);
+        assert!(serde_json::from_str::<LocationPayload>(&extra).is_err());
+        let array = format!(r#"{{"project":"/home","request":{request},"location":[]}}"#);
+        assert!(serde_json::from_str::<LocationPayload>(&array).is_err());
+        assert!(
+            serde_json::from_str::<LocationPayload>(r#"{"project":"/home","request":[]}"#).is_err()
+        );
+    }
 
     #[test]
     fn outbox_size_includes_receipt() {
@@ -298,24 +344,14 @@ mod receipt_tests {
     }
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-enum Action {
-    AddLocation,
-    RemoveLocation,
-}
+pub use studio_runtime_schema::project_ingress::LocationAction;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Envelope {
     request_id: String,
-    action: Action,
-    payload: Payload,
-}
-#[derive(Deserialize)]
-struct Payload {
-    project: String,
-    path: Option<String>,
-    request: Value,
+    action: LocationAction,
+    #[serde(deserialize_with = "studio_runtime_schema::http_ingress::deserialize_object")]
+    payload: LocationPayload,
 }
 #[derive(Deserialize)]
 struct Outbox {
@@ -335,13 +371,15 @@ pub struct CompletionDecision {
 }
 impl CompletionSnapshot {
     fn from_outbox(outbox: Outbox, project: Option<&Value>) -> Result<Self, LocationError> {
+        let Some(request) = outbox.body.payload.request.value() else {
+            return Err(invalid("runtime_server_outbox", "body/payload/request"));
+        };
         if outbox.id.is_empty()
             || outbox.body.request_id.is_empty()
-            || outbox.body.payload.request["project"] != outbox.body.payload.project
-            || outbox.body.payload.request["server"] != outbox.server
-            || outbox.body.payload.request["path"] != json!(outbox.body.payload.path)
-            || (outbox.body.payload.request["action"] == "add_location")
-                != (outbox.body.action == Action::AddLocation)
+            || request.project != outbox.body.payload.project
+            || request.server != outbox.server
+            || request.path.as_ref() != outbox.body.payload.path.value()
+            || request.action != outbox.body.action
         {
             return Err(invalid("runtime_server_outbox", "body/payload/request"));
         }
@@ -379,14 +417,14 @@ impl CompletionSnapshot {
         }
         let applied = receipt.outcome == LocationOutcome::Applied;
         let envelope = &self.outbox.body;
-        if applied && envelope.action == Action::AddLocation {
+        if applied && envelope.action == LocationAction::AddLocation {
             let location = receipt
                 .value
                 .as_ref()
                 .ok_or_else(|| invalid("location receipt", "/value"))?;
             if location.server_id != self.outbox.server
                 || location.home_project_id.as_deref() != Some(envelope.payload.project.as_str())
-                || location.path != envelope.payload.path
+                || location.path.as_ref() != envelope.payload.path.value()
                 || location.request_id.as_deref() != Some(envelope.request_id.as_str())
                 || location
                     .canonical_path
@@ -406,7 +444,7 @@ impl CompletionSnapshot {
                 .as_array_mut()
                 .ok_or_else(|| invalid("runtime_projects", "/locations"))?;
             locations.retain(|location| location["serverId"] != self.outbox.server);
-            if envelope.action == Action::AddLocation {
+            if envelope.action == LocationAction::AddLocation {
                 let value = receipt
                     .value
                     .as_ref()
@@ -489,7 +527,13 @@ pub fn complete_snapshot_in_transaction(
             tx,
             &snapshot.outbox.body.payload.project,
             &snapshot.outbox.body.request_id,
-            &snapshot.outbox.body.payload.request,
+            snapshot
+                .outbox
+                .body
+                .payload
+                .request
+                .value()
+                .ok_or_else(|| invalid("runtime_server_outbox", "body/payload/request"))?,
             &receipt,
             decision.project,
         )?;
@@ -522,14 +566,17 @@ fn settle_location(
     tx: &Transaction<'_>,
     project_id: &str,
     key: &str,
-    original_request: &Value,
+    original_request: &LocationWire,
     receipt: &LocationResult,
     project: Option<Value>,
 ) -> Result<(), LocationError> {
     let request = ProjectsRepository::location_request(tx, project_id, key)?.ok_or(
         LocationError::Refused("The location request has no admitted project intent"),
     )?;
-    if request.signature() != sha256_hex(canonical_json(original_request).as_bytes()) {
+    let request_bytes =
+        studio_runtime_schema::json_compat::python_json_compact_serialized(original_request)
+            .map_err(studio_runtime_store::StoreError::from)?;
+    if request.signature() != sha256_hex(request_bytes.as_bytes()) {
         return Err(LocationError::Refused(
             "The location request has different admitted content",
         ));
@@ -655,12 +702,106 @@ pub(crate) struct LocationRequest {
     pub server: String,
     pub op: LocationOp,
 }
-#[derive(Serialize)]
-pub(crate) struct LocationWire<'a> {
-    action: &'static str,
-    path: Option<&'a str>,
-    project: &'a str,
-    server: &'a str,
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocationWire {
+    pub action: LocationAction,
+    pub path: Option<String>,
+    pub project: String,
+    pub server: String,
+}
+
+/// Location identity carried by a peer command, retaining optional wire fields.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocationReference {
+    pub server_id: String,
+    pub path: String,
+    pub project_id: String,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub git_origin: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub requested_path: studio_runtime_schema::queue_command::Field<String>,
+}
+
+impl From<studio_runtime_schema::project_record::ProjectLocation> for LocationReference {
+    fn from(value: studio_runtime_schema::project_record::ProjectLocation) -> Self {
+        Self {
+            server_id: value.server_id,
+            path: value.path,
+            project_id: value.project_id,
+            git_origin: value.git_origin,
+            requested_path: value.requested_path,
+        }
+    }
+}
+
+/// Cross-server location command. Optional fields preserve presence for the
+/// durable request fingerprint.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocationPayload {
+    pub project: String,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub name: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub path: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        deserialize_with = "field_object",
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub request: studio_runtime_schema::queue_command::Field<LocationWire>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub signature: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub result_id: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        deserialize_with = "field_object",
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub location: studio_runtime_schema::queue_command::Field<LocationReference>,
+    #[serde(
+        rename = "_projectAdmission",
+        default,
+        deserialize_with = "field_object",
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub admission: studio_runtime_schema::queue_command::Field<LocationAdmission>,
+}
+
+fn field_object<'de, D, T>(
+    deserializer: D,
+) -> Result<studio_runtime_schema::queue_command::Field<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    use studio_runtime_schema::{http_ingress::Object, queue_command::Field};
+    Ok(match Field::<Object<T>>::deserialize(deserializer)? {
+        Field::Missing => Field::Missing,
+        Field::Null => Field::Null,
+        Field::Value(Object(value)) => Field::Value(value),
+    })
 }
 impl LocationRequest {
     pub(crate) fn parse(args: LocationIngress, local: Option<&str>) -> Result<Self, &'static str> {
@@ -706,20 +847,23 @@ impl LocationRequest {
             op,
         })
     }
-    pub(crate) fn wire(&self) -> LocationWire<'_> {
+    pub(crate) fn wire(&self) -> LocationWire {
         let (action, path) = match &self.op {
-            LocationOp::Add { path } => ("add_location", Some(path.as_str())),
-            LocationOp::Remove => ("remove_location", None),
+            LocationOp::Add { path } => (LocationAction::AddLocation, Some(path.clone())),
+            LocationOp::Remove => (LocationAction::RemoveLocation, None),
         };
         LocationWire {
             action,
             path,
-            project: &self.project,
-            server: &self.server,
+            project: self.project.clone(),
+            server: self.server.clone(),
         }
     }
     pub(crate) fn signature(&self) -> Result<String, serde_json::Error> {
-        Ok(sha256_hex(serde_json::to_string(&self.wire())?.as_bytes()))
+        Ok(sha256_hex(
+            studio_runtime_schema::json_compat::python_json_compact_serialized(&self.wire())?
+                .as_bytes(),
+        ))
     }
 }
 fn task_location_request(
@@ -840,9 +984,9 @@ pub fn refresh_tool_receipt(
 /// Internal outbound payload field. Its value binds reservation to the checked
 /// local project sequence, workspace, and optional managed actor epoch.
 pub const LOCATION_ADMISSION_FIELD: &str = "_projectAdmission";
-#[derive(serde::Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct LocationAdmission {
+pub struct LocationAdmission {
     project: String,
     seq: i64,
     workspace: String,
@@ -853,32 +997,25 @@ pub fn location_admission(
     db: &rusqlite::Connection,
     project: &str,
     actor: Option<(&str, i64)>,
-) -> Result<Value, LocationError> {
+) -> Result<LocationAdmission, LocationError> {
     let seq=db.query_row(
         "SELECT s.seq FROM sync_entities s JOIN runtime_projects p ON p.id=s.id WHERE s.collection='project' AND s.id=?1 AND s.deleted=0",
         [project],|row|row.get::<_,i64>(0),
     ).optional()?.ok_or(LocationError::Refused("The project changed before location reservation"))?;
-    serde_json::to_value(LocationAdmission {
+    Ok(LocationAdmission {
         project: project.into(),
         seq,
         workspace: studio_runtime_store::SyncDocumentsRepository::workspace_id(db)?,
         actor: actor.map(|(id, _)| id.into()),
         epoch: actor.map(|(_, epoch)| epoch),
     })
-    .map_err(|_| LocationError::Refused("Invalid project location admission"))
 }
 pub(crate) fn check_location_admission(
     tx: &Transaction<'_>,
-    payload: &Value,
+    project: &str,
+    expected: &LocationAdmission,
 ) -> Result<(), LocationError> {
-    let saved = payload
-        .get(LOCATION_ADMISSION_FIELD)
-        .ok_or(LocationError::Refused(
-            "A checked project location admission is required",
-        ))?;
-    let expected: LocationAdmission = serde_json::from_value(saved.clone())
-        .map_err(|_| LocationError::Refused("Invalid project location admission"))?;
-    if payload.get("project").and_then(Value::as_str) != Some(expected.project.as_str()) {
+    if project != expected.project {
         return Err(LocationError::Refused(
             "The project location admission changed",
         ));
@@ -888,13 +1025,13 @@ pub(crate) fn check_location_admission(
         &expected.project,
         expected.actor.as_deref().zip(expected.epoch),
     )?;
-    if current != *saved {
+    if current != *expected {
         return Err(LocationError::Refused(
             "The project changed before location reservation",
         ));
     }
-    if let Some(actor) = expected.actor {
-        let current = ProjectsRepository::agent(tx, &actor)?
+    if let Some(actor) = &expected.actor {
+        let current = ProjectsRepository::agent(tx, actor)?
             .ok_or(LocationError::Refused("The caller is no longer available"))?
             .1;
         if current.get("epoch").and_then(Value::as_i64) != expected.epoch

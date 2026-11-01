@@ -2,7 +2,10 @@
 use super::*;
 use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 use studio_runtime_providers::Method;
-use studio_runtime_schema::{claude_controls::ClaudeSettings, queue_command::Field};
+use studio_runtime_schema::{
+    claude_controls::{ClaudeSessionRead, ClaudeSettings},
+    queue_command::Field,
+};
 pub type ControlFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 /// Implementations bind calls to one retained account/connection/generation.
 #[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -417,7 +420,7 @@ impl Controls {
     pub async fn read_or_stop(
         &self,
         agent: &Value,
-        body: &Value,
+        body: &ClaudeSessionRead,
         operation: Option<Value>,
     ) -> Result<Value> {
         let snapshot = ControlSnapshot::from_records(agent.clone(), operation)?;
@@ -427,21 +430,23 @@ impl Controls {
     pub async fn read_or_stop_snapshot(
         &self,
         snapshot: &ControlSnapshot,
-        body: &Value,
+        body: &ClaudeSessionRead,
     ) -> Result<Value> {
         let agent = snapshot.agent();
         let binding = self.session.binding();
         let scope = ControlScope {
             agent: snapshot.agent.id.clone(),
             epoch: snapshot.epoch(),
-            request_id: body
-                .get("request_id")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
+            request_id: match body {
+                ClaudeSessionRead::StopTask { request_id, .. } => {
+                    Some(request_id.as_str().to_owned())
+                }
+                ClaudeSessionRead::State { .. } | ClaudeSessionRead::Commands { .. } => None,
+            },
         };
-        let action = body.get("action").and_then(Value::as_str);
+        let is_state = matches!(body, ClaudeSessionRead::State { .. });
         let lazy = agent.get("lazyAccountTransfer").filter(|v| truthy(Some(v)));
-        let account = if action == Some("state") {
+        let account = if is_state {
             lazy.and_then(|v| v.get("sourceAccountKey"))
                 .and_then(Value::as_str)
                 .unwrap_or(&snapshot.agent.account_key)
@@ -451,15 +456,15 @@ impl Controls {
         if binding.account() != account {
             return Err(ControlError::Changed);
         }
-        let thread = if action == Some("state") && lazy.is_some() {
+        let thread = if is_state && lazy.is_some() {
             lazy.and_then(|v| v.get("sourceThreadId"))
                 .and_then(Value::as_str)
                 .map(str::to_owned)
         } else {
             snapshot.agent.thread_id.clone()
         };
-        match action {
-            Some("state") => {
+        match body {
+            ClaudeSessionRead::State { .. } => {
                 let mut result = if let Some(thread) = thread {
                     match self
                         .bound_call(
@@ -482,7 +487,13 @@ impl Controls {
                         | ControlReply::FileBackups(_) => return Err(ControlError::Unknown),
                     }
                 } else {
-                    json!({"settings":agent.get("claudeOptions").cloned().unwrap_or(json!({})),"turns":[],"tasks":[]})
+                    let mut settings = agent.get("claudeOptions").cloned().unwrap_or(json!({}));
+                    if let (Some(options), Some(mode)) =
+                        (settings.as_object_mut(), agent.get("permissionMode"))
+                    {
+                        options.insert("permissionMode".into(), mode.clone());
+                    }
+                    json!({"settings":settings,"turns":[],"tasks":[]})
                 };
                 if !result.is_object() {
                     return Err(ControlError::Unknown);
@@ -492,7 +503,7 @@ impl Controls {
                 }
                 Ok(result)
             }
-            Some("commands") => {
+            ClaudeSessionRead::Commands { .. } => {
                 match self
                     .bound_call(
                         &binding,
@@ -512,15 +523,10 @@ impl Controls {
                     | ControlReply::FileBackups(_) => Err(ControlError::Unknown),
                 }
             }
-            Some("stop_task") => {
+            ClaudeSessionRead::StopTask { task_id, .. } => {
                 if truthy(agent.get("accountTransferId")) {
                     return Err(ControlError::Changed);
                 }
-                let task = body
-                    .get("task_id")
-                    .and_then(Value::as_str)
-                    .filter(|t| !t.is_empty() && t.len() <= 1024)
-                    .ok_or(ControlError::Request)?;
                 let thread = thread.ok_or(ControlError::Request)?;
                 let request_id = scope.request_id.clone().ok_or(ControlError::Request)?;
                 match self
@@ -529,7 +535,7 @@ impl Controls {
                         &scope,
                         ControlInvocation::StopTask {
                             thread_id: thread,
-                            task_id: task.to_owned(),
+                            task_id: task_id.as_str().to_owned(),
                             request_id,
                         },
                         20,
@@ -544,7 +550,6 @@ impl Controls {
                     | ControlReply::FileBackups(_) => Err(ControlError::Unknown),
                 }
             }
-            _ => Err(ControlError::Request),
         }
     }
 }

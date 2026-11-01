@@ -7,7 +7,7 @@ import {
   TextInput,
 } from "@mantine/core";
 import { useRef, useState } from "react";
-import { errorText, type GetResult, type PostBody } from "../../api";
+import { errorText, type PostBody } from "../../api";
 import {
   useServerApi,
   useServerStorage,
@@ -358,7 +358,7 @@ function TaskDetail({
         <dt>Dependencies</dt>
         <dd>{task.dependencies?.join(", ") || "None"}</dd>
         <dt>Blocked by</dt>
-        <dd>{task.blockedBy?.join(", ") || "None"}</dd>
+        <dd>{task.policy.blockedBy.join(", ") || "None"}</dd>
         <dt>Version</dt>
         <dd>{task.version}</dd>
         <dt>Revision</dt>
@@ -483,7 +483,7 @@ function TaskDetail({
               disabled={
                 !reason.trim() ||
                 (override && !overrideReason.trim()) ||
-                gate?.status === "running"
+                !task.policy.acceptAvailable
               }
               onClick={() => void decide("accept")}
             >
@@ -498,8 +498,8 @@ function TaskDetail({
               Reject task
             </Button>
           </div>
-          {gate?.status === "running" && (
-            <p>Wait for the gate to finish before acceptance.</p>
+          {!task.policy.acceptAvailable && (
+            <p>Acceptance is unavailable until a result is ready for review.</p>
           )}
         </fieldset>
       )}
@@ -535,19 +535,11 @@ export default function Tasks({
   agentId: string;
   rootId?: string;
 }) {
-  const { get, post } = useServerApi();
+  const { post } = useServerApi();
   const storage = useServerStorage();
   const assignments = useSubscription({ kind: "work", agentId: rootId });
   const root = useSubscription({ kind: "agentDetail", agentId: rootId });
-  const [manual, setManual] = useState<{
-    rootId: string;
-    baseline: typeof assignments.data;
-    data: GetResult<"/api/work">;
-  } | null>(null);
-  const current =
-    manual?.rootId === rootId && manual.baseline === assignments.data
-      ? manual.data
-      : assignments.data;
+  const current = assignments.data;
   const resource = {
     data:
       current === undefined || !root.data
@@ -611,18 +603,6 @@ export default function Tasks({
         >
           Create task
         </Button>
-        <Button
-          variant="default"
-          disabled={busy}
-          onClick={() => {
-            const baseline = assignments.data;
-            void get("/api/work", { query: { agent: agentId } })
-              .then((data) => setManual({ rootId, baseline, data }))
-              .catch((error) => setError(errorText(error)));
-          }}
-        >
-          Refresh tasks
-        </Button>
       </div>
       {(resource.error || error) && (
         <p role="alert">{resource.error || error}</p>
@@ -644,14 +624,10 @@ export default function Tasks({
           onChange={(e) => setStatus(e.currentTarget.value)}
           data={[
             { value: "", label: "All statuses" },
-            ...[
-              "ready",
-              "blocked",
-              "running",
-              "review",
-              "accepted",
-              "cancelled",
-            ].map((value) => ({ value, label: value })),
+            ...Object.values(GeneratedApiWorkStatus).map((value) => ({
+              value,
+              label: value,
+            })),
           ]}
         />
         <NativeSelect

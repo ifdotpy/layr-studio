@@ -570,13 +570,11 @@ pub(crate) fn settle_terminal_in_transaction(
     // Studio can write a steer to a turn that the provider already ended,
     // before it reads that turn's end. Such a steer was never applied.
     let end_closes_steer = agent.as_ref().is_some_and(|agent| {
-        studio_runtime_providers::ProviderKind::of_field(agent.extra.get("provider")).is_ok_and(
-            |kind| {
-                crate::provider_adapter::adapter(kind)
-                    .capabilities()
-                    .turn_end_closes_steer
-            },
-        )
+        agent.provider.value().is_some_and(|kind| {
+            crate::provider_adapter::adapter(*kind)
+                .capabilities()
+                .turn_end_closes_steer
+        })
     });
     if end_closes_steer && let Some(ended_at) = params["turn"]["completedAt"].as_f64() {
         SchedulerRepository::release_steers_written_after_turn_end(
@@ -604,7 +602,7 @@ pub(crate) fn settle_terminal_in_transaction(
     if result {
         if agent.as_ref().is_some_and(|record| {
             record.workspace_mode == Some(studio_runtime_schema::records::WorkspaceMode::LayrNative)
-                && record.extra.get("layrReady").and_then(Value::as_bool) == Some(true)
+                && record.layr_ready == Some(true)
         }) {
             crate::layr_native::stage_turn_save(transaction, &identity.agent_id, turn_id)?;
         }
@@ -1274,7 +1272,7 @@ mod child_turn_parent_tests {
                     .expect("monitor");
                     studio_runtime_store::monitor_runtime::put(tx, &monitor)?;
                     agent.status = AgentStatus::Completed;
-                    agent.turn_id = None;
+                    agent.turn_id = Default::default();
                     agent.in_flight = Some(false);
                     let mut value = agent.value();
                     crate::lifecycle_effects::ProductionRecoveryDelivery { at: 3.0 }

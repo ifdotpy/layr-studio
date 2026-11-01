@@ -1,6 +1,7 @@
 import { NativeReleasePhase, AgentStatus } from "./generated/api";
 import { nativeErrorView } from "./nativeErrors";
 import type { GetResult } from "./api";
+import type { Approval } from "./approvals";
 import type {
   AgentEntityDto,
   ChatEntityDto,
@@ -10,7 +11,6 @@ import type {
   MonitorEntityDto,
   PeerTeamEntityDto,
   ProjectEntityDto,
-  RequestEntityDto,
   RoomEntityDto,
   RuleEntityDto,
   TaskEntityDto,
@@ -39,7 +39,6 @@ export type Complaint = ComplaintEntityDto;
 export type BackgroundTask = TaskEntityDto;
 export type WorkspaceTask = GetResult<"/api/workspace/tasks">["tasks"][number];
 export type Monitor = MonitorEntityDto;
-export type Request = RequestEntityDto;
 export type Rule = RuleEntityDto;
 export type Project = ProjectEntityDto;
 export type Event = EventEntityDto;
@@ -65,13 +64,13 @@ type SnapshotRuntime = WorkspaceEntityDto & {
     | Record<string, components["schemas"]["QueueView"]>
     | undefined;
   rateLimitsByAccount?:
-    | Record<string, components["schemas"]["AccountRateLimitsDto"]>
+    | Record<string, components["schemas"]["RateLimitView"]>
     | undefined;
-  rateLimits?: components["schemas"]["AccountRateLimitsDto"] | null | undefined;
+  rateLimits?: components["schemas"]["RateLimitView"] | null | undefined;
   retainedWorktrees?:
     | components["schemas"]["RetainedWorktreeEntityDto"][]
     | undefined;
-  questionHistory?: components["schemas"]["AgentRequest"][] | undefined;
+  questionHistory?: Approval[] | undefined;
   messageReceipts?:
     | components["schemas"]["MessageReceiptEntityDto"][]
     | undefined;
@@ -83,7 +82,7 @@ type SnapshotRuntime = WorkspaceEntityDto & {
   tasks: BackgroundTask[];
   monitors: Monitor[];
   complaints: Complaint[];
-  requests: Request[];
+  requests: Approval[];
   rules: Rule[];
   projects: Project[];
   /** Project entity sequence by native ID, owned by the entity projection; stale-delete guard. */
@@ -123,14 +122,16 @@ export type LocalMessageAttachment = {
 };
 export type Message = Omit<
   TranscriptWireItem,
-  "assets" | "deliveryStatus" | "nativeError" | "role" | "text" | "threadId"
+  | "assets"
+  | "deliveryStatus"
+  | "nativeError"
+  | "pending"
+  | "role"
+  | "text"
+  | "threadId"
 > & {
   assets?: Array<TranscriptAsset | LocalMessageAttachment> | null | undefined;
-  deliveryStatus?:
-    | TranscriptWireItem["deliveryStatus"]
-    | "sending"
-    | "paused"
-    | undefined;
+  deliveryStatus?: import("./sync/send").DeliveryState | undefined;
   nativeError?: DeepReadonly<JsonInput> | undefined;
   role: NonNullable<TranscriptWireItem["role"]>;
   text: NonNullable<TranscriptWireItem["text"]>;
@@ -141,7 +142,7 @@ export type Message = Omit<
   localDelivery?: boolean | undefined;
   model?: string | undefined;
   title?: string | undefined;
-  pending?: boolean | undefined;
+  streamPending?: boolean | undefined;
   senderName?: string | undefined;
   sender?: string | undefined;
   seq?: number | undefined;

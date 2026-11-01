@@ -532,8 +532,11 @@ impl Sender {
 
     async fn put_once(&self, target: &str, payload: &Value) -> Result<Reply, Stop> {
         let key = RequestIdentity::issue_root();
-        let envelope =
-            json!({"requestId": key, "operation": [], "action": ACTION, "payload": payload});
+        let envelope = crate::orchestration_wire::OrchestrationRequest {
+            request_id: key.clone(),
+            operation: Vec::new(),
+            command: crate::orchestration_wire::OrchestrationCommand::BackupPut(payload.clone()),
+        };
         let receipt = self
             .transport
             .exchange(target, &envelope, PUT_REQUEST)

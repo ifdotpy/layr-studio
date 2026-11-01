@@ -108,7 +108,7 @@ async fn auth_repair_regression_post_login_allows_only_fresh_safe_continuation()
                 },
                 "unrelated" => { value["error"] = json!("Provider event outcome is unknown"); },
                 "deleted" => { value["deletedAt"] = json!(1.0); },
-                "workspace" => { value["workspaceOperation"] = json!({"id":"fixture-workspace"}); },
+                "workspace" => { value["workspaceOperation"] = json!("capture"); },
                 _ => {},
             }
             AgentRepository::put(tx, &AgentRecord::from_value(value)?)?;

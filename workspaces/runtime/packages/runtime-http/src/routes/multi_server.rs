@@ -28,8 +28,6 @@ const MANAGEMENT_DEPENDENCIES: &[Dependency] = &[
     #[cfg(not(unix))]
     Dependency::new("server-credentials/platform-support"),
 ];
-const ACCESS_ACTIVITY_TIMESTAMP_FIELD: &str = "lastAccess";
-const DISCOVERY_OBSERVATION_TIMESTAMP_FIELD: &str = "lastSeen";
 
 pub(crate) fn routes() -> RouteGroup {
     RouteGroup::new(vec![
@@ -104,12 +102,12 @@ async fn snapshot(
     let result = multi_server::snapshot(&store, &identity)
         .await
         .map_err(map_service_error)?;
-    Ok(Json(super::generated_json::<
-        crate::generated::AccessSnapshot,
-    >(result)?))
+    Ok(Json(result))
 }
 
-pub(super) async fn read_snapshot(state: &HttpState) -> Result<Value, ApiError> {
+pub(super) async fn read_snapshot(
+    state: &HttpState,
+) -> Result<studio_runtime_schema::multi_server_access::AccessSnapshot, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let credentials = state.credentials.clone();
     let origin = state.public_origin.clone();
@@ -123,11 +121,17 @@ pub(super) async fn read_snapshot(state: &HttpState) -> Result<Value, ApiError> 
 }
 
 pub(super) fn publish_resource_change(notifications: &ResourceNotifications, request_id: &str) {
-    let request = serde_json::json!({
-        "requestId": request_id,
-        "resources": [{"kind": "multi-server"}],
-    });
-    if let Err(error) = notifications.publish_once(&request) {
+    use studio_runtime_schema::{
+        resource_notification::ResourceNotifyRequest,
+        resource_ref::{EmptyResource, ResourceRef},
+    };
+    let result = ResourceNotifyRequest::new(
+        request_id.to_owned(),
+        vec![ResourceRef::MultiServerResource(EmptyResource {})],
+    )
+    .map_err(|_| studio_runtime_services::resource_notify::ResourceNotifyError::Invalid)
+    .and_then(|request| notifications.publish_once(&request));
+    if let Err(error) = result {
         // The in-memory publisher is unavailable only while its stream hub is
         // closing or its publication state is poisoned. Closing forces streams
         // to reconnect and receive the current baseline. Never fail the already
@@ -147,34 +151,29 @@ fn publish_uncertain_write_hint(notifications: &ResourceNotifications) {
 pub(super) fn notify_snapshot_change(
     notifications: &ResourceNotifications,
     request_id: &str,
-    before: &Value,
-    after: &Value,
+    before: &studio_runtime_schema::multi_server_access::AccessSnapshot,
+    after: &studio_runtime_schema::multi_server_access::AccessSnapshot,
 ) {
-    if semantic_snapshot(before) != semantic_snapshot(after) {
+    if !matches!((semantic_snapshot(before), semantic_snapshot(after)), (Ok(a), Ok(b)) if a == b) {
         publish_resource_change(notifications, request_id);
     }
 }
 
-fn semantic_snapshot(snapshot: &Value) -> Value {
+fn semantic_snapshot(
+    snapshot: &studio_runtime_schema::multi_server_access::AccessSnapshot,
+) -> Result<Vec<u8>, serde_json::Error> {
     let mut semantic = snapshot.clone();
-    for collection in ["clients", "servers"] {
-        let Some(records) = semantic.get_mut(collection).and_then(Value::as_array_mut) else {
-            continue;
-        };
-        for record in records {
-            if let Some(record) = record.as_object_mut() {
-                record.remove(ACCESS_ACTIVITY_TIMESTAMP_FIELD);
-                record.remove(DISCOVERY_OBSERVATION_TIMESTAMP_FIELD);
-            }
-        }
+    for record in semantic.clients.iter_mut().chain(&mut semantic.servers) {
+        record.last_access = None;
+        record.last_seen = studio_runtime_schema::queue_command::Field::Missing;
     }
-    semantic
+    serde_json::to_vec(&semantic)
 }
 
 async fn manage(
     State(state): State<HttpState>,
     headers: HeaderMap,
-    ApiJson(body): ApiJson<Value>,
+    ApiJson(body): ApiJson<studio_runtime_schema::multi_server_ingress::ManagementRequest>,
 ) -> Result<Response, ApiError> {
     if !cfg!(unix) {
         return Err(unavailable_for(
@@ -183,10 +182,7 @@ async fn manage(
             MANAGEMENT_DEPENDENCIES,
         ));
     }
-    let action = body
-        .get("action")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+    let action = body.action();
     // Signed principals never reach this handler (`incoming_multi_server`
     // refuses these actions), so only the Serve proxy is checked here. The
     // owner session through Serve may still call `ui_invite`.
@@ -197,8 +193,8 @@ async fn manage(
         return Ok(super::incoming_multi_server::failure(scope.refusal()));
     }
     if action == "create_invite" {
-        let request_id = body["requestId"]
-            .as_str()
+        let request_id = body
+            .request_id()
             .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid request ID"))?
             .to_owned();
         let store = state.store.clone().ok_or_else(ApiError::internal)?;
@@ -238,9 +234,13 @@ async fn manage(
         publish_resource_change(&notifications, &request_id);
         return Ok(Json(result).into_response());
     }
-    if action == "accept_invite" {
-        let request_id = body["requestId"]
-            .as_str()
+    if let studio_runtime_schema::multi_server_ingress::ManagementRequest::AcceptInvite {
+        invitation,
+        request_id: typed_request_id,
+    } = &body
+    {
+        let request_id = body
+            .request_id()
             .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid request ID"))?
             .to_owned();
         let store = state.store.clone().ok_or_else(ApiError::internal)?;
@@ -253,7 +253,8 @@ async fn manage(
             &credentials,
             origin.as_deref(),
             whoami,
-            &body,
+            typed_request_id.as_str(),
+            invitation,
         )
         .await
         {
@@ -268,14 +269,23 @@ async fn manage(
         };
         return Ok(Json(result).into_response());
     }
-    if action == "ui_invite" {
-        let request_id = body["requestId"]
-            .as_str()
+    if let studio_runtime_schema::multi_server_ingress::ManagementRequest::UiInvite {
+        server_id,
+        request_id: typed_request_id,
+    } = &body
+    {
+        let request_id = body
+            .request_id()
             .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid request ID"))?
             .to_owned();
         let store = state.store.clone().ok_or_else(ApiError::internal)?;
         let notifications = state.resource_notifications.clone();
-        let result = ui_invite(Arc::clone(&store), &body).await?;
+        let result = ui_invite(
+            Arc::clone(&store),
+            server_id.as_str(),
+            typed_request_id.as_str(),
+        )
+        .await?;
         publish_resource_change(&notifications, &request_id);
         return Ok(Json(result).into_response());
     }
@@ -283,8 +293,8 @@ async fn manage(
         && let Some(origin) = state.public_origin.clone()
     {
         let before = read_snapshot(&state).await?;
-        let request_id = body["requestId"]
-            .as_str()
+        let request_id = body
+            .request_id()
             .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid request ID"))?
             .to_owned();
         let store = state.store.clone().ok_or_else(ApiError::internal)?;
@@ -311,12 +321,7 @@ async fn manage(
                 return Err(map_discovery_error(error));
             }
         };
-        return Ok(
-            Json(super::generated_json::<crate::generated::AccessSnapshot>(
-                result,
-            )?)
-            .into_response(),
-        );
+        return Ok(Json(result).into_response());
     }
     if matches!(
         action,
@@ -324,17 +329,21 @@ async fn manage(
     ) || (action == "discover" && state.public_origin.is_none())
     {
         let before = read_snapshot(&state).await?;
-        let request_id = body["requestId"]
-            .as_str()
+        let request_id = body
+            .request_id()
             .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid request ID"))?
             .to_owned();
         let store = state.store.clone().ok_or_else(ApiError::internal)?;
         let credentials = state.credentials.clone();
         let origin = state.public_origin.clone();
         let notifications = state.resource_notifications.clone();
-        let action = body["action"].as_str().unwrap_or_default();
-        if action == "name" {
-            let target = body["serverId"].as_str().unwrap_or_default();
+        if let studio_runtime_schema::multi_server_ingress::ManagementRequest::Name {
+            server_id,
+            label,
+            request_id,
+        } = &body
+        {
+            let target = server_id.as_str();
             let local_target = credentials
                 .is_local_target(Arc::clone(&store), target)
                 .await
@@ -345,8 +354,8 @@ async fn manage(
                     .rename_with_notification(
                         Arc::clone(&store),
                         target,
-                        body["label"].as_str().unwrap_or_default(),
-                        body["requestId"].as_str().unwrap_or_default(),
+                        label.as_str(),
+                        request_id.as_str(),
                         "local",
                         move |request_id| publish_resource_change(&notification_sink, request_id),
                     )
@@ -358,14 +367,11 @@ async fn manage(
                     &credentials,
                     origin.as_deref(),
                     target,
-                    body["label"].as_str().unwrap_or_default(),
-                    body["requestId"].as_str().unwrap_or_default(),
+                    label.as_str(),
+                    request_id.as_str(),
                 )
                 .await?;
-                publish_resource_change(
-                    &notifications,
-                    body["requestId"].as_str().unwrap_or_default(),
-                );
+                publish_resource_change(&notifications, request_id.as_str());
             }
         }
         let identity = credentials
@@ -384,12 +390,7 @@ async fn manage(
         if action != "name" {
             notify_snapshot_change(&notifications, &request_id, &before, &result);
         }
-        return Ok(
-            Json(super::generated_json::<crate::generated::AccessSnapshot>(
-                result,
-            )?)
-            .into_response(),
-        );
+        return Ok(Json(result).into_response());
     }
     Err(unavailable_for(
         "POST",
@@ -422,35 +423,19 @@ async fn accept_invite(
             dyn Fn() -> futures_util::future::BoxFuture<'static, Option<Value>> + Send + Sync,
         >,
     >,
-    body: &Value,
-) -> Result<Value, ApiError> {
-    let invitation = body
-        .get("invitation")
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "The invitation is invalid"))?;
-    let server_id = invitation["serverId"]
-        .as_str()
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "The invitation is invalid"))?;
-    let origin = invitation["origin"]
-        .as_str()
-        .and_then(|value| remote_transport::validate_federation_origin(value).ok())
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "The invitation is invalid"))?;
-    let public_key = invitation["publicKey"]
-        .as_str()
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "The invitation is invalid"))?;
-    if invitation["protocol"]
-        != studio_runtime_schema::multi_server_protocol::ACCESS_PROTOCOL_VERSION
-    {
+    request_id: &str,
+    invitation: &studio_runtime_schema::multi_server_ingress::AccessInvitation,
+) -> Result<studio_runtime_schema::multi_server_access::AccessSnapshot, ApiError> {
+    let server_id = invitation.server_id.as_str();
+    let origin = remote_transport::validate_federation_origin(invitation.origin.as_str())
+        .map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "The invitation is invalid"))?;
+    let public_key = invitation.public_key.as_str();
+    if public_key.is_empty() {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "The invitation is invalid",
         ));
     }
-    let request_id = body["requestId"]
-        .as_str()
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "The invitation is invalid"))?;
     let origin_local = local_origin
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
@@ -478,7 +463,7 @@ async fn accept_invite(
     let local_label = local["label"].as_str().unwrap_or("Studio server");
     let request_body = serde_json::json!({
         "protocol": studio_runtime_schema::multi_server_protocol::ACCESS_PROTOCOL_VERSION,
-        "inviteId": invitation["inviteId"], "token": invitation["token"],
+        "inviteId": invitation.invite_id.as_str(), "token": invitation.token.as_str(),
         "clientId": local_id, "label": local_label, "kind": "server",
         "publicKey": local["publicKey"], "origin": origin_local, "requestId": request_id,
     });
@@ -541,30 +526,68 @@ async fn accept_invite(
         .await
         .map_err(ApiError::stored)?;
     if let Some(prior) = prior {
-        let prior: Value = serde_json::from_str(&prior).map_err(|_| {
+        let prior = studio_runtime_services::multi_server_discovery::StoredPeer::from_raw(&prior)
+            .ok_or_else(|| {
             ApiError::new(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "Invalid stored object runtime_access_clients",
             )
         })?;
-        let prior = studio_runtime_services::multi_server_discovery::StoredPeer::from_value(prior);
-        if !prior
-            .as_ref()
-            .is_some_and(|peer| peer.is_paired() && peer.public_key() == public_key)
-        {
+        if !prior.is_paired() || prior.public_key() != public_key {
             return Err(ApiError::new(
                 StatusCode::CONFLICT,
                 "The server identity is already registered or revoked",
             ));
         }
     } else {
-        let record = serde_json::json!({"id":server_id,"clientId":server_id,"serverId":server_id,"kind":"server","origin":origin,"publicKey":public_key,"label":invitation["label"],"tailscaleUser":response["tailscaleUser"],"status":"paired","created":now,"lastAccess":null,"revoked":null});
+        use studio_runtime_schema::{
+            multi_server_access::{AccessClientKind, AccessClientStatus, PersistedAccessClient},
+            multi_server_protocol::NonNegativeNumber,
+            queue_command::Field,
+        };
+        let invalid = || {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Invalid paired server identity",
+            )
+        };
+        let record = PersistedAccessClient {
+            id: server_id.to_owned().try_into().map_err(|_| invalid())?,
+            client_id: server_id.to_owned().try_into().map_err(|_| invalid())?,
+            server_id: Field::Value(server_id.to_owned()),
+            kind: AccessClientKind::Server,
+            label: invitation
+                .label
+                .as_str()
+                .to_owned()
+                .try_into()
+                .map_err(|_| invalid())?,
+            origin: Field::Value(origin.to_owned()),
+            public_key: public_key.to_owned().try_into().map_err(|_| invalid())?,
+            tailscale_user: Field::Value(owner),
+            status: AccessClientStatus::Paired,
+            created: NonNegativeNumber::try_from(
+                serde_json::Number::from_f64(now).ok_or_else(invalid)?,
+            )
+            .map_err(|_| invalid())?,
+            last_access: Field::Null,
+            revoked: Field::Null,
+            last_seen: Field::Missing,
+            auto_pair: Field::Missing,
+            reachability: Field::Missing,
+            alias: Field::Missing,
+            replaced_by: Field::Missing,
+            grant: Field::Missing,
+            pairing_request_id: Field::Missing,
+            pairing_hash: Field::Missing,
+            pairing_receipt: Field::Missing,
+        };
         let server_id_for_save = server_id.to_owned();
         store
             .transaction_with(move |tx| {
                 tx.execute(
                     "INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2)",
-                    rusqlite::params![server_id_for_save, record.to_string()],
+                    rusqlite::params![server_id_for_save, serde_json::to_string(&record)?],
                 )?;
                 tx.execute(
                     "INSERT INTO runtime_access_audit(client,actor,action,created) VALUES(?1,'local','accept_invite',?2)",
@@ -582,32 +605,23 @@ async fn accept_invite(
 
 async fn ui_invite(
     store: Arc<studio_runtime_store::RuntimeStore>,
-    body: &Value,
+    server_id: &str,
+    request_id: &str,
 ) -> Result<Value, ApiError> {
-    let server_id = body["serverId"]
-        .as_str()
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "The server ID is invalid"))?;
-    let request_id = body["requestId"]
-        .as_str()
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "The request ID is invalid"))?;
     let server_id_for_read = server_id.to_owned();
     let peer = store.read_async("runtime-http/routes/multi_server/ui-invite-peer", move |tx| {
                     tx.query_row("SELECT record FROM runtime_access_clients WHERE id=?1 AND json_extract(record,'$.kind')='server' AND json_extract(record,'$.status')='paired'", [server_id_for_read], |row| row.get::<_, String>(0))
                         .optional()?
-                        .map(|raw| serde_json::from_str(&raw).map_err(|_| studio_runtime_store::StoreError::SchemaMismatch("invalid stored object runtime_access_clients".into())))
+                        .map(|raw| studio_runtime_services::multi_server_discovery::StoredPeer::from_raw(&raw).ok_or_else(|| studio_runtime_store::StoreError::SchemaMismatch("invalid stored object runtime_access_clients".into())))
                         .transpose()
-                        .map(|value| value.unwrap_or(Value::Null))
                 }).await.map_err(ApiError::stored)?;
-    if peer.is_null() {
+    let Some(peer) = peer else {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "The server is not paired or is revoked",
         ));
-    }
-    let origin = peer["origin"]
-        .as_str()
+    };
+    let origin = Some(peer.origin())
         .filter(|v| !v.is_empty())
         .ok_or_else(|| {
             ApiError::new(
@@ -615,8 +629,7 @@ async fn ui_invite(
                 "The remote server identity is unavailable",
             )
         })?;
-    let public_key = peer["publicKey"]
-        .as_str()
+    let public_key = Some(peer.public_key())
         .filter(|v| !v.is_empty())
         .ok_or_else(|| {
             ApiError::new(
@@ -731,15 +744,15 @@ async fn remote_set_server_name(
             "The server is not paired or is revoked",
         ));
     };
-    let peer: Value = serde_json::from_str(&raw_peer).map_err(|_| {
-        ApiError::new(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Invalid stored object runtime_access_clients",
-        )
-    })?;
-    let peer = studio_runtime_services::multi_server_discovery::StoredPeer::from_value(peer);
-    let origin = peer.as_ref().map_or("", |peer| peer.origin());
-    let public_key = peer.as_ref().map_or("", |peer| peer.public_key());
+    let peer = studio_runtime_services::multi_server_discovery::StoredPeer::from_raw(&raw_peer)
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Invalid stored object runtime_access_clients",
+            )
+        })?;
+    let origin = peer.origin();
+    let public_key = peer.public_key();
     if origin.is_empty() || public_key.is_empty() {
         return Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -869,20 +882,17 @@ async fn remote_set_server_name(
             let Some(raw) = raw else {
                 return Ok::<_, studio_runtime_store::StoreError>(false);
             };
-            let record: Value = serde_json::from_str(&raw).map_err(|_| {
-                studio_runtime_store::StoreError::SchemaMismatch(
-                    "invalid stored object runtime_access_clients".into(),
-                )
-            })?;
             let Some(mut record) =
-                studio_runtime_services::multi_server_discovery::StoredPeer::from_value(record)
+                studio_runtime_services::multi_server_discovery::StoredPeer::from_raw(&raw)
             else {
                 return Ok(false);
             };
             if !record.is_paired() || record.public_key() != public_key_for_finish {
                 return Ok(false);
             }
-            record.set_label(refreshed_label);
+            record.set_label(refreshed_label).map_err(|_| {
+                studio_runtime_store::StoreError::SchemaMismatch("invalid peer label".into())
+            })?;
             tx.execute(
                 "UPDATE runtime_access_clients SET record=?1 WHERE id=?2",
                 rusqlite::params![serde_json::to_string(&record)?, target_for_finish],
@@ -894,7 +904,9 @@ async fn remote_set_server_name(
     Ok(())
 }
 
-async fn auto_pair(ApiJson(_body): ApiJson<Value>) -> Result<Json<Value>, ApiError> {
+async fn auto_pair(
+    ApiJson(_body): ApiJson<studio_runtime_schema::multi_server_ingress::AutoPairRequest>,
+) -> Result<Json<Value>, ApiError> {
     Err(ApiError::new(
         StatusCode::FORBIDDEN,
         "Auto pairing requires a signed paired-server request",
@@ -915,14 +927,18 @@ async fn identity() -> Response {
         .into_response()
 }
 
-async fn rename(ApiJson(_body): ApiJson<Value>) -> Result<Json<Value>, ApiError> {
+async fn rename(
+    ApiJson(_body): ApiJson<studio_runtime_schema::multi_server_ingress::RenameServer>,
+) -> Result<Json<Value>, ApiError> {
     Err(ApiError::new(
         StatusCode::FORBIDDEN,
         "Renaming requires a signed paired-server request",
     ))
 }
 
-async fn pair(ApiJson(_body): ApiJson<Value>) -> Result<Json<Value>, ApiError> {
+async fn pair(
+    ApiJson(_body): ApiJson<studio_runtime_schema::multi_server_ingress::DevicePairRequest>,
+) -> Result<Json<Value>, ApiError> {
     Err(ApiError::new(
         StatusCode::FORBIDDEN,
         "Pairing requires a signed paired-server request",
@@ -1064,8 +1080,22 @@ mod tests {
         let server_id = peer["serverId"].as_str().unwrap().to_owned();
         let public_key = peer["publicKey"].as_str().unwrap().to_owned();
         let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-        let invitation = json!({"serverId":server_id,"origin":peer_origin,"publicKey":public_key,"protocol":studio_runtime_schema::multi_server_protocol::ACCESS_PROTOCOL_VERSION,"inviteId":"invite","token":"fixture","label":"Peer"});
-        let body = json!({"invitation":invitation,"requestId":request_id});
+        let invitation = studio_runtime_schema::multi_server_ingress::AccessInvitation {
+            server_id: server_id.clone().try_into().unwrap(),
+            origin: peer_origin.to_owned().try_into().unwrap(),
+            public_key: public_key.clone().try_into().unwrap(),
+            protocol: (studio_runtime_schema::multi_server_protocol::ACCESS_PROTOCOL_VERSION
+                as i64)
+                .try_into()
+                .unwrap(),
+            invite_id: "invite".to_owned().try_into().unwrap(),
+            token: "fixture".to_owned().try_into().unwrap(),
+            label: "Peer".to_owned().try_into().unwrap(),
+            tailscale_user: "owner@example.test".to_owned().try_into().unwrap(),
+            expires: studio_runtime_schema::shared_values::MAX_SAFE_INTEGER
+                .try_into()
+                .unwrap(),
+        };
         let request = json!({"protocol":studio_runtime_schema::multi_server_protocol::ACCESS_PROTOCOL_VERSION,"inviteId":"invite","token":"fixture","clientId":local["serverId"],"label":local["label"],"kind":"server","publicKey":local["publicKey"],"origin":local_origin,"requestId":request_id});
         let raw = remote_transport::canonical_json(&request).unwrap();
         let fingerprint = remote_transport::multi_server_request_fingerprint(
@@ -1092,7 +1122,8 @@ mod tests {
             &credentials,
             Some(local_origin),
             Some(Arc::clone(&whoami)),
-            &body,
+            &request_id,
+            &invitation,
         )
         .await
         .unwrap();
@@ -1101,7 +1132,8 @@ mod tests {
             &credentials,
             Some(local_origin),
             Some(Arc::clone(&whoami)),
-            &body,
+            &request_id,
+            &invitation,
         )
         .await
         .unwrap();
@@ -1112,7 +1144,8 @@ mod tests {
             &credentials,
             Some(local_origin),
             Some(whoami),
-            &body,
+            &request_id,
+            &invitation,
         )
         .await
         .unwrap_err();
@@ -1131,21 +1164,23 @@ mod tests {
 
     #[test]
     fn semantic_snapshot_ignores_activity_times_but_keeps_peer_status() {
-        let before = serde_json::json!({
-            "clients": [{"id":"peer","lastAccess":10,"reachability":"reachable"}],
-            "servers": [{"id":"peer","lastSeen":10,"reachability":"reachable"}],
-        });
-        let after = serde_json::json!({
-            "clients": [{"id":"peer","lastAccess":20,"reachability":"reachable"}],
-            "servers": [{"id":"peer","lastSeen":20,"reachability":"reachable"}],
-        });
-        assert_eq!(semantic_snapshot(&before), semantic_snapshot(&after));
-
-        let changed = serde_json::json!({
-            "clients": [{"id":"peer","lastAccess":20,"reachability":"unreachable"}],
-            "servers": [{"id":"peer","lastSeen":20,"reachability":"unreachable"}],
-        });
-        assert_ne!(semantic_snapshot(&before), semantic_snapshot(&changed));
+        use studio_runtime_schema::{
+            multi_server_access::{AccessSnapshot, Reachability},
+            queue_command::Field,
+        };
+        let before: AccessSnapshot = serde_json::from_str(r#"{"protocol":1,"identity":{"serverId":"local","label":"Local","origin":null,"publicKey":"key","tailscaleUser":null},"clients":[{"id":"peer","clientId":"peer","kind":"server","label":"Peer","created":1,"publicKey":"key","status":"paired","serverId":null,"origin":null,"tailscaleUser":null,"revoked":null,"lastAccess":10,"reachability":"reachable"}],"servers":[{"id":"peer","clientId":"peer","kind":"server","label":"Peer","created":1,"publicKey":"key","status":"paired","serverId":null,"origin":null,"tailscaleUser":null,"revoked":null,"lastAccess":null,"lastSeen":10,"reachability":"reachable"}],"invites":[],"settings":{"autoPair":true}}"#).unwrap();
+        let mut after = before.clone();
+        after.clients[0].last_access = Some(20.into());
+        after.servers[0].last_seen = Field::Value(20.into());
+        assert_eq!(
+            semantic_snapshot(&before).unwrap(),
+            semantic_snapshot(&after).unwrap()
+        );
+        after.servers[0].reachability = Field::Value(Reachability::Unreachable);
+        assert_ne!(
+            semantic_snapshot(&before).unwrap(),
+            semantic_snapshot(&after).unwrap()
+        );
     }
 
     impl studio_runtime_services::multi_server_discovery::ServerDiscoveryPort for FakeDiscovery {
@@ -1156,19 +1191,21 @@ mod tests {
             public_origin: &'a str,
         ) -> futures_util::future::BoxFuture<
             'a,
-            Result<Value, studio_runtime_services::multi_server_auth::AccessError>,
+            Result<
+                studio_runtime_schema::multi_server_access::AccessSnapshot,
+                studio_runtime_services::multi_server_auth::AccessError,
+            >,
         > {
             self.0.fetch_add(1, Ordering::SeqCst);
             Box::pin(async move {
                 assert_eq!(identity["origin"], public_origin);
-                Ok(serde_json::json!({
-                    "protocol": 1,
-                    "identity": identity,
-                    "clients": [],
-                    "servers": [],
-                    "invites": [],
-                    "settings": {"autoPair": true, "aliases": {}}
-                }))
+                Ok(studio_runtime_schema::multi_server_access::AccessSnapshot {
+                    protocol: studio_runtime_schema::multi_server_access::AccessProtocolVersion::current(),
+                    identity: <studio_runtime_schema::multi_server_access::AccessIdentity as serde::Deserialize>::deserialize(identity).unwrap(),
+                    clients: vec![], servers: vec![], invites: vec![],
+                    settings: studio_runtime_schema::multi_server_access::AccessSettings { auto_pair: true, auto_update: true, aliases: Default::default() },
+                    identity_alerts: vec![],
+                })
             })
         }
     }
@@ -1256,7 +1293,10 @@ mod tests {
         let response = manage(
             State(state),
             HeaderMap::new(),
-            ApiJson(serde_json::json!({"action":"discover","requestId":"discovery-fixture"})),
+            ApiJson(
+                serde_json::from_str(r#"{"action":"discover","requestId":"discovery-fixture"}"#)
+                    .unwrap(),
+            ),
         )
         .await
         .expect("fake discovery succeeds");
@@ -1270,7 +1310,7 @@ mod tests {
         );
     }
 
-    /// Historical replacement records retain their fields and identity alerts.
+    /// Historical replacement identities retain their public identity alerts.
     #[tokio::test]
     async fn snapshot_serves_replaced_identities_and_their_alerts() {
         let root = tempfile::tempdir().expect("isolated multi-server state");
@@ -1285,8 +1325,7 @@ mod tests {
                 "label":"Studio server (previous identity)","kind":"server",
                 "origin":"https://local.example","publicKey":"","tailscaleUser":null,
                 "status":"revoked","created":1.5,"lastAccess":null,"revoked":1.5,"alias":"MAC",
-                "replacedBy":"current","replacement":{"requestId":"replace-1","actorId":"local",
-                "created":1.5,"rewritten":{"runtime_projects":1},"reconcile":[]}
+                "replacedBy":"current"
             }),
             serde_json::json!({
                 "id":"newpeer","clientId":"newpeer","serverId":"newpeer","label":"Peer",
@@ -1299,8 +1338,7 @@ mod tests {
                 "id":"lostpeer","clientId":"lostpeer","serverId":"lostpeer","label":"Gone",
                 "kind":"server","origin":"https://gone.example","publicKey":"key",
                 "tailscaleUser":"owner@example.test","status":"revoked","created":3.0,
-                "lastAccess":null,"revoked":3.0,"replacedBy":"newpeer",
-                "replacement":{"requestId":"replace-2","actorId":"local","created":3.0}
+                "lastAccess":null,"revoked":3.0,"replacedBy":"newpeer"
             }),
         ];
         let discovered = serde_json::json!({
@@ -1413,7 +1451,7 @@ mod tests {
             .map(|raw| serde_json::from_str(&raw).expect("stored JSON"))
             .expect("stored record");
         assert_eq!(saved["alias"], "GON");
-        assert_eq!(saved["replacement"]["requestId"], "replace-2");
+        assert_eq!(saved["replacedBy"], "newpeer");
     }
 
     #[tokio::test]
@@ -1444,11 +1482,10 @@ mod tests {
         let response = manage(
             State(state),
             HeaderMap::new(),
-            ApiJson(serde_json::json!({
-                "action":"create_invite",
-                "requestId":"fake-owner-invite",
-                "label":"Fixture server"
-            })),
+            ApiJson(
+                serde_json::from_str(r#"{"action":"create_invite","requestId":"fake-owner-invite","label":"Fixture server"}"#)
+                .unwrap(),
+            ),
         )
         .await
         .expect("fake Tailscale identity creates an invite");

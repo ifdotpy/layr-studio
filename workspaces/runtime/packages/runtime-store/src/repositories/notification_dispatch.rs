@@ -158,7 +158,11 @@ impl NotificationDispatchRepository {
         agent: &str,
         record: &Value,
     ) -> StoreResult<()> {
-        if !crate::agent_volatile::update(transaction, agent, record)? {
+        let typed = crate::AgentRecord::from_value(record.clone())
+            .map_err(|_| invalid_record("runtime_agents", agent))?;
+        if typed.id.0 != agent
+            || !crate::Table::<crate::AgentRecord>::new(transaction).update(&typed)?
+        {
             return Err(invalid_record("runtime_agents", agent));
         }
         Ok(())

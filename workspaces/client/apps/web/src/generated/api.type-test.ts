@@ -2,12 +2,30 @@ import type { components } from "./api";
 
 type SyncEntity = components["schemas"]["SyncEntity"];
 
+const task = {
+  id: "one",
+  agent: "agent",
+  created: 1,
+  status: "running",
+  kind: "command",
+  display: {
+    kind: "command",
+    kindLabel: "command",
+    title: "Command",
+    active: true,
+    indicator: "working",
+    label: "running",
+    inBackgroundList: true,
+    actions: ["readOutput"],
+  },
+} satisfies components["schemas"]["TaskEntityDto"];
+
 const validEntity: SyncEntity = {
   op: "upsert",
   collection: "task",
   id: "one",
   seq: 1,
-  value: { id: "one" },
+  value: task,
 };
 
 const invalidSequence: SyncEntity = {
@@ -16,7 +34,7 @@ const invalidSequence: SyncEntity = {
   id: "one",
   // @ts-expect-error The generated schema requires seq to be numeric.
   seq: "1",
-  value: { id: "one" },
+  value: task,
 };
 
 const invalidField: SyncEntity = {
@@ -24,7 +42,7 @@ const invalidField: SyncEntity = {
   collection: "task",
   id: "one",
   seq: 1,
-  value: { id: "one" },
+  value: task,
   // @ts-expect-error The generated strict model rejects undeclared properties.
   unexpected: true,
 };

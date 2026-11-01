@@ -127,8 +127,10 @@ const agent = {
 const saved: OutgoingMessage = {
   id: "message-1",
   body: { id: "message-1", room: "lead", text: "Hello" },
-  status: "queued",
-  attempted: false,
+  status: {
+    source: "device",
+    state: { kind: "transport_failed", error: "Failed to fetch" },
+  },
   created: 1,
 };
 
@@ -195,7 +197,10 @@ it("renders a saved message with neutral text and icon through the conversation 
   expect(markup).toContain("lucide-clock");
   expect(markup).not.toContain("Connection lost");
   expect(markup).not.toContain("lucide-wifi-off");
-  expect(saved.status).toBe("queued");
+  expect(saved.status).toEqual({
+    source: "device",
+    state: { kind: "transport_failed", error: "Failed to fetch" },
+  });
 });
 it("keeps actual retry activity beside the saved-message notice", () => {
   h.health = "degraded";

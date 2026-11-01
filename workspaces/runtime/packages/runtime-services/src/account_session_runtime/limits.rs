@@ -214,12 +214,6 @@ fn commit(
     if identical && next_stamp.is_none() {
         return Ok((Some(value), false));
     }
-    let content_changed = !identical
-        && old.as_ref().is_none_or(|old| {
-            old["data"] != value["data"]
-                || old["error"] != value["error"]
-                || old["stale"] != value["stale"]
-        });
     let stamp = next_stamp.as_ref().unwrap_or(&stamp);
     let observation = serde_json::to_string(&Observation {
         scope: &stamp["scope"],
@@ -230,22 +224,12 @@ fn commit(
     if identical {
         return Ok((Some(value), false));
     }
-    if content_changed {
-        SyncDocumentsRepository::put_entity(tx, "rateLimit", account, value.clone(), false)?;
-    }
-    let previous_due = earliest_due(tx, account)?;
+    let raw = serde_json::value::RawValue::from_string(serde_json::to_string(&value)?)?;
+    let view = studio_runtime_schema::usage_limits::RateLimitView::read(&raw, account, now)?;
+    SyncDocumentsRepository::put_entity(tx, "rateLimit", account, view, false)?;
     crate::continuation_runtime::stage_limits_changed_for_account(tx, account, &value, now)
         .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
-    let schedule_advanced = earliest_due(tx, account)?
-        .is_some_and(|due| previous_due.is_none_or(|previous| due < previous));
-    Ok((Some(value), content_changed || schedule_advanced))
-}
-
-fn earliest_due(
-    tx: &studio_runtime_store::Transaction<'_>,
-    account: &str,
-) -> Result<Option<f64>, StoreError> {
-    tx.query_row("SELECT MIN(CAST(json_extract(resume.record,'$.dueAt') AS REAL)) FROM runtime_usage_resumes AS resume JOIN runtime_agents AS owner ON owner.id=resume.agent AND json_extract(owner.record,'$.usageResume.id')=resume.id WHERE json_extract(resume.record,'$.status')='scheduled' AND json_extract(resume.record,'$.accountKey')=?1",[account],|row|row.get(0)).map_err(Into::into)
+    Ok((Some(value), true))
 }
 
 pub(super) async fn read_for_resume(

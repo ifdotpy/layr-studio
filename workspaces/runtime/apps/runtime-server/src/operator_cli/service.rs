@@ -285,7 +285,9 @@ fn linux_unit(layout: &ServiceLayout, root: &Path, state: &Path) -> Result<Strin
     let current = root.join(&layout.current_relative);
     let binary =
         systemd_quote(&current.join(&layout.binary_relative).to_string_lossy())?.replace('$', "$$");
-    let directory = systemd_quote(&current.to_string_lossy())?;
+    let directory = current.to_string_lossy();
+    service_value(&directory)?;
+    let directory = directory.replace('%', "%%");
     let mut environment = String::new();
     // Carry the operator's launch environment, never backend/Python mode flags.
     for (key, value) in launch_environment(state) {

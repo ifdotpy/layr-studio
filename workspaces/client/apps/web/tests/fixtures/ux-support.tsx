@@ -1,3 +1,4 @@
+import { backgroundDisplay } from "./background.ts";
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
@@ -20,6 +21,7 @@ const task = (id: string, created: number, agent = "lead"): BackgroundTask => ({
   id,
   created,
   agent,
+  display: backgroundDisplay("command", id),
   kind: "command",
   name: "commandExecution",
   command: id,

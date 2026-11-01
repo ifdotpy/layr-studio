@@ -117,14 +117,8 @@ export function useRemovedMessages(
     () =>
       value.restored.map((message) => ({
         ...message,
-        pending: false,
         localDelivery: false,
         materialized: true,
-        deliveryStatus: ["sending", "reserved", "dispatching"].includes(
-          message.deliveryStatus || "",
-        )
-          ? "uncertain"
-          : message.deliveryStatus,
       })),
     [value, revision],
   );

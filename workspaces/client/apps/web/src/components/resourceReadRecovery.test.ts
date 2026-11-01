@@ -257,103 +257,15 @@ describe("resource read callers", () => {
     vi.unstubAllGlobals();
   });
 
-  it("reconciles requested receipt entities with zero idle GETs", async () => {
-    const receipt = { id: "message-one", agent: "lead", status: "delivered" };
-    mount(() =>
-      useMessageReceipts("lead", "scope", "workspace", ["message-one"]),
-    );
-    receiveReceipts([
-      receipt,
-      { ...receipt, id: "unrequested" },
-      { ...receipt, agent: "other" },
-    ]);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(reconcile).toHaveBeenCalledExactlyOnceWith(
-      "lead",
-      [receipt],
-      "workspace",
-      expect.any(AbortSignal),
-    );
-    expect(
-      (states[0]!.value as { receipts: Map<string, unknown> }).receipts.get(
-        receipt.id,
-      ),
-    ).toEqual(receipt);
-    receiveReceipts([
-      receipt,
-      { ...receipt, agent: "other", id: "other-message" },
-    ]);
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(reconcile).toHaveBeenCalledTimes(1);
-    expect(get).not.toHaveBeenCalled();
-  });
-
-  it("persists delivery before publishing a receipt that can retire its reader", async () => {
-    const receipt = { id: "message-one", agent: "lead", status: "delivered" };
-    let finishWrite: (() => void) | undefined;
-    reconcile.mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          finishWrite = resolve;
-        }),
-    );
-    mount(() =>
-      useMessageReceipts("lead", "scope", "workspace", ["message-one"]),
-    );
-    receiveReceipts([receipt]);
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(reconcile).toHaveBeenCalledTimes(1);
-    const currentReceipts = () =>
-      (states[0]!.value as { receipts: Map<string, unknown> }).receipts;
-    expect(currentReceipts().has("message-one")).toBe(false);
-    finishWrite!();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(currentReceipts().get("message-one")).toEqual(receipt);
-    cleanups.pop()?.();
-    const signal = reconcile.mock.calls[0]?.[3] as AbortSignal;
-    expect(signal.aborted).toBe(true);
-  });
-
-  it("discards a queued receipt projection after unmount", async () => {
+  it("never reconciles an outbox from a cached projection", async () => {
     mount(() =>
       useMessageReceipts("lead", "scope", "workspace", ["message-one"]),
     );
     receiveReceipts([
       { id: "message-one", agent: "lead", status: "delivered" },
     ]);
-    const previous = states[0]!.value;
-    cleanups.pop()?.();
     await vi.advanceTimersByTimeAsync(0);
-    expect(get).not.toHaveBeenCalled();
     expect(reconcile).not.toHaveBeenCalled();
-    expect(states[0]!.value).toBe(previous);
-  });
-
-  it("aborts reconciliation when receipt readers unmount", async () => {
-    const receipt = { id: "message-one", agent: "lead", status: "delivered" };
-    reconcile.mockImplementationOnce(
-      (_room, _receipts, _workspaceId, value) => {
-        const signal = value as AbortSignal;
-        return new Promise<void>((resolve) =>
-          signal.addEventListener("abort", () => resolve(), { once: true }),
-        );
-      },
-    );
-    mount(() =>
-      useMessageReceipts("lead", "scope", "workspace", ["message-one"]),
-    );
-    receiveReceipts([receipt]);
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(reconcile).toHaveBeenCalledTimes(1);
-    const signal = reconcile.mock.calls[0]?.[3] as AbortSignal;
-    expect(signal.aborted).toBe(false);
-    cleanups.pop()?.();
-
-    expect(signal.aborted).toBe(true);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(get).not.toHaveBeenCalled();
   });
 
   it("waits for the workspace identity before it reads message receipts", async () => {
@@ -950,12 +862,6 @@ describe("resource read callers", () => {
           accountCostsByAccount: { default: account },
         },
       });
-    expect(
-      states.some(
-        (entry) =>
-          (entry.value as { value?: unknown } | null)?.value === session,
-      ),
-    ).toBe(false);
     expect(
       states.some(
         (entry) =>

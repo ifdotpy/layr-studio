@@ -1,3 +1,4 @@
+import { useUnsentText } from "../../../unsent/useUnsentText";
 import { useSubscription } from "../../../sync/subscriptions";
 import {
   useServerApi,
@@ -74,8 +75,12 @@ function MessageResponse({
 
   const draftKey = JSON.stringify([pendingKey, detail.id]);
   const draft = replyDrafts.get(draftKey);
+  const [savedReply, saveReply, clearReply] = useUnsentText("reply", draftKey);
   const previous = requests.get(detail.id);
   const [text, setText] = useState(previous?.text || draft?.text || "");
+  useEffect(() => {
+    if (!previous && savedReply !== null) setText(savedReply);
+  }, [savedReply]);
   const status: UserComplaintResponse["status"] =
     previous?.status || "in_progress";
   const [sending, setSending] = useState(false);
@@ -83,6 +88,7 @@ function MessageResponse({
   const [error, setError] = useState<unknown>(null);
   const saveDraft = (value: ReplyDraft) => {
     replyDrafts.set(draftKey, value);
+    saveReply(value.text);
   };
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -119,6 +125,7 @@ function MessageResponse({
       requests.delete(detail.id);
       setRetry(false);
       replyDrafts.delete(draftKey);
+      await clearReply(text);
       setText("");
       if ("detail" in outcome) onResponse(outcome.detail);
       else notify(errorText(outcome.reloadError));
@@ -130,6 +137,7 @@ function MessageResponse({
     } catch (failure) {
       if (failure instanceof ApiError) {
         if (isDefinitiveComplaintRefusal(failure.status)) {
+          await clearReply(text);
           const remaining = new Map(requests);
           remaining.delete(detail.id);
           try {

@@ -1019,15 +1019,11 @@ fn catalog_definitions<'a>(
 /// The thread role of an agent record: its saved role, else the role of a
 /// lead, a native review child, or a worker.
 fn role(record: &Value) -> Result<thread::Role, WorkerError> {
-    Ok(optional(record, "role")?.unwrap_or(
-        if studio_runtime_store::truthy(record.get("nativeReview")) {
-            thread::Role::Reviewer
-        } else if flag(record, "isLead")? {
-            thread::Role::Orchestrator
-        } else {
-            thread::Role::Implementer
-        },
-    ))
+    let native_review = studio_runtime_store::truthy(record.get("nativeReview"));
+    Ok(optional(record, "role")?.unwrap_or(thread::Role::inferred(
+        native_review,
+        !native_review && flag(record, "isLead")?,
+    )))
 }
 
 fn federation_enabled(tx: &Transaction<'_>) -> Result<bool, WorkerError> {
@@ -1256,6 +1252,9 @@ fn native_claude_options(
 ) -> Result<serde_json::Map<String, Value>, WorkerError> {
     let mut options: serde_json::Map<String, Value> =
         optional(record, "claudeOptions")?.unwrap_or_default();
+    if let Some(mode) = record.get("permissionMode").filter(|mode| !mode.is_null()) {
+        options.insert("permissionMode".into(), mode.clone());
+    }
     if crate::layr_native::is_native(record) && record["role"] == "reviewer" {
         let scratch = record["layrScratch"]
             .as_str()
@@ -1360,11 +1359,11 @@ pub(super) fn thread_snapshot(
             effort: text(record, "effort")?,
             native_effort: text(record, "nativeEffort")?,
             fast_mode: flag(record, "fastMode")?,
-            yolo_mode: optional(record, "yoloMode")?,
+            yolo_mode: text(record, "permissionMode")?.map(|mode| mode == studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions.as_str()),
             profile_instructions: text(record, "profileInstructions")?.unwrap_or_default(),
             role,
             is_lead: lead,
-            needs_title: flag(record, "needsTitle")?,
+            needs_title: record["naming"] == "pending_title",
             claude_options: native_claude_options(resources, record, state_root)?,
             daybreak_enabled: stored(record, "daybreakEnabled")?,
             cyber_access_program: stored(record, "cyberAccessProgram")?,
@@ -1480,6 +1479,8 @@ pub(super) fn submission_snapshot(
                 .map_err(|_| invalid("complaint/version"))?,
             created: complaint
                 .created
+                .as_ref()
+                .and_then(|value| value.seconds())
                 .ok_or_else(|| invalid("complaint/created"))?,
         });
     }
@@ -1527,14 +1528,7 @@ pub(super) fn submission_snapshot(
     for (_, raw) in team {
         let worker: AgentRecord = serde_json::from_str(&raw).map_err(|_| invalid("worker"))?;
         let v = worker.value();
-        let status = match worker.status.as_str() {
-            "completed" => turn::WorkerStatus::Completed,
-            "failed" => turn::WorkerStatus::Failed,
-            "interrupted" => turn::WorkerStatus::Interrupted,
-            "paused" => turn::WorkerStatus::Paused,
-            "queued" => turn::WorkerStatus::Queued,
-            _ => turn::WorkerStatus::Running,
-        };
+        let status = turn::WorkerStatus::from_agent_status(worker.status.as_str());
         workers.push(turn::Worker {
             id: worker.id.0,
             root_id: root_id.into(),
@@ -1886,8 +1880,12 @@ mod resource_tests {
                     assert!(matches!(plan, thread::Outcome::Resume(_)), "{plan:?}");
                 }
                 let saved = agent(tx, "lead")?.value();
-                assert_eq!(saved["error"], error);
-                assert_eq!(saved["lastCompletedTurnError"], error);
+                let mut expected = error.clone();
+                if let Some(fields) = expected.as_object_mut() {
+                    fields.insert("studioRawEvidence".into(), error.clone());
+                }
+                assert_eq!(saved["error"], expected);
+                assert_eq!(saved["lastCompletedTurnError"], expected);
             }
             Ok::<_, WorkerError>(())
         }).await.expect("valid structured errors preserve preparation and holds");
@@ -1905,7 +1903,9 @@ mod resource_tests {
             for error in [json!(false), json!(42), json!([])] {
                 let record = json!({"compactions":0,"accountKey":"default","id":"lead","rootId":"lead","epoch":1,"status":"queued",
                     "isLead":true,"provider":"claude","cwd":"/project","threadId":"existing-thread","error":error});
-                AgentRepository::put(tx, &AgentRecord::from_value(record.clone()).expect("agent"))?;
+                let mut persisted = record.clone();
+                persisted["error"] = Value::Null;
+                AgentRepository::put(tx, &AgentRecord::from_value(persisted).expect("agent"))?;
                 assert!(matches!(thread_snapshot(tx, &resources, &record, "connection", Path::new("/state"), None),
                     Err(WorkerError::Store(StoreError::InvalidStoredObject { table: "turn_preparation", id })) if id == "error"));
             }
@@ -2904,7 +2904,7 @@ mod workspace_fence_tests {
                 for resumed in [false, true] {
                     let mut record = json!({"compactions":0,"accountKey":"default","id":"worker","rootId":"lead","parentId":"lead","epoch":1,
                         "status":"queued","isLead":false,"role":"implementer","provider":"claude","cwd":"/project",
-                        "workspaceMode":"shared","yoloMode":*mode == "bypassPermissions","claudeOptions":{"permissionMode": mode}});
+                        "workspaceMode":"shared","permissionMode":mode});
                     if resumed {
                         record["threadId"] = json!("existing-thread");
                         record["nativeToolSource"] = json!("current");
@@ -3008,7 +3008,7 @@ mod workspace_fence_tests {
                     "layrReady":mode == "layr-native" && ready,
                     "layrScratch":"/private/reviewer-scratch",
                     "layrStoreRoot":"/state/layr-native/store",
-                    "yoloMode":true,"claudeOptions":{"permissionMode":"bypassPermissions"}});
+                    "permissionMode":"bypassPermissions"});
                     for resumed in [false, true] {
                         let mut record = record.clone();
                         if resumed {

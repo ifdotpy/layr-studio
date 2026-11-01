@@ -1286,7 +1286,7 @@ async fn radio_member_message_is_refused_only_during_its_shared_reply_turn() {
         "radio":{"direct":true,"teamId":"guard","revision":1,"status":"speaking",
             "speaker":worker_id,"next":[],"error":null,"seen":{},
             "active":{"eventId":"radio-turn:guard","agentId":worker_id,"epoch":epoch,
-                "threadId":worker["threadId"],"identity":{},"through":0}}});
+                "threadId":worker["threadId"],"identity":[worker["threadId"],epoch,0],"through":0}}});
     let worker_for_setup = worker_id.clone();
     store
         .transaction_with::<_, studio_runtime_store::StoreError>(move |tx| {

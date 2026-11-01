@@ -4,9 +4,7 @@
 //! keeps the thread loaded.
 use super::*;
 use crate::schema::table_exists;
-use crate::startup_recovery::{
-    active_monitor_predicate, unsettled_request_predicate, unsettled_tool_request_predicate,
-};
+use crate::startup_recovery::{active_monitor_predicate, unsettled_tool_request_predicate};
 
 /// Agent statuses whose turn may still be starting or running.
 const ACTIVE_AGENT_STATUSES: &str = "'queued','starting','running','approval'";
@@ -19,9 +17,12 @@ const ACTIVE_SOURCE_CLEANUP_PHASES: &str = "'planned','submitted'";
 /// agent has a turn, input, request, monitor, or operation in progress.
 fn agent_in_use(connection: &Connection) -> StoreResult<String> {
     let mut checks = vec![
-        format!("COALESCE(status,'') IN ({ACTIVE_AGENT_STATUSES})"),
-        "COALESCE(in_flight,0)!=0".to_owned(),
-        "COALESCE(turn_id,'')!=''".to_owned(),
+        format!(
+            "COALESCE({},'') IN ({ACTIVE_AGENT_STATUSES})",
+            crate::domain::chat_status_sql("runtime_agents.id")
+        ),
+        // The unfinished turn of the chat, which also covers the provider turn.
+        crate::domain::chat_busy_sql("runtime_agents.id"),
         format!(
             "COALESCE(json_array_length({}),0)>0",
             crate::agent_volatile::field_sql("runtime_agents", "activeTools")
@@ -39,7 +40,6 @@ fn agent_in_use(connection: &Connection) -> StoreResult<String> {
     ];
     for (table, predicate) in [
         ("runtime_monitors", active_monitor_predicate()),
-        ("runtime_requests", unsettled_request_predicate()),
         ("runtime_tool_requests", unsettled_tool_request_predicate()),
     ] {
         if table_exists(connection, table)? {
@@ -48,6 +48,14 @@ fn agent_in_use(connection: &Connection) -> StoreResult<String> {
                  AND json_extract(record,'$.agent')=runtime_agents.id)"
             ));
         }
+    }
+    // An open approval (pending or being answered) holds the thread.
+    if table_exists(connection, "approvals")? {
+        checks.push(
+            "EXISTS(SELECT 1 FROM approvals WHERE state IN ('pending','answering') \
+             AND agent=runtime_agents.id)"
+                .to_owned(),
+        );
     }
     Ok(checks.join(" OR "))
 }
@@ -150,7 +158,7 @@ impl SchedulerRepository {
         );
         let thread_in_use = format!(
             "({transfer} OR EXISTS({ACCOUNT_AGENT_SQL} \
-               AND thread_id=c.thread_id AND ({in_use})) \
+               AND id IN (SELECT chat FROM sessions WHERE thread_id=c.thread_id AND state<>'ended') AND ({in_use})) \
              OR EXISTS(SELECT 1 FROM runtime_agents WHERE \
                source_cleanup_phase IN ({ACTIVE_SOURCE_CLEANUP_PHASES}) \
                AND source_cleanup_account_key=?1 AND source_cleanup_thread_id=c.thread_id))"
@@ -206,7 +214,7 @@ impl SchedulerRepository {
         let mut statement = connection.prepare_cached(&format!(
             "SELECT c.value FROM json_each(?2) c WHERE NOT EXISTS(SELECT 1 FROM runtime_agents \
              WHERE account_key=?1 AND deleted_at IS NULL AND NOT ({finished}) \
-             AND thread_id=c.value)"
+             AND id IN (SELECT chat FROM sessions WHERE thread_id=c.value AND state<>'ended'))"
         ))?;
         let rows = statement.query_map([account, &encoded_threads], |row| row.get(0))?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -226,7 +234,9 @@ impl SchedulerRepository {
         let in_use = agent_in_use(connection)?;
         Ok(exists(
             connection,
-            &format!("{ACCOUNT_AGENT_SQL} AND thread_id=?2 AND ({in_use})"),
+            &format!(
+                "{ACCOUNT_AGENT_SQL} AND id IN (SELECT chat FROM sessions WHERE thread_id=?2 AND state<>'ended') AND ({in_use})"
+            ),
             &[account, thread],
         )? || exists(
             connection,
@@ -278,14 +288,17 @@ mod tests {
                 "CREATE TABLE runtime_events(id TEXT PRIMARY KEY, agent TEXT, kind TEXT, text TEXT,
                    status TEXT, created REAL, epoch INTEGER, turn_id TEXT, error TEXT);
                  CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL, monitor_status TEXT);
-                 CREATE TABLE runtime_requests(id TEXT PRIMARY KEY, record TEXT NOT NULL);
-                 CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL);
+                 CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
                  CREATE TABLE runtime_account_transfers(id TEXT PRIMARY KEY, record TEXT NOT NULL);",
             )
             .expect("schema creates");
+        crate::approvals::create_schema(&connection).expect("approvals table creates");
         connection
             .execute_batch(crate::agent_volatile::agent_volatile_table_sql())
             .expect("volatile agent table creates");
+        connection
+            .execute_batch(&crate::domain::tables_sql())
+            .expect("domain tables create");
         connection
     }
 
@@ -301,6 +314,7 @@ mod tests {
                 [id, &record.to_string()],
             )
             .expect("agent writes");
+        crate::domain::project(connection, id, &record).expect("session follows the record");
     }
 
     fn thread_in_use(connection: &Connection) -> bool {
@@ -400,13 +414,29 @@ mod tests {
     }
 
     #[test]
+    fn a_stale_turn_id_without_an_unfinished_turn_releases_the_thread() {
+        let connection = database();
+        agent(
+            &connection,
+            "a",
+            json!({"status":"completed","turnId":"turn","inFlight":false}),
+        );
+        assert!(!thread_in_use(&connection), "only an unfinished turn holds");
+        agent(
+            &connection,
+            "a",
+            json!({"status":"running","turnId":"turn","inFlight":true}),
+        );
+        assert!(thread_in_use(&connection), "the unfinished turn holds");
+    }
+
+    #[test]
     fn every_in_use_condition_holds_the_thread_and_the_account() {
         let cases = [
             json!({"status":"running"}),
             json!({"status":"queued"}),
             json!({"status":"approval"}),
             json!({"inFlight":true}),
-            json!({"turnId":"turn"}),
             json!({"activeTools":[{"id":"tool"}]}),
             json!({"workspaceOperation":"merge"}),
             json!({"accountTransferId":"transfer"}),
@@ -467,12 +497,33 @@ mod tests {
         connection
             .execute("DELETE FROM runtime_monitors", [])
             .expect("monitor deletes");
-        connection
-            .execute(
-                "INSERT INTO runtime_requests(id,record) VALUES('r',?1)",
-                [json!({"id":"r","agent":"a","status":"pending"}).to_string()],
+        {
+            use studio_runtime_schema::approvals as typed;
+            crate::approvals::create(
+                &connection,
+                crate::approvals::NewApproval {
+                    id: typed::ApprovalId("r".into()),
+                    agent: typed::AgentId("a".into()),
+                    turn: Some(typed::TurnId("t".into())),
+                    epoch: None,
+                    request: typed::Request::Exec {
+                        command: String::new(),
+                        cwd: String::new(),
+                        reason: None,
+                    },
+                    delivery: None,
+                    detail: typed::Detail {
+                        params: typed::ProviderObject(Default::default()),
+                        preview: None,
+                        answer_error: None,
+                        host_close_reason: None,
+                    },
+                    fire_at: None,
+                },
+                typed::Timestamp(1.0),
             )
             .expect("request writes");
+        }
         assert!(
             thread_in_use(&connection),
             "a pending request holds the thread"

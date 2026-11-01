@@ -3,10 +3,21 @@ use crate::queue_command::Field;
 use crate::stored_record::StoredJsonInteger;
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
-use std::collections::BTreeMap;
+
+#[derive(Clone, Debug, PartialEq, Serialize, schemars::JsonSchema)]
+#[serde(transparent)]
+pub struct AnnotationRecord(AnnotationFields);
+
+impl<'de> Deserialize<'de> for AnnotationRecord {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::json_object::JsonObject::<AnnotationFields>::deserialize(deserializer)
+            .map(|value| Self(value.0))
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct AnnotationRecord {
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AnnotationFields {
     id: String,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<String>")]
@@ -23,12 +34,20 @@ pub struct AnnotationRecord {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<Number>")]
     created: Field<Number>,
-    #[serde(flatten)]
-    extra: BTreeMap<String, Value>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    root_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    turn_id: Field<String>,
 }
 
 fn line_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({"anyOf":[{"type":"integer","x-safe-integer":"unsigned"},{"type":"null"}]})
+}
+
+pub fn valid_line(value: &Value) -> bool {
+    value.is_null() || StoredJsonInteger::deserialize(value).is_ok()
 }
 
 impl AnnotationRecord {
@@ -36,7 +55,23 @@ impl AnnotationRecord {
         serde_json::from_value(value)
     }
     pub fn id(&self) -> &String {
-        &self.id
+        &self.0.id
+    }
+    pub fn sync_view(&self, bound: &impl Fn(&str, &str) -> String) -> Self {
+        let mut view = self.clone();
+        view.0.id = bound(&view.0.id, "id");
+        for (field, name) in [
+            (&mut view.0.agent, "agent"),
+            (&mut view.0.root_id, "rootId"),
+            (&mut view.0.path, "path"),
+            (&mut view.0.text, "text"),
+            (&mut view.0.turn_id, "turnId"),
+        ] {
+            if let Field::Value(value) = field {
+                *value = bound(value, name);
+            }
+        }
+        view
     }
     pub fn value(&self) -> Value {
         // Every field is already serializable JSON data.
@@ -73,7 +108,7 @@ mod tests {
             (json!({"id":"a"}), true),
             (
                 json!({"id":"a","line":-1.0,"created":null,"extra":[1]}),
-                true,
+                false,
             ),
             (json!({"id":"a","line":u64::MAX}), true),
             (json!({"id":"a","line":1.5}), false),

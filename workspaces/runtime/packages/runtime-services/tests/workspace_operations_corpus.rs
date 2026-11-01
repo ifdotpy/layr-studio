@@ -313,6 +313,24 @@ async fn committed_turn_captures_once_preserving_user_index_and_files() {
 }
 
 #[tokio::test]
+async fn skipped_turn_checkpoint_reports_workspace_failure() {
+    let f = Fixture::new(true).await;
+    let request = CompletedTurn::from_record(&f.actor).expect("request");
+    std::fs::remove_dir_all(&f.repo).expect("remove workspace");
+    let before = f.snapshot();
+    let error = Box::pin(checkpoint_after_turn(Arc::clone(&f.store), &request))
+        .await
+        .expect_err("workspace failure is reported");
+    assert!(matches!(
+        error,
+        WorkspaceEffectsError::Checkpoint(
+            studio_runtime_services::checkpoints::CheckpointsError::WorkspaceUnavailable
+        )
+    ));
+    assert_eq!(f.snapshot(), before);
+}
+
+#[tokio::test]
 async fn late_completion_and_missing_receipt_write_nothing() {
     let f = Fixture::new(true).await;
     let request = CompletedTurn::from_record(&f.actor).expect("request");

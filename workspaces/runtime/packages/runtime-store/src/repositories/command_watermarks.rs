@@ -14,7 +14,39 @@ pub(crate) const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS client_command_w
 
 pub struct CommandWatermarks;
 
+/// Durable admission for a send, saved before its asset upload.
+pub const SEND_ADMISSIONS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS command_send_admissions (id TEXT PRIMARY KEY, signature TEXT NOT NULL, created INTEGER NOT NULL) WITHOUT ROWID; CREATE INDEX IF NOT EXISTS command_send_admissions_created ON command_send_admissions(created,id);";
+
 impl CommandWatermarks {
+    pub fn install_send_admissions(tx: &Transaction<'_>, now_ms: i64) -> rusqlite::Result<()> {
+        tx.execute_batch(SEND_ADMISSIONS_SCHEMA)?;
+        tx.execute("INSERT INTO runtime_orchestration_settings(id,record) VALUES('global',json_object('sendAdmissionCutoverMs',?1)) ON CONFLICT(id) DO UPDATE SET record=json_insert(record,'$.sendAdmissionCutoverMs',?1)", [now_ms])?;
+        Ok(())
+    }
+    /// Migration time in Unix milliseconds; stored once so restarts keep the boundary.
+    pub fn send_cutover(conn: &Connection) -> rusqlite::Result<i64> {
+        conn.query_row("SELECT json_extract(record,'$.sendAdmissionCutoverMs') FROM runtime_orchestration_settings WHERE id='global'", [], |row| row.get(0))
+    }
+    /// Reserve the original fingerprint for the lifetime of the replay window.
+    pub fn reserve_send(
+        tx: &Transaction<'_>,
+        id: &str,
+        signature: &str,
+        created: i64,
+        now: i64,
+    ) -> rusqlite::Result<bool> {
+        let cutoff = now.saturating_sub(studio_runtime_schema::persistence::REQUEST_RESULT_TTL_MS);
+        tx.execute("DELETE FROM command_send_admissions WHERE id IN (SELECT id FROM command_send_admissions WHERE created<=?1 ORDER BY created,id LIMIT ?2)", params![cutoff, crate::request_results::REQUEST_RESULT_GC_BATCH_ROWS as i64])?;
+        tx.execute(
+            "INSERT OR IGNORE INTO command_send_admissions(id,signature,created) VALUES(?1,?2,?3)",
+            params![id, signature, created],
+        )?;
+        tx.query_row(
+            "SELECT signature=?2 FROM command_send_admissions WHERE id=?1",
+            params![id, signature],
+            |row| row.get(0),
+        )
+    }
     /// The highest applied number of `client`, or 0 when it never applied a command.
     pub fn applied(conn: &Connection, client: &str) -> rusqlite::Result<i64> {
         Ok(conn
@@ -51,6 +83,19 @@ impl CommandWatermarks {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn send_cutover_is_recorded_once() {
+        let mut db = Connection::open_in_memory().expect("database");
+        db.execute_batch(
+            "CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL)",
+        )
+        .expect("settings");
+        let tx = db.transaction().expect("transaction");
+        CommandWatermarks::install_send_admissions(&tx, 123).expect("first migration");
+        CommandWatermarks::install_send_admissions(&tx, 456).expect("repeated migration");
+        assert_eq!(CommandWatermarks::send_cutover(&tx).expect("cutover"), 123);
+    }
 
     #[test]
     fn watermark_starts_at_zero_and_never_moves_down() {

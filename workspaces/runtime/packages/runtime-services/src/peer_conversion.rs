@@ -10,6 +10,7 @@ use rusqlite::{Connection, Transaction, params};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use studio_runtime_schema::peer_team_ingress::Convert;
 use studio_runtime_store::{
     ProjectsRepository, RuntimeStore, SyncDocumentsRepository, system_reads as records,
 };
@@ -35,38 +36,26 @@ const MOVE_FIELDS: &[(&str, &[&str])] = &[
 /// Called only by the authenticated user HTTP route, never by model tools.
 pub async fn convert(
     store: Arc<RuntimeStore>,
-    body: &Value,
+    body: &Convert,
 ) -> Result<ConversionReply, ProjectsError> {
-    let allowed = [
-        "action",
-        "path",
-        "member",
-        "target",
-        "expected_revision",
-        "request_id",
-    ];
-    if body
-        .as_object()
-        .is_none_or(|object| object.keys().any(|key| !allowed.contains(&key.as_str())))
-    {
-        return Err(ProjectsError::Invalid("Unknown chat conversion field"));
-    }
-    let path_input = body.get("path").cloned();
-    let source = field(body, "member")?;
-    let target = field(body, "target")?;
+    let path_input = body.path.clone();
+    let source = field(&body.member)?;
+    let target = field(&body.target)?;
     if source == target {
         return Err(ProjectsError::Invalid("Select two different chats"));
     }
-    let request = field(body, "request_id")?;
+    let request = field(&body.request_id)?;
     let request_id = request.to_owned();
-    let revision = body["expected_revision"]
+    let revision = body
+        .expected_revision
         .as_u64()
         .ok_or(ProjectsError::Invalid(
             "Supply the current peer team revision",
         ))?;
     let key = format!("peer-convert:{request}");
-    let signature =
-        event_write::request_signature(&json!({"operation":"peer-convert","body":body}));
+    let signature = studio_runtime_store::sha256_hex(
+        &serde_json::to_vec(body).map_err(studio_runtime_store::StoreError::from)?,
+    );
     let replay_root = request_id.clone();
     let replay_key = key.clone();
     let replay_signature = signature.clone();
@@ -92,7 +81,7 @@ pub async fn convert(
     let prepared = studio_runtime_process::blocking_pool::spawn_blocking(
         "runtime-services/peer-conversion",
         move || {
-            let path = project_key(path_input.as_ref(), false)?;
+            let path = project_key(Some(&path_input), false)?;
             prepared.recheck_paths()?;
             Ok::<_, ProjectsError>((path, prepared))
         },
@@ -127,7 +116,7 @@ pub async fn convert(
         idle(db,&tree,true)?;
         let moving=tree.iter().filter(|a|a["rootId"]==source).collect::<Vec<_>>();
         let moving_ids=moving.iter().filter_map(|a|a["id"].as_str()).collect::<Vec<_>>();
-        let affected=records::all(db,"runtime_rooms")?.into_iter().filter(|r| matches!(r["rootId"].as_str(),Some(root) if root==source.as_str() || root==target.as_str()) || r["members"].as_array().is_some_and(|m|m.iter().any(|id|moving_ids.contains(&id.as_str().unwrap_or_default()) || teams.iter().any(|t|t["members"].as_array().is_some_and(|members|members.contains(id)))))).collect::<Vec<_>>();
+        let affected=studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(db).list()?.into_iter().filter(|r| matches!(r.root_id.as_ref().map(String::as_str),Some(root) if root==source.as_str() || root==target.as_str()) || r.members.as_ref().is_some_and(|m|m.iter().any(|id|moving_ids.contains(&id.as_str()) || teams.iter().any(|t|t["members"].as_array().is_some_and(|members|members.iter().any(|member|member.as_str()==Some(id.as_str()))))))).collect::<Vec<_>>();
         let now=crate::projects::now_seconds();
         let mut next_teams=Vec::new();
         for team in &teams {
@@ -143,9 +132,9 @@ pub async fn convert(
             agent["rootId"]=json!(target); agent["updated"]=json!(now);
             let object=agent.as_object_mut().ok_or(ProjectsError::Invalid("stored agent invalid"))?;
             object.remove("concurrency");
-            if let Some(v)=dst.get("maxAgents") {object.insert("maxAgents".to_owned(),v.clone());}
+            object.insert("capacity".to_owned(),json!({"kind":"automatic","max":crate::agents_create::capacity_max(dst)}));
             if original["id"]==source {
-                for field in ["subagentConcurrencyVersion","maxAgentsExplicit","agentMode","agentModeRevision","agentModeSupported","projectFolder","pinned"] {object.remove(field);}
+                for field in ["subagentConcurrencyVersion","agentMode","agentModeRevision","agentModeSupported","projectFolder","pinned"] {object.remove(field);}
                 agent["isLead"]=json!(false); agent["parentId"]=json!(target); agent["role"]=json!("implementer"); agent["status"]=json!("paused"); agent["autoWake"]=json!(false); agent["worktree"]=json!(false);
                 agent["epoch"]=json!(original["epoch"].as_u64().unwrap_or(0).checked_add(1).ok_or(ProjectsError::Invalid("agent epoch exhausted"))?);
                 agent["convertedFromLead"]=json!({"requestId":request_id.clone(),"by":"user","at":now,"oldRootId":source,"rootId":target});
@@ -175,10 +164,10 @@ pub async fn convert(
             studio_runtime_store::Table::new(db).put(&rule)?;
         }
         for mut room in affected {
-            if room["rootId"]==source {
-                room["rootId"]=json!(target); room["updated"]=json!(now);
-                if room["kind"]=="broadcast" {room["kind"]=json!("private");room["members"]=json!(moving.iter().filter(|a|!truthy(a.get("deletedAt"))).map(|a|a["id"].clone()).collect::<Vec<_>>());room["customName"]=json!(format!("{} (previous broadcast)",src["name"].as_str().filter(|v|!v.is_empty()).unwrap_or(source.as_str())));}
-                put(db,"runtime_rooms",&room)?;
+            if room.root_id.as_ref().map(String::as_str)==Some(source.as_str()) {
+                room.root_id=studio_runtime_schema::queue_command::Field::Value(target.clone()); room.updated=serde_json::Number::from_f64(now).map_or(studio_runtime_schema::queue_command::Field::Null, studio_runtime_schema::queue_command::Field::Value);
+                if room.kind==studio_runtime_schema::room_record::RoomKind::Broadcast {room.kind=studio_runtime_schema::room_record::RoomKind::Private;room.members=Some(moving.iter().filter(|a|!truthy(a.get("deletedAt"))).filter_map(|a|a["id"].as_str().map(str::to_owned)).collect());room.custom_name=studio_runtime_schema::queue_command::Field::Value(format!("{} (previous broadcast)",src["name"].as_str().filter(|v|!v.is_empty()).unwrap_or(source.as_str())));}
+                studio_runtime_store::Table::new(db).put(&room)?;
             }
             crate::radio_runtime::publish_room(db,&room,&prepared)?;
         }
@@ -193,12 +182,12 @@ pub async fn convert(
         Ok(result)
     }).await
 }
-fn field<'a>(body: &'a Value, field: &str) -> Result<&'a str, ProjectsError> {
-    body[field]
-        .as_str()
-        .map(event_write::python_strip)
-        .filter(|v| !v.is_empty() && v.chars().count() <= 255)
-        .ok_or(ProjectsError::Invalid("chat conversion field invalid"))
+fn field(value: &str) -> Result<&str, ProjectsError> {
+    let value = event_write::python_strip(value);
+    if value.is_empty() || value.chars().count() > 255 {
+        return Err(ProjectsError::Invalid("chat conversion field invalid"));
+    }
+    Ok(value)
 }
 fn event_error(error: event_write::EventWriteError) -> ProjectsError {
     match error {
@@ -223,7 +212,9 @@ fn put(db: &Transaction<'_>, table: &'static str, value: &Value) -> Result<(), P
         .ok_or(ProjectsError::Invalid("record ID missing"))?;
     records::validate(table, id, value.clone())?;
     if table == studio_runtime_store::agent_volatile::AGENT_TABLE {
-        studio_runtime_store::agent_volatile::update(db, id, value)?;
+        let agent = studio_runtime_store::AgentRecord::from_value(value.clone())
+            .map_err(studio_runtime_store::StoreError::from)?;
+        studio_runtime_store::Table::<studio_runtime_store::AgentRecord>::new(db).update(&agent)?;
         return Ok(());
     }
     db.execute(
@@ -231,6 +222,9 @@ fn put(db: &Transaction<'_>, table: &'static str, value: &Value) -> Result<(), P
         params![value.to_string(), id],
     )?;
     Ok(())
+}
+fn transfer_involves(transfer: &studio_runtime_store::AccountTransferRecord, agent: &str) -> bool {
+    transfer.lead_id == agent || transfer.members.0.iter().any(|(id, _)| id == agent)
 }
 /// Shared idle gate for user actions that change a chat's owner or workspace.
 /// `uncertain_blocks` is true for a move to another owner, which must carry an
@@ -264,9 +258,18 @@ pub(crate) fn idle(
                 "Finish the pending workspace operation first",
             ));
         }
-        if truthy(a.get("accountTransferId"))
-            || truthy(a.get("lazyAccountTransfer"))
-            || a["accountTransfer"]["status"] == "pending"
+        let agent = studio_runtime_store::AgentRepository::get(
+            db,
+            &studio_runtime_store::AgentId::from(a["id"].as_str().unwrap_or_default()),
+        )?
+        .ok_or(ProjectsError::Invalid("stored agent missing"))?;
+        if agent.account_transfer_id.value().is_some()
+            || agent.lazy_account_transfer.value().is_some()
+            || matches!(
+                agent.account_transfer.value(),
+                Some(studio_runtime_store::transfer_record::AgentTransferState::Unreadable(_))
+            )
+            || matches!(agent.account_transfer.value(), Some(studio_runtime_store::transfer_record::AgentTransferState::Summary(summary)) if matches!(summary.status, studio_runtime_store::transfer_record::TransferStatus::Pending))
         {
             return Err(ProjectsError::Invalid("Finish the account transfer first"));
         }
@@ -278,14 +281,21 @@ pub(crate) fn idle(
         }
         if db.query_row("SELECT EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND (status IN ('pending','reserved','dispatching') OR (?2 AND status='uncertain')))",rusqlite::params![a["id"].as_str().unwrap_or_default(),uncertain_blocks],|r|r.get::<_,bool>(0))? {return Err(ProjectsError::Invalid("Finish pending input first"));}
     }
+    for id in studio_runtime_store::AccountTransferRepository::recovery_ids(db)? {
+        if let Some((transfer, _)) =
+            studio_runtime_store::AccountTransferRepository::get_typed_with_raw(db, &id)?
+            && transfer.status == studio_runtime_store::transfer_record::TransferStatus::Pending
+            && ids.iter().any(|id| transfer_involves(&transfer, id))
+        {
+            return Err(ProjectsError::Invalid("Finish pending operations first"));
+        }
+    }
     for table in [
         "runtime_tasks",
         "runtime_monitors",
-        "runtime_requests",
         "runtime_tool_requests",
         "runtime_rules",
         "runtime_workspace_operations",
-        "runtime_account_transfers",
         "runtime_rooms",
     ] {
         let owners = ids.iter().copied().collect::<Vec<_>>();
@@ -299,7 +309,6 @@ pub(crate) fn idle(
                             Some("running" | "starting" | "approval")
                         )
                 }
-                "runtime_requests" => belongs && r["status"] == "pending",
                 "runtime_tool_requests" => {
                     belongs
                         && !truthy(r.get("readOnly"))
@@ -314,13 +323,6 @@ pub(crate) fn idle(
                             Some("complete" | "completed" | "failed" | "cancelled")
                         )
                 }
-                "runtime_account_transfers" => {
-                    r["status"] == "pending"
-                        && (ids.contains(r["leadId"].as_str().unwrap_or_default())
-                            || r["members"]
-                                .as_object()
-                                .is_some_and(|m| m.keys().any(|id| ids.contains(id.as_str()))))
-                }
                 "runtime_rooms" => {
                     r["members"].as_array().is_some_and(|m| {
                         m.iter()
@@ -334,12 +336,74 @@ pub(crate) fn idle(
             }
         }
     }
+    for id in ids.iter() {
+        let waiting = studio_runtime_store::approvals::for_agent(
+            db,
+            &studio_runtime_schema::approvals::AgentId((*id).to_owned()),
+        )
+        .map_err(studio_runtime_store::StoreError::from)?
+        .iter()
+        .any(|row| {
+            matches!(
+                row.state,
+                studio_runtime_schema::approvals::ApprovalState::Pending
+            )
+        });
+        if waiting {
+            return Err(ProjectsError::Invalid("Finish pending operations first"));
+        }
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod receipt_tests {
     use super::ConversionReply;
+
+    #[test]
+    fn equivalent_typed_requests_have_identical_signatures() {
+        use studio_runtime_schema::peer_team_ingress::{Convert, RadioManage, TeamMutation};
+        fn signature<T: serde::Serialize>(body: &T) -> String {
+            studio_runtime_store::sha256_hex(&serde_json::to_vec(body).expect("request encoding"))
+        }
+        let conversion: Convert = serde_json::from_str(r#"{"action":"convert","path":"p","request_id":"r","member":"a","target":"b","expected_revision":1}"#).unwrap();
+        let conversion_reordered: Convert = serde_json::from_str(r#"{"expected_revision":1,"target":"b","member":"a","request_id":"r","path":"p","action":"convert"}"#).unwrap();
+        assert_eq!(
+            signature(&conversion),
+            "f2a4d3ee3f7fb705439305bc89250ac9e340c380fb8eb4499f5626377a7ab103"
+        );
+        assert_eq!(signature(&conversion), signature(&conversion_reordered));
+        let team: TeamMutation = serde_json::from_str(r#"{"action":"delete","path":"p","request_id":"r","team_id":"t","expected_revision":1}"#).unwrap();
+        let team_reordered: TeamMutation = serde_json::from_str(r#"{"expected_revision":1,"team_id":"t","request_id":"r","path":"p","action":"delete"}"#).unwrap();
+        assert_eq!(signature(&team), signature(&team_reordered));
+        let radio: RadioManage = serde_json::from_str(
+            r#"{"action":"radio","radio_action":"open","path":"p","team_id":"t","request_id":"r"}"#,
+        )
+        .unwrap();
+        let radio_reordered: RadioManage = serde_json::from_str(
+            r#"{"request_id":"r","team_id":"t","path":"p","radio_action":"open","action":"radio"}"#,
+        )
+        .unwrap();
+        assert_eq!(signature(&radio), signature(&radio_reordered));
+    }
+
+    #[tokio::test]
+    async fn transfer_member_blocks_peer_conversion() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(dir.path()))
+            .await
+            .unwrap();
+        store.transaction(|db| {
+            let agent = studio_runtime_store::AgentRecord::from_value(serde_json::json!({
+                "id":"member", "rootId":"member", "epoch":1, "status":"idle", "compactions":0, "accountKey":"source", "provider":"codex", "model":"gpt-6-astra", "cwd":std::env::temp_dir()
+            })).unwrap();
+            studio_runtime_store::AgentRepository::put(db, &agent)?;
+            db.execute("INSERT INTO runtime_account_transfers(id,record) VALUES(?1,?2)", rusqlite::params!["transfer", r#"{"id":"transfer","leadId":"other","targetAccountKey":"target","status":"pending","created":1,"members":{"member":{"phase":"unknown","sourceAccountKey":"source"}}}"#])?;
+            let value = serde_json::json!({"id":"member", "status":"idle"});
+            assert!(matches!(super::idle(db, &[value], true), Err(super::ProjectsError::Invalid("Finish pending operations first"))));
+            Ok(())
+        }).await.unwrap();
+    }
 
     #[test]
     fn conversion_receipt_keeps_persisted_fields() {

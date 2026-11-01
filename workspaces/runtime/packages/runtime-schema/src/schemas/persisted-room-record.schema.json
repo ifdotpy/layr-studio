@@ -1,99 +1,276 @@
 {
   "$defs": {
-    "JsonValue": {}
-  },
-  "additionalProperties": {
-    "$ref": "#/$defs/JsonValue"
-  },
-  "properties": {
-    "customName": {
-      "anyOf": [
-        {
-          "type": "string"
+    "InterruptState": {
+      "enum": ["pending", "unknown", "accepted", "rejected"],
+      "type": "string"
+    },
+    "Radio": {
+      "additionalProperties": true,
+      "properties": {
+        "active": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "properties": {
+                "agentId": {
+                  "type": "string"
+                },
+                "epoch": {
+                  "format": "uint64",
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "eventId": {
+                  "type": "string"
+                },
+                "identity": {
+                  "maxItems": 3,
+                  "minItems": 3,
+                  "prefixItems": [
+                    {
+                      "type": ["string", "null"]
+                    },
+                    {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": ["integer", "null"]
+                    },
+                    {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "interruptRequested": {
+                  "type": ["boolean", "null"]
+                },
+                "interruptState": {
+                  "$ref": "#/$defs/InterruptState"
+                },
+                "questionContinuationPlanned": {
+                  "type": ["boolean", "null"]
+                },
+                "threadId": {
+                  "type": ["string", "null"]
+                },
+                "through": {
+                  "format": "uint64",
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "turnId": {
+                  "type": ["string", "null"]
+                }
+              },
+              "required": [
+                "eventId",
+                "agentId",
+                "epoch",
+                "identity",
+                "through",
+                "threadId"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
-        {
-          "type": "null"
+        "direct": {
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "seen": {
+          "additionalProperties": {
+            "$ref": "#/$defs/RoomRadioSeen"
+          },
+          "type": "object"
+        },
+        "speaker": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/Status"
+        },
+        "teamId": {
+          "type": "string"
         }
+      },
+      "required": [
+        "teamId",
+        "revision",
+        "status",
+        "speaker",
+        "next",
+        "direct",
+        "active",
+        "error",
+        "seen"
       ],
-      "title": "Customname"
+      "type": "object"
+    },
+    "RoomKind": {
+      "enum": ["private", "broadcast", "federated"],
+      "type": "string"
+    },
+    "RoomRadioSeen": {
+      "additionalProperties": false,
+      "properties": {
+        "identity": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": ["string", "null"]
+            },
+            {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": ["integer", "null"]
+            },
+            {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            }
+          ],
+          "type": "array"
+        },
+        "seq": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": ["identity", "seq"],
+      "type": "object"
+    },
+    "RoomStatus": {
+      "enum": ["pending", "approved", "revoked"],
+      "type": "string"
+    },
+    "Status": {
+      "enum": ["idle", "waiting", "speaking", "blocked", "stopping"],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Stored room fields shared by writers and projections.",
+  "properties": {
+    "created": {
+      "type": ["number", "null"]
+    },
+    "customName": {
+      "type": ["string", "null"]
+    },
+    "federation": {
+      "type": ["boolean", "null"]
     },
     "id": {
-      "title": "Id",
       "type": "string"
     },
     "kind": {
-      "title": "Kind",
-      "type": "string"
+      "$ref": "#/$defs/RoomKind"
+    },
+    "localMembers": {
+      "items": {
+        "type": "string"
+      },
+      "type": ["array", "null"]
     },
     "members": {
       "items": {
         "type": "string"
       },
-      "title": "Members",
       "type": "array"
     },
+    "name": {
+      "type": ["string", "null"]
+    },
+    "peerId": {
+      "type": ["string", "null"]
+    },
+    "peerLabel": {
+      "type": ["string", "null"]
+    },
+    "peerTeamId": {
+      "type": ["string", "null"]
+    },
+    "peerTeamName": {
+      "type": ["string", "null"]
+    },
+    "projectDeletedAt": {
+      "type": ["number", "null"]
+    },
+    "projectId": {
+      "type": ["string", "null"]
+    },
     "projectPath": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "title": "Projectpath"
+      "type": ["string", "null"]
     },
     "radio": {
       "anyOf": [
         {
-          "additionalProperties": {
-            "$ref": "#/$defs/JsonValue"
-          },
-          "properties": {
-            "direct": { "type": "boolean" },
-            "active": { "type": ["object", "null"] }
-          },
-          "required": ["direct", "active"],
-          "type": "object"
+          "$ref": "#/$defs/Radio"
         },
         {
           "type": "null"
         }
-      ],
-      "title": "Radio"
+      ]
     },
     "rootId": {
+      "type": ["string", "null"]
+    },
+    "status": {
       "anyOf": [
         {
-          "type": "string"
+          "$ref": "#/$defs/RoomStatus"
         },
         {
           "type": "null"
         }
-      ],
-      "title": "Rootid"
+      ]
     },
     "updated": {
-      "anyOf": [
-        {
-          "type": "number"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "title": "Updated"
+      "type": ["number", "null"]
     },
     "userHidden": {
-      "anyOf": [
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "title": "Userhidden"
+      "type": ["boolean", "null"]
     }
   },
   "required": ["id", "kind"],

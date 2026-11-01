@@ -335,7 +335,12 @@ pub fn limits_snapshot_with_observation(
     let mut snapshot = raw
         .map(|raw| serde_json::from_str::<Value>(&raw))
         .transpose()?
-        .and_then(|mut envelope| envelope.get_mut("value").map(Value::take));
+        .and_then(|mut envelope| {
+            envelope
+                .get_mut("value")?
+                .get_mut("observation")
+                .map(Value::take)
+        });
     if let Some(snapshot) = &mut snapshot {
         apply_limits_observation(snapshot, observation);
     }
@@ -368,6 +373,7 @@ pub fn limits_snapshots(connection: &Connection) -> StoreResult<LimitsRead> {
             let mut envelope = decode_limits_document(&bytes, length)?;
             let mut snapshot = envelope
                 .get_mut("value")
+                .and_then(|value| value.get_mut("observation"))
                 .map(Value::take)
                 .ok_or_else(|| ("/value".to_owned(), "type".to_owned()))?;
             apply_limits_observation(&mut snapshot, &mut receipt);
@@ -584,7 +590,7 @@ mod tests {
         db.execute(
             "INSERT INTO sync_entities VALUES('rateLimit','alpha',?1,0)",
             [
-                json!({"value":{"accountKey":"alpha","at":1.0,"data":{"accountId":"A"}}})
+                json!({"value":{"observation":{"accountKey":"alpha","at":1.0,"data":{"accountId":"A"}}}})
                     .to_string(),
             ],
         )
@@ -616,7 +622,10 @@ mod tests {
                 connection
                     .execute(
                         "INSERT INTO sync_entities VALUES('rateLimit',?1,?2,0)",
-                        rusqlite::params![key, json!({"value":snapshot}).to_string()],
+                        rusqlite::params![
+                            key,
+                            json!({"value":{"observation":snapshot}}).to_string()
+                        ],
                     )
                     .expect("fixture row");
             }
@@ -663,7 +672,7 @@ mod tests {
         let db = database(&json!({"value":false}));
         let read = limits_snapshots(&db).expect("read diagnostic");
         assert_eq!(read.diagnostics[0].workspace_row, "rateLimit");
-        assert_eq!(read.diagnostics[0].pointer, "");
+        assert_eq!(read.diagnostics[0].pointer, "/value");
         assert!(read.snapshots.is_empty());
 
         let deep = format!(

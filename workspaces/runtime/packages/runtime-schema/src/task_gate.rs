@@ -9,6 +9,16 @@ pub const MAX_TIMEOUT_MS: u64 = 3_600_000;
 /// Maximum command or override reason length, in Unicode code points.
 pub const MAX_TEXT_CODEPOINTS: usize = 32_000;
 
+/// Current server-owned dependency and acceptance policy for one work detail.
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkDetailPolicy {
+    pub blocked_by: Vec<String>,
+    pub display_status: crate::persistence::WorkStatus,
+    pub accept_available: bool,
+    pub gate_override_required: bool,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Gate {
@@ -82,6 +92,27 @@ pub fn apply_tool_contract(name: &str, input: &mut serde_json::Map<String, Value
 /// OpenAPI fields consumed by the web. The generator checks these exact fields against this owner.
 pub fn apply_api_contract(document: &mut Value) {
     let schemas = &mut document["components"]["schemas"];
+    let mut generator = schemars::generate::SchemaSettings::draft2020_12()
+        .for_deserialize()
+        .with(|settings| settings.definitions_path = "/components/schemas".into())
+        .into_generator();
+    generator.subschema_for::<WorkDetailPolicy>();
+    for (name, schema) in generator.definitions() {
+        schemas[name] = schema.clone();
+    }
+    schemas["WorkDetail"] = json!({"allOf":[
+        {"$ref":"#/components/schemas/WorkItem"},
+        {"type":"object","properties":{"policy":{"$ref":"#/components/schemas/WorkDetailPolicy"}},"required":["policy"]}
+    ]});
+    schemas["SyncWorkDetailEntityPayload"]["properties"]["value"] =
+        json!({"$ref":"#/components/schemas/WorkDetail"});
+    if let Some(variants) = schemas["SyncEntity"]["oneOf"].as_array_mut() {
+        for variant in variants {
+            if variant["properties"]["collection"]["const"] == "workDetail" {
+                variant["properties"]["value"] = json!({"$ref":"#/components/schemas/WorkDetail"});
+            }
+        }
+    }
     schemas["TaskAcceptanceGate"] = input_schema();
     schemas["TaskGateDefaultResponse"] = json!({"type":"object","properties":{
         "id":{"type":"string"},"defaultGate":{"$ref":"#/components/schemas/TaskAcceptanceGate"}},

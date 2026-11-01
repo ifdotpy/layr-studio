@@ -18,8 +18,8 @@ export function limitLine(
 ) {
   if (resetAt != null && now >= resetAt)
     return resumes
-      ? "The limit has reset. Studio is checking the account."
-      : "The limit has reset. Refresh to check the account.";
+      ? "The reset time passed. Studio is checking the account."
+      : "The reset time passed. Refresh to check the account.";
   if (resumes)
     return "Limit reached. Studio resumes this chat after the reset.";
   return resetAt != null

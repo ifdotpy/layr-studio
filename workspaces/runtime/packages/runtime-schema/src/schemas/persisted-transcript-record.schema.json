@@ -1,5 +1,51 @@
 {
   "$defs": {
+    "AgentError": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/NativeProviderError"
+        }
+      ]
+    },
+    "CodexErrorDetail": {
+      "additionalProperties": true,
+      "properties": {
+        "httpStatusCode": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "turnKind": {
+          "type": ["string", "null"]
+        }
+      },
+      "type": "object"
+    },
+    "CodexErrorInfo": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/CodexErrorPayload"
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "CodexErrorPayload": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CodexErrorDetail"
+        },
+        true
+      ]
+    },
     "EventKind": {
       "enum": [
         "user",
@@ -35,6 +81,33 @@
         "rule_hold"
       ],
       "type": "string"
+    },
+    "NativeProviderError": {
+      "additionalProperties": true,
+      "description": "The provider-owned portion of an agent error that Studio displays or classifies.",
+      "properties": {
+        "additionalDetails": true,
+        "claudeFailure": true,
+        "code": {
+          "type": ["string", "null"]
+        },
+        "codexErrorInfo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodexErrorInfo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "data": true,
+        "message": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
     },
     "PersistedTranscriptInput": {
       "additionalProperties": true,
@@ -107,6 +180,16 @@
       },
       "type": ["array", "null"]
     },
+    "nativeError": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AgentError"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "role": {
       "$ref": "#/$defs/TranscriptRole"
     },
@@ -121,6 +204,16 @@
     },
     "truncated": {
       "type": ["boolean", "null"]
+    },
+    "turnError": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AgentError"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "turnId": {
       "type": ["string", "null"]

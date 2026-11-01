@@ -1474,24 +1474,14 @@ fn load(tx: &Transaction<'_>, id: &str) -> Result<Snapshot> {
     Snapshot::checked(agent(tx, &receipt.agent_id)?, receipt, outcome)
         .map_err(|error| located(error, "runtime_outbox", id))
 }
-pub(crate) fn hold_unclean_actions(tx: &Transaction<'_>) -> Result<()> {
-    let mut query = tx.prepare("SELECT id FROM runtime_outbox WHERE kind=?1 AND status=?2")?;
-    let ids = query
-        .query_map(
-            rusqlite::params![OutboxKind::NativeAction, OutboxStatus::Pending],
-            |row| row.get::<_, String>(0),
-        )?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    drop(query);
-    for id in ids {
-        let row = Outbox::get::<NativeActionIntent>(tx, &id)?.ok_or(NativeError::Changed)?;
-        write_outcome(
-            tx,
-            &row.payload.receipt.request_id,
-            &Outcome::Unknown { error: None },
-        )?;
-    }
-    Ok(())
+/// Entity hook of the unclean-stop pass for one held native action.
+pub(crate) fn hold_action(tx: &Transaction<'_>, id: &str) -> Result<()> {
+    let row = Outbox::get::<NativeActionIntent>(tx, id)?.ok_or(NativeError::Changed)?;
+    write_outcome(
+        tx,
+        &row.payload.receipt.request_id,
+        &Outcome::Unknown { error: None },
+    )
 }
 
 fn write_outcome(tx: &Transaction<'_>, id: &str, outcome: &Outcome) -> Result<()> {

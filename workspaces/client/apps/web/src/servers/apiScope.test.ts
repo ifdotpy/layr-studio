@@ -1,3 +1,4 @@
+import { FrontendLocality } from "../generated/api";
 import { required } from "../components/componentTestFixtures.ts";
 import type { TranscriptWireItem } from "../types";
 // Cache separation fixtures omit role; they exercise only item identity and text.
@@ -70,6 +71,8 @@ describe("concurrent servers in one interface", () => {
     expect(api.getStreamSession()).toBeUndefined();
     api.receiveStreamSession({
       routes: [],
+      locality: FrontendLocality.local,
+      cachePolicies: [],
       sessionId: "one",
       workspaceId: "a".repeat(32),
       token: "owner",
@@ -85,6 +88,8 @@ describe("concurrent servers in one interface", () => {
     expect(() =>
       api.receiveStreamSession({
         routes: [],
+        locality: FrontendLocality.local,
+        cachePolicies: [],
         sessionId: "two",
         workspaceId: "b".repeat(32),
       }),

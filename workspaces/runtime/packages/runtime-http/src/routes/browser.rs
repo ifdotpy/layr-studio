@@ -50,8 +50,11 @@ impl PairedExchange for SignedBrowserExchange {
                 .checked_duration_since(Instant::now())
                 .filter(|v| !v.is_zero())
                 .ok_or(BrowserError::Unknown)?;
+            if action != "browser_callback" {
+                return Err(BrowserError::Exchange);
+            }
             let outcome = driver
-                .exchange_with_timeout(&server, &action, &payload, &request_id, now, timeout)
+                .exchange_with_timeout(&server, studio_runtime_services::orchestration_wire::OrchestrationCommand::BrowserCallback(payload), &request_id, now, timeout)
                 .await
                 .unwrap_or(DeliveryOutcome::Unknown);
             Ok(match outcome {
@@ -374,7 +377,18 @@ mod tests {
             assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{invalid}");
         }
         let response = app.oneshot(request).await.expect("HTTP response");
-        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let status = response.status();
+        let (parts, body) = response.into_parts();
+        let bytes = axum::body::to_bytes(body, 4096)
+            .await
+            .expect("response body reads");
+        assert_eq!(
+            status,
+            axum::http::StatusCode::OK,
+            "{}",
+            String::from_utf8_lossy(&bytes)
+        );
+        let response = axum::response::Response::from_parts(parts, axum::body::Body::from(bytes));
         let bytes = axum::body::to_bytes(response.into_body(), 4096)
             .await
             .expect("response body reads");
@@ -386,6 +400,24 @@ mod tests {
                 .close("0123456789abcdef0123456789abcdef")
                 .await
                 .expect("forwarder closes")
+        );
+    }
+}
+
+#[cfg(test)]
+mod strict_forward_tests {
+    #[test]
+    fn forwarding_input_is_closed_and_bounded() {
+        let valid = r#"{"server":"s","bridgeId":"0123456789abcdef0123456789abcdef","token":"0123456789abcdef","host":"localhost","port":1024,"path":"/","expiresAt":1}"#;
+        assert!(serde_json::from_str::<super::ForwardInput>(valid).is_ok());
+        assert!(
+            serde_json::from_str::<super::ForwardInput>(&valid.replace("1024", "1023")).is_err()
+        );
+        assert!(
+            serde_json::from_str::<super::ForwardInput>(
+                &valid.replace(r#""expiresAt""#, r#""extra":1,"expiresAt""#)
+            )
+            .is_err()
         );
     }
 }

@@ -4,11 +4,11 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use rusqlite::OptionalExtension;
-use serde_json::Value;
 use std::sync::Arc;
+use studio_runtime_services::commands::CommandError;
 use studio_runtime_services::coordination::{self, CoordinationError};
 
-use super::extractors::{ApiJson, QueryParams};
+use super::extractors::{ApiJson, TypedQuery};
 use super::manifest::{OperationStatus, RouteGroup, get, post};
 use crate::error::ApiError;
 use crate::router::HttpState;
@@ -30,64 +30,67 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
+/// Maximum room ID length for a message history query, in Unicode code points.
+const MESSAGE_ROOM_ID_MAX_CHARS: usize = 4096;
+/// Maximum encoded receipt ID list, in Unicode code points.
+const MESSAGE_RECEIPT_IDS_MAX_CHARS: usize = 1_000_000;
+/// Maximum agent ID length for receipt queries, in Unicode code points.
+const MESSAGE_AGENT_ID_MAX_CHARS: usize = 4096;
+type MessageRoomId = studio_runtime_schema::bounded_text::BoundedText<0, MESSAGE_ROOM_ID_MAX_CHARS>;
+type MessageCursor = studio_runtime_schema::bounded_integer::BoundedInteger<
+    0,
+    { studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64 },
+>;
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AgentChatQuery {
+    room: Option<MessageRoomId>,
+    before: Option<MessageCursor>,
+    after: Option<MessageCursor>,
+    limit: Option<MessageCursor>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReceiptQuery {
+    agent: Option<studio_runtime_schema::bounded_text::BoundedText<0, MESSAGE_AGENT_ID_MAX_CHARS>>,
+    ids: Option<studio_runtime_schema::bounded_text::BoundedText<0, MESSAGE_RECEIPT_IDS_MAX_CHARS>>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MessagesQuery {
+    room: Option<studio_runtime_schema::bounded_text::BoundedText<0, MESSAGE_ROOM_ID_MAX_CHARS>>,
+}
+
 async fn messages(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<MessagesQuery>,
 ) -> Result<Json<Vec<crate::generated::MessageRecord>>, ApiError> {
     let room = query
-        .typed_value("room")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
+        .room
+        .as_ref()
+        .map_or("", |value| value.as_str())
         .to_owned();
     let store = state.store.ok_or_else(ApiError::internal)?;
     let result = store
         .read_async("runtime-http/routes/messages", move |connection| {
             let value = coordination::history(connection, &room).map_err(coordination_error)?;
-            Ok::<_, ApiError>(value.into_iter().map(message_record).collect())
+            value
+                .iter()
+                .map(message_record)
+                .collect::<Result<Vec<_>, _>>()
         })
         .await?;
     Ok(Json(result))
 }
 
-fn message_record(message: coordination::ValidatedMessage) -> crate::generated::MessageRecord {
-    use crate::generated::DeliveryStatus as Target;
-    use studio_runtime_schema::persistence::DeliveryStatus as Source;
-    let deliveries = message
-        .deliveries
-        .into_iter()
-        .map(|(id, delivery)| {
-            let status = match delivery.status {
-                Source::Queued => Target::Queued,
-                Source::StoredOnly => Target::StoredOnly,
-                Source::Accepted => Target::Accepted,
-                Source::Sent => Target::Sent,
-                Source::Cancelled => Target::Cancelled,
-                Source::Pending => Target::Pending,
-                Source::Delivered => Target::Delivered,
-                Source::Failed => Target::Failed,
-                Source::Uncertain => Target::Uncertain,
-            };
-            (
-                id,
-                crate::generated::RecipientDelivery {
-                    status,
-                    error: Some(delivery.error),
-                },
-            )
-        })
-        .collect();
-    crate::generated::MessageRecord {
-        id: message.id,
-        room: message.room,
-        author: message.author,
-        text: message.text,
-        at: crate::generated::MessageRecordAt::Number(message.at),
-        deliveries: crate::generated::MessageRecordDeliveries {
-            additional_properties: deliveries,
-        },
-        error: None,
-        status: None,
-    }
+fn message_record(
+    message: &coordination::ValidatedMessage,
+) -> Result<crate::generated::MessageRecord, ApiError> {
+    let encoded = serde_json::to_vec(message).map_err(ApiError::json)?;
+    serde_json::from_slice(&encoded).map_err(ApiError::json)
 }
 
 /// The send path of the `send` command and of the chat commands that send a message.
@@ -95,6 +98,25 @@ pub(super) async fn send_message(
     state: HttpState,
     body: crate::generated::ManagedMessageBody,
 ) -> Result<Json<crate::generated::StudioApiWorkModelsMessageReceipt>, ApiError> {
+    send_message_with(state, body, |_| Ok::<(), CommandError>(()))
+        .await
+        .map(|(receipt, _)| receipt)
+}
+
+/// The send path with a write that commits with the message. `in_transaction` runs in the
+/// transaction that posts the message, after the post, so both commit or neither does. The
+/// federated branch does not post here and does not run it: it returns `None`.
+pub(super) async fn send_message_with<T: Send + 'static>(
+    state: HttpState,
+    body: crate::generated::ManagedMessageBody,
+    in_transaction: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T, CommandError> + Send + 'static,
+) -> Result<
+    (
+        Json<crate::generated::StudioApiWorkModelsMessageReceipt>,
+        Option<T>,
+    ),
+    ApiError,
+> {
     let store = state.store.ok_or_else(ApiError::internal)?;
     let wake = state.event_wake;
     let message_admission = state.message_admission.clone();
@@ -183,13 +205,13 @@ pub(super) async fn send_message(
             serde_json::from_str(result.get()).map_err(|_| ApiError::internal())?;
         result.id = body.id.clone();
         wake.notify_one();
-        return Ok(Json(result));
+        return Ok((Json(result), None));
     }
     let prepared = prepared.ok_or_else(ApiError::internal)?;
     let admission = message_admission.unwrap_or_else(|| Arc::from(prepared));
-    let posted = store
+    let (posted, result, finished) = store
         .transaction_with_error(move |transaction| {
-            coordination::post_message_with_admission(
+            let posted = coordination::post_message_with_admission(
                 transaction,
                 coordination::PostManagedMessage {
                     room: &body.room,
@@ -199,14 +221,20 @@ pub(super) async fn send_message(
                     assets: &assets,
                 },
                 admission.as_ref(),
-            )
+            )?;
+            let result = serde_json::to_value(&posted.receipt)
+                .and_then(
+                    serde_json::from_value::<crate::generated::StudioApiWorkModelsMessageReceipt>,
+                )
+                .map_err(|_| CoordinationError::InvalidStored {
+                    object: "message receipt",
+                    id: body.id.clone(),
+                })?;
+            let finished = in_transaction(transaction)?;
+            Ok::<_, CommandError>((posted, result, Some(finished)))
         })
         .await
-        .map_err(coordination_error)?;
-    let encoded = serde_json::to_vec(&posted.receipt).map_err(ApiError::json)?;
-    let result =
-        serde_json::from_slice::<crate::generated::StudioApiWorkModelsMessageReceipt>(&encoded)
-            .map_err(ApiError::json)?;
+        .map_err(super::commands::command_error)?;
     posted.notify_committed(|| wake.notify_one());
     if remote_worker && let Some(driver) = &orchestration_driver {
         let now = studio_runtime_services::event_write::unix_time()
@@ -216,24 +244,21 @@ pub(super) async fn send_message(
             .await
             .map_err(|_| ApiError::internal())?;
     }
-    Ok(Json(result))
+    Ok((Json(result), finished))
 }
 
 async fn agent_chat(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<AgentChatQuery>,
 ) -> Result<Json<crate::generated::ChatRead>, ApiError> {
     let room = query
-        .typed_value("room")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
+        .room
+        .as_ref()
+        .map_or("", |value| value.as_str())
         .to_owned();
-    let before = query.typed_value("before").and_then(Value::as_i64);
-    let after = query.typed_value("after").and_then(Value::as_i64);
-    let limit = query
-        .typed_value("limit")
-        .and_then(Value::as_i64)
-        .unwrap_or(100);
+    let before = query.before.map(|value| value.get());
+    let after = query.after.map(|value| value.get());
+    let limit = query.limit.map_or(100, |value| value.get());
     if before.is_some() && after.is_some() {
         return Err(ApiError::validation(vec![
             serde_json::json!("query"),
@@ -267,17 +292,14 @@ pub(super) async fn room_snapshot(
 
 async fn receipts(
     State(state): State<HttpState>,
-    query: QueryParams,
-) -> Result<Json<crate::generated::MessageReceipts>, ApiError> {
+    TypedQuery(query): TypedQuery<ReceiptQuery>,
+) -> Result<Json<MessageReceiptsResponse>, ApiError> {
     let agent = query
-        .typed_value("agent")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
+        .agent
+        .as_ref()
+        .map_or("", |value| value.as_str())
         .to_owned();
-    let ids = query
-        .typed_value("ids")
-        .and_then(Value::as_str)
-        .unwrap_or("[]");
+    let ids = query.ids.as_ref().map_or("[]", |value| value.as_str());
     let ids: Vec<String> = serde_json::from_str(ids).map_err(|_| {
         ApiError::validation(vec![serde_json::json!("query"), serde_json::json!("ids")])
     })?;
@@ -285,14 +307,24 @@ async fn receipts(
     let store = state.store.ok_or_else(ApiError::internal)?;
     let value = store
         .read_async("runtime-http/routes/messages", move |tx| {
-            let mut value =
+            let value =
                 studio_runtime_services::coordination_reads::delivery_receipts(tx, &agent, &ids)
                     .map_err(coordination_error)?;
-            value["workspaceId"] = Value::String(workspace);
-            super::generated_json::<crate::generated::MessageReceipts>(value)
+            Ok::<_, ApiError>(MessageReceiptsResponse {
+                workspace_id: workspace,
+                receipts: value,
+            })
         })
         .await?;
     Ok(Json(value))
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MessageReceiptsResponse {
+    workspace_id: String,
+    #[serde(flatten)]
+    receipts: studio_runtime_services::coordination_reads::MessageReceipts,
 }
 async fn delete_room(
     State(state): State<HttpState>,
@@ -371,6 +403,64 @@ mod delivery_tests {
     use crate::generated::ManagedMessageBody;
     use serde_json::json;
     use studio_runtime_schema::{DeliveryMoment, delivery::LEGACY_DELIVERY_MOMENTS};
+
+    #[test]
+    fn chat_read_accepts_projected_room_roots() {
+        let value = json!({"room": {"id": "room", "leadIds": ["lead"]}, "messages": []});
+        assert!(serde_json::from_value::<crate::generated::ChatRead>(value).is_ok());
+    }
+
+    #[test]
+    fn chat_queries_reject_unknown_and_unsafe_limits() {
+        let valid: axum::http::Uri = "/api/agent-chat?room=room&limit=10".parse().unwrap();
+        assert!(axum::extract::Query::<super::AgentChatQuery>::try_from_uri(&valid).is_ok());
+        for input in [
+            "/api/agent-chat?limit=-1",
+            "/api/agent-chat?extra=1",
+            "/api/agent-chat?%62efore=1&before=1",
+            "/api/agent-chat?before=9007199254740992",
+        ] {
+            let uri: axum::http::Uri = input.parse().unwrap();
+            assert!(axum::extract::Query::<super::AgentChatQuery>::try_from_uri(&uri).is_err());
+        }
+    }
+
+    #[test]
+    fn history_response_projects_recipient_status() {
+        let message = studio_runtime_services::coordination::ValidatedMessage {
+            id: "one".into(),
+            room: "chat".into(),
+            author: "user".into(),
+            text: "hello".into(),
+            at: 1.0,
+            deliveries: std::collections::BTreeMap::from([(
+                "agent".into(),
+                studio_runtime_schema::persistence::RecipientDelivery {
+                    status: studio_runtime_schema::persistence::DeliveryStatus::Pending,
+                    error: None,
+                },
+            )]),
+        };
+        let response = super::message_record(&message).expect("message response");
+        let encoded = serde_json::to_string(&response).expect("encode response");
+        let value: serde_json::Value = serde_json::from_str(&encoded).expect("response JSON");
+        assert_eq!(value["deliveries"]["agent"]["status"], "queued");
+    }
+
+    #[test]
+    fn generated_closed_request_rejects_unknown_fields() {
+        assert!(
+            serde_json::from_str::<crate::generated::RoomDeleteBody>(r#"{"id":"room"}"#).is_ok()
+        );
+        assert!(
+            serde_json::from_str::<crate::generated::RoomDeleteBody>(
+                r#"{"id":"room","extra":true}"#
+            )
+            .is_err()
+        );
+        let body = json!({"id":"00000000-0000-4000-8000-000000000001", "room":"agent", "text":"hello", "extra":true});
+        assert!(serde_json::from_value::<ManagedMessageBody>(body).is_err());
+    }
 
     #[test]
     fn managed_message_serde_uses_the_owner_at_ingress() {

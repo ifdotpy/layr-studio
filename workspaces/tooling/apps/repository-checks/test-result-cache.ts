@@ -236,6 +236,10 @@ export function crateKeys(
   const folder = (id: string) =>
     path.relative(root, path.dirname(packages.get(id)!.manifest_path));
   const keys = new Map<string, string | undefined>();
+  const args = step.commands?.[0]?.[1] ?? [];
+  const excluded = args.flatMap((arg, index) =>
+    arg === "--exclude" ? [args[index + 1]] : [],
+  );
   for (const id of members) {
     const seen = new Set([id]);
     const stack = [id];
@@ -246,6 +250,7 @@ export function crateKeys(
           stack.push(dep);
         }
     const name = packages.get(id)!.name;
+    if (excluded.includes(name)) continue;
     keys.set(
       name,
       stepKey(

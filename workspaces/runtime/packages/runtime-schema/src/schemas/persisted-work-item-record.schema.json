@@ -2,6 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
+    "agent": {
+      "type": ["string", "null"]
+    },
+    "archive": true,
     "decisions": {
       "items": {
         "additionalProperties": true,

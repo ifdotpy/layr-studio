@@ -113,12 +113,12 @@ impl Actor {
             root_id: record.root_id.0.clone(),
             parent_id: record.parent_id.as_deref().map(str::to_owned),
             is_lead: record.is_lead == Some(true),
-            reviewer: record.extra.get("role").and_then(Value::as_str) == Some("reviewer"),
+            reviewer: record.role.value().copied()
+                == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer),
             provider: record
-                .extra
-                .get("provider")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
+                .provider
+                .value()
+                .map(|provider| provider.key().to_owned()),
             remote_origin: truthy(record.extra.get("remoteOrigin")),
             execution_move: truthy(record.extra.get("executionMove")),
             record,
@@ -933,13 +933,6 @@ fn project_child(record: &Value, task_id: Option<&str>) -> Value {
                     json!("shared")
                 }
             }),
-    );
-    output.insert(
-        "workspaceBackend".to_owned(),
-        record
-            .get("workspaceBackend")
-            .cloned()
-            .unwrap_or(Value::Null),
     );
     if let Some(base_commit) = record.get("workerBaseCommit") {
         output.insert("baseRef".to_owned(), record["workerBaseRef"].clone());

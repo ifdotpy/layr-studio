@@ -3,6 +3,21 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
+/// A complaint timestamp in seconds since the Unix epoch, retaining its JSON number representation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(transparent)]
+pub struct ComplaintSeconds(serde_json::Number);
+
+impl ComplaintSeconds {
+    pub fn from_seconds(seconds: f64) -> Option<Self> {
+        serde_json::Number::from_f64(seconds).map(Self)
+    }
+
+    pub fn seconds(&self) -> Option<f64> {
+        self.0.as_f64()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ComplaintStatus {
@@ -68,10 +83,10 @@ pub struct ComplaintRecord {
     pub text: Option<String>,
     #[serde(deserialize_with = "required_nullable")]
     #[schemars(required, schema_with = "nullable_number")]
-    pub created: Option<f64>,
+    pub created: Option<ComplaintSeconds>,
     #[serde(deserialize_with = "required_nullable")]
     #[schemars(required, schema_with = "nullable_number")]
-    pub read_at: Option<f64>,
+    pub read_at: Option<ComplaintSeconds>,
     pub recipient: ComplaintRecipient,
     pub responses: Vec<ComplaintResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -80,7 +95,7 @@ pub struct ComplaintRecord {
     pub title: Option<String>,
     #[serde(deserialize_with = "required_nullable")]
     #[schemars(required, schema_with = "nullable_number")]
-    pub updated: Option<f64>,
+    pub updated: Option<ComplaintSeconds>,
     #[serde(deserialize_with = "required_nullable")]
     #[schemars(required, schema_with = "nullable_integer")]
     pub version: Option<i64>,

@@ -1,3 +1,4 @@
+import { backgroundDisplay } from "../fixtures/background.ts";
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
@@ -13,6 +14,8 @@ import type {
   Monitor,
   Snapshot,
 } from "../../src/types.ts";
+import { simpleRequest } from "../../src/approvalFixtures.ts";
+import type { Approval } from "../../src/approvals.ts";
 import "../../src/style.css";
 import "../../src/workspace-layout.css";
 
@@ -22,6 +25,7 @@ declare global {
     worker: (index: number) => Agent;
     command: (index: number) => BackgroundTask;
     monitor: (index: number) => Monitor;
+    input: (id: string) => Approval;
     setData: (value: PhaseSnapshot) => void;
   }
 }
@@ -44,6 +48,8 @@ window.worker = (i) => ({
   inFlight: true,
 });
 window.command = (i) => ({
+  created: 1,
+  display: backgroundDisplay("command", "npm run check " + i),
   id: "cmd-" + i,
   agent: "lead",
   kind: "command",
@@ -51,7 +57,10 @@ window.command = (i) => ({
   status: "running",
   epoch: 2,
 });
+window.input = (id) => simpleRequest({ id, agent: "lead", epoch: 2 });
 window.monitor = (i) => ({
+  created: 1,
+  display: backgroundDisplay("monitor", "watch build " + i),
   id: "monitor-" + i,
   agent: "lead",
   command: "watch build " + i,

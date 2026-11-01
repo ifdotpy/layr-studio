@@ -6,6 +6,7 @@ use axum::{
     extract::ConnectInfo,
     http::Request,
 };
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use studio_runtime_http::{HttpState, router};
@@ -15,6 +16,20 @@ use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore};
 use tower::ServiceExt;
 
 const LEAD: &str = "bf2eeb40-0cc8-44ef-a4e8-aa321b4d7331";
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PermissionFields {
+    permission_mode: String,
+    yolo_mode: Option<bool>,
+    claude_options: Option<ClaudePermissionFields>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClaudePermissionFields {
+    permission_mode: Option<String>,
+}
 struct Catalog;
 impl AccountSessionPort for Catalog {
     fn current_scope(&self, account: &str) -> Option<ConnectionScope> {
@@ -158,11 +173,19 @@ async fn ui_child_permissions_inherit_override_review_and_refuse_escalation() {
             "bypassPermissions",
         ),
     ] {
-        let parent = json!({"compactions":0,"id":LEAD,"rootId":LEAD,"epoch":0,"status":"idle","isLead":true,"name":"Lead","cwd":cwd,"hostProjectPath":cwd,"accountKey":"default","provider":"claude","model":"claude-haiku-4-5","autoWake":true,"yoloMode":true,"workspaceMode":"worktree","workerDefaults":{"accountKey":"default","model":"claude-haiku-4-5"},"claudeOptions":{"permissionMode":mode,"thinking":false}});
+        // fe1e1f249 moved Claude permissionMode to the agent record.
+        let parent = json!({"compactions":0,"id":LEAD,"rootId":LEAD,"epoch":0,"status":"idle","isLead":true,"name":"Lead","cwd":cwd,"hostProjectPath":cwd,"accountKey":"default","provider":"claude","model":"claude-haiku-4-5","autoWake":true,"permissionMode":mode,"workspaceMode":"worktree","workerDefaults":{"accountKey":"default","model":"claude-haiku-4-5"},"claudeOptions":{"thinking":false}});
         let projected =
             studio_runtime_services::sync_views::project_persisted_record("agent", &parent)
                 .unwrap();
-        assert_eq!(projected["claudeOptions"], json!({"permissionMode":mode}));
+        let projected: PermissionFields = serde_json::from_value(projected).unwrap();
+        assert_eq!(projected.permission_mode, mode);
+        assert!(projected.yolo_mode.is_none());
+        assert!(
+            projected
+                .claude_options
+                .is_none_or(|options| options.permission_mode.is_none())
+        );
         store
             .transaction(move |tx| {
                 AgentRepository::put(tx, &AgentRecord::from_value(parent).unwrap())
@@ -182,8 +205,14 @@ async fn ui_child_permissions_inherit_override_review_and_refuse_escalation() {
                 .unwrap()
                 .unwrap()
                 .value();
-        assert_eq!(child["claudeOptions"], json!({"permissionMode":expected}));
-        assert_eq!(child["yoloMode"], expected == "bypassPermissions");
+        let child: PermissionFields = serde_json::from_value(child).unwrap();
+        assert_eq!(child.permission_mode, expected);
+        assert!(child.yolo_mode.is_none());
+        assert!(
+            child
+                .claude_options
+                .is_none_or(|options| options.permission_mode.is_none())
+        );
         let (status, _) = call(&app, body).await;
         assert_eq!(status, 200, "The accepted request remains replayable");
     }

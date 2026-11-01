@@ -1,5 +1,5 @@
 //! Thin adapters over the synchronous receipt action service.
-use super::extractors::QueryParams;
+use super::extractors::TypedQuery;
 use super::manifest::{OperationStatus, RouteGroup, get};
 use crate::{error::ApiError, router::HttpState};
 use axum::{Json, extract::State, http::StatusCode};
@@ -12,20 +12,19 @@ pub(crate) fn routes() -> RouteGroup {
         read,
     )])
 }
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ToolQuery {
+    agent: Option<String>,
+    request_id: Option<String>,
+}
+
 async fn read(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<ToolQuery>,
 ) -> Result<Json<crate::generated::ToolRequestsApiToolRequestsGetResponse>, ApiError> {
-    let actor = query
-        .typed_value("agent")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let id = query
-        .typed_value("request_id")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned);
+    let actor = query.agent.unwrap_or_default();
+    let id = query.request_id.filter(|id| !id.is_empty());
     let store = state.store.ok_or_else(ApiError::internal)?;
     let state_root = store.root().to_owned();
     let payload_root = state_root.clone();
@@ -185,5 +184,25 @@ mod tests {
 
         assert_eq!(recovered["result"]["contentItems"][0]["text"], content);
         assert!(recovered["result"].get("_payloadBlobs").is_none());
+    }
+}
+
+#[cfg(test)]
+mod typed_query_tests {
+    use axum::extract::Query;
+    use serde::de::DeserializeOwned;
+
+    fn accepts<T: DeserializeOwned>(query: &str) -> bool {
+        let uri = format!("/?{query}").parse().unwrap();
+        Query::<T>::try_from_uri(&uri).is_ok()
+    }
+
+    #[test]
+    fn query_contracts() {
+        assert!(accepts::<super::ToolQuery>("agent=a&request_id=b"));
+        assert!(!accepts::<super::ToolQuery>("extra=x"));
+        assert!(!accepts::<super::ToolQuery>(
+            "agent=a&request_id=b&unknown=x"
+        ));
     }
 }

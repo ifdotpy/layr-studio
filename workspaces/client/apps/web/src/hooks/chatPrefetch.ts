@@ -10,12 +10,5 @@ export function useChatPrefetch(
   _workspaceId: string,
   _enabled = true,
 ) {
-  return useMemo(
-    () =>
-      Object.assign((_id: string) => {}, {
-        suspend: (_ids: ReadonlySet<string>) => {},
-        resume: (_ids: ReadonlySet<string>) => {},
-      }),
-    [],
-  );
+  return useMemo(() => (_id: string) => {}, []);
 }

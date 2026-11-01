@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   SHARED_INPUTS,
   cachedStepKey,
+  crateKeys,
   passedCrates,
   selectCrates,
   recordPass,
@@ -194,4 +195,50 @@ test("nextest selects stale crates with a filter so the workspace feature set an
     selectCrates([["cargo", ["test", "--workspace"]]], ["studio-a"]),
     [["cargo", ["test", "-p", "studio-a"]]],
   );
+});
+
+test("excluded workspace packages do not prevent reuse", () => {
+  const { root } = repository();
+  const metadata = {
+    workspace_members: ["a", "native"],
+    packages: [
+      {
+        id: "a",
+        name: "studio-a",
+        manifest_path: path.join(root, "guest/Cargo.toml"),
+      },
+      {
+        id: "native",
+        name: "studio-native-client",
+        manifest_path: path.join(root, "guest/Cargo.toml"),
+      },
+    ],
+    resolve: {
+      nodes: [
+        { id: "a", deps: [] },
+        { id: "native", deps: [] },
+      ],
+    },
+  };
+  const keys = crateKeys(
+    root,
+    metadata,
+    {
+      id: "rust-tests",
+      commands: [
+        [
+          "cargo",
+          [
+            "nextest",
+            "run",
+            "--workspace",
+            "--exclude",
+            "studio-native-client",
+          ],
+        ],
+      ],
+    },
+    {},
+  );
+  assert.deepEqual([...keys!.keys()], ["studio-a"]);
 });

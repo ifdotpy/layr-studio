@@ -17,8 +17,8 @@ async fn spawn_permission_case(
             .value()
     };
     parent["provider"] = json!("claude");
-    parent["yoloMode"] = json!(mode == "bypassPermissions");
-    parent["claudeOptions"] = json!({"permissionMode": mode, "thinking": false});
+    parent["permissionMode"] = json!(mode);
+    parent["claudeOptions"] = json!({"thinking": false});
     let saved = parent.clone();
     store
         .transaction_with::<_, StoreError>(move |tx| {
@@ -80,8 +80,7 @@ async fn spawn_permission_case(
         .unwrap()
         .value();
     assert_eq!(child["model"], "claude-haiku-4-5");
-    assert_eq!(child["claudeOptions"]["permissionMode"], expected);
-    assert_eq!(child["yoloMode"], expected == "bypassPermissions");
+    assert_eq!(child["permissionMode"], expected);
     assert!(
         child["claudeOptions"].get("thinking").is_none(),
         "Only the permission mode is inherited"
@@ -106,7 +105,7 @@ async fn spawn_permission_case(
         .unwrap()
         .unwrap()
         .value();
-    assert_eq!(restored["claudeOptions"]["permissionMode"], expected);
+    assert_eq!(restored["permissionMode"], expected);
 }
 
 fn permission_case(
@@ -116,7 +115,7 @@ fn permission_case(
     override_mode: Option<studio_runtime_schema::claude_permissions::PermissionMode>,
     expected: &str,
 ) {
-    let parent = json!({"provider":provider,"yoloMode":yolo,"claudeOptions":mode.map(|mode| json!({"permissionMode":mode,"thinking":false})).unwrap_or(json!({}))});
+    let parent = json!({"provider":provider,"permissionMode":mode.unwrap_or(if yolo { "bypassPermissions" } else { "default" })});
     let mut child = json!({"provider":"claude","role":"implementer"});
     crate::child_permissions::inherit_claude_permissions(
         &mut child,
@@ -125,8 +124,7 @@ fn permission_case(
         override_mode,
     )
     .unwrap();
-    assert_eq!(child["claudeOptions"], json!({"permissionMode":expected}));
-    assert_eq!(child["yoloMode"], expected == "bypassPermissions");
+    assert_eq!(child["permissionMode"], expected);
 }
 
 #[test]
@@ -190,7 +188,7 @@ fn claude_child_accepts_explicit_mode_override() {
 }
 
 #[test]
-fn claude_child_maps_legacy_and_codex_yolo() {
+fn claude_child_maps_codex_permission_mode() {
     for provider in ["claude", "codex"] {
         for (yolo, expected) in [(false, "default"), (true, "bypassPermissions")] {
             permission_case(provider, None, yolo, None, expected);
@@ -211,11 +209,10 @@ async fn claude_child_reads_current_parent_permission_at_commit() {
         .unwrap()
         .value();
     parent["provider"] = json!("claude");
-    parent["claudeOptions"] = json!({"permissionMode": "bypassPermissions"});
+    parent["permissionMode"] = json!("bypassPermissions");
     parent["workerDefaults"] = json!({"model": "claude-haiku-4-5"});
     let actor = Actor::from_record(&parent, LEAD, context.epoch).unwrap();
-    parent["claudeOptions"]["permissionMode"] = json!("plan");
-    parent["yoloMode"] = json!(false);
+    parent["permissionMode"] = json!("plan");
     store
         .transaction_with::<_, StoreError>(move |tx| {
             AgentRepository::put(tx, &AgentRecord::from_value(parent).unwrap())
@@ -234,6 +231,53 @@ async fn claude_child_reads_current_parent_permission_at_commit() {
         .unwrap()
         .unwrap()
         .value();
-    assert_eq!(child["claudeOptions"]["permissionMode"], "plan");
-    assert_eq!(child["yoloMode"], false);
+    assert_eq!(child["permissionMode"], "plan");
+}
+
+#[tokio::test]
+async fn null_and_absent_stored_permission_use_the_same_child_default() {
+    for null in [false, true] {
+        let (_dir, store, context) = fixture().await;
+        let id = context.agent.clone();
+        store.transaction_with::<_, StoreError>(move |tx| {
+            let sql = if null {
+                "UPDATE runtime_agents SET record=json_set(record,'$.permissionMode',NULL) WHERE id=?1"
+            } else {
+                "UPDATE runtime_agents SET record=json_remove(record,'$.permissionMode') WHERE id=?1"
+            };
+            tx.execute(sql, [&id])?;
+            Ok(())
+        }).await.unwrap();
+        let parent = AgentRepository::get(
+            &store.test_reader().unwrap(),
+            &AgentId::from(context.agent.as_str()),
+        )
+        .unwrap()
+        .unwrap()
+        .value();
+        assert!(parent.get("permissionMode").is_none());
+        let actor = Actor::from_record(&parent, &context.agent, context.epoch).unwrap();
+        let spawned = crate::managed_child_create::spawn_agents(
+            &store,
+            &actor,
+            &json!({"agents":[{"name":"Child", "prompt":"Task", "workspace":"shared"}]}),
+            "permission-null-parity",
+            20.0,
+            &CreationEnvironment,
+        )
+        .await
+        .unwrap();
+        let id = AgentId::from(
+            spawned.result().test_value()["agents"][0]["id"]
+                .as_str()
+                .unwrap(),
+        );
+        let child = AgentRepository::get(&store.test_reader().unwrap(), &id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            child.permission_mode,
+            Some(studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions)
+        );
+    }
 }

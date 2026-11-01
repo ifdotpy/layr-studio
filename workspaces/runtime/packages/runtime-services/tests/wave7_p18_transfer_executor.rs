@@ -23,7 +23,7 @@ fn ticket() -> Ticket {
         operation: OPERATION.into(),
         agent: "lead".into(),
         epoch: 3,
-        account: "target".into(),
+        account: "target".to_owned().try_into().expect("account key"),
         connection: "retained-connection".into(),
         request: "exact-native-request".into(),
     }
@@ -105,7 +105,15 @@ impl TransferExecutor for Executor<'_> {
                 .transaction(|_| Ok(()))
                 .await
                 .expect("history is outside transaction");
-            assert_eq!(input.operation()["members"]["lead"]["phase"], "reading");
+            assert_eq!(
+                input
+                    .operation()
+                    .members
+                    .get("lead")
+                    .expect("lead member")
+                    .phase,
+                studio_runtime_store::transfer_record::TransferPhase::Reading
+            );
             assert_eq!(input.agent()["threadId"], "source-thread");
             assert_eq!(operation(self.store)["members"]["lead"]["phase"], "reading");
             if matches!(self.behavior, Behavior::PreparationFailed) {

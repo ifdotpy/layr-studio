@@ -49,22 +49,25 @@ test("chat reconnect follows transport across hidden conversations", async ({
     await expect(first).toContainText("Writing");
     await expect(second).toHaveAttribute("data-connection", "");
     await page.evaluate(() => window.setConnection("offline"));
-    await expect(first).toContainText("Connection lost. Reconnecting…");
+    await expect(first).toHaveAttribute("data-connection", "degraded");
+    await expect(first).toContainText("Connection failed.");
     await page.evaluate(() => window.setConnection("connecting"));
-    await expect(first).toContainText("Connection lost. Reconnecting…");
+    await expect(first).toContainText("Connection failed.");
     await page.evaluate(() => window.selectChat("second"));
-    await expect(second).toContainText("Connection lost. Reconnecting…");
+    await expect(second).toContainText("Connection failed.");
     await expect(first).toHaveAttribute("data-connection", "");
     await page.evaluate(() => window.selectChat("first"));
-    await expect(first).toContainText("Connection lost. Reconnecting…");
+    await expect(first).toBeVisible();
+    await expect(first).toContainText("Connection failed.");
     await page.evaluate(() => window.selectChat("second"));
+    await expect(second).toBeVisible();
     await page.evaluate(() => window.setConnection("connecting"));
-    await expect(second).toContainText("Connection lost. Reconnecting…");
+    await expect(second).toContainText("Connection failed.");
     await page.evaluate(() => window.selectServer(true));
-    await expect(second).toHaveAttribute("data-connection", "");
-    await expect(second).not.toContainText("Connection lost.");
+    await expect(second).toHaveAttribute("data-connection", "connecting");
+    await expect(second).not.toContainText("Connection failed.");
     await page.evaluate(() => window.selectServer(false));
-    await expect(second).toContainText("Connection lost. Reconnecting…");
+    await expect(second).toContainText("Connection failed.");
     await page.evaluate(() => window.setConnection("live"));
     await expect(second).toHaveAttribute("data-connection", "live");
     await expect(second).toContainText("Writing");
@@ -73,7 +76,7 @@ test("chat reconnect follows transport across hidden conversations", async ({
     await expect(first).toContainText("Writing");
     await page.evaluate(() => window.phase("first", "retrying"));
     await expect(first).toContainText("Provider is reconnecting");
-    await expect(first).not.toContainText("Connection lost.");
+    await expect(first).not.toContainText("Connection failed.");
     await page.evaluate(() => window.phase("first", "writing"));
     await expect(first).toContainText("Writing");
     await expect(first).not.toContainText("Provider is reconnecting");
@@ -188,20 +191,15 @@ test("agent phase browser", async ({ page: runnerPage }) => {
               autoWake: false,
             });
           if (kind === "input")
-            runtime.requests = Array.from({ length: count }, (_, i) => ({
-              id: "input-" + i,
-              agent: "lead",
-              status: "pending",
-              epoch: 2,
-            }));
+            runtime.requests = Array.from({ length: count }, (_, i) =>
+              window.input("input-" + i),
+            );
           if (kind === "mixed") {
             threads.push(window.worker(1), window.worker(2));
             runtime.tasks = [window.command(1)];
             runtime.monitors = [window.monitor(1)];
             lead.parkedEvent = "very-long-event-name-".repeat(10);
-            runtime.requests = [
-              { id: "input", agent: "lead", status: "pending", epoch: 2 },
-            ];
+            runtime.requests = [window.input("input")];
           }
           if (kind === "completed") lead.status = "completed";
           if (kind === "completed-monitor") {

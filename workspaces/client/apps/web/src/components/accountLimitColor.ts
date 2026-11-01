@@ -1,15 +1,11 @@
-/** Remaining provider capacity, in percent. These are presentation thresholds. */
-const comfortableRemainingPercent = 50;
-const lowRemainingPercent = 15;
+import { LimitColor } from "../generated/api";
+import type { LimitColor as LimitColorValue } from "../generated/api";
 
-export function remainingLimitColor(remaining: number | null): string {
-  const state =
-    remaining === null
-      ? "paused"
-      : remaining > comfortableRemainingPercent
-        ? "unread"
-        : remaining >= lowRemainingPercent
-          ? "answer"
-          : "error";
-  return `var(--studio-state-${state})`;
-}
+const colors = {
+  [LimitColor.paused]: "var(--studio-state-paused)",
+  [LimitColor.unread]: "var(--studio-state-unread)",
+  [LimitColor.answer]: "var(--studio-state-answer)",
+  [LimitColor.error]: "var(--studio-state-error)",
+} satisfies Record<LimitColorValue, string>;
+
+export const remainingLimitColor = (color: LimitColorValue) => colors[color];

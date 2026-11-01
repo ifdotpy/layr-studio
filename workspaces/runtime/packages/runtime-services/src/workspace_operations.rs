@@ -238,7 +238,6 @@ impl OperationSnapshot {
                 if let Some(object) = agent.as_object_mut() {
                     object.remove("workspaceReservationId");
                 }
-                agent["checkpointError"] = operation.extensions()["error"].clone();
             }
         } else {
             operation.restart_hold = Field::Value(true);

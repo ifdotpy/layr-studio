@@ -146,7 +146,7 @@ async fn monitor_start_refuses_changed_ownership_permissions_or_monitor() {
         json!({"threadId":"new-thread"}),
         json!({"cwd":"/changed"}),
         json!({"accountKey":"other"}),
-        json!({"yoloMode":true}),
+        json!({"permissionMode":"bypassPermissions"}),
         json!({"approvalPolicy":"never"}),
         json!({"sandbox":{"type":"dangerFullAccess"}}),
         json!({"profile":{"id":"other"}}),

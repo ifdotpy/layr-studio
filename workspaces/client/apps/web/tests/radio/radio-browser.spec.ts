@@ -25,6 +25,37 @@ test("Radio browser", async ({
 
   const cacheDir = await mkdtemp(join(tmpdir(), "studio-radio-"));
   const streams = new Set<import("node:http").ServerResponse>();
+  const roomMessages = [
+    {
+      id: "1",
+      seq: 1,
+      sender: "user",
+      text: "Compare these approaches",
+      created: 1750000000,
+    },
+    {
+      id: "2",
+      seq: 2,
+      sender: "a",
+      senderName: "Astra",
+      text: "First reply. **Keep this visible.**",
+      created: 1750000010,
+    },
+    {
+      id: "3",
+      seq: 3,
+      sender: "b",
+      senderName: "Claude",
+      text: "Second reply with a different view.",
+      created: 1750000020,
+    },
+  ];
+  const roomRef = { kind: "room", roomId: "radio:t" } as const;
+  const frame = (
+    resources: import("../../src/sync/resourceEvents.ts").ResourceRef[],
+    revision: number,
+  ) =>
+    `event: resources\ndata: ${JSON.stringify({ protocol: 4, workspaceId: "1234567890abcdef1234567890abcdef", epoch: "radio-epoch", revision, reason: revision === 1 ? "initial" : "change", resources, resourceVersions: resources.map((resource) => ({ resource, revision, ...(resource.kind === "room" ? { viewSnapshot: { room: { room: { id: "radio:t", members: ["a", "b"] }, messages: roomMessages, nextBefore: null, nextAfter: null } } } : {}) })) })}\n\n`;
   const server = await createServer({
     configFile: false,
     root,
@@ -44,9 +75,7 @@ test("Radio browser", async ({
             );
             res.writeHead(200, { "Content-Type": "text/event-stream" });
             res.write(apiSchemaHandshakeSse());
-            res.write(
-              `event: resources\ndata: ${JSON.stringify({ protocol: 4, workspaceId: "1234567890abcdef1234567890abcdef", epoch: "radio-epoch", revision: 1, reason: "initial", resources, resourceVersions: resources.map((resource: import("../../src/sync/resourceEvents.ts").ResourceRef) => ({ resource, revision: 1 })) })}\n\n`,
-            );
+            res.write(frame(resources, 1));
           });
           s.middlewares.use("/check", (_req, res) => {
             res.setHeader("Content-Type", "text/html");
@@ -67,7 +96,6 @@ test("Radio browser", async ({
     page.on("pageerror", (e) => errors.push(e.message));
     let mode = "lost";
     let releaseResponse: (() => void) | undefined;
-    let transcriptReads = 0;
     const requests: PostBody<"/api/peer-teams">[] = [];
     await page.route("**/api/sync/identity", (r) =>
       r.fulfill({
@@ -78,41 +106,13 @@ test("Radio browser", async ({
         },
       }),
     );
-    await page.route(
-      "**/api/agent-chat?*",
-      (r) => (
-        transcriptReads++,
-        r.fulfill({
-          json: {
-            messages: [
-              {
-                id: "1",
-                seq: 1,
-                sender: "user",
-                text: "Compare these approaches",
-                created: 1750000000,
-              },
-              {
-                id: "2",
-                seq: 2,
-                sender: "a",
-                senderName: "Astra",
-                text: "First reply. **Keep this visible.**",
-                created: 1750000010,
-              },
-              {
-                id: "3",
-                seq: 3,
-                sender: "b",
-                senderName: "Claude",
-                text: "Second reply with a different view.",
-                created: 1750000020,
-              },
-            ],
-            nextBefore: null,
-          },
-        })
-      ),
+    await page.route("**/api/agent-chat?*", (r) =>
+      r.fulfill({
+        json: {
+          messages: roomMessages,
+          nextBefore: null,
+        },
+      }),
     );
     await page.route("**/snapshot", async (r) =>
       r.fulfill({
@@ -197,7 +197,6 @@ test("Radio browser", async ({
       window.refreshCalls = 0;
     });
     await input.fill("Confirmed send");
-    const beforeTranscript = transcriptReads;
     await page.getByRole("button", { name: "Send", exact: true }).click();
     await expect.poll(() => typeof releaseResponse).toBe("function");
     assert.equal(await input.inputValue(), "Confirmed send");
@@ -207,7 +206,16 @@ test("Radio browser", async ({
     releaseResponse!();
     await expect(input).toBeEnabled({ timeout: 2000 });
     assert.equal(await input.inputValue(), "");
-    await expect.poll(() => transcriptReads).toBeGreaterThan(beforeTranscript);
+    roomMessages.push({
+      id: "4",
+      seq: 4,
+      sender: "b",
+      senderName: "Claude",
+      text: "SSE reply after send",
+      created: 1750000030,
+    });
+    for (const stream of streams) stream.write(frame([roomRef], 2));
+    await expect(page.getByText("SSE reply after send")).toBeVisible();
     await page.waitForFunction(
       () => typeof window.rejectRefresh === "function",
     );
@@ -269,6 +277,14 @@ test("Radio browser", async ({
         radio: {
           ...window.currentRoom.radio!,
           status: "speaking",
+          controls: {
+            busy: true,
+            inputBlocked: false,
+            canPass: true,
+            stopping: false,
+            speaking: true,
+            busyNotice: "Current reply finishes first.",
+          },
           speaker: "a",
         },
       }),
@@ -326,6 +342,14 @@ test("Radio browser", async ({
         radio: {
           ...window.currentRoom.radio!,
           status: "blocked",
+          controls: {
+            busy: false,
+            inputBlocked: false,
+            canPass: false,
+            stopping: false,
+            speaking: false,
+            busyNotice: null,
+          },
           error: "Reply interrupted. Send a new message.",
           active: null,
           speaker: null,
@@ -336,16 +360,26 @@ test("Radio browser", async ({
       await page.getByRole("button", { name: "Send", exact: true }).isEnabled(),
       true,
     );
-    await page.evaluate(() =>
-      window.setRoom({
-        ...window.currentRoom,
-        radio: {
-          ...window.currentRoom.radio!,
-          status: "blocked",
-          active: radioActive(),
-          speaker: "a",
-        },
-      }),
+    await page.evaluate(
+      (active) =>
+        window.setRoom({
+          ...window.currentRoom,
+          radio: {
+            ...window.currentRoom.radio!,
+            status: "blocked",
+            controls: {
+              busy: true,
+              inputBlocked: true,
+              canPass: false,
+              stopping: false,
+              speaking: false,
+              busyNotice: "Resolve the current reply before sending.",
+            },
+            active,
+            speaker: "a",
+          },
+        }),
+      radioActive(),
     );
     assert.equal(
       await page
@@ -357,17 +391,27 @@ test("Radio browser", async ({
       await page.getByRole("button", { name: "Stop", exact: true }).isEnabled(),
       true,
     );
-    await page.evaluate(() =>
-      window.setRoom({
-        ...window.currentRoom,
-        radio: {
-          ...window.currentRoom.radio!,
-          status: "speaking",
-          error: null,
-          active: radioActive(),
-          speaker: "a",
-        },
-      }),
+    await page.evaluate(
+      (active) =>
+        window.setRoom({
+          ...window.currentRoom,
+          radio: {
+            ...window.currentRoom.radio!,
+            status: "speaking",
+            controls: {
+              busy: true,
+              inputBlocked: false,
+              canPass: true,
+              stopping: false,
+              speaking: true,
+              busyNotice: "Current reply finishes first.",
+            },
+            error: null,
+            active,
+            speaker: "a",
+          },
+        }),
+      radioActive(),
     );
     await page
       .getByRole("button", { name: "Options for team Research" })

@@ -135,12 +135,12 @@ impl PairedTransport for Link {
     fn exchange<'a>(
         &'a self,
         _server: &'a str,
-        envelope: &'a Value,
+        envelope: &'a crate::orchestration_wire::OrchestrationRequest,
         _timeout: Duration,
     ) -> BoxFuture<'a, Result<studio_runtime_store::multi_server_delivery::RemoteReply, AccessError>>
     {
         Box::pin(async move {
-            let key = envelope["requestId"].as_str().unwrap().to_owned();
+            let key = envelope.request_id.clone();
             let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
             let reply = self
                 .peer

@@ -123,11 +123,18 @@ domain!(FederationAckState { Pending=>"pending", Sent=>"sent", Confirmed=>"confi
 domain!(FederationMessageKind { ChatMessage=>"chat-message", RoomInvite=>"room-invite", RoomAccept=>"room-accept" });
 domain!(AccessOutboundState { Unknown=>"unknown", Complete=>"complete", Redacted=>"redacted" });
 domain!(RemoteOutcome { Applied=>"applied", NotApplied=>"not_applied", Unknown=>"unknown" });
-domain!(RequestCardStatus { Pending=>"pending", Answering=>"answering", Answered=>"answered", Uncertain=>"uncertain", Blocked=>"blocked", Resolved=>"resolved", Expired=>"expired", Deleted=>"deleted" });
+domain!(RequestCardStatus { Pending=>"pending", Answering=>"answering", Answered=>"answered", Uncertain=>"uncertain", Resolved=>"resolved", Expired=>"expired", Deleted=>"deleted" });
 domain!(TerminalActionFailure { UnknownOutcome=>"unknown_outcome", Rejected=>"rejected", Disconnected=>"disconnected" });
 domain!(NativeReleasePhase { Checking=>"checking", Unsubscribing=>"unsubscribing", Unknown=>"unknown", Released=>"released", Blocked=>"blocked", Resumed=>"resumed" });
 domain!(ServerFetchState { Preparing=>"preparing", Fetching=>"fetching", Complete=>"complete" });
-domain!(ServerOperationKind { Event=>"event", Input=>"input", Message=>"message", MoveSend=>"move_send", MoveStatus=>"move_status", LocationInfo=>"location_info", LocationMatches=>"location_matches", Stop=>"stop", ExecEvent=>"exec_event", Projects=>"projects", ProjectsChanged=>"projects.changed", Folders=>"folders", Git=>"git", Export=>"export", Chunk=>"chunk", ExecRead=>"exec_read", ExecInput=>"exec_input", ExecCancel=>"exec_cancel", Release=>"release", UpdateOffer=>"update.offer", UpdateExport=>"update.export", UpdateChunk=>"update.chunk", UpdateRelease=>"update.release", BackupPut=>"backup.put", Task=>"task", Complaint=>"complaint", Context=>"context", Directory=>"directory", ChatRead=>"chat_read", MoveManage=>"move_manage", MoveInterrupt=>"move_interrupt", MoveSpawn=>"move_spawn", Exec=>"exec", ExecReceipt=>"exec_receipt", BrowserCallback=>"browser_callback", AddLocation=>"add_location", RemoveLocation=>"remove_location", MoveValidate=>"move_validate", MoveBegin=>"move_begin", DeviceTrust=>"device_trust" });
+domain!(ServerOperationKind { Event=>"event", Input=>"input", Message=>"message", MoveSend=>"move_send", LocationInfo=>"location_info", LocationMatches=>"location_matches", Stop=>"stop", ExecEvent=>"exec_event", Projects=>"projects", ProjectsChanged=>"projects.changed", Folders=>"folders", Git=>"git", Export=>"export", Chunk=>"chunk", ExecRead=>"exec_read", ExecInput=>"exec_input", ExecCancel=>"exec_cancel", Release=>"release", UpdateOffer=>"update.offer", UpdateExport=>"update.export", UpdateChunk=>"update.chunk", UpdateRelease=>"update.release", BackupPut=>"backup.put", Exec=>"exec", ExecReceipt=>"exec_receipt", BrowserCallback=>"browser_callback", AddLocation=>"add_location", RemoveLocation=>"remove_location", MoveValidate=>"move_validate", MoveBegin=>"move_begin", DeviceTrust=>"device_trust" });
+
+impl ServerOperationKind {
+    /// The complete set of supported cross-server action names.
+    pub fn wire_names() -> &'static [&'static str] {
+        Self::VARIANTS
+    }
+}
 domain!(RecoveryReceiptStatus { Unknown=>"unknown", Unconfirmed=>"unconfirmed", Blocked=>"blocked", Skipped=>"skipped", Superseded=>"superseded", HistoryMissing=>"history_missing", InputRestored=>"input_restored", Held=>"held", Reconciled=>"reconciled", Adopted=>"adopted", Accepted=>"accepted", Checked=>"checked", Released=>"released" });
 domain!(NativeSettingsStatus { Submitted=>"submitted", Acknowledged=>"acknowledged", NotSent=>"not_sent", Unknown=>"unknown", Rejected=>"rejected" });
 domain!(SafetyRetryStage { Turns=>"turns", Items=>"items", Interrupt=>"interrupt", VerifyTurns=>"verify_turns", VerifyItems=>"verify_items", Fork=>"fork", Start=>"start", Running=>"running", Unknown=>"unknown", Failed=>"failed", Cancelled=>"cancelled" });
@@ -142,6 +149,45 @@ domain!(OwnerKind { Agent=>"agent", Task=>"task", Account=>"account", Vm=>"vm", 
 domain!(RequestResultStatus { Applied=>"applied", Rejected=>"rejected" });
 domain!(RequestReferenceKind { Agent=>"agent", Annotation=>"annotation", Complaint=>"complaint", Message=>"message", Project=>"project", Room=>"room", Work=>"work" });
 domain!(OutboxKind { ProviderCall=>"provider_call", ProviderCallback=>"provider_callback", JournalEntry=>"journal_entry", Publication=>"publication", StreamFlush=>"stream_flush", FollowupEffect=>"followup_effect", Steer=>"steer", VoiceStop=>"voice_stop", VoiceDelete=>"voice_delete", WorkArchive=>"work_archive", WorkVm=>"work_vm", TitleGeneration=>"title_generation", NativeAction=>"native_action", TerminalAction=>"terminal_action", MonitorInput=>"monitor_input", McpReconnect=>"mcp_reconnect", ProjectRegistration=>"project_registration", RemoteDelivery=>"remote_delivery", ManagedTool=>"managed_tool" });
+/// Restart rule of an outbox kind after an unclean stop (target architecture, "Command execution").
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RestartRule {
+    /// The target dedupes by id: send again with the same id. Remote effects only.
+    TargetDedupes,
+    /// The outcome is unknown after the stop. Only the user resolves it.
+    None,
+    /// A local effect owned by its own worker. Not held on an unclean stop.
+    Local,
+    /// The remote family decides per action. See `RemoteEffect::restart_rule`.
+    Delegated,
+}
+
+impl OutboxKind {
+    /// Exhaustive on purpose: every kind names its rule, with no wildcard arm.
+    pub const fn restart_rule(self) -> RestartRule {
+        match self {
+            Self::ProviderCall
+            | Self::ProviderCallback
+            | Self::Steer
+            | Self::VoiceStop
+            | Self::VoiceDelete
+            | Self::TitleGeneration
+            | Self::NativeAction => RestartRule::None,
+            Self::RemoteDelivery => RestartRule::Delegated,
+            Self::JournalEntry
+            | Self::Publication
+            | Self::StreamFlush
+            | Self::FollowupEffect
+            | Self::WorkArchive
+            | Self::WorkVm
+            | Self::TerminalAction
+            | Self::MonitorInput
+            | Self::McpReconnect
+            | Self::ProjectRegistration
+            | Self::ManagedTool => RestartRule::Local,
+        }
+    }
+}
 domain!(OutboxStatus { Pending=>"pending", Submitted=>"submitted", Unknown=>"unknown", Committed=>"committed", Unrecognized=>"unrecognized" });
 domain!(HoldStatus { Clear=>"clear", Invalid=>"invalid", Unrecognized=>"unrecognized" });
 domain!(ToolRequestKind { ManagedTool=>"managed_tool", ProviderCallback=>"provider_callback", Unrecognized=>"unrecognized" });
@@ -600,5 +646,34 @@ mod tests {
             );
         }
         assert!(RequestIdentity::new("access", &[], "old-id", &[]).is_err());
+    }
+
+    #[test]
+    fn every_outbox_kind_has_a_listed_restart_rule() {
+        let expected = [
+            (OutboxKind::ProviderCall, RestartRule::None),
+            (OutboxKind::ProviderCallback, RestartRule::None),
+            (OutboxKind::JournalEntry, RestartRule::Local),
+            (OutboxKind::Publication, RestartRule::Local),
+            (OutboxKind::StreamFlush, RestartRule::Local),
+            (OutboxKind::FollowupEffect, RestartRule::Local),
+            (OutboxKind::Steer, RestartRule::None),
+            (OutboxKind::VoiceStop, RestartRule::None),
+            (OutboxKind::VoiceDelete, RestartRule::None),
+            (OutboxKind::WorkArchive, RestartRule::Local),
+            (OutboxKind::WorkVm, RestartRule::Local),
+            (OutboxKind::TitleGeneration, RestartRule::None),
+            (OutboxKind::NativeAction, RestartRule::None),
+            (OutboxKind::TerminalAction, RestartRule::Local),
+            (OutboxKind::MonitorInput, RestartRule::Local),
+            (OutboxKind::McpReconnect, RestartRule::Local),
+            (OutboxKind::ProjectRegistration, RestartRule::Local),
+            (OutboxKind::RemoteDelivery, RestartRule::Delegated),
+            (OutboxKind::ManagedTool, RestartRule::Local),
+        ];
+        assert_eq!(expected.len(), OutboxKind::VARIANTS.len());
+        for (kind, rule) in expected {
+            assert_eq!(kind.restart_rule(), rule, "{}", kind.as_str());
+        }
     }
 }

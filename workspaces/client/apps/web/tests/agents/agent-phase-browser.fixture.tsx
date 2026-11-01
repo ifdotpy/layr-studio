@@ -14,7 +14,10 @@ import type {
 import type { ResourceData } from "../../src/sync/subscriptions/contracts.ts";
 import type { ServerEventSource } from "../../src/servers/eventSource.ts";
 import { API_SCHEMA_HASH } from "../../src/generated/apiSchema.ts";
-import { SYNC_PROTOCOL_VERSION } from "../../src/generated/api.ts";
+import {
+  SYNC_PROTOCOL_VERSION,
+  type components,
+} from "../../src/generated/api.ts";
 import { SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS } from "../../src/generated/sharedValues.ts";
 import { fixturePostBody, fixturePostResult } from "../misc-fixture.ts";
 
@@ -101,6 +104,16 @@ function scope(ownerId: string, hold = false) {
     close() {
       this.closed = true;
     }
+    session() {
+      const session = {
+        sessionId: ownerId + sources.length,
+        workspaceId: ownerId,
+        locality: "local",
+        routes: [],
+        cachePolicies: [],
+      } satisfies components["schemas"]["SyncSessionEvent"];
+      this.emit("session", session);
+    }
     baseline() {
       this.emit("resources", {
         protocol: SYNC_PROTOCOL_VERSION,
@@ -137,11 +150,15 @@ function scope(ownerId: string, hold = false) {
           ),
           ...update.add.map((item) => item.resource),
         ];
+        const ack = {
+          gen: update.gen,
+          cachePolicies: [],
+        } satisfies components["schemas"]["SyncSubscriptionAck"];
         queueMicrotask(() => {
-          source.emit("subscriptions", { gen: update.gen });
+          source.emit("subscriptions", ack);
           if (!hold) source.baseline();
         });
-        return fixturePostResult<typeof path>({ gen: update.gen });
+        return fixturePostResult<typeof path>(ack);
       },
       isApiSchemaMismatch: () => false,
       onApiSchemaMismatch: () => () => {},
@@ -167,8 +184,10 @@ function scope(ownerId: string, hold = false) {
       queueMicrotask(() => {
         source.onopen?.();
         source.emit("api-schema", { hash: API_SCHEMA_HASH });
-        source.emit("session", { sessionId: ownerId + sources.length });
-        if (!hold) source.baseline();
+        if (!hold) {
+          source.session();
+          source.baseline();
+        }
         retryReady?.();
         retryReady = undefined;
       });
@@ -197,6 +216,7 @@ function scope(ownerId: string, hold = false) {
   const services = partialServices({
     owner: { id: ownerId, origin: location.origin },
     resources,
+    sync: { cacheSubscription: async () => {} },
     api: {
       syncGet: (...args: unknown[]) => {
         window.agentPhaseReads.push(args);
@@ -220,6 +240,7 @@ function scope(ownerId: string, hold = false) {
           });
       } else if (value === "live") {
         hold = false;
+        sources.at(-1)!.session();
         sources.at(-1)!.baseline();
       }
       return undefined;
@@ -270,7 +291,7 @@ function Chat({ id, visible }: { id: string; visible: boolean }) {
     <section
       hidden={!visible}
       data-chat={id}
-      data-connection={messages.connection}
+      data-connection={messages.connection?.health ?? ""}
       data-loaded={messages.loaded}
     >
       <AgentPhase agent={agent} connection={messages.connection} />

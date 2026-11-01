@@ -6,6 +6,7 @@ import { Bookmark, ListTree, Search } from "lucide-react";
 import { useEffect, useMemo, useState, type RefObject } from "react";
 import { errorText, type GetResult } from "../api";
 import type { Message } from "../types";
+import { isMessagePending } from "../messageSendStatus.ts";
 import "./prompt-navigation.css";
 
 type TranscriptSearchResult =
@@ -35,7 +36,10 @@ export default function PromptNavigator({
   const { syncGet } = useServerApi();
 
   const prompts = useMemo(
-    () => messages.filter((item) => item.role === "user" && !item.pending),
+    () =>
+      messages.filter(
+        (item) => item.role === "user" && !isMessagePending(item),
+      ),
     [messages],
   );
   const [activeId, setActiveId] = useState("");

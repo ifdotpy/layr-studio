@@ -45,7 +45,6 @@ export function UnifiedAgentSettings({
           id: settings.agent.id,
           account_key: key,
         });
-        await settings.refresh();
       }}
       renderPicker={(selectAccount, disabled) => (
         <>

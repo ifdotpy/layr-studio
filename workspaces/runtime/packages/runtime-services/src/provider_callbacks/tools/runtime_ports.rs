@@ -570,10 +570,14 @@ impl super::runtime_dispatch::InterruptPort for ManagedInterruptAdapter {
                 &record.id.0,
                 request_id,
                 Command::Stop {
-                    target: target_id.to_owned(),
+                    target: target_id
+                        .to_owned()
+                        .try_into()
+                        .map_err(|_| Error::Invalid("Invalid target"))?,
                     body: StopBody { descendants: false },
                 },
-            );
+            )
+            .map_err(|_| Error::Invalid("Invalid command client id"))?;
             let now_ms = (now * 1000.0) as i64;
             let lifecycle = Arc::clone(&self.lifecycle);
             let for_transaction = Arc::clone(&lifecycle);

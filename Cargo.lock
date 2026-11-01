@@ -5253,6 +5253,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "studio-client-domain",
+ "studio-request-signing",
  "studio-runtime-schema",
  "tempfile",
  "tokio",
@@ -5281,6 +5282,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "studio-client-domain",
+ "studio-request-signing",
  "wasm-bindgen",
 ]
 
@@ -5357,6 +5359,15 @@ dependencies = [
  "studio-test-deps",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "studio-request-signing"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "ring",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -5449,6 +5460,7 @@ version = "0.1.0"
 dependencies = [
  "data-encoding",
  "jsonschema 0.60.0",
+ "regex",
  "rusqlite",
  "schemars 1.2.3",
  "serde",
@@ -5456,7 +5468,9 @@ dependencies = [
  "sha2 0.11.1",
  "strum",
  "studio-client-domain",
+ "studio-request-signing",
  "thiserror 2.0.21",
+ "unicode-general-category",
  "uuid",
 ]
 
@@ -5529,7 +5543,9 @@ dependencies = [
  "shlex",
  "socket2",
  "spki",
+ "strum",
  "studio-operations",
+ "studio-request-signing",
  "studio-runtime-process",
  "studio-runtime-providers",
  "studio-runtime-schema",
@@ -5560,6 +5576,7 @@ dependencies = [
  "schemars 1.2.3",
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "sha2 0.11.1",
  "strum",
  "studio-runtime-providers",

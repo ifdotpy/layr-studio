@@ -6,7 +6,7 @@ use studio_runtime_services::account_session_runtime::LimitsSnapshot;
 
 use crate::error::ApiError;
 use crate::router::HttpState;
-use crate::routes::extractors::QueryParams;
+use crate::routes::extractors::TypedQuery;
 use crate::routes::manifest::{OperationStatus, RouteGroup, get as register_get};
 
 pub(crate) fn routes() -> RouteGroup {
@@ -56,20 +56,34 @@ pub(super) async fn accounts(
     super::accounts_response(snapshot)
 }
 
+#[derive(serde::Deserialize)]
+enum One {
+    #[serde(rename = "1")]
+    One,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LimitsQuery {
+    account_key: Option<String>,
+    agent: Option<String>,
+    cached: Option<One>,
+}
+
 async fn limits(
     State(state): State<HttpState>,
-    params: QueryParams,
+    TypedQuery(params): TypedQuery<LimitsQuery>,
 ) -> Result<Json<crate::generated::UsageLimitsResponse>, ApiError> {
     let account_key = params
-        .typed_value("account_key")
-        .and_then(serde_json::Value::as_str)
+        .account_key
+        .as_deref()
         .filter(|value| !value.is_empty())
         .unwrap_or("default");
-    let agent_id = params.nonempty_str("agent").map(str::to_owned);
-    let cached = params
-        .typed_value("cached")
-        .and_then(serde_json::Value::as_str)
-        == Some("1");
+    let agent_id = params
+        .agent
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    let cached = params.cached.is_some();
     if let Some(port) = state.account_session.clone() {
         let response = studio_runtime_services::account_session_runtime::limits(
             port.as_ref(),
@@ -328,5 +342,19 @@ mod tests {
             assert_eq!(body["archivedAccounts"][0]["provider"], "claude");
             assert_eq!(std::fs::read(&path).expect("registry unchanged"), bytes);
         }
+    }
+}
+
+#[cfg(test)]
+mod limitsquery_tests {
+    #[test]
+    fn query_contract() {
+        fn decode(query: &str) -> bool {
+            let uri: axum::http::Uri = format!("/?{query}").parse().unwrap();
+            axum::extract::Query::<super::LimitsQuery>::try_from_uri(&uri).is_ok()
+        }
+        assert!(decode("cached=1"));
+        assert!(!decode("cached=0"));
+        assert!(!decode("extra=x"));
     }
 }

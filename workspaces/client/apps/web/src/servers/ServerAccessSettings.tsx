@@ -1,3 +1,4 @@
+import { AccessClientStatus } from "../generated/api";
 import { outboxRequests } from "../browserPersistence";
 import { randomUUID } from "../uuid";
 import { useServerStorage } from "./ServerServicesContext";
@@ -115,7 +116,7 @@ export default function ServerAccessSettings({ active }: { active: boolean }) {
         <div key={client.clientId}>
           <strong>{client.label}</strong>
           <Button
-            disabled={busy || client.status === "revoked"}
+            disabled={busy || client.status === AccessClientStatus.revoked}
             variant="subtle"
             onClick={() =>
               run({

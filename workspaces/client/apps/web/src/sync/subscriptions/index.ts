@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { useServerResources } from "../../servers/ServerServicesContext";
+import { useCacheAfterPaint } from "./useCacheAfterPaint";
 import {
   subscriptionKey,
   type ResourceData,
@@ -42,5 +43,7 @@ export function useSubscription<R extends ResourceRef>(
       stableRef === null ? inactive : subscriptions.getSnapshot(stableRef),
     [subscriptions, stableRef],
   );
-  return useSyncExternalStore(subscribe, snapshot, snapshot);
+  const value = useSyncExternalStore(subscribe, snapshot, snapshot);
+  useCacheAfterPaint(stableRef, value.data);
+  return value;
 }

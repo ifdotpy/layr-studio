@@ -2,10 +2,21 @@
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use ring::hmac;
 use rusqlite::OptionalExtension;
-use serde_json::{Value, json};
+use serde::Deserialize;
+use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use studio_runtime_schema::multi_server_protocol::ACCESS_PROTOCOL_VERSION;
+use studio_runtime_schema::multi_server_protocol::{
+    ACCESS_PROTOCOL_VERSION, PersistedAccessInvite,
+};
+use studio_runtime_schema::{
+    multi_server_access::{
+        AccessClientKind, AccessClientStatus, AccessIdentity, AccessInvitation,
+        AccessProtocolVersion, AccessSettings, AccessSnapshot, IdentityAlert, IdentityAlertCode,
+        InvitationResponse, InviteSummary, PersistedAccessClient, Reachability,
+    },
+    queue_command::Field,
+};
 use studio_runtime_store::{MultiServerRepository, RuntimeStore, StoreError};
 use thiserror::Error;
 
@@ -33,8 +44,12 @@ pub async fn audit(store: &RuntimeStore) -> Result<Value, MultiServerError> {
         .await?)
 }
 
-pub async fn snapshot(store: &RuntimeStore, identity: &Value) -> Result<Value, MultiServerError> {
-    let identity = identity.clone();
+pub async fn snapshot(
+    store: &RuntimeStore,
+    identity: &Value,
+) -> Result<AccessSnapshot, MultiServerError> {
+    let identity: AccessIdentity =
+        AccessIdentity::deserialize(identity).map_err(StoreError::from)?;
     Ok(store
         .transaction_with(move |tx| snapshot_in_transaction(tx, &identity, true))
         .await?)
@@ -45,8 +60,9 @@ pub async fn snapshot(store: &RuntimeStore, identity: &Value) -> Result<Value, M
 pub async fn snapshot_for_comparison(
     store: &RuntimeStore,
     identity: &Value,
-) -> Result<Value, MultiServerError> {
-    let identity = identity.clone();
+) -> Result<AccessSnapshot, MultiServerError> {
+    let identity: AccessIdentity =
+        AccessIdentity::deserialize(identity).map_err(StoreError::from)?;
     Ok(store
         .transaction_with(move |tx| snapshot_in_transaction(tx, &identity, false))
         .await?)
@@ -54,9 +70,9 @@ pub async fn snapshot_for_comparison(
 
 fn snapshot_in_transaction(
     tx: &rusqlite::Transaction<'_>,
-    identity: &Value,
+    identity: &AccessIdentity,
     persist_default_aliases: bool,
-) -> Result<Value, StoreError> {
+) -> Result<AccessSnapshot, StoreError> {
     let aliases = server_aliases(tx, identity, persist_default_aliases)?;
     let clients = project_records(tx, "runtime_access_clients")?;
     let discovered = project_records(tx, "runtime_access_discovered")?;
@@ -67,27 +83,17 @@ fn snapshot_in_transaction(
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
         .map(|r| {
             let (id, raw) = r?;
-            let v = parse("runtime_access_invites", &id, &raw)?;
-            let invite_id = v
-                .get("inviteId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| invalid("runtime_access_invites", &id, "inviteId"))?;
-            let expires = v
-                .get("expires")
-                .and_then(Value::as_i64)
-                .ok_or_else(|| invalid("runtime_access_invites", &id, "expires"))?;
+            let v = decode_invite(&id, &raw)?;
             let created = v
-                .get("created")
-                .and_then(Value::as_i64)
+                .created
+                .value()
                 .ok_or_else(|| invalid("runtime_access_invites", &id, "created"))?;
-            let status = v
-                .get("status")
-                .and_then(Value::as_str)
-                .ok_or_else(|| invalid("runtime_access_invites", &id, "status"))?;
-            if !["open", "used"].contains(&status) {
-                return Err(invalid("runtime_access_invites", &id, "status"));
-            }
-            Ok(json!({"inviteId":invite_id,"expires":expires,"created":created,"status":status}))
+            Ok(InviteSummary {
+                invite_id: v.invite_id().to_owned(),
+                expires: v.expires.clone(),
+                created: created.clone(),
+                status: v.status.clone(),
+            })
         })
         .collect::<Result<Vec<_>, StoreError>>()?;
     let auto_pair = tx
@@ -103,90 +109,89 @@ fn snapshot_in_transaction(
     let identity_alerts = identity_alerts(tx, identity, &clients, &discovered)?;
     let servers = server_list(&clients, discovered);
 
-    Ok(json!({
-        "protocol": ACCESS_PROTOCOL_VERSION,
-        "identity": identity,
-        "clients": clients,
-        "servers": servers,
-        "invites": invites,
-        "settings": {"autoPair": auto_pair, "autoUpdate": auto_update, "aliases": aliases},
-        "identityAlerts": identity_alerts,
-    }))
+    Ok(AccessSnapshot {
+        protocol: AccessProtocolVersion::current(),
+        identity: identity.clone(),
+        clients: clients.into_iter().map(Into::into).collect(),
+        servers: servers.into_iter().map(Into::into).collect(),
+        invites,
+        settings: AccessSettings {
+            auto_pair,
+            auto_update,
+            aliases,
+        },
+        identity_alerts,
+    })
 }
 
 /// Paired servers in the shape of Python `ServerTransport.servers()`: the
 /// discovery-merged server list without unpaired or revoked rows.
-pub fn paired_servers(tx: &rusqlite::Transaction<'_>) -> Result<Vec<Value>, StoreError> {
+pub fn paired_servers(
+    tx: &rusqlite::Transaction<'_>,
+) -> Result<Vec<studio_runtime_schema::multi_server_access::PublicAccessClient>, StoreError> {
     // Python `MultiServerService._public` names every public field, null when absent.
-    const PUBLIC: [&str; 14] = [
-        "id",
-        "clientId",
-        "serverId",
-        "label",
-        "kind",
-        "origin",
-        "publicKey",
-        "tailscaleUser",
-        "status",
-        "created",
-        "lastAccess",
-        "revoked",
-        "alias",
-        "replacedBy",
-    ];
-    let mut clients = project_records(tx, "runtime_access_clients")?;
-    for client in clients
-        .iter_mut()
-        .filter(|client| client["kind"].as_str() == Some("server"))
-    {
-        if let Some(object) = client.as_object_mut() {
-            object.retain(|key, _| PUBLIC.contains(&key.as_str()));
-            for key in PUBLIC {
-                object.entry(key).or_insert(Value::Null);
-            }
-        }
-    }
+    let clients = project_records(tx, "runtime_access_clients")?;
     let discovered = project_records(tx, "runtime_access_discovered")?;
     Ok(server_list(&clients, discovered)
         .into_iter()
-        .filter(|server| server["status"].as_str() == Some("paired"))
+        .filter(|server| server.status == AccessClientStatus::Paired)
+        .map(|server| {
+            let mut server =
+                studio_runtime_schema::multi_server_access::PublicAccessClient::from(server);
+            if server.alias.is_missing() {
+                server.alias = Field::Null;
+            }
+            if server.replaced_by.is_missing() {
+                server.replaced_by = Field::Null;
+            }
+            server
+        })
         .collect())
 }
 
 /// Paired and discovered servers by ID. A saved server takes its activity from its discovery
 /// record. The rules are those of `ServerDiscovery.servers` in codex_server_discovery.py.
-fn server_list(clients: &[Value], discovered: Vec<Value>) -> Vec<Value> {
+fn server_list(
+    clients: &[PersistedAccessClient],
+    discovered: Vec<PersistedAccessClient>,
+) -> Vec<PersistedAccessClient> {
     let mut known = discovered
         .into_iter()
-        .map(|peer| (peer["id"].as_str().unwrap_or_default().to_owned(), peer))
+        .map(|peer| (peer.id.as_str().to_owned(), peer))
         .collect::<BTreeMap<_, _>>();
     for client in clients
         .iter()
-        .filter(|client| client["kind"].as_str() == Some("server"))
+        .filter(|client| client.kind == AccessClientKind::Server)
     {
-        let id = client["id"].as_str().unwrap_or_default().to_owned();
+        let id = client.id.as_str().to_owned();
         let found = known.get(&id);
         let reachability = match found {
-            Some(peer) if peer["status"].as_str() == Some("unreachable") => "unreachable",
-            Some(_) => "reachable",
-            None => "unknown",
+            Some(peer) if peer.status == AccessClientStatus::Unreachable => {
+                Reachability::Unreachable
+            }
+            Some(_) => Reachability::Reachable,
+            None => Reachability::Unknown,
         };
         let mut server = client.clone();
-        server["lastSeen"] = found.map_or(Value::Null, |peer| peer["lastSeen"].clone());
-        server["autoPair"] = found.map_or(Value::Null, |peer| peer["autoPair"].clone());
-        server["reachability"] = json!(reachability);
+        server.last_seen = found
+            .and_then(|peer| peer.last_seen.value().cloned())
+            .map_or(Field::Null, Field::Value);
+        server.auto_pair = found
+            .and_then(|peer| peer.auto_pair.value().copied())
+            .map_or(Field::Null, Field::Value);
+        server.reachability = Field::Value(reachability);
         known.insert(id, server);
     }
     known
         .into_values()
         .map(|mut peer| {
-            if peer.get("reachability").is_none() {
-                let unreachable = peer["status"].as_str() == Some("unreachable");
-                peer["reachability"] = json!(if unreachable {
-                    "unreachable"
-                } else {
-                    "reachable"
-                });
+            if peer.reachability.is_missing() {
+                peer.reachability =
+                    Field::Value(if peer.status == AccessClientStatus::Unreachable {
+                        Reachability::Unreachable
+                    } else {
+                        Reachability::Reachable
+                    });
             }
             peer
         })
@@ -221,22 +226,18 @@ fn table_exists(tx: &rusqlite::Transaction<'_>, table: &str) -> Result<bool, Sto
 /// read and never stored. See docs/multi-server.md, "Lost server identities".
 fn identity_alerts(
     tx: &rusqlite::Transaction<'_>,
-    identity: &Value,
-    clients: &[Value],
-    discovered: &[Value],
-) -> Result<Vec<Value>, StoreError> {
-    let id_of = |record: &Value| record["id"].as_str().unwrap_or_default().to_owned();
+    identity: &AccessIdentity,
+    clients: &[PersistedAccessClient],
+    discovered: &[PersistedAccessClient],
+) -> Result<Vec<IdentityAlert>, StoreError> {
+    let id_of = |record: &PersistedAccessClient| record.id.as_str().to_owned();
     let servers = clients
         .iter()
-        .filter(|record| record["kind"].as_str() == Some("server"))
+        .filter(|record| record.kind == AccessClientKind::Server)
         .collect::<Vec<_>>();
     let replaced = servers
         .iter()
-        .filter(|record| {
-            record["replacedBy"]
-                .as_str()
-                .is_some_and(|id| !id.is_empty())
-        })
+        .filter(|record| record.replaced_by.value().is_some_and(|id| !id.is_empty()))
         .map(|record| id_of(record))
         .collect::<BTreeSet<_>>();
     let mut known = servers
@@ -248,43 +249,48 @@ fn identity_alerts(
     }
     let mut successors = servers
         .iter()
-        .filter(|record| record["status"].as_str() == Some("paired"))
+        .filter(|record| record.status == AccessClientStatus::Paired)
         .collect::<Vec<_>>();
     successors.sort_by_key(|record| id_of(record));
     let mut alerts = Vec::new();
     for successor in successors {
         let new = id_of(successor);
-        let Some(origin) = successor["origin"]
-            .as_str()
+        let Some(origin) = successor
+            .origin
+            .value()
+            .map(String::as_str)
             .filter(|origin| !origin.is_empty())
         else {
             continue;
         };
         for (old, peer) in &known {
-            if *old != new && !replaced.contains(old) && peer["origin"].as_str() == Some(origin) {
-                alerts.push(json!({
-                    "code": "peer_identity_changed",
-                    "oldServerId": old,
-                    "newServerId": new,
-                    "origin": origin,
-                    "detail": format!(
+            if *old != new
+                && !replaced.contains(old)
+                && peer.origin.value().map(String::as_str) == Some(origin)
+            {
+                alerts.push(IdentityAlert {
+                    code: IdentityAlertCode::PeerIdentityChanged,
+                    old_server_id: old.clone(),
+                    new_server_id: new.clone(),
+                    origin: Some(origin.to_owned()),
+                    detail: format!(
                         "{origin} now presents server {new}. References to server {old} remain unavailable."
                     ),
-                }));
+                });
             }
         }
     }
-    let local = identity["serverId"].as_str().unwrap_or_default();
+    let local = identity.server_id.as_str();
     for old in previous_local_identities(tx, local)?.difference(&replaced) {
-        alerts.push(json!({
-            "code": "local_identity_changed",
-            "oldServerId": old,
-            "newServerId": local,
-            "origin": identity["origin"],
-            "detail": format!(
+        alerts.push(IdentityAlert {
+            code: IdentityAlertCode::LocalIdentityChanged,
+            old_server_id: old.clone(),
+            new_server_id: local.to_owned(),
+            origin: identity.origin.clone(),
+            detail: format!(
                 "Local state still names this server {old}, but its current identity is {local}. References to the previous identity remain unavailable."
             ),
-        }));
+        });
     }
     Ok(alerts)
 }
@@ -326,51 +332,28 @@ fn previous_local_identities(
 pub async fn manage(
     store: &RuntimeStore,
     identity: &Value,
-    body: &Value,
+    body: &studio_runtime_schema::multi_server_ingress::ManagementRequest,
     actor: &str,
-) -> Result<Value, MultiServerError> {
-    let action = body
-        .get("action")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let server = body
-        .get("serverId")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let target = body
-        .get("clientId")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let request = body
-        .get("requestId")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let alias = body
-        .get("alias")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let auto = body
-        .get("autoPair")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let identity = identity.clone();
+) -> Result<AccessSnapshot, MultiServerError> {
+    use studio_runtime_schema::multi_server_ingress::ManagementRequest;
+    let identity: AccessIdentity =
+        AccessIdentity::deserialize(identity).map_err(StoreError::from)?;
     let body = body.clone();
     let actor = actor.to_owned();
-    store.transaction_with(move |tx| -> Result<Value, MultiServerError> {
-        match action.as_str() {
-            "settings" => { tx.execute("UPDATE runtime_access_settings SET auto_pair=?1 WHERE id=1",[i64::from(auto)])?; audit_write(tx,"local",&actor,"settings")?; }
-            "revoke" => { let id=body.get("clientId").and_then(Value::as_str).unwrap_or_default(); let mut client=stored(tx,"runtime_access_clients",id)?.ok_or_else(||MultiServerError::Refused("client does not exist".into()))?; if client.get("status").and_then(Value::as_str)!=Some("revoked") { client["status"]=json!("revoked"); client["revoked"]=json!(unix_time()?); tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2",rusqlite::params![client.to_string(),id])?; audit_write(tx,id,&actor,"revoke")?; } }
-            "alias" => {
-                if !valid_identifier(&server) || !valid_identifier(&request) || !valid_alias(&alias) {
+    store.transaction_with(move |tx| -> Result<AccessSnapshot, MultiServerError> {
+        match &body {
+            ManagementRequest::Settings { auto_pair, .. } => { tx.execute("UPDATE runtime_access_settings SET auto_pair=?1 WHERE id=1",[i64::from(auto_pair.value().copied().unwrap_or(false))])?; audit_write(tx,"local",&actor,"settings")?; }
+            ManagementRequest::Revoke { client_id, .. } => { let id=client_id.as_str(); let mut client=stored(tx,"runtime_access_clients",id)?.ok_or_else(||MultiServerError::Refused("client does not exist".into()))?; if client.status != AccessClientStatus::Revoked { client.status=AccessClientStatus::Revoked; client.revoked=Field::Value(serde_json::Number::from_f64(unix_time()?).ok_or_else(|| invalid("runtime_access_clients",id,"revoked"))?); tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2",rusqlite::params![serde_json::to_string(&client).map_err(|_|invalid("runtime_access_clients",id,"record"))?,id])?; audit_write(tx,id,&actor,"revoke")?; } }
+            ManagementRequest::Alias { server_id, request_id, alias } => {
+                let server = server_id.as_str();
+                let request = request_id.as_str();
+                let alias_value = alias.clone();
+                let alias = alias.as_str();
+                if !valid_identifier(server) || !valid_identifier(request) {
                     return Err(MultiServerError::Refused("invalid server alias request".into()));
                 }
-                let local = server == "local" || server == identity["serverId"].as_str().unwrap_or_default();
-                let target = if local { "local" } else { server.as_str() };
+                let local = server == "local" || server == identity.server_id;
+                let target = if local { "local" } else { server };
                 let prior=tx.query_row("SELECT server,alias FROM runtime_access_alias_requests WHERE id=?1",[&request],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).optional()?;
                 if let Some((saved_target,saved_alias)) = prior {
                     if saved_target != target || saved_alias != alias {
@@ -378,12 +361,12 @@ pub async fn manage(
                     }
                 } else {
                     let aliases = ensure_server_aliases(tx, &identity)?;
-                    let local_id = identity["serverId"].as_str().unwrap_or_default();
-                    if !local && !aliases.contains_key(&server) {
+                    let local_id = identity.server_id.as_str();
+                    if !local && !aliases.contains_key(server) {
                         return Err(MultiServerError::Refused("server does not exist".into()));
                     }
                     let collision = aliases.iter().any(|(id, existing)| {
-                        existing == &alias && id != target && !(local && id == local_id)
+                        existing == alias && id != target && !(local && id == local_id)
                     });
                     if collision {
                         return Err(MultiServerError::Conflict("server alias is already in use".into()));
@@ -391,17 +374,19 @@ pub async fn manage(
                     if local {
                         tx.execute("INSERT INTO runtime_access_local_alias VALUES(1,?) ON CONFLICT(id) DO UPDATE SET alias=excluded.alias", [&alias])?;
                     } else {
-                        let mut peer = stored(tx, "runtime_access_clients", &server)?
+                        let mut peer = stored(tx, "runtime_access_clients", server)?
                             .ok_or_else(|| MultiServerError::Refused("server does not exist".into()))?;
-                        peer["alias"] = json!(alias);
-                        tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2", rusqlite::params![peer.to_string(), server])?;
+                        peer.alias = Field::Value(alias_value);
+                        tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2", rusqlite::params![serde_json::to_string(&peer).map_err(|_|invalid("runtime_access_clients",server,"record"))?, server])?;
                     }
                     tx.execute("INSERT INTO runtime_access_alias_requests VALUES(?,?,?)", rusqlite::params![request,target,alias])?;
                     audit_write(tx,target,&actor,"alias")?;
                 }
             }
-            "unrevoke" => { let prior=tx.query_row("SELECT client FROM runtime_access_unrevokes WHERE id=?1",[&request],|r|r.get::<_,String>(0)).optional()?; if let Some(saved)=prior {if saved!=target{return Err(MultiServerError::Conflict("request ID selected another server".into()));}} else {let v=stored(tx,"runtime_access_clients",&target)?.ok_or_else(||MultiServerError::Refused("select a revoked server".into()))?;if v.get("status").and_then(Value::as_str)!=Some("revoked")||v.get("kind").and_then(Value::as_str)!=Some("server"){return Err(MultiServerError::Refused("select a revoked server".into()));}tx.execute("DELETE FROM runtime_access_clients WHERE id=?1",[&target])?;tx.execute("DELETE FROM runtime_access_auto_attempts WHERE id=?1",[&target])?;tx.execute("INSERT INTO runtime_access_unrevokes VALUES(?1,?2)",rusqlite::params![request,target])?;audit_write(tx,&target,&actor,"unrevoke")?;} }
-            _ => return Err(MultiServerError::Refused(format!("unsupported local multi-server action: {action}"))),
+            ManagementRequest::Unrevoke { request_id, client_id } => { let request = request_id.as_str(); let target = client_id.as_str(); let prior=tx.query_row("SELECT client FROM runtime_access_unrevokes WHERE id=?1",[&request],|r|r.get::<_,String>(0)).optional()?; if let Some(saved)=prior {if saved!=target{return Err(MultiServerError::Conflict("request ID selected another server".into()));}} else {let v=stored(tx,"runtime_access_clients",target)?.ok_or_else(||MultiServerError::Refused("select a revoked server".into()))?;if v.status!=AccessClientStatus::Revoked || v.kind!=AccessClientKind::Server{return Err(MultiServerError::Refused("select a revoked server".into()));}tx.execute("DELETE FROM runtime_access_clients WHERE id=?1",[&target])?;tx.execute("DELETE FROM runtime_access_auto_attempts WHERE id=?1",[&target])?;tx.execute("INSERT INTO runtime_access_unrevokes VALUES(?1,?2)",rusqlite::params![request,target])?;audit_write(tx,target,&actor,"unrevoke")?;} }
+            ManagementRequest::AcceptInvite { .. } | ManagementRequest::CreateInvite { .. }
+            | ManagementRequest::Discover { .. } | ManagementRequest::Name { .. }
+            | ManagementRequest::UiInvite { .. } => return Err(MultiServerError::Refused(format!("unsupported local multi-server action: {}", body.action()))),
         }
         let clients=project_records(tx,"runtime_access_clients")?;
         let records=MultiServerRepository::audit(tx)?;
@@ -416,30 +401,37 @@ pub async fn manage(
 pub async fn create_invite(
     store: Arc<RuntimeStore>,
     identity: &Value,
-    body: &Value,
+    body: &studio_runtime_schema::multi_server_ingress::ManagementRequest,
     actor: &str,
     tailscale_user: Option<&str>,
-) -> Result<Value, MultiServerError> {
-    let request_id = body
-        .get("requestId")
-        .and_then(Value::as_str)
-        .filter(|value| valid_identifier(value))
-        .ok_or_else(|| MultiServerError::Refused("Invalid request ID".into()))?;
+) -> Result<InvitationResponse, MultiServerError> {
+    use studio_runtime_schema::multi_server_ingress::ManagementRequest;
+    let identity: AccessIdentity = AccessIdentity::deserialize(identity)
+        .map_err(|_| MultiServerError::Refused("Invalid local invitation identity".into()))?;
+    let ManagementRequest::CreateInvite {
+        request_id,
+        label,
+        grant,
+    } = body
+    else {
+        return Err(MultiServerError::Refused("Invalid pairing request".into()));
+    };
+    let request_id = request_id.as_str();
+    if !valid_identifier(request_id) {
+        return Err(MultiServerError::Refused("Invalid request ID".into()));
+    }
     let origin = identity
-        .get("origin")
-        .and_then(Value::as_str)
+        .origin
+        .as_deref()
         .and_then(|value| crate::remote_transport::validate_federation_origin(value).ok())
         .ok_or_else(|| {
             MultiServerError::Refused("Configure Tailscale Serve HTTPS before pairing".into())
         })?;
-    let saved_label = identity
-        .get("label")
-        .and_then(Value::as_str)
-        .ok_or_else(|| MultiServerError::Refused("The local server label is unavailable".into()))?;
-    let label = match body.get("label") {
-        None | Some(Value::Null) => saved_label,
-        Some(Value::String(label)) => {
-            let label = label.trim();
+    let saved_label = identity.label.as_str();
+    let label = match label.value() {
+        None => saved_label,
+        Some(value) => {
+            let label = value.as_str().trim();
             if label.is_empty() || label.chars().count() > 80 {
                 return Err(MultiServerError::Refused(
                     "Server label must be 1 to 80 characters".into(),
@@ -447,27 +439,8 @@ pub async fn create_invite(
             }
             label
         }
-        Some(_) => {
-            return Err(MultiServerError::Refused(
-                "Server label must be 1 to 80 characters".into(),
-            ));
-        }
     };
-    // The owner picks the grant of the device that will use this invitation.
-    let grant = match body.get("grant") {
-        None | Some(Value::Null) => None,
-        Some(Value::String(grant))
-            if grant == crate::device_trust::GRANT_FULL
-                || grant == crate::device_trust::GRANT_OBSERVE =>
-        {
-            Some(grant.as_str())
-        }
-        Some(_) => {
-            return Err(MultiServerError::Refused(
-                "Grant must be full or observe".into(),
-            ));
-        }
-    };
+    let grant = grant.value().map(|value| value.as_str());
     let tailscale_user = tailscale_user
         .filter(|user| !user.is_empty() && user.len() <= 254)
         .ok_or_else(|| {
@@ -483,30 +456,19 @@ pub async fn create_invite(
     .map_err(|_| {
         MultiServerError::Refused("The local server credentials are unavailable".into())
     })?;
-    let fingerprint = studio_runtime_store::sha256_hex(
-        crate::remote_transport::canonical_json(body)
-            .map_err(|_| MultiServerError::Refused("Invalid pairing request".into()))?
-            .as_bytes(),
-    );
+    let fingerprint = invite_fingerprint(body)?;
     let request_id_for_read = request_id.to_owned();
     let prior = store
         .read_async("runtime-services/multi_server", move |tx| {
-            let saved: Option<(String, String)> = tx
+            let saved: Option<(String, String, String)> = tx
                 .query_row(
-                    "SELECT hash,record FROM runtime_access_invites WHERE request_id=?1",
+                    "SELECT id,hash,record FROM runtime_access_invites WHERE request_id=?1",
                     [&request_id_for_read],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .optional()?;
             saved
-                .map(|(hash, raw)| {
-                    let record: Value = serde_json::from_str(&raw).map_err(|_| {
-                        StoreError::SchemaMismatch(format!(
-                            "invalid stored object runtime_access_invites/{request_id_for_read}"
-                        ))
-                    })?;
-                    Ok::<_, StoreError>((hash, record))
-                })
+                .map(|(id, hash, raw)| decode_invite(&id, &raw).map(|record| (hash, record)))
                 .transpose()
         })
         .await?;
@@ -528,22 +490,37 @@ pub async fn create_invite(
             )
             .as_ref(),
         );
-        let mut invite = json!({
-            "protocol": ACCESS_PROTOCOL_VERSION,
-            "inviteId": invite_id,
-            "serverId": identity["serverId"],
-            "label": label,
-            "origin": origin,
-            "publicKey": identity["publicKey"],
-            "tailscaleUser": tailscale_user,
-            "expires": now as i64 + INVITATION_TTL_SECONDS,
-            "created": now,
-            "status": "open",
-            "tokenHash": studio_runtime_store::sha256_hex(token.as_bytes()),
-        });
-        if let Some(grant) = grant {
-            invite["grant"] = json!(grant);
-        }
+        use studio_runtime_schema::{multi_server_protocol::InviteStatus, queue_command::Field};
+        let invalid_invite =
+            |_| MultiServerError::Refused("Invalid local invitation identity".into());
+        let invite = PersistedAccessInvite {
+            protocol: Field::Value(ACCESS_PROTOCOL_VERSION),
+            invite_id: invite_id.clone().try_into().map_err(invalid_invite)?,
+            server_id: Field::Value(identity.server_id.clone()),
+            label: Field::Value(label.to_owned()),
+            origin: Field::Value(origin.to_owned()),
+            public_key: Field::Value(identity.public_key.clone()),
+            tailscale_user: tailscale_user
+                .to_owned()
+                .try_into()
+                .map_err(invalid_invite)?,
+            expires: serde_json::Number::from(now as i64 + INVITATION_TTL_SECONDS)
+                .try_into()
+                .map_err(invalid_invite)?,
+            created: Field::Value(
+                serde_json::Number::from_f64(now)
+                    .ok_or_else(|| {
+                        MultiServerError::Refused("Invalid local invitation time".into())
+                    })?
+                    .try_into()
+                    .map_err(invalid_invite)?,
+            ),
+            status: InviteStatus::Open,
+            token_hash: studio_runtime_store::sha256_hex(token.as_bytes())
+                .try_into()
+                .map_err(invalid_invite)?,
+            grant: grant.map_or(Field::Missing, |value| Field::Value(value.to_owned())),
+        };
         let invite_id = invite_id.clone();
         let request_id = request_id.to_owned();
         let fingerprint = fingerprint.clone();
@@ -553,7 +530,7 @@ pub async fn create_invite(
             .transaction_with(move |tx| {
                 tx.execute(
                 "INSERT INTO runtime_access_invites(id,request_id,hash,record) VALUES(?1,?2,?3,?4)",
-                rusqlite::params![invite_id, request_id, fingerprint, invite_for_write.to_string()],
+                rusqlite::params![invite_id, request_id, fingerprint, serde_json::to_string(&invite_for_write)?],
             )?;
                 audit_write(tx, "local", &actor, "create_invite")?;
                 Ok::<_, StoreError>(())
@@ -561,7 +538,7 @@ pub async fn create_invite(
             .await?;
         invite
     };
-    let invite_id = invite["inviteId"].as_str().unwrap_or_default();
+    let invite_id = invite.invite_id();
     let token_data = format!("invite-v1\n{invite_id}\n{request_id}");
     let token = URL_SAFE_NO_PAD.encode(
         hmac::sign(
@@ -570,107 +547,69 @@ pub async fn create_invite(
         )
         .as_ref(),
     );
-    let invitation = json!({
-        "protocol": invite["protocol"], "inviteId": invite["inviteId"],
-        "serverId": invite["serverId"], "label": invite["label"],
-        "origin": invite["origin"], "publicKey": invite["publicKey"],
-        "tailscaleUser": invite["tailscaleUser"], "expires": invite["expires"],
-        "token": token,
-    });
-    Ok(json!({
-        "invitation": invitation,
-        "expires": invite["expires"]
-    }))
+    let missing = || MultiServerError::Refused("Invalid local invitation identity".into());
+    Ok(InvitationResponse {
+        invitation: AccessInvitation {
+            protocol: invite
+                .protocol
+                .value()
+                .copied()
+                .ok_or_else(missing)?
+                .try_into()
+                .map_err(|_| missing())?,
+            invite_id: invite.invite_id().to_owned(),
+            server_id: invite.server_id.value().cloned().ok_or_else(missing)?,
+            label: invite.label.value().cloned().ok_or_else(missing)?,
+            origin: invite.origin.value().cloned().ok_or_else(missing)?,
+            public_key: invite.public_key.value().cloned().ok_or_else(missing)?,
+            tailscale_user: invite.tailscale_user().to_owned(),
+            expires: invite.expires.clone(),
+            token,
+        },
+        expires: invite.expires.clone(),
+    })
 }
 
-fn project_records(tx: &rusqlite::Transaction<'_>, table: &str) -> Result<Vec<Value>, StoreError> {
+/// Preserve the canonical JSON bytes used by stored invite fingerprints before
+/// request bodies became typed, including omitted fields and explicit nulls.
+fn invite_fingerprint(
+    body: &studio_runtime_schema::multi_server_ingress::ManagementRequest,
+) -> Result<String, MultiServerError> {
+    let value = serde::Serialize::serialize(body, serde_json::value::Serializer)
+        .map_err(|_| MultiServerError::Refused("Invalid pairing request".into()))?;
+    let canonical = crate::remote_transport::canonical_json(&value)
+        .map_err(|_| MultiServerError::Refused("Invalid pairing request".into()))?;
+    Ok(studio_runtime_store::sha256_hex(canonical.as_bytes()))
+}
+
+fn project_records(
+    tx: &rusqlite::Transaction<'_>,
+    table: &str,
+) -> Result<Vec<PersistedAccessClient>, StoreError> {
     let q = format!("SELECT id,record FROM {table} ORDER BY id");
     let mut st = tx.prepare_cached(&q)?;
     let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
     rows.map(|row| {
         let (id, raw) = row?;
-        let mut v = parse(table, &id, &raw)?;
-        let obj = v
-            .as_object_mut()
-            .ok_or_else(|| invalid(table, &id, "record"))?;
-        let allowed = [
-            "id",
-            "clientId",
-            "serverId",
-            "label",
-            "kind",
-            "origin",
-            "publicKey",
-            "tailscaleUser",
-            "status",
-            "created",
-            "lastAccess",
-            "revoked",
-            "reachability",
-            "lastSeen",
-            "autoPair",
-            "alias",
-            "replacedBy",
-        ];
-        obj.retain(|k, _| allowed.contains(&k.as_str()));
-        for key in ["id", "clientId", "label", "kind", "publicKey", "status"] {
-            if !obj.get(key).is_some_and(Value::is_string) {
-                return Err(invalid(table, &id, key));
-            }
-        }
-        if !["ui", "server"].contains(&obj["kind"].as_str().unwrap_or_default())
-            || !["paired", "revoked", "discovered", "unreachable"]
-                .contains(&obj["status"].as_str().unwrap_or_default())
-        {
-            return Err(invalid(table, &id, "kind/status"));
-        }
-        for key in [
-            "serverId",
-            "origin",
-            "tailscaleUser",
-            "reachability",
-            "alias",
-            "replacedBy",
-        ] {
-            if obj.get(key).is_some_and(|v| !v.is_null() && !v.is_string()) {
-                return Err(invalid(table, &id, key));
-            }
-        }
-        for key in ["created", "lastAccess", "revoked", "lastSeen"] {
-            if obj
-                .get(key)
-                .is_some_and(|v| !v.is_null() && v.as_f64().is_none_or(|n| !n.is_finite()))
-            {
-                return Err(invalid(table, &id, key));
-            }
-        }
-        if obj
-            .get("autoPair")
-            .is_some_and(|v| !v.is_null() && !v.is_boolean())
-        {
-            return Err(invalid(table, &id, "autoPair"));
-        }
-        if obj
-            .get("reachability")
-            .and_then(Value::as_str)
-            .is_some_and(|v| !["reachable", "unreachable", "unknown"].contains(&v))
-        {
-            return Err(invalid(table, &id, "reachability"));
-        }
-        Ok(v)
+        let mut client = decode_client(table, &id, &raw)?;
+        client.grant = Field::Missing;
+        client.pairing_request_id = Field::Missing;
+        client.pairing_hash = Field::Missing;
+        client.pairing_receipt = Field::Missing;
+        Ok(client)
     })
     .collect()
 }
 fn ensure_server_aliases(
     tx: &rusqlite::Transaction<'_>,
-    identity: &Value,
+    identity: &AccessIdentity,
 ) -> Result<BTreeMap<String, String>, StoreError> {
     server_aliases(tx, identity, true)
 }
 
 fn server_aliases(
     tx: &rusqlite::Transaction<'_>,
-    identity: &Value,
+    identity: &AccessIdentity,
     persist_default_aliases: bool,
 ) -> Result<BTreeMap<String, String>, StoreError> {
     let local_alias = tx
@@ -681,40 +620,41 @@ fn server_aliases(
         )
         .optional()?
         .unwrap_or_else(|| "LOC".to_owned());
-    let mut clients = project_records(tx, "runtime_access_clients")?;
+    let clients = project_records(tx, "runtime_access_clients")?;
     let mut aliases = BTreeMap::from([
         ("local".to_owned(), local_alias.to_owned()),
-        (
-            identity["serverId"].as_str().unwrap_or_default().to_owned(),
-            local_alias.to_owned(),
-        ),
+        (identity.server_id.clone(), local_alias.to_owned()),
     ]);
     let mut used = BTreeSet::from([local_alias.to_owned()]);
     for client in clients
         .iter()
-        .filter(|client| client.get("kind").and_then(Value::as_str) == Some("server"))
+        .filter(|client| client.kind == AccessClientKind::Server)
     {
-        if let Some(alias) = client.get("alias").and_then(Value::as_str) {
-            used.insert(alias.to_owned());
+        if let Some(alias) = client.alias.value() {
+            used.insert(alias.as_str().to_owned());
         }
     }
-    for client in &mut clients {
-        if client.get("kind").and_then(Value::as_str) != Some("server") {
+    for client in &clients {
+        if client.kind != AccessClientKind::Server {
             continue;
         }
-        let Some(id) = client.get("id").and_then(Value::as_str).map(str::to_owned) else {
-            continue;
-        };
-        let alias = if let Some(alias) = client.get("alias").and_then(Value::as_str) {
-            alias.to_owned()
+        let id = client.id.as_str().to_owned();
+        let alias = if let Some(alias) = client.alias.value() {
+            alias.as_str().to_owned()
         } else {
             let alias = default_server_alias(client, &mut used);
-            client["alias"] = json!(alias);
             if persist_default_aliases {
-                // Set only the alias: the stored record keeps the fields that the projection omits.
+                let mut saved = stored(tx, "runtime_access_clients", &id)?
+                    .ok_or_else(|| invalid("runtime_access_clients", &id, "record"))?;
+                saved.alias = Field::Value(
+                    serde::Deserialize::deserialize(serde::de::value::StringDeserializer::<
+                        serde::de::value::Error,
+                    >::new(alias.clone()))
+                    .map_err(|_| invalid("runtime_access_clients", &id, "alias"))?,
+                );
                 tx.execute(
-                    "UPDATE runtime_access_clients SET record=json_set(record,'$.alias',?1) WHERE id=?2",
-                    rusqlite::params![alias, id],
+                    "UPDATE runtime_access_clients SET record=?1 WHERE id=?2",
+                    rusqlite::params![serde_json::to_string(&saved)?, id],
                 )?;
             }
             alias
@@ -724,16 +664,17 @@ fn server_aliases(
     Ok(aliases)
 }
 
-fn default_server_alias(server: &Value, used: &mut BTreeSet<String>) -> String {
+fn default_server_alias(server: &PersistedAccessClient, used: &mut BTreeSet<String>) -> String {
     let hostname = server
-        .get("origin")
-        .and_then(Value::as_str)
+        .origin
+        .value()
+        .map(String::as_str)
         .and_then(|origin| url::Url::parse(origin).ok())
         .and_then(|origin| origin.host_str().map(str::to_owned))
         .unwrap_or_default();
     let preferred = [
         hostname.split('.').next().unwrap_or_default(),
-        server["label"].as_str().unwrap_or_default(),
+        server.label.as_str(),
     ]
     .into_iter()
     .map(|value| {
@@ -765,22 +706,34 @@ fn stored(
     tx: &rusqlite::Transaction<'_>,
     table: &str,
     id: &str,
-) -> Result<Option<Value>, StoreError> {
+) -> Result<Option<PersistedAccessClient>, StoreError> {
     tx.query_row(
         &format!("SELECT record FROM {table} WHERE id=?1"),
         [id],
         |r| r.get::<_, String>(0),
     )
     .optional()?
-    .map(|raw| parse(table, id, &raw))
+    .map(|raw| decode_client(table, id, &raw))
     .transpose()
 }
-fn parse(table: &str, id: &str, raw: &str) -> Result<Value, StoreError> {
-    let v: Value = serde_json::from_str(raw).map_err(|_| invalid(table, id, "record"))?;
-    if !v.is_object() {
-        return Err(invalid(table, id, "record"));
+fn decode_client(table: &str, id: &str, raw: &str) -> Result<PersistedAccessClient, StoreError> {
+    let client = serde_json::from_str::<
+        studio_runtime_schema::http_ingress::Object<PersistedAccessClient>,
+    >(raw)
+    .map_err(|_| invalid(table, id, "record"))?
+    .0;
+    Ok(client)
+}
+fn decode_invite(id: &str, raw: &str) -> Result<PersistedAccessInvite, StoreError> {
+    let invite = serde_json::from_str::<
+        studio_runtime_schema::http_ingress::Object<PersistedAccessInvite>,
+    >(raw)
+    .map_err(|_| invalid("runtime_access_invites", id, "record"))?
+    .0;
+    if invite.invite_id() != id {
+        return Err(invalid("runtime_access_invites", id, "inviteId"));
     }
-    Ok(v)
+    Ok(invite)
 }
 fn invalid(t: &str, id: &str, field: &str) -> StoreError {
     StoreError::SchemaMismatch(format!("invalid stored object {t}/{id}: {field}"))
@@ -812,17 +765,117 @@ fn valid_identifier(value: &str) -> bool {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || b"_.:-".contains(&byte))
 }
-fn valid_alias(alias: &str) -> bool {
-    !alias.is_empty() && alias.len() <= 3 && alias.bytes().all(|b| b.is_ascii_uppercase())
-}
 
 #[cfg(test)]
 mod tests {
-    use super::{create_invite, manage};
+    use super::MultiServerError;
     use crate::federation_credentials::Credentials;
+    use serde::Deserialize;
     use serde_json::json;
     use std::sync::Arc;
     use studio_runtime_store::RuntimeStore;
+
+    async fn create_invite(
+        store: Arc<RuntimeStore>,
+        identity: &serde_json::Value,
+        body: &serde_json::Value,
+        actor: &str,
+        user: Option<&str>,
+    ) -> Result<studio_runtime_schema::multi_server_access::InvitationResponse, MultiServerError>
+    {
+        let request =
+            studio_runtime_schema::multi_server_ingress::ManagementRequest::deserialize(body)
+                .map_err(|_| MultiServerError::Refused("invalid test request".into()))?;
+        super::create_invite(store, identity, &request, actor, user).await
+    }
+    async fn manage(
+        store: &RuntimeStore,
+        identity: &serde_json::Value,
+        body: &serde_json::Value,
+        actor: &str,
+    ) -> Result<studio_runtime_schema::multi_server_access::AccessSnapshot, MultiServerError> {
+        let request =
+            studio_runtime_schema::multi_server_ingress::ManagementRequest::deserialize(body)
+                .map_err(|_| MultiServerError::Refused("invalid test request".into()))?;
+        super::manage(store, identity, &request, actor).await
+    }
+
+    #[test]
+    fn stored_invite_fingerprint_matches_legacy_canonical_json() {
+        use studio_runtime_schema::multi_server_ingress::ManagementRequest;
+
+        let wire =
+            r#"{"requestId":"stored-1","label":"Café","grant":"observe","action":"create_invite"}"#;
+        let old_body: serde_json::Value = serde_json::from_str(wire).unwrap();
+        let typed: ManagementRequest = serde_json::from_str(wire).unwrap();
+        let old_bytes = crate::remote_transport::canonical_json(&old_body).unwrap();
+        assert_eq!(
+            old_bytes,
+            r#"{"action":"create_invite","grant":"observe","label":"Café","requestId":"stored-1"}"#
+        );
+        let old_hash = studio_runtime_store::sha256_hex(old_bytes.as_bytes());
+        assert_eq!(
+            old_hash,
+            "016cd5bb32c6b282facf16337fee8493688172cab5a6bfbb0f1d1fa4af3360ca"
+        );
+        assert_eq!(super::invite_fingerprint(&typed).unwrap(), old_hash);
+
+        let missing = r#"{"action":"create_invite","requestId":"r"}"#;
+        let null = r#"{"action":"create_invite","requestId":"r","label":null}"#;
+        let missing_body: ManagementRequest = serde_json::from_str(missing).unwrap();
+        let null_body: ManagementRequest = serde_json::from_str(null).unwrap();
+        let serialized = serde_json::to_string(&missing_body).unwrap();
+        let serialized: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(
+            serialized,
+            json!({"action":"create_invite","requestId":"r"})
+        );
+        for (wire, typed) in [(missing, &missing_body), (null, &null_body)] {
+            let old: serde_json::Value = serde_json::from_str(wire).unwrap();
+            let old = crate::remote_transport::canonical_json(&old).unwrap();
+            assert_eq!(
+                super::invite_fingerprint(typed).unwrap(),
+                studio_runtime_store::sha256_hex(old.as_bytes())
+            );
+        }
+        assert_ne!(
+            super::invite_fingerprint(&missing_body).unwrap(),
+            super::invite_fingerprint(&null_body).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn snapshot_accepts_invitation_fractional_timestamps() {
+        let root = tempfile::tempdir().expect("isolated multi-server state");
+        let store = Arc::new(RuntimeStore::open(Some(root.path())).await.unwrap());
+        let identity = Credentials::default()
+            .identity(Arc::clone(&store), Some("https://studio.example.ts.net"))
+            .await
+            .unwrap();
+        let invite = create_invite(
+            Arc::clone(&store),
+            &identity,
+            &json!({"action":"create_invite","requestId":"snapshot-invite"}),
+            "local",
+            Some("owner@example.test"),
+        )
+        .await
+        .unwrap();
+        store
+            .transaction_with(|tx| {
+                tx.execute(
+                    "UPDATE runtime_access_invites SET record=json_set(record,'$.expires',1234.5)",
+                    [],
+                )?;
+                Ok::<_, studio_runtime_store::StoreError>(())
+            })
+            .await
+            .unwrap();
+        let snapshot = super::snapshot(&store, &identity).await.unwrap();
+        assert_eq!(snapshot.invites[0].invite_id, invite.invitation.invite_id);
+        assert!(snapshot.invites[0].created.as_f64().unwrap() > 0.0);
+        assert_eq!(snapshot.invites[0].expires.as_f64(), Some(1234.5));
+    }
 
     #[tokio::test]
     async fn invitation_uses_injected_owner_identity_and_exact_retry_is_stable() {
@@ -850,6 +903,10 @@ mod tests {
         )
         .await
         .expect("fixture owner can create invitation");
+        let snapshot = super::snapshot(&store, &identity)
+            .await
+            .expect("new invitation appears in access snapshot");
+        assert_eq!(snapshot.invites[0].invite_id, first.invitation.invite_id);
         let retry = create_invite(
             Arc::clone(&store),
             &identity,
@@ -859,14 +916,12 @@ mod tests {
         )
         .await
         .expect("exact invitation retry reuses durable invite");
-        assert_eq!(first, retry);
-        assert_eq!(first["invitation"]["tailscaleUser"], "owner@example.test");
-        assert!(
-            !first["invitation"]["token"]
-                .as_str()
-                .unwrap_or_default()
-                .is_empty()
+        assert_eq!(
+            serde_json::to_vec(&first).unwrap(),
+            serde_json::to_vec(&retry).unwrap()
         );
+        assert_eq!(first.invitation.tailscale_user, "owner@example.test");
+        assert!(!first.invitation.token.is_empty());
         let stored_token_hash = store
             .read_async("runtime-services/multi_server/tests", |tx| {
                 tx.query_row(
@@ -889,14 +944,7 @@ mod tests {
                         .as_bytes()
                 )
                 .expect("hexadecimal token hash"),
-            ring::digest::digest(
-                &ring::digest::SHA256,
-                first["invitation"]["token"]
-                    .as_str()
-                    .expect("invitation token")
-                    .as_bytes()
-            )
-            .as_ref()
+            ring::digest::digest(&ring::digest::SHA256, first.invitation.token.as_bytes()).as_ref()
         );
         let conflict = json!({"action":"create_invite","requestId":"invite-test","label":"Other"});
         assert!(
@@ -929,7 +977,10 @@ mod tests {
         )
         .await
         .expect("Python default label is used when label is omitted");
-        assert_eq!(default_label["invitation"]["label"], identity["label"]);
+        assert_eq!(
+            default_label.invitation.label,
+            identity["label"].as_str().unwrap()
+        );
         let null_label = create_invite(
             Arc::clone(&store),
             &identity,
@@ -939,7 +990,10 @@ mod tests {
         )
         .await
         .expect("null label uses the saved identity label");
-        assert_eq!(null_label["invitation"]["label"], identity["label"]);
+        assert_eq!(
+            null_label.invitation.label,
+            identity["label"].as_str().unwrap()
+        );
     }
 
     #[tokio::test]
@@ -983,12 +1037,15 @@ mod tests {
         let first = manage(&store, &identity, &request, "local")
             .await
             .expect("a paired peer alias updates local state");
-        assert_eq!(first["settings"]["aliases"]["peer-a"], "NEW");
-        assert_eq!(first["settings"]["aliases"]["peer-c"], "ONE");
+        assert_eq!(first.settings.aliases["peer-a"], "NEW");
+        assert_eq!(first.settings.aliases["peer-c"], "ONE");
         let retry = manage(&store, &identity, &request, "local")
             .await
             .expect("exact alias retry returns the saved state");
-        assert_eq!(retry, first);
+        assert_eq!(
+            serde_json::to_vec(&retry).unwrap(),
+            serde_json::to_vec(&first).unwrap()
+        );
 
         let changed =
             json!({"action":"alias","serverId":"peer-a","alias":"TWO","requestId":"peer-alias"});
@@ -1052,7 +1109,7 @@ mod tests {
         let first = super::snapshot(&store, &identity)
             .await
             .expect("snapshot seeds peer alias");
-        assert_eq!(first["settings"]["aliases"]["peer-b"], "BOB");
+        assert_eq!(first.settings.aliases["peer-b"], "BOB");
         let saved: String = store
             .read_async("runtime-services/multi_server/tests", |tx| {
                 tx.query_row(
@@ -1083,8 +1140,8 @@ mod tests {
         let later = super::snapshot(&store, &identity)
             .await
             .expect("snapshot preserves saved aliases");
-        assert_eq!(later["settings"]["aliases"]["peer-b"], "BOB");
-        assert_eq!(later["settings"]["aliases"]["peer-a"], "AAA");
+        assert_eq!(later.settings.aliases["peer-b"], "BOB");
+        assert_eq!(later.settings.aliases["peer-a"], "AAA");
     }
 
     #[tokio::test]
@@ -1116,7 +1173,7 @@ mod tests {
         let snapshot = super::snapshot_for_comparison(&store, &identity)
             .await
             .expect("comparison snapshot computes default alias");
-        assert_eq!(snapshot["settings"]["aliases"]["peer-b"], "BOB");
+        assert_eq!(snapshot.settings.aliases["peer-b"], "BOB");
         let saved: Option<String> = store
             .read_async("runtime-services/multi_server/tests", |tx| {
                 tx.query_row(

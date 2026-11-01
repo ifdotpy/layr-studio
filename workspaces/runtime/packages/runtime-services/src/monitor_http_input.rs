@@ -119,14 +119,17 @@ pub(crate) fn acknowledged(request_id: &str) -> Value {
 }
 
 /// Use the existing process receipt read without the original stdin content.
-pub(crate) fn read(connection: &Connection, query: &Value) -> Result<ProcessReceipt, MonitorError> {
+pub(crate) fn read(
+    connection: &Connection,
+    query: &crate::process_controls::ReceiptIdentity,
+) -> Result<ProcessReceipt, MonitorError> {
     let missing = ProcessReceipt::not_found;
-    let request_id = query["requestId"].as_str().unwrap_or_default();
+    let request_id = &query.request_id;
     let Some((_, receipt)) = saved(connection, request_id)? else {
         return Ok(missing());
     };
-    if query["agent"] != receipt.operation.agent.as_str()
-        || query["epoch"] != receipt.operation.epoch.get()
+    if query.agent != receipt.operation.agent.as_str()
+        || query.epoch != receipt.operation.epoch.get()
     {
         return Ok(missing());
     }
@@ -135,9 +138,7 @@ pub(crate) fn read(connection: &Connection, query: &Value) -> Result<ProcessRece
     else {
         return Ok(missing());
     };
-    if actor.value()["accountKey"] != query["accountKey"]
-        || actor.value()["epoch"] != query["epoch"]
-    {
+    if actor.value()["accountKey"] != query.account_key || actor.value()["epoch"] != query.epoch {
         return Ok(missing());
     }
     let Some(monitor) = MonitorsRepository::get(connection, &receipt.monitor)? else {

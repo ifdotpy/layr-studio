@@ -98,7 +98,7 @@ const valuesFrom = (
 ): ClaudeValues => ({
   permissionMode:
     value.settings?.permissionMode ||
-    (agent.yoloMode === false ? "default" : "bypassPermissions"),
+    (agent.permissionMode ?? "bypassPermissions"),
   thinking: value.settings?.thinking !== false,
   mcpAutoBackground: value.settings?.mcpAutoBackground !== false,
   ...(value.settings?.autoCompactWindow

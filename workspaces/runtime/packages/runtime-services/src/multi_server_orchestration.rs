@@ -152,20 +152,34 @@ fn pending_key(
     authority: &str,
     envelope: &Envelope,
 ) -> Result<String, AccessError> {
+    pending_key_parts(
+        tx,
+        direction,
+        authority,
+        &envelope.root,
+        &envelope.operation_parts(),
+    )
+}
+
+fn pending_key_parts(
+    tx: &rusqlite::Connection,
+    direction: Direction,
+    authority: &str,
+    root: &str,
+    operation: &[&str],
+) -> Result<String, AccessError> {
     let exists: bool = match direction {
         Direction::Incoming => tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM runtime_server_inbox WHERE id=?1 AND principal=?2)",
-            params![envelope.root, authority],
+            params![root, authority],
             |r| r.get(0),
         )?,
-        Direction::Outgoing => {
-            crate::server_outbox::find_for(tx, authority, &envelope.root)?.is_some()
-        }
+        Direction::Outgoing => crate::server_outbox::find_for(tx, authority, root)?.is_some(),
     };
-    Ok(if exists && envelope.operation.is_empty() {
-        envelope.root.clone()
+    Ok(if exists && operation.len() == 1 {
+        root.to_owned()
     } else {
-        envelope.clone().scoped(direction, authority).key
+        remote_operation_key(direction.namespace(), &[authority], root, operation)
     })
 }
 
@@ -294,9 +308,9 @@ fn settle_delivery(
     Ok(())
 }
 
-use crate::multi_server_auth::{AccessError, digest, refused, schema, stored, text};
+use crate::multi_server_auth::{AccessError, digest, refused, schema, stored_client, text};
 use crate::remote_transport::{
-    MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, MultiServerRequest, PairedRequest, canonical_json,
+    MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, MultiServerRequest, PairedRequest,
     exchange_paired_request, learn_paired_request_link, load_multi_server_identity,
     multi_server_signed_headers, new_nonce, verify_multi_server_reply,
 };
@@ -451,7 +465,7 @@ pub trait PairedTransport: Send + Sync {
     fn exchange<'a>(
         &'a self,
         server: &'a str,
-        envelope: &'a Value,
+        envelope: &'a crate::orchestration_wire::OrchestrationRequest,
         timeout: std::time::Duration,
     ) -> BoxFuture<'a, Result<RemoteReply, AccessError>>;
 }
@@ -480,25 +494,19 @@ impl HttpsPairedTransport {
             )
             .optional()?;
         let value = raw
-            .map(|raw| {
-                stored(
-                    "PersistedAccessClient",
-                    "runtime_access_clients",
-                    server,
-                    &raw,
-                )
-            })
+            .map(|raw| stored_client("runtime_access_clients", server, &raw))
             .transpose()?
             .ok_or_else(|| refused(403, "client_revoked", "The server is not paired"))?;
-        if text(&value, "id") != server
-            || text(&value, "status") != "paired"
-            || text(&value, "kind") != "server"
+        if value.id.as_str() != server
+            || value.status
+                != studio_runtime_schema::multi_server_access::AccessClientStatus::Paired
+            || value.kind != studio_runtime_schema::multi_server_access::AccessClientKind::Server
         {
             return Err(refused(403, "client_revoked", "The server is not paired"));
         }
         Ok((
-            text(&value, "origin").to_owned(),
-            text(&value, "publicKey").to_owned(),
+            value.origin.value().cloned().unwrap_or_default(),
+            value.public_key.as_str().to_owned(),
         ))
     }
 }
@@ -507,7 +515,7 @@ impl PairedTransport for HttpsPairedTransport {
     fn exchange<'a>(
         &'a self,
         server: &'a str,
-        envelope: &'a Value,
+        envelope: &'a crate::orchestration_wire::OrchestrationRequest,
         timeout: std::time::Duration,
     ) -> BoxFuture<'a, Result<RemoteReply, AccessError>> {
         Box::pin(async move {
@@ -541,11 +549,11 @@ impl PairedTransport for HttpsPairedTransport {
                     "The local server identity is unavailable",
                 )
             })?;
-            let request_id = text(&envelope, "requestId").to_owned();
+            let request_id = envelope.request_id.clone();
             let url = format!("{}/api/servers/orchestration", origin.trim_end_matches('/'));
-            let body = canonical_json(&envelope)
-                .map_err(|_| refused(400, "invalid_request", "Invalid cross-server request"))?
-                .into_bytes();
+            let body = legacy_compact(&envelope)
+                .map(String::into_bytes)
+                .map_err(|_| refused(400, "invalid_request", "Invalid cross-server request"))?;
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|_| refused(503, "clock_unavailable", "The system clock is unavailable"))?
@@ -649,12 +657,12 @@ pub trait OrchestrationEffects: Send + Sync {
     fn execute<'a>(
         &'a self,
         principal: &'a str,
-        envelope: &'a Value,
+        envelope: &'a crate::orchestration_wire::OrchestrationRequest,
     ) -> BoxFuture<'a, Result<ExchangeOutcome, AccessError>>;
 }
 
 pub trait BrowserCallbackEffect: Send + Sync {
-    fn receive<'a>(&'a self, envelope: &'a Value) -> BoxFuture<'a, Result<Value, AccessError>>;
+    fn receive<'a>(&'a self, payload: &'a Value) -> BoxFuture<'a, Result<Value, AccessError>>;
 }
 
 /// Idempotent receiver effects shared by the signed HTTP route and tests.
@@ -760,14 +768,15 @@ impl RuntimeOrchestrationEffects {
     async fn peer_update(
         &self,
         principal: &str,
-        envelope: &Value,
+        action: &str,
+        payload: &Value,
     ) -> Result<ExchangeOutcome, AccessError> {
         let result = Arc::clone(&self.update_offer)
             .receive(
                 self.store.root().to_path_buf(),
                 principal.to_owned(),
-                text(envelope, "action").to_owned(),
-                envelope["payload"].clone(),
+                action.to_owned(),
+                payload.clone(),
             )
             .await;
         match result {
@@ -787,11 +796,9 @@ impl RuntimeOrchestrationEffects {
     async fn peer_backup(
         &self,
         principal: &str,
-        envelope: &Value,
+        payload: &Value,
     ) -> Result<ExchangeOutcome, AccessError> {
-        let payload = match <crate::peer_backup::Put as serde::Deserialize>::deserialize(
-            &envelope["payload"],
-        ) {
+        let payload = match <crate::peer_backup::Put as serde::Deserialize>::deserialize(payload) {
             Ok(payload) => payload,
             Err(_) => return Ok(ExchangeOutcome::NotApplied("Invalid backup request".into())),
         };
@@ -819,7 +826,8 @@ impl RuntimeOrchestrationEffects {
     async fn stop_worker(
         &self,
         principal: &str,
-        envelope: &Value,
+        request_id: &str,
+        payload: &crate::orchestration_worker::StopPayload,
     ) -> Result<ExchangeOutcome, AccessError> {
         let Some(ports) = self.lifecycle_ports.as_ref() else {
             return Err(refused(
@@ -828,17 +836,13 @@ impl RuntimeOrchestrationEffects {
                 "The remote stop lifecycle is unavailable",
             ));
         };
-        let payload = &envelope["payload"];
-        let request_id = text(envelope, "requestId");
-        let link = text(payload, "link");
-        let worker = text(payload, "worker");
-        let control_epoch = payload
-            .get("controlEpoch")
-            .and_then(Value::as_i64)
-            .ok_or_else(|| refused(400, "invalid_request", "Invalid remote stop request"))?;
+        let link = payload.link.as_str();
+        let worker = payload.worker.as_str();
+        let control_epoch = payload.control_epoch;
         let reason = payload
-            .get("reason")
-            .and_then(Value::as_str)
+            .reason
+            .value()
+            .map(String::as_str)
             .unwrap_or("Stopped by the parent")
             .to_owned();
         if request_id.is_empty() || link.is_empty() || worker.is_empty() {
@@ -890,24 +894,33 @@ impl RuntimeOrchestrationEffects {
     async fn project_location(
         &self,
         principal: &str,
-        envelope: &Value,
+        action: &str,
+        request_id: &str,
+        payload: &crate::project_locations::LocationPayload,
     ) -> Result<ExchangeOutcome, AccessError> {
-        let action = text(envelope, "action");
-        let payload = &envelope["payload"];
-        let home_project = text(payload, "project");
-        let request_id = text(envelope, "requestId");
+        let home_project = payload.project.as_str();
         if home_project.is_empty() || request_id.is_empty() {
             return Err(refused(400, "invalid_request", "Invalid project location"));
         }
         if action == "add_location" {
-            let path = text(payload, "path");
-            let name = text(payload, "name");
+            let path = payload.path.value().map_or("", String::as_str);
+            let name = payload.name.value().map_or("", String::as_str);
             if path.is_empty() || path.len() > 4096 || name.is_empty() || name.len() > 255 {
                 return Err(refused(400, "invalid_request", "Invalid project location"));
             }
             let registered = crate::projects::write(
                 Arc::clone(&self.store),
-                json!({"action":"register","path":path,"name":name}),
+                studio_runtime_schema::project_ingress::ProjectWrite::register(
+                    path.to_owned(),
+                    Some(name.to_owned()),
+                )
+                .map_err(|_| {
+                    refused(
+                        400,
+                        "location_unavailable",
+                        "The project folder is unavailable",
+                    )
+                })?,
                 self.default_account.clone(),
                 self.known_accounts.clone(),
             )
@@ -993,14 +1006,24 @@ impl RuntimeOrchestrationEffects {
                 studio_runtime_store::ProjectsRepository::put_project(tx, &project)?;
                 Ok::<_, AccessError>(())
             }).await?;
-            return applied(&json!({
-                "serverId":local_server,"path":path,"canonicalPath":canonical_path,
-                "projectId":project_id,"gitOrigin":git_origin,
-                "homeProjectId":home_project,"requestId":request_id
-            }));
+            return applied(&crate::project_locations::LocationValue {
+                server_id: local_server,
+                path: Some(path.to_owned()),
+                canonical_path: Some(canonical_path.to_owned()),
+                project_id: Some(project_id.to_owned()),
+                git_origin: Some(git_origin.map_or(
+                    crate::project_locations::Nullable::Null,
+                    crate::project_locations::Nullable::Value,
+                )),
+                home_project_id: Some(home_project.to_owned()),
+                request_id: Some(request_id.to_owned()),
+                removed: None,
+            });
         }
-        let location = &payload["location"];
-        let project_id = text(location, "projectId");
+        let project_id = payload
+            .location
+            .value()
+            .map_or("", |location| location.project_id.as_str());
         if !project_id.is_empty() {
             let project_id_for_write = project_id.to_owned();
             let principal_for_write = principal.to_owned();
@@ -1044,36 +1067,33 @@ impl RuntimeOrchestrationEffects {
             )
         })??
         .unwrap_or_default();
-        applied(&json!({"removed":true,"serverId":local_server}))
+        applied(&crate::project_locations::LocationValue {
+            server_id: local_server,
+            path: None,
+            canonical_path: None,
+            project_id: None,
+            git_origin: None,
+            home_project_id: None,
+            request_id: None,
+            removed: Some(true),
+        })
     }
 
     async fn worker_call(
         &self,
         principal: &str,
-        envelope: &Value,
+        key: &str,
+        call: crate::orchestration_worker::WorkerAction,
     ) -> Result<ExchangeOutcome, AccessError> {
-        let action = text(envelope, "action");
-        let key = text(envelope, "requestId");
-        let payload = &envelope["payload"];
-        let link_id = text(payload, "link");
-        let worker_id = text(payload, "worker");
-        let epoch = payload
-            .get("epoch")
-            .and_then(Value::as_i64)
-            .ok_or_else(|| refused(400, "invalid_request", "Invalid cross-server request"))?;
-        let parent_epoch = payload
-            .get("parentEpoch")
-            .and_then(Value::as_i64)
-            .ok_or_else(|| refused(400, "invalid_request", "Invalid cross-server request"))?;
-        let args = &payload["args"];
+        let (link_id, worker_id, epoch, parent_epoch) = call.identity();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|_| refused(503, "clock_unavailable", "The system clock is unavailable"))?
             .as_secs_f64();
-        let move_admission = if action == "move_send" {
-            let target_id = args
-                .get("agent_id")
-                .and_then(Value::as_str)
+        let move_admission = if let crate::orchestration_worker::WorkerAction::MoveSend(call) =
+            &call
+        {
+            let target_id = Some(call.args.agent_id.as_str())
                 .filter(|id| !id.is_empty())
                 .ok_or_else(|| refused(400, "invalid_request", "Invalid move-send request"))?;
             let target_id = target_id.to_owned();
@@ -1104,8 +1124,6 @@ impl RuntimeOrchestrationEffects {
         let principal = principal.to_owned();
         let worker_id = worker_id.to_owned();
         let key = key.to_owned();
-        let action = action.to_owned();
-        let args = args.clone();
         self.store
             .transaction_with(move |tx| {
                 let link_raw: Option<String> = tx
@@ -1174,26 +1192,22 @@ impl RuntimeOrchestrationEffects {
                 {
                     return Err(refused(409, "worker_stopped", "The worker was stopped"));
                 }
-                match action.as_str() {
-                    "message" => {
+                match call {
+                    crate::orchestration_worker::WorkerAction::Message(call) => {
                         crate::provider_callbacks::tools::services::messages::send_remote_worker(
-                            tx, &worker_id, &args, &key, now,
+                            tx, &worker_id, &call.args, &key, now,
                         )
                         .map(|value| ExchangeOutcome::Applied(AppliedReply::new(value)))
                         .map_err(callback_error)
                     }
-                    "move_send" => {
-                        let target_id = args
-                            .get("agent_id")
-                            .and_then(Value::as_str)
+                    crate::orchestration_worker::WorkerAction::MoveSend(call) => {
+                        let args = call.args;
+                        let target_id = Some(args.agent_id.as_str())
                             .filter(|id| !id.is_empty())
                             .ok_or_else(|| {
                                 refused(400, "invalid_request", "Invalid move-send request")
                             })?;
-                        let message = args
-                            .get("text")
-                            .and_then(Value::as_str)
-                            .map(crate::event_write::python_strip)
+                        let message = Some(crate::event_write::python_strip(&args.text))
                             .filter(|text| {
                                 !text.is_empty()
                                     && crate::coordination::message_text_within_limit(text)
@@ -1201,7 +1215,12 @@ impl RuntimeOrchestrationEffects {
                             .ok_or_else(|| {
                                 refused(400, "invalid_request", "Invalid move-send request")
                             })?;
-                        let delivery = delivery_moment(&args)?;
+                        let delivery = DeliveryMoment::for_event_parts(
+                            "",
+                            &args.text,
+                            args.delivery.value().map(String::as_str),
+                        )
+                        .map_err(|_| refused(400, "invalid_request", "Invalid delivery moment"))?;
                         let target =
                             crate::event_write::checked_agent(tx, target_id).map_err(|_| {
                                 refused(
@@ -1246,11 +1265,6 @@ impl RuntimeOrchestrationEffects {
                         .map_err(|_| refused(403, "send_refused", "The message was refused"))
                         .and_then(|result| applied(&result.receipt))
                     }
-                    _ => Err(refused(
-                        501,
-                        "orchestration_effect",
-                        "The cross-server action is unavailable",
-                    )),
                 }
             })
             .await
@@ -1260,18 +1274,19 @@ impl RuntimeOrchestrationEffects {
 async fn receive_remote_anchor_input(
     store: Arc<RuntimeStore>,
     principal: &str,
-    envelope: &Value,
+    key: &str,
+    payload: &crate::orchestration_worker::InputPayload,
 ) -> Result<ExchangeOutcome, AccessError> {
-    let payload = &envelope["payload"];
-    let key = text(envelope, "requestId");
-    let link_id = text(payload, "link");
-    let kind = text(payload, "kind");
-    let event_text = text(payload, "text");
-    let parent_epoch = payload
-        .get("parentEpoch")
-        .and_then(Value::as_i64)
-        .ok_or_else(|| refused(400, "invalid_request", "Invalid remote anchor input"))?;
-    let delivery = delivery_moment(payload)?;
+    let link_id = payload.link.as_str();
+    let kind = payload.kind.as_str();
+    let event_text = payload.text.as_str();
+    let parent_epoch = payload.parent_epoch;
+    let delivery = DeliveryMoment::for_event_parts(
+        kind,
+        event_text,
+        payload.delivery.value().map(String::as_str),
+    )
+    .map_err(|_| refused(400, "invalid_request", "Invalid delivery moment"))?;
     if key.is_empty()
         || link_id.is_empty()
         || !crate::coordination::message_text_within_limit(event_text)
@@ -1412,26 +1427,25 @@ fn durable_anchor_input_receipt(
     principal: &str,
     envelope: &Envelope,
 ) -> Result<Option<Box<serde_json::value::RawValue>>, AccessError> {
-    let payload = &envelope.payload;
-    if envelope.action.as_str() != "input"
-        || payload
-            .get(REMOTE_ANCHOR_INPUT_FIELD)
-            .and_then(Value::as_bool)
-            != Some(true)
-    {
+    let crate::orchestration_wire::OrchestrationCommand::Input(payload) = &envelope.command else {
+        return Ok(None);
+    };
+    if payload.anchor.value() != Some(&true) {
         return Ok(None);
     }
-    let link_id = text(payload, "link");
-    let event_text = text(payload, "text");
-    let Ok(delivery) = delivery_moment(payload) else {
+    let link_id = payload.link.as_str();
+    let event_text = payload.text.as_str();
+    let Ok(delivery) = DeliveryMoment::for_event_parts(
+        &payload.kind,
+        event_text,
+        payload.delivery.value().map(String::as_str),
+    ) else {
         return Ok(None);
     };
-    let Some(parent_epoch) = payload.get("parentEpoch").and_then(Value::as_i64) else {
-        return Ok(None);
-    };
+    let parent_epoch = payload.parent_epoch;
     if envelope.root.is_empty()
         || link_id.is_empty()
-        || text(payload, "kind") != "user"
+        || payload.kind != "user"
         || !crate::coordination::message_text_within_limit(event_text)
     {
         return Ok(None);
@@ -1479,27 +1493,30 @@ fn durable_anchor_input_receipt(
 async fn receive_remote_input(
     store: Arc<RuntimeStore>,
     principal: &str,
-    envelope: &Value,
+    key: &str,
+    payload: &crate::orchestration_worker::InputPayload,
 ) -> Result<ExchangeOutcome, AccessError> {
-    let payload = &envelope["payload"];
-    let key = text(envelope, "requestId");
-    let link_id = text(payload, "link");
-    let worker_id = text(payload, "worker");
-    let kind = text(payload, "kind");
-    let event_text = text(payload, "text");
-    let parent_epoch = payload
-        .get("parentEpoch")
-        .and_then(Value::as_i64)
-        .ok_or_else(|| refused(400, "invalid_request", "Invalid remote input"))?;
+    let link_id = payload.link.as_str();
+    let worker_id = payload.worker.value().map_or("", String::as_str);
+    let kind = payload.kind.as_str();
+    let event_text = payload.text.as_str();
+    let parent_epoch = payload.parent_epoch;
     let control_epoch = payload
-        .get("controlEpoch")
-        .and_then(Value::as_i64)
+        .control_epoch
+        .value()
+        .copied()
         .ok_or_else(|| refused(400, "invalid_request", "Invalid remote input"))?;
     let remote_epoch = payload
-        .get("epoch")
-        .and_then(Value::as_i64)
+        .epoch
+        .value()
+        .copied()
         .ok_or_else(|| refused(400, "invalid_request", "Invalid remote input"))?;
-    let delivery = delivery_moment(payload)?;
+    let delivery = DeliveryMoment::for_event_parts(
+        kind,
+        event_text,
+        payload.delivery.value().map(String::as_str),
+    )
+    .map_err(|_| refused(400, "invalid_request", "Invalid delivery moment"))?;
     if key.is_empty()
         || link_id.is_empty()
         || worker_id.is_empty()
@@ -1768,9 +1785,233 @@ impl OrchestrationEffects for RuntimeOrchestrationEffects {
     fn execute<'a>(
         &'a self,
         principal: &'a str,
-        envelope: &'a Value,
+        envelope: &'a crate::orchestration_wire::OrchestrationRequest,
     ) -> BoxFuture<'a, Result<ExchangeOutcome, AccessError>> {
-        Box::pin(self.execute_async(principal, envelope))
+        Box::pin(async move {
+            use crate::orchestration_wire::OrchestrationCommand;
+            match &envelope.command {
+                OrchestrationCommand::AddLocation(payload) => {
+                    self.project_location(principal, "add_location", &envelope.request_id, payload)
+                        .await
+                }
+                OrchestrationCommand::RemoveLocation(payload) => {
+                    self.project_location(
+                        principal,
+                        "remove_location",
+                        &envelope.request_id,
+                        payload,
+                    )
+                    .await
+                }
+                OrchestrationCommand::Event(payload) => {
+                    self.receive_event(principal, &envelope.request_id, payload)
+                        .await
+                }
+                OrchestrationCommand::Input(payload) if payload.anchor.value() == Some(&true) => {
+                    receive_remote_anchor_input(
+                        Arc::clone(&self.store),
+                        principal,
+                        &envelope.request_id,
+                        payload,
+                    )
+                    .await
+                }
+                OrchestrationCommand::Input(payload) => {
+                    receive_remote_input(
+                        Arc::clone(&self.store),
+                        principal,
+                        &envelope.request_id,
+                        payload,
+                    )
+                    .await
+                }
+                OrchestrationCommand::Stop(payload) => {
+                    self.stop_worker(principal, &envelope.request_id, payload)
+                        .await
+                }
+                OrchestrationCommand::Message(payload) => {
+                    self.worker_call(
+                        principal,
+                        &envelope.request_id,
+                        crate::orchestration_worker::WorkerAction::Message(payload.clone()),
+                    )
+                    .await
+                }
+                OrchestrationCommand::MoveSend(payload) => {
+                    self.worker_call(
+                        principal,
+                        &envelope.request_id,
+                        crate::orchestration_worker::WorkerAction::MoveSend(payload.clone()),
+                    )
+                    .await
+                }
+                OrchestrationCommand::Folders(payload) => {
+                    let path = payload.cwd.value().cloned();
+                    let result = studio_runtime_process::blocking_pool::spawn_blocking(
+                        "runtime-services/multi_server_orchestration",
+                        move || crate::system_reads::directories(path.as_deref()),
+                    )
+                    .await
+                    .map_err(|_| {
+                        refused(400, "folder_unavailable", "This directory is unavailable")
+                    })?
+                    .map_err(|_| {
+                        refused(400, "folder_unavailable", "This directory is unavailable")
+                    })?;
+                    applied(&result)
+                }
+                OrchestrationCommand::LocationInfo(payload) => {
+                    let path = payload.cwd.clone();
+                    studio_runtime_process::blocking_pool::spawn_blocking(
+                        "runtime-services/multi_server_orchestration",
+                        move || crate::projects::peer_location_info(&path),
+                    )
+                    .await
+                    .map_err(|_| {
+                        refused(
+                            400,
+                            "location_unavailable",
+                            "The project folder is unavailable",
+                        )
+                    })?
+                    .map_err(|_| {
+                        refused(
+                            400,
+                            "location_unavailable",
+                            "The project folder is unavailable",
+                        )
+                    })
+                    .and_then(|value| applied(&value))
+                }
+                OrchestrationCommand::LocationMatches(payload) => {
+                    crate::projects::peer_location_matches(
+                        &self.store,
+                        payload.origin.clone(),
+                        payload.cwd.value().cloned(),
+                    )
+                    .await
+                    .map_err(|_| {
+                        refused(
+                            400,
+                            "location_unavailable",
+                            "Project location matches are unavailable",
+                        )
+                    })
+                    .and_then(|value| applied(&value))
+                }
+                OrchestrationCommand::Git(payload) => {
+                    self.git_channel(
+                        crate::server_git::GitOperation::Read(payload.clone()),
+                        &envelope.request_id,
+                    )
+                    .await
+                }
+                OrchestrationCommand::Export(payload) => {
+                    self.git_channel(
+                        crate::server_git::GitOperation::Export(payload.clone()),
+                        &envelope.request_id,
+                    )
+                    .await
+                }
+                OrchestrationCommand::Chunk(payload) => {
+                    self.git_channel(
+                        crate::server_git::GitOperation::Chunk(payload.clone()),
+                        &envelope.request_id,
+                    )
+                    .await
+                }
+                OrchestrationCommand::Release(payload) => {
+                    self.git_channel(
+                        crate::server_git::GitOperation::Release(payload.clone()),
+                        &envelope.request_id,
+                    )
+                    .await
+                }
+                OrchestrationCommand::Exec(payload) => match payload {
+                    crate::orchestration_exec::ExecPayload::Start(payload) => {
+                        self.server_command(
+                            principal,
+                            &envelope.request_id,
+                            &crate::orchestration_exec::CommandOperation::Start(payload.clone()),
+                        )
+                        .await
+                    }
+                    crate::orchestration_exec::ExecPayload::Compacted(_) => Err(refused(
+                        400,
+                        "invalid_request",
+                        "A compacted receipt cannot execute",
+                    )),
+                },
+                OrchestrationCommand::ExecRead(payload) => {
+                    self.server_command(
+                        principal,
+                        &envelope.request_id,
+                        &crate::orchestration_exec::CommandOperation::Read(payload.clone()),
+                    )
+                    .await
+                }
+                OrchestrationCommand::ExecInput(payload) => {
+                    self.server_command(
+                        principal,
+                        &envelope.request_id,
+                        &crate::orchestration_exec::CommandOperation::Control(
+                            crate::orchestration_exec::ControlRequest::Input(payload.clone()),
+                        ),
+                    )
+                    .await
+                }
+                OrchestrationCommand::ExecCancel(payload) => {
+                    self.server_command(
+                        principal,
+                        &envelope.request_id,
+                        &crate::orchestration_exec::CommandOperation::Control(
+                            crate::orchestration_exec::ControlRequest::Cancel(payload.clone()),
+                        ),
+                    )
+                    .await
+                }
+                OrchestrationCommand::ExecEvent(payload) => {
+                    let payload = payload.clone();
+                    let key = crate::projects::cross_server_identity(&[
+                        "command-exit",
+                        &payload.handle,
+                        &payload.record.status,
+                    ]);
+                    let principal = principal.to_owned();
+                    let now = crate::event_write::unix_time().map_err(|_| {
+                        refused(503, "clock_unavailable", "The system clock is unavailable")
+                    })?;
+                    self.store
+                        .transaction_with(move |tx| {
+                            receive_exec_event(tx, &principal, &payload, key, now)
+                        })
+                        .await
+                }
+                command @ (OrchestrationCommand::Projects(_)
+                | OrchestrationCommand::ProjectsChanged(_)
+                | OrchestrationCommand::UpdateOffer(_)
+                | OrchestrationCommand::UpdateExport(_)
+                | OrchestrationCommand::UpdateChunk(_)
+                | OrchestrationCommand::UpdateRelease(_)
+                | OrchestrationCommand::BackupPut(_)
+                | OrchestrationCommand::BrowserCallback(_)
+                | OrchestrationCommand::MoveValidate(_)
+                | OrchestrationCommand::MoveBegin(_)
+                | OrchestrationCommand::DeviceTrust(_)) => {
+                    self.execute_async(
+                        principal,
+                        command.kind().as_str(),
+                        command.remaining_payload().expect("remaining payload"),
+                    )
+                    .await
+                }
+                OrchestrationCommand::ExecReceipt(_) => Err(refused(
+                    400,
+                    "invalid_request",
+                    "Receipt probes are handled by the driver",
+                )),
+            }
+        })
     }
 }
 
@@ -1796,10 +2037,18 @@ impl crate::server_exec::ExecEvents for ExecNotices {
         record: &'a Value,
     ) -> BoxFuture<'a, ()> {
         Box::pin(async move {
-            let handle = text(record, "handle").to_owned();
-            let status = text(record, "status").to_owned();
-            let key = crate::projects::cross_server_identity(&["command-exit", &handle, &status]);
-            let payload = json!({"actor": actor, "handle": handle, "record": record});
+            let record = match <crate::orchestration_exec::CompletionRecord as serde::Deserialize>::deserialize(record) {
+                Ok(record) => record,
+                Err(error) => { eprintln!("invalid server command completion record: {error}"); return; }
+            };
+            let handle = record.handle.clone();
+            let status = &record.status;
+            let key = crate::projects::cross_server_identity(&["command-exit", &handle, status]);
+            let payload = crate::orchestration_exec::ExecEvent {
+                actor: actor.to_owned(),
+                handle: handle.clone(),
+                record,
+            };
             let principal = principal.to_owned();
             let store = Arc::clone(&self.store);
             let local = store.local_server_id().ok().flatten().unwrap_or_default();
@@ -1816,8 +2065,7 @@ impl crate::server_exec::ExecEvents for ExecNotices {
                     enqueue_in_transaction(
                         tx,
                         &principal,
-                        EXEC_EVENT_ACTION,
-                        &payload,
+                        crate::orchestration_wire::OrchestrationCommand::ExecEvent(payload.clone()),
                         &handle,
                         now as i64,
                     )?;
@@ -1836,7 +2084,8 @@ impl RuntimeOrchestrationEffects {
     async fn server_command(
         &self,
         principal: &str,
-        envelope: &Value,
+        key: &str,
+        operation: &crate::orchestration_exec::CommandOperation,
     ) -> Result<ExchangeOutcome, AccessError> {
         let unknown = || refused(503, "command_unknown", "The command outcome is unknown");
         let runner = crate::server_exec::ServerExec::for_store(
@@ -1847,16 +2096,17 @@ impl RuntimeOrchestrationEffects {
         )
         .await
         .map_err(|_| unknown())?;
-        let action = text(envelope, "action");
-        let key = text(envelope, "requestId");
-        let payload = &envelope["payload"];
-        let result = match action {
-            EXEC_ACTION => {
+        let result = match operation {
+            crate::orchestration_exec::CommandOperation::Start(payload) => {
                 let local = self.store.local_server_id()?.unwrap_or_default();
                 runner.start(principal, &local, payload, key).await
             }
-            "exec_read" => runner.read(principal, payload).await,
-            _ => runner.control(principal, action, payload, key).await,
+            crate::orchestration_exec::CommandOperation::Read(payload) => {
+                runner.read(principal, payload).await
+            }
+            crate::orchestration_exec::CommandOperation::Control(payload) => {
+                runner.control(principal, payload, key).await
+            }
         };
         match result {
             Ok(value) => applied(&value),
@@ -1872,10 +2122,10 @@ impl RuntimeOrchestrationEffects {
     async fn device_trust(
         &self,
         principal: &str,
-        envelope: &Value,
+        payload: &Value,
     ) -> Result<ExchangeOutcome, AccessError> {
         let local = self.store.local_server_id()?.unwrap_or_default();
-        let payload = envelope["payload"].clone();
+        let payload = payload.clone();
         let sender = principal.to_owned();
         let now = crate::event_write::unix_time()
             .map_err(|_| refused(503, "clock_unavailable", "The system clock is unavailable"))?;
@@ -1911,14 +2161,16 @@ impl RuntimeOrchestrationEffects {
 
     /// Python `_git_action` for Git reads and branch bundles. A refusal is a
     /// not-applied receipt; a process failure leaves the outcome unknown.
-    async fn git_channel(&self, envelope: &Value) -> Result<ExchangeOutcome, AccessError> {
+    async fn git_channel(
+        &self,
+        operation: crate::server_git::GitOperation,
+        key: &str,
+    ) -> Result<ExchangeOutcome, AccessError> {
         let root = self.store.root().to_path_buf();
-        let action = text(envelope, "action").to_owned();
-        let key = text(envelope, "requestId").to_owned();
-        let payload = envelope["payload"].clone();
+        let key = key.to_owned();
         let result = studio_runtime_process::blocking_pool::spawn_blocking(
             "runtime-services/multi_server_orchestration",
-            move || crate::server_git::receive(&root, &action, &payload, &key),
+            move || crate::server_git::receive(&root, &operation, &key),
         )
         .await
         .map_err(|_| refused(503, "git_unavailable", "The Git read could not run"))?;
@@ -1938,24 +2190,21 @@ impl RuntimeOrchestrationEffects {
     async fn execute_async(
         &self,
         principal: &str,
-        envelope: &Value,
+        action: &str,
+        payload: &Value,
     ) -> Result<ExchangeOutcome, AccessError> {
-        let action = text(envelope, "action");
         if action == "browser_callback" {
             return self
                 .browser_callback
-                .receive(envelope)
+                .receive(payload)
                 .await
                 .and_then(|value| applied(&value));
-        }
-        if action == "stop" {
-            return self.stop_worker(principal, envelope).await;
         }
         if action == "projects" {
             return self.projects().await;
         }
         if action == crate::device_trust::ACTION {
-            return self.device_trust(principal, envelope).await;
+            return self.device_trust(principal, payload).await;
         }
         if action == crate::peer_projects::CHANGED_ACTION {
             if let Some(wake) = &self.projects_changed {
@@ -1966,120 +2215,34 @@ impl RuntimeOrchestrationEffects {
             )));
         }
         if crate::peer_updates::ACTIONS.contains(&action) {
-            return self.peer_update(principal, envelope).await;
+            return self.peer_update(principal, action, payload).await;
         }
         if action == crate::peer_backup::ACTION {
-            return self.peer_backup(principal, envelope).await;
+            return self.peer_backup(principal, payload).await;
         }
-        if GIT_CHANNEL_ACTIONS.contains(&action) {
-            return self.git_channel(envelope).await;
-        }
-        if SERVER_COMMAND_ACTIONS.contains(&action) {
-            return self.server_command(principal, envelope).await;
-        }
-        if action == "folders" {
-            let path = envelope["payload"].get("cwd").and_then(Value::as_str);
-            let path = path.map(str::to_owned);
-            let result = studio_runtime_process::blocking_pool::spawn_blocking(
-                "runtime-services/multi_server_orchestration",
-                move || crate::system_reads::directories(path.as_deref()),
-            )
-            .await
-            .map_err(|_| refused(400, "folder_unavailable", "This directory is unavailable"))?
-            .map_err(|_| refused(400, "folder_unavailable", "This directory is unavailable"))?;
-            return applied(&result);
-        }
-        if matches!(action, "add_location" | "remove_location") {
-            return self.project_location(principal, envelope).await;
-        }
-        if action == "location_info" {
-            let path = text(&envelope["payload"], "cwd").to_owned();
-            return studio_runtime_process::blocking_pool::spawn_blocking(
-                "runtime-services/multi_server_orchestration",
-                move || crate::projects::peer_location_info(&path),
-            )
-            .await
-            .map_err(|_| {
-                refused(
-                    400,
-                    "location_unavailable",
-                    "The project folder is unavailable",
-                )
-            })?
-            .map_err(|_| {
-                refused(
-                    400,
-                    "location_unavailable",
-                    "The project folder is unavailable",
-                )
-            })
-            .and_then(|value| applied(&value));
-        }
-        if action == "location_matches" {
-            let payload = &envelope["payload"];
-            let origin = text(payload, "origin").to_owned();
-            let cwd = payload
-                .get("cwd")
-                .and_then(Value::as_str)
-                .map(str::to_owned);
-            return crate::projects::peer_location_matches(&self.store, origin, cwd)
-                .await
-                .map_err(|_| {
-                    refused(
-                        400,
-                        "location_unavailable",
-                        "Project location matches are unavailable",
-                    )
-                })
-                .and_then(|value| applied(&value));
-        }
-        if action == "input" {
-            if envelope["payload"]
-                .get(REMOTE_ANCHOR_INPUT_FIELD)
-                .and_then(Value::as_bool)
-                == Some(true)
-            {
-                return receive_remote_anchor_input(Arc::clone(&self.store), principal, envelope)
-                    .await;
-            }
-            return receive_remote_input(Arc::clone(&self.store), principal, envelope).await;
-        }
-        if matches!(action, "message" | "move_send") {
-            return self.worker_call(principal, envelope).await;
-        }
-        if action == EXEC_EVENT_ACTION {
-            let payload = envelope["payload"].clone();
-            let key = crate::projects::cross_server_identity(&[
-                "command-exit",
-                text(&payload, "handle"),
-                text(&payload["record"], "status"),
-            ]);
-            let principal = principal.to_owned();
-            let now = crate::event_write::unix_time().map_err(|_| {
-                refused(503, "clock_unavailable", "The system clock is unavailable")
-            })?;
-            return self
-                .store
-                .transaction_with(move |tx| receive_exec_event(tx, &principal, &payload, key, now))
-                .await;
-        }
-        if action != "event" {
-            return Err(refused(
-                501,
-                "orchestration_effect",
-                "The cross-server action is unavailable",
-            ));
-        }
-        let key = text(envelope, "requestId");
-        let payload = &envelope["payload"];
-        let link_id = text(payload, "link");
-        let kind = text(payload, "kind");
-        let event_text = text(payload, "text");
-        let delivery = delivery_moment(payload)?;
-        let parent_epoch = payload
-            .get("parentEpoch")
-            .and_then(Value::as_i64)
-            .ok_or_else(|| refused(400, "invalid_request", "Invalid cross-server event"))?;
+        Err(refused(
+            501,
+            "orchestration_effect",
+            "The cross-server action is unavailable",
+        ))
+    }
+
+    async fn receive_event(
+        &self,
+        principal: &str,
+        key: &str,
+        payload: &crate::orchestration_worker::EventPayload,
+    ) -> Result<ExchangeOutcome, AccessError> {
+        let link_id = payload.link.as_str();
+        let kind = payload.kind.as_str();
+        let event_text = payload.text.as_str();
+        let delivery = DeliveryMoment::for_event_parts(
+            kind,
+            event_text,
+            payload.delivery.value().map(String::as_str),
+        )
+        .map_err(|_| refused(400, "invalid_request", "Invalid delivery moment"))?;
+        let parent_epoch = payload.parent_epoch;
         if key.is_empty()
             || link_id.is_empty()
             || event_text.len() > 12000
@@ -2206,9 +2369,8 @@ impl RuntimeOrchestrationEffects {
                             })
                             .unwrap_or_default(),
                     );
-                    proxy
-                        .extra
-                        .insert("lastCompletedTurn".to_owned(), json!(key_for_write));
+                    proxy.last_completed_turn =
+                        studio_runtime_schema::queue_command::Field::Value(key_for_write.clone());
                     studio_runtime_store::AgentRepository::put(tx, &proxy)?;
                 }
                 let existing: Option<(String, String, String, f64, i64)> = tx
@@ -2278,10 +2440,6 @@ pub const EXEC_RECEIPT_ACTION: &str = ServerOperationKind::ExecReceipt.as_str();
 pub const EXEC_EVENT_ACTION: &str = ServerOperationKind::ExecEvent.as_str();
 /// First name part of the probe identity: `identity('exec-receipt', handle)`.
 const EXEC_RECEIPT_IDENTITY_PART: &str = "exec-receipt";
-/// The payload field that replaces an `exec` command in its outbox body after
-/// the first delivery attempt. Its value is the receiver's request signature
-/// of the original command: SHA-256 hex of `[sender, "exec", payload]`.
-const EXEC_RECEIPT_DIGEST_FIELD: &str = "receiptDigest";
 /// Recovery event kind that `_exec_event` writes for the owning lead.
 const EXEC_EXIT_EVENT_KIND: &str = "monitor_exit";
 const EXEC_EXIT_EVENT_DETAIL: &str = "Read output with orchestration_servers action=exec_read.";
@@ -2291,47 +2449,48 @@ const EXEC_RECEIPT_DIGEST_REFUSAL: &str = "The receipt fingerprint belongs to an
 
 /// Python `deliver`: an `exec` row in receipt form never sends its command
 /// again. It sends this probe with a stable identity instead.
-fn exec_receipt_probe(key: &str, payload: &Value) -> Option<Value> {
-    let digest = payload.get(EXEC_RECEIPT_DIGEST_FIELD)?;
-    if !studio_runtime_store::truthy(Some(digest)) {
+fn exec_receipt_probe(
+    key: &str,
+    payload: &crate::orchestration_exec::CompactedExec,
+) -> Option<crate::orchestration_wire::OrchestrationRequest> {
+    if payload.receipt_digest.is_empty() {
         return None;
     }
-    Some(json!({
-        "requestId": key,
-        "operation":[EXEC_RECEIPT_IDENTITY_PART],
-        "action": EXEC_RECEIPT_ACTION,
-        "payload": {
-            "handle": key,
-            "actor": payload.get("actor").cloned().unwrap_or(Value::Null),
-            "digest": digest,
-        },
-    }))
+    Some(crate::orchestration_wire::OrchestrationRequest {
+        request_id: key.to_owned(),
+        operation: vec![EXEC_RECEIPT_IDENTITY_PART.to_owned()],
+        command: crate::orchestration_wire::OrchestrationCommand::ExecReceipt(
+            crate::orchestration_exec::ReceiptRequest {
+                handle: key.to_owned(),
+                actor: payload.actor.clone(),
+                digest: payload.receipt_digest.clone(),
+            },
+        ),
+    })
 }
 
-/// Python `_compact_exec`: the outbox body after the first `exec` attempt.
-/// It keeps the actor for ownership checks and drops the command itself.
+/// Persist the effect-free compact form after the first delivery attempt.
 fn exec_receipt_body(envelope: &Envelope, local_server: &str) -> Result<String, AccessError> {
     let digest = envelope.incoming_signature(local_server)?;
-    canonical_json(&json!({
-        "requestId": envelope.root,
-        "operation":envelope.operation,
-        "action": envelope.action,
-        "payload": {
-            "actor": envelope.payload.get("actor").cloned().unwrap_or(Value::Null),
-            EXEC_RECEIPT_DIGEST_FIELD: digest,
-        },
-    }))
-    .map_err(|_| refused(400, "invalid_request", "Invalid cross-server request"))
-}
-
-/// Python compares `stored != payload.get('actor')`: a missing or null actor
-/// matches only a NULL column.
-fn payload_actor_is(payload: &Value, stored: Option<&str>) -> bool {
-    match payload.get("actor") {
-        None | Some(Value::Null) => stored.is_none(),
-        Some(Value::String(actor)) => stored == Some(actor.as_str()),
-        Some(_) => false,
-    }
+    let compact = crate::orchestration_wire::OrchestrationRequest {
+        request_id: envelope.root.clone(),
+        operation: envelope.operation.clone(),
+        command: crate::orchestration_wire::OrchestrationCommand::Exec(
+            crate::orchestration_exec::ExecPayload::Compacted(
+                crate::orchestration_exec::CompactedExec {
+                    actor: envelope.command.actor().map_or(
+                        studio_runtime_schema::queue_command::Field::Null,
+                        |value| {
+                            studio_runtime_schema::queue_command::Field::Value(value.to_owned())
+                        },
+                    ),
+                    receipt_digest: digest,
+                },
+            ),
+        ),
+    };
+    legacy_compact(&compact)
+        .map_err(|_| refused(400, "invalid_request", "Invalid cross-server request"))
 }
 
 /// Python `_exec_owner`: the handle is this server's `exec` outbox row for the
@@ -2340,12 +2499,9 @@ fn payload_actor_is(payload: &Value, stored: Option<&str>) -> bool {
 fn exec_owner(
     tx: &Transaction<'_>,
     server: &str,
-    actor: &Value,
-    handle: &Value,
+    actor: &str,
+    handle: &str,
 ) -> Result<bool, AccessError> {
-    let Some(handle) = handle.as_str() else {
-        return Ok(false);
-    };
     let scoped = remote_operation_key(
         Direction::Outgoing.namespace(),
         &[server],
@@ -2372,16 +2528,17 @@ fn exec_owner(
             (server.to_owned(), body)
         }
     };
-    let envelope: Value = serde_json::from_str(&body).map_err(|_| {
-        refused(
-            503,
-            "invalid_record",
-            "Stored cross-server envelope is invalid",
-        )
-    })?;
+    let envelope: crate::orchestration_wire::OrchestrationRequest = serde_json::from_str(&body)
+        .map_err(|_| {
+            refused(
+                503,
+                "invalid_record",
+                "Stored cross-server envelope is invalid",
+            )
+        })?;
     Ok(saved_server == server
-        && envelope.get("action").and_then(Value::as_str) == Some(EXEC_ACTION)
-        && envelope.pointer("/payload/actor").unwrap_or(&Value::Null) == actor)
+        && envelope.command.kind() == ServerOperationKind::Exec
+        && envelope.command.actor() == Some(actor))
 }
 
 /// Python `_exec_owner` for the caller side of `exec_read`, `exec_input` and
@@ -2389,25 +2546,38 @@ fn exec_owner(
 pub(crate) fn exec_handle_owned(
     tx: &Transaction<'_>,
     server: &str,
-    actor: &Value,
-    handle: &Value,
+    actor: &str,
+    handle: &str,
 ) -> Result<bool, AccessError> {
     exec_owner(tx, server, actor, handle)
 }
 
 /// Python `_exec_event`, with the `_evidence` lookup that answers a replayed
 /// claim: an existing event with this identity proves the effect.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompletionEventText<'a> {
+    detail: &'static str,
+    duration: Option<&'a serde_json::Number>,
+    error: Option<&'a String>,
+    exit_code: Option<&'a i64>,
+    id: &'a str,
+    server_id: &'a str,
+    signal: Option<&'a i64>,
+    status: &'a str,
+    timed_out: bool,
+}
+
 fn receive_exec_event(
     tx: &Transaction<'_>,
     principal: &str,
-    payload: &Value,
+    payload: &crate::orchestration_exec::ExecEvent,
     key: String,
     now: f64,
 ) -> Result<ExchangeOutcome, AccessError> {
     let invalid = || refused(400, "invalid_request", "Invalid cross-server command event");
-    let (Some(actor), Some(handle)) = (payload.get("actor"), payload.get("handle")) else {
-        return Err(invalid());
-    };
+    let actor = payload.actor.as_str();
+    let handle = payload.handle.as_str();
     if !exec_owner(tx, principal, actor, handle)? {
         return Ok(ExchangeOutcome::NotApplied(EXEC_OWNER_REFUSAL.to_owned()));
     }
@@ -2417,36 +2587,30 @@ fn receive_exec_event(
         })
         .optional()?;
     if stored.is_some() {
-        return applied(&json!({"stored": true}));
+        return applied(&json!({"stored":true}));
     }
-    let actor = actor.as_str().ok_or_else(invalid)?;
     let Some(lead) = studio_runtime_store::AgentRepository::get(
         tx,
         &studio_runtime_store::AgentId::from(actor),
     )?
     else {
-        return applied(&json!({"stored": false, "detail": "The lead no longer exists"}));
+        return applied(&json!({"stored":false,"detail":"The lead no longer exists"}));
     };
     if lead.is_deleted() {
-        return applied(&json!({"stored": false, "detail": "The lead was deleted"}));
+        return applied(&json!({"stored":false,"detail":"The lead was deleted"}));
     }
-    let record = payload
-        .get("record")
-        .and_then(Value::as_object)
-        .ok_or_else(invalid)?;
-    let status = record.get("status").ok_or_else(invalid)?;
-    let field = |name: &str| record.get(name).cloned().unwrap_or(Value::Null);
-    let event_text = canonical_json(&json!({
-        "id": handle,
-        "serverId": principal,
-        "status": status,
-        "exitCode": field("exitCode"),
-        "signal": field("signal"),
-        "duration": field("duration"),
-        "timedOut": record.get("timedOut").cloned().unwrap_or(Value::Bool(false)),
-        "error": field("error"),
-        "detail": EXEC_EXIT_EVENT_DETAIL,
-    }))
+    let record = &payload.record;
+    let event_text = legacy_compact(&CompletionEventText {
+        id: handle,
+        server_id: principal,
+        status: &record.status,
+        exit_code: record.exit_code.value(),
+        signal: record.signal.value(),
+        duration: record.duration.value(),
+        timed_out: record.timed_out.value().copied().unwrap_or(false),
+        error: record.error.value(),
+        detail: EXEC_EXIT_EVENT_DETAIL,
+    })
     .map_err(|_| invalid())?;
     crate::event_write::enqueue_recovery_event(
         tx,
@@ -2463,7 +2627,7 @@ fn receive_exec_event(
             "The command event could not be stored",
         )
     })?;
-    applied(&json!({"stored": true}))
+    applied(&json!({"stored":true}))
 }
 
 /// The `exec_receipt` branch of Python `_receive`. `None` is an unexpected
@@ -2472,23 +2636,21 @@ fn receive_exec_event(
 fn exec_receipt_answer(
     tx: &Transaction<'_>,
     principal: &str,
-    payload: &Value,
+    payload: &crate::orchestration_exec::ReceiptRequest,
     now: i64,
 ) -> Result<Option<Result<RemoteReply, &'static str>>, AccessError> {
-    let Some(handle) = payload.get("handle").and_then(Value::as_str) else {
-        return Ok(None);
-    };
+    let handle = payload.handle.as_str();
     let unknown = ExchangeOutcome::Unknown.to_reply(handle);
     let invalid = || refused(503, "invalid_record", "Stored delivery result is invalid");
     if let Some(saved) = saved_remote(tx, Direction::Incoming, principal, handle)? {
         let signature = saved.signature;
         let saved = saved.reply;
         if saved.principal.as_deref() != Some(principal)
-            || !payload_actor_is(payload, saved.actor.as_deref())
+            || payload.actor.value().map(String::as_str) != saved.actor.as_deref()
         {
             return Ok(Some(Err(EXEC_RECEIPT_OWNER_REFUSAL)));
         }
-        if payload.get("digest").and_then(Value::as_str) != Some(signature.as_str()) {
+        if payload.digest != signature {
             return Ok(Some(Err(EXEC_RECEIPT_DIGEST_REFUSAL)));
         }
         return Ok(Some(Ok(
@@ -2500,10 +2662,7 @@ fn exec_receipt_answer(
             },
         )));
     }
-    let probe_source = Envelope::from_value(
-        &json!({"requestId":handle,"operation":[],"action":ServerOperationKind::Exec,"payload":{}}),
-    )?;
-    let key = pending_key(tx, Direction::Incoming, principal, &probe_source)?;
+    let key = pending_key_parts(tx, Direction::Incoming, principal, handle, &[EXEC_ACTION])?;
     let original: Option<(String, Option<String>, Option<String>)> = tx
         .query_row(
             "SELECT signature,principal,actor FROM runtime_server_inbox WHERE id=?1",
@@ -2514,10 +2673,12 @@ fn exec_receipt_answer(
     let Some((signature, owner, actor)) = original else {
         return Ok(Some(Ok(unknown)));
     };
-    if owner.as_deref() != Some(principal) || !payload_actor_is(payload, actor.as_deref()) {
+    if owner.as_deref() != Some(principal)
+        || payload.actor.value().map(String::as_str) != actor.as_deref()
+    {
         return Ok(Some(Err(EXEC_RECEIPT_OWNER_REFUSAL)));
     }
-    if payload.get("digest").and_then(Value::as_str) != Some(signature.as_str()) {
+    if payload.digest != signature {
         return Ok(Some(Err(EXEC_RECEIPT_DIGEST_REFUSAL)));
     }
     // Python `_evidence(db, 'exec', ...)`: a settled job record proves the
@@ -2546,7 +2707,11 @@ fn exec_receipt_answer(
 /// The saved state of an `exec` outbox row that is already in receipt form.
 enum SavedExecReceipt {
     /// Not settled: deliver this probe.
-    Pending(Value, String, String),
+    Pending(
+        Box<crate::orchestration_wire::OrchestrationRequest>,
+        String,
+        String,
+    ),
     /// Settled: the saved receipt of the original command.
     Settled(ExchangeOutcome),
 }
@@ -2595,14 +2760,39 @@ pub struct Envelope {
     root: String,
     action: ServerOperationKind,
     operation: Vec<String>,
-    payload: Value,
+    command: crate::orchestration_wire::OrchestrationCommand,
     body: String,
     fingerprint: String,
 }
+
+/// Preserve the pre-typing sorted UTF-8 compact JSON used on the wire and in durable identities.
+fn legacy_compact(value: &impl serde::Serialize) -> Result<String, serde_json::Error> {
+    studio_runtime_schema::json_compat::python_json_compact_serialized(value)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OutgoingFingerprint<'a> {
+    request_id: &'a str,
+    action: &'a str,
+    payload: crate::orchestration_wire::CommandPayload<'a>,
+}
+
 impl Envelope {
-    pub fn from_value(value: &Value) -> Result<Self, AccessError> {
-        schema("ServerOperationRequest", value)?;
-        let body = canonical_json(value)
+    pub fn from_request(
+        value: &crate::orchestration_wire::OrchestrationRequest,
+    ) -> Result<Self, AccessError> {
+        if !value.valid_request_id() {
+            return Err(refused(
+                400,
+                "invalid_request",
+                "Invalid cross-server request",
+            ));
+        }
+        if let Some(remaining) = value.remaining_value() {
+            schema("ServerOperationRequest", &remaining)?;
+        }
+        let body = legacy_compact(value)
             .map_err(|_| refused(400, "invalid_request", "Invalid cross-server request"))?;
         if body.len() > MAX_REQUEST_BYTES {
             return Err(refused(
@@ -2611,9 +2801,15 @@ impl Envelope {
                 "The remote request exceeds 256 KiB",
             ));
         }
-        let action = text(value, "action");
-        if matches!(action, "move_validate" | "move_begin")
-            && value.get("payload").and_then(|v| v.get("packed")).is_some()
+        let action = value.command.kind();
+        if matches!(
+            action,
+            ServerOperationKind::MoveValidate | ServerOperationKind::MoveBegin
+        ) && value
+            .command
+            .remaining_payload()
+            .and_then(|v| v.get("packed"))
+            .is_some()
         {
             return Err(refused(
                 501,
@@ -2622,17 +2818,29 @@ impl Envelope {
             ));
         }
         Ok(Self {
-            key: text(value, "requestId").to_owned(),
-            root: text(value, "requestId").to_owned(),
-            action: action.parse().map_err(|_|refused(400,"invalid_request","Unknown cross-server operation"))?,
-            operation: value["operation"].as_array().and_then(|items| items.iter().map(|item| item.as_str().map(str::to_owned)).collect()).ok_or_else(||refused(400,"invalid_request","Invalid cross-server operation identity"))?,
-            payload: value["payload"].clone(),
-            fingerprint: digest(canonical_json(&json!({"requestId":text(value,"requestId"),"action":action,"payload":value["payload"]})).map_err(|_|refused(400,"invalid_request","Invalid cross-server request"))?.as_bytes()),
+            key: value.request_id.clone(),
+            root: value.request_id.clone(),
+            action,
+            operation: value.operation.clone(),
+            command: value.command.clone(),
+            fingerprint: digest(
+                legacy_compact(&OutgoingFingerprint {
+                    request_id: &value.request_id,
+                    action: action.as_str(),
+                    payload: crate::orchestration_wire::CommandPayload(&value.command),
+                })
+                .map_err(|_| refused(400, "invalid_request", "Invalid cross-server request"))?
+                .as_bytes(),
+            ),
             body,
         })
     }
-    pub fn value(&self) -> Value {
-        json!({"requestId":self.root,"operation":self.operation,"action":self.action,"payload":self.payload})
+    pub fn value(&self) -> crate::orchestration_wire::OrchestrationRequest {
+        crate::orchestration_wire::OrchestrationRequest {
+            request_id: self.root.clone(),
+            operation: self.operation.clone(),
+            command: self.command.clone(),
+        }
     }
     fn scoped(mut self, direction: Direction, peer: &str) -> Self {
         self.key = remote_operation_key(
@@ -2650,9 +2858,13 @@ impl Envelope {
     }
     fn incoming_signature(&self, principal: &str) -> Result<String, AccessError> {
         Ok(digest(
-            canonical_json(&json!([principal, self.action, self.payload]))
-                .map_err(|_| refused(400, "invalid_request", "Invalid cross-server request"))?
-                .as_bytes(),
+            legacy_compact(&(
+                principal,
+                self.action.as_str(),
+                crate::orchestration_wire::CommandPayload(&self.command),
+            ))
+            .map_err(|_| refused(400, "invalid_request", "Invalid cross-server request"))?
+            .as_bytes(),
         ))
     }
 }
@@ -2708,33 +2920,14 @@ const PEER_REPLAY_SAFE_ACTIONS: &[ServerOperationKind] = &[
     ServerOperationKind::BackupPut,
 ];
 
-/// Worker calls that a remote worker sends to its home server (Python
-/// `worker_call`). The home server binds each request identity to a durable
-/// inbox claim, so the sender delivers the same envelope again after a lost
-/// reply, as Python `_retry` does. The receiver never runs a claimed write
-/// twice, so these actions are not replay-safe on the receiving side.
-pub(crate) const WORKER_CALL_RETRY_ACTIONS: &[ServerOperationKind] = &[
-    ServerOperationKind::Task,
-    ServerOperationKind::Complaint,
-    ServerOperationKind::Context,
-    ServerOperationKind::Directory,
-    ServerOperationKind::ChatRead,
-    ServerOperationKind::MoveManage,
-    ServerOperationKind::MoveInterrupt,
-    ServerOperationKind::MoveSpawn,
-];
-
 /// The sender may deliver this queued or crashed outbox envelope again.
 fn outgoing_retry(action: ServerOperationKind) -> bool {
-    action == ServerOperationKind::Export
-        || peer_replay_safe(action)
-        || WORKER_CALL_RETRY_ACTIONS.contains(&action)
+    action == ServerOperationKind::Export || peer_replay_safe(action)
 }
 
 fn outgoing_retry_sql_values() -> String {
     PEER_REPLAY_SAFE_ACTIONS
         .iter()
-        .chain(WORKER_CALL_RETRY_ACTIONS)
         .chain(std::iter::once(&ServerOperationKind::Export))
         .map(|action| format!("'{}'", action.as_str()))
         .collect::<Vec<_>>()
@@ -2805,16 +2998,23 @@ pub struct OrchestrationDriver {
     effects: Arc<dyn OrchestrationEffects>,
 }
 const MAX_OUTBOX_BATCH: usize = 32;
-pub(crate) const REMOTE_ANCHOR_INPUT_FIELD: &str = "anchor";
 
 fn check_project_reservation(
     tx: &Transaction<'_>,
-    action: &str,
-    payload: &Value,
+    command: &crate::orchestration_wire::OrchestrationCommand,
 ) -> Result<(), AccessError> {
-    if matches!(action, "add_location" | "remove_location") {
-        crate::project_locations::check_location_admission(tx, payload).map_err(
-            |error| match error {
+    if let crate::orchestration_wire::OrchestrationCommand::AddLocation(payload)
+    | crate::orchestration_wire::OrchestrationCommand::RemoveLocation(payload) = command
+    {
+        let expected = payload.admission.value().ok_or_else(|| {
+            refused(
+                409,
+                "project_location_changed",
+                "The project or caller changed before location reservation",
+            )
+        })?;
+        crate::project_locations::check_location_admission(tx, &payload.project, expected)
+            .map_err(|error| match error {
                 crate::project_locations::LocationError::Store(error) => AccessError::from(error),
                 crate::project_locations::LocationError::InvalidStored { .. }
                 | crate::project_locations::LocationError::Refused(_)
@@ -2824,8 +3024,7 @@ fn check_project_reservation(
                     "project_location_changed",
                     "The project or caller changed before location reservation",
                 ),
-            },
-        )?;
+            })?;
     }
     Ok(())
 }
@@ -2867,14 +3066,15 @@ pub fn hold_unclean_server_requests(tx: &Transaction<'_>) -> Result<usize, Acces
 pub fn enqueue_in_transaction(
     transaction: &Transaction<'_>,
     server: &str,
-    action: &str,
-    payload: &Value,
+    command: crate::orchestration_wire::OrchestrationCommand,
     request_id: &str,
     now: i64,
 ) -> Result<(), AccessError> {
-    let mut envelope = Envelope::from_value(
-        &json!({"requestId":request_id,"operation":[],"action":action,"payload":payload}),
-    )?
+    let mut envelope = Envelope::from_request(&crate::orchestration_wire::OrchestrationRequest {
+        request_id: request_id.to_owned(),
+        operation: Vec::new(),
+        command,
+    })?
     .scoped(Direction::Outgoing, server);
     require_paired(transaction, server)?;
     if replay_delivery(transaction, Direction::Outgoing, server, &envelope, now)?.is_some() {
@@ -2892,7 +3092,7 @@ pub fn enqueue_in_transaction(
         }
         return Ok(());
     }
-    check_project_reservation(transaction, action, payload)?;
+    check_project_reservation(transaction, &envelope.command)?;
     let admitted = admit_delivery(transaction, Direction::Outgoing, server, &envelope, now)?;
     crate::server_outbox::insert(
         transaction,
@@ -2927,15 +3127,13 @@ impl OrchestrationDriver {
     pub async fn exchange(
         &self,
         server: &str,
-        action: &str,
-        payload: &Value,
+        command: crate::orchestration_wire::OrchestrationCommand,
         request_id: &str,
         now: i64,
     ) -> Result<ExchangeOutcome, AccessError> {
         self.exchange_with_timeout(
             server,
-            action,
-            payload,
+            command,
             request_id,
             now,
             std::time::Duration::from_secs(20),
@@ -2946,15 +3144,18 @@ impl OrchestrationDriver {
     pub async fn exchange_with_timeout(
         &self,
         server: &str,
-        action: &str,
-        payload: &Value,
+        command: crate::orchestration_wire::OrchestrationCommand,
         request_id: &str,
         now: i64,
         timeout: std::time::Duration,
     ) -> Result<ExchangeOutcome, AccessError> {
         self.exchange_request(
             server,
-            &json!({"requestId":request_id,"operation":[],"action":action,"payload":payload}),
+            &crate::orchestration_wire::OrchestrationRequest {
+                request_id: request_id.to_owned(),
+                operation: Vec::new(),
+                command,
+            },
             now,
             timeout,
         )
@@ -2964,7 +3165,7 @@ impl OrchestrationDriver {
     pub async fn exchange_operation(
         &self,
         server: &str,
-        request: &Value,
+        request: &crate::orchestration_wire::OrchestrationRequest,
         now: i64,
     ) -> Result<ExchangeOutcome, AccessError> {
         self.exchange_request(server, request, now, std::time::Duration::from_secs(20))
@@ -2974,7 +3175,7 @@ impl OrchestrationDriver {
     async fn exchange_request(
         &self,
         server: &str,
-        request: &Value,
+        request: &crate::orchestration_wire::OrchestrationRequest,
         now: i64,
         timeout: std::time::Duration,
     ) -> Result<ExchangeOutcome, AccessError> {
@@ -2993,7 +3194,7 @@ impl OrchestrationDriver {
         })??
         .unwrap_or_default();
         let is_local = !local_server.is_empty() && server == local_server;
-        let mut envelope = Envelope::from_value(request)?.scoped(Direction::Outgoing, server);
+        let mut envelope = Envelope::from_request(request)?.scoped(Direction::Outgoing, server);
 
         if envelope.action.as_str() == EXEC_ACTION {
             match self
@@ -3060,11 +3261,7 @@ impl OrchestrationDriver {
                     now,
                 )?;
                 if matches!(decision, DeliveryDecision::Execute) {
-                    check_project_reservation(
-                        tx,
-                        envelope_for_claim.action.as_str(),
-                        &envelope_for_claim.value()["payload"],
-                    )?;
+                    check_project_reservation(tx, &envelope_for_claim.command)?;
                     // An in-flight claim is not due: the pump replays a running peer
                     // operation only after its exchange deadline has passed.
                     if saved.is_some() {
@@ -3193,14 +3390,21 @@ impl OrchestrationDriver {
         let Some((saved_server, body, fingerprint, key)) = row else {
             return Ok(None);
         };
-        let saved: Value = serde_json::from_str(&body).map_err(|_| {
-            refused(
-                503,
-                "invalid_record",
-                "Stored cross-server envelope is invalid",
-            )
-        })?;
-        let Some(probe) = exec_receipt_probe(&envelope.root, &saved["payload"]) else {
+        let saved: crate::orchestration_wire::OrchestrationRequest = serde_json::from_str(&body)
+            .map_err(|_| {
+                refused(
+                    503,
+                    "invalid_record",
+                    "Stored cross-server envelope is invalid",
+                )
+            })?;
+        let crate::orchestration_wire::OrchestrationCommand::Exec(
+            crate::orchestration_exec::ExecPayload::Compacted(compact),
+        ) = &saved.command
+        else {
+            return Ok(None);
+        };
+        let Some(probe) = exec_receipt_probe(&envelope.root, compact) else {
             return Ok(None);
         };
         if saved_server != server || (body != envelope.body && fingerprint != envelope.fingerprint)
@@ -3211,7 +3415,11 @@ impl OrchestrationDriver {
                 "This request id has different content",
             ));
         }
-        Ok(Some(SavedExecReceipt::Pending(probe, key, fingerprint)))
+        Ok(Some(SavedExecReceipt::Pending(
+            Box::new(probe),
+            key,
+            fingerprint,
+        )))
     }
 
     /// Send the effect-free `exec_receipt` probe for one `exec` row in receipt
@@ -3222,11 +3430,11 @@ impl OrchestrationDriver {
         server: &str,
         local_server: Option<&str>,
         envelope: &Envelope,
-        probe: &Value,
+        probe: &crate::orchestration_wire::OrchestrationRequest,
         timeout: std::time::Duration,
         now: i64,
     ) -> Result<ExchangeOutcome, AccessError> {
-        let probe_key = text(probe, "requestId");
+        let probe_key = probe.request_id.as_str();
         let reply = match local_server {
             Some(local_server) => self.receive(local_server, probe, now).await,
             None => self
@@ -3334,9 +3542,21 @@ impl OrchestrationDriver {
     pub async fn receive(
         &self,
         principal: &str,
-        value: &Value,
+        value: &crate::orchestration_wire::OrchestrationRequest,
         now: i64,
     ) -> Result<ExchangeOutcome, AccessError> {
+        if matches!(
+            &value.command,
+            crate::orchestration_wire::OrchestrationCommand::Exec(
+                crate::orchestration_exec::ExecPayload::Compacted(_)
+            )
+        ) {
+            return Err(refused(
+                400,
+                "invalid_request",
+                "A compacted receipt cannot execute",
+            ));
+        }
         let store_for_local = Arc::clone(&self.store);
         let local_server = studio_runtime_process::blocking_pool::spawn_blocking(
             "runtime-services/multi_server_orchestration",
@@ -3352,7 +3572,7 @@ impl OrchestrationDriver {
         })??
         .unwrap_or_default();
         let is_local = !local_server.is_empty() && principal == local_server;
-        let envelope = Envelope::from_value(value)?.scoped(Direction::Incoming, principal);
+        let envelope = Envelope::from_request(value)?.scoped(Direction::Incoming, principal);
         if envelope.action.as_str() == EXEC_RECEIPT_ACTION {
             return self
                 .receive_exec_receipt(principal, is_local, envelope, now)
@@ -3423,7 +3643,7 @@ impl OrchestrationDriver {
                     let admission = serde_json::to_string(&admitted).map_err(|_| refused(503,"invalid_record","Delivery admission could not be saved"))?;
                     tx.execute(
                         "INSERT INTO runtime_server_inbox(id,signature,state,result,created_at,principal,actor,admission) VALUES(?1,?2,?7,NULL,?3,?4,?5,?6)",
-                        params![key, signature_for_claim, now, principal_for_claim, envelope_for_claim.payload.get("actor").and_then(Value::as_str),admission,ServerDeliveryState::Running],
+                        params![key, signature_for_claim, now, principal_for_claim, envelope_for_claim.command.actor(),admission,ServerDeliveryState::Running],
                     )?;
                 }
             }
@@ -3507,8 +3727,12 @@ impl OrchestrationDriver {
                 if !is_local {
                     require_paired(tx, &principal)?;
                 }
-                let Some(answer) = exec_receipt_answer(tx, &principal, &envelope.payload, now)?
+                let crate::orchestration_wire::OrchestrationCommand::ExecReceipt(payload) =
+                    &envelope.command
                 else {
+                    return Ok(ExchangeOutcome::Unknown);
+                };
+                let Some(answer) = exec_receipt_answer(tx, &principal, payload, now)? else {
                     return Ok(ExchangeOutcome::Unknown);
                 };
                 Ok(match answer {
@@ -3535,15 +3759,76 @@ impl OrchestrationDriver {
             })
             .await?;
         let mut count = 0;
-        for (server, body, state) in pending {
-            let value = serde_json::from_str::<Value>(&body).map_err(|_| {
-                refused(
-                    503,
-                    "invalid_record",
-                    "Stored cross-server envelope is invalid",
-                )
-            })?;
-            let envelope = Envelope::from_value(&value)?;
+        for (key, server, body, state) in pending {
+            let value = match serde_json::from_str::<
+                studio_runtime_schema::http_ingress::Object<
+                    crate::orchestration_wire::OrchestrationRequest,
+                >,
+            >(&body)
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    #[derive(serde::Deserialize)]
+                    #[serde(rename_all = "camelCase")]
+                    struct StoredHeader {
+                        request_id: String,
+                        action: String,
+                    }
+                    let header = serde_json::from_str::<StoredHeader>(&body);
+                    if let Ok(header) = header
+                        && header.action.parse::<ServerOperationKind>().is_err()
+                    {
+                        let server_for_write = server.clone();
+                        let key_for_write = key.clone();
+                        let body_for_write = body.clone();
+                        let reason = format!(
+                            "Cross-server action '{}' is no longer supported",
+                            header.action
+                        );
+                        let result = self
+                            .store
+                            .transaction_with(move |tx| {
+                                let Some(entry) = crate::server_outbox::find_for(
+                                    tx,
+                                    &server_for_write,
+                                    &key_for_write,
+                                )?
+                                else {
+                                    return Ok::<_, AccessError>(());
+                                };
+                                if entry.record.body != body_for_write {
+                                    return Err(refused(
+                                        409,
+                                        "receipt_changed",
+                                        "The saved delivery changed",
+                                    ));
+                                }
+                                settle_delivery(
+                                    tx,
+                                    Direction::Outgoing,
+                                    &key_for_write,
+                                    &header.request_id,
+                                    &entry.signature,
+                                    &ExchangeOutcome::NotApplied(reason),
+                                )
+                            })
+                            .await;
+                        match result {
+                            Ok(()) => {
+                                eprintln!("retired unsupported cross-server delivery {key}");
+                                count += 1;
+                            }
+                            Err(error) => {
+                                eprintln!("failed to retire cross-server delivery {key}: {error}")
+                            }
+                        }
+                    } else {
+                        eprintln!("invalid stored cross-server delivery {key}: {error}");
+                    }
+                    continue;
+                }
+            };
+            let envelope = Envelope::from_request(&value.0)?;
             // A crash after claiming leaves a row running. Stable-identity
             // peer operations can safely replay; provider commands remain
             // one-shot and deliberately stay unknown after that crash point.
@@ -3686,12 +3971,12 @@ fn require_paired(tx: &Transaction<'_>, id: &str) -> Result<(), AccessError> {
         )
         .optional()?;
     let value = raw
-        .map(|s| stored("PersistedAccessClient", "runtime_access_clients", id, &s))
+        .map(|s| stored_client("runtime_access_clients", id, &s))
         .transpose()?
         .ok_or_else(|| refused(403, "client_revoked", "The server is not paired"))?;
-    if text(&value, "id") != id
-        || text(&value, "status") != "paired"
-        || text(&value, "kind") != "server"
+    if value.id.as_str() != id
+        || value.status != studio_runtime_schema::multi_server_access::AccessClientStatus::Paired
+        || value.kind != studio_runtime_schema::multi_server_access::AccessClientKind::Server
     {
         return Err(refused(403, "client_revoked", "The server is not paired"));
     }
@@ -3723,13 +4008,76 @@ fn outbox_next_due_at(
 }
 
 /// Normalize a paired peer's wire value once before service admission.
-fn delivery_moment(payload: &Value) -> Result<DeliveryMoment, AccessError> {
-    DeliveryMoment::for_event(text(payload, "kind"), text(payload, "text"), Some(payload))
-        .map_err(|_| refused(400, "invalid_request", "Invalid delivery moment"))
-}
-
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn outgoing_fingerprint_keeps_legacy_canonical_bytes() {
+        let request: crate::orchestration_wire::OrchestrationRequest = serde_json::from_str(r#"{"requestId":"r","operation":["12"],"action":"chunk","payload":{"offset":12,"export":"é"}}"#).unwrap();
+        let envelope = super::Envelope::from_request(&request).unwrap();
+        assert_eq!(
+            envelope.body,
+            r#"{"action":"chunk","operation":["12"],"payload":{"export":"é","offset":12},"requestId":"r"}"#
+        );
+        assert_eq!(
+            envelope.fingerprint,
+            "ba2496138bf599fc8b5a9a0f02ed29471300845fa6f8080a1ace71bb63867302"
+        );
+    }
+
+    #[test]
+    fn incoming_signature_keeps_legacy_canonical_bytes() {
+        let request: crate::orchestration_wire::OrchestrationRequest = serde_json::from_str(r#"{"requestId":"r","operation":["12"],"action":"chunk","payload":{"offset":12,"export":"é"}}"#).unwrap();
+        let envelope = super::Envelope::from_request(&request).unwrap();
+        assert_eq!(
+            envelope.incoming_signature("peer-a").unwrap(),
+            "c66ce92f06625e45445058c8cf9cc8f08b03a374ac312d0a108dcd437786d3a2"
+        );
+    }
+
+    #[test]
+    fn incoming_signature_preserves_omitted_optional_fields() {
+        for (action, payload, expected) in [
+            (
+                "exec",
+                r#"{"actor":"a","cwd":"/p","command":["true"]}"#,
+                "ac79af099c47ad1d87b3749f2f9cda67d68e1135f712b08fde2f17a71a55bd92",
+            ),
+            (
+                "exec_read",
+                r#"{"actor":"a","handle":"h"}"#,
+                "b10f6717c5e873feadbe9737fd317ee9772b18e228647d0410471bc2d5125e32",
+            ),
+            (
+                "exec_input",
+                r#"{"actor":"a","handle":"h","input":"x"}"#,
+                "d2bd970650f6293a3197a9677111836c38957ef0c8a9b2af4fe55db674976f2e",
+            ),
+            (
+                "export",
+                r#"{"cwd":"/p","branch":"main"}"#,
+                "10b352edc16702746cabc61a1dfb0699e34e25f555885c93f34d9947e41e4a8c",
+            ),
+        ] {
+            let body = format!(
+                r#"{{"requestId":"r","operation":[],"action":"{action}","payload":{payload}}}"#
+            );
+            let request: crate::orchestration_wire::OrchestrationRequest =
+                serde_json::from_str(&body).unwrap();
+            let envelope = super::Envelope::from_request(&request).unwrap();
+            assert_eq!(
+                envelope.incoming_signature("peer").unwrap(),
+                expected,
+                "{action}"
+            );
+        }
+    }
+
+    fn fixture_envelope(
+        value: &serde_json::Value,
+    ) -> crate::orchestration_wire::OrchestrationRequest {
+        <crate::orchestration_wire::OrchestrationRequest as serde::Deserialize>::deserialize(value)
+            .expect("valid fixture envelope")
+    }
     struct CountEffects(std::sync::atomic::AtomicUsize);
     impl super::OrchestrationEffects for CountEffects {
         fn supports(&self, _: &str) -> bool {
@@ -3738,21 +4086,88 @@ mod tests {
         fn execute<'a>(
             &'a self,
             principal: &'a str,
-            envelope: &'a serde_json::Value,
+            envelope: &'a crate::orchestration_wire::OrchestrationRequest,
         ) -> futures_util::future::BoxFuture<
             'a,
             Result<super::ExchangeOutcome, crate::multi_server_auth::AccessError>,
         > {
             Box::pin(async move {
                 self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                if envelope["payload"]["unknown"] == true {
+                if envelope
+                    .command
+                    .remaining_payload()
+                    .is_some_and(|payload| payload["unknown"] == true)
+                {
                     return Ok(super::ExchangeOutcome::Unknown);
                 }
                 super::applied(
-                    &serde_json::json!({"owner":principal,"root":envelope["requestId"],"operation":envelope["operation"]}),
+                    &serde_json::json!({"owner":principal,"root":envelope.request_id,"operation":envelope.operation}),
                 )
             })
         }
+    }
+
+    #[tokio::test]
+    async fn retired_action_is_refused_without_blocking_next_outbox_row() {
+        assert_retired_action(super::ServerDeliveryState::Queued).await;
+    }
+
+    #[tokio::test]
+    async fn submitted_retired_action_is_refused_without_blocking_next_outbox_row() {
+        assert_retired_action(super::ServerDeliveryState::Running).await;
+    }
+
+    async fn assert_retired_action(state: super::ServerDeliveryState) {
+        let directory = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            studio_runtime_store::RuntimeStore::open(Some(directory.path()))
+                .await
+                .unwrap(),
+        );
+        store.set_local_server_id(Some("peer".into())).unwrap();
+        let old = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+        let next = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+        let old_for_write = old.clone();
+        let next_for_write = next.clone();
+        store.transaction(move |tx| {
+            let signature = "legacy-signature";
+            let body = serde_json::json!({"requestId":old_for_write,"operation":[],"action":"task","payload":{"actor":"lead"}}).to_string();
+            crate::server_outbox::insert(tx, "peer", &old_for_write, signature, state, 0.0,
+                &crate::server_outbox::ServerRequestRecord { body, admission: studio_runtime_schema::persistence::AdmittedRequest::from_persisted_fields(old_for_write.clone(), signature.into(), chrono::Utc::now().timestamp_millis()), attempts:0, error:None }, chrono::Utc::now().timestamp()).unwrap();
+            let request = crate::orchestration_wire::OrchestrationRequest { request_id: next_for_write, operation:Vec::new(), command:crate::orchestration_wire::OrchestrationCommand::Projects(serde_json::json!({})) };
+            let envelope = super::Envelope::from_request(&request).unwrap().scoped(super::Direction::Outgoing, "peer");
+            crate::server_outbox::insert(tx, "peer", &envelope.key, &envelope.fingerprint, super::ServerDeliveryState::Queued, 0.0,
+                &crate::server_outbox::ServerRequestRecord { body:envelope.body.clone(), admission:studio_runtime_schema::persistence::AdmittedRequest::from_persisted_fields(envelope.key.clone(), envelope.fingerprint.clone(), chrono::Utc::now().timestamp_millis()), attempts:0, error:None }, chrono::Utc::now().timestamp()).unwrap();
+            Ok(())
+        }).await.unwrap();
+        let effects = std::sync::Arc::new(CountEffects(std::sync::atomic::AtomicUsize::new(0)));
+        let driver = super::OrchestrationDriver::new(
+            store.clone(),
+            std::sync::Arc::new(super::HttpsPairedTransport::new(store.clone())),
+            effects.clone(),
+        );
+        driver
+            .pump_due(chrono::Utc::now().timestamp())
+            .await
+            .unwrap();
+        assert_eq!(effects.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let connection = store.test_reader().unwrap();
+        let remaining: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM runtime_outbox WHERE kind='remote_delivery'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0);
+        let result: String = connection
+            .query_row(
+                "SELECT result FROM request_results WHERE id=?1",
+                [&old],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(result.contains("not_applied"));
     }
 
     #[tokio::test]
@@ -3767,7 +4182,15 @@ mod tests {
         );
         let root =
             uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, b"completed-location").to_string();
-        let envelope = super::Envelope::from_value(&serde_json::json!({"requestId":root,"operation":[],"action":"add_location","payload":{"actor":"lead","project":"project","path":"/peer"}})).expect("source envelope");
+        let payload: crate::project_locations::LocationPayload =
+            serde_json::from_str(r#"{"project":"project","path":"/peer"}"#).expect("location");
+        let command = crate::orchestration_wire::OrchestrationCommand::AddLocation(payload);
+        let request = crate::orchestration_wire::OrchestrationRequest {
+            request_id: root.clone(),
+            operation: Vec::new(),
+            command: command.clone(),
+        };
+        let envelope = super::Envelope::from_request(&request).expect("source envelope");
         let canonical =
             super::remote_operation_key("server-outbox", &["peer"], &root, &["add_location"]);
         let imported_root = root.clone();
@@ -3792,8 +4215,7 @@ mod tests {
                 driver
                     .exchange(
                         "peer",
-                        "add_location",
-                        &serde_json::json!({"actor":"lead","project":"project","path":"/peer"}),
+                        command.clone(),
                         &root,
                         chrono::Utc::now().timestamp()
                     )
@@ -3848,7 +4270,7 @@ mod tests {
         for peer in ["peer-a", "peer-b"] {
             assert_eq!(
                 driver
-                    .receive(peer, &request, now)
+                    .receive(peer, &fixture_envelope(&request), now)
                     .await
                     .expect("scoped reply"),
                 super::applied(&serde_json::json!({"owner":peer,"root":root,"operation":[]}))
@@ -3871,7 +4293,7 @@ mod tests {
         for peer in ["peer-a", "peer-b"] {
             assert_eq!(
                 driver
-                    .receive(peer, &request, now)
+                    .receive(peer, &fixture_envelope(&request), now)
                     .await
                     .expect("original reply after restart"),
                 super::applied(&serde_json::json!({"owner":peer,"root":root,"operation":[]}))
@@ -3880,10 +4302,10 @@ mod tests {
         }
         assert_eq!(effects.0.load(std::sync::atomic::Ordering::SeqCst), 2);
         for offset in ["0", "0", "4096", "4096"] {
-            let chunk = serde_json::json!({"requestId":root,"operation":[offset],"action":"chunk","payload":{"offset":offset}});
+            let chunk = serde_json::json!({"requestId":root,"operation":[offset],"action":"chunk","payload":{"export":"bundle","offset":offset.parse::<u64>().unwrap()}});
             assert_eq!(
                 driver
-                    .receive("peer-a", &chunk, now)
+                    .receive("peer-a", &fixture_envelope(&chunk), now)
                     .await
                     .expect("chunk reply"),
                 super::applied(
@@ -3897,21 +4319,21 @@ mod tests {
             4,
             "same-offset chunk retries replay; a new offset executes once"
         );
-        let conflict = serde_json::json!({"requestId":root,"operation":["0"],"action":"chunk","payload":{"offset":"different"}});
+        let conflict = serde_json::json!({"requestId":root,"operation":["0"],"action":"chunk","payload":{"export":"other-bundle","offset":0}});
         assert_eq!(
             driver
-                .receive("peer-a", &conflict, now)
+                .receive("peer-a", &fixture_envelope(&conflict), now)
                 .await
                 .expect_err("content conflicts")
                 .status(),
             409
         );
         let unknown_root = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-        let unknown = serde_json::json!({"requestId":unknown_root,"operation":[],"action":"input","payload":{"unknown":true}});
+        let unknown = serde_json::json!({"requestId":unknown_root,"operation":[],"action":"move_validate","payload":{"unknown":true}});
         for _ in 0..2 {
             assert_eq!(
                 driver
-                    .receive("peer-a", &unknown, now)
+                    .receive("peer-a", &fixture_envelope(&unknown), now)
                     .await
                     .expect("unknown held"),
                 super::ExchangeOutcome::Unknown
@@ -3930,7 +4352,7 @@ mod tests {
             uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, b"retained-peer-request").to_string();
         let retained =
             serde_json::json!({"requestId":legacy,"operation":[],"action":"projects","payload":{}});
-        let signature = super::Envelope::from_value(&retained)
+        let signature = super::Envelope::from_request(&fixture_envelope(&retained))
             .expect("retained envelope")
             .incoming_signature("peer-a")
             .expect("signature");
@@ -3971,7 +4393,7 @@ mod tests {
             .expect("retained result");
         assert_eq!(
             driver
-                .receive("peer-a", &retained, now)
+                .receive("peer-a", &fixture_envelope(&retained), now)
                 .await
                 .expect("retained v5 replay"),
             super::applied(&serde_json::json!({"retained":true})).expect("reply")
@@ -3980,7 +4402,7 @@ mod tests {
         changed["payload"] = serde_json::json!({"changedAfterCutover":true});
         assert_eq!(
             driver
-                .receive("peer-a", &changed, now)
+                .receive("peer-a", &fixture_envelope(&changed), now)
                 .await
                 .expect_err("changed imported fingerprint never executes")
                 .status(),
@@ -3989,7 +4411,7 @@ mod tests {
         let missing = serde_json::json!({"requestId":uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID,b"missing-peer-request").to_string(),"operation":[],"action":"projects","payload":{}});
         assert_eq!(
             driver
-                .receive("peer-a", &missing, now)
+                .receive("peer-a", &fixture_envelope(&missing), now)
                 .await
                 .expect_err("unretained v5 expired")
                 .status(),
@@ -3997,7 +4419,7 @@ mod tests {
         );
         let missing_for_import = missing.clone();
         store.transaction(move|tx|{
-            let envelope=super::Envelope::from_value(&missing_for_import).expect("pending source envelope");
+            let envelope=super::Envelope::from_request(&fixture_envelope(&missing_for_import)).expect("pending source envelope");
             let signature=envelope.incoming_signature("peer-a").expect("source signature");
             let token=serde_json::json!({"id":envelope.root,"signature":signature,"created":chrono::Utc::now().timestamp_millis()});
             tx.execute("INSERT INTO runtime_server_inbox(id,signature,state,result,created_at,principal,actor,admission) VALUES(?1,?2,?3,NULL,?4,'peer-a',NULL,?5)",rusqlite::params![envelope.root,signature,studio_runtime_schema::persistence::ServerDeliveryState::Waiting,now,token.to_string()])?;
@@ -4005,7 +4427,7 @@ mod tests {
         }).await.expect("classified pending source");
         assert_eq!(
             driver
-                .receive("peer-a", &missing, now)
+                .receive("peer-a", &fixture_envelope(&missing), now)
                 .await
                 .expect_err("pending v5 never starts another effect")
                 .status(),
@@ -4020,7 +4442,7 @@ mod tests {
         store.transaction(move|tx|{tx.execute("UPDATE request_results SET created=?1 WHERE json_extract(result,'$.reply.response.requestId')=?2",rusqlite::params![chrono::Utc::now().timestamp_millis()-studio_runtime_schema::persistence::REQUEST_RESULT_TTL_MS-1,root_for_expiry])?;Ok(())}).await.expect("expired cache fixture");
         assert_eq!(
             driver
-                .receive("peer-a", &request, now)
+                .receive("peer-a", &fixture_envelope(&request), now)
                 .await
                 .expect_err("expired reply never resends")
                 .status(),
@@ -4343,7 +4765,7 @@ mod tests {
         let offered = driver
             .receive(
                 "peer-a",
-                &request("offer-1", "update.offer", json!({})),
+                &fixture_envelope(&request("offer-1", "update.offer", json!({}))),
                 100,
             )
             .await
@@ -4356,7 +4778,11 @@ mod tests {
         let other = driver
             .receive(
                 "peer-a",
-                &request("export-0", "update.export", json!({"builtAt": 1.5})),
+                &fixture_envelope(&request(
+                    "export-0",
+                    "update.export",
+                    json!({"builtAt": 1.5}),
+                )),
                 100,
             )
             .await
@@ -4368,11 +4794,11 @@ mod tests {
         let ExchangeOutcome::Applied(meta) = driver
             .receive(
                 "peer-a",
-                &request(
+                &fixture_envelope(&request(
                     "export-1",
                     "update.export",
                     json!({"builtAt": 1792647971.037}),
-                ),
+                )),
                 101,
             )
             .await
@@ -4390,7 +4816,7 @@ mod tests {
         );
         for now in [102, 103] {
             let ExchangeOutcome::Applied(value) = driver
-                .receive("peer-a", &chunk, now)
+                .receive("peer-a", &fixture_envelope(&chunk), now)
                 .await
                 .expect("chunk receipt")
             else {
@@ -4442,7 +4868,7 @@ mod tests {
             driver
                 .receive(
                     "stranger",
-                    &request("offer-2", "update.offer", json!({})),
+                    &fixture_envelope(&request("offer-2", "update.offer", json!({}))),
                     104
                 )
                 .await

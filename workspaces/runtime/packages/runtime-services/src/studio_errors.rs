@@ -586,14 +586,9 @@ fn build(tx: &Transaction<'_>, now: f64) -> Result<(Vec<StudioError>, Baseline),
             SourceOwner::Missing | SourceOwner::Deleted => continue,
         };
         let error = record
-            .extra
-            .get("error")
-            .map(|value| {
-                value
-                    .as_str()
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| value.to_string())
-            })
+            .error
+            .value()
+            .map(|error| error.diagnostic_text())
             .unwrap_or_default();
         let Some(kind) = agent_kind(record.status.as_str(), &error) else {
             continue;
@@ -601,18 +596,18 @@ fn build(tx: &Transaction<'_>, now: f64) -> Result<(Vec<StudioError>, Baseline),
         let turn = record
             .turn_id
             .as_deref()
-            .or_else(|| {
-                record
-                    .extra
-                    .get("lastCompletedTurn")
-                    .and_then(Value::as_str)
-            })
+            .or_else(|| record.last_completed_turn.value().map(String::as_str))
             .map(str::to_owned);
         let at = record
             .activity
             .as_ref()
             .and_then(|activity| activity.at)
-            .or_else(|| record.extra.get("created").and_then(Value::as_f64))
+            .or_else(|| {
+                record
+                    .created
+                    .value()
+                    .and_then(|number| number.number().as_f64())
+            })
             .unwrap_or(0.0);
         push(
             &mut rows,
@@ -1031,14 +1026,9 @@ fn agent_may_change(tx: &Transaction<'_>, id: &str) -> Result<bool, StoreError> 
         SourceOwner::Invalid(_) => return Ok(true),
         SourceOwner::Live(record) => {
             let error = record
-                .extra
-                .get("error")
-                .map(|value| {
-                    value
-                        .as_str()
-                        .map(str::to_owned)
-                        .unwrap_or_else(|| value.to_string())
-                })
+                .error
+                .value()
+                .map(|error| error.diagnostic_text())
                 .unwrap_or_default();
             if agent_kind(record.status.as_str(), &error).is_some() {
                 return Ok(true);

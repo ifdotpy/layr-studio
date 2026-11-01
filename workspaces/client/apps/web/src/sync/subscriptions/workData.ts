@@ -1,4 +1,3 @@
-import { WorkStatus } from "../../generated/api";
 import type { DeepReadonly } from "../../deepReadonly.ts";
 import type { SyncEntityPayload as MutableSyncEntityPayload } from "../../generated/api";
 import type { ReviewTask, WorkList } from "./contracts.ts";
@@ -42,11 +41,6 @@ export function createTaskAssignmentSelector() {
         histories.set(entity.value.taskId, history);
       }
     }
-    const accepted = new Set(
-      metadata
-        .filter((entity) => entity.value.status === WorkStatus.accepted)
-        .map((entity) => entity.id),
-    );
     const next = new Map<string, Assignment>();
     const tasks = metadata.map((entity) => {
       const prior = previous.get(entity.id);
@@ -64,17 +58,8 @@ export function createTaskAssignmentSelector() {
           );
       const sources = [entity, ...history];
       const task = entity.value;
-      const blockedBy =
-        task.dependencies?.filter((id) => !accepted.has(id)) ?? [];
-      const displayStatus =
-        ["ready", "running"].includes(task.status) && blockedBy.length > 0
-          ? "blocked"
-          : task.status;
       if (
         prior &&
-        prior.task.displayStatus === displayStatus &&
-        prior.task.blockedBy?.length === blockedBy.length &&
-        blockedBy.every((id, index) => id === prior.task.blockedBy?.[index]) &&
         prior.sources.length === sources.length &&
         sources.every((row, index) => row === prior.sources[index])
       ) {
@@ -83,8 +68,6 @@ export function createTaskAssignmentSelector() {
       }
       const value: ReviewTask = {
         ...task,
-        displayStatus,
-        blockedBy,
         results: historyUnchanged
           ? (prior.task.results ?? [])
           : history.flatMap((row) =>

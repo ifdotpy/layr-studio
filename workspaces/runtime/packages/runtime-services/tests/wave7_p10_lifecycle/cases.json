@@ -5384,6 +5384,12 @@
             "status": "ready",
             "version": 1,
             "title": "Unrelated",
+            "policy": {
+              "blockedBy": [],
+              "displayStatus": "ready",
+              "acceptAvailable": false,
+              "gateOverrideRequired": false
+            },
             "releases": [],
             "results": [],
             "decisions": [],
@@ -5580,6 +5586,12 @@
             "status": "review",
             "version": 1,
             "title": "Under review",
+            "policy": {
+              "blockedBy": [],
+              "displayStatus": "review",
+              "acceptAvailable": false,
+              "gateOverrideRequired": false
+            },
             "releases": [],
             "results": [],
             "decisions": [],

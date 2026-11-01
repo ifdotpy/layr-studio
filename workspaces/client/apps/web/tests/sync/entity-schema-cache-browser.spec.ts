@@ -22,6 +22,7 @@ import {
   API_SCHEMA_HASH_HEADER,
   apiSchemaHandshakeSse,
   protocol3SseEvent,
+  syncSessionSse,
   readApiSchemaHash,
   spawnFixture,
   rustUiFixture,
@@ -155,11 +156,7 @@ test.describe("legacy schema mismatch", () => {
       sessionStreams.set(frame.sessionId, response);
       response.write(
         apiSchemaHandshakeSse(
-          protocol3SseEvent("session", {
-            sessionId: frame.sessionId,
-            routes: [],
-            workspaceId: frame.workspaceId,
-          } satisfies components["schemas"]["SyncSessionEvent"]) + frame.body,
+          syncSessionSse(frame.sessionId, frame.workspaceId) + frame.body,
           { hash: frame.hash },
         ),
       );
@@ -247,6 +244,7 @@ test.describe("legacy schema mismatch", () => {
         stream.write(
           protocol3SseEvent("subscriptions", {
             gen: change.gen,
+            cachePolicies: [],
           } satisfies components["schemas"]["SyncSubscriptionAck"]),
         );
         if (resources.length)

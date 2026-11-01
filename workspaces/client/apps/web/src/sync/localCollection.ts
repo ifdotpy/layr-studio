@@ -225,8 +225,9 @@ export class LocalCollection {
   }
 
   /** Add cached rows that are absent or older than the cache. Newer rows win. */
-  async hydrate(rows: Row[]) {
+  async hydrate(rows: Row[], isCurrent: () => boolean = () => true) {
     const run = async () => {
+      if (!isCurrent()) return false;
       const added: Row[] = [];
       for (const row of rows) {
         const current = this.rows.get(row.id);
@@ -236,10 +237,11 @@ export class LocalCollection {
         added.push(stored);
       }
       for (const row of added) this.emit(row, "cache");
+      return true;
     };
     const result = this.writes.then(run, run);
     this.writes = result.catch(() => {});
-    await result;
+    return result;
   }
 
   /** Every stored row, tombstones included. */

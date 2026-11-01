@@ -36,7 +36,7 @@ pub enum CoordinationError {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ManagedMessageReply {
     pub id: String,
-    pub status: studio_runtime_schema::persistence::DeliveryStatus,
+    pub status: studio_runtime_schema::delivery::MessageSendStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(
@@ -54,8 +54,9 @@ pub struct GroupMessageReply {
     pub author: String,
     pub text: String,
     pub at: f64,
+    #[serde(serialize_with = "studio_runtime_schema::delivery::serialize_recipient_deliveries")]
     pub deliveries: BTreeMap<String, studio_runtime_schema::persistence::RecipientDelivery>,
-    pub status: studio_runtime_schema::persistence::DeliveryStatus,
+    pub status: studio_runtime_schema::delivery::MessageSendStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -63,15 +64,8 @@ pub struct GroupMessageReply {
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct FollowupMessageReply {
     pub id: String,
-    pub status: FollowupStatus,
+    pub status: studio_runtime_schema::delivery::MessageSendStatus,
     pub error: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-#[serde(untagged)]
-pub enum FollowupStatus {
-    Event(studio_runtime_schema::persistence::EventStatus),
-    Delivery(studio_runtime_schema::persistence::DeliveryStatus),
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
@@ -390,9 +384,8 @@ fn post_managed_message(
 
     // A manual send wakes a stopped agent in the same transaction as the event.
     agent.auto_wake = Some(true);
-    agent.extra.insert("error".to_owned(), Value::Null);
-    agent.extra.insert("complaintMisses".to_owned(), json!(0));
-    agent.extra.remove("nativeFailureHold");
+    agent.error = studio_runtime_schema::queue_command::Field::Null;
+    agent.clear_native_failure_hold();
     capacity_reset(transaction, &mut agent)?;
     studio_runtime_store::AgentRepository::put(transaction, &agent)?;
     let projection = studio_runtime_store::projection_value(&agent);
@@ -426,7 +419,7 @@ fn post_managed_message(
     .map_err(event_write_error)?;
     let result = ManagedMessageReply {
         id: input.id.to_owned(),
-        status: studio_runtime_schema::persistence::DeliveryStatus::Queued,
+        status: studio_runtime_schema::delivery::MessageSendStatus::Queued,
         error: None,
         waiting_for: (!blockers.is_empty()).then_some(blockers),
     };
@@ -609,8 +602,8 @@ fn send_followup_inner(
         let parse =
             || serde::de::value::StrDeserializer::<serde::de::value::Error>::new(&event.status);
         let status = <studio_runtime_schema::persistence::EventStatus as serde::Deserialize>::deserialize(parse())
-            .map(FollowupStatus::Event)
-            .or_else(|_| <studio_runtime_schema::persistence::DeliveryStatus as serde::Deserialize>::deserialize(parse()).map(FollowupStatus::Delivery))
+            .map(studio_runtime_schema::delivery::MessageSendStatus::from)
+            .or_else(|_| <studio_runtime_schema::persistence::DeliveryStatus as serde::Deserialize>::deserialize(parse()).map(studio_runtime_schema::delivery::MessageSendStatus::from))
             .map_err(|_| invalid_stored("runtime_events", id))?;
         return Ok(PostMessageResult {
             receipt: PostMessageReceipt::Followup(FollowupMessageReply {
@@ -623,9 +616,8 @@ fn send_followup_inner(
     }
     if sender_identity.is_some() {
         recipient.auto_wake = Some(true);
-        recipient.extra.insert("error".into(), Value::Null);
-        recipient.extra.insert("complaintMisses".into(), json!(0));
-        recipient.extra.remove("nativeFailureHold");
+        recipient.error = studio_runtime_schema::queue_command::Field::Null;
+        recipient.clear_native_failure_hold();
         capacity_reset(transaction, &mut recipient)?;
         studio_runtime_store::AgentRepository::put(transaction, &recipient)?;
         let projection = studio_runtime_store::projection_value(&recipient);
@@ -658,7 +650,7 @@ fn send_followup_inner(
     .map_err(event_write_error)?;
     let receipt = ManagedMessageReply {
         id: id.to_owned(),
-        status: studio_runtime_schema::persistence::DeliveryStatus::Queued,
+        status: studio_runtime_schema::delivery::MessageSendStatus::Queued,
         error: None,
         waiting_for: (!blockers.is_empty()).then_some(blockers),
     };
@@ -700,10 +692,9 @@ fn require_not_excluded(
 ) -> Result<(), CoordinationError> {
     let account = agent.account_key.as_str();
     if root
-        .extra
-        .get("excludedAccountKeys")
-        .and_then(Value::as_array)
-        .is_some_and(|keys| keys.iter().any(|key| key.as_str() == Some(account)))
+        .excluded_account_keys
+        .value()
+        .is_some_and(|keys| keys.iter().any(|key| key == account))
     {
         return Err(CoordinationError::InvalidRequest(
             "This account is disabled for this chat",
@@ -729,10 +720,7 @@ fn assert_native_thread_open(
         })
         .is_some()
         || (thread.is_some()
-            && agent
-                .extra
-                .get("error")
-                .is_some_and(is_misalignment_policy_violation))
+            && agent.error.value().is_some_and(|error| error.known_kind() == Some(studio_runtime_schema::provider_errors::KnownCodexErrorKind::MisalignmentPolicyViolation)))
         || (thread.is_some()
             && agent
                 .extra
@@ -825,9 +813,9 @@ pub fn post_message(
         ));
     };
     let text = input.text.trim();
-    if !(1..=12_000).contains(&text.chars().count()) {
+    if text.is_empty() || !message_text_within_limit(text) {
         return Err(CoordinationError::InvalidRequest(
-            "Use a message with 1 to 12000 characters.",
+            "Use a message within the allowed character limit.",
         ));
     }
     let members = group.members.clone();
@@ -1013,6 +1001,7 @@ pub struct ValidatedMessage {
     pub author: String,
     pub text: String,
     pub at: f64,
+    #[serde(serialize_with = "studio_runtime_schema::delivery::serialize_recipient_deliveries")]
     pub deliveries: BTreeMap<String, studio_runtime_schema::persistence::RecipientDelivery>,
 }
 
@@ -1097,7 +1086,7 @@ fn message_receipt(message: ValidatedMessage, newly_queued: bool) -> GroupMessag
         text: message.text,
         at: message.at,
         deliveries: message.deliveries,
-        status,
+        status: status.into(),
         error,
     }
 }
@@ -1165,7 +1154,7 @@ mod tests {
              CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT,kind TEXT,text TEXT,status TEXT,created REAL,epoch INTEGER,turn_id TEXT,error TEXT);
              CREATE TABLE runtime_event_meta(id TEXT PRIMARY KEY,record TEXT NOT NULL);
              CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-             CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+             CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
              CREATE TABLE sync_entities(collection TEXT NOT NULL,id TEXT NOT NULL,seq INTEGER NOT NULL,hash TEXT NOT NULL,payload TEXT,deleted INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(collection,id));
              CREATE TABLE sync_documents(seq INTEGER PRIMARY KEY AUTOINCREMENT,scope TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,deleted INTEGER NOT NULL DEFAULT 0);
              CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);")
@@ -1268,11 +1257,9 @@ mod tests {
         .expect("lead lookup succeeds")
         .expect("lead exists");
         lead.auto_wake = Some(true);
-        lead.extra.insert("profileId".into(), json!("profile-1"));
-        lead.extra.insert(
-            "profileInstructions".into(),
-            json!("Use the project profile."),
-        );
+        lead.profile_id = studio_runtime_schema::queue_command::Field::Value("profile-1".into());
+        lead.profile_instructions =
+            studio_runtime_schema::queue_command::Field::Value("Use the project profile.".into());
         studio_runtime_store::AgentRepository::put(&connection, &lead)
             .expect("profile fields persist");
 
@@ -1298,10 +1285,13 @@ mod tests {
         )
         .expect("lead lookup succeeds after write")
         .expect("lead remains");
-        assert_eq!(saved.extra.get("profileId"), Some(&json!("profile-1")));
         assert_eq!(
-            saved.extra.get("profileInstructions"),
-            Some(&json!("Use the project profile."))
+            saved.profile_id.value().map(String::as_str),
+            Some("profile-1")
+        );
+        assert_eq!(
+            saved.profile_instructions.value().map(String::as_str),
+            Some("Use the project profile.")
         );
     }
 
@@ -1741,7 +1731,7 @@ mod tests {
         let first = post(&mut connection, "Hello").expect("message writes");
         assert_eq!(
             first.status,
-            studio_runtime_schema::persistence::DeliveryStatus::Queued
+            studio_runtime_schema::delivery::MessageSendStatus::Queued
         );
         assert_eq!(
             first.deliveries["worker"].status,
@@ -1759,7 +1749,7 @@ mod tests {
         let replay = post(&mut connection, "Hello").expect("exact replay returns receipt");
         assert_eq!(
             replay.status,
-            studio_runtime_schema::persistence::DeliveryStatus::Delivered,
+            studio_runtime_schema::delivery::MessageSendStatus::Delivered,
             "retry reflects the current delivery state"
         );
         assert!(matches!(
@@ -1838,13 +1828,21 @@ mod tests {
             reply: first.clone(),
             references: Vec::new(),
         };
+        let mut legacy = json!(&old);
+        for delivery in legacy["reply"]["deliveries"]
+            .as_object_mut()
+            .unwrap()
+            .values_mut()
+        {
+            delivery["status"] = json!("pending");
+        }
         connection
             .execute(
                 "INSERT INTO request_results(id,signature,result,created) VALUES(?1,?2,?3,?4)",
                 rusqlite::params![
                     id,
                     signature,
-                    serde_json::to_string(&old).unwrap(),
+                    serde_json::to_string(&legacy).unwrap(),
                     chrono::Utc::now().timestamp_millis()
                 ],
             )
@@ -2042,7 +2040,7 @@ mod tests {
         .expect("message writes");
         assert_eq!(
             receipt.status,
-            studio_runtime_schema::persistence::DeliveryStatus::Queued
+            studio_runtime_schema::delivery::MessageSendStatus::Queued
         );
         assert_eq!(
             receipt.deliveries["lead"].status,

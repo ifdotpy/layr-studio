@@ -28,7 +28,8 @@
       "yoloMode": false,
       "compactions": 0,
       "events": 0,
-      "complaintsPresented": [],
+      "capacity": { "kind": "automatic", "max": 64 },
+      "naming": "automatic",
       "cyberAccessProgram": null,
       "startAttempt": {
         "$ref": 0
@@ -644,7 +645,8 @@
       "yoloMode": false,
       "compactions": 0,
       "events": 0,
-      "complaintsPresented": [],
+      "capacity": { "kind": "automatic", "max": 64 },
+      "naming": "automatic",
       "cyberAccessProgram": null,
       "inFlight": true,
       "claudePreInputRetry": {
@@ -858,7 +860,8 @@
       "yoloMode": false,
       "compactions": 0,
       "events": 0,
-      "complaintsPresented": [],
+      "capacity": { "kind": "automatic", "max": 64 },
+      "naming": "automatic",
       "cyberAccessProgram": null,
       "inFlight": true,
       "turnId": null,

@@ -1,7 +1,8 @@
-//! Task mutation ingress owner. Receipt signatures continue to use the original
-//! transport JSON, so decoding never rewrites decimal numbers, omission or null.
+//! Task mutation ingress owner. Receipt signatures use canonical typed request
+//! serialization; retries issued before this change may be refused as mismatches.
 
 use crate::queue_command::Field;
+use crate::{bounded_text::BoundedText, continuation_snapshot::BoundedVec};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -83,16 +84,19 @@ impl<'de> Deserialize<'de> for Version {
 /// let version = Version(-1); // Ingress validation cannot be bypassed.
 /// ```
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "action", rename_all = "snake_case")]
-pub enum TaskCommand {
-    List,
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TaskCommand<
+    const DESCRIPTION_MAX: usize = MAX_HTTP_DESCRIPTION_CODEPOINTS,
+    const CANCEL_MAX: usize = MAX_HTTP_CANCEL_REASON_CODEPOINTS,
+> {
+    List {},
     Create {
         #[schemars(length(min = 1, max = MAX_TITLE_CODEPOINTS))]
-        title: String,
+        title: BoundedText<1, MAX_TITLE_CODEPOINTS>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[schemars(length(max = MAX_HTTP_DESCRIPTION_CODEPOINTS))]
         #[schemars(transform = tool_non_null)]
-        description: Option<String>,
+        description: Option<BoundedText<0, DESCRIPTION_MAX>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         owner: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -100,7 +104,7 @@ pub enum TaskCommand {
         status: Option<InitialStatus>,
         #[serde(default)]
         #[schemars(length(max = MAX_DEPENDENCIES))]
-        dependencies: Vec<String>,
+        dependencies: BoundedVec<String, MAX_DEPENDENCIES>,
         #[serde(default, skip_serializing_if = "Field::is_missing")]
         #[schemars(with = "Option<Value>")]
         result_schema: Field<Value>,
@@ -115,11 +119,11 @@ pub enum TaskCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[schemars(length(min = 1, max = MAX_TITLE_CODEPOINTS))]
         #[schemars(transform = tool_non_null)]
-        title: Option<String>,
+        title: Option<BoundedText<1, MAX_TITLE_CODEPOINTS>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[schemars(length(max = MAX_HTTP_DESCRIPTION_CODEPOINTS))]
         #[schemars(transform = tool_non_null)]
-        description: Option<String>,
+        description: Option<BoundedText<0, DESCRIPTION_MAX>>,
         #[serde(default, skip_serializing_if = "Field::is_missing")]
         #[schemars(with = "Option<String>")]
         owner: Field<String>,
@@ -129,7 +133,7 @@ pub enum TaskCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[schemars(length(max = MAX_DEPENDENCIES))]
         #[schemars(transform = tool_non_null)]
-        dependencies: Option<Vec<String>>,
+        dependencies: Option<BoundedVec<String, MAX_DEPENDENCIES>>,
         #[serde(default, skip_serializing_if = "Field::is_missing")]
         #[schemars(with = "Option<Value>")]
         result_schema: Field<Value>,
@@ -142,14 +146,14 @@ pub enum TaskCommand {
         #[serde(default)]
         version: Option<Version>,
         #[schemars(length(min = 1, max = MAX_TOOL_CANCEL_REASON_CODEPOINTS))]
-        reason: String,
+        reason: BoundedText<1, CANCEL_MAX>,
     },
     Reject {
         task_id: String,
         #[serde(default)]
         version: Option<Version>,
         #[schemars(length(min = 1, max = MAX_REVIEW_CODEPOINTS))]
-        result: String,
+        result: BoundedText<1, MAX_REVIEW_CODEPOINTS>,
     },
     Claim {
         task_id: String,
@@ -164,28 +168,38 @@ pub enum TaskCommand {
         version: Option<Version>,
         result: Value,
         #[schemars(length(max = MAX_CHECKS_CODEPOINTS))]
-        checks: String,
+        checks: BoundedText<0, MAX_CHECKS_CODEPOINTS>,
         #[schemars(length(max = MAX_REVISION_CODEPOINTS))]
-        revision: String,
+        revision: BoundedText<0, MAX_REVISION_CODEPOINTS>,
         #[serde(default)]
         #[schemars(length(max = MAX_FILES))]
-        files: Vec<String>,
+        files: BoundedVec<String, MAX_FILES>,
     },
     Accept {
         task_id: String,
         #[serde(default)]
         version: Option<Version>,
         #[schemars(length(min = 1, max = MAX_REVIEW_CODEPOINTS))]
-        result: String,
+        result: BoundedText<1, MAX_REVIEW_CODEPOINTS>,
         #[serde(default)]
         #[schemars(length(min = 1, max = crate::task_gate::MAX_TEXT_CODEPOINTS))]
-        override_reason: Option<String>,
+        override_reason: Option<BoundedText<1, { crate::task_gate::MAX_TEXT_CODEPOINTS }>>,
     },
     SetDefaultGate {
         #[schemars(required)]
+        #[serde(deserialize_with = "deserialize_required_gate")]
         gate: Option<crate::task_gate::GateInput>,
     },
 }
+
+fn deserialize_required_gate<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<crate::task_gate::GateInput>, D::Error> {
+    Option::deserialize(deserializer)
+}
+
+pub type ToolTaskCommand =
+    TaskCommand<MAX_TOOL_DESCRIPTION_CODEPOINTS, MAX_TOOL_CANCEL_REASON_CODEPOINTS>;
 
 impl TaskCommand {
     pub fn parse(value: &Value) -> Result<Self, String> {
@@ -195,15 +209,19 @@ impl TaskCommand {
     }
 
     /// The agent transport retains its historical description and reason budgets.
-    pub fn parse_tool(value: &Value) -> Result<Self, String> {
+    pub fn parse_tool(value: &Value) -> Result<ToolTaskCommand, String> {
         static CONTRACT: std::sync::OnceLock<(Value, crate::Validator)> =
             std::sync::OnceLock::new();
-        Self::parse_contract(
+        ToolTaskCommand::parse_contract(
             value,
             CONTRACT.get_or_init(|| compiled_contract(tool_schema())),
         )
     }
+}
 
+impl<const DESCRIPTION_MAX: usize, const CANCEL_MAX: usize>
+    TaskCommand<DESCRIPTION_MAX, CANCEL_MAX>
+{
     fn parse_contract(
         value: &Value,
         (schema, validator): &(Value, crate::Validator),
@@ -235,11 +253,15 @@ impl TaskCommand {
                 );
             }
         }
-        let command = Self::deserialize(value).map_err(|error| error.to_string())?;
         if !validator.is_valid(value) {
             return Err("Invalid task command field or bound".into());
         }
-        Ok(command)
+        let mut fields = value.as_object().cloned().ok_or("Invalid task command")?;
+        let properties = variant["properties"]
+            .as_object()
+            .ok_or("Invalid task command schema")?;
+        fields.retain(|name, _| name != "agent" && name != "id" && properties.contains_key(name));
+        Self::deserialize(Value::Object(fields)).map_err(|error| error.to_string())
     }
 }
 
@@ -282,6 +304,12 @@ fn schema_with_bounds(
         .as_array_mut()
         .expect("tagged command variants")
     {
+        if reject_consumed_null {
+            variant
+                .as_object_mut()
+                .expect("command variant")
+                .remove("additionalProperties");
+        }
         let properties = variant["properties"]
             .as_object_mut()
             .expect("command properties");
@@ -554,8 +582,10 @@ mod tests {
         for token in ["x", "🙂"] {
             for action in ["create", "update"] {
                 for (size, valid) in [(160, true), (161, false)] {
-                    let value =
-                        json!({"action":action,"task_id":"task","title":token.repeat(size)});
+                    let mut value = json!({"action":action,"title":token.repeat(size)});
+                    if action == "update" {
+                        value["task_id"] = json!("task");
+                    }
                     assert_eq!(TaskCommand::parse(&value).is_ok(), valid);
                     assert_eq!(TaskCommand::parse_tool(&value).is_ok(), valid);
                 }
@@ -565,12 +595,19 @@ mod tests {
                     (64000, true, false),
                     (64001, false, false),
                 ] {
-                    let value = json!({"action":action,"task_id":"task","title":"Task","description":token.repeat(size)});
+                    let mut value =
+                        json!({"action":action,"title":"Task","description":token.repeat(size)});
+                    if action == "update" {
+                        value["task_id"] = json!("task");
+                    }
                     assert_eq!(TaskCommand::parse(&value).is_ok(), http);
                     assert_eq!(TaskCommand::parse_tool(&value).is_ok(), tool);
                 }
                 for field in ["description", "status"] {
-                    let mut value = json!({"action":action,"task_id":"task","title":"Task"});
+                    let mut value = json!({"action":action,"title":"Task"});
+                    if action == "update" {
+                        value["task_id"] = json!("task");
+                    }
                     value[field] = Value::Null;
                     assert!(TaskCommand::parse(&value).is_ok());
                     assert!(TaskCommand::parse_tool(&value).is_err());
@@ -592,7 +629,7 @@ mod tests {
             json!({"action":"cancel","task_id":"task","reason":"done","description":"x".repeat(32001)}),
             json!({"action":"create","title":"Task","reason":null}),
         ] {
-            assert!(TaskCommand::parse(&value).is_ok());
+            assert!(TaskCommand::parse(&value).is_err());
             assert!(TaskCommand::parse_tool(&value).is_ok());
         }
     }

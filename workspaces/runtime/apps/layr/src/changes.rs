@@ -8,6 +8,7 @@ use crate::fsutil::{self, Meta, Src};
 use crate::storage as btrfs;
 use crate::stream;
 use anyhow::Result;
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
@@ -36,9 +37,7 @@ impl Change {
 #[cfg(all(target_os = "linux", not(feature = "overlayfs")))]
 pub fn candidates(parent: &(impl Src + ?Sized), child: &(impl Src + ?Sized)) -> Result<Vec<Change>> {
     let (parent, child) = (folder(parent)?, folder(child)?);
-    let data = btrfs::send_no_data(parent, child)?;
-    let cmds = stream::parse(&data)?;
-    let entries = stream::entries(&cmds);
+    let entries = btrfs::send_no_data(parent, child)?;
     build(parent, child, entries)
 }
 
@@ -82,12 +81,20 @@ fn build(parent: &Path, child: &Path, entries: Vec<stream::Entry>) -> Result<Vec
             (None, None) => {}
         }
     }
-    // Content below a moved folder moved too.
-    for (o, p) in moved_dirs {
+    // Content below a moved folder moved too. One walk per outermost moved folder; a folder
+    // moved inside it again maps its own files (the longest moved prefix of a path wins).
+    let map: BTreeMap<String, String> = moved_dirs.iter().map(|(o, p)| (p.clone(), o.clone())).collect();
+    let roots: Vec<&String> = map
+        .keys()
+        .filter(|p| !p.match_indices('/').any(|(i, _)| map.contains_key(&p[..i])))
+        .collect();
+    for p in roots {
         let mut found: Vec<(String, String)> = Vec::new();
-        fsutil::walk(child, &p, &mut |rel, _m| {
-            let tail = &rel[p.len() + 1..];
-            found.push((format!("{o}/{tail}"), rel.to_string()));
+        fsutil::walk(child, p, &mut |rel, _m| {
+            let Some((top, from)) = rel.rmatch_indices('/').find_map(|(i, _)| map.get(&rel[..i]).map(|o| (i, o))) else {
+                return Ok(true);
+            };
+            found.push((format!("{from}/{}", &rel[top + 1..]), rel.to_string()));
             Ok(true)
         })?;
         for (src, dst) in found {
@@ -158,14 +165,28 @@ pub fn really_changed(parent: &(impl Src + ?Sized), child: &(impl Src + ?Sized),
     // APFS also uses kernel clone IDs; live status reads validate generations.
     #[cfg(any(target_os = "macos", feature = "overlayfs"))]
     if o.is_file() && o.size == n.size && c.ranges.as_ref().is_some_and(|ranges| ranges.is_empty()) {
-        return Ok(false);
+        return Ok(!stored_same(parent, child, &c.path));
     }
-    Ok(!fsutil::same_entry(parent, c.src(), child, &c.path, c.ranges.as_deref())?)
+    let equal = fsutil::same_entry(parent, c.src(), child, &c.path, c.ranges.as_deref())?;
+    Ok(!equal || (o.is_file() && !stored_same(parent, child, &c.path)))
+}
+
+/// True when two files hold the same extended attributes and ACL (APFS; else always).
+#[cfg(target_os = "macos")]
+fn stored_same(parent: &(impl Src + ?Sized), child: &(impl Src + ?Sized), path: &str) -> bool {
+    match (parent.at(path), child.at(path)) {
+        (Ok(a), Ok(b)) => crate::thin::stored_metadata_same(&a, &b).unwrap_or(false),
+        _ => true,
+    }
+}
+#[cfg(not(target_os = "macos"))]
+fn stored_same(_: &(impl Src + ?Sized), _: &(impl Src + ?Sized), _: &str) -> bool {
+    true
 }
 
 /// File level changes (folders dropped), confirmed by content. A move keeps `old_path`.
 pub fn file_changes(parent: &(impl Src + ?Sized), child: &(impl Src + ?Sized)) -> Result<Vec<Change>> {
-    file_changes_of(parent, child, candidates(parent, child)?)
+    file_changes_of(parent, child, candidates_equal(parent, child)?)
 }
 
 /// File level changes of a candidate list (`file_changes`).
@@ -236,25 +257,33 @@ pub fn with_renames(parent: &(impl Src + ?Sized), child: &(impl Src + ?Sized), v
     let mut pairs: Vec<(usize, usize)> = Vec::new();
     let mut used_d: HashSet<usize> = HashSet::new();
     let mut used_a: HashSet<usize> = HashSet::new();
-    // Exact: same size and same bytes.
-    let mut by_size: HashMap<u64, Vec<usize>> = HashMap::new();
+    // Exact: same size and same bytes. Each candidate is read and hashed once; the chosen pair
+    // is compared byte by byte.
+    let hash = |bytes: &[u8]| -> [u8; 32] { Sha256::digest(bytes).into() };
+    let mut by_key: HashMap<(u64, [u8; 32]), Vec<usize>> = HashMap::new();
+    let del_sizes: HashSet<u64> = dels.iter().map(|&d| v[d].old.as_ref().unwrap().size).collect();
+    let add_sizes: HashSet<u64> = adds.iter().map(|&a| v[a].new.as_ref().unwrap().size).collect();
     for &d in &dels {
-        by_size.entry(v[d].old.as_ref().unwrap().size).or_default().push(d);
+        let size = v[d].old.as_ref().unwrap().size;
+        if add_sizes.contains(&size) {
+            if let Some(x) = read_parent(&v[d].path) {
+                by_key.entry((size, hash(&x))).or_default().push(d);
+            }
+        }
     }
     for &a in &adds {
         let size = v[a].new.as_ref().unwrap().size;
-        if let Some(ds) = by_size.get(&size) {
-            let ad = match read_child(&v[a].path) {
-                Some(x) => x,
-                None => continue,
-            };
-            for &d in ds {
-                if !used_d.contains(&d) && read_parent(&v[d].path).as_ref() == Some(&ad) {
-                    pairs.push((d, a));
-                    used_d.insert(d);
-                    used_a.insert(a);
-                    break;
-                }
+        if !del_sizes.contains(&size) {
+            continue;
+        }
+        let Some(ad) = read_child(&v[a].path) else { continue };
+        let Some(ds) = by_key.get(&(size, hash(&ad))) else { continue };
+        for &d in ds {
+            if !used_d.contains(&d) && read_parent(&v[d].path).as_ref() == Some(&ad) {
+                pairs.push((d, a));
+                used_d.insert(d);
+                used_a.insert(a);
+                break;
             }
         }
     }
@@ -316,6 +345,18 @@ pub fn candidates(parent: &(impl Src + ?Sized), child: &(impl Src + ?Sized)) -> 
     crate::storage::candidates(parent, child)
 }
 
+/// Candidates for a caller that only asks whether content differs: APFS then skips the exact
+/// ranges of changed files. Other backends have the ranges from their stream at no cost.
+#[cfg(target_os = "macos")]
+fn candidates_equal(parent: &(impl Src + ?Sized), child: &(impl Src + ?Sized)) -> Result<Vec<Change>> {
+    crate::storage::candidates_equal(parent, child)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn candidates_equal(parent: &(impl Src + ?Sized), child: &(impl Src + ?Sized)) -> Result<Vec<Change>> {
+    candidates(parent, child)
+}
+
 #[cfg(feature = "overlayfs")]
 pub fn candidates(parent: &(impl Src + ?Sized), child: &(impl Src + ?Sized)) -> Result<Vec<Change>> {
     crate::storage::candidates(folder(parent)?, folder(child)?)
@@ -325,4 +366,52 @@ pub fn candidates(parent: &(impl Src + ?Sized), child: &(impl Src + ?Sized)) -> 
 #[cfg(not(target_os = "macos"))]
 fn folder(s: &(impl Src + ?Sized)) -> Result<&Path> {
     s.folder().ok_or_else(|| anyhow::anyhow!("a layered tree exists only on APFS"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A folder that counts the reads of its files.
+    struct Counting(PathBuf, AtomicUsize);
+    impl Src for Counting {
+        fn at(&self, rel: &str) -> Result<PathBuf> {
+            self.1.fetch_add(1, Ordering::Relaxed);
+            fsutil::safe_join(&self.0, rel)
+        }
+        fn folder(&self) -> Option<&Path> {
+            Some(&self.0)
+        }
+    }
+
+    fn meta(size: u64) -> Meta {
+        Meta { ftype: fsutil::FType::File, mode: 0o644, size, ino: 0, uid: 0, gid: 0, mtime: 0 }
+    }
+
+    /// Exact rename search reads each candidate once, not once per pair of candidates.
+    #[test]
+    fn exact_renames_read_each_candidate_once() {
+        let tmp = std::env::temp_dir().join(format!("layr-renames-{}", crate::ids::new_id()));
+        let (p, c) = (tmp.join("p"), tmp.join("c"));
+        std::fs::create_dir_all(&p).unwrap();
+        std::fs::create_dir_all(&c).unwrap();
+        let n = 30;
+        let mut changes = Vec::new();
+        for i in 0..n {
+            // All files have the same size and different bytes.
+            std::fs::write(p.join(format!("old{i}")), format!("{i:08}")).unwrap();
+            std::fs::write(c.join(format!("new{i}")), format!("{:08}", n - 1 - i)).unwrap();
+            changes.push(Change { path: format!("old{i}"), old_path: None, old: Some(meta(8)), new: None, ranges: None });
+            changes.push(Change { path: format!("new{i}"), old_path: None, old: None, new: Some(meta(8)), ranges: None });
+        }
+        let (parent, child) = (Counting(p, AtomicUsize::new(0)), Counting(c, AtomicUsize::new(0)));
+        let out = with_renames(&parent, &child, changes);
+        let moves = out.iter().filter(|c| c.old_path.is_some()).count();
+        assert_eq!(moves, n, "every file pairs with its equal");
+        let reads = parent.1.load(Ordering::Relaxed) + child.1.load(Ordering::Relaxed);
+        assert!(reads <= 4 * n + 2, "{reads} reads for {n} + {n} candidates");
+        std::fs::remove_dir_all(tmp).unwrap();
+    }
 }

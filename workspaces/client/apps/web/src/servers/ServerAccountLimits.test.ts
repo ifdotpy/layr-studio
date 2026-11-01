@@ -4,6 +4,7 @@ import { Accordion, MantineProvider } from "@mantine/core";
 import { expect, test } from "vitest";
 import { accountLimitView } from "../components/AccountTiles";
 import { AccountCapacityView, type Account } from "../components/Accounts";
+import { projectedLimits } from "../usage/accountLimits.fixture";
 import type { AccountLimitsSnapshot } from "../usage/accountUsage";
 import {
   AccountLimitsAcrossServers,
@@ -142,7 +143,13 @@ test("one reading shows one remaining limit with its age and server", () => {
     createElement(AccountCapacityView, {
       card: true,
       account: owner,
-      view: accountLimitView(owner, limits("b", 200, 67), 300),
+      view: accountLimitView(
+        owner,
+        limits("b", 200, 67),
+        300,
+        true,
+        projectedLimits("b", 200, null),
+      ),
       note: "Updated 1 min ago on Igor MBP",
     }),
   );

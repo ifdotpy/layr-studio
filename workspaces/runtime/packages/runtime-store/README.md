@@ -229,7 +229,7 @@ committed snapshot; it includes both typed-record and specialized SQL tables):
   `runtime_access_clients`, `runtime_access_invites`,
   `runtime_access_local_alias`, `runtime_access_name_requests`,
   `runtime_access_name_targets`, `runtime_access_nonces`,
-  `runtime_access_outbound`, `runtime_access_receipts`.
+  `runtime_access_receipts`.
 - Accounts and agents: `runtime_account_transfers`, `runtime_agent_moves`,
   `runtime_agent_record_generation`, `runtime_annotations`, `runtime_assets`,
   `runtime_budget`, `runtime_capacity_retries`,
@@ -240,7 +240,7 @@ committed snapshot; it includes both typed-record and specialized SQL tables):
   `runtime_execution_effects`, `runtime_execution_inputs`,
   `runtime_execution_nodes`, `runtime_execution_runs`.
 - Federation: `runtime_federation_identity`, `runtime_federation_inbox`,
-  `runtime_federation_invites`, `runtime_federation_outbox`,
+  `runtime_federation_invites`,
   `runtime_federation_peers`, `runtime_federation_rooms`,
   `runtime_federation_settings`.
 - Items and operations: `runtime_item_fulltext`, `runtime_items`,
@@ -251,8 +251,8 @@ committed snapshot; it includes both typed-record and specialized SQL tables):
   `runtime_scheduler_agent_changes`.
 - Search: `runtime_search_next`, `runtime_search_next_meta`,
   `runtime_search_rollout` and FTS-owned shadows.
-- Server: `runtime_server_fetch`, `runtime_server_inbox`,
-  `runtime_server_links`, `runtime_server_outbox`,
+- Server: `runtime_server_inbox`,
+  `runtime_server_links`,
   `runtime_server_output_tools`, `runtime_server_retired`,
   `runtime_sidebar_order`.
 - Tools and turns: `runtime_tool_request_aliases`, `runtime_tool_requests`,

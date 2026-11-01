@@ -118,6 +118,7 @@ test("ux support ui", async ({ page: runnerPage }) => {
         return route.fulfill({
           json: {
             processes: [],
+            activities: [],
             responseTarget: null,
           } satisfies components["schemas"]["ProcessList"],
         });

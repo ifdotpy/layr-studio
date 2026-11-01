@@ -86,6 +86,14 @@ impl RecoverySnapshot {
     pub fn record(&self) -> &Value {
         self.agent.as_ref()
     }
+    pub(crate) fn turn_epoch_matches(&self) -> bool {
+        self.typed
+            .turn_epoch
+            .as_ref()
+            .unwrap_or(&self.typed.epoch)
+            .get()
+            == self.typed.epoch.get()
+    }
     pub fn start_attempt(&self) -> &Value {
         self.agent
             .get("startAttempt")
@@ -383,7 +391,7 @@ fn eligibility(a: &Value, typed: &RecoveryAgentRecord) -> Eligibility {
     let c = &a["connectionRecovery"];
     let inactive = !typed.in_flight.unwrap_or(false);
     let stopped = inactive && !typed.auto_wake.unwrap_or(false);
-    let turn_epoch = a.get("turnEpoch").unwrap_or(&a["epoch"]) == &a["epoch"];
+    let turn_epoch = typed.turn_epoch.as_ref().unwrap_or(&typed.epoch).get() == typed.epoch.get();
     let orphan_busy = typed.in_flight.unwrap_or(false)
         && !typed.turn_id.as_deref().is_some_and(|s| !s.is_empty())
         && !has(a, "startAttempt")
@@ -772,6 +780,13 @@ mod unbounded_batch_tests {
 mod connection_recovery_identity_tests {
     use super::connection_recovery_id;
     use serde_json::json;
+
+    #[test]
+    fn capacity_normalization_keeps_connection_recovery_identity() {
+        let old = json!({"id":"a","epoch":4,"accountKey":"acct","threadId":"t","turnId":"u","maxAgents":80,"maxAgentsExplicit":true});
+        let new = json!({"id":"a","epoch":4,"accountKey":"acct","threadId":"t","turnId":"u","capacity":{"kind":"explicit","max":80}});
+        assert_eq!(connection_recovery_id(&old), connection_recovery_id(&new));
+    }
 
     #[test]
     fn a_new_disconnect_cannot_reuse_an_old_connection_recovery_receipt() {

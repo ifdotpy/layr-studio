@@ -9,7 +9,11 @@ async fn change_agent(state: &State, key: &'static str, value: Value) {
             store
                 .transaction_with(move |tx| {
                     let mut row = AgentRepository::get(tx, &AgentId::from(id.as_str()))?.unwrap();
-                    row.extra.insert(key.into(), value);
+                    if key == "nativeRelease" {
+                        row.native_release = Some(serde::Deserialize::deserialize(value).unwrap());
+                    } else {
+                        row.extra.insert(key.into(), value);
+                    }
                     AgentRepository::put(tx, &row)?;
                     Ok::<_, WorkerError>(())
                 })
@@ -103,7 +107,11 @@ async fn compiler_dependencies_and_late_holds_are_checked_before_commit() {
                             "contextRepair" => (mutation_name,json!({"phase":"unknown"})),
                             _ => (mutation_name,json!("transfer")),
                         };
-                        row.extra.insert(key.into(),value);
+                        if key == "accountTransferId" {
+                            row.account_transfer_id = serde::Deserialize::deserialize(value).expect("typed transfer id");
+                        } else {
+                            row.extra.insert(key.into(),value);
+                        }
                         AgentRepository::put(tx,&row)?;
                     }
                 }
@@ -353,7 +361,7 @@ async fn missing_native_effort_uses_shared_catalog_published_after_construction(
                 .transaction_with(move |tx| {
                     let mut agent =
                         AgentRepository::get(tx, &AgentId::from(update_id.as_str()))?.unwrap();
-                    agent.extra.remove("nativeEffort");
+                    agent.native_effort = studio_runtime_schema::queue_command::Field::Missing;
                     AgentRepository::put(tx, &agent)
                 })
                 .await?;
@@ -502,7 +510,7 @@ async fn cold_and_expired_catalogs_hold_the_attempt_without_failing_it() {
                     .transaction_with(move |tx| {
                         let mut row =
                             AgentRepository::get(tx, &AgentId::from(id.as_str()))?.unwrap();
-                        row.extra.remove("nativeEffort");
+                        row.native_effort = studio_runtime_schema::queue_command::Field::Missing;
                         AgentRepository::put(tx, &row)?;
                         Ok::<_, WorkerError>(())
                     })
@@ -619,8 +627,9 @@ async fn continuation_gate_refuses_a_preexisting_admission_hold() {
                     let mut row =
                         AgentRepository::get(tx, &AgentId::from(update_agent_id.as_str()))?
                             .unwrap();
-                    row.extra
-                        .insert("accountTransferId".into(), json!("transfer"));
+                    row.account_transfer_id = studio_runtime_schema::queue_command::Field::Value(
+                        "transfer".to_owned().try_into().unwrap(),
+                    );
                     AgentRepository::put(tx, &row)
                 })
                 .await?;
@@ -717,7 +726,7 @@ async fn tagged_radio_answer_claims_as_ordinary_input_without_a_hold() {
             let held = store
                 .transaction_with(move |tx| {
                     let row = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?.unwrap();
-                    Ok::<_, WorkerError>(row.extra.contains_key("nativeFailureHold"))
+                    Ok::<_, WorkerError>(!row.native_failure_hold.is_missing())
                 })
                 .await?;
             assert!(!held, "no permanent hold is written");

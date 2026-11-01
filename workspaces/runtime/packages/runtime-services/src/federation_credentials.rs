@@ -570,16 +570,9 @@ fn public_identity(identity: &StoredMultiServerIdentity, origin: Option<&str>) -
 }
 
 fn validate_stored_name(label: &str) -> Result<(), CredentialError> {
-    if studio_runtime_schema::validate(
-        "RenameServer",
-        &json!({"label": label, "requestId": "recovery"}),
-    )
-    .map_err(|_| CredentialError::InvalidJournal)?
-    {
-        Ok(())
-    } else {
-        Err(CredentialError::InvalidJournal)
-    }
+    studio_runtime_schema::multi_server_ingress::ServerLabel::try_from(label.to_owned())
+        .map(|_| ())
+        .map_err(|_| CredentialError::InvalidJournal)
 }
 
 fn validate_federation_label(label: &str) -> Result<(), CredentialError> {

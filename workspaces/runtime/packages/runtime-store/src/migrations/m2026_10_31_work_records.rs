@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn normalizes_legacy_work_once() {
         let mut db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE runtime_payload_migrations(name TEXT PRIMARY KEY,cursor INTEGER,complete INTEGER,status TEXT); INSERT INTO runtime_work VALUES('row','{\"id\":5,\"id\":{},\"status\":9,\"status\":\"review\",\"updated\":\"bad\",\"results\":false,\"decisions\":[1,null,{\"resultId\":null}]}'),('extra','{\"id\":\"extra\",\"status\":\"ready\",\"note\":1,\"note\":2}');").unwrap();
+        db.execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_payload_migrations(name TEXT PRIMARY KEY,cursor INTEGER,complete INTEGER,status TEXT); INSERT INTO runtime_work VALUES('row','{\"id\":5,\"id\":{},\"status\":9,\"status\":\"review\",\"updated\":\"bad\",\"results\":false,\"decisions\":[1,null,{\"resultId\":null}]}'),('extra','{\"id\":\"extra\",\"status\":\"ready\",\"note\":1,\"note\":2}');").unwrap();
         let tx = db.transaction().unwrap();
         apply(&tx).unwrap();
         apply(&tx).unwrap();

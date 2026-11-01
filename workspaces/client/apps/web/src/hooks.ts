@@ -1,4 +1,5 @@
 import { useSubscription } from "./sync/subscriptions";
+import { useCacheAfterPaint } from "./sync/subscriptions/useCacheAfterPaint";
 import { SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS } from "./generated/sharedValues";
 import {
   useServerApi,
@@ -55,6 +56,7 @@ import {
   retainArray,
   retainUsageAccounts,
 } from "./hooks/snapshotSelection";
+const STATE_REF = { kind: "state" } as const;
 // Event callbacks see the latest committed selection without invalidating
 // consumers when another chat changes. Never call these during render.
 export function useCommittedCallback<Args extends unknown[], Result>(
@@ -201,6 +203,7 @@ export function useSnapshot(
       },
     };
   }, [data, created, scope]);
+  useCacheAfterPaint(STATE_REF, visibleData);
   const generation = useRef(0);
   const replicated = useRef(false);
   const sessionToken = useRef("");
@@ -215,7 +218,6 @@ export function useSnapshot(
   const refresh = useCallback(
     async (
       credentialsOnly = replicated.current,
-      onProjection?: (projection: Snapshot, workspaceId: string) => void,
       resetRecovery = true,
     ): Promise<void> => {
       if (resetRecovery) {
@@ -232,7 +234,7 @@ export function useSnapshot(
       const request = ++generation.current;
       try {
         const session = await refreshSession();
-        if (request !== generation.current && !onProjection) return;
+        if (request !== generation.current) return;
         if (request === generation.current) {
           sessionToken.current = session.token;
           setData((old) =>
@@ -242,15 +244,7 @@ export function useSnapshot(
           );
         }
         if (!credentialsOnly) {
-          let projectionWorkspaceId = "";
-          const projection = await refreshProjection({
-            onWorkspaceId: (id) => {
-              projectionWorkspaceId = id;
-            },
-          });
-          // A mutation readback owns its result even when another refresh wins
-          // the render generation. Its caller verifies the workspace identity.
-          onProjection?.(projection, projectionWorkspaceId);
+          const projection = await refreshProjection({});
           if (request !== generation.current) return;
           setData({ ...projection, token: session.token });
         }
@@ -285,7 +279,7 @@ export function useSnapshot(
               !document.hidden &&
               navigator.onLine !== false
             )
-              void refresh(credentialsOnly, undefined, false);
+              void refresh(credentialsOnly, false);
           }, delay);
         }
       }
@@ -327,7 +321,7 @@ export function useSnapshot(
       retryInitialization.current = undefined;
       setWorkspaceId(storage.workspaceId);
       try {
-        await refresh(true, undefined, false);
+        await refresh(true, false);
       } catch (error) {
         if (stopped) return;
         dispatchProjectionStatus({
@@ -341,7 +335,7 @@ export function useSnapshot(
       recovery = new ReadRecoveryBudget();
       startupExhausted.current = false;
       credentialRecovery.current = new ReadRecoveryBudget();
-      if (initialized) await refresh(true, undefined, false);
+      if (initialized) await refresh(true, false);
       else await initialize();
     };
     retryInitialization.current = restart;
@@ -431,10 +425,11 @@ export function transcriptMessages(
   source: TranscriptWireItem[],
   id: string | null,
 ): Message[] {
-  return source.flatMap((m: TranscriptWireItem) =>
-    m.inputs
+  return source.flatMap((m: TranscriptWireItem) => {
+    const { pending, deliveryStatus, ...record } = m;
+    return m.inputs
       ? m.inputs.map((r, i) => ({
-          ...m,
+          ...record,
           threadId: m.threadId ?? undefined,
           id: r.id ? `${id}:${r.id}` : `${m.id}:${i}`,
           sourceId: m.id,
@@ -442,11 +437,14 @@ export function transcriptMessages(
             r.clientMessageId ||
             r.id ||
             (i === 0 ? m.clientMessageId : undefined),
-          deliveryStatus: r.deliveryStatus,
+          deliveryStatus: r.deliveryStatus
+            ? { source: "server" as const, status: r.deliveryStatus }
+            : undefined,
           requestedDelivery: r.requestedDelivery,
           deliveryError: r.deliveryError,
           materialized: r.materialized ?? m.materialized,
-          pending: r.pending ?? undefined,
+          streamPending:
+            r.kind === "user" ? undefined : (r.pending ?? undefined),
           assets: r.assets || (i === 0 ? m.assets : []),
           role: r.kind === "user" ? "user" : "tool",
           text: r.text,
@@ -469,8 +467,18 @@ export function transcriptMessages(
                 )[r.kind] ||
                 "Team activity",
         }))
-      : [{ ...m, threadId: m.threadId ?? undefined }],
-  );
+      : [
+          {
+            ...record,
+            deliveryStatus: deliveryStatus
+              ? { source: "server" as const, status: deliveryStatus }
+              : undefined,
+            streamPending:
+              m.role === "user" ? undefined : (pending ?? undefined),
+            threadId: m.threadId ?? undefined,
+          },
+        ];
+  });
 }
 
 type TranscriptPage = {
@@ -867,7 +875,9 @@ export function useMessages(
               text: m.text,
               at: m.at,
               role: m.author === "user" ? "user" : "assistant",
-              deliveryStatus: m.status ?? undefined,
+              deliveryStatus: m.status
+                ? { source: "server" as const, status: m.status }
+                : undefined,
               deliveryError: m.error ?? undefined,
             })),
           );
@@ -972,7 +982,9 @@ export function useMessages(
           text: m.text,
           at: m.at,
           role: m.author === "user" ? "user" : "assistant",
-          deliveryStatus: m.status ?? undefined,
+          deliveryStatus: m.status
+            ? { source: "server" as const, status: m.status }
+            : undefined,
           deliveryError: m.error ?? undefined,
         })),
       );

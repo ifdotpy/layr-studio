@@ -1,5 +1,6 @@
 //! Federation queue limits that the store enforces. The other federation
-//! limits live in `studio_runtime_services::federation_limits`.
+//! limits live in `studio_runtime_services::federation_limits` and
+//! `federation_ingress`.
 
 /// Version of the signed federation envelope protocol. Unit: protocol revision.
 pub const PROTOCOL_VERSION: i64 = 1;

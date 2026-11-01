@@ -1,27 +1,13 @@
 //! Transactional location outbox and tool-receipt persistence. No delivery occurs here.
 use crate::request_results::{AdmittedRequest, RequestResults, ResultEnvelope};
-use crate::schema::{ConditionalTableRequirement, SchemaRequirements, TableRequirement};
+use crate::schema::{SchemaRequirements, TableRequirement};
 use crate::{StoreError, StoreResult};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::Value;
 
 pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     tables: &[],
-    conditional_tables: &[ConditionalTableRequirement {
-        table_exists: "runtime_server_outbox",
-        tables: &[TableRequirement {
-            name: "runtime_server_outbox",
-            columns: &[
-                "id",
-                "server",
-                "body",
-                "state",
-                "result",
-                "error",
-                "completed_at",
-            ],
-        }],
-    }],
+    conditional_tables: &[],
     triggers: &[],
     conditional_triggers: &[],
     connection_functions: &[],

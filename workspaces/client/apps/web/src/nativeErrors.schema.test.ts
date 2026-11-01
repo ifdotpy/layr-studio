@@ -95,35 +95,27 @@ test("committed vendor classifications exhaust the renderer hints", () => {
     assert.equal(knownCodexErrorKind(info), undefined);
 });
 
-test("native error rendering handles structured and plain errors", () => {
+test("native error rendering reads normalized fields without recursion", () => {
   assertKnownVariants(Object.keys(nativeErrorHints));
   assert.equal(
-    nativeErrorView('{"message":"RPC rejected","code":-32600}').message,
+    nativeErrorView({ message: "RPC rejected", code: "-32600" }).message,
     "RPC rejected",
   );
   assert.equal(nativeErrorView("ordinary failure").message, "ordinary failure");
   assert.ok(
-    nativeErrorView({
-      message: "New variant",
-      codexErrorInfo: "futureCode",
-    }).hint,
+    nativeErrorView({ message: "New variant", codexErrorInfo: "futureCode" })
+      .hint,
   );
   assert.equal(
     nativeErrorKind({ data: { codexErrorInfo: "serverOverloaded" } }),
-    "serverOverloaded",
+    "",
   );
   const capacity = nativeErrorView({
-    message: "  ",
+    message: "",
     codexErrorInfo: "serverOverloaded",
   });
   assert.equal(capacity.message, "Codex is currently experiencing high load.");
   assert.equal(capacity.severity, "warning");
-  assert.equal(
-    nativeErrorView(
-      JSON.stringify({ message: "  ", codexErrorInfo: "serverOverloaded" }),
-    ).message,
-    capacity.message,
-  );
   assert.equal(
     nativeErrorView({
       codexErrorInfo: { activeTurnNotSteerable: { turnKind: "compact" } },
@@ -150,28 +142,22 @@ test("native error rendering handles structured and plain errors", () => {
     }),
     undefined,
   );
-  for (const message of [
-    "Invalid prompt: we've limited access to this content for safety reasons. More context",
-    "This content was flagged for possible biological risk.",
-    JSON.stringify({
-      error: { code: "bio_policy", message: "Restricted" },
-    }),
-  ]) {
-    const view = nativeErrorView({ message, codexErrorInfo: "other" });
-    assert.equal(view!.title, "This content can't be shown");
-    assert.equal(view.severity, "info");
-    assert.ok(view);
-    assert.equal(
-      required(view!.links[0]).href,
-      "https://chatgpt.com/r/b749fb02595e04c3007a54375f3f4374",
-    );
-  }
+  const biological = nativeErrorView({
+    message: "Restricted",
+    code: "bio_policy",
+    codexErrorInfo: "other",
+  });
+  assert.equal(biological.title, "This content can't be shown");
+  assert.equal(biological.severity, "info");
+  assert.equal(
+    required(biological.links[0]).href,
+    "https://chatgpt.com/r/b749fb02595e04c3007a54375f3f4374",
+  );
   assert.equal(
     nativeErrorView({ message: "Log text mentions bio_policy only." }).links
       .length,
     0,
   );
-  assert.ok(nativeErrorView);
   for (const [plan, link] of [
     ["pro", "https://chatgpt.com/cyber/"],
     [
@@ -195,89 +181,16 @@ test("native error rendering handles structured and plain errors", () => {
     "Codex refused this turn under its cybersecurity policy.",
   );
   assert.equal(cyber.title, "Cybersecurity policy refusal");
-  assert.ok(cyber.hint);
   assert.match(cyber.hint, /narrower or rephrased task/);
-  assert.equal(cyber.details.includes("Raw refusal detail"), true);
-  const nestedError = {
-    error: { message: "Service unavailable", code: "unavailable" },
-  };
-  for (const raw of [
-    JSON.stringify(nestedError),
-    "```json\n" + JSON.stringify(nestedError) + "\n```",
-    "HTTP 503: " + JSON.stringify(nestedError) + " (request abc)",
-    JSON.stringify({ error: { message: JSON.stringify(nestedError) } }),
-    JSON.stringify("Service unavailable"),
-  ]) {
-    const view = nativeErrorView(raw);
-    assert.equal(view!.message, "Service unavailable");
-    assert.equal(view.details, raw);
-    const notification = {
-      message: raw,
-      codexErrorInfo: "httpConnectionFailed",
-    };
-    const copy = JSON.stringify(notification);
-    const native = nativeErrorView(notification);
-    assert.equal(native.message, "Service unavailable");
-    assert.equal(native.kind, "httpConnectionFailed");
-    assert.equal(native.details, JSON.stringify(notification, null, 2));
-    assert.equal(JSON.stringify(notification), copy);
-  }
+  assert.ok(cyber.details.includes("Raw refusal detail"));
+  // Encoded and nested provider errors arrive normalized by the server.
   assert.equal(
-    nativeErrorView(new Error("Error instance")).message,
-    "Error instance",
-  );
-  const instance = new Error('HTTP 503: {"error":{"message":"Unavailable"}}');
-  assert.equal(nativeErrorView(instance).message, "Unavailable");
-  assert.equal(
-    JSON.parse(nativeErrorView(instance).details).message,
-    instance.message,
+    nativeErrorView({ message: "Unavailable" }).message,
+    "Unavailable",
   );
   assert.equal(
-    nativeErrorView({ error: { message: "Nested failure" } }).message,
+    nativeErrorView({ message: "Nested failure" }).message,
     "Nested failure",
-  );
-  for (const raw of [
-    'HTTP 400: {"error":{"code":"bio_policy","message":"Restricted"}} tail',
-    '```json\n{"error":{"code":"bio_policy","message":"Restricted"}}\n```',
-  ]) {
-    const view = nativeErrorView({ message: raw, codexErrorInfo: "other" });
-    assert.equal(view!.message, "Restricted");
-    assert.equal(view!.title, "This content can't be shown");
-    assert.equal(view!.kind, "other");
-  }
-  for (const raw of [
-    'HTTP 500: {"message":"bio_policy mentioned in a log"}',
-    'HTTP 500: {"error":{"message":"Failed"},"metadata":{"code":"bio_policy"}}',
-    'HTTP 500: {"error":{"message":"Failed","codexErrorInfo":"misalignmentPolicyViolation"}}',
-    '{"message":"Failed","metadata":{"error":{"code":"bio_policy"}}}',
-  ]) {
-    const view = nativeErrorView({ message: raw, codexErrorInfo: "other" });
-    assert.equal(view!.kind, "other");
-    assert.equal(view!.title, "");
-    assert.equal(view!.links.length, 0);
-    assert.equal(nativeThreadError({ error: { message: raw } }), undefined);
-  }
-  for (const raw of [
-    'HTTP failure {"requestId":"abc"} tail',
-    '{"requestId":"abc"}',
-    'HTTP failure {"error":{"message":null}} tail',
-    'HTTP failure {"error":{"message":"unterminated}',
-    "HTTP failure " + "{".repeat(70_000),
-  ])
-    assert.equal(nativeErrorView(raw).message, raw);
-  assert.equal(
-    nativeErrorView(
-      'HTTP error {"requestId":"abc"} then {"error":{"message":"Actual failure"}}',
-    ).message,
-    "Actual failure",
-  );
-  assert.equal(
-    nativeErrorView({
-      message: JSON.stringify({
-        error: { message: '<img src=x onerror="alert(1)"> {text}' },
-      }),
-    }).message,
-    '<img src=x onerror="alert(1)"> {text}',
   );
 });
 

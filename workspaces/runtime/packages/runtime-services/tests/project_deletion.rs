@@ -10,6 +10,13 @@ use studio_runtime_services::{
 };
 use studio_runtime_store::{ProjectsRepository, RuntimeStore, SyncDocumentsRepository};
 const DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+fn location_command(
+    payload: &Value,
+) -> studio_runtime_services::orchestration_wire::OrchestrationCommand {
+    studio_runtime_services::orchestration_wire::OrchestrationCommand::AddLocation(
+        <studio_runtime_services::project_locations::LocationPayload as serde::Deserialize>::deserialize(payload).expect("location fixture"),
+    )
+}
 struct Catalog {
     observed: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     release: Mutex<std::sync::mpsc::Receiver<()>>,
@@ -331,7 +338,8 @@ async fn project_deletion_registry_only_remove_allows_fresh_creation() {
     let path = project["id"].as_str().expect("id");
     let response = studio_runtime_services::projects::write(
         store.clone(),
-        json!({"action":"remove","path":path}),
+        serde::Deserialize::deserialize(json!({"action":"remove","path":path}))
+            .expect("project request"),
         "default".into(),
         vec![],
     )
@@ -365,7 +373,7 @@ async fn project_deletion_location_reservation_rechecks_the_checked_lifetime() {
         fn exchange<'a>(
             &'a self,
             _: &'a str,
-            envelope: &'a Value,
+            envelope: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
             _: std::time::Duration,
         ) -> futures_util::future::BoxFuture<
             'a,
@@ -375,7 +383,7 @@ async fn project_deletion_location_reservation_rechecks_the_checked_lifetime() {
             Box::pin(async move {
                 Ok(
                     studio_runtime_services::multi_server_orchestration::ExchangeOutcome::Unknown
-                        .to_reply(envelope["requestId"].as_str().expect("request ID")),
+                        .to_reply(&envelope.request_id),
                 )
             })
         }
@@ -390,7 +398,8 @@ async fn project_deletion_location_reservation_rechecks_the_checked_lifetime() {
             .expect("checked location lifetime");
     drop(reader);
     let mut payload = json!({"project":id,"name":"Project","path":"/remote","request":{"action":"add_location","project":id,"server":"peer","path":"/remote"},"signature":"signature"});
-    payload[studio_runtime_services::project_locations::LOCATION_ADMISSION_FIELD] = admission;
+    payload[studio_runtime_services::project_locations::LOCATION_ADMISSION_FIELD] =
+        json!(admission);
     delete(store.clone(), id).await;
     let peer = Arc::new(Peer(std::sync::atomic::AtomicUsize::new(0)));
     let driver = OrchestrationDriver::new(
@@ -400,7 +409,7 @@ async fn project_deletion_location_reservation_rechecks_the_checked_lifetime() {
     );
     assert!(
         driver
-            .exchange("peer", "add_location", &payload, "location", 3)
+            .exchange("peer", location_command(&payload), "location", 3)
             .await
             .is_err(),
         "deletion between preparation and reservation must refuse"
@@ -411,8 +420,7 @@ async fn project_deletion_location_reservation_rechecks_the_checked_lifetime() {
             studio_runtime_services::multi_server_transport::enqueue_in_transaction(
                 tx,
                 "peer",
-                "add_location",
-                &enqueue_payload,
+                location_command(&enqueue_payload),
                 "marked-enqueue",
                 3,
             )
@@ -649,7 +657,7 @@ async fn project_deletion_refuses_fresh_markerless_location_reservations_but_rep
         fn exchange<'a>(
             &'a self,
             _: &'a str,
-            envelope: &'a Value,
+            envelope: &'a studio_runtime_services::orchestration_wire::OrchestrationRequest,
             _: std::time::Duration,
         ) -> futures_util::future::BoxFuture<
             'a,
@@ -659,7 +667,7 @@ async fn project_deletion_refuses_fresh_markerless_location_reservations_but_rep
             Box::pin(async move {
                 Ok(
                     studio_runtime_services::multi_server_orchestration::ExchangeOutcome::Unknown
-                        .to_reply(envelope["requestId"].as_str().expect("request ID")),
+                        .to_reply(&envelope.request_id),
                 )
             })
         }
@@ -677,7 +685,7 @@ async fn project_deletion_refuses_fresh_markerless_location_reservations_but_rep
     );
     assert!(
         driver
-            .exchange("peer", "add_location", &payload, "fresh", 3)
+            .exchange("peer", location_command(&payload), "fresh", 3)
             .await
             .is_err(),
         "fresh exchange requires admission"
@@ -686,7 +694,7 @@ async fn project_deletion_refuses_fresh_markerless_location_reservations_but_rep
     let fresh = payload.clone();
     let enqueue = store
         .transaction_with(move |tx| {
-            enqueue_in_transaction(tx, "peer", "add_location", &fresh, "fresh-enqueue", 3)
+            enqueue_in_transaction(tx, "peer", location_command(&fresh), "fresh-enqueue", 3)
         })
         .await;
     assert!(
@@ -694,21 +702,27 @@ async fn project_deletion_refuses_fresh_markerless_location_reservations_but_rep
         "the transaction enqueue writer also requires admission"
     );
     // A saved exact marker-less reservation represents a previous server version.
-    let envelope = json!({"requestId":"legacy","action":"add_location","payload":payload});
-    let encoded = studio_runtime_services::remote_transport::canonical_json(&envelope)
-        .expect("canonical envelope");
-    let fingerprint = studio_runtime_store::sha256_hex(encoded.as_bytes());
+    let envelope = studio_runtime_services::orchestration_wire::OrchestrationRequest {
+        request_id: "legacy".into(),
+        operation: Vec::new(),
+        command: location_command(&payload),
+    };
+    let encoded = serde_json::to_string(&envelope).expect("typed envelope");
+    let legacy = json!({"requestId":"legacy","action":"add_location","payload":payload});
+    let canonical = studio_runtime_schema::json_compat::python_json_compact_serialized(&legacy)
+        .expect("legacy canonical fingerprint");
+    let fingerprint = studio_runtime_store::sha256_hex(canonical.as_bytes());
     let saved_fingerprint = fingerprint.clone();
     store.transaction(move|tx|{studio_runtime_store::remote_outbox::RemoteOutbox::put(tx,studio_runtime_store::remote_outbox::RemoteEffect::ServerRequest,"peer","legacy",&fingerprint,studio_runtime_schema::persistence::OutboxStatus::Pending,Some(0),serde_json::json!({"body":encoded,"admission":{"id":"legacy","signature":fingerprint,"created":1},"attempts":0,"error":null}),1)?;Ok(())}).await.expect("legacy reservation");
     let replay = payload.clone();
     store
         .transaction_with(move |tx| {
-            enqueue_in_transaction(tx, "peer", "add_location", &replay, "legacy", 3)
+            enqueue_in_transaction(tx, "peer", location_command(&replay), "legacy", 3)
         })
         .await
         .expect("exact legacy enqueue replay");
     let unknown = driver
-        .exchange("peer", "add_location", &payload, "legacy", 3)
+        .exchange("peer", location_command(&payload), "legacy", 3)
         .await
         .expect("exact legacy reservation remains recoverable");
     assert!(matches!(
@@ -763,7 +777,7 @@ async fn project_deletion_refuses_fresh_markerless_location_reservations_but_rep
         .await
         .expect("retained legacy receipt");
     let replayed = driver
-        .exchange("peer", "add_location", &payload, "legacy", 4)
+        .exchange("peer", location_command(&payload), "legacy", 4)
         .await
         .expect("legacy completed receipt replays without admission");
     assert!(
@@ -773,7 +787,7 @@ async fn project_deletion_refuses_fresh_markerless_location_reservations_but_rep
     changed["path"] = json!("/changed");
     assert!(
         driver
-            .exchange("peer", "add_location", &changed, "legacy", 30)
+            .exchange("peer", location_command(&changed), "legacy", 30)
             .await
             .is_err(),
         "legacy replay still binds exact content"

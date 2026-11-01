@@ -91,34 +91,90 @@ pub struct ClaudeInputEvent {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClaudeInputSource {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub root_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub role: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_lead: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effort: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub native_effort: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fast_mode: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub permission_mode: Option<crate::claude_permissions::PermissionMode>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub yolo_mode: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub compactions: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub image_workspace: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub image_workspace_ready: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    #[schemars(with = "Option<String>")]
+    pub cwd: crate::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    #[schemars(with = "Option<String>")]
+    pub root_id: crate::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    #[schemars(with = "Option<String>")]
+    pub parent_id: crate::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    #[schemars(with = "Option<String>")]
+    pub role: crate::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    #[schemars(with = "Option<bool>")]
+    pub is_lead: crate::queue_command::Field<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    #[schemars(with = "Option<String>")]
+    pub model: crate::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    #[schemars(with = "Option<String>")]
+    pub effort: crate::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    #[schemars(with = "Option<String>")]
+    pub native_effort: crate::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    #[schemars(with = "Option<bool>")]
+    pub fast_mode: crate::queue_command::Field<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    #[schemars(with = "Option<crate::claude_permissions::PermissionMode>")]
+    pub permission_mode: crate::queue_command::Field<crate::claude_permissions::PermissionMode>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    #[schemars(with = "Option<bool>")]
+    pub yolo_mode: crate::queue_command::Field<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    #[schemars(with = "Option<u64>")]
+    pub compactions: crate::queue_command::Field<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    #[schemars(with = "Option<bool>")]
+    pub image_workspace: crate::queue_command::Field<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::queue_command::Field::is_missing"
+    )]
+    #[schemars(with = "Option<bool>")]
+    pub image_workspace_ready: crate::queue_command::Field<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

@@ -4,7 +4,7 @@
 //! a retry sends the same request id and the exact stored body.
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind};
+use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind, RestartRule};
 
 use super::outbox::{Outbox, OutboxError, OutboxRow};
 
@@ -12,9 +12,9 @@ use super::outbox::{Outbox, OutboxError, OutboxRow};
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteEffect {
-    /// Reservation of a paired-server HTTP request (`runtime_access_outbound`).
+    /// Reservation of a paired-server HTTP request, stored in `runtime_outbox`.
     AccessRequest,
-    /// Reservation of a local Git fetch from a paired server (`runtime_server_fetch`).
+    /// Reservation of a local Git fetch from a paired server, stored in `runtime_outbox`.
     ServerFetch,
     /// `update.offer` to a paired server (peer app updates, `peer_update_pull.rs`).
     UpdateOffer,
@@ -24,10 +24,10 @@ pub enum RemoteEffect {
     UpdateChunk,
     /// `update.release`: tell the paired server that the pull ended.
     UpdateRelease,
-    /// A signed request to a paired server (`runtime_server_outbox`). The body keeps its
+    /// A signed request to a paired server, stored in `runtime_outbox`. The body keeps its
     /// action, so the restart rule depends on the action (see `multi_server_orchestration`).
     ServerRequest,
-    /// A federation chat or room message (`runtime_federation_outbox`).
+    /// A federation chat or room message, stored in `runtime_outbox`.
     FederationMessage,
 }
 
@@ -59,17 +59,6 @@ impl RemoteEffect {
             Self::ServerRequest | Self::FederationMessage => RestartRule::TargetDedupes,
         }
     }
-}
-
-/// Restart rule of an effect kind (target architecture, "Command execution").
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RestartRule {
-    /// The target dedupes by id: send again with the same id.
-    TargetDedupes,
-    /// Ask the target. Found: done. Proven absent: queue again. Else: unknown.
-    AskTarget,
-    /// The outcome is unknown. Only the user resolves it.
-    None,
 }
 
 /// The typed payload of every remote entry.

@@ -1,5 +1,4 @@
 import { watchServerName } from "./serverNames";
-import { createSessionCostCache } from "../usage/sessionCostCache";
 import { createUploads, UPLOAD_DATABASE_NAME } from "../sync/uploads";
 import { createServerAudio } from "../native/serverAudio";
 import { createRecordingStorage } from "../dictation/storage";
@@ -13,7 +12,6 @@ import { createChatCreationStore } from "../chatCreation";
 import { createFileActions } from "../fileActions";
 import { createFileDialogs } from "../native/fileDialogs";
 import { watchResourceReads } from "../sync/subscriptions/reads";
-import { createAccountLimitsCache } from "../usage/accountUsage";
 import { createBrowserDrafts } from "../sync/drafts";
 import { createOutbox } from "../sync/send";
 import { createSyncClient } from "../sync/client";
@@ -31,6 +29,7 @@ import type { StudioServer } from "./registry";
 import { createServerTransport } from "./serverTransport";
 import { serverCredentialAdapter } from "./transport";
 import { scopedSessionOutbox } from "../browserPersistence";
+import { indexedDb } from "../indexedDb";
 
 /** Services belong to a server, never to the currently visible chat. */
 export function createServerServices(server: StudioServer) {
@@ -42,12 +41,16 @@ export function createServerServices(server: StudioServer) {
     return serverCredentialAdapter().fetch(owner, request);
   });
   const storage = preferenceStorageForServer(transport.owner.id);
-  const accountLimits = createAccountLimitsCache(storage);
   // The native core stores the projections of the local server; every other server keeps the page cache.
   const localNativeClient = () =>
     transport.owner.id === "local" && hasNativeClient();
   const sequences = createEntitySequenceScope();
   const activity = createServerActivity();
+  const cacheStorage = indexedDb(
+    `studio-subscription-cache:${transport.owner.id}`,
+    "subscriptions",
+    1,
+  );
   const api = createApiScope({
     origin: transport.owner.origin,
     fetch: transport.fetch,
@@ -62,7 +65,6 @@ export function createServerServices(server: StudioServer) {
     api.pending.observeClientSeq(sequence);
   });
   const audio = createServerAudio();
-  const sessionCosts = createSessionCostCache();
   const transcripts = createTranscriptCache();
   const tokenRates = createTokenRateCache();
   let runtime:
@@ -87,6 +89,17 @@ export function createServerServices(server: StudioServer) {
       resources,
       sequences,
       transcripts,
+      onFreshReceipts: async (workspaceId, receipts) => {
+        for (const receipt of receipts) {
+          if (receipt.agent)
+            await outbox.reconcileOutboxReceipts(
+              receipt.agent,
+              [receipt],
+              workspaceId,
+            );
+        }
+      },
+      cacheStorage,
       databaseSuffix:
         transport.owner.id === "local"
           ? ""
@@ -102,13 +115,14 @@ export function createServerServices(server: StudioServer) {
   };
   const outbox = createOutbox({
     api,
+    serverId: transport.owner.id,
     watchResourceConnection: (...args) =>
       synchronization().resources.watchResourceConnection(...args),
-    storage,
   });
   let browserDrafts: ReturnType<typeof createBrowserDrafts> | undefined;
   const drafts = () => {
     return (browserDrafts ??= createBrowserDrafts({
+      serverId: transport.owner.id,
       api,
       resources: {
         watchResourceChanges: (...args) =>
@@ -151,9 +165,8 @@ export function createServerServices(server: StudioServer) {
   return {
     owner: transport.owner,
     audio,
-    sessionCosts,
     chatCreations: createChatCreationStore(storage),
-    recordings: createRecordingStorage(),
+    recordings: createRecordingStorage(transport.owner.id),
     localDrafts,
     uploads,
     storageEventKey: createStorageEventKey(
@@ -161,7 +174,6 @@ export function createServerServices(server: StudioServer) {
     ),
     fileDialogs: createFileDialogs(transport.owner.id),
     fileActions: createFileActions(transport.owner.id),
-    accountLimits,
     watchResourceReads: ((refs, read, failed, options) =>
       watchResourceReads(refs, read, failed, {
         ...options,
@@ -184,11 +196,13 @@ export function createServerServices(server: StudioServer) {
     api,
     storage,
     ready,
-    close() {
+    close(removeCache = false) {
       audio.close();
       stopName();
       runtime?.resources.dispose();
+      runtime?.sync.disposeCache();
       transport.close();
+      if (removeCache) void cacheStorage.destroy();
     },
   };
 }

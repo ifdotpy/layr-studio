@@ -14,6 +14,20 @@ pub enum Field<T> {
     Value(T),
 }
 
+impl<T: JsonSchema> JsonSchema for Field<T> {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        <Option<T> as JsonSchema>::schema_name()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        <Option<T> as JsonSchema>::json_schema(generator)
+    }
+}
+
 impl<T> Field<T> {
     pub fn is_missing(&self) -> bool {
         matches!(self, Self::Missing)
@@ -29,6 +43,20 @@ impl<T> Field<T> {
     }
     pub fn is_some(&self) -> bool {
         matches!(self, Self::Value(_))
+    }
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Field<U> {
+        match self {
+            Self::Missing => Field::Missing,
+            Self::Null => Field::Null,
+            Self::Value(value) => Field::Value(f(value)),
+        }
+    }
+    pub fn try_map<U, E>(self, f: impl FnOnce(T) -> Result<U, E>) -> Result<Field<U>, E> {
+        match self {
+            Self::Missing => Ok(Field::Missing),
+            Self::Null => Ok(Field::Null),
+            Self::Value(value) => f(value).map(Field::Value),
+        }
     }
 }
 impl<'de, T: Deserialize<'de>> Deserialize<'de> for Field<T> {

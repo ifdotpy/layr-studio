@@ -500,6 +500,7 @@ pub fn put(
     let agent_value = agent;
     let agent = object(id, agent)?;
     let record = stored_record(agent)?;
+    let old_root = crate::entity_publication::agent_team_root(connection, id)?;
     let sql = if insert_only {
         "INSERT INTO runtime_agents(id,record) VALUES (?1,?2) ON CONFLICT(id) DO NOTHING"
     } else {
@@ -507,6 +508,13 @@ pub fn put(
          DO UPDATE SET record=excluded.record WHERE record IS NOT excluded.record"
     };
     let written = connection.execute_cached(sql, params![id, record])? == 1;
+    if written {
+        crate::entity_publication::mark_agent_team_roots(
+            id,
+            old_root.as_deref(),
+            agent.get("rootId").and_then(Value::as_str),
+        );
+    }
     if written || !insert_only {
         put_fields(connection, id, agent)?;
         crate::domain::project(connection, id, agent_value)?;
@@ -520,10 +528,18 @@ pub fn update(connection: &Connection, id: &str, agent: &Value) -> StoreResult<b
     let agent_value = agent;
     let agent = object(id, agent)?;
     let record = stored_record(agent)?;
+    let old_root = crate::entity_publication::agent_team_root(connection, id)?;
     let written = connection.execute_cached(
         "UPDATE runtime_agents SET record=?2 WHERE id=?1 AND record IS NOT ?2",
         params![id, record],
     )? == 1;
+    if written {
+        crate::entity_publication::mark_agent_team_roots(
+            id,
+            old_root.as_deref(),
+            agent.get("rootId").and_then(Value::as_str),
+        );
+    }
     let exists = written
         || connection
             .query_row_cached("SELECT 1 FROM runtime_agents WHERE id=?1", [id], |_| Ok(()))
@@ -545,11 +561,11 @@ mod tests {
 
     fn agents() -> Vec<Value> {
         vec![
-            json!({"compactions":0,"id":"a","provider":"codex","rootId":"a","epoch":1,"status":"running","threadId":"t","accountKey":"default",
+            json!({"capacity":{"kind":"automatic","max":64},"naming":"automatic","compactions":0,"id":"a","provider":"codex","rootId":"a","epoch":1,"status":"running","threadId":"t","accountKey":"default",
                 "events":7,"lastEvent":"2026-10-20T00:00:00Z","activity":{"phase":"writing","at":5.0},
                 "activeTools":[],"tail":"answer tail","lastAnswer":"answer","contextUsage":null,
                 "tokensUsed":120,"tokenUsageAccounting":"total","prompt":"keep"}),
-            json!({"compactions":0,"id":"b","provider":"codex","rootId":"a","epoch":0,"status":"idle","name":"no volatile fields","accountKey":"default"}),
+            json!({"capacity":{"kind":"automatic","max":64},"naming":"automatic","compactions":0,"id":"b","provider":"codex","rootId":"a","epoch":0,"status":"idle","name":"no volatile fields","accountKey":"default"}),
         ]
     }
 

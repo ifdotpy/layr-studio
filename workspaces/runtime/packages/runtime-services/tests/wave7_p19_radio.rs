@@ -1,11 +1,3 @@
-fn typed_question(value: &serde_json::Value) -> studio_runtime_store::RequestRecord {
-    let mut fixture = value.clone();
-    fixture["status"] = serde_json::json!("pending");
-    fixture["createdAt"] = serde_json::json!(0.0);
-    fixture["params"] = serde_json::json!({});
-    serde_json::from_str(&fixture.to_string()).expect("typed question fixture")
-}
-
 use rusqlite::types::Value as SqlValue;
 use serde_json::{Value, json};
 use std::{fs, path::Path};
@@ -137,6 +129,23 @@ async fn corpus() -> RadioCorpus {
                             serde_json::from_str(row["payload"].as_str().expect("agent payload"))
                                 .expect("agent payload JSON");
                         payload["value"]["compactions"] = json!(0);
+                        if payload["value"]["role"] == "lead" {
+                            payload["value"]["role"] = json!("orchestrator");
+                        }
+                        if side == "after" {
+                            let fields = payload
+                                .get_mut("value")
+                                .and_then(Value::as_object_mut)
+                                .expect("agent projection");
+                            fields.insert(
+                                "capacity".into(),
+                                json!(studio_runtime_store::AgentCapacity::default()),
+                            );
+                            fields.insert(
+                                "naming".into(),
+                                json!(studio_runtime_store::AgentNaming::default()),
+                            );
+                        }
                         row["payload"] = json!(payload.to_string());
                     }
                 }
@@ -146,12 +155,20 @@ async fn corpus() -> RadioCorpus {
                     let mut record: Value =
                         serde_json::from_str(row["record"].as_str().expect("agent record"))
                             .expect("agent JSON");
+                    if record["role"] == "lead" {
+                        record["role"] = json!("orchestrator");
+                    }
                     record
                         .as_object_mut()
                         .expect("agent object")
                         .entry("compactions")
                         .or_insert(json!(0));
-                    row["record"] = json!(record.to_string());
+                    normalize_frozen_naming(&mut record);
+                    let record = studio_runtime_store::AgentRecord::from_value(record)
+                        .expect("normalized agent fixture");
+                    row.as_object_mut()
+                        .expect("agent row")
+                        .insert("record".into(), json!(record.into_value().to_string()));
                 }
             }
             if let Some(rows) = case[side]["rules"].as_array_mut() {
@@ -175,6 +192,14 @@ async fn corpus() -> RadioCorpus {
                 }
             }
         }
+        if let Some(drafts) = case["drafts"].as_array_mut() {
+            for draft in drafts {
+                normalize_frozen_naming(draft);
+                if draft["role"] == "lead" {
+                    draft["role"] = json!("orchestrator");
+                }
+            }
+        }
         relocate_project(case, projects.path());
     }
     RadioCorpus {
@@ -185,6 +210,24 @@ async fn corpus() -> RadioCorpus {
             .collect(),
         cases,
         _projects: projects,
+    }
+}
+// Frozen Python drafts use the retired naming flags; current fixtures use one state.
+fn normalize_frozen_naming(value: &mut Value) {
+    let Some(fields) = value.as_object_mut() else {
+        return;
+    };
+    let manual = fields.remove("manualName");
+    let title = fields.remove("needsTitle");
+    if manual.is_some() || title.is_some() {
+        let naming = if manual == Some(json!(true)) {
+            "manual"
+        } else if title == Some(json!(true)) {
+            "pending_title"
+        } else {
+            "automatic"
+        };
+        fields.insert("naming".into(), json!(naming));
     }
 }
 /// The Python oracle ran on Linux, where its temporary project path is
@@ -304,6 +347,20 @@ async fn seed(store: &RuntimeStore, snapshot: &Value) {
                     }
                     continue;
                 }
+                if table == "requests" {
+                    // The oracle names the retired table. The typed rows live in `approvals`.
+                    db.execute("DELETE FROM approvals", [])?;
+                    for row in rows.as_array().expect("rows") {
+                        let mut record: Value = serde_json::from_str(row["record"].as_str().expect("record"))
+                            .expect("request record");
+                        // The frozen Python record names its creation time `created`.
+                        if let Some(created) = record.as_object_mut().and_then(|map| map.remove("created")) {
+                            record["createdAt"] = created;
+                        }
+                        studio_runtime_services::provider_callbacks::legacy_view::insert(db, &record)?;
+                    }
+                    continue;
+                }
                 if table == "operation_receipts" {
                     db.execute("DELETE FROM request_results", [])?;
                     let receipts: Vec<LegacyReceipt> = serde_json::from_value(rows.clone()).expect("receipts");
@@ -321,6 +378,7 @@ async fn seed(store: &RuntimeStore, snapshot: &Value) {
                 }
                 let table_name = match table.as_str() {
                     "sync_entities" => "sync_entities".to_owned(),
+                    "approvals" => "approvals".to_owned(),
                     "sidebar_order" => "runtime_sidebar_order".to_owned(),
                     _ => format!("runtime_{table}"),
                 };
@@ -349,8 +407,11 @@ async fn seed(store: &RuntimeStore, snapshot: &Value) {
                     )?;
                 }
             }
+            let legacy_naming: i64 = db.query_row("SELECT count(*) FROM runtime_agents WHERE json_type(record, '$.needsTitle') IS NOT NULL OR json_type(record, '$.manualName') IS NOT NULL", [], |row| row.get(0))?;
+            assert_eq!(legacy_naming, 0, "radio fixture agents must use canonical naming");
             db.execute("INSERT OR IGNORE INTO runtime_agent_volatile(id) SELECT id FROM runtime_agents", [])?;
             studio_runtime_store::migrations::migrate_radio_room(db)?;
+            studio_runtime_store::migrations::migrate_room_record(db)?;
             studio_runtime_store::migrations::migrate_project_teams(db)?;
             studio_runtime_store::migrations::migrate_project_record_kind(db)?;
             for id in completed_turns {
@@ -362,6 +423,22 @@ async fn seed(store: &RuntimeStore, snapshot: &Value) {
         .await
         .expect("Python records seed");
 }
+/// The oracle gives only the identity of the question it routes. It is a pending approval.
+fn pending_question(raw: &Value) -> studio_runtime_schema::approvals::Approval {
+    let mut raw = raw.clone();
+    if raw.get("status").is_none() {
+        raw["status"] = json!("pending");
+    }
+    if raw.get("params").is_none() {
+        raw["params"] = json!({});
+    }
+    studio_runtime_store::approvals::from_legacy_record(
+        raw["id"].as_str().unwrap_or("question"),
+        &raw,
+    )
+    .expect("typed approval fixture")
+}
+
 fn state(store: &RuntimeStore, tables: &Value) -> Value {
     let db = store.test_reader().expect("read");
     super::agent_view_fixtures::assert_agent_view_projections(&db);
@@ -370,6 +447,14 @@ fn state(store: &RuntimeStore, tables: &Value) -> Value {
         if table == "operation_receipts" {
             // Replay and conflict checks below exercise the current request_results owner.
             result.insert(table.clone(), json!([]));
+            continue;
+        }
+        if table == "requests" {
+            let rows = studio_runtime_services::provider_callbacks::legacy_view::views(&db)
+                .iter()
+                .map(|view| json!({"id":view["id"],"status":view["status"]}))
+                .collect::<Vec<_>>();
+            result.insert(table.clone(), json!(rows));
             continue;
         }
         if table == "completed_turns" {
@@ -398,6 +483,7 @@ fn state(store: &RuntimeStore, tables: &Value) -> Value {
         };
         let table_name = match table.as_str() {
             "sync_entities" => "sync_entities".to_owned(),
+            "approvals" => "approvals".to_owned(),
             "sidebar_order" => "runtime_sidebar_order".to_owned(),
             _ => format!("runtime_{table}"),
         };
@@ -448,6 +534,15 @@ fn state(store: &RuntimeStore, tables: &Value) -> Value {
 fn normalize(value: &mut Value) {
     match value {
         Value::Object(map) => {
+            if map.get("kind").and_then(Value::as_str) == Some("agent") {
+                for key in [
+                    "accountChange",
+                    "accountTransferProgress",
+                    "accountDestinations",
+                ] {
+                    map.remove(key);
+                }
+            }
             if matches!(
                 map.get("recordKind").and_then(Value::as_str),
                 Some("live" | "removal")
@@ -523,6 +618,28 @@ fn normalize(value: &mut Value) {
                 }
                 normalize(value);
             }
+            // Frozen Python room entities predate these fields. Validate the
+            // newly published controls before comparing the shared old contract.
+            if map.get("collection") == Some(&json!("room"))
+                && let Some(room) = map.get_mut("payload").and_then(|p| p.get_mut("value"))
+                && let Some(room) = room.as_object_mut()
+            {
+                room.remove("leadIds");
+                if let Some(radio) = room.get_mut("radio").and_then(Value::as_object_mut)
+                    && let Some(controls) = radio.remove("controls")
+                {
+                    let status = <studio_runtime_schema::room_record::Status as serde::Deserialize>::deserialize(&radio["status"]).expect("radio status");
+                    assert_eq!(
+                        controls,
+                        json!(
+                            studio_runtime_schema::radio_controls::RadioControls::derive(
+                                status,
+                                radio["active"].is_object()
+                            )
+                        )
+                    );
+                }
+            }
             if map.remove("interruptState").is_some() {
                 // Python stores the handoff intent as interruptRequested; Rust
                 // retains the durable pending/unknown delivery state separately.
@@ -544,16 +661,25 @@ async fn run(store: std::sync::Arc<RuntimeStore>, case: &Value) -> Result<Value,
     // Binding callers resolve the client path to a project key before SQL.
     let project_key = host_key(case["body"]["path"].as_str().expect("project path"));
     match mode.as_str() {
-        "convert" => studio_runtime_services::peer_conversion::convert(std::sync::Arc::clone(&store), &case["body"]).await.map(|reply| serde_json::from_slice(&serde_json::to_vec(&reply).expect("serialize reply")).expect("reply")),
-        "project" => studio_runtime_services::projects::write(
-            std::sync::Arc::clone(&store),
-            case["body"].clone(),
-            "default".to_owned(),
-            vec![serde::Deserialize::deserialize(json!({"id":"default","status":"ready","canAttemptNativeProof":true})).expect("account fixture")],
-        ).await,
+        "convert" => studio_runtime_services::peer_conversion::convert(std::sync::Arc::clone(&store), &serde::Deserialize::deserialize(case["body"].clone()).map_err(|_| ProjectsError::Invalid("invalid conversion"))?).await.map(|reply| serde_json::from_slice(&serde_json::to_vec(&reply).expect("serialize reply")).expect("reply")),
+        "project" => {
+            let mut body = case["body"].clone();
+            if body["action"] == "reorder" {
+                // The corpus adds a path for fixture setup; it is not part of the HTTP body.
+                body.as_object_mut().expect("project body").remove("path");
+                studio_runtime_services::projects::reorder(&store, serde::Deserialize::deserialize(body).expect("sidebar request")).await
+            } else {
+                studio_runtime_services::projects::write(
+                    std::sync::Arc::clone(&store),
+                    serde::Deserialize::deserialize(body).expect("project request"),
+                    "default".to_owned(),
+                    vec![serde::Deserialize::deserialize(json!({"id":"default","status":"ready","canAttemptNativeProof":true})).expect("account fixture")],
+                ).await
+            }
+        },
         "peer" => studio_runtime_services::projects::peer_team_write(
             std::sync::Arc::clone(&store),
-            case["body"].clone(),
+            serde::Deserialize::deserialize(case["body"].clone()).map_err(|_| ProjectsError::Invalid("invalid peer team"))?,
             "default".to_owned(),
             vec![serde::Deserialize::deserialize(json!({"id":"default","status":"ready","canAttemptNativeProof":true})).expect("account fixture")],
         ).await,
@@ -570,7 +696,7 @@ async fn run(store: std::sync::Arc<RuntimeStore>, case: &Value) -> Result<Value,
                     value["compactions"] = json!(0);
                     AgentRecord::from_value(value).expect("checked Python agent draft")
                 });
-                radio_runtime::create_with(std::sync::Arc::clone(&store), &case["body"], Box::new(Creation(drafts))).await.map(|reply| serde_json::from_str(&serde_json::to_string(&reply).expect("reply encodes")).expect("reply decodes"))
+                radio_runtime::create_with(std::sync::Arc::clone(&store), &serde::Deserialize::deserialize(case["body"].clone()).map_err(|_| ProjectsError::Invalid("invalid radio create"))?, Box::new(Creation(drafts))).await.map(|reply| serde_json::from_str(&serde_json::to_string(&reply).expect("reply encodes")).expect("reply decodes"))
             }
         },
         "project-binding" => store.transaction_with(move |db| {
@@ -585,10 +711,11 @@ async fn run(store: std::sync::Arc<RuntimeStore>, case: &Value) -> Result<Value,
             ))
         }).await,
         "answer" => store.transaction_with(move |db| {
+            let question = pending_question(&case["body"]["question"]);
             radio_runtime::route_question_answer(
                 db,
                 &prepared,
-                &typed_question(&case["body"]["question"]),
+                &question,
                 case["body"]["text"].as_str().unwrap_or("answer"),
                 None,
                 1000.0,
@@ -605,7 +732,7 @@ async fn run(store: std::sync::Arc<RuntimeStore>, case: &Value) -> Result<Value,
             )?;
             Ok(Value::Null)
         }).await,
-        _ => radio_runtime::manage(std::sync::Arc::clone(&store), &case["body"]).await.map(|reply| serde_json::from_str(&serde_json::to_string(&reply).expect("reply encodes")).expect("reply decodes")),
+        _ => radio_runtime::manage(std::sync::Arc::clone(&store), &serde::Deserialize::deserialize(case["body"].clone()).map_err(|_| ProjectsError::Invalid("invalid radio command"))?).await.map(|reply| serde_json::from_str(&serde_json::to_string(&reply).expect("reply encodes")).expect("reply decodes")),
     }
 }
 #[tokio::test]
@@ -689,6 +816,14 @@ async fn python_written_radio_corpus_and_restart_replay() {
         if original_case["error"] == true {
             continue;
         }
+        let db = store.test_reader().expect("radio state reader");
+        let legacy_naming: i64 = db.query_row("SELECT count(*) FROM runtime_agents WHERE json_type(record, '$.needsTitle') IS NOT NULL OR json_type(record, '$.manualName') IS NOT NULL", [], |row| row.get(0)).expect("check canonical naming");
+        assert_eq!(
+            legacy_naming, 0,
+            "{} wrote legacy naming",
+            original_case["name"]
+        );
+        drop(db);
         let mut actual = state(&store, &original_case["before"]);
         if original_case["mode"] == "tick" {
             for event in actual["events"].as_array().into_iter().flatten() {
@@ -716,6 +851,19 @@ async fn python_written_radio_corpus_and_restart_replay() {
         }
         let mut expected = original_case["after"].clone();
         expected["operation_receipts"] = json!([]);
+        expected["requests"] = json!(
+            expected["requests"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|row| {
+                    let record: Value =
+                        serde_json::from_str(row["record"].as_str().expect("record"))
+                            .expect("request record");
+                    json!({"id":record["id"],"status":record["status"]})
+                })
+                .collect::<Vec<_>>()
+        );
         normalize(&mut actual);
         normalize(&mut expected);
         assert_eq!(actual, expected, "{}", original_case["name"]);
@@ -916,12 +1064,35 @@ async fn answered_question_releases_one_continuation_and_malformed_rows_write_no
     seed(&store, &case["before"]).await;
     assert!(radio_runtime::holds_floor(&store.test_reader().expect("read"), "a").expect("floor"));
     let prepared = std::sync::Arc::new(PreparedHost::load(&store).await.expect("prepare"));
-    let question = typed_question(&case["body"]["question"]);
-    store.transaction_with(move |db|->Result<(),ProjectsError> {
-        assert_eq!(radio_runtime::route_question_answer(db,&prepared,&question,"answer",None,1000.0)?, radio_runtime::QuestionAnswerRoute::ConsumedByRadio);
-        db.execute("UPDATE runtime_requests SET record=json_set(record,'$.status','answered') WHERE id='q'",[])?;
-        Ok(())
-    }).await.expect("P04 caller commits both writes");
+    let question = pending_question(&case["body"]["question"]);
+    store
+        .transaction_with(move |db| -> Result<(), ProjectsError> {
+            use studio_runtime_schema::approvals::{Answer, CommandId, Principal, Timestamp};
+            assert_eq!(
+                radio_runtime::route_question_answer(
+                    db, &prepared, &question, "answer", None, 1000.0
+                )?,
+                radio_runtime::QuestionAnswerRoute::ConsumedByRadio
+            );
+            let answer = Answer::Answers { answers: vec![] };
+            studio_runtime_store::approvals::answer(
+                db,
+                &question.id,
+                answer,
+                CommandId("q".into()),
+            )
+            .map_err(studio_runtime_store::StoreError::from)?;
+            studio_runtime_store::approvals::confirm_delivery(
+                db,
+                &question.id,
+                Principal::Owner,
+                Timestamp(1000.0),
+            )
+            .map_err(studio_runtime_store::StoreError::from)?;
+            Ok(())
+        })
+        .await
+        .expect("P04 caller commits both writes");
     drop(store);
     let store = std::sync::Arc::new(
         RuntimeStore::open(Some(root.path()))
@@ -1126,7 +1297,7 @@ struct Creation([AgentRecord; 2]);
 impl radio_runtime::RadioCreation for Creation {
     fn prepare(
         &mut self,
-        _body: &Value,
+        _body: &studio_runtime_schema::peer_team_ingress::RadioCreate,
         _path: &Path,
         ids: [AgentId; 2],
     ) -> Result<[AgentRecord; 2], ProjectsError> {

@@ -75,7 +75,7 @@ const IDLE_STATE_OBSERVED_TABLES: [ObservedTable; 6] = [
     ObservedTable::Events,
     ObservedTable::Monitors,
     ObservedTable::AccountTransfers,
-    ObservedTable::RuntimeRequests,
+    ObservedTable::Approvals,
     ObservedTable::RuntimeToolRequests,
 ];
 // Maximum provider events per journal transaction (count); bounds transaction work and ACK delay.
@@ -2950,11 +2950,11 @@ impl Worker {
                         return Err(WorkerError::StaleVmActor);
                     };
                     let fields = &row.extra;
-                    let wait = fields.get("usageResume").unwrap_or(&Value::Null);
-                    let auth_attempt = fields
-                        .get("authResumeAttempt")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(0);
+                    let wait = row
+                        .usage_resume_value()
+                        .map_err(|_| WorkerError::StaleVmActor)?
+                        .unwrap_or(Value::Null);
+                    let auth_attempt = row.auth_resume_attempt.unwrap_or(0);
                     if auth_attempt == 0 || wait["cause"] != "auth" || wait["status"] != "started" {
                         return Ok(None);
                     }
@@ -2973,15 +2973,16 @@ impl Worker {
                         Some("claude"),
                     )? || row.status != studio_runtime_store::AgentStatus::Starting
                         || row.auto_wake != Some(true)
-                        || fields.get("nativeFailureHold") == Some(&json!(true))
-                        || [
-                            "executionMove",
-                            "lazyAccountTransfer",
-                            "accountTransferId",
-                            "workspaceOperation",
-                        ]
-                        .iter()
-                        .any(|key| fields.get(*key).is_some_and(|value| !value.is_null()))
+                        || matches!(
+                            row.native_failure_hold.value(),
+                            Some(studio_runtime_store::NativeFailureHold::Boolean(true))
+                        )
+                        || row.lazy_account_transfer.value().is_some()
+                        || row.account_transfer_id.value().is_some()
+                        || ["executionMove"]
+                            .iter()
+                            .any(|key| fields.get(*key).is_some_and(|value| !value.is_null()))
+                        || row.workspace_operation.is_some()
                         || row.cwd.as_deref() != Some(request.cwd.as_str())
                         || guest_home != request.guest_home
                         || row.thread_id.as_deref() != intent.thread_id.as_deref()
@@ -3015,7 +3016,7 @@ impl Worker {
                         .transpose()
                         .map_err(|_| WorkerError::StaleVmActor)?
                         .as_ref()
-                        != Some(wait)
+                        != Some(&wait)
                     {
                         return Err(WorkerError::StaleVmActor);
                     }
@@ -3048,10 +3049,7 @@ impl Worker {
                         else {
                             return Ok(None);
                         };
-                        let Ok(provider) = studio_runtime_providers::ProviderKind::of_field(
-                            record.extra.get("provider"),
-                        )
-                        .map(|kind| kind.key()) else {
+                        let Some(provider) = record.provider.value().map(|kind| kind.key()) else {
                             return Ok(None);
                         };
                         if !crate::linux_vm_provider::vm_actor_matches(
@@ -3894,8 +3892,35 @@ impl Worker {
                 .key()
                 .to_owned(),
         });
+        let acknowledged = self
+            .session
+            .status
+            .borrow()
+            .attachment
+            .info
+            .as_ref()
+            .map_or(0, |info| info.acknowledged.0);
+        let generation = self.generation.0;
+        let seed_scope = journal_scope.clone();
         let (previous, committed) = self
             .db("journal", move |store| async move {
+                if acknowledged > 0 && expected_vm_actor.is_none() {
+                    let read_scope = seed_scope.clone();
+                    let behind = store
+                        .read_async("runtime-services/journal_seed_ack", move |tx| {
+                            Ok::<_, WorkerError>(
+                                store::checkpoint(tx, &read_scope, generation)? < acknowledged,
+                            )
+                        })
+                        .await?;
+                    if behind {
+                        store
+                            .transaction_with(move |tx| {
+                                store::seed_ack(tx, &seed_scope, generation, acknowledged)
+                            })
+                            .await?;
+                    }
+                }
                 let result = store::journal_batch(
                     store,
                     &account,

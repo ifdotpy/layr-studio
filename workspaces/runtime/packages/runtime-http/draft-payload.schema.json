@@ -27,7 +27,7 @@
       "type": "string"
     },
     "text": {
-      "maxLength": 2000000,
+      "maxLength": 100000,
       "type": "string"
     },
     "updated": {

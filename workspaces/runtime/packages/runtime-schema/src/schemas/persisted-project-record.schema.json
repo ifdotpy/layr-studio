@@ -184,7 +184,7 @@
           "items": {
             "type": "string"
           },
-          "type": "array"
+          "type": ["array", "null"]
         },
         "accountGroupsRevision": {
           "format": "uint64",
@@ -198,7 +198,7 @@
           "items": {
             "type": "string"
           },
-          "type": "array"
+          "type": ["array", "null"]
         },
         "accountRevision": {
           "format": "uint64",
@@ -212,7 +212,7 @@
           "items": {
             "$ref": "#/$defs/ProjectFolder"
           },
-          "type": "array"
+          "type": ["array", "null"]
         },
         "homeServerId": {
           "type": ["string", "null"]
@@ -224,13 +224,13 @@
           "additionalProperties": {
             "$ref": "#/$defs/ProjectLocationIntent"
           },
-          "type": "object"
+          "type": ["object", "null"]
         },
         "locations": {
           "items": {
             "$ref": "#/$defs/ProjectLocation"
           },
-          "type": "array"
+          "type": ["array", "null"]
         },
         "locationsRevision": {
           "format": "uint64",
@@ -249,11 +249,10 @@
           "type": "string"
         },
         "peerTeams": {
-          "default": [],
           "items": {
             "$ref": "#/$defs/ProjectPeerTeam"
           },
-          "type": "array"
+          "type": ["array", "null"]
         },
         "peerTeamsRevision": {
           "format": "uint64",
@@ -264,7 +263,7 @@
           "items": {
             "$ref": "#/$defs/ProjectAlias"
           },
-          "type": "array"
+          "type": ["array", "null"]
         },
         "recordKind": {
           "const": "live",

@@ -629,7 +629,9 @@ impl crate::monitor_runtime::RuleFinish for MonitorRuleFinish {
                 .map(|operation| operation.account_key.as_str())
                 .is_some_and(|account| account != check.account_key.as_deref().unwrap_or("default"))
         {
-            return Err(MonitorError::Refused("Monitor rule identity changed"));
+            // The rule moved on from this check, so the monitor has nothing to
+            // finish. Refusing would keep a dead command running forever.
+            return Ok(());
         }
         if !finish_in_transaction(
             tx,
@@ -646,7 +648,8 @@ impl crate::monitor_runtime::RuleFinish for MonitorRuleFinish {
             },
             now,
         )? {
-            return Err(MonitorError::Refused("Monitor rule check is stale"));
+            // Same: a stale check never finishes the rule, the monitor still ends.
+            return Ok(());
         }
         Ok(())
     }

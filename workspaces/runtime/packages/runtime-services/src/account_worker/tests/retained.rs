@@ -730,12 +730,14 @@ async fn reset_service_holds_lost_response_without_resending() {
         lose_response: lose_response.clone(),
     });
     let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-    let body = json!({
-        "account_key":"default",
-        "account_id":"account-A",
-        "credit_id":"credit-A",
-        "request_id":request_id
-    });
+    let body = studio_runtime_schema::limit_reset_request::ResetRequest {
+        account_key: Some("default".to_owned()),
+        account_id: "account-A".to_owned().try_into().expect("account id"),
+        credit_id: "credit-A".to_owned().try_into().expect("credit id"),
+        request_id: uuid::Uuid::parse_str(&request_id)
+            .expect("request id")
+            .into(),
+    };
     let first_session = session.clone();
     let first_body = body.clone();
     let first_store = reset_store.clone();
@@ -1663,7 +1665,7 @@ async fn seed_restart_input(state: &State, fail_terminal_settlement: bool) {
                 agent.thread_id = Some("fake-thread-0".to_string());
                 agent.auto_wake = Some(true);
                 agent.in_flight = Some(false);
-                agent.extra.insert("error".into(), json!("Context repair waits for a confirmed input receipt: annotation:input"));
+                agent.error = studio_runtime_schema::queue_command::Field::Value(studio_runtime_schema::provider_errors::AgentError::Message(("Context repair waits for a confirmed input receipt: annotation:input").to_string()));
                 agent.restart_recovery = Some(Box::new(studio_runtime_schema::recovery_record::RecoveryFields { stage: Some("held".into()), start_attempt: Some(Box::new(serde::Deserialize::deserialize(attempt).expect("typed fixture"))), ..Default::default() }));
                 agent.extra.insert("contextRepairWait".into(), json!({"error":"Context repair waits for a confirmed input receipt: annotation:input","scope":"native","events":[event],"nextCheckAt":0,"source":{"id":agent_id,"epoch":epoch,"accountKey":"default","threadId":"fake-thread-0","attemptId":null}}));
                 agent.start_attempt.take();
@@ -2236,10 +2238,7 @@ async fn seed_restart_turn(state: &State) {
                     agent.turn_epoch = Some(epoch);
                     agent.auto_wake = Some(false);
                     agent.in_flight = Some(false);
-                    agent.extra.insert(
-                        "error".into(),
-                        json!(studio_runtime_store::BACKEND_RESTARTED_TURN_ERROR),
-                    );
+                    agent.set_error_receipt(json!(studio_runtime_store::BACKEND_RESTARTED_TURN_ERROR)).expect("typed fixture error");
                     agent.disconnect_recovery = Some(Box::new(serde::Deserialize::deserialize(disconnect).expect("typed fixture")));
                     agent.restart_recovery = Some(Box::new(serde::Deserialize::deserialize(marker).expect("typed fixture")));
                     agent.start_attempt.take();
@@ -2353,7 +2352,7 @@ async fn automatic_recovery_case(restart: bool, child: bool, stopped: bool) {
                 agent.root_id = AgentId::from("parent");
                 agent.parent_id = Some(("parent").to_string());
                 agent.is_lead = Some(false);
-                agent.extra.insert("role".into(), json!("implementer"));
+                agent.role = studio_runtime_schema::queue_command::Field::Value(studio_runtime_schema::creation_intent::AgentRole::Implementer);
             }
             agent.status = studio_runtime_store::AgentStatus::Running;
             agent.turn_id = Some("old-turn".to_string());
@@ -2558,7 +2557,7 @@ async fn seed_adopted_turn_checked_while_running(state: &State) {
                     agent.turn_epoch = Some(epoch);
                     agent.auto_wake = Some(true);
                     agent.in_flight = Some(false);
-                    agent.extra.insert("error".into(), Value::Null);
+                    agent.error = studio_runtime_schema::queue_command::Field::Null;
                     agent.start_attempt = Some(serde::Deserialize::deserialize(attempt).expect("typed fixture"));
                     agent.disconnect_recovery = Some(Box::new(serde::Deserialize::deserialize(disconnect).expect("typed fixture")));
                     agent.restart_recovery = Some(Box::new(serde::Deserialize::deserialize(marker).expect("typed fixture")));
@@ -2650,7 +2649,7 @@ async fn restart_terminal_commit_before_wake_converges_on_next_worker_start() {
                 agent.thread_id = Some("fake-thread-0".to_string());
                 agent.auto_wake = Some(true);
                 agent.in_flight = Some(false);
-                agent.extra.insert("error".into(), json!("held"));
+                agent.error = studio_runtime_schema::queue_command::Field::Value(studio_runtime_schema::provider_errors::AgentError::Message(("held").to_string()));
                 agent.restart_recovery = Some(Box::new(studio_runtime_schema::recovery_record::RecoveryFields { stage: Some("held".into()), start_attempt: Some(Box::new(serde::Deserialize::deserialize(attempt).expect("typed fixture"))), ..Default::default() }));
                 agent.extra.insert("contextRepairWait".into(), json!({
                     "error":"held","scope":"native","events":["annotation:input"],"nextCheckAt":0,

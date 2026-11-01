@@ -14,11 +14,10 @@ import {
   WorkerPermissions,
 } from "./WorkerPermissions";
 
-const lead = (mode: ClaudePermissionMode, yolo = true): Agent => ({
+const lead = (mode: ClaudePermissionMode): Agent => ({
   id: "lead",
   provider: GeneratedApiProviderKind.claude,
-  yoloMode: yolo,
-  claudeOptions: { permissionMode: mode },
+  permissionMode: mode,
 });
 
 test("unknown provider identities never inherit or display Codex permissions", () => {
@@ -30,16 +29,13 @@ test("unknown provider identities never inherit or display Codex permissions", (
   }
 });
 
-test.each(CLAUDE_PERMISSION_MODES)(
-  "inherits effective %s despite legacy yolo",
-  (mode) => {
-    expect(inheritedClaudeMode(lead(mode))).toBe(mode);
-    expect(
-      allowedWorkerModes(lead(mode), false).includes("bypassPermissions"),
-    ).toBe(mode === "bypassPermissions");
-    expect(allowedWorkerModes(lead(mode), true)).toEqual(["plan"]);
-  },
-);
+test.each(CLAUDE_PERMISSION_MODES)("inherits effective %s", (mode) => {
+  expect(inheritedClaudeMode(lead(mode))).toBe(mode);
+  expect(
+    allowedWorkerModes(lead(mode), false).includes("bypassPermissions"),
+  ).toBe(mode === "bypassPermissions");
+  expect(allowedWorkerModes(lead(mode), true)).toEqual(["plan"]);
+});
 test("legacy modes use provider-specific yolo defaults and invalid modes fail closed", () => {
   expect(
     inheritedClaudeMode({
@@ -57,15 +53,14 @@ test("legacy modes use provider-specific yolo defaults and invalid modes fail cl
     inheritedClaudeMode({
       id: "lead",
       provider: GeneratedApiProviderKind.claude,
-      yoloMode: true,
+      permissionMode: "bypassPermissions",
     }),
   ).toBe("bypassPermissions");
   expect(
     allowedWorkerModes(
-      {
-        ...lead("auto"),
-        claudeOptions: { permissionMode: "unknown" },
-      } as unknown as Agent,
+      JSON.parse(
+        '{"id":"lead","provider":"claude","permissionMode":"unknown"}',
+      ),
       false,
     ),
   ).toEqual([]);
@@ -76,7 +71,13 @@ function render(provider: string, reviewer = false, yolo = false) {
       MantineProvider,
       null,
       createElement(WorkerPermissions, {
-        lead: lead("auto", yolo),
+        lead: lead(
+          provider === "codex"
+            ? yolo
+              ? "bypassPermissions"
+              : "default"
+            : "auto",
+        ),
         provider,
         reviewer,
         value: undefined,

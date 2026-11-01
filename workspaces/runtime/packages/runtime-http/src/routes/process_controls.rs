@@ -1,6 +1,6 @@
 //! Shared process panel with exact-owner checks and retained stop receipts.
 use super::{
-    extractors::{ApiJson, QueryParams},
+    extractors::{ApiJson, TypedQuery},
     manifest::{OperationStatus, RouteGroup, get, post},
 };
 use crate::{error::ApiError, router::HttpState};
@@ -95,7 +95,10 @@ fn connections(
     }
     Ok(connections)
 }
-pub(super) async fn read_listing(state: HttpState, scope: String) -> Result<Value, ApiError> {
+pub(super) async fn read_listing(
+    state: HttpState,
+    scope: String,
+) -> Result<studio_runtime_schema::process_controls::ProcessListing, ApiError> {
     let store = store(&state)?;
     let proof = held_response_proof(&state, &scope).await;
     store
@@ -153,21 +156,38 @@ async fn held_response_proof(
     .ok()?;
     controls::HeldResponseProof::observe(owner, scope, &reply)
 }
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProcessListQuery {
+    agent: studio_runtime_schema::bounded_text::BoundedText<1, 200>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct ReceiptQuery {
+    request_id: studio_runtime_schema::bounded_text::BoundedText<1, 200>,
+    agent: studio_runtime_schema::bounded_text::BoundedText<1, 200>,
+    account_key: studio_runtime_schema::bounded_text::BoundedText<1, 200>,
+    epoch: studio_runtime_schema::bounded_integer::BoundedInteger<0, 9_007_199_254_740_991>,
+}
+
 async fn listing(
     State(state): State<HttpState>,
-    params: QueryParams,
-) -> Result<Json<Value>, ApiError> {
-    let scope = params
-        .nonempty_str("agent")
-        .ok_or_else(|| invalid("Supply an agent ID"))?
-        .to_owned();
+    TypedQuery(params): TypedQuery<ProcessListQuery>,
+) -> Result<Json<studio_runtime_schema::process_controls::ProcessListing>, ApiError> {
+    let scope = params.agent.as_str().to_owned();
     Ok(Json(read_listing(state, scope).await?))
 }
 async fn receipt(
     State(state): State<HttpState>,
-    params: QueryParams,
+    TypedQuery(params): TypedQuery<ReceiptQuery>,
 ) -> Result<Json<ProcessReceipt>, ApiError> {
-    let query = Value::Object((*params.into_typed()).clone());
+    let query = controls::ReceiptIdentity {
+        request_id: params.request_id.as_str().to_owned(),
+        agent: params.agent.as_str().to_owned(),
+        account_key: params.account_key.as_str().to_owned(),
+        epoch: params.epoch.get(),
+    };
     let store = store(&state)?;
     let value = store
         .read_async("runtime-http/routes/process_controls", move |connection| {
@@ -323,7 +343,7 @@ async fn execute(
                 if let Some(entry) = result
                     .processes
                     .iter_mut()
-                    .find(|p| p.key == text(&target, "key"))
+                    .find(|p| p.key == target.view.key)
                 {
                     entry.outcome = outcome;
                 }
@@ -386,12 +406,12 @@ async fn save(
 
 async fn bind(
     state: &HttpState,
-    process: &Value,
+    process: &controls::ProcessRecord,
 ) -> Result<(Arc<dyn AccountSessionPort>, ConnectionScope, ProviderTicket), ApiError> {
     let expected = process.clone();
     let (owners, processes) = {
         let state = state.clone();
-        let agent = text(&expected, "agent").to_owned();
+        let agent = expected.view.agent.clone();
         store(&state)?
             .read_async("runtime-http/routes/process_controls", move |connection| {
                 let owners = controls::owners(connection, &agent).map_err(error)?;
@@ -403,29 +423,35 @@ async fn bind(
             })
             .await?
     };
-    if !processes
-        .iter()
-        .any(|p| controls::matches(p, &expected) && p["capabilities"]["stop"] == true)
-    {
+    if !processes.iter().any(|p| {
+        controls::matches(p, &expected)
+            && p.view
+                .display
+                .actions
+                .contains(&studio_runtime_schema::process_controls::BackgroundTaskAction::Stop)
+    }) {
         return Err(invalid("The process changed. Refresh the process list"));
     }
     let owner = &owners[0];
     let port = provider(state, owner)?;
-    let account = text(&expected, "_sourceAccountKey");
+    let account = expected
+        .source_account
+        .as_deref()
+        .ok_or_else(ApiError::internal)?;
     let scope = port
         .current_scope(account)
         .ok_or_else(|| invalid("The native process connection is unavailable"))?;
-    if scope.connection != text(&expected, "_sourceConnectionId")
-        || owner["threadId"] != expected["_sourceThreadId"]
+    if Some(scope.connection.as_str()) != expected.source_connection.as_deref()
+        || owner["threadId"].as_str() != expected.source_thread.as_deref()
     {
         return Err(invalid("The native process connection changed"));
     }
     let ticket = ProviderTicket {
-        operation: text(&expected, "key").to_owned(),
-        agent: text(&expected, "agent").to_owned(),
-        epoch: expected["epoch"].as_u64().ok_or_else(ApiError::internal)?,
+        operation: expected.view.key.clone(),
+        agent: expected.view.agent.clone(),
+        epoch: expected.view.epoch,
         account: account.to_owned(),
-        thread: Some(text(&expected, "_sourceThreadId").to_owned()),
+        thread: expected.source_thread.clone(),
         connection: scope.connection.clone(),
         generation: scope.generation,
         request: String::new(),
@@ -469,11 +495,11 @@ async fn dispatch(
 async fn stop_process(
     state: &HttpState,
     runtime: Option<&Arc<MonitorRuntime>>,
-    process: &Value,
+    process: &controls::ProcessRecord,
     request_id: &str,
     request_identity: (&str, &AdmittedRequest),
 ) -> Result<ProcessOutcome, ApiError> {
-    if process["source"] == "monitor" {
+    if process.view.source == studio_runtime_schema::process_controls::ProcessSourceKind::Monitor {
         let Some(runtime) = runtime else {
             return Ok(ProcessOutcome::Failed {
                 error: "Monitor runtime is unavailable".into(),
@@ -513,13 +539,14 @@ async fn stop_process(
     };
     let operation = format!(
         "process-action:{request_id}:{}",
-        controls::digest(&process["key"])
+        controls::digest(&json!(process.view.key))
     );
     ticket.request = operation.clone();
-    let claude = process["source"] == "claude_task";
-    let item = text(&process["_raw"], "itemId");
+    let claude = process.view.source
+        == studio_runtime_schema::process_controls::ProcessSourceKind::ClaudeTask;
+    let item = process.item_id.as_deref().ok_or_else(ApiError::internal)?;
     let task = item.strip_prefix("task:").unwrap_or(item);
-    let pid = &process["_raw"]["processId"];
+    let pid = &process.process_id;
     let mut params = if claude {
         json!({"threadId":ticket.thread})
     } else {
@@ -557,10 +584,21 @@ async fn stop_process(
         if page.data.len() > NATIVE_TERMINAL_ITEMS_PER_PAGE {
             return Err(invalid("Invalid native terminal list"));
         }
-        found = page
-            .data
-            .iter()
-            .any(|entry| entry["itemId"] == item && entry["processId"] == *pid);
+        found = page.data.iter().any(|entry| {
+            entry["itemId"] == item
+                && match pid {
+                    Some(studio_runtime_schema::task_record::ProcessId::Text(value)) => {
+                        entry["processId"].as_str() == Some(value)
+                    }
+                    Some(studio_runtime_schema::task_record::ProcessId::Signed(value)) => {
+                        entry["processId"].as_i64() == Some(*value)
+                    }
+                    Some(studio_runtime_schema::task_record::ProcessId::Unsigned(value)) => {
+                        entry["processId"].as_u64() == Some(*value)
+                    }
+                    None => entry["processId"].is_null(),
+                }
+        });
         if found {
             break;
         }
@@ -787,3 +825,30 @@ async fn background_command(
     })
 }
 inventory::submit! {crate::routes::manifest::RouteModuleRegistration {name:"process_controls",routes:Some(routes),dependencies:&["provider-session/native-request","provider-session/monitor-commands"]}}
+
+#[cfg(test)]
+mod typed_query_tests {
+    use axum::extract::Query;
+    use serde::de::DeserializeOwned;
+
+    fn accepts<T: DeserializeOwned>(query: &str) -> bool {
+        let uri = format!("/?{query}").parse().unwrap();
+        Query::<T>::try_from_uri(&uri).is_ok()
+    }
+
+    #[test]
+    fn query_contracts() {
+        assert!(accepts::<super::ProcessListQuery>("agent=a"));
+        assert!(!accepts::<super::ProcessListQuery>("agent="));
+        assert!(!accepts::<super::ProcessListQuery>("agent=a&unknown=x"));
+        assert!(accepts::<super::ReceiptQuery>(
+            "agent=a&accountKey=b&requestId=c&epoch=1"
+        ));
+        assert!(!accepts::<super::ReceiptQuery>(
+            "agent=a&accountKey=b&requestId=c&epoch=-1"
+        ));
+        assert!(!accepts::<super::ReceiptQuery>(
+            "agent=a&accountKey=b&requestId=c&epoch=1&unknown=x"
+        ));
+    }
+}

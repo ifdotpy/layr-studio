@@ -51,6 +51,7 @@ import {
   entityPullFixtureForRequest,
   apiSchemaHandshakeSse,
   protocol3SseEvent,
+  syncSessionSse,
   readTestState,
   readFixtureSyncContract,
   stubEntityState,
@@ -186,10 +187,18 @@ async function scrollFollow(page: Page, full: boolean) {
   let transcriptSeq = 1;
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (message) => {
+    if (
+      message.type() === "error" &&
+      message.text().includes("Sync stream frame could not be applied")
+    )
+      errors.push(message.text());
+  });
   // The transcript map owns both pulled baselines and sparse stream deltas.
   const syncStreams = new Map<ServerResponse, ResourceRef[]>();
   const sessions = new Map<string, ServerResponse>();
   let subscriptionUpdates = 0;
+  const subscriptionAcks: unknown[] = [];
   let streamRevision = 0;
   let transcriptPulls = 0;
   const streamFrame = (
@@ -256,7 +265,12 @@ async function scrollFollow(page: Page, full: boolean) {
           next.push(added);
       }
       resources.splice(0, resources.length, ...next);
-      stream.write(protocol3SseEvent("subscriptions", { gen: update.gen }));
+      const ack = {
+        gen: update.gen,
+        cachePolicies: [],
+      } satisfies components["schemas"]["SyncSubscriptionAck"];
+      subscriptionAcks.push(ack);
+      stream.write(protocol3SseEvent("subscriptions", ack));
       if (update.add.length)
         stream.write(
           protocol3SseEvent(
@@ -268,7 +282,7 @@ async function scrollFollow(page: Page, full: boolean) {
         "Content-Type": "application/json",
         "Access-Control-Allow-Origin": "*",
       });
-      response.end(JSON.stringify({ gen: update.gen }));
+      response.end(JSON.stringify(ack));
       return;
     }
     const resources = fixtureResourceRefs(
@@ -282,7 +296,9 @@ async function scrollFollow(page: Page, full: boolean) {
     });
     const sessionId = randomUUID();
     sessions.set(sessionId, response);
-    response.write(protocol3SseEvent("session", { sessionId }));
+    response.write(
+      syncSessionSse(sessionId, syncContract.identity.workspaceId),
+    );
     response.write(apiSchemaHandshakeSse());
     response.write(
       protocol3SseEvent("resources", streamFrame(resources, "initial")),
@@ -475,6 +491,13 @@ async function scrollFollow(page: Page, full: boolean) {
     await expect(chatRow).toBeVisible();
     await chatRow.click();
     await root.locator('[data-message="prompt-live"]').waitFor();
+    await expect.poll(() => subscriptionAcks.length).toBeGreaterThan(0);
+    assert.ok(
+      subscriptionAcks.every((ack) =>
+        Array.isArray((ack as { cachePolicies?: unknown }).cachePolicies),
+      ),
+      "subscription acknowledgements include cache policies",
+    );
     await page.waitForTimeout(500);
     assert.ok(
       await page.evaluate(

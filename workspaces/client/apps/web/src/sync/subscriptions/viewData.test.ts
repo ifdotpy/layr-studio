@@ -9,7 +9,11 @@ import type { ObserveSubscriptionData } from "./module";
 type SyncFixture = ReturnType<Parameters<typeof createDataObserver>[0]>;
 
 it.each([
-  [{ kind: "processes", agentId: "lead" }, "processes", { processes: [] }],
+  [
+    { kind: "processes", agentId: "lead" },
+    "processes",
+    { processes: [], activities: [] },
+  ],
   [
     { kind: "complaint", complaintId: "message" },
     "complaint",
@@ -78,7 +82,7 @@ it("an oversized view recovers once and subsequent complete frames resume zero-r
     },
     watchResourceConnection: () => () => {},
   };
-  const read = vi.fn(async () => ({ processes: [] }));
+  const read = vi.fn(async () => ({ processes: [], activities: [] }));
   const accept = vi.fn();
   const stop = createDataObserver(
     () => ({}) as SyncFixture,
@@ -92,7 +96,7 @@ it("an oversized view recovers once and subsequent complete frames resume zero-r
   receive({
     epoch: "server",
     revision: 2,
-    viewSnapshot: { processes: { processes: [] } },
+    viewSnapshot: { processes: { processes: [], activities: [] } },
   });
   await vi.waitFor(() => expect(accept).toHaveBeenCalledTimes(2));
   expect(read).toHaveBeenCalledOnce();

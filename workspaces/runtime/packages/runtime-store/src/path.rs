@@ -67,6 +67,14 @@ fn expand_home(path: &Path) -> StoreResult<PathBuf> {
 }
 
 fn canonical_existing_dir(path: PathBuf) -> StoreResult<CanonicalPath> {
+    let candidate = CanonicalPath::weak_missing_tail(&std::path::absolute(&path)?)?;
+    if candidate
+        .components()
+        .any(|part| matches!(part, Component::Normal(value) if value == ".claude"))
+    {
+        return Err(StoreError::UnsafeStateDirectory);
+    }
+    std::fs::create_dir_all(&path)?;
     let resolved = CanonicalPath::existing(&path)?;
     if resolved
         .components()
@@ -85,8 +93,27 @@ fn canonical_existing_dir(path: PathBuf) -> StoreResult<CanonicalPath> {
 
 #[cfg(test)]
 mod tests {
-    use super::expand_home;
+    use super::{canonical_existing_dir, expand_home};
     use std::path::Path;
+
+    #[test]
+    fn missing_state_directory_is_created() {
+        let parent = tempfile::tempdir().unwrap();
+        let state = parent.path().join("missing/state");
+        assert_eq!(
+            canonical_existing_dir(state.clone())
+                .unwrap()
+                .into_path_buf(),
+            state
+        );
+        assert!(state.is_dir());
+        let unsafe_state = parent.path().join(".claude/missing");
+        assert!(matches!(
+            canonical_existing_dir(unsafe_state.clone()),
+            Err(crate::StoreError::UnsafeStateDirectory)
+        ));
+        assert!(!unsafe_state.exists());
+    }
 
     #[test]
     fn explicit_paths_expand_only_a_leading_tilde() {

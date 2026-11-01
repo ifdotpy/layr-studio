@@ -14,10 +14,6 @@ pub(crate) fn check(connection: &Connection) -> StoreResult<Vec<StateCheckTable>
             "runtime_server_inbox",
             "json_object('id',id,'signature',signature,'state',state,'result',result,'created_at',created_at,'completed_at',completed_at)",
         ),
-        (
-            "runtime_server_outbox",
-            "json_object('id',id,'server',server,'body',body,'state',state,'result',result,'fingerprint',fingerprint,'attempts',attempts,'created_at',created_at,'completed_at',completed_at)",
-        ),
     ] {
         let mut report = StateCheckTable {
             table,
@@ -32,23 +28,54 @@ pub(crate) fn check(connection: &Connection) -> StoreResult<Vec<StateCheckTable>
         )?;
         if exists {
             let mut counts = BTreeMap::new();
-            let mut statement = connection.prepare(&format!("SELECT {projection} FROM {table}"))?;
+            let mut statement =
+                connection.prepare(&format!("SELECT id,{projection} FROM {table}"))?;
             let mut rows = statement.query([])?;
             while let Some(row) = rows.next()? {
                 report.row_count += 1;
-                let error = match row
-                    .get::<_, String>(0)
-                    .ok()
-                    .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-                {
-                    Some(value) => studio_runtime_schema::first_error(
-                        studio_runtime_schema::table_schema(table).ok_or_else(|| {
-                            StoreError::SchemaValidation(format!("no storage schema for {table}"))
-                        })?,
-                        &value,
-                    )
-                    .map_err(StoreError::SchemaValidation)?,
-                    None => Some((String::new(), "JSON".to_owned())),
+                let id = row.get::<_, String>(0).ok();
+                let raw = row.get::<_, String>(1).ok();
+                let error = if table == "runtime_access_invites" {
+                    match raw.as_deref().and_then(|raw| {
+                        serde_json::from_str::<
+                            studio_runtime_schema::http_ingress::Object<
+                                studio_runtime_schema::multi_server_protocol::PersistedAccessInvite,
+                            >,
+                        >(raw)
+                        .ok()
+                    }) {
+                        Some(_) => None,
+                        None => Some((String::new(), "recordType".to_owned())),
+                    }
+                } else if matches!(
+                    table,
+                    "runtime_access_clients" | "runtime_access_discovered"
+                ) {
+                    let decoded = raw.as_deref().and_then(|raw| {
+                        serde_json::from_str::<
+                            studio_runtime_schema::http_ingress::Object<
+                                studio_runtime_schema::multi_server_access::PersistedAccessClient,
+                            >,
+                        >(raw)
+                        .ok()
+                    });
+                    match (id.as_deref(), decoded) {
+                        (Some(_), Some(_)) => None,
+                        _ => Some((String::new(), "recordType".to_owned())),
+                    }
+                } else {
+                    match raw.and_then(|s| serde_json::from_str::<Value>(&s).ok()) {
+                        Some(value) => studio_runtime_schema::first_error(
+                            studio_runtime_schema::table_schema(table).ok_or_else(|| {
+                                StoreError::SchemaValidation(format!(
+                                    "no storage schema for {table}"
+                                ))
+                            })?,
+                            &value,
+                        )
+                        .map_err(StoreError::SchemaValidation)?,
+                        None => Some((String::new(), "JSON".to_owned())),
+                    }
                 };
                 if let Some(error) = error {
                     report.rejected_count += 1;

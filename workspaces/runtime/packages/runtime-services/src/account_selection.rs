@@ -4,8 +4,7 @@ use serde_json::{Value, json};
 use studio_runtime_store::{AccountTransferRepository, AgentRepository, RuntimeStore, StoreError};
 
 struct SelectionAccount {
-    deleted: bool,
-    disconnected: bool,
+    eligibility: studio_runtime_schema::agent_progress::AccountEligibility,
     provider: Option<studio_runtime_providers::ProviderKind>,
 }
 
@@ -25,10 +24,13 @@ impl SelectionSnapshot {
         directory: &str,
         empty: bool,
     ) -> Result<Value, TransferError> {
-        let account = account.map(|account| SelectionAccount {
-            deleted: crate::event_write::truthy(account.get("deleted")),
-            disconnected: crate::event_write::truthy(account.get("disconnected")),
-            provider: studio_runtime_providers::ProviderKind::of_record(account).ok(),
+        let account = account.and_then(|account| {
+            let public: crate::account_policy::PublicAccount =
+                serde::Deserialize::deserialize(account.clone()).ok()?;
+            Some(SelectionAccount {
+                eligibility: public.eligibility(),
+                provider: public.provider_kind(),
+            })
         });
         self.decide_account(target, account.as_ref(), directory, empty)
     }
@@ -62,14 +64,12 @@ impl SelectionSnapshot {
             return Ok(agent);
         }
         let account = account.ok_or(TransferError::Refused("Unknown account"))?;
-        if account.deleted {
+        if matches!(
+            account.eligibility,
+            studio_runtime_schema::agent_progress::AccountEligibility::Unavailable { .. }
+        ) {
             return Err(TransferError::Refused(
-                "This account was deleted. Select another account",
-            ));
-        }
-        if account.disconnected {
-            return Err(TransferError::Refused(
-                "Reconnect this account before selecting it",
+                "This account is not available for selection",
             ));
         }
         if !empty || truthy(agent.get("inFlight")) {
@@ -185,8 +185,7 @@ pub async fn select(
         .chain(&accounts.archived_accounts)
         .find(|row| row.id.as_str() == Some(target))
         .map(|row| SelectionAccount {
-            deleted: row.deleted.truthy(),
-            disconnected: row.disconnected.truthy(),
+            eligibility: row.eligibility(),
             provider: row
                 .provider
                 .as_str()
@@ -267,7 +266,7 @@ pub async fn select(
                     .map_err(|_| TransferError::Refused("Cannot register the selected project"))?;
                 AgentRepository::put(
                     tx,
-                    &serde_json::from_value(value.clone()).map_err(StoreError::from)?,
+                    &serde::Deserialize::deserialize(value.clone()).map_err(StoreError::from)?,
                 )?;
                 return Ok(crate::agents_create::publish_agent(tx, &value)?);
             }

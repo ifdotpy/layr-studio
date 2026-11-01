@@ -10,15 +10,13 @@ use studio_runtime_services::workspace_views::{
 };
 use studio_runtime_store::{
     AgentRecord, AnnotationRecord, CheckpointRecord, ComplaintRecord, Connection, PlanRecord,
-    RequestRecord, RuleRecord, StoreError, TaskRecord, TranscriptRepository,
-    WorkspaceViewsRepository,
+    RuleRecord, StoreError, TaskRecord, TranscriptRepository, WorkspaceViewsRepository,
 };
 
 use crate::error::ApiError;
 use crate::router::HttpState;
-use crate::validation::Registry;
 
-use super::extractors::QueryParams;
+use super::extractors::TypedQuery;
 use super::manifest::{OperationStatus, RouteGroup, get};
 
 pub(crate) fn routes() -> RouteGroup {
@@ -39,21 +37,83 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ChangesScope {
+    Chat,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChangesQuery {
+    agent: Option<String>,
+    scope: Option<ChangesScope>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum WorkspaceView {
+    Full,
+    Work,
+    Inbox,
+    Annotations,
+}
+impl WorkspaceView {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Work => "work",
+            Self::Inbox => "inbox",
+            Self::Annotations => "annotations",
+        }
+    }
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkspaceQuery {
+    agent: Option<String>,
+    view: Option<WorkspaceView>,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TaskQuery {
+    id: Option<String>,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TaskOutputQuery {
+    id: Option<String>,
+    agent: studio_runtime_schema::bounded_text::BoundedText<1, { usize::MAX }>,
+}
+#[derive(serde::Deserialize)]
+enum Timing {
+    #[serde(rename = "0")]
+    Off,
+    #[serde(rename = "1")]
+    On,
+}
+/// Largest exact integer accepted by the task page query.
+const TASK_QUERY_INTEGER_MAX: u64 = 9_007_199_254_740_991;
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkspaceTasksQuery {
+    agent: Option<String>,
+    cursor: Option<String>,
+    before: Option<String>,
+    limit:
+        Option<studio_runtime_schema::bounded_integer::BoundedInteger<0, TASK_QUERY_INTEGER_MAX>>,
+    #[serde(rename = "timing")]
+    _timing: Option<Timing>,
+}
+
 async fn changes(
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<ChangesQuery>,
     State(state): State<HttpState>,
 ) -> Result<Json<crate::generated::ChangesResponse>, ApiError> {
-    let agent = query.nonempty_str("agent").map(str::to_owned);
-    let scope = query.nonempty_str("scope").map(str::to_owned);
+    let agent = query.agent.filter(|value| !value.is_empty());
+    let chat = query.scope.is_some();
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
-    if scope.as_deref().is_some_and(|scope| scope != "chat") {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "Unknown changes scope",
-        ));
-    }
     let actor_id = agent.ok_or_else(invalid_request)?;
-    let chat = scope.is_some();
     // Reported changes come from the transcript; Git changes run after the read.
     let read = store
         .read_async("runtime-http/routes/workspace_views", move |transaction| {
@@ -92,16 +152,19 @@ async fn changes(
 }
 
 async fn workspace(
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<WorkspaceQuery>,
     State(state): State<HttpState>,
 ) -> Result<Json<studio_runtime_services::workspace_views::WorkspaceViewResponse>, ApiError> {
-    let agent = query.nonempty_str("agent").map(str::to_owned);
-    let view = query.nonempty_str("view").unwrap_or("full").to_owned();
+    let agent = query.agent.filter(|value| !value.is_empty());
+    let view = query
+        .view
+        .as_ref()
+        .map_or("full", WorkspaceView::as_str)
+        .to_owned();
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
-    let validators = state.validators.clone();
     let value = store
         .read_async("runtime-http/routes/workspace_views", move |transaction| {
-            workspace_view(transaction, &validators, agent.as_deref(), &view)
+            workspace_view(transaction, agent.as_deref(), &view)
         })
         .await?;
     Ok(Json(value))
@@ -168,7 +231,6 @@ fn empty_reported_changes() -> Value {
 
 fn workspace_view(
     connection: &Connection,
-    validators: &Registry,
     agent_id: Option<&str>,
     view: &str,
 ) -> Result<studio_runtime_services::workspace_views::WorkspaceViewResponse, ApiError> {
@@ -244,10 +306,16 @@ fn workspace_view(
         );
     }
 
-    let requests = record_values(
-        WorkspaceViewsRepository::records_for_agents::<RequestRecord>(connection, "agent", &ids)
-            .map_err(ApiError::stored)?,
-    )?;
+    let mut requests = Vec::new();
+    for id in &ids {
+        requests.extend(
+            studio_runtime_store::approvals::for_agent(
+                connection,
+                &studio_runtime_schema::approvals::AgentId(id.clone()),
+            )
+            .map_err(|error| ApiError::stored(error.into()))?,
+        );
+    }
     let complaints = if root.is_some() {
         record_values(
             WorkspaceViewsRepository::records_for_agents::<ComplaintRecord>(
@@ -265,7 +333,6 @@ fn workspace_view(
         WorkspaceViewsRepository::records_for_agents::<RuleRecord>(connection, "agent", &ids)
             .map_err(ApiError::stored)?;
     let tasks = project_task_records(
-        validators,
         WorkspaceViewsRepository::snapshot_tasks(connection, root.as_deref())
             .map_err(ApiError::stored)?,
     )?;
@@ -365,29 +432,23 @@ fn record_values<T: serde::Serialize>(records: Vec<T>) -> Result<Vec<Value>, Api
 }
 
 fn project_task_records(
-    validators: &Registry,
     records: Vec<TaskRecord>,
-) -> Result<Vec<Value>, ApiError> {
+) -> Result<Vec<studio_runtime_schema::process_controls::TaskProjection>, ApiError> {
     records
         .into_iter()
         .map(|task| {
             let id = task.id().as_ref().to_owned();
-            validators
-                .project_entity("task", &studio_runtime_store::projection_value(&task))
+            studio_runtime_services::sync_views::project_task_record(&task)
                 .ok_or_else(|| invalid_stored("runtime_tasks", &id))
         })
         .collect()
 }
 
 async fn task_detail(
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<TaskQuery>,
     State(state): State<HttpState>,
 ) -> Result<Json<Value>, ApiError> {
-    let id = query
-        .typed_value("id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
+    let id = query.id.unwrap_or_default();
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let task = store
         .read_async("runtime-http/routes/workspace_views", move |connection| {
@@ -410,17 +471,14 @@ async fn task_detail(
 }
 
 async fn task_output(
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<TaskOutputQuery>,
     State(state): State<HttpState>,
 ) -> Result<Json<Value>, ApiError> {
     let id = query
-        .nonempty_str("id")
-        .ok_or_else(invalid_request)?
-        .to_owned();
-    let owner = query
-        .nonempty_str("agent")
-        .ok_or_else(invalid_request)?
-        .to_owned();
+        .id
+        .filter(|id| !id.is_empty())
+        .ok_or_else(invalid_request)?;
+    let owner = query.agent.as_str().to_owned();
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let (task, agent) = store
         .read_async("task-output/owner", move |connection| {
@@ -444,47 +502,38 @@ async fn task_output(
 }
 
 async fn workspace_tasks(
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<WorkspaceTasksQuery>,
     State(state): State<HttpState>,
-) -> Result<Json<Value>, ApiError> {
-    let agent = query.nonempty_str("agent").map(str::to_owned);
-    let limit = query
-        .typed_value("limit")
-        .and_then(Value::as_u64)
-        .unwrap_or(100)
-        .clamp(1, 100) as usize;
-    let cursor = parse_task_cursor(query.nonempty_str("cursor"), CursorKind::Current)
-        .map_err(|_| invalid_cursor("cursor"))?;
-    let before = parse_task_cursor(query.nonempty_str("before"), CursorKind::Before)
-        .map_err(|_| invalid_cursor("before"))?;
+) -> Result<Json<studio_runtime_services::workspace_views::TaskFeedResponse>, ApiError> {
+    let agent = query.agent.filter(|value| !value.is_empty());
+    let limit = query.limit.map_or(100, |value| value.get()).clamp(1, 100) as usize;
+    let cursor = parse_task_cursor(
+        query.cursor.as_deref().filter(|value| !value.is_empty()),
+        CursorKind::Current,
+    )
+    .map_err(|_| invalid_cursor("cursor"))?;
+    let before = parse_task_cursor(
+        query.before.as_deref().filter(|value| !value.is_empty()),
+        CursorKind::Before,
+    )
+    .map_err(|_| invalid_cursor("before"))?;
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let result = store
         .read_async(
             "runtime-http/routes/workspace_views",
-            move |connection| -> Result<Value, ApiError> {
-                // Each served row is decoded below; rows outside the page are not read.
-                let agents = record_values(
-                    WorkspaceViewsRepository::agents(connection).map_err(map_store_error)?,
-                )?;
-                let root =
-                    studio_runtime_services::workspace_views::agent_root(&agents, agent.as_deref())
-                        .map_err(|error| {
-                            match error {
-                        studio_runtime_services::workspace_views::AgentScopeError::MissingAgent => {
-                            invalid_request()
-                        }
-                        studio_runtime_services::workspace_views::AgentScopeError::MissingRoot => {
-                            invalid_stored("runtime_agents", agent.as_deref().unwrap_or("unknown"))
-                        }
-                        }
-                        })?;
-                let ids = studio_runtime_services::workspace_views::agents_in_root(
-                    &agents,
-                    root.as_deref(),
-                )
-                .into_iter()
-                .filter_map(|record| record["id"].as_str().map(str::to_owned))
-                .collect::<Vec<_>>();
+            move |connection| -> Result<_, ApiError> {
+                let root = agent
+                    .as_deref()
+                    .map(|id| {
+                        let agent = WorkspaceViewsRepository::agent(connection, id)
+                            .map_err(map_store_error)?
+                            .filter(|agent| !agent.is_deleted())
+                            .ok_or_else(invalid_request)?;
+                        Ok::<_, ApiError>(agent.root_id.0)
+                    })
+                    .transpose()?;
+                let ids = WorkspaceViewsRepository::task_agent_ids(connection, root.as_deref())
+                    .map_err(map_store_error)?;
                 let page = WorkspaceViewsRepository::task_page(
                     connection,
                     &ids,
@@ -501,13 +550,10 @@ async fn workspace_tasks(
                     .into_iter()
                     .take(limit)
                     .map(|row| {
-                        let record = row.decode(connection).map_err(map_store_error)?;
-                        let mut summary = record;
-                        if let Some(record) = summary.as_object_mut() {
-                            record.remove("tail");
-                            record.remove("arguments");
-                            record.remove("error");
-                        }
+                        let mut summary = row.decode(connection).map_err(map_store_error)?;
+                        summary.tail = None;
+                        summary.arguments = None;
+                        summary.error = None;
                         Ok(summary)
                     })
                     .collect::<Result<Vec<_>, ApiError>>()?;
@@ -560,6 +606,19 @@ mod tests {
     use axum::response::IntoResponse;
     use studio_runtime_store::StoreError;
 
+    #[test]
+    fn workspace_tasks_serialize_the_typed_projection() {
+        let task: studio_runtime_store::TaskRecord = serde_json::from_str(
+            r#"{"id":"a:item","agent":"a","created":1,"itemId":"item","kind":"command","status":"running","turnId":"turn","type":"commandExecution","name":"run","outputFile":"logs/out"}"#,
+        ).unwrap();
+        let tasks = super::project_task_records(vec![task]).unwrap();
+        let encoded = serde_json::to_string(&tasks).unwrap();
+        let actual: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(actual[0]["id"], "a:item");
+        assert_eq!(actual[0]["outputFile"], "logs/out");
+        assert!(actual[0].get("itemId").is_none());
+    }
+
     #[tokio::test]
     async fn reported_changes_http_preserves_payload_and_visibility_boundaries() {
         use axum::body::{Body, to_bytes};
@@ -573,7 +632,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.unwrap());
         store.transaction_with(|tx| {
-            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('agent',?1)", [json!({"compactions":0,"accountKey":"default","provider":"codex","id":"agent","rootId":"agent","epoch":0,"status":"idle"}).to_string()])?;
+            studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":"codex","id":"agent","rootId":"agent","epoch":0,"status":"idle"}))?)?;
             Ok::<_, StoreError>(())
         }).await.unwrap();
         let state = crate::HttpState::new(
@@ -716,7 +775,8 @@ mod tests {
         let root = tempfile::tempdir().expect("temporary runtime");
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
         store.transaction_with(|tx| {
-            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('agent',?1)", [json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"agent","rootId":"agent","epoch":0,"status":"idle"}).to_string()])?;
+            studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"agent","rootId":"agent","epoch":0,"status":"idle"}))?)?;
+            tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", ("deleted", json!({"id":"deleted","rootId":"deleted","provider":"codex","deletedAt":1}).to_string()))?;
             for (id, created) in [("a", 1), ("b", 2), ("c", 3)] {
                 tx.execute("INSERT INTO runtime_tasks VALUES(?1,?2)", (id, json!({"id":if id == "a" { "wrong" } else { id },"agent":"agent","created":created,"kind":"command","type":"commandExecution","name":"commandExecution","itemId":"item","turnId":"turn","status":"completed","tail":"large tail","arguments":"{}","error":"detail"}).to_string()))?;
             }
@@ -776,7 +836,7 @@ mod tests {
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.unwrap());
         store.transaction_with(|tx| {
             for id in ["lead", "foreign"] {
-                tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", (id, json!({"compactions":0,"accountKey":"default","provider":"codex","id":id,"rootId":id,"epoch":0,"status":"idle"}).to_string()))?;
+                studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":"codex","id":id,"rootId":id,"epoch":0,"status":"idle"}))?)?;
             }
             tx.execute("INSERT INTO runtime_checkpoints(id,record) VALUES('good',?1)", [json!({"id":"good","agent":"lead","created":1,"items":["private"],"future":{"kept":true}}).to_string()])?;
             tx.execute("INSERT INTO runtime_checkpoints(id,record) VALUES('foreign',?1)", [json!({"id":"wrong","agent":"foreign","created":1}).to_string()])?;
@@ -918,5 +978,102 @@ inventory::submit! {
             "workspace-state/git-changes",
             "workspace-state/snapshot",
         ],
+    }
+}
+
+#[cfg(test)]
+mod typed_query_tests {
+    use axum::extract::Query;
+    use serde::de::DeserializeOwned;
+
+    fn accepts<T: DeserializeOwned>(query: &str) -> bool {
+        let uri = format!("/?{query}").parse().unwrap();
+        Query::<T>::try_from_uri(&uri).is_ok()
+    }
+
+    #[tokio::test]
+    async fn registered_routes_reject_unknown_queries_after_decoding_valid_queries() {
+        use axum::{
+            body::Body,
+            http::{Request, StatusCode},
+        };
+        use tower::ServiceExt;
+        let app = crate::router::router(crate::router::HttpState::new(
+            "token".into(),
+            "fixture".into(),
+            "isolated".into(),
+            49171,
+            None,
+            None,
+            None,
+        ))
+        .unwrap();
+        for query in [
+            "/api/file?agent=a&path=b",
+            "/api/file-info?agent=a&path=b",
+            "/api/changes?agent=a&scope=chat",
+            "/api/workspace?agent=a&view=work",
+            "/api/task?id=a",
+            "/api/task/output?id=a&agent=a",
+            "/api/workspace/tasks?agent=a&limit=20",
+            "/api/project-locations?project=p&server=s",
+            "/api/work?agent=a",
+            "/api/queue?agent=a",
+            "/api/retained-worktrees?agent=a",
+            "/api/processes?agent=a",
+            "/api/processes/action?requestId=r&agent=a&accountKey=k&epoch=1",
+            "/api/monitor/log?id=a",
+            "/api/tool-requests?agent=a",
+        ] {
+            for (uri, invalid) in [
+                (query.to_owned(), false),
+                (format!("{query}&unknown=x"), true),
+            ] {
+                let request = Request::builder()
+                    .uri(&uri)
+                    .header("host", "127.0.0.1:49171")
+                    .header("x-canvas-token", "token")
+                    .extension(axum::extract::ConnectInfo(
+                        "127.0.0.1:12345".parse::<std::net::SocketAddr>().unwrap(),
+                    ))
+                    .body(Body::empty())
+                    .unwrap();
+                let status = app.clone().oneshot(request).await.unwrap().status();
+                if invalid {
+                    assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}");
+                } else {
+                    assert_ne!(status, StatusCode::BAD_REQUEST, "{uri}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn query_contracts() {
+        assert!(accepts::<super::ChangesQuery>("agent=a&scope=chat"));
+        assert!(!accepts::<super::ChangesQuery>("scope=other"));
+        assert!(!accepts::<super::ChangesQuery>(
+            "agent=a&scope=chat&unknown=x"
+        ));
+        assert!(accepts::<super::WorkspaceQuery>("agent=a&view=work"));
+        assert!(!accepts::<super::WorkspaceQuery>("view=other"));
+        assert!(!accepts::<super::WorkspaceQuery>(
+            "agent=a&view=work&unknown=x"
+        ));
+        assert!(accepts::<super::TaskQuery>("id=a"));
+        assert!(!accepts::<super::TaskQuery>("extra=x"));
+        assert!(!accepts::<super::TaskQuery>("id=a&unknown=x"));
+        assert!(accepts::<super::TaskOutputQuery>("id=a&agent=b"));
+        assert!(!accepts::<super::TaskOutputQuery>("agent="));
+        assert!(!accepts::<super::TaskOutputQuery>("id=a&agent=b&unknown=x"));
+        assert!(accepts::<super::WorkspaceTasksQuery>(
+            "agent=a&limit=50&timing=1"
+        ));
+        assert!(!accepts::<super::WorkspaceTasksQuery>(
+            "limit=9007199254740992"
+        ));
+        assert!(!accepts::<super::WorkspaceTasksQuery>(
+            "agent=a&limit=50&timing=1&unknown=x"
+        ));
     }
 }

@@ -61,14 +61,7 @@ fn desk_service_status(raw: &str) -> Result<DeskServiceStatus, serde_json::Error
     serde_json::from_str::<JsonObject<DeskServiceStatus>>(raw).map(|view| view.0)
 }
 
-// The OpenAPI resource owns the shared job-kind contract.
-use crate::generated::VaultJobProgressResourceJob as VaultJobKind;
-impl Copy for VaultJobKind {}
-impl std::hash::Hash for VaultJobKind {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        std::hash::Hash::hash(self.as_str(), state);
-    }
-}
+use studio_runtime_schema::progress_selector::VaultJob as VaultJobKind;
 
 struct VaultJobs {
     jobs: HashMap<(VaultJobKind, String), Value>,
@@ -253,14 +246,9 @@ fn vault_selector(
     kind: VaultJobKind,
     request_id: String,
 ) -> studio_runtime_schema::progress_selector::ProgressSelector {
-    use studio_runtime_schema::progress_selector::{ProgressSelector, VaultJob};
-    ProgressSelector::Vault {
+    studio_runtime_schema::progress_selector::ProgressSelector::Vault {
         request_id,
-        job: match kind {
-            VaultJobKind::Setup => VaultJob::Setup,
-            VaultJobKind::Login => VaultJob::Login,
-            VaultJobKind::Pull => VaultJob::Pull,
-        },
+        job: kind,
     }
 }
 

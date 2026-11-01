@@ -375,8 +375,12 @@ async fn callback_remote_message_uses_the_existing_federation_outbox() {
         "action":"message",
         "payload":{"link":"callback-link","worker":"lead","epoch":0,"parentEpoch":0,"args":args}
     });
+    let typed = |value: &Value| {
+        <crate::orchestration_wire::OrchestrationRequest as serde::Deserialize>::deserialize(value)
+            .expect("remote fixture")
+    };
     let queued = effects
-        .execute("peer-server", &envelope)
+        .execute("peer-server", &typed(&envelope))
         .await
         .expect("moved worker callback uses the federation service");
     let ExchangeOutcome::Applied(queued) = queued else {
@@ -387,7 +391,7 @@ async fn callback_remote_message_uses_the_existing_federation_outbox() {
     assert_eq!(rows(&store, "runtime_federation_outbox").len(), 1);
 
     let replay = effects
-        .execute("peer-server", &envelope)
+        .execute("peer-server", &typed(&envelope))
         .await
         .expect("stable remote callback replays its receipt");
     assert_eq!(replay, ExchangeOutcome::Applied(queued.clone()));
@@ -395,7 +399,12 @@ async fn callback_remote_message_uses_the_existing_federation_outbox() {
 
     let mut changed = envelope.clone();
     changed["payload"]["args"]["text"] = json!("changed");
-    assert!(effects.execute("peer-server", &changed).await.is_err());
+    assert!(
+        effects
+            .execute("peer-server", &typed(&changed))
+            .await
+            .is_err()
+    );
     assert_eq!(rows(&store, "runtime_federation_outbox").len(), 1);
 }
 
@@ -996,6 +1005,75 @@ async fn federation_pair_consumes_one_invitation_and_replays_by_peer_identity() 
         rows(&receiver, "runtime_federation_invites"),
         invites_before
     );
+}
+
+#[tokio::test]
+async fn legacy_federated_conflict_does_not_poison_original_command() {
+    let corpus = Corpus::new();
+    let (_, store) = corpus.store("legacy-user-message", false).await;
+    let id = fixture_request_id("legacy-user-message-key");
+    let first = delivery::user_message(
+        store.clone(),
+        corpus.room(),
+        "user message",
+        id,
+        studio_runtime_schema::delivery::DeliveryMoment::CurrentTurn,
+        corpus.now(),
+    )
+    .await
+    .expect("original");
+    let cutoff = chrono::Utc::now().timestamp_millis() + 60_000;
+    store.transaction(move |tx| { tx.execute("INSERT INTO runtime_orchestration_settings(id,record) VALUES('global',json_object('sendAdmissionCutoverMs',?1)) ON CONFLICT(id) DO UPDATE SET record=json_set(record,'$.sendAdmissionCutoverMs',?1)", [cutoff])?; Ok(()) }).await.expect("cutover");
+    let command = |delivery: &str| -> studio_runtime_schema::command::CommandRequest {
+        serde_json::from_str(&format!(r#"{{"id":"{id}","client":"web-1","number":1,"kind":"send","target":"{}","body":{{"text":"user message","delivery":"{delivery}"}}}}"#, corpus.room())).expect("command")
+    };
+    let changed = command("next_turn");
+    store
+        .transaction_with_error(move |tx| {
+            crate::commands::begin(
+                tx,
+                &crate::principal::Principal::Owner,
+                &changed,
+                chrono::Utc::now().timestamp_millis(),
+            )
+        })
+        .await
+        .expect("changed admission");
+    assert!(
+        delivery::user_message(
+            store.clone(),
+            corpus.room(),
+            "user message",
+            id,
+            studio_runtime_schema::delivery::DeliveryMoment::NextTurn,
+            corpus.now() + 1.0
+        )
+        .await
+        .is_err()
+    );
+    let original = command("current_turn");
+    store
+        .transaction_with_error(move |tx| {
+            crate::commands::begin(
+                tx,
+                &crate::principal::Principal::Owner,
+                &original,
+                chrono::Utc::now().timestamp_millis(),
+            )
+        })
+        .await
+        .expect("original admission");
+    let retry = delivery::user_message(
+        store,
+        corpus.room(),
+        "user message",
+        id,
+        studio_runtime_schema::delivery::DeliveryMoment::CurrentTurn,
+        corpus.now() + 2.0,
+    )
+    .await
+    .expect("original retry");
+    assert_eq!(first.get(), retry.get());
 }
 
 #[tokio::test]

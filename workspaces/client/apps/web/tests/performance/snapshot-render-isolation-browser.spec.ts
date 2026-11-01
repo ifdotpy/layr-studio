@@ -255,7 +255,7 @@ test("snapshot updates isolate the conversation and unchanged rows", async ({
       if (!body) return route.fallback();
       return route.fulfill({
         headers: apiSchemaHeaders(),
-        json: sendReply({ id: body.id, status: "sent" }),
+        json: sendReply({ id: body.id, status: "delivered" }),
       });
     });
     await page.locator("#message").fill("Instruction for the selected worker.");

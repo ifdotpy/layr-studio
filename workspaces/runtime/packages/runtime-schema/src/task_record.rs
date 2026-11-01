@@ -296,6 +296,12 @@ impl TaskRecord {
             .as_ref()
             .and_then(|n| n.number().as_f64())
     }
+    pub fn created_number(&self) -> &NonnegativeNumber {
+        &self.created
+    }
+    pub fn interactive(&self) -> Option<bool> {
+        self.interactive
+    }
     pub fn created(&self) -> f64 {
         // NonnegativeNumber already validates that the number is representable as f64.
         self.created

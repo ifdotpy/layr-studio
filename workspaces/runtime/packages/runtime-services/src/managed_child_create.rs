@@ -16,7 +16,6 @@ use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore, 
 use thiserror::Error;
 
 use crate::managed_host_tools::MAX_SPAWN_BATCH_AGENTS;
-use studio_runtime_schema::agent_limits::DEFAULT_MAX_TEAM_AGENTS;
 const MAX_NAME_CHARS: usize = 100;
 const MAX_PROMPT_CHARS: usize = 32_000;
 /// Python's Linux VM review state save timeout, in seconds.
@@ -361,10 +360,10 @@ pub(crate) async fn resolve_worker_settings(
         })?;
     let adapter = crate::provider_adapter::adapter(account.provider);
     let model = if requested_model == crate::agents_create::DEFAULT_LEAD_MODEL
-        && root.get("model").is_none()
-        && defaults.get("model").is_none()
+        && root.get("model").and_then(Value::as_str).is_none()
+        && defaults.get("model").and_then(Value::as_str).is_none()
         && profile_model.is_none()
-        && spec.model.is_missing()
+        && spec.model.value().is_none()
         && !adapter.owns_model(requested_model)
     {
         adapter.default_model()
@@ -460,7 +459,9 @@ pub(crate) async fn spawn_agents(
     environment: &dyn ManagedCreationEnvironment,
 ) -> Result<crate::managed_host_tools::DispatchedOperation, Error> {
     let actor_record = actor.record().clone();
-    if actor_record.extra.get("role").and_then(Value::as_str) == Some("reviewer") {
+    if actor_record.role.value().copied()
+        == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer)
+    {
         return Err(
             crate::managed_host_tools::Error::Invalid("Reviewers cannot create agents").into(),
         );
@@ -804,11 +805,18 @@ pub(crate) async fn spawn_agents(
             record["profileInstructions"] = json!(profile.instructions);
         }
         record["name"] = json!(name.trim());
-        record["yoloMode"] = root_value.get("yoloMode").cloned().unwrap_or(json!(true));
-        record["maxAgents"] = root_value
-            .get("maxAgents")
+        record["permissionMode"] = root_value
+            .get("permissionMode")
+            .filter(|mode| !mode.is_null())
             .cloned()
-            .unwrap_or(json!(DEFAULT_MAX_TEAM_AGENTS));
+            .unwrap_or(json!(
+                studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
+            ));
+        crate::agents_create::set_capacity(
+            &mut record,
+            crate::agents_create::capacity_max(&root_value),
+            false,
+        )?;
         drafts.push(Draft {
             typed: draft,
             record,
@@ -835,7 +843,7 @@ pub(crate) async fn spawn_agents(
             .ok_or(crate::managed_host_tools::Error::Stale)?.value();
         event_write::assert_delegation(&current_root)
             .map_err(|_| crate::managed_host_tools::Error::Invalid("Delegation is disabled"))?;
-        let max = current_root.extra.get("maxAgents").and_then(Value::as_i64).unwrap_or(DEFAULT_MAX_TEAM_AGENTS);
+        let max = current_root.capacity.max();
         let existing = drafts.iter().map(|draft| AgentRepository::get(tx, &AgentId::from(draft.id.as_str())))
             .collect::<Result<Vec<_>, _>>()?;
         let new_count = existing.iter().filter(|item| item.is_none()).count() as i64;
@@ -1015,7 +1023,7 @@ fn recheck_actor(
     if current.epoch != actor.epoch
         || current.root_id != actor.root_id
         || current.account_key != actor.account_key
-        || current.extra.get("provider") != actor.extra.get("provider")
+        || current.provider != actor.provider
         || current.is_deleted()
         || current.auto_wake != Some(true)
     {
@@ -1144,14 +1152,23 @@ fn can_delegate(
     actor: &AgentRecord,
     root: &AgentRecord,
 ) -> Result<bool, crate::managed_host_tools::Error> {
-    if actor.extra.get("role").and_then(Value::as_str) == Some("reviewer") {
+    if actor.role.value().copied()
+        == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer)
+    {
         return Ok(false);
     }
     let limit = root
-        .extra
-        .get("workerDefaults")
-        .and_then(|value| value.get("delegationDepth"))
-        .and_then(Value::as_u64)
+        .worker_defaults
+        .value()
+        .and_then(|value| match value {
+            studio_runtime_store::StoredWorkerDefaults::Known(value) => value
+                .delegation_depth
+                .value()
+                .map(|depth| depth.get() as u64),
+            studio_runtime_store::StoredWorkerDefaults::Unreadable(value) => {
+                value.get("delegationDepth").and_then(Value::as_u64)
+            }
+        })
         .filter(|value| (1..=3).contains(value))
         .unwrap_or(1);
     let mut cursor = actor.clone();
@@ -1204,7 +1221,6 @@ fn project_child(record: &Value, task_id: Option<&str>, worktree: bool) -> Value
             .cloned()
             .unwrap_or_else(|| json!(if worktree { "worktree" } else { "shared" })),
     );
-    output.insert("workspaceBackend".to_owned(), Value::Null);
     if let Some(value) = record
         .get("worktreeWarning")
         .filter(|value| event_write::truthy(Some(value)))
@@ -1362,8 +1378,7 @@ pub(crate) async fn request_review(
             crate::managed_host_tools::Error::Unavailable("workspace-state/vm-workspace").into(),
         );
     }
-    if studio_runtime_providers::ProviderKind::of_field(actor_record.extra.get("provider"))
-        != Ok(studio_runtime_providers::ProviderKind::Codex)
+    if actor_record.provider.value().copied() != Some(studio_runtime_providers::ProviderKind::Codex)
     {
         return Err(crate::managed_host_tools::Error::Invalid(
             "Native review requires a Codex agent",
@@ -1380,7 +1395,7 @@ pub(crate) async fn request_review(
         )
         .into());
     }
-    if event_write::truthy(actor_record.extra.get("daybreakEnabled")) {
+    if actor_record.daybreak_enabled == Some(true) {
         return Err(crate::managed_host_tools::Error::Invalid(
             "Native review cannot select Daybreak. Delegate a review task to a subagent instead",
         )
@@ -1505,16 +1520,18 @@ pub(crate) async fn request_review(
         .map_err(map_create_error)?
         .value();
     record["provider"] = json!(ProviderKind::Codex.key());
-    record["yoloMode"] = json!(false);
+    record["permissionMode"] =
+        json!(studio_runtime_schema::claude_permissions::PermissionMode::Default);
     record["worktree"] = json!(false);
     record["workspaceMode"] = json!("shared");
     record["workspaceInGit"] = json!(false);
     record["workerBaseRef"] = Value::Null;
     record["workerBaseCommit"] = Value::Null;
-    record["maxAgents"] = root_value
-        .get("maxAgents")
-        .cloned()
-        .unwrap_or(json!(DEFAULT_MAX_TEAM_AGENTS));
+    crate::agents_create::set_capacity(
+        &mut record,
+        crate::agents_create::capacity_max(&root_value),
+        false,
+    )?;
     let review = ReviewDraft {
         typed: prepared,
         record,
@@ -1527,10 +1544,7 @@ pub(crate) async fn request_review(
         .transaction_with_error(move |tx| -> Result<Value, crate::managed_host_tools::Error> {
             recheck_actor(tx, &actor_record)?;
             if AgentRepository::get(tx, &AgentId::from(child_id.as_str()))?.is_none() {
-                let maximum = root_value
-                    .get("maxAgents")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(64);
+                let maximum = crate::agents_create::capacity_max(&root_value);
                 if active_agents(tx, &actor_record.root_id.0)? >= maximum {
                     return Err(crate::managed_host_tools::Error::Invalid(
                         "Team active agent limit reached; free a finished agent before creating a review",

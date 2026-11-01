@@ -316,7 +316,9 @@ async fn legacy_work_is_available_in_the_first_sse_baseline_without_an_entity_pu
     let store = Arc::new(RuntimeStore::open(Some(directory.path())).await.unwrap());
     store.transaction(|tx| {
         AgentRepository::put(tx,&AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"lead","rootId":"lead","epoch":1,"status":"completed","isLead":true,"taskDefaultGate":{"command":"upgrade-check","timeout_ms":1234}}))?)?;
-        tx.execute("INSERT INTO runtime_work(id,record) VALUES('old-work',?1)",[json!({"id":"old-work","rootId":"lead","title":"Legacy assignment","status":"review","created":1,"updated":1,"version":1,"results":[{"id":"old-result","agent":"lead","text":"Legacy evidence","checks":"Checked","revision":"abc","files":[],"created":1}]}).to_string()])?;
+        let legacy_work = json!({"id":"old-work","rootId":"lead","title":"Legacy assignment","status":"review","created":1,"updated":1,"version":1,"results":[{"id":"old-result","agent":"lead","text":"Legacy evidence","checks":"Checked","revision":"abc","files":[],"created":1}]});
+        tx.execute("INSERT INTO runtime_work(id,record) VALUES('old-work',?1)",[legacy_work.to_string()])?;
+        studio_runtime_store::work_history::reconcile(tx, "old-work", &legacy_work)?;
         tx.execute("DELETE FROM sync_entity_meta WHERE key=?1",[studio_runtime_store::WORK_DETAILS_SEED_MARKER])?;
         Ok(())
     }).await.unwrap();

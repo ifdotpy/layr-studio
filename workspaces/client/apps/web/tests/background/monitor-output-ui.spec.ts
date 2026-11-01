@@ -1,13 +1,17 @@
+import { backgroundDisplay } from "../fixtures/background.ts";
 import { fixturePostBody } from "../teams/helpers.ts";
 import type { GetResult, PostBody } from "../../src/apiTypes.ts";
 import type {} from "./monitor-output-ui.fixture.tsx";
 // Hidden browser fixture for the real activity drawer. Native processes use HTTP fixtures.
-import { test, expect } from "../playwright.ts";
+import { test, expect, handleEntitySyncFixtureRequest } from "../playwright.ts";
+import { fixtureSnapshot } from "../fixtures/snapshot.ts";
 import { createServer } from "vite";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { Connect } from "vite";
 
 for (const width of [320, 1200]) {
   test(`monitor output controls at ${width}px`, async ({ page }, testInfo) => {
@@ -34,13 +38,15 @@ for (const width of [320, 1200]) {
       agent: "lead",
       accountKey: "default",
       epoch: 2,
-      status: "running",
+      status: "running" as const,
       created: Date.now() / 1000 - 60,
       generation: "generation",
       cancelRequested: false,
       bytes: 0,
       output: "",
+      tail: "",
       outputTruncated: false,
+      outputPatterns: [],
       capabilities: {
         readOutput: true,
         sendInput: false,
@@ -50,6 +56,7 @@ for (const width of [320, 1200]) {
     };
     const monitor: GetResult<"/api/processes">["processes"][number] = {
       ...common,
+      display: backgroundDisplay("monitor", "Build watcher"),
       id: "monitor",
       key: "monitor-key",
       source: "monitor",
@@ -64,12 +71,44 @@ for (const width of [320, 1200]) {
     };
     const background: GetResult<"/api/processes">["processes"][number] = {
       ...common,
+      display: backgroundDisplay("backgroundTask", "Claude background task"),
       id: "claude",
       key: "claude-key",
       source: "claude_task",
       name: "Claude background task",
       outputFile: "/workspace/logs/background-output.txt",
     };
+    const syncFixture = {
+      workspaceId: "1234567890abcdef1234567890abcdef",
+      snapshot: fixtureSnapshot([
+        {
+          id: "lead",
+          rootId: "lead",
+          name: "Lead",
+          epoch: 2,
+          accountKey: "default",
+        },
+      ]),
+      versionedResources: true,
+      processSnapshot: () => ({
+        processes: [monitor, background],
+        activities: [
+          { source: "process" as const, value: monitor },
+          { source: "process" as const, value: background },
+        ],
+        responseTarget: null,
+      }),
+    };
+    server.middlewares.stack.unshift({
+      route: "",
+      handle(
+        req: IncomingMessage,
+        res: ServerResponse,
+        next: Connect.NextFunction,
+      ) {
+        if (!handleEntitySyncFixtureRequest(req, res, syncFixture)) next();
+      },
+    });
     let restartUnknown = true;
     let outputDenied = false;
     await page.route("**/fixture", (route) =>
@@ -81,6 +120,7 @@ for (const width of [320, 1200]) {
     await page.route("**/api/**", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
+      if (url.pathname.startsWith("/api/sync/")) return route.continue();
       if (request.method() === "POST") {
         calls.push({
           path: url.pathname,

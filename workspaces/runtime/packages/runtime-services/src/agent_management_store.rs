@@ -405,7 +405,7 @@ fn execute_decision(
                 .and_then(Iterator::collect::<Result<Vec<_>, _>>)
                 .map_err(studio_runtime_store::StoreError::from)?;
             for raw in rooms {
-                let room: Value =
+                let room: studio_runtime_schema::room_record::RoomRecord =
                     serde_json::from_str(&raw).map_err(studio_runtime_store::StoreError::from)?;
                 if directory.is_none() {
                     directory = Some(crate::sync_entity_context::RoomDirectory::load_live(
@@ -415,15 +415,22 @@ fn execute_decision(
                 let context = directory
                     .as_ref()
                     .expect("directory loaded above")
-                    .for_room(transaction, &room, true)?;
-                if let Some(mut view) = crate::sync_views::room_entity_view(&room, &context) {
-                    if let Some(members) = view.get_mut("members").and_then(Value::as_array_mut) {
-                        members.retain(|member| !deleted.contains(member) || *member == root);
-                    }
-                    let id = room["id"]
-                        .as_str()
-                        .ok_or(ManagementError::Invalid("Invalid room identity"))?;
-                    retained_broadcasts.push((id.to_owned(), view));
+                    .for_room_identity(
+                        transaction,
+                        &room.id,
+                        room.kind == studio_runtime_schema::room_record::RoomKind::Federated,
+                        true,
+                    )?;
+                if let Some(mut view) = crate::room_projection::project_room(&room, &context)
+                    .map_err(studio_runtime_store::StoreError::from)?
+                {
+                    view.members.retain(|member| {
+                        !deleted
+                            .iter()
+                            .any(|id| id.as_str() == Some(member.as_str()))
+                            || member == root
+                    });
+                    retained_broadcasts.push((room.id, view));
                 }
             }
         }
@@ -535,7 +542,7 @@ fn execute_decision(
             .into_iter()
             .map(|(_, id, _)| id)
             .collect(),
-        requests: written_ids(&decision.writes, "runtime_requests"),
+        requests: written_ids(&decision.writes, "approvals"),
         work: changed_work,
         checked_agents: Vec::new(),
         ..Default::default()

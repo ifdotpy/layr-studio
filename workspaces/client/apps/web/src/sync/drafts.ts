@@ -5,6 +5,8 @@ import {
   useState,
   type SetStateAction,
 } from "react";
+import { UNSENT_FAILURE_EVENT, draftStore } from "../unsent/store.ts";
+import { serverViewId } from "../servers/environment.ts";
 import { syncPost } from "../api.ts";
 import { randomUUID } from "../uuid.ts";
 import type { DraftVersion } from "../generated/rustOwned.ts";
@@ -23,6 +25,7 @@ type Drafts = Record<string, string>;
 const incompleteDrafts = "Some saved drafts could not be loaded.";
 
 export function createBrowserDrafts(options: {
+  serverId?: string;
   api: {
     syncPost: (
       path: "/api/sync/drafts",
@@ -43,6 +46,7 @@ export function createBrowserDrafts(options: {
     const dismissed = useRef(new Set<string>());
     const [conflicts, setConflicts] = useState<DraftVersion[]>([]);
     const [error, setError] = useState("");
+    const [unsentError, setUnsentError] = useState("");
     const quiet = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     const maximum = useRef<ReturnType<typeof setTimeout> | undefined>(
       undefined,
@@ -115,6 +119,7 @@ export function createBrowserDrafts(options: {
       store.current = createDirectDrafts({
         post: (rows) => options.api.syncPost("/api/sync/drafts", { rows }),
         changed: reconcile,
+        buffer: draftStore(options.serverId ?? serverViewId ?? "local"),
       });
     const flush = () => {
       clearTimeout(quiet.current);
@@ -209,6 +214,16 @@ export function createBrowserDrafts(options: {
       [writer],
     );
     useEffect(() => {
+      const fail = () =>
+        setUnsentError(
+          "Draft changes could not be saved. Keep this chat open.",
+        );
+      if (typeof window !== "undefined")
+        window.addEventListener(UNSENT_FAILURE_EVENT, fail);
+      void store.current
+        ?.restore()
+        .then(schedule)
+        .catch(() => setError("Draft changes could not be restored."));
       const stop = options.resources.watchResourceChanges(
         { kind: "drafts" },
         (version) => {
@@ -251,6 +266,8 @@ export function createBrowserDrafts(options: {
       );
       return () => {
         stop();
+        if (typeof window !== "undefined")
+          window.removeEventListener(UNSENT_FAILURE_EVENT, fail);
         clearTimeout(quiet.current);
         clearTimeout(maximum.current);
       };
@@ -264,8 +281,9 @@ export function createBrowserDrafts(options: {
       subscribeDraft,
       conflicts,
       dismissDraft,
-      error,
-      localPersistenceFailed: !!error && error !== incompleteDrafts,
+      error: unsentError || error,
+      localPersistenceFailed:
+        !!unsentError || (!!error && error !== incompleteDrafts),
     };
   };
 }

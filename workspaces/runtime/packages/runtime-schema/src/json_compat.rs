@@ -25,6 +25,13 @@ pub fn python_json_compact(value: &Value) -> String {
     serializer::serialize(value, ",", ":", false).expect("JSON values are serializable")
 }
 
+/// Serialize typed data using the legacy sorted UTF-8 compact spelling.
+pub fn python_json_compact_serialized<T: serde::Serialize + ?Sized>(
+    value: &T,
+) -> Result<String, serde_json::Error> {
+    serializer::serialize(value, ",", ":", false)
+}
+
 /// Sorted ASCII JSON with explicitly selected separators for provider catalog digests.
 pub fn python_json_with_separators(value: &Value, item: &str, key: &str) -> String {
     serializer::serialize(value, item, key, true).expect("JSON values are serializable")

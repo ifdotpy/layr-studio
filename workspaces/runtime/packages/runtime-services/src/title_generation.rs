@@ -30,22 +30,12 @@ use thiserror::Error;
 
 const MAX_ITEMS: usize = 40;
 
-pub(crate) fn hold_unclean_jobs(tx: &rusqlite::Transaction<'_>) -> Result<(), TitleError> {
-    let mut query = tx.prepare("SELECT id FROM runtime_outbox WHERE kind=?1 AND status=?2")?;
-    let ids = query
-        .query_map(
-            rusqlite::params![OutboxKind::TitleGeneration, OutboxStatus::Pending],
-            |row| row.get::<_, String>(0),
-        )?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(query);
-    for id in ids {
-        let row = Outbox::get::<TitleJob>(tx, &id)?.ok_or(TitleError::Conflict)?;
-        let mut job = row.payload;
-        job.status = TitleStatus::Unknown;
-        write_job(tx, &job, false)?;
-    }
-    Ok(())
+/// Entity hook of the unclean-stop pass for one held title job.
+pub(crate) fn hold_job(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<(), TitleError> {
+    let row = Outbox::get::<TitleJob>(tx, id)?.ok_or(TitleError::Conflict)?;
+    let mut job = row.payload;
+    job.status = TitleStatus::Unknown;
+    write_job(tx, &job, false)
 }
 const MAX_ITEM_BYTES: usize = 1_048_576;
 /// Python's one-shot title generation deadline (`codex_rename.py:109-110`).
@@ -832,10 +822,10 @@ async fn generate_inner(
                 return Err(TitleError::Conflict);
             }
             let mut record = read_agent(tx, &job.agent_id)?;
-            if record.get("manualName").is_some_and(truthy)
+            if record["naming"] == "manual"
                 || record.get("epoch").and_then(Value::as_i64) != job.epoch
                 || record.get("name").and_then(Value::as_str) != job.original_name.as_deref()
-                || record.get("needsTitle").and_then(Value::as_bool) != Some(true)
+                || record["naming"] != "pending_title"
                 || record.get("deletedAt").is_some_and(truthy)
             {
                 job.status = TitleStatus::Discarded;
@@ -847,8 +837,7 @@ async fn generate_inner(
                 return Ok(false);
             }
             record["name"] = json!(job.title);
-            record["needsTitle"] = json!(false);
-            record["manualName"] = json!(true);
+            record["naming"] = json!("manual");
             AgentRepository::put(
                 tx,
                 &AgentRecord::from_value(record.clone()).map_err(StoreError::from)?,
@@ -884,9 +873,8 @@ fn make_snapshot(
     if agent.get("id").and_then(Value::as_str) != Some(agent_id) {
         return Err(invalid("runtime_agents", agent_id));
     }
-    let eligible = !agent.get("manualName").is_some_and(truthy)
-        && agent.get("needsTitle").and_then(Value::as_bool) == Some(true)
-        && !agent.get("deletedAt").is_some_and(truthy);
+    let eligible =
+        agent["naming"] == "pending_title" && !agent.get("deletedAt").is_some_and(truthy);
     let prompt = build_prompt(connection, agent_id, &agent)?;
     let (model, effort) = title_model(catalog, &agent)?;
     let account_key = match agent.get("accountKey") {
@@ -1059,6 +1047,26 @@ fn invalid(table: &'static str, id: &str) -> TitleError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn naming_normalization_preserves_title_job_fingerprint() {
+        let mut snapshot = Snapshot {
+            agent: json!({"id":"agent","epoch":1,"provider":"codex","model":"model","needsTitle":true}),
+            original_name: "Untitled".into(),
+            epoch: 1,
+            prompt: "prompt".into(),
+            model: "model".into(),
+            effort: None,
+            account_key: "default".into(),
+            provider: Some("codex".into()),
+            request_id: "request".into(),
+            eligible: true,
+        };
+        let before = signature(&snapshot);
+        snapshot.agent.as_object_mut().unwrap().remove("needsTitle");
+        snapshot.agent["naming"] = json!("pending_title");
+        assert_eq!(signature(&snapshot), before);
+    }
 
     #[test]
     fn provider_identity_title_model_rejects_unknown_before_selection() {

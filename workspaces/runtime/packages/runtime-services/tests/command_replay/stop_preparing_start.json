@@ -1,0 +1,7 @@
+{
+  "records": {"tables": {"runtime_agents": [
+    {"id": "lead", "rootId": "lead", "parentId": null, "epoch": 3, "status": "starting", "compactions": 0, "name": "Lead", "isLead": true, "autoWake": true, "inFlight": true, "created": 1.0}
+  ]}},
+  "action": {"action": "stop", "target": "lead", "descendants": false},
+  "now": 1234567.5
+}
