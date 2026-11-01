@@ -42,13 +42,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &mut child.stdout.take().ok_or("missing generator output")?,
         &mut inputs,
     )?;
-    let canonical_root = format!("{}/", root.canonicalize()?.display());
-    for line in inputs.lines() {
-        let path = line
-            .strip_prefix("cargo:rerun-if-changed=")
-            .ok_or("unexpected generator output")?;
+    // The generator reports its own path, so that path gives the root it printed.
+    let paths = inputs
+        .lines()
+        .map(|line| line.strip_prefix("cargo:rerun-if-changed="))
+        .collect::<Option<Vec<_>>>()
+        .ok_or("unexpected generator output")?;
+    let printed_root = paths
+        .iter()
+        .find_map(|path| path.strip_suffix(generator))
+        .ok_or("generator did not report its own path")?;
+    for path in paths {
         let file = path
-            .strip_prefix(&canonical_root)
+            .strip_prefix(printed_root)
             .ok_or("generator input outside the repository")?;
         println!("cargo:rerun-if-changed={relative_root}/{file}");
     }
