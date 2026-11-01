@@ -305,6 +305,36 @@ fn mark_checking(view: &mut studio_runtime_schema::usage_limits::RateLimitView, 
     }
 }
 
+fn decoded_account_views(
+    tx: &studio_runtime_store::Transaction<'_>,
+    now: f64,
+) -> Result<
+    Vec<(
+        String,
+        studio_runtime_schema::usage_limits::RateLimitView,
+        bool,
+    )>,
+    StoreError,
+> {
+    let mut query = tx.prepare(
+        "SELECT id,substr(CAST(payload AS BLOB),1,?1) FROM sync_entities WHERE collection='rateLimit' AND deleted=0",
+    )?;
+    let rows = query.query_map(
+        [account_state::MAX_PERSISTED_DOCUMENT_BYTES as i64 + 1],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<Vec<u8>>>(1)?)),
+    )?;
+    rows.map(|row| {
+        let (account, payload) = row?;
+        let (view, unreadable) = account_state::normalized_limits_view(
+            &account,
+            payload.as_deref().unwrap_or_default(),
+            now,
+        );
+        Ok((account, view, unreadable))
+    })
+    .collect()
+}
+
 /// Recompute affected agent projections in the transaction that publishes them.
 pub(crate) fn publish_agent_change(
     tx: &studio_runtime_store::Transaction<'_>,
@@ -317,18 +347,7 @@ pub(crate) fn publish_agent_change(
         studio_runtime_store::AgentRepository::get(tx, &agent_id.into())?
     };
     let now = timestamp().map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
-    let rows = {
-        let mut query = tx.prepare(
-            "SELECT id,payload FROM sync_entities WHERE collection='rateLimit' AND deleted=0",
-        )?;
-        let rows = query.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        rows.collect::<Result<Vec<_>, _>>()?
-    };
-    for (account, payload) in rows {
-        let (mut value, unreadable) =
-            account_state::normalized_limits_view(&account, payload.as_bytes(), now);
+    for (account, mut value, unreadable) in decoded_account_views(tx, now)? {
         if unreadable {
             tx.execute(
                 "DELETE FROM sync_entities WHERE collection='rateLimit' AND id=?1",
@@ -370,18 +389,7 @@ pub(crate) fn publish_agent_change(
 
 pub(crate) fn seed_agents(tx: &studio_runtime_store::Transaction<'_>) -> Result<(), StoreError> {
     let now = timestamp().map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
-    let rows = {
-        let mut query = tx.prepare(
-            "SELECT id,payload FROM sync_entities WHERE collection='rateLimit' AND deleted=0",
-        )?;
-        let rows = query.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        rows.collect::<Result<Vec<_>, _>>()?
-    };
-    for (account, payload) in rows {
-        let (mut value, unreadable) =
-            account_state::normalized_limits_view(&account, payload.as_bytes(), now);
+    for (account, mut value, unreadable) in decoded_account_views(tx, now)? {
         if unreadable {
             tx.execute(
                 "DELETE FROM sync_entities WHERE collection='rateLimit' AND id=?1",

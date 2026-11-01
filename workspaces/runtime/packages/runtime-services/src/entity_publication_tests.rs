@@ -31,6 +31,19 @@ async fn unreadable_limits_do_not_block_publication_or_startup() {
 }
 
 #[tokio::test]
+async fn null_limits_payload_does_not_block_publication_or_startup() {
+    let (_dir, store) = store().await;
+    store.transaction(|tx| {
+        studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "rateLimit", "broken", json!({"unexpected": true}), false)?;
+        tx.execute("UPDATE sync_entities SET payload=NULL WHERE collection='rateLimit' AND id='broken'", [])?;
+        crate::account_session_runtime::limits::publish_agent_change(tx, CHAT, true)?;
+        tx.execute("UPDATE sync_entities SET payload=NULL WHERE collection='rateLimit' AND id='broken'", [])?;
+        crate::account_session_runtime::limits::seed_agents(tx)?;
+        Ok(())
+    }).await.unwrap();
+}
+
+#[tokio::test]
 async fn agent_limit_failure_republishes_account_recovery() {
     let (_dir, store) = store().await;
     seed_chat(&store, chat(json!({}))).await;
