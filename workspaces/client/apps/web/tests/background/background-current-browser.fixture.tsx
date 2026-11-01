@@ -22,27 +22,18 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "../../src/style.css";
-import * as api from "../../src/api.ts";
-import { createSubscriptions } from "../../src/sync/subscriptions/module.ts";
 import { ServerServicesProvider } from "../../src/servers/ServerServicesContext.tsx";
-import type { ServerServices } from "../../src/servers/serverServices.ts";
+import { createServerServices } from "../../src/servers/serverServices.ts";
 import BackgroundTasks from "../../src/components/shell/BackgroundTasks.tsx";
-const resources = createSubscriptions({
-  watchResourceChanges: () => () => {},
-  watchResourceConnection: () => () => {},
+const services = createServerServices({
+  id: "local",
+  label: "Fixture",
+  origin: location.origin,
 });
-// Only the services consumed by this fixture are needed.
-function partialServices(value: unknown): ServerServices {
-  return value as ServerServices;
-}
-const services = partialServices({
-  owner: { id: "fixture", origin: location.origin },
-  resources,
-  api,
-});
+await services.ready();
 const root = createRoot(document.getElementById("root")!);
 window.renderFixture = (data, listing, leadId = "lead", initialFocus) => {
-  resources.publish({ kind: "processes", agentId: leadId }, listing);
+  services.resources.publish({ kind: "processes", agentId: leadId }, listing);
   root.render(
     React.createElement(
       MantineProvider,

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { once } from "node:events";
-import { CARGO_BUILD_JOBS } from "./gate-config.ts";
+import { CARGO_BUILD_JOBS, NATIVE_PACKAGE } from "./gate-config.ts";
 import {
   checkRatchet,
   fingerprintMatches,
@@ -137,10 +137,14 @@ export function collect(output: string): Record<string, Violation[]> {
   return result.finish();
 }
 
-export async function run(shrink = false): Promise<number> {
+export async function run(
+  shrink = false,
+  excludeNative = false,
+): Promise<number> {
   const args = [
     "clippy",
     "--workspace",
+    ...(excludeNative ? ["--exclude", NATIVE_PACKAGE] : []),
     "--all-targets",
     "--locked",
     "-j",
@@ -211,4 +215,7 @@ export async function run(shrink = false): Promise<number> {
   return errors.length ? 1 : 0;
 }
 if (process.argv[1] === fileURLToPath(import.meta.url))
-  process.exitCode = await run(process.argv[2] === "--shrink");
+  process.exitCode = await run(
+    process.argv.includes("--shrink"),
+    process.argv.includes("--exclude-native"),
+  );

@@ -35,3 +35,5 @@ export function scrubAgentEnvironment<T extends NodeJS.ProcessEnv>(
 // Just and CI consume this owner instead of copying the compilation budget.
 if (process.argv[1] === fileURLToPath(import.meta.url))
   process.stdout.write(`${CARGO_BUILD_JOBS}\n`);
+// Native WebView tests run separately on the prepared native CI builder.
+export const NATIVE_PACKAGE = "studio-native-client";

@@ -29,6 +29,57 @@ const fakeStep = (
   ...extra,
 });
 
+test("WASM preparation installs the matching generator when absent", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "studio-wasm-install-"));
+  try {
+    const bin = path.join(directory, "bin");
+    mkdirSync(bin);
+    const log = path.join(directory, "cargo.log");
+    writeFileSync(
+      path.join(bin, "cargo"),
+      `#!/bin/sh
+printf '%s\\n' "$*" >> "$CAPTURE"
+if [ "$1" = install ]; then
+  mkdir -p "$7/bin"
+  printf '#!/bin/sh\\nexit 0\\n' > "$7/bin/wasm-bindgen"
+  chmod +x "$7/bin/wasm-bindgen"
+fi
+`,
+    );
+    chmodSync(path.join(bin, "cargo"), 0o755);
+    writeFileSync(path.join(bin, "wasm-bindgen"), "#!/bin/sh\nexit 1\n", {
+      mode: 0o755,
+    });
+    const result = spawnSync(
+      process.execPath,
+      ["workspaces/client/apps/web/scripts/build-client-wasm.ts"],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          PATH: bin + path.delimiter + process.env.PATH,
+          CARGO_HOME: directory,
+          XDG_CACHE_HOME: directory,
+          CAPTURE: log,
+        },
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const version = readFileSync(
+      "workspaces/client/packages/client-wasm/Cargo.toml",
+      "utf8",
+    ).match(/^wasm-bindgen\s*=\s*"=([^"\s]+)"/m)![1];
+    assert.match(
+      readFileSync(log, "utf8"),
+      new RegExp(
+        `install wasm-bindgen-cli --version ${version} --locked --root `,
+      ),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("worker isolation preserves PATH tools and discovers the selected Node", () => {
   const directory = mkdtempSync(path.join(tmpdir(), "studio-worker-tools-"));
   try {
@@ -365,10 +416,12 @@ test("Cargo compilation is confined to the fixed Rust lane and both tiers use on
     const rust = steps.find((s) => s.id === "rust-tests");
     const [rustCommand] = rust?.commands ?? [];
     assert.ok(rustCommand);
-    assert.deepEqual(rustCommand[1].slice(0, 5), [
+    assert.deepEqual(rustCommand[1].slice(0, 7), [
       "nextest",
       "run",
       "--workspace",
+      "--exclude",
+      "studio-native-client",
       "--no-fail-fast",
       "--profile",
     ]);
@@ -382,6 +435,10 @@ test("Cargo compilation is confined to the fixed Rust lane and both tiers use on
       steps.find((s) => s.id === "workspace")?.commands ?? [];
     assert.ok(workspaceCommand);
     assert.ok(workspaceCommand[1].includes("--examples"));
+    for (const command of [workspaceCommand, rustCommand]) {
+      const index = command[1].indexOf("--exclude");
+      assert.equal(command[1][index + 1], "studio-native-client");
+    }
   }
   assert.ok(
     gateSteps(process.cwd(), "test-fast-rest-non-rust").every(
@@ -413,6 +470,47 @@ test("Rust formatting is checked by the fast and comprehensive gates", () => {
     assert.deepEqual(step?.commands, [
       ["cargo", ["fmt", "--all", "--", "--check"]],
     ]);
+  }
+});
+
+test("local Clippy excludes native while the hosted command includes it", () => {
+  const local = gateSteps(process.cwd(), "test-comprehensive").find(
+    (step) => step.id === "clippy",
+  )!;
+  assert.ok(local.commands![0]![1].includes("--exclude-native"));
+  const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
+  assert.match(
+    workflow,
+    /run: node workspaces\/tooling\/apps\/repository-checks\/clippy-ratchet\.ts\s*$/m,
+  );
+  const directory = mkdtempSync(
+    path.join(tmpdir(), "studio-clippy-selection-"),
+  );
+  try {
+    const capture = path.join(directory, "args");
+    writeFileSync(
+      path.join(directory, "cargo"),
+      `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.CAPTURE, JSON.stringify(process.argv.slice(2)));\n`,
+      { mode: 0o755 },
+    );
+    const args = (extra: string[]) => {
+      spawnSync(
+        process.execPath,
+        [
+          "workspaces/tooling/apps/repository-checks/clippy-ratchet.ts",
+          ...extra,
+        ],
+        { env: { ...process.env, PATH: directory, CAPTURE: capture } },
+      );
+      const result: unknown = JSON.parse(readFileSync(capture, "utf8"));
+      assert.ok(Array.isArray(result));
+      assert.ok(result.every((value) => typeof value === "string"));
+      return result;
+    };
+    assert.ok(args(["--exclude-native"]).includes("studio-native-client"));
+    assert.ok(!args([]).includes("studio-native-client"));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 
