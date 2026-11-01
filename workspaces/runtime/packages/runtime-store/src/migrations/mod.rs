@@ -45,6 +45,7 @@ mod m2026_10_31_sync_project;
 mod m2026_10_31_transfer_history_pages;
 mod m2026_10_31_work_projection;
 mod m2026_10_31_work_records;
+mod m2026_11_01_annotation_record;
 mod m2026_11_01_plan_record;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -214,6 +215,20 @@ impl Migration for RegistryMigration {
 // Explicit dependency order: provider leaves precede strict generated columns;
 // columns precede indexes; volatile data moves before its new triggers exist.
 static CATALOG: &[&dyn Migration] = &[
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-annotation-record",
+            introduced: MigrationDate {
+                year: 2026,
+                month: 11,
+                day: 1,
+            },
+            target: MigrationTarget::Canvas,
+            supported_source: "Legacy annotations with unused extension fields",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_annotation_record::apply(c.transaction),
+    },
     &SqlMigration {
         definition: MigrationDefinition {
             id: "2026-11-01-plan-record",
