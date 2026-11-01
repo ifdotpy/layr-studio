@@ -32,7 +32,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         .collect::<Vec<_>>()
         .join(",");
     let max_revision = studio_runtime_schema::shared_values::MAX_SAFE_INTEGER;
-    let mut query = tx.prepare(&format!("SELECT id,record FROM runtime_agents WHERE json_valid(record) AND EXISTS (SELECT 1 FROM json_each(record) j WHERE j.key IN ({dropped}) OR (j.key='excludedAccountKeys' AND (j.type NOT IN ('array','null') OR (j.type='array' AND EXISTS (SELECT 1 FROM json_each(j.value) item WHERE item.type != 'text')))) OR (j.key='imageWorkspace' AND j.type NOT IN ('true','false','null')) OR (j.key='maxAgents' AND (j.type NOT IN ('integer','real','null') OR (j.type IN ('integer','real') AND (j.atom < 0 OR j.atom > {max_revision} OR j.atom != CAST(j.atom AS INTEGER))))) OR (j.key IN ('error','lastCompletedTurnError') AND j.type NOT IN ('text','null')) OR (j.key='layrReady' AND j.type NOT IN ('true','false')) OR (j.key IN ('lastCompletedTurn','hostProjectPath','executionSettingsAccountKey','lastCompletedTurnStatus','nativeEffort','projectFolder','checkpointHistoryHead','workspaceReservationId','workspaceOperation') AND j.type NOT IN ('text','null')) OR (j.key='provider' AND (j.type NOT IN ('text','null') OR (j.type='text' AND j.value NOT IN ({providers})))) OR (j.key='created' AND (j.type NOT IN ('integer','real','null') OR j.atom < 0)) OR (j.key='queueMutationRevision' AND (j.type != 'integer' OR j.atom < 0 OR j.atom > {max_revision})) OR (j.key IN ('excludedAccountKeys','imageWorkspace','maxAgents','error','lastCompletedTurnError','layrReady','lastCompletedTurn','hostProjectPath','executionSettingsAccountKey','lastCompletedTurnStatus','nativeEffort','projectFolder','checkpointHistoryHead','workspaceReservationId','workspaceOperation','provider','created','queueMutationRevision') AND (SELECT count(*) FROM json_each(record) d WHERE d.key=j.key)>1))"))?;
+    let mut query = tx.prepare(&format!("SELECT id,record FROM runtime_agents WHERE json_valid(record) AND EXISTS (SELECT 1 FROM json_each(record) j WHERE j.key IN ({dropped}) OR (j.key='excludedAccountKeys' AND (j.type NOT IN ('array','null') OR (j.type='array' AND EXISTS (SELECT 1 FROM json_each(j.value) item WHERE item.type != 'text')))) OR (j.key='imageWorkspace' AND j.type NOT IN ('true','false','null')) OR (j.key='maxAgents' AND (j.type NOT IN ('integer','real','null') OR (j.type IN ('integer','real') AND (j.atom < 0 OR j.atom > {max_revision} OR j.atom != CAST(j.atom AS INTEGER))))) OR (j.key IN ('error','lastCompletedTurnError') AND j.type NOT IN ('text','null')) OR (j.key='layrReady' AND j.type NOT IN ('true','false')) OR (j.key IN ('lastCompletedTurn','hostProjectPath','executionSettingsAccountKey','lastCompletedTurnStatus','nativeEffort','projectFolder','checkpointHistoryHead','workspaceReservationId','workspaceOperation') AND j.type NOT IN ('text','null')) OR (j.key='provider' AND (j.type NOT IN ('text','null') OR (j.type='text' AND j.value NOT IN ({providers})))) OR (j.key='created' AND (j.type NOT IN ('integer','real','null') OR j.atom < 0)) OR (j.key IN ('queueMutationRevision','authResumeAttempt') AND (j.type != 'integer' OR j.atom < 0 OR j.atom > {max_revision})) OR (j.key IN ('excludedAccountKeys','imageWorkspace','maxAgents','error','lastCompletedTurnError','layrReady','lastCompletedTurn','hostProjectPath','executionSettingsAccountKey','lastCompletedTurnStatus','nativeEffort','projectFolder','checkpointHistoryHead','workspaceReservationId','workspaceOperation','provider','created','queueMutationRevision','authResumeAttempt') AND (SELECT count(*) FROM json_each(record) d WHERE d.key=j.key)>1))"))?;
     let rows = query.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
@@ -127,11 +127,13 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         }) {
             record.remove("created");
         }
-        if record.get("queueMutationRevision").is_some_and(|v| {
-            serde_json::from_str::<u64>(v.get())
-                .map_or(true, |revision| revision > max_revision as u64)
-        }) {
-            record.remove("queueMutationRevision");
+        for key in ["queueMutationRevision", "authResumeAttempt"] {
+            if record.get(key).is_some_and(|v| {
+                serde_json::from_str::<u64>(v.get())
+                    .map_or(true, |revision| revision > max_revision as u64)
+            }) {
+                record.remove(key);
+            }
         }
         tx.execute(
             "UPDATE runtime_agents SET record=?1 WHERE id=?2",
@@ -240,7 +242,7 @@ mod tests {
         }
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(r#"CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-        INSERT INTO runtime_agents VALUES('legacy','{"id":"legacy","provider":"future","created":-1,"complaintMisses":9,"turnRecovery":{"outcome":"idle"},"lastContextRepairWait":{"status":"superseded"},"lastContextRepairCheck":{"phase":"waiting"},"completedWorkerTurns":2,"supervisorRestore":{"status":"not_restored"},"countedWorkerTurn":true,"imageWorkspaceBaseError":"old","imageWorkspaceBaseRef":"main","imageWorkspaceCreatedAt":2,"imageWorkspaceError":"old","imageWorkspaceHasGit":true,"imageWorkspaceNoticeSent":true,"imageWorkspaceNoticeText":"old","imageWorkspaceRelative":".","imageWorkspaceStartCommit":"abc","imageWorkspaceSubpath":".","maxAgents":-1,"nativeEffort":42,"imageWorkspace":42,"projectFolder":42,"checkpointHistoryHead":42,"workspaceReservationId":42,"workspaceOperation":42,"excludedAccountKeys":["blocked",42],"layrReady":"bad","queueMutationRevision":-1,"lastCompletedTurn":42,"hostProjectPath":42,"executionSettingsAccountKey":42,"lastCompletedTurnStatus":42,"error":{"error":{"message":"nested","code":42},"ignored":true},"lastCompletedTurnError":{"message":"previous","ignored":true}}');"#).unwrap();
+        INSERT INTO runtime_agents VALUES('legacy','{"id":"legacy","provider":"future","created":-1,"complaintMisses":9,"turnRecovery":{"outcome":"idle"},"lastContextRepairWait":{"status":"superseded"},"lastContextRepairCheck":{"phase":"waiting"},"completedWorkerTurns":2,"supervisorRestore":{"status":"not_restored"},"countedWorkerTurn":true,"imageWorkspaceBaseError":"old","imageWorkspaceBaseRef":"main","imageWorkspaceCreatedAt":2,"imageWorkspaceError":"old","imageWorkspaceHasGit":true,"imageWorkspaceNoticeSent":true,"imageWorkspaceNoticeText":"old","imageWorkspaceRelative":".","imageWorkspaceStartCommit":"abc","imageWorkspaceSubpath":".","maxAgents":-1,"nativeEffort":42,"imageWorkspace":42,"projectFolder":42,"checkpointHistoryHead":42,"workspaceReservationId":42,"workspaceOperation":42,"excludedAccountKeys":["blocked",42],"layrReady":"bad","queueMutationRevision":-1,"authResumeAttempt":-1,"lastCompletedTurn":42,"hostProjectPath":42,"executionSettingsAccountKey":42,"lastCompletedTurnStatus":42,"error":{"error":{"message":"nested","code":42},"ignored":true},"lastCompletedTurnError":{"message":"previous","ignored":true}}');"#).unwrap();
         let tx = db.transaction().unwrap();
         super::apply(&tx).unwrap();
         super::apply(&tx).unwrap();

@@ -620,7 +620,10 @@ impl ProposedAgent {
         self.set_extra(key, value);
     }
     pub(crate) fn auth_attempt(&mut self, value: u64) {
-        self.set_extra("authResumeAttempt", json!(value));
+        self.evidence["authResumeAttempt"] = json!(value);
+        if let Some(agent) = &mut self.identity {
+            agent.auth_resume_attempt = Some(value);
+        }
     }
     pub(crate) fn enable_usage(&mut self) {
         self.evidence["usageResumeEnabled"] = json!(true);
@@ -744,7 +747,7 @@ mod tests {
         assert_eq!(proposal.value()["titleJob"], Value::Null);
         assert_eq!(proposal.value()["nativeRelease"], Value::Null);
         assert_eq!(proposal.value()["firedEvents"], json!([]));
-        assert_eq!(proposal.checked().unwrap().extra["authResumeAttempt"], 0);
+        assert_eq!(proposal.checked().unwrap().auth_resume_attempt, Some(0));
         assert_eq!(proposal.checked().unwrap().status.as_str(), "future-state");
     }
 

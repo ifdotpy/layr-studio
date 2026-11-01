@@ -475,6 +475,12 @@ pub struct AgentRecord {
     pub queue_mutation_revision: Option<u64>,
     #[serde(
         default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_safe_counter"
+    )]
+    pub auth_resume_attempt: Option<u64>,
+    #[serde(
+        default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
     pub last_completed_turn: studio_runtime_schema::queue_command::Field<String>,
@@ -914,6 +920,7 @@ impl AgentRecord {
             provider: Default::default(),
             created: Default::default(),
             queue_mutation_revision: None,
+            auth_resume_attempt: None,
             last_completed_turn: Default::default(),
             host_project_path: Default::default(),
             execution_settings_account_key: Default::default(),
@@ -2997,6 +3004,27 @@ mod tests {
         let null = raw.replace("42", "null");
         let agent: AgentRecord = serde_json::from_str(&null).unwrap();
         assert_eq!(agent.value().get("imageWorkspace"), Some(&Value::Null));
+    }
+
+    #[test]
+    fn agent_auth_resume_attempt_is_a_nonnegative_safe_integer() {
+        for value in ["-1", "1.5", "9007199254740992", "\"1\""] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"authResumeAttempt":{value}}}"#
+            );
+            assert!(
+                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                "{value}"
+            );
+        }
+        let valid = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"authResumeAttempt":1}"#;
+        let record: AgentRecord = serde_json::from_str(valid).unwrap();
+        assert_eq!(record.auth_resume_attempt, Some(1));
+        assert!(
+            serde_json::to_string(&record)
+                .unwrap()
+                .contains("\"authResumeAttempt\":1")
+        );
     }
 
     #[test]

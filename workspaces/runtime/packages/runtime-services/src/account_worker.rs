@@ -2951,10 +2951,7 @@ impl Worker {
                     };
                     let fields = &row.extra;
                     let wait = fields.get("usageResume").unwrap_or(&Value::Null);
-                    let auth_attempt = fields
-                        .get("authResumeAttempt")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(0);
+                    let auth_attempt = row.auth_resume_attempt.unwrap_or(0);
                     if auth_attempt == 0 || wait["cause"] != "auth" || wait["status"] != "started" {
                         return Ok(None);
                     }
