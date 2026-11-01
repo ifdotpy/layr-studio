@@ -5530,6 +5530,7 @@ dependencies = [
  "shlex",
  "socket2",
  "spki",
+ "strum",
  "studio-operations",
  "studio-runtime-process",
  "studio-runtime-providers",

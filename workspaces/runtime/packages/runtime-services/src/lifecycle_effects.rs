@@ -459,14 +459,6 @@ impl ProductionLifecyclePorts {
     }
 
     async fn dispatch_remote_stops(&self) -> Result<(), ManagementError> {
-        #[derive(serde::Deserialize, serde::Serialize)]
-        #[serde(rename_all = "camelCase", deny_unknown_fields)]
-        struct RemoteOperation {
-            request_id: String,
-            operation: Vec<String>,
-            action: studio_runtime_schema::persistence::ServerOperationKind,
-            payload: Box<serde_json::value::RawValue>,
-        }
         let pending = self
             .store
             .read_async("runtime-services/lifecycle_effects", |tx| {
@@ -497,16 +489,18 @@ impl ProductionLifecyclePorts {
             .map(|duration| duration.as_secs() as i64)
             .unwrap_or_default();
         for (id, server, body) in pending {
-            let Ok(envelope) = serde_json::from_str::<RemoteOperation>(&body) else {
+            let Ok(envelope) =
+                serde_json::from_str::<crate::orchestration_wire::OrchestrationRequest>(&body)
+            else {
                 eprintln!("stored cross-server stop intent is invalid: {id}");
                 continue;
             };
-            if envelope.action != studio_runtime_schema::persistence::ServerOperationKind::Stop {
+            if envelope.command.kind()
+                != studio_runtime_schema::persistence::ServerOperationKind::Stop
+            {
                 continue;
             }
-            let request = serde_json::to_value(&envelope)
-                .map_err(|_| ManagementError::Invalid("Invalid cross-server stop intent"))?;
-            if let Err(error) = driver.exchange_operation(&server, &request, now).await {
+            if let Err(error) = driver.exchange_operation(&server, &envelope, now).await {
                 eprintln!("cross-server stop remains queued ({id}): {error}");
             }
         }
@@ -675,7 +669,7 @@ impl LifecyclePorts for ProductionLifecyclePorts {
 
     fn committed(&self) -> crate::agent_lifecycle_runtime::LifecycleCommitFuture<'_> {
         Box::pin(async move {
-            measure_runtime_stage_async("ports.committed", async {
+            Box::pin(measure_runtime_stage_async("ports.committed", async {
                 self.monitor_wake.notify_one();
                 self.lifecycle_wake.notify_one();
                 if let Some(wake) = &self.continuation_wake {
@@ -724,7 +718,7 @@ impl LifecyclePorts for ProductionLifecyclePorts {
                 })
                 .await?;
                 Ok(())
-            })
+            }))
             .await
         })
     }
@@ -775,17 +769,16 @@ impl ProductionLifecyclePorts {
             .and_then(Value::as_str)
             .filter(|reason| !reason.is_empty())
             .unwrap_or("Stopped by the parent");
-        let payload = json!({
-            "link": link,
-            "worker": agent_id,
-            "reason": reason,
-            "controlEpoch": control_epoch,
-        });
+        let payload = crate::orchestration_worker::StopPayload {
+            link: link.to_owned(),
+            worker: agent_id.to_owned(),
+            control_epoch,
+            reason: studio_runtime_schema::queue_command::Field::Value(reason.to_owned()),
+        };
         multi_server_transport::enqueue_in_transaction(
             tx,
             server,
-            "stop",
-            &payload,
+            crate::orchestration_wire::OrchestrationCommand::Stop(payload),
             request_id,
             effect.at().max(0.0) as i64,
         )

@@ -2,7 +2,7 @@
 use crate::bounded_text::BoundedText;
 use crate::queue_command::Field;
 use crate::recovery_record::SafeInteger;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::LazyLock;
 
 #[derive(Clone, Debug)]
@@ -137,7 +137,7 @@ impl ProjectWrite {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LocationAction {
     AddLocation,

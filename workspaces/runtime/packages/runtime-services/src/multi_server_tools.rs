@@ -93,10 +93,20 @@ impl ServerTools {
         let now = crate::event_write::unix_time()
             .map_err(|_| Step::Refused("The system clock is unavailable".into()))?
             as i64;
+        let kind = action
+            .parse()
+            .map_err(|_| Step::Refused("Invalid cross-server action".into()))?;
+        let command =
+            crate::orchestration_wire::OrchestrationCommand::remaining(kind, payload.clone())
+                .ok_or_else(|| Step::Refused("Invalid cross-server action".into()))?;
         self.driver
             .exchange_operation(
                 server,
-                &json!({"requestId":key,"operation":operation,"action":action,"payload":payload}),
+                &crate::orchestration_wire::OrchestrationRequest {
+                    request_id: key.to_owned(),
+                    operation: operation.to_vec(),
+                    command,
+                },
                 now,
             )
             .await
@@ -412,18 +422,13 @@ impl ServerTools {
     async fn deliver(
         &self,
         server: &str,
-        action: &str,
-        payload: &Value,
+        command: crate::orchestration_wire::OrchestrationCommand,
         key: &str,
     ) -> Result<Value, Step> {
         let now = crate::event_write::unix_time()
             .map_err(|_| Step::Refused("The system clock is unavailable".into()))?
             as i64;
-        match self
-            .driver
-            .exchange(server, action, payload, key, now)
-            .await
-        {
+        match self.driver.exchange(server, command, key, now).await {
             Ok(outcome) => Ok(receipt(&outcome, key)),
             Err(AccessError::Refused {
                 code: "request_conflict" | "request_size" | "invalid_request" | "client_revoked",
@@ -489,8 +494,26 @@ impl ServerTools {
             }
         }
         let key = key.to_owned();
-        self.deliver(server, action, &Value::Object(payload), &key)
-            .await
+        let command = if action == "folders" {
+            let cwd = match payload.remove("cwd") {
+                None => studio_runtime_schema::queue_command::Field::Missing,
+                Some(Value::Null) => studio_runtime_schema::queue_command::Field::Null,
+                Some(Value::String(value)) => {
+                    studio_runtime_schema::queue_command::Field::Value(value)
+                }
+                Some(_) => return refuse("Invalid folder path"),
+            };
+            crate::orchestration_wire::OrchestrationCommand::Folders(
+                crate::orchestration_worker::FoldersPayload { cwd },
+            )
+        } else {
+            let kind = action
+                .parse()
+                .map_err(|_| Step::Refused("Invalid cross-server action".into()))?;
+            crate::orchestration_wire::OrchestrationCommand::remaining(kind, Value::Object(payload))
+                .ok_or_else(|| Step::Refused("Invalid cross-server action".into()))?
+        };
+        self.deliver(server, command, &key).await
     }
 
     /// Python `tools` action `list`: a server with a failed queued delivery is offline.
@@ -596,120 +619,181 @@ impl ServerTools {
         let key_for_write = outbox_key.clone();
         let server_for_write = server.clone();
         let action_for_write = action.to_owned();
-        let prepared = self
-            .store
-            .transaction_with(move |tx| -> Result<Result<Value, Value>, Step> {
-                let current = checked_actor(tx, &actor_id)?;
-                if current.is_lead != Some(true) || current.epoch != epoch {
-                    return refuse("Only the active lead can change project locations");
-                }
-                let parent = task_admission(tx, &key_for_write, &actor_id)?;
-                let admitted = parent.derive_result("project-location", &["location"], &signature);
-                if let Some(saved) =
-                    crate::event_write::replay_request::<Box<serde_json::value::RawValue>>(
-                        tx,
-                        admitted.id(),
-                        admitted.signature(),
-                        (crate::event_write::unix_time()
-                            .map_err(|_| Step::Refused("The system clock is unavailable".into()))?
-                            * 1000.0) as i64,
-                    )?
-                {
-                    let _: crate::project_locations::LocationResult =
-                        serde_json::from_str(saved.reply.get()).map_err(StoreError::from)?;
-                    return Ok(Err(
-                        serde_json::from_str(saved.reply.get()).map_err(StoreError::from)?
-                    ));
-                }
-                let Some((_, mut project)) = ProjectsRepository::get(tx, &project_id)? else {
-                    return refuse("Select an existing project");
-                };
-                crate::project_locations::normalize_project(&mut project, &local_for_write)?;
-                let scoped_key = remote_operation_key(
-                    "server-outbox",
-                    &[&server_for_write],
-                    &key_for_write,
-                    &[&action_for_write],
-                );
-                let old: Option<(String, String)> =
-                    match crate::server_outbox::find(tx, &key_for_write).map_err(access_step)? {
-                        Some(entry) => Some(entry),
-                        None => crate::server_outbox::find(tx, &scoped_key).map_err(access_step)?,
-                    }
-                    .map(|entry| (entry.target, entry.record.body));
-                if let Some((old_server, body)) = old {
-                    #[derive(Deserialize)]
-                    struct SavedEnvelope {
-                        payload: Box<serde_json::value::RawValue>,
-                    }
-                    let envelope: SavedEnvelope = serde_json::from_str(&body).map_err(|_| {
-                        Step::Refused("Stored cross-server envelope is invalid".into())
-                    })?;
-                    if old_server != server_for_write
-                        || ProjectsRepository::location_request(tx, &project_id, &key_for_write)?
+        let prepared =
+            self.store
+                .transaction_with(
+                    move |tx| -> Result<
+                        Result<crate::project_locations::LocationPayload, Value>,
+                        Step,
+                    > {
+                        let current = checked_actor(tx, &actor_id)?;
+                        if current.is_lead != Some(true) || current.epoch != epoch {
+                            return refuse("Only the active lead can change project locations");
+                        }
+                        let parent = task_admission(tx, &key_for_write, &actor_id)?;
+                        let admitted =
+                            parent.derive_result("project-location", &["location"], &signature);
+                        if let Some(saved) =
+                            crate::event_write::replay_request::<Box<serde_json::value::RawValue>>(
+                                tx,
+                                admitted.id(),
+                                admitted.signature(),
+                                (crate::event_write::unix_time().map_err(|_| {
+                                    Step::Refused("The system clock is unavailable".into())
+                                })? * 1000.0) as i64,
+                            )?
+                        {
+                            let _: crate::project_locations::LocationResult =
+                                serde_json::from_str(saved.reply.get())
+                                    .map_err(StoreError::from)?;
+                            return Ok(Err(serde_json::from_str(saved.reply.get())
+                                .map_err(StoreError::from)?));
+                        }
+                        let Some((_, mut project)) = ProjectsRepository::get(tx, &project_id)?
+                        else {
+                            return refuse("Select an existing project");
+                        };
+                        crate::project_locations::normalize_project(
+                            &mut project,
+                            &local_for_write,
+                        )?;
+                        let scoped_key = remote_operation_key(
+                            "server-outbox",
+                            &[&server_for_write],
+                            &key_for_write,
+                            &[&action_for_write],
+                        );
+                        let old: Option<(String, String)> =
+                            match crate::server_outbox::find(tx, &key_for_write)
+                                .map_err(access_step)?
+                            {
+                                Some(entry) => Some(entry),
+                                None => crate::server_outbox::find(tx, &scoped_key)
+                                    .map_err(access_step)?,
+                            }
+                            .map(|entry| (entry.target, entry.record.body));
+                        if let Some((old_server, body)) = old {
+                            #[derive(Deserialize)]
+                            struct SavedEnvelope {
+                                payload: Box<serde_json::value::RawValue>,
+                            }
+                            let envelope: SavedEnvelope =
+                                serde_json::from_str(&body).map_err(|_| {
+                                    Step::Refused("Stored cross-server envelope is invalid".into())
+                                })?;
+                            if old_server != server_for_write
+                                || ProjectsRepository::location_request(
+                                    tx,
+                                    &project_id,
+                                    &key_for_write,
+                                )?
+                                .as_ref()
+                                    != Some(&admitted)
+                            {
+                                return refuse("This request ID has different content");
+                            }
+                            return Ok(Ok(serde_json::from_str(envelope.payload.get())
+                                .map_err(StoreError::from)?));
+                        }
+                        let busy = crate::server_outbox::project_action_pending(
+                            tx,
+                            "'add_location','remove_location'",
+                            &project_id,
+                        )?;
+                        if busy {
+                            return refuse(
+                                "A location change is pending. Read its existing receipt",
+                            );
+                        }
+                        let locations =
+                            project["locations"].as_array().cloned().unwrap_or_default();
+                        let location = locations
+                            .iter()
+                            .find(|row| row["serverId"].as_str() == Some(server_for_write.as_str()))
+                            .cloned();
+                        if action_for_write == "add_location"
+                            && let Some(location) = &location
+                            && location.get("requestedPath").unwrap_or(&location["path"])
+                                != &json!(path)
+                        {
+                            return refuse("This project already has a location on that server");
+                        }
+                        if action_for_write == "remove_location"
+                            && location.is_some()
+                            && locations.len() == 1
+                        {
+                            return refuse("Keep at least one project location");
+                        }
+                        use studio_runtime_schema::queue_command::Field;
+                        let typed_location = location
                             .as_ref()
-                            != Some(&admitted)
-                    {
-                        return refuse("This request ID has different content");
-                    }
-                    return Ok(Ok(
-                        serde_json::from_str(envelope.payload.get()).map_err(StoreError::from)?
-                    ));
-                }
-                let busy = crate::server_outbox::project_action_pending(
-                    tx,
-                    "'add_location','remove_location'",
-                    &project_id,
-                )?;
-                if busy {
-                    return refuse("A location change is pending. Read its existing receipt");
-                }
-                let locations = project["locations"].as_array().cloned().unwrap_or_default();
-                let location = locations
-                    .iter()
-                    .find(|row| row["serverId"].as_str() == Some(server_for_write.as_str()))
-                    .cloned();
-                if action_for_write == "add_location"
-                    && let Some(location) = &location
-                    && location.get("requestedPath").unwrap_or(&location["path"]) != &json!(path)
-                {
-                    return refuse("This project already has a location on that server");
-                }
-                if action_for_write == "remove_location"
-                    && location.is_some()
-                    && locations.len() == 1
-                {
-                    return refuse("Keep at least one project location");
-                }
-                let mut payload = json!({
-                    "project": project_id,
-                    "name": project["name"],
-                    "path": path,
-                    "request": request.wire(),
-                });
-                if let Some(location) = location {
-                    payload["location"] = location;
-                }
-                ProjectsRepository::put_location_request(
-                    tx,
-                    &project_id,
-                    &key_for_write,
-                    &admitted,
-                )?;
-                payload[crate::project_locations::LOCATION_ADMISSION_FIELD] =
-                    crate::project_locations::location_admission(
-                        tx,
-                        &project_id,
-                        Some((&actor_id, epoch)),
-                    )?;
-                Ok(Ok(payload))
-            })
-            .await?;
+                            .map(|location| {
+                                let required = |key: &str| {
+                                    location
+                                        .get(key)
+                                        .and_then(Value::as_str)
+                                        .map(str::to_owned)
+                                        .ok_or_else(|| {
+                                            Step::Refused(
+                                                "Stored project location is invalid".into(),
+                                            )
+                                        })
+                                };
+                                let optional = |key: &str| match location.get(key) {
+                                    None => Ok(Field::Missing),
+                                    Some(Value::Null) => Ok(Field::Null),
+                                    Some(Value::String(value)) => Ok(Field::Value(value.clone())),
+                                    Some(_) => Err(Step::Refused(
+                                        "Stored project location is invalid".into(),
+                                    )),
+                                };
+                                Ok::<_, Step>(crate::project_locations::LocationReference {
+                                    server_id: required("serverId")?,
+                                    path: required("path")?,
+                                    project_id: required("projectId")?,
+                                    git_origin: optional("gitOrigin")?,
+                                    requested_path: optional("requestedPath")?,
+                                })
+                            })
+                            .transpose()?;
+                        ProjectsRepository::put_location_request(
+                            tx,
+                            &project_id,
+                            &key_for_write,
+                            &admitted,
+                        )?;
+                        let payload = crate::project_locations::LocationPayload {
+                            project: project_id.clone(),
+                            name: match project.get("name") {
+                                None | Some(Value::Null) => Field::Null,
+                                Some(Value::String(value)) => Field::Value(value.clone()),
+                                Some(_) => return refuse("Stored project name is invalid"),
+                            },
+                            path: path.clone().map_or(Field::Null, Field::Value),
+                            request: Field::Value(request.wire()),
+                            signature: Field::Missing,
+                            result_id: Field::Missing,
+                            location: typed_location.map_or(Field::Missing, Field::Value),
+                            admission: Field::Value(crate::project_locations::location_admission(
+                                tx,
+                                &project_id,
+                                Some((&actor_id, epoch)),
+                            )?),
+                        };
+                        Ok(Ok(payload))
+                    },
+                )
+                .await?;
         let payload = match prepared {
             Err(previous) => return Ok(previous),
             Ok(payload) => payload,
         };
-        let result = self.deliver(&server, action, &payload, &outbox_key).await?;
+        let command = if action == "add_location" {
+            crate::orchestration_wire::OrchestrationCommand::AddLocation(payload)
+        } else {
+            crate::orchestration_wire::OrchestrationCommand::RemoveLocation(payload)
+        };
+        let result = self.deliver(&server, command, &outbox_key).await?;
         Ok(result)
     }
 
@@ -752,8 +836,17 @@ impl ServerTools {
         let Some(origin) = origin else {
             return Ok(json!({"matches": []}));
         };
-        self.deliver(server, "location_matches", &json!({"origin": origin}), key)
-            .await
+        self.deliver(
+            server,
+            crate::orchestration_wire::OrchestrationCommand::LocationMatches(
+                crate::orchestration_worker::LocationMatchesPayload {
+                    origin,
+                    cwd: studio_runtime_schema::queue_command::Field::Missing,
+                },
+            ),
+            key,
+        )
+        .await
     }
 
     /// Python `_exec_tool`.
@@ -828,7 +921,12 @@ impl ServerTools {
                 Ok(())
             })
             .await?;
-        self.deliver(&server, action, &payload, &key).await
+        let kind = action
+            .parse()
+            .map_err(|_| Step::Refused("Invalid cross-server action".into()))?;
+        let command = crate::orchestration_wire::OrchestrationCommand::remaining(kind, payload)
+            .ok_or_else(|| Step::Refused("Invalid cross-server action".into()))?;
+        self.deliver(&server, command, &key).await
     }
 
     /// Python `_fetch`: copy a remote worker branch into FETCH_HEAD of a local
@@ -949,7 +1047,13 @@ impl ServerTools {
         };
         let export = serde_json::to_vec(preparation.export()).map_err(StoreError::from)?;
         let export = serde_json::from_slice(&export).map_err(StoreError::from)?;
-        let receipt = self.deliver(server, "export", &export, &export_key).await?;
+        let receipt = self
+            .deliver(
+                server,
+                crate::orchestration_wire::OrchestrationCommand::Export(export),
+                &export_key,
+            )
+            .await?;
         if matches!(preparation, FetchPayload::Fetching(_)) {
             return Ok(
                 json!({"requestId":key,"outcome":"unknown","detail":"The local Git fetch has no final receipt. Inspect FETCH_HEAD; do not repeat it."}),
@@ -1170,8 +1274,7 @@ impl ServerTools {
                     crate::multi_server_orchestration::enqueue_in_transaction(
                         tx,
                         &server_owned,
-                        "release",
-                        release,
+                        crate::orchestration_wire::OrchestrationCommand::Release(release.clone()),
                         &release_key_for_write,
                         now,
                     )
@@ -1189,7 +1292,11 @@ impl ServerTools {
             // The receipt above is final. A failed release stays queued in the
             // outbox, and the peer removes an unreleased export after a day.
             if self
-                .deliver(server, "release", &release, &release_key)
+                .deliver(
+                    server,
+                    crate::orchestration_wire::OrchestrationCommand::Release(release),
+                    &release_key,
+                )
                 .await
                 .is_err()
             {}
@@ -1262,17 +1369,40 @@ impl ServerTools {
                 };
                 let record: Value = serde_json::from_str(&raw)
                     .map_err(|_| Step::Refused("The remote-parent link is invalid".into()))?;
-                Ok(record.get("parentEpoch").cloned().unwrap_or(Value::Null))
+                record
+                    .get("parentEpoch")
+                    .and_then(Value::as_i64)
+                    .ok_or_else(|| Step::Refused("The remote-parent link is invalid".into()))
             })
             .await?;
-        let payload = json!({
-            "link": link,
-            "worker": actor.record().id.0,
-            "epoch": epoch,
-            "parentEpoch": parent_epoch,
-            "args": args,
-        });
-        let mut receipt = self.deliver(&home, action, &payload, &key).await?;
+        use crate::orchestration_wire::OrchestrationCommand;
+        use crate::orchestration_worker::{MoveSend, WorkerCall, WorkerMessage};
+        let command = match action {
+            "message" => OrchestrationCommand::Message(WorkerCall {
+                link,
+                worker: actor.record().id.0.clone(),
+                epoch,
+                parent_epoch,
+                args: <WorkerMessage as serde::Deserialize>::deserialize(args)
+                    .map_err(|_| Step::Refused("Invalid message arguments".into()))?,
+            }),
+            "move_send" => OrchestrationCommand::MoveSend(WorkerCall {
+                link,
+                worker: actor.record().id.0.clone(),
+                epoch,
+                parent_epoch,
+                args: <MoveSend as serde::Deserialize>::deserialize(args)
+                    .map_err(|_| Step::Refused("Invalid move-send request".into()))?,
+            }),
+            _ => {
+                let kind = action
+                    .parse()
+                    .map_err(|_| Step::Refused("Invalid cross-server action".into()))?;
+                OrchestrationCommand::remaining(kind, json!({"link":link,"worker":actor.record().id.0,"epoch":epoch,"parentEpoch":parent_epoch,"args":args}))
+                    .ok_or_else(|| Step::Refused("Invalid cross-server action".into()))?
+            }
+        };
+        let mut receipt = self.deliver(&home, command, &key).await?;
         match receipt["outcome"].as_str() {
             Some("not_applied") => refuse(field(&receipt, "error")),
             Some("applied") => Ok(receipt["value"].take()),

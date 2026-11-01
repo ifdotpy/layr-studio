@@ -80,10 +80,11 @@ fn seed(directory: &std::path::Path) -> Value {
 }
 
 /// The paired fixture server's reply rules.
-fn reply(envelope: &Value) -> Value {
-    let key = envelope["requestId"].clone();
-    let payload = &envelope["payload"];
-    match envelope["action"].as_str().unwrap() {
+fn reply(envelope: &crate::orchestration_wire::OrchestrationRequest) -> Value {
+    let key = &envelope.request_id;
+    let null = Value::Null;
+    let payload = envelope.command.remaining_payload().unwrap_or(&null);
+    match envelope.command.kind().as_str() {
         "projects" => json!({"requestId": key, "outcome": "applied", "value": {"items": [
             {"id": "/peer/project", "path": "/peer/project", "name": "Peer project", "created": 1.0}]}}),
         "git" => {
@@ -99,10 +100,17 @@ fn reply(envelope: &Value) -> Value {
         "exec_read" => json!({"requestId": key, "outcome": "applied", "value": {
             "handle": payload["handle"], "status": "completed", "exitCode": 0, "stdout": "ok\n",
             "stdoutOffset": 0, "stdoutNextOffset": 3, "outputExpiresAt": FAR}}),
-        "add_location" => json!({"requestId": key, "outcome": "applied", "value": {
-            "serverId": PEER, "path": payload["path"], "canonicalPath": payload["path"],
-            "projectId": payload["path"], "gitOrigin": null, "homeProjectId": payload["project"],
-            "requestId": key}}),
+        "add_location" => {
+            let crate::orchestration_wire::OrchestrationCommand::AddLocation(payload) =
+                &envelope.command
+            else {
+                panic!("location")
+            };
+            json!({"requestId": key, "outcome": "applied", "value": {
+                "serverId": PEER, "path": payload.path.value(), "canonicalPath": payload.path.value(),
+                "projectId": payload.path.value(), "gitOrigin": null, "homeProjectId": payload.project,
+                "requestId": key}})
+        }
         "remove_location" => {
             json!({"requestId": key, "outcome": "applied", "value": {"removed": true, "serverId": PEER}})
         }
@@ -113,7 +121,11 @@ fn reply(envelope: &Value) -> Value {
             {"id": "home-task", "title": "Home task"}]}})
         }
         "message" => {
-            json!({"requestId": key, "outcome": "applied", "value": {"stored": true, "target": payload["args"]["target"]}})
+            let crate::orchestration_wire::OrchestrationCommand::Message(call) = &envelope.command
+            else {
+                panic!("message")
+            };
+            json!({"requestId": key, "outcome": "applied", "value": {"stored": true, "target": call.args.target}})
         }
         "directory" => {
             json!({"requestId": key, "outcome": "applied", "value": {"tool": payload["args"]["tool"], "agents": []}})
@@ -144,20 +156,19 @@ struct RecordingTransport {
 
 #[derive(Default)]
 struct LostExportReply {
-    sent: Mutex<Vec<Value>>,
+    sent: Mutex<Vec<crate::orchestration_wire::OrchestrationRequest>>,
 }
 impl PairedTransport for LostExportReply {
     fn exchange<'a>(
         &'a self,
         _: &'a str,
-        envelope: &'a Value,
+        envelope: &'a crate::orchestration_wire::OrchestrationRequest,
         _: std::time::Duration,
     ) -> BoxFuture<'a, Result<studio_runtime_store::multi_server_delivery::RemoteReply, AccessError>>
     {
         Box::pin(async move {
             self.sent.lock().unwrap().push(envelope.clone());
-            Ok(ExchangeOutcome::Unknown
-                .to_reply(envelope["requestId"].as_str().expect("request ID")))
+            Ok(ExchangeOutcome::Unknown.to_reply(&envelope.request_id))
         })
     }
 }
@@ -254,7 +265,7 @@ impl PairedTransport for RecordingTransport {
     fn exchange<'a>(
         &'a self,
         server: &'a str,
-        envelope: &'a Value,
+        envelope: &'a crate::orchestration_wire::OrchestrationRequest,
         _timeout: std::time::Duration,
     ) -> BoxFuture<'a, Result<studio_runtime_store::multi_server_delivery::RemoteReply, AccessError>>
     {
@@ -1036,7 +1047,7 @@ async fn a_lost_reply_is_unknown_and_an_exact_retry_does_not_send_again_in_fligh
         fn exchange<'a>(
             &'a self,
             _server: &'a str,
-            _envelope: &'a Value,
+            _envelope: &'a crate::orchestration_wire::OrchestrationRequest,
             _timeout: std::time::Duration,
         ) -> BoxFuture<
             'a,
@@ -1122,7 +1133,7 @@ impl PairedTransport for LoopbackPeer {
     fn exchange<'a>(
         &'a self,
         server: &'a str,
-        envelope: &'a Value,
+        envelope: &'a crate::orchestration_wire::OrchestrationRequest,
         _timeout: std::time::Duration,
     ) -> BoxFuture<'a, Result<studio_runtime_store::multi_server_delivery::RemoteReply, AccessError>>
     {
@@ -1131,8 +1142,8 @@ impl PairedTransport for LoopbackPeer {
             self.sent
                 .lock()
                 .unwrap()
-                .push(envelope["action"].as_str().unwrap().to_owned());
-            let key = envelope["requestId"].as_str().unwrap().to_owned();
+                .push(envelope.command.kind().as_str().to_owned());
+            let key = envelope.request_id.clone();
             let now = crate::event_write::unix_time().unwrap() as i64;
             let outcome = self.driver.receive(&self.principal, envelope, now).await?;
             Ok(outcome.to_reply(&key))
@@ -1227,13 +1238,17 @@ async fn fetching_reuses_original_export_inputs_and_missing_inputs_never_send() 
     let sent = transport.sent.lock().unwrap();
     assert_eq!(sent.len(), 2, "missing persisted inputs never send");
     for envelope in sent.iter() {
+        let crate::orchestration_wire::OrchestrationCommand::Export(payload) = &envelope.command
+        else {
+            panic!("export")
+        };
         assert_eq!(
-            serde_json::from_value::<ExportRequest>(envelope["payload"].clone()).unwrap(),
+            <ExportRequest as serde::Deserialize>::deserialize(payload).unwrap(),
             original
         );
     }
     assert_eq!(
-        sent[0]["requestId"], sent[1]["requestId"],
+        sent[0].request_id, sent[1].request_id,
         "lost-response retry keeps the root"
     );
 }
@@ -1930,9 +1945,13 @@ async fn a_python_lead_runs_a_command_here_and_gets_one_exit_notice() {
     let folder = tempfile::tempdir().unwrap();
     // Python `_exec_tool` on the paired server sends this envelope.
     let root = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-    let envelope = json!({"requestId": root, "operation":[], "action": "exec", "payload": {
+    let envelope = crate::orchestration_wire::OrchestrationRequest {
+        request_id: root.clone(),
+        operation: Vec::new(),
+        command: crate::orchestration_wire::OrchestrationCommand::Exec(json!({
         "actor": "peer-lead", "cwd": folder.path(), "command": ["sh", "-c", "printf remote"],
-        "env": {}, "timeout": 5, "output_limit": 262144}});
+        "env": {}, "timeout": 5, "output_limit": 262144})),
+    };
     let now = crate::event_write::unix_time().unwrap() as i64;
     let outcome = driver.receive(PEER, &envelope, now).await.unwrap();
     let ExchangeOutcome::Applied(value) = outcome else {
@@ -1948,8 +1967,13 @@ async fn a_python_lead_runs_a_command_here_and_gets_one_exit_notice() {
     let foreign = driver
         .receive(
             PEER,
-            &json!({"requestId": studio_runtime_schema::persistence::RequestIdentity::issue_root(), "operation":[], "action": "exec_read",
-                "payload": {"actor": "another-lead", "handle": root}}),
+            &crate::orchestration_wire::OrchestrationRequest {
+                request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
+                operation: Vec::new(),
+                command: crate::orchestration_wire::OrchestrationCommand::ExecRead(
+                    json!({"actor": "another-lead", "handle": root}),
+                ),
+            },
             now,
         )
         .await
@@ -1976,9 +2000,13 @@ async fn a_python_lead_runs_a_command_here_and_gets_one_exit_notice() {
     let missing = driver
         .receive(
             PEER,
-            &json!({"requestId": studio_runtime_schema::persistence::RequestIdentity::issue_root(), "operation":[], "action": "exec", "payload": {
+            &crate::orchestration_wire::OrchestrationRequest {
+                request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
+                operation: Vec::new(),
+                command: crate::orchestration_wire::OrchestrationCommand::Exec(json!({
                 "actor": "peer-lead", "cwd": folder.path(), "command": ["/nonexistent/command"],
-                "timeout": 5}}),
+                "timeout": 5})),
+            },
             now,
         )
         .await

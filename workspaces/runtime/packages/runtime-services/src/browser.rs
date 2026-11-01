@@ -368,10 +368,10 @@ impl BrowserCallbackReceiver {
 impl crate::multi_server_orchestration::BrowserCallbackEffect for BrowserCallbackReceiver {
     fn receive<'a>(
         &'a self,
-        envelope: &'a Value,
+        payload: &'a Value,
     ) -> futures_util::future::BoxFuture<'a, Result<Value, crate::multi_server_auth::AccessError>>
     {
-        Box::pin(self.receive(&envelope["payload"]))
+        Box::pin(self.receive(payload))
     }
 }
 

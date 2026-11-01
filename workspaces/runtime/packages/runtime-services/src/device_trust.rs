@@ -301,8 +301,9 @@ pub async fn sync_peer(
     let reply = match driver
         .exchange(
             server,
-            ACTION,
-            &json!({ "entries": entries }),
+            crate::orchestration_wire::OrchestrationCommand::DeviceTrust(
+                json!({ "entries": entries }),
+            ),
             &key,
             now as i64,
         )

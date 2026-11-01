@@ -50,8 +50,11 @@ impl PairedExchange for SignedBrowserExchange {
                 .checked_duration_since(Instant::now())
                 .filter(|v| !v.is_zero())
                 .ok_or(BrowserError::Unknown)?;
+            if action != "browser_callback" {
+                return Err(BrowserError::Exchange);
+            }
             let outcome = driver
-                .exchange_with_timeout(&server, &action, &payload, &request_id, now, timeout)
+                .exchange_with_timeout(&server, studio_runtime_services::orchestration_wire::OrchestrationCommand::BrowserCallback(payload), &request_id, now, timeout)
                 .await
                 .unwrap_or(DeliveryOutcome::Unknown);
             Ok(match outcome {
