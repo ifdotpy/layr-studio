@@ -3735,6 +3735,7 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
             })
             .collect::<Vec<_>>()
     };
+    eprintln!("STAGE transcript-read");
     let mut expected: Vec<Value> =
         serde_json::from_str(include_str!("fixtures/claude-stream-items.json")).unwrap();
     // The input includes runtime instructions; compare its complete persisted text.
@@ -3785,6 +3786,7 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
         std::fs::read_to_string(&queries).unwrap().lines().count(),
         1
     );
+    eprintln!("STAGE queries-counted");
     let (_query_watcher, mut query_events) = watch_file_changes(&queries);
     assert_eq!(
         app.clone()
@@ -3798,6 +3800,7 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
             .status(),
         200
     );
+    eprintln!("STAGE second-posted");
     wait_for_durable_agent_status(&fixture, &agent_id, "completed").await;
     eprintln!("STAGE second-turn-completed");
     let managed_calls: i64 = fixture.store.test_reader().unwrap().query_row(
