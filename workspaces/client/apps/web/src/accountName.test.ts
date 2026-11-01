@@ -6,6 +6,18 @@ import {
 } from "./accountName";
 
 describe("account names", () => {
+  it("uses server eligibility even when status disagrees", () => {
+    const account = {
+      id: "a",
+      home: "/a",
+      label: "A",
+      source: "test",
+      provider: "codex" as const,
+      status: "ready" as const,
+      eligibility: { kind: "unavailable" as const, reason: "Unavailable" },
+    };
+    expect(accountCanStart(account)).toBe(false);
+  });
   it("allows a pinned native proof attempt without claiming authentication", () => {
     const account = {
       id: "claude-local",
@@ -15,16 +27,11 @@ describe("account names", () => {
       provider: "claude" as const,
       status: "error" as const,
       canAttemptNativeProof: true,
+      eligibility: { kind: "available" as const },
     };
     expect(accountCanStart(account)).toBe(true);
     expect(account.status).toBe("error");
-    expect(accountCanStart({ ...account, canAttemptNativeProof: false })).toBe(
-      false,
-    );
-    expect(accountCanStart({ ...account, status: "signedOut" })).toBe(false);
-    expect(accountCanStart({ ...account, provider: "codex" })).toBe(false);
-    expect(accountCanStart({ ...account, disconnected: true })).toBe(false);
-    expect(accountCanStart({ ...account, deleted: true })).toBe(false);
+    expect(accountCanStart(undefined)).toBe(false);
   });
   it("uses the persisted label and the full email tooltip", () => {
     const account = { label: " Work 1 ", email: "work@example.com" };

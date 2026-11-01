@@ -80,16 +80,22 @@ pub(super) fn accounts_response(
     use crate::generated::{Account, AccountsResponse, CodexLoginReceipt, CodexLoginReceiptStatus};
     use studio_runtime_schema::account_registry::LoginStatus;
 
+    let project = |account: studio_runtime_services::account_policy::PublicAccount| {
+        let eligibility = account.eligibility();
+        let mut value = serde_json::to_value(account)?;
+        value["eligibility"] = serde_json::to_value(eligibility)?;
+        serde_json::from_value::<Account>(value)
+    };
     let accounts = snapshot
         .accounts
         .into_iter()
-        .map(|account| serde_json::to_value(account).and_then(serde_json::from_value::<Account>))
+        .map(project)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| crate::error::ApiError::internal())?;
     let archived_accounts = snapshot
         .archived_accounts
         .into_iter()
-        .map(|account| serde_json::to_value(account).and_then(serde_json::from_value::<Account>))
+        .map(project)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| crate::error::ApiError::internal())?;
     let logins = snapshot
@@ -266,6 +272,19 @@ mod registration_tests {
 #[cfg(test)]
 mod stored_shape_tests {
     use serde_json::json;
+
+    #[test]
+    fn account_response_includes_server_eligibility() {
+        let snapshot = studio_runtime_services::account_policy::AccountsSnapshot {
+            accounts: vec![serde_json::from_value(json!({"id":"a","home":"/a","label":"A","source":"test","provider":"codex","status":"ready"})).unwrap()],
+            archived_accounts: vec![], default_account_key: json!("a"), default_account_groups: vec![], logins: vec![], known_account_keys: Default::default(),
+        };
+        let response = super::accounts_response(snapshot).unwrap().0;
+        assert_eq!(
+            serde_json::to_value(response).unwrap()["accounts"][0]["eligibility"]["kind"],
+            "available"
+        );
+    }
 
     #[test]
     fn a_provider_argument_vector_is_an_analytics_command() {
