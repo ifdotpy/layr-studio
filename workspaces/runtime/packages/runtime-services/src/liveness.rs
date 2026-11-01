@@ -348,7 +348,9 @@ fn minutes(seconds: f64) -> i64 {
 /// unfinished turn). The turn rows decide busy, not the agent `in_flight` column.
 fn stalled_turn_candidates_sql() -> String {
     format!(
-        "SELECT id FROM runtime_agents WHERE deleted_at IS NULL AND status IN ('running','paused') AND {}",
+        "SELECT id FROM runtime_agents WHERE deleted_at IS NULL \
+         AND {} IN ('running','paused') AND {}",
+        studio_runtime_store::domain::chat_status_sql("runtime_agents.id"),
         studio_runtime_store::domain::chat_busy_sql("runtime_agents.id")
     )
 }
@@ -433,14 +435,15 @@ fn waiting_inputs(
     found: &mut Vec<Finding>,
 ) -> Result<(), StoreError> {
     // A message with a stored start error is already a `input_stuck` row.
-    let mut statement = tx.prepare_cached(
+    let mut statement = tx.prepare_cached(&format!(
         "SELECT e.agent,e.id,e.created,COUNT(*) OVER (PARTITION BY e.agent) FROM runtime_events e \
          JOIN runtime_agents a ON a.id=e.agent \
          WHERE e.status='pending' AND e.kind='user' AND e.created<?1 AND COALESCE(e.error,'')='' \
          AND a.deleted_at IS NULL AND e.epoch=json_extract(a.record,'$.epoch') \
-         AND a.status NOT IN ('running','starting','queued','approval') \
+         AND {status} NOT IN ('running','starting','queued','approval') \
          ORDER BY e.agent,e.created,e.id",
-    )?;
+        status = studio_runtime_store::domain::chat_status_sql("a.id")
+    ))?;
     let rows = statement
         .query_map([now - PENDING_INPUT_SECONDS], |row| {
             Ok((
@@ -495,13 +498,14 @@ fn waiting_sessions(
     now: f64,
     found: &mut Vec<Finding>,
 ) -> Result<(), StoreError> {
-    let mut statement = tx.prepare_cached(
+    let mut statement = tx.prepare_cached(&format!(
         "SELECT a.id,COALESCE(json_extract(a.record,'$.accountKey'),'default'),COALESCE(json_extract(a.record,'$.name'),'Agent'),\
          (SELECT MIN(e.created) FROM runtime_events e WHERE e.agent=a.id AND e.status='pending' AND e.epoch=json_extract(a.record,'$.epoch')) \
-         FROM runtime_agents a WHERE a.deleted_at IS NULL AND a.status IN ('queued','starting') \
+         FROM runtime_agents a WHERE a.deleted_at IS NULL AND {status} IN ('queued','starting') \
          AND json_extract(a.record,'$.startWait.reason')='provider_session' \
          AND json_extract(a.record,'$.startWait.epoch')=json_extract(a.record,'$.epoch') ORDER BY a.id",
-    )?;
+        status = studio_runtime_store::domain::chat_status_sql("a.id")
+    ))?;
     let rows = statement
         .query_map([], |row| {
             Ok((
@@ -771,6 +775,11 @@ mod busy_candidate_tests {
             )
             .unwrap();
         }
+        db.execute(
+            "INSERT INTO chats(id,state,status) VALUES('busy','active','running'),('idle','active','running')",
+            [],
+        )
+        .unwrap();
         db.execute(
             "INSERT INTO turns(id,chat,state) VALUES('t1','busy','starting')",
             [],

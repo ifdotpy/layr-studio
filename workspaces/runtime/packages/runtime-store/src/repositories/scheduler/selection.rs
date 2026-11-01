@@ -1,6 +1,6 @@
 use super::*;
 use crate::CachedSql;
-use crate::domain::chat_busy_sql;
+use crate::domain::{chat_busy_sql, chat_status_sql};
 use std::sync::LazyLock;
 
 #[derive(serde::Serialize, serde::Deserialize, PartialEq)]
@@ -214,7 +214,8 @@ fn child_result_held(event: &str, held_after: &str) -> String {
     format!(
         "({event}.kind='child_result' AND {event}.created>{held_after} \
          AND EXISTS(SELECT 1 FROM runtime_agents c WHERE c.parent_id=+{event}.agent \
-           AND c.deleted_at IS NULL AND c.status IN ('queued','starting','running')))"
+           AND c.deleted_at IS NULL AND {status} IN ('queued','starting','running')))",
+        status = chat_status_sql("c.id")
     )
 }
 
@@ -881,8 +882,7 @@ impl SchedulerRepository {
     pub fn pending_agents(connection: &Connection) -> StoreResult<Vec<(String, i64)>> {
         let mut statement = connection.prepare_cached(&format!(
             "SELECT a.id,json_extract(a.record,'$.epoch') FROM runtime_agents a \
-             WHERE a.status='queued' \
-             AND EXISTS(SELECT 1 FROM chats ch WHERE ch.id=a.id AND ch.auto_wake=1) \
+             WHERE {} \
              AND NOT {} \
              AND COALESCE(a.native_failure_hold,0)=0 \
              AND COALESCE(a.remote_worker,0)=0 \
@@ -890,6 +890,7 @@ impl SchedulerRepository {
              AND EXISTS(SELECT 1 FROM runtime_events e WHERE e.agent=a.id \
                         AND e.epoch=json_extract(a.record,'$.epoch') AND e.status='pending') \
              ORDER BY a.rowid",
+            chat_has("a.", "ch.status='queued' AND ch.auto_wake=1"),
             chat_busy_sql("a.id")
         ))?;
         let rows = statement.query_map([], |row| {

@@ -1,6 +1,6 @@
 //! Callback services plug into this typed dispatch boundary.
 use serde_json::{Value, json};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use studio_runtime_providers::{Frame, ResponseBody};
 use studio_runtime_store::{AgentExecutionMode, AgentRecord, JsonRecord, RuntimeStore};
 use tokio::sync::Notify;
@@ -316,13 +316,19 @@ pub(super) async fn wait_for_managed_catalog(
 /// `approval` and still runs: its other tool calls and requests need it too.
 /// Without a turn id (an MCP elicitation may have none) the thread's active
 /// turn answers.
-const CALLBACK_CONTEXT_QUERY: &str = "SELECT id,record FROM runtime_agents
+static CALLBACK_CONTEXT_QUERY: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT id,record FROM runtime_agents
 WHERE id IN (SELECT chat FROM sessions WHERE thread_id=?3 AND state<>'ended') AND account_key=?1
   AND EXISTS(SELECT 1 FROM turns t WHERE t.chat=runtime_agents.id AND t.attempt_connection_generation=?2)
-  AND (?4 IS NULL OR turn_id=?4) AND status IN ('running','approval')
+  AND (?4 IS NULL OR {turn}=?4) AND {status} IN ('running','approval')
   AND EXISTS(SELECT 1 FROM chats ch WHERE ch.id=runtime_agents.id AND ch.auto_wake=1)
   AND (?5 IS NULL OR id=?5)
-LIMIT 2";
+LIMIT 2",
+        turn = studio_runtime_store::domain::unfinished_provider_turn_sql("runtime_agents.id"),
+        status = studio_runtime_store::domain::chat_status_sql("runtime_agents.id"),
+    )
+});
 
 /// How a callback handler left its request record.
 pub(super) enum CallbackHandled {
@@ -557,7 +563,7 @@ pub(super) fn callback_context_in(
     let Ok(generation_value) = i64::try_from(generation) else {
         return Ok(None);
     };
-    let mut statement = db.prepare_cached(CALLBACK_CONTEXT_QUERY)?;
+    let mut statement = db.prepare_cached(&CALLBACK_CONTEXT_QUERY)?;
     let candidates = statement
         .query_map(
             rusqlite::params![account, generation_value, thread, turn, emitting_actor],
@@ -657,7 +663,7 @@ mod tests {
         let connection = store.test_reader().expect("read connection");
         let details = {
             let mut plan = connection
-                .prepare(&format!("EXPLAIN QUERY PLAN {CALLBACK_CONTEXT_QUERY}"))
+                .prepare(&format!("EXPLAIN QUERY PLAN {}", *CALLBACK_CONTEXT_QUERY))
                 .expect("explain query");
             plan.query_map(
                 params![
@@ -684,6 +690,7 @@ mod tests {
         let agent = |id: &str| {
             json!({"compactions":0,
                 "id": id, "rootId": id, "epoch": 1, "status": "running", "autoWake": true,
+                "inFlight": true,
                 "provider": studio_runtime_schema::ProviderKind::Codex,
                 "accountKey": "account-a", "threadId": "thread-a", "turnId": "turn-a",
                 "startAttempt": {"connectionGeneration": 7, "connectionId": "connection-a"}
@@ -722,12 +729,13 @@ mod tests {
         assert_eq!(context.agent, "agent-a");
         // A turn that waits for a native card still owns its callbacks.
         store
-            .transaction(|transaction| {
-                transaction.execute(
-                    "UPDATE runtime_agents SET record=json_set(record,'$.status','approval') WHERE id='agent-a'",
-                    [],
-                )?;
-                Ok(())
+            .transaction(move |transaction| {
+                let mut record = agent("agent-a");
+                record["status"] = json!("approval");
+                studio_runtime_store::AgentRepository::put(
+                    transaction,
+                    &studio_runtime_store::AgentRecord::from_value(record)?,
+                )
             })
             .await
             .expect("agent waits for approval");
@@ -829,7 +837,7 @@ mod catalog_wait_tests {
         );
         let agent = json!({"compactions":0,
             "provider": "codex", "id": "agent-a", "rootId": "agent-a", "epoch": 1, "status": "running",
-            "autoWake": true, "accountKey": "account-a", "threadId": "thread-a",
+            "autoWake": true, "inFlight": true, "accountKey": "account-a", "threadId": "thread-a",
             "turnId": "turn-a",
             "startAttempt": {"connectionGeneration": 7, "connectionId": "connection-a"}
         });
