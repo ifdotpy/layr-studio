@@ -24,28 +24,20 @@ pub enum NativeSafetyStage {
 pub struct ConnectionCheckDto {
     pub at: serde_json::Number,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub account_key: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub native_state: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub previous_error: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub read_error: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub restart_turn_status: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub thread_id: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub turn_id: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<SafeInteger>")]
     pub epoch: Field<SafeInteger>,
 }
 
@@ -53,10 +45,8 @@ pub struct ConnectionCheckDto {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativeThreadBlockDto {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub thread_id: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<crate::provider_errors::NativeProviderError>")]
     pub error: Field<crate::provider_errors::NativeProviderError>,
 }
 
@@ -64,10 +54,8 @@ pub struct NativeThreadBlockDto {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativeTurnErrorDto {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub turn_id: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<crate::provider_errors::NativeProviderError>")]
     pub error: Field<crate::provider_errors::NativeProviderError>,
 }
 
@@ -75,43 +63,30 @@ pub struct NativeTurnErrorDto {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativeSafetyRetryDto {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub accepted_turn_id: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub account_key: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub error: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub id: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub model: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub new_thread_id: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub request_id: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub rpc_method: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub turn_id: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<serde_json::Number>")]
     pub created: Field<serde_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<serde_json::Number>")]
     pub updated: Field<serde_json::Number>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<SafeInteger>")]
     pub epoch: Field<SafeInteger>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<NativeSafetyStage>")]
     pub stage: Field<NativeSafetyStage>,
 }
 

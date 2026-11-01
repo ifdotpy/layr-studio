@@ -22,12 +22,6 @@ fn nullable<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     Option::<T>::deserialize(deserializer)
 }
 
-fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
-    deserializer: D,
-) -> Result<Option<T>, D::Error> {
-    T::deserialize(deserializer).map(Some)
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReviewDefaultsDto {
@@ -35,12 +29,7 @@ pub struct ReviewDefaultsDto {
     pub model: Option<String>,
     #[serde(deserialize_with = "nullable")]
     pub effort: Option<String>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    #[schemars(with = "bool")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fast_mode: Option<bool>,
 }
 
@@ -122,9 +111,14 @@ mod tests {
             let dto: ReviewDefaultsDto = serde_json::from_value(value.clone()).unwrap();
             assert_eq!(serde_json::to_value(dto).unwrap(), value);
         }
+        let null_fast: ReviewDefaultsDto =
+            serde_json::from_value(json!({"model":null,"effort":null,"fastMode":null})).unwrap();
+        assert_eq!(
+            serde_json::to_value(null_fast).unwrap(),
+            json!({"model":null,"effort":null})
+        );
         for value in [
             json!({"effort":null}),
-            json!({"model":null,"effort":null,"fastMode":null}),
             json!({"model":null,"effort":null,"extra":true}),
         ] {
             assert!(serde_json::from_value::<ReviewDefaultsDto>(value).is_err());

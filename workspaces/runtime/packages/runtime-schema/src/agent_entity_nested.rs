@@ -7,22 +7,16 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentOverview {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub task: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<bool>")]
     pub task_truncated: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub result: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<bool>")]
     pub result_truncated: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub result_file: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub result_turn_id: Field<String>,
 }
 
@@ -125,19 +119,14 @@ pub enum AgentNativeStatusError {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentNativeStatus {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<f64>")]
     pub at: Field<f64>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<AgentNativeStatusError>")]
     pub error: Field<AgentNativeStatusError>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub message: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<NativeStatusPhase>")]
     pub phase: Field<NativeStatusPhase>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub turn_id: Field<String>,
 }
 
@@ -156,7 +145,6 @@ pub struct MovePointerDto {
     #[serde(rename = "move")]
     pub move_id: String,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub agent_id: Field<String>,
 }
 
@@ -164,12 +152,6 @@ fn required_nullable<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     deserializer: D,
 ) -> Result<Option<T>, D::Error> {
     Option::<T>::deserialize(deserializer)
-}
-
-fn optional_nonnull<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
-    deserializer: D,
-) -> Result<Option<T>, D::Error> {
-    T::deserialize(deserializer).map(Some)
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -180,25 +162,13 @@ pub struct WorkerDefaultsDto {
     #[serde(deserialize_with = "required_nullable")]
     pub effort: Option<String>,
     pub fast_mode: bool,
-    #[serde(
-        default,
-        deserialize_with = "optional_nonnull",
-        skip_serializing_if = "Option::is_none"
-    )]
-    #[schemars(with = "bool")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daybreak_enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<crate::account_key::AccountKey>")]
     pub account_key: Field<crate::account_key::AccountKey>,
-    #[serde(
-        default,
-        deserialize_with = "optional_nonnull",
-        skip_serializing_if = "Option::is_none"
-    )]
-    #[schemars(with = "crate::bounded_integer::BoundedInteger<1, 3>")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delegation_depth: Option<crate::bounded_integer::BoundedInteger<1, 3>>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub cyber_access_program: Field<String>,
 }
 
@@ -206,28 +176,20 @@ pub struct WorkerDefaultsDto {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExecutionSettingsDto {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub account_key: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub cyber_access_program: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<bool>")]
     pub daybreak_enabled: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub effort: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<bool>")]
     pub fast_mode: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub model: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub native_effort: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<f64>")]
     pub updated_at: Field<f64>,
 }
 
@@ -254,13 +216,10 @@ pub struct ActiveToolDto {
 #[serde(deny_unknown_fields)]
 pub struct AgentActivity {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<f64>")]
     pub at: Field<f64>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<String>")]
     pub phase: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    #[schemars(with = "Option<Vec<ActiveToolDto>>")]
     pub tools: Field<Vec<ActiveToolDto>>,
 }
 
@@ -542,11 +501,13 @@ mod tests {
     fn worker_defaults_reject_invalid_keys_and_missing_or_null_required_fields() {
         let valid = json!({"model":null,"effort":null,"fastMode":false});
         assert!(serde_json::from_value::<WorkerDefaultsDto>(valid.clone()).is_ok());
+        let null_options = json!({"model":null,"effort":null,"fastMode":false,"daybreakEnabled":null,"delegationDepth":null});
+        let defaults: WorkerDefaultsDto = serde_json::from_value(null_options).unwrap();
+        assert_eq!(serde_json::to_value(defaults).unwrap(), valid);
         for invalid in [
             json!({"effort":null,"fastMode":false}),
             json!({"model":null,"effort":null,"fastMode":null}),
             json!({"model":null,"effort":null,"fastMode":false,"accountKey":""}),
-            json!({"model":null,"effort":null,"fastMode":false,"daybreakEnabled":null}),
             json!({"model":null,"effort":null,"fastMode":false,"delegationDepth":4}),
         ] {
             assert!(serde_json::from_value::<WorkerDefaultsDto>(invalid).is_err());
@@ -577,7 +538,6 @@ mod tests {
     fn native_status_schema_rejects_a_changed_error_field() {
         #[derive(JsonSchema)]
         struct ChangedStatus {
-            #[schemars(with = "Option<String>")]
             error: Field<String>,
         }
         assert!(
@@ -604,10 +564,27 @@ mod tests {
     }
 
     #[test]
+    fn published_native_status_error_matches_serde() {
+        let document: serde_json::Value =
+            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let root = json!({"$ref":"#/components/schemas/AgentNativeStatus","components":document["components"]});
+        let validator = jsonschema::validator_for(&root).unwrap();
+        for (value, valid) in [
+            (json!({"error":{"message":"failed"}}), true),
+            (json!({"error":7}), false),
+        ] {
+            assert_eq!(validator.is_valid(&value), valid);
+            assert_eq!(
+                serde_json::from_value::<AgentNativeStatus>(value).is_ok(),
+                valid
+            );
+        }
+    }
+
+    #[test]
     fn activity_schema_preserves_a_changed_tool_item_type() {
         #[derive(JsonSchema)]
         struct ChangedActivity {
-            #[schemars(with = "Option<Vec<String>>")]
             tools: Field<Vec<String>>,
         }
         assert!(
