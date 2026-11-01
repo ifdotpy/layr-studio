@@ -197,6 +197,7 @@ pub(crate) fn agent_view_contexts(
         contexts.insert(
             id.to_owned(),
             AgentViewContext {
+                team_counts: team_counts(transaction, id, record)?,
                 project_server_id: project_server_id.map(str::to_owned),
                 launcher_alive: true,
                 empty_lead,
@@ -277,6 +278,7 @@ pub(crate) fn agent_view_context(
     let progress = crate::agent_progress::derive(transaction, record, &assigned)?;
     let attention = pending_attention(transaction, id, record)?;
     Ok(AgentViewContext {
+        team_counts: team_counts(transaction, id, record)?,
         command_progress: progress.commands,
         stall: progress.stall,
         project_server_id: project_server_id.map(str::to_owned),
@@ -286,6 +288,38 @@ pub(crate) fn agent_view_context(
         has_approval: attention.1,
         latest_work_result_file: latest.map(|(_, path)| path),
     })
+}
+
+pub(crate) const TEAM_COUNT_INPUTS_SQL: &str = "SELECT status,json_extract(record,'$.autoWake') FROM runtime_agents INDEXED BY runtime_agent_live_root_v2 WHERE root_id=?1 AND deleted_at IS NULL AND id<>?1 AND COALESCE(json_extract(record,'$.isLead'),0)=0";
+
+fn team_counts(
+    transaction: &Transaction<'_>,
+    id: &str,
+    record: &Value,
+) -> StoreResult<Option<studio_runtime_schema::agent_progress::TeamCounts>> {
+    if !truthy(record.get("isLead")) {
+        return Ok(None);
+    }
+    let mut total = 0;
+    let mut working = 0;
+    let mut statement = transaction.prepare_cached(TEAM_COUNT_INPUTS_SQL)?;
+    let rows = statement.query_map([id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<bool>>(1)?.unwrap_or(false),
+        ))
+    })?;
+    for row in rows {
+        let (status, auto_wake) = row?;
+        total += 1;
+        if crate::turn_prepare::WorkerStatus::from_agent_status(&status).working(auto_wake) {
+            working += 1;
+        }
+    }
+    Ok(Some(studio_runtime_schema::agent_progress::TeamCounts {
+        working,
+        total,
+    }))
 }
 
 fn exists_for_agent(

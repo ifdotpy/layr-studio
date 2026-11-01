@@ -428,6 +428,7 @@ async fn lazy_first_native_thread_preparation_moves_history_or_reports_error() {
     let view = studio_runtime_services::sync_views::agent_entity_view(
         &agent(&store),
         &studio_runtime_services::sync_views::AgentViewContext {
+            team_counts: None,
             project_server_id: None,
             launcher_alive: true,
             empty_lead: false,

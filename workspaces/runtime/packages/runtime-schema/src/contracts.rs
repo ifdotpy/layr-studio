@@ -1296,6 +1296,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     openapi["components"]["schemas"]["ComplaintBody"]["properties"]["status"] =
         crate::complaints::status_property();
     openapi["components"]["schemas"]["StartWaitReason"] = serde_json::Value::Null;
+    openapi["components"]["schemas"]["TeamCounts"] = serde_json::json!({});
     for (name, schema) in crate::agent_progress::schemas()
         .into_iter()
         .chain(crate::desktop::schemas())

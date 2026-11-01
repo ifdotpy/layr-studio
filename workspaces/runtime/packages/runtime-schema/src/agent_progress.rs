@@ -142,8 +142,17 @@ fn reason_schema(generator: &mut schemars::SchemaGenerator) -> serde_json::Value
     serde_json::json!({"type": "string", "enum": values})
 }
 
+/// Counts of live descendant workers. Working uses the team progress status definition.
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct TeamCounts {
+    pub working: usize,
+    pub total: usize,
+}
+
 /// Schemas consumed by OpenAPI and its generated renderer contract.
-pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 5] {
+pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 6] {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
@@ -165,6 +174,10 @@ pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 5] {
             "AgentStall",
             AgentStall::json_schema(&mut generator).to_value(),
         ),
+        (
+            "TeamCounts",
+            TeamCounts::json_schema(&mut generator).to_value(),
+        ),
     ]
 }
 
@@ -174,6 +187,19 @@ pub(crate) fn check_schema_parity(openapi: &serde_json::Value) -> Result<(), Str
             return Err(format!(
                 "{name} must match runtime-schema/src/agent_progress.rs"
             ));
+        }
+    }
+    for consumer in [
+        "AgentEntityDto",
+        "AgentSummaryEntityDto",
+        "AgentResponse",
+        "BranchResponse",
+    ] {
+        if openapi.pointer(&format!(
+            "/components/schemas/{consumer}/properties/teamCounts"
+        )) != Some(&serde_json::json!({"$ref":"#/components/schemas/TeamCounts"}))
+        {
+            return Err(format!("{consumer}.teamCounts must reference TeamCounts"));
         }
     }
     for (field, schema) in [

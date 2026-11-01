@@ -5804,6 +5804,9 @@
           "taskDefaultGate": {
             "$ref": "#/components/schemas/TaskAcceptanceGate"
           },
+          "teamCounts": {
+            "$ref": "#/components/schemas/TeamCounts"
+          },
           "threadId": {
             "anyOf": [
               {
@@ -9351,6 +9354,9 @@
             "default": null,
             "title": "Tail"
           },
+          "teamCounts": {
+            "$ref": "#/components/schemas/TeamCounts"
+          },
           "threadId": {
             "anyOf": [
               {
@@ -10090,6 +10096,9 @@
                 "type": "null"
               }
             ]
+          },
+          "teamCounts": {
+            "$ref": "#/components/schemas/TeamCounts"
           },
           "threadId": {
             "anyOf": [
@@ -17763,6 +17772,9 @@
             ],
             "default": null,
             "title": "Tail"
+          },
+          "teamCounts": {
+            "$ref": "#/components/schemas/TeamCounts"
           },
           "threadId": {
             "anyOf": [
@@ -54982,6 +54994,26 @@
             "task"
           ]
         }
+      },
+      "TeamCounts": {
+        "description": "Counts of live descendant workers. Working uses the team progress status definition.",
+        "properties": {
+          "total": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "working": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "working",
+          "total"
+        ],
+        "type": "object"
       },
       "TerminalClose": {
         "additionalProperties": false,
