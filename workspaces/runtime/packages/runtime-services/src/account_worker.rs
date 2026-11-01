@@ -2971,14 +2971,10 @@ impl Worker {
                     )? || row.status != studio_runtime_store::AgentStatus::Starting
                         || row.auto_wake != Some(true)
                         || fields.get("nativeFailureHold") == Some(&json!(true))
-                        || [
-                            "executionMove",
-                            "lazyAccountTransfer",
-                            "accountTransferId",
-                            "workspaceOperation",
-                        ]
-                        .iter()
-                        .any(|key| fields.get(*key).is_some_and(|value| !value.is_null()))
+                        || row.workspace_operation.is_some()
+                        || ["executionMove", "lazyAccountTransfer", "accountTransferId"]
+                            .iter()
+                            .any(|key| fields.get(*key).is_some_and(|value| !value.is_null()))
                         || row.cwd.as_deref() != Some(request.cwd.as_str())
                         || guest_home != request.guest_home
                         || row.thread_id.as_deref() != intent.thread_id.as_deref()

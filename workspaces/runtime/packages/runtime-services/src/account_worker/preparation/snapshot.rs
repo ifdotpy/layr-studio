@@ -1906,7 +1906,9 @@ mod resource_tests {
             for error in [json!(false), json!(42), json!([])] {
                 let record = json!({"compactions":0,"accountKey":"default","id":"lead","rootId":"lead","epoch":1,"status":"queued",
                     "isLead":true,"provider":"claude","cwd":"/project","threadId":"existing-thread","error":error});
-                AgentRepository::put(tx, &AgentRecord::from_value(record.clone()).expect("agent"))?;
+                let mut persisted = record.clone();
+                persisted["error"] = Value::Null;
+                AgentRepository::put(tx, &AgentRecord::from_value(persisted).expect("agent"))?;
                 assert!(matches!(thread_snapshot(tx, &resources, &record, "connection", Path::new("/state"), None),
                     Err(WorkerError::Store(StoreError::InvalidStoredObject { table: "turn_preparation", id })) if id == "error"));
             }

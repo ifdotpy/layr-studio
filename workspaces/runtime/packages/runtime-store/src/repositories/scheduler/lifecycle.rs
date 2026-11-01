@@ -2834,10 +2834,13 @@ pub(super) fn transport_continuation_allowed(agent: &AgentRecord) -> bool {
 
 pub(super) fn continuation_allowed(agent: &AgentRecord) -> bool {
     !agent.is_deleted()
+        && !agent
+            .workspace_operation
+            .value()
+            .is_some_and(|value| !value.is_empty())
         && ![
             "nativeFailureHold",
             "accountTransferId",
-            "workspaceOperation",
             "contextRepairWait",
         ]
         .iter()

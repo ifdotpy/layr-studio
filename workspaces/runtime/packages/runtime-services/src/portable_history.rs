@@ -1590,7 +1590,13 @@ mod tests {
             if let Some(provider) = provider {
                 agent["provider"] = provider;
             }
-            let agent = studio_runtime_store::AgentRecord::from_value(agent).expect("agent");
+            let agent = match studio_runtime_store::AgentRecord::from_value(agent) {
+                Ok(agent) => agent,
+                Err(_) => {
+                    assert!(!root.path().join("portable-history").exists());
+                    continue;
+                }
+            };
             let input = super::ExportInput {
                 agent_id: "agent-a".into(),
                 account_key: "default".into(),
