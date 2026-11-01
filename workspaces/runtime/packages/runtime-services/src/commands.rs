@@ -15,7 +15,7 @@
 
 use crate::agent_lifecycle_runtime::LifecyclePorts;
 use crate::agent_management::Action;
-use rusqlite::{Connection, Transaction};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use studio_runtime_schema::command::{
     COMMAND_ROW_MAX_BYTES, Command, CommandRequest, CommandResponse, CommandRow, CommandStatus,
 };
@@ -285,8 +285,8 @@ pub struct WithdrawInput {
     pub deleted: bool,
     /// The chat runs on another server (a remote worker or anchor).
     pub remote: bool,
-    /// The pending event with the message id, in this chat and epoch. Pending is the
-    /// only status the read returns.
+    /// The event with the message id, in this chat and epoch: pending (queued), or
+    /// reserved or dispatching (held by the running turn).
     pub queued: Option<QueuedMessage>,
 }
 
@@ -296,14 +296,18 @@ pub struct QueuedMessage {
     pub kind: String,
     pub valid: bool,
     pub text: String,
+    /// The message is held by the running turn, not queued.
+    pub held: bool,
 }
 
-/// What `apply_withdraw` writes: the queue status and the server draft.
+/// What `apply_withdraw` writes: the queue status and the server draft. `interrupt` is
+/// set for a held message: its turn must stop too.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WithdrawDecision {
     pub chat: String,
     pub message: String,
     pub text: String,
+    pub interrupt: bool,
 }
 
 /// Step 2 for `withdraw`, read part: gather the facts that `decide_withdraw` needs.
@@ -328,9 +332,23 @@ pub fn read_withdraw(
                 kind: event.kind,
                 valid: event.valid,
                 text,
+                held: false,
             })
         }
-        None => None,
+        None => tx
+            .query_row(
+                "SELECT kind,text FROM runtime_events WHERE id=?1 AND agent=?2 AND epoch=?3 AND status IN ('reserved','dispatching')",
+                params![message, chat, agent.epoch],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+            .map(|(kind, text)| QueuedMessage {
+                id: message.into(),
+                kind,
+                valid: true,
+                text,
+                held: true,
+            }),
     };
     Ok(WithdrawInput {
         chat: chat.into(),
@@ -341,11 +359,8 @@ pub fn read_withdraw(
 }
 
 /// Step 2 for `withdraw`, decide part: no I/O. The refusals keep this order: deleted,
-/// remote, not queued, invalid or not a user message.
-///
-/// TODO(#630): a message that already left the queue is held by a turn. The command must
-/// then interrupt that turn and return the text the same way. That needs the Turn table of
-/// the domain model; until it is on main, such a message is a conflict.
+/// remote, not queued, invalid or not a user message. A held message is withdrawn too;
+/// its turn is interrupted (`interrupt`).
 pub fn decide_withdraw(
     input: &WithdrawInput,
     message: &str,
@@ -374,10 +389,12 @@ pub fn decide_withdraw(
         chat: input.chat.clone(),
         message: queued.id.clone(),
         text: queued.text.clone(),
+        interrupt: queued.held,
     })
 }
 
 /// Step 2 for `withdraw`, apply part: write the queue status and the server draft. The
+/// status is `cancelled`, as for a steer input that its stopped turn never read. The
 /// reference is read after the status write, because the status change moves its revision.
 pub fn apply_withdraw(
     tx: &Transaction<'_>,
@@ -469,6 +486,41 @@ fn server_draft(
     Ok(())
 }
 
+/// The stop of `target` for `principal`. A stop only interrupts the running turn; it does
+/// not pause the chat or clear its queue. An agent principal names itself as the sender.
+fn stop_action(principal: &Principal, target: &str, descendants: bool) -> Action {
+    let (sender, sender_epoch) = match principal {
+        Principal::Agent { id, epoch } => (Some(id.clone()), i64::try_from(*epoch).ok()),
+        Principal::Owner
+        | Principal::Device { .. }
+        | Principal::Peer { .. }
+        | Principal::Federated { .. }
+        | Principal::Policy => (None, None),
+    };
+    Action::Stop {
+        target: target.to_owned(),
+        descendants,
+        reason: None,
+        sender,
+        sender_epoch,
+    }
+}
+
+/// Run a stop in the caller's transaction. The ports stage its provider effects.
+fn run_stop(
+    tx: &Transaction<'_>,
+    action: &Action,
+    now: f64,
+    ports: Option<&dyn LifecyclePorts>,
+) -> Result<serde_json::Value, CommandError> {
+    Ok(match ports {
+        Some(ports) => {
+            crate::agent_lifecycle_runtime::execute_in_transaction(tx, action, now, ports)?
+        }
+        None => crate::agent_management_store::execute_in_transaction(tx, action, now)?,
+    })
+}
+
 /// Steps 1 to 3 for the commands that run inside one transaction (`withdraw`, `stop`).
 /// The change, the reference and the watermark commit together. `ports` stage the provider
 /// effects of a stop; the caller wakes them after the commit.
@@ -500,32 +552,24 @@ pub fn execute_sync(
         Command::Withdraw { target, body } => {
             let input = read_withdraw(tx, target.as_str(), body.message.as_str())?;
             let decision = decide_withdraw(&input, body.message.as_str())?;
-            apply_withdraw(tx, &decision, now_ms)?
+            let reference = apply_withdraw(tx, &decision, now_ms)?;
+            if decision.interrupt {
+                run_stop(
+                    tx,
+                    &stop_action(principal, &decision.chat, false),
+                    now,
+                    ports,
+                )?;
+            }
+            reference
         }
         Command::Stop { target, body } => {
-            let (sender, sender_epoch) = match principal {
-                Principal::Agent { id, epoch } => (Some(id.clone()), i64::try_from(*epoch).ok()),
-                Principal::Owner
-                | Principal::Device { .. }
-                | Principal::Peer { .. }
-                | Principal::Federated { .. }
-                | Principal::Policy => (None, None),
-            };
-            // A stop only interrupts the running turn; it does not pause the chat or
-            // clear its queue.
-            let action = Action::Stop {
-                target: target.as_str().to_owned(),
-                descendants: body.descendants,
-                reason: None,
-                sender,
-                sender_epoch,
-            };
-            reply = match ports {
-                Some(ports) => {
-                    crate::agent_lifecycle_runtime::execute_in_transaction(tx, &action, now, ports)?
-                }
-                None => crate::agent_management_store::execute_in_transaction(tx, &action, now)?,
-            };
+            reply = run_stop(
+                tx,
+                &stop_action(principal, target.as_str(), body.descendants),
+                now,
+                ports,
+            )?;
             agent_reference(tx, target.as_str())?
         }
         Command::Send { .. } => unreachable!("refused above"),
@@ -605,6 +649,14 @@ mod withdraw_decision_tests {
             kind: kind.into(),
             valid,
             text: "draft text".into(),
+            held: false,
+        }
+    }
+
+    fn held(id: &str, kind: &str) -> QueuedMessage {
+        QueuedMessage {
+            held: true,
+            ..queued(id, kind, true)
         }
     }
 
@@ -625,6 +677,42 @@ mod withdraw_decision_tests {
         assert_eq!(decision.chat, "chat-1");
         assert_eq!(decision.message, "m1");
         assert_eq!(decision.text, "draft text");
+        assert!(!decision.interrupt);
+    }
+
+    #[test]
+    fn a_message_held_by_a_running_turn_is_withdrawn_and_interrupts_it() {
+        let decision = decide_withdraw(&input(false, false, Some(held("m1", "user"))), "m1")
+            .expect("withdraw held");
+        assert_eq!(decision.chat, "chat-1");
+        assert_eq!(decision.message, "m1");
+        assert_eq!(decision.text, "draft text");
+        assert!(decision.interrupt);
+    }
+
+    #[test]
+    fn a_held_followup_is_refused_as_not_a_user_message() {
+        let error = decide_withdraw(&input(false, false, Some(held("m1", "followup"))), "m1")
+            .expect_err("held kind");
+        assert!(matches!(
+            error,
+            CommandError::Invalid("Only a user message can be withdrawn")
+        ));
+    }
+
+    #[test]
+    fn the_deleted_and_remote_checks_come_before_the_held_case() {
+        let error = decide_withdraw(&input(true, false, Some(held("m1", "user"))), "m1")
+            .expect_err("deleted");
+        assert!(matches!(
+            error,
+            CommandError::Invalid("This agent was deleted")
+        ));
+        let error = decide_withdraw(&input(false, true, Some(held("m1", "user"))), "m1")
+            .expect_err("remote");
+        assert!(
+            matches!(error, CommandError::Invalid(text) if text.starts_with("Not implemented"))
+        );
     }
 
     #[test]
