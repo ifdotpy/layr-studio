@@ -218,9 +218,9 @@ struct TransferIdentity {
     target_account_key: String,
     status: TransferStatus,
 }
-#[derive(Deserialize, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-enum TransferStatus {
+pub(crate) enum TransferStatus {
     Pending,
     Completed,
     Cancelled,
@@ -1775,11 +1775,19 @@ fn public_view(op: &Value, order: &[String]) -> Result<Value, TransferError> {
         "scope",
         "targetProvider",
         "finishHistory",
-        "requests",
     ] {
         if let Some(value) = op.get(key) {
             output[key] = value.clone();
         }
+    }
+    if let Some(requests) = op.get("requests").and_then(Value::as_object) {
+        let mut public = requests.clone();
+        for request in public.values_mut() {
+            if let Some(fields) = request.as_object_mut() {
+                fields.remove("savedResponse");
+            }
+        }
+        output["requests"] = Value::Object(public);
     }
     output["scope"] = op.get("scope").cloned().unwrap_or(json!("team"));
     let mut members = json!({});
