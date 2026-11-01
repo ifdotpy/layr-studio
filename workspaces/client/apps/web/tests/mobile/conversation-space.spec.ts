@@ -1,3 +1,4 @@
+import { backgroundDisplay } from "../fixtures/background.ts";
 import assert from "node:assert/strict";
 import type { EntityFixtureState, TestStateView } from "../playwright.ts";
 import {
@@ -42,6 +43,7 @@ test("phone conversation gives the transcript its viewport budget", async ({
   snapshot.runtime.monitors = [
     ...(snapshot.runtime.monitors || []),
     {
+      display: backgroundDisplay("monitor", "Check the release build"),
       id: "conversation-space-monitor",
       agent: agent.id,
       status: "running",

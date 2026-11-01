@@ -1,3 +1,4 @@
+import { backgroundDisplay } from "../fixtures/background.ts";
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
@@ -44,6 +45,8 @@ window.worker = (i) => ({
   inFlight: true,
 });
 window.command = (i) => ({
+  created: 1,
+  display: backgroundDisplay("command", "npm run check " + i),
   id: "cmd-" + i,
   agent: "lead",
   kind: "command",
@@ -52,6 +55,8 @@ window.command = (i) => ({
   epoch: 2,
 });
 window.monitor = (i) => ({
+  created: 1,
+  display: backgroundDisplay("monitor", "watch build " + i),
   id: "monitor-" + i,
   agent: "lead",
   command: "watch build " + i,

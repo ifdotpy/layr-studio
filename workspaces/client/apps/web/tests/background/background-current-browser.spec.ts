@@ -1,3 +1,4 @@
+import { backgroundDisplay } from "../fixtures/background.ts";
 import { required } from "../teams/helpers.ts";
 import { execFileSync } from "node:child_process";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";
@@ -160,6 +161,7 @@ test("Background Current Browser", async ({
       id,
       status,
       agent,
+      display: backgroundDisplay("command", "command " + id),
       kind: "command",
       command: "command " + id,
       tail: "Summary output " + id,
@@ -195,11 +197,12 @@ test("Background Current Browser", async ({
           },
           task("child", "running", "worker"),
           task("other-active", "running", "other"),
-          ...(
-            ["completed", "failed", "cancelled", "interrupted", "lost"] as const
-          ).map((status) => task(status, status)),
+          ...(["completed", "failed", "interrupted", "lost"] as const).map(
+            (status) => task(status, status),
+          ),
+          // @ts-expect-error cancelled is a deliberately legacy task status.
+          task("cancelled", "cancelled"),
           task("starting", "starting"),
-          // @ts-expect-error pending is a deliberately legacy task status.
           task("pending", "pending"),
           // @ts-expect-error stopping is a deliberately legacy task status.
           task("stopping", "stopping"),

@@ -1242,12 +1242,19 @@ export type TestRuntimeView = {
   >;
   terminals?: import("../src/generated/api.ts").components["schemas"]["TerminalEntityDto"][];
   studioErrors?: import("../src/generated/api.ts").components["schemas"]["StudioError"][];
-  rateLimits: AccountRateLimitsDto | null;
+  rateLimits:
+    | AccountRateLimitsDto
+    | import("../src/generated/api.ts").components["schemas"]["RateLimitView"]
+    | null;
   queuesByAgent?: Record<
     string,
     import("../src/generated/api.ts").components["schemas"]["QueueView"]
   >;
-  rateLimitsByAccount: Record<string, AccountRateLimitsDto>;
+  rateLimitsByAccount: Record<
+    string,
+    | AccountRateLimitsDto
+    | import("../src/generated/api.ts").components["schemas"]["RateLimitView"]
+  >;
   modelsByAccount?: Record<
     string,
     import("../src/generated/api.ts").components["schemas"]["ModelEntityDto"][]
@@ -1926,51 +1933,54 @@ function entityValuesFromSnapshot(
       values.push({
         collection: "rateLimit",
         id: account,
-        value: {
-          observation: value,
-          projection: {
-            buckets: {
-              current: {
-                buckets: [],
-                remaining: null,
-                color: LimitColor.paused,
-                low: false,
+        value:
+          "observation" in value
+            ? value
+            : {
+                observation: value,
+                projection: {
+                  buckets: {
+                    current: {
+                      buckets: [],
+                      remaining: null,
+                      color: LimitColor.paused,
+                      low: false,
+                    },
+                    next: {
+                      buckets: [],
+                      remaining: null,
+                      color: LimitColor.paused,
+                      low: false,
+                    },
+                    validUntil: null,
+                  },
+                  reset: {
+                    present: false,
+                    accountId: null,
+                    availableCount: null,
+                    countLabel: "Count unavailable",
+                    emptyMessage:
+                      "Reset credit details unavailable. Refresh to check.",
+                    credits: [],
+                  },
+                  runway: {
+                    computedAt: 0,
+                    validUntil: null,
+                    current: {
+                      color: RunwayColor.gray,
+                      days: null,
+                      unlimited: false,
+                      windows: [],
+                    },
+                    next: {
+                      color: RunwayColor.gray,
+                      days: null,
+                      unlimited: false,
+                      windows: [],
+                    },
+                  },
+                },
               },
-              next: {
-                buckets: [],
-                remaining: null,
-                color: LimitColor.paused,
-                low: false,
-              },
-              validUntil: null,
-            },
-            reset: {
-              present: false,
-              accountId: null,
-              availableCount: null,
-              countLabel: "Count unavailable",
-              emptyMessage:
-                "Reset credit details unavailable. Refresh to check.",
-              credits: [],
-            },
-            runway: {
-              computedAt: 0,
-              validUntil: null,
-              current: {
-                color: RunwayColor.gray,
-                days: null,
-                unlimited: false,
-                windows: [],
-              },
-              next: {
-                color: RunwayColor.gray,
-                days: null,
-                unlimited: false,
-                windows: [],
-              },
-            },
-          },
-        },
       });
 
   const workspaceSource = {
