@@ -70,7 +70,37 @@ pub enum AgentEntityDtoKind {
     Agent,
 }
 
-pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 3] {
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentMode {
+    Multi,
+    Single,
+}
+
+// Stored unknown statuses are addressed by work-1793547226242324480-6.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentStatus {
+    Unknown,
+    Idle,
+    Queued,
+    Starting,
+    Running,
+    Waiting,
+    Approval,
+    Completed,
+    Interrupted,
+    Failed,
+    Blocked,
+    Paused,
+    Parked,
+    Abandoned,
+    #[serde(rename = "capacity-retry")]
+    CapacityRetry,
+    WaitingOnMonitor,
+}
+
+pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 5] {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
@@ -97,10 +127,16 @@ pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 3] {
     let mut source = AgentSource::json_schema(&mut generator).to_value();
     source["title"] = "AgentSource".into();
     let naming = AgentNaming::json_schema(&mut generator).to_value();
+    let mut mode = AgentMode::json_schema(&mut generator).to_value();
+    mode["title"] = "AgentMode".into();
+    let mut status = AgentStatus::json_schema(&mut generator).to_value();
+    status["title"] = "AgentStatus".into();
     [
         ("AgentOverview", overview),
         ("AgentSource", source),
         ("AgentNaming", naming),
+        ("AgentMode", mode),
+        ("AgentStatus", status),
     ]
 }
 
