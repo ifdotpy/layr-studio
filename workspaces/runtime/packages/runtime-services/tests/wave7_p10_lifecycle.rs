@@ -447,7 +447,8 @@ async fn production_stop_cancels_usage_and_capacity_continuations_in_store() {
         .iter_mut()
         .find(|agent| agent["id"] == "lead")
         .expect("lead record");
-    lead["usageResume"] = json!({"id":"resume-stop","status":"scheduled","dueAt":200.0});
+    lead["usageResume"] =
+        json!({"id":"resume-stop","status":"scheduled","dueAt":200.0,"waitingForAuth":null});
     lead["capacityRetry"] = json!({"id":"retry-stop","status":"scheduled","dueAt":200.0});
 
     let root = tempfile::tempdir().expect("root");
@@ -461,7 +462,7 @@ async fn production_stop_cancels_usage_and_capacity_continuations_in_store() {
                 params![
                     "resume-stop",
                     "lead",
-                    json!({"id":"resume-stop","status":"scheduled","dueAt":200.0}).to_string()
+                    json!({"id":"resume-stop","status":"scheduled","dueAt":200.0,"waitingForAuth":null}).to_string()
                 ],
             )?;
             tx.execute(
@@ -516,6 +517,23 @@ async fn production_stop_cancels_usage_and_capacity_continuations_in_store() {
     assert_eq!(
         serde_json::from_str::<Value>(&usage).expect("usage JSON")["status"],
         "cancelled"
+    );
+    let embedded: String = db
+        .query_row(
+            "SELECT record->'$.usageResume' FROM runtime_agents WHERE id='lead'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("embedded usage");
+    assert_eq!(
+        serde_json::from_str::<Value>(&embedded).unwrap(),
+        serde_json::from_str::<Value>(&usage).unwrap()
+    );
+    assert!(
+        serde_json::from_str::<Value>(&usage)
+            .unwrap()
+            .get("waitingForAuth")
+            .is_none()
     );
     assert_eq!(
         serde_json::from_str::<Value>(&capacity).expect("capacity JSON")["status"],

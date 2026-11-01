@@ -189,6 +189,20 @@ inventory::submit! { crate::repositories::SchemaRegistration { repository: "cont
 mod tests {
     use super::*;
     #[test]
+    fn document_write_preserves_unreadable_native_failure_hold() {
+        let db = crate::fresh_state::test_canvas();
+        let value = json!({"id":"agent","rootId":"agent","epoch":1,"status":"idle",
+            "accountKey":"default","provider":"codex","compactions":0,"nativeFailureHold":{"reason":"pending"}});
+        ContextRepairRepository::put_agent(&db, &value).expect("write document");
+        let stored = AgentRepository::get(&db, &crate::AgentId::from("agent"))
+            .expect("read agent")
+            .expect("agent exists");
+        assert!(matches!(stored.native_failure_hold.value(),
+            Some(crate::NativeFailureHold::Unreadable(raw)) if raw == &json!({"reason":"pending"})));
+        assert!(stored.native_failure_held());
+        assert!(!stored.extra.contains_key("nativeFailureHold"));
+    }
+    #[test]
     fn terminal_provenance_remains_on_its_exact_execution_owner() {
         let mut db = Connection::open_in_memory().expect("database");
         db.execute_batch("CREATE TABLE runtime_execution_runs(id TEXT PRIMARY KEY,agent TEXT,account TEXT,thread TEXT,epoch INTEGER,turn TEXT);

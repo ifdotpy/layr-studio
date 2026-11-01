@@ -70,7 +70,7 @@ async fn claude_turn_freezes_exact_input_before_native_write() {
                 );
                 row.native_effort =
                     studio_runtime_schema::queue_command::Field::Value("medium".into());
-                row.extra.insert("claudeOptions".into(), json!({}));
+                row.claude_options = serde_json::from_value(json!({})).unwrap();
                 AgentRepository::put(tx, &row)?;
                 Ok(())
             })

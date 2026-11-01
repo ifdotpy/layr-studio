@@ -59,11 +59,13 @@ mod m2026_11_01_agent_capacity;
 mod m2026_11_01_agent_naming;
 mod m2026_11_01_annotation_record;
 mod m2026_11_01_approval_secrets;
+mod m2026_11_01_chat_busy_deleted_index;
 mod m2026_11_01_chat_busy_indexes;
 mod m2026_11_01_plan_record;
 mod m2026_11_01_project_context;
 mod m2026_11_01_project_revisions;
 mod m2026_11_01_rate_limit_view;
+mod m2026_11_01_transfer_delegation_depth;
 mod m2026_11_01_transfer_operations;
 mod m2026_11_01_transfer_pointers;
 mod m2026_11_01_transfer_summary;
@@ -1003,6 +1005,16 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
+            id: "2026-11-01-transfer-delegation-depth",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent and transfer worker defaults with out-of-range delegation depth",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_transfer_delegation_depth::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
             id: "2026-11-01-typed-transfer-pointers",
             introduced: NOVEMBER_1,
             target: MigrationTarget::Canvas,
@@ -1234,6 +1246,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_01_chat_busy_indexes::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-chat-busy-deleted-index",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Deleted agent index that reads the in_flight column",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_chat_busy_deleted_index::apply(c.transaction),
     },
 ];
 

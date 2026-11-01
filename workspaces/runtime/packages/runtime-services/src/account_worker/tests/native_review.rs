@@ -51,6 +51,7 @@ for (key, value) in [
                     "status" => row.status = serde::Deserialize::deserialize(value).unwrap(),
                     "role" => row.role = serde::Deserialize::deserialize(value).unwrap(),
                     "nativeEffort" => row.native_effort = serde::Deserialize::deserialize(value).unwrap(),
+                    "yoloMode" => row.yolo_mode = serde::Deserialize::deserialize(value).unwrap(),
                     "startAttempt" => row.start_attempt = Some(serde::Deserialize::deserialize(value).unwrap()),
                     "disconnectRecovery" => row.disconnect_recovery = Some(Box::new(serde::Deserialize::deserialize(value).unwrap())),
                     _ => { row.extra.insert(key.into(), value); }

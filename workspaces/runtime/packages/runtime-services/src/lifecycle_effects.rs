@@ -929,20 +929,29 @@ fn cancel_resume(tx: &Transaction<'_>, effect: &LifecycleEffect) -> Result<(), M
         });
         stored["dueAt"] = Value::Null;
         stored["reason"] = json!("The agent was stopped.");
+        if projection == "usageResume" && stored.get("waitingForAuth").is_some_and(Value::is_null) {
+            if let Some(object) = stored.as_object_mut() {
+                object.remove("waitingForAuth");
+            }
+        }
         ContinuationRepository::put_record(tx, table, agent_id, &stored)?;
         if projection == "usageResume"
             && let Some(mut current) = AgentRepository::get(tx, &AgentId::from(agent_id))?
         {
             let mut updated = current
-                .extra
-                .get(projection)
-                .cloned()
+                .usage_resume_value()
+                .map_err(studio_runtime_store::StoreError::from)?
                 .unwrap_or(Value::Null);
             if updated.get("id").and_then(Value::as_str) == Some(id) {
                 updated["status"] = json!("cancelled");
                 updated["dueAt"] = Value::Null;
                 updated["reason"] = stored["reason"].clone();
-                current.extra.insert(projection.to_owned(), updated);
+                if updated.get("waitingForAuth").is_some_and(Value::is_null) {
+                    if let Some(object) = updated.as_object_mut() {
+                        object.remove("waitingForAuth");
+                    }
+                }
+                current.set_usage_resume(updated);
                 AgentRepository::put(tx, &current)?;
             }
         }
@@ -1375,6 +1384,7 @@ pub(crate) fn notify_parent_of_failed_turn(
     let Some(agent) = AgentRepository::get(tx, &AgentId::from(agent_id))? else {
         return Ok(());
     };
+    let usage_resume = agent.usage_resume_value()?;
     let retrying = |value: Option<&Value>| {
         value.is_some_and(|retry| {
             retry.get("turnId") == Some(&json!(turn_id))
@@ -1390,7 +1400,7 @@ pub(crate) fn notify_parent_of_failed_turn(
         || agent.auto_wake != Some(true)
         || !reports_turns(&agent)
         || retrying(agent.extra.get("capacityRetry"))
-        || retrying(agent.extra.get("usageResume"))
+        || retrying(usage_resume.as_ref())
     {
         return Ok(());
     }

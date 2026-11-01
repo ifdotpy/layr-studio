@@ -20138,7 +20138,7 @@ export interface components {
     ReviewDefaultsDto: {
       /** Effort */
       effort: null | string;
-      fastMode?: boolean | undefined;
+      fastMode?: boolean | null | undefined;
       /** Model */
       model: null | string;
     };
@@ -27554,12 +27554,12 @@ export interface components {
        * Daybreakenabled
        * @default false
        */
-      daybreakEnabled?: boolean | undefined;
+      daybreakEnabled?: boolean | null | undefined;
       /**
        * Delegationdepth
        * @default 1
        */
-      delegationDepth?: number | undefined;
+      delegationDepth?: number | null | undefined;
       /** Effort */
       effort: null | string;
       /** Fastmode */

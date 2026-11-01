@@ -305,7 +305,11 @@ pub struct TransferClaudeOptions {
     pub binary_path: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub config_dir: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[serde(
+        default,
+        skip_serializing_if = "Field::is_missing",
+        deserialize_with = "deserialize_object_vec_field"
+    )]
     pub custom_models: Field<Vec<ClaudeCustomModel>>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub launch_args: Field<String>,
@@ -318,9 +322,34 @@ pub struct ClaudeCustomModel {
     pub label: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+fn deserialize_object_vec_field<'de, D, T>(deserializer: D) -> Result<Field<Vec<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let value = Option::<Vec<serde_json::Value>>::deserialize(deserializer)?;
+    match value {
+        None => Ok(Field::Null),
+        Some(values) => values
+            .into_iter()
+            .map(|value| {
+                if !value.is_object() {
+                    return Err(serde::de::Error::custom("expected an object"));
+                }
+                serde_json::from_value(value).map_err(serde::de::Error::custom)
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Field::Value),
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TransferSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub updated_at: Field<f64>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub provider: Field<studio_runtime_schema::ProviderKind>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -348,7 +377,23 @@ pub struct TransferSettings {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub yolo_mode: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub portable_history: Field<PortableHistory>,
+    pub portable_history: Field<crate::records::StoredTransferObject<PortableHistory>>,
+}
+
+impl From<studio_runtime_schema::agent_entity_nested::ExecutionSettingsDto> for TransferSettings {
+    fn from(value: studio_runtime_schema::agent_entity_nested::ExecutionSettingsDto) -> Self {
+        Self {
+            account_key: value.account_key.value().cloned(),
+            updated_at: value.updated_at,
+            cyber_access_program: value.cyber_access_program,
+            daybreak_enabled: value.daybreak_enabled,
+            effort: value.effort,
+            fast_mode: value.fast_mode,
+            model: value.model,
+            native_effort: value.native_effort,
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -367,8 +412,10 @@ pub struct DestinationSettings {
 pub struct HistorySource {
     pub agent_id: String,
     pub account_key: AccountKey,
-    pub epoch: Option<i64>,
-    pub thread_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub epoch: Field<i64>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub thread_id: Field<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -379,8 +426,54 @@ pub struct PortableHistory {
     pub sha256: String,
     pub bytes: u64,
     pub counts: BTreeMap<String, u64>,
+    #[serde(deserialize_with = "crate::records::deserialize_object")]
     pub source: HistorySource,
     pub transfer_id: String,
+}
+
+/// A historical account move. Unknown legacy shapes remain in the enclosing raw variant.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TransferAccountHistoryEntry {
+    pub account_key: AccountKey,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub thread_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub provider: Field<studio_runtime_schema::ProviderKind>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub transfer_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub target_account_key: Field<AccountKey>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub target_provider: Field<studio_runtime_schema::ProviderKind>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub target_thread_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub at: Field<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub portable_history: Field<crate::records::StoredTransferObject<PortableHistory>>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub tool_refresh_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub result: Field<serde_json::Value>,
+}
+
+impl TransferAccountHistoryEntry {
+    pub fn new(account_key: AccountKey) -> Self {
+        Self {
+            account_key,
+            thread_id: Field::Missing,
+            provider: Field::Missing,
+            transfer_id: Field::Missing,
+            target_account_key: Field::Missing,
+            target_provider: Field::Missing,
+            target_thread_id: Field::Missing,
+            at: Field::Missing,
+            portable_history: Field::Missing,
+            tool_refresh_id: Field::Missing,
+            result: Field::Missing,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -491,7 +584,7 @@ pub struct TransferMember {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub provider_receipts: Field<Vec<ProviderReceipt>>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub portable_history: Field<PortableHistory>,
+    pub portable_history: Field<crate::records::StoredTransferObject<PortableHistory>>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub source_empty_proof: Field<SourceEmptyProof>,
 }
@@ -833,9 +926,9 @@ pub struct TransferWorkerDefaults {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub daybreak_enabled: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub account_key: Field<AccountKey>,
+    pub account_key: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub delegation_depth: Field<i64>,
+    pub delegation_depth: Field<studio_runtime_schema::agent_entity_nested::WorkerDelegationDepth>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub cyber_access_program: Field<String>,
 }
@@ -1033,6 +1126,29 @@ mod tests {
     fn unknown_member_field_is_rejected() {
         let json = r#"{"id":"transfer","leadId":"lead","targetAccountKey":"target","status":"pending","created":1.0,"members":{"lead":{"phase":"waiting","sourceAccountKey":"source","unexpected":1}}}"#;
         assert!(serde_json::from_str::<TransferRecord>(json).is_err());
+    }
+
+    #[test]
+    fn transfer_snapshot_preserves_legacy_portable_history_array() {
+        let input = serde_json::json!({"id":"transfer","leadId":"lead","targetAccountKey":"target",
+            "status":"pending","created":1.0,"members":{"lead":{"phase":"waiting",
+            "sourceAccountKey":"source","settings":{"portableHistory":[1,"legacy"]}}}});
+        let record: TransferRecord = serde_json::from_value(input.clone()).unwrap();
+        let history = record
+            .members
+            .get("lead")
+            .unwrap()
+            .settings
+            .value()
+            .unwrap()
+            .portable_history
+            .value()
+            .unwrap();
+        assert!(matches!(
+            history,
+            crate::StoredTransferObject::Unreadable(_)
+        ));
+        assert_eq!(serde_json::to_value(record).unwrap(), input);
     }
 
     #[test]

@@ -650,7 +650,7 @@ fn queue_agent(connection: &Transaction<'_>, agent: &AgentRecord) -> Result<(), 
         | AgentStatus::CapacityRetry
         | AgentStatus::Other(_) => true,
     };
-    if !auto_wake || truthy(agent.extra.get("nativeFailureHold")) || !status {
+    if !auto_wake || agent.native_failure_held() || !status {
         return Ok(());
     }
     let mut updated = agent.clone();

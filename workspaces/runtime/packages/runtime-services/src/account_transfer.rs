@@ -1761,9 +1761,28 @@ pub fn typed_enroll(
             AgentStatus::Running | AgentStatus::Starting | AgentStatus::Approval
         );
     let lazy = !done && !active;
-    let pending = extra_field(agent, "pendingSettings")?;
-    let pending_account: Field<studio_runtime_schema::account_key::AccountKey> =
-        extra_field(agent, "pendingSettingsAccountKey")?;
+    let pending = match &agent.pending_settings {
+        Field::Missing => Field::Missing,
+        Field::Null => Field::Null,
+        Field::Value(studio_runtime_store::StoredTransferObject::Known(v)) => {
+            Field::Value(v.clone())
+        }
+        Field::Value(studio_runtime_store::StoredTransferObject::Unreadable(v)) => Field::Value(
+            serde_json::from_value(v.clone())
+                .map_err(|_| invalid("transfer agent", "/pendingSettings"))?,
+        ),
+    };
+    let pending_account = match &agent.pending_settings_account_key {
+        Field::Missing => Field::Missing,
+        Field::Null => Field::Null,
+        Field::Value(studio_runtime_store::StoredTransferValue::Known(v)) => {
+            Field::Value(v.clone())
+        }
+        Field::Value(studio_runtime_store::StoredTransferValue::Unreadable(v)) => Field::Value(
+            serde_json::from_value(v.clone())
+                .map_err(|_| invalid("transfer agent", "/pendingSettingsAccountKey"))?,
+        ),
+    };
     let pending_mismatch =
         pending.is_some() && pending_account.value().unwrap_or(&source) != &source;
     let blocked = lazy && pending_mismatch;
@@ -1778,7 +1797,7 @@ pub fn typed_enroll(
     };
     member.lazy = Field::Value(lazy);
     member.pending_settings = or_null(pending.clone());
-    member.source_pending_settings = or_null(pending);
+    member.source_pending_settings = or_null(pending.clone());
     member.source_claude_options = or_null(extra_field(agent, "claudeOptions")?);
     member.error = if blocked {
         Field::Value(
@@ -1806,8 +1825,20 @@ pub fn typed_enroll(
         fast_mode: agent.fast_mode.map_or(Field::Missing, Field::Value),
         daybreak_enabled: extra_field(agent, "daybreakEnabled")?,
         cyber_access_program: extra_field(agent, "cyberAccessProgram")?,
-        worker_defaults: extra_field(agent, "workerDefaults")?,
-        pending_settings: extra_field(agent, "pendingSettings")?,
+        worker_defaults: match &agent.worker_defaults {
+            Field::Missing => Field::Missing,
+            Field::Null => Field::Null,
+            Field::Value(studio_runtime_store::StoredWorkerDefaults::Known(defaults)) => {
+                Field::Value(defaults.clone())
+            }
+            Field::Value(studio_runtime_store::StoredWorkerDefaults::Unreadable(raw)) => {
+                Field::Value(
+                    serde_json::from_value(raw.clone())
+                        .map_err(|_| invalid("transfer agent", "/workerDefaults"))?,
+                )
+            }
+        },
+        pending_settings: pending,
         pending_settings_account_key: pending_account,
         claude_options: extra_field(agent, "claudeOptions")?,
         execution_settings_account_key: extra_field(agent, "executionSettingsAccountKey")?,
@@ -1828,32 +1859,24 @@ pub fn typed_enroll(
         agent.provider = Field::Value(target_provider);
         agent.model = Some(crate::provider_adapter::default_model(target_provider).into());
         agent.effort = Field::Null;
-        agent.extra.insert("nativeEffort".into(), json!("medium"));
+        agent.native_effort = Field::Value("medium".into());
         agent.fast_mode = Some(false);
-        agent.extra.insert("daybreakEnabled".into(), json!(false));
-        agent
-            .extra
-            .insert("cyberAccessProgram".into(), json!("standard"));
-        for key in [
-            "claudeOptions",
-            "pendingSettings",
-            "pendingSettingsAccountKey",
-        ] {
-            agent.extra.remove(key);
-        }
+        agent.daybreak_enabled = Some(false);
+        agent.cyber_access_program = Field::Value(
+            studio_runtime_store::StoredTransferValue::Known("standard".into()),
+        );
+        agent.claude_options = Field::Missing;
+        agent.pending_settings = Field::Missing;
+        agent.pending_settings_account_key = Field::Missing;
     }
-    let has_pending = agent
-        .extra
-        .get("pendingSettings")
-        .is_some_and(|value| !value.is_null());
-    agent.extra.insert(
-        "pendingSettingsAccountKey".into(),
-        if has_pending {
-            json!(target)
-        } else {
-            Value::Null
-        },
-    );
+    let has_pending = agent.pending_settings.is_some();
+    agent.pending_settings_account_key = if has_pending {
+        Field::Value(studio_runtime_store::StoredTransferValue::Known(
+            target.clone(),
+        ))
+    } else {
+        Field::Null
+    };
     if !has_pending {
         agent.execution_settings_account_key = Field::Value(source.as_str().to_owned());
     }
@@ -2487,6 +2510,161 @@ mod provider_receipt_tests {
                 .unwrap()
                 .changed
         );
+    }
+
+    #[test]
+    fn enrollment_reads_typed_pending_settings_and_captures_source() {
+        let mut agent: studio_runtime_store::AgentRecord = serde_json::from_value(serde_json::json!({
+            "id":"agent","rootId":"agent","provider":"codex","accountKey":"source",
+            "epoch":0,"status":"idle","compactions":0,
+            "pendingSettings":{"model":"typed","updatedAt":12.0},"pendingSettingsAccountKey":"source"
+        })).unwrap();
+        agent.extra.insert(
+            "pendingSettings".into(),
+            serde_json::json!({"model":"stale"}),
+        );
+        let id = "move".to_owned().try_into().unwrap();
+        let target = "target".to_owned().try_into().unwrap();
+        let member = super::typed_enroll(
+            &mut agent,
+            &id,
+            &target,
+            studio_runtime_schema::ProviderKind::Codex,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            member
+                .pending_settings
+                .value()
+                .unwrap()
+                .model
+                .value()
+                .map(String::as_str),
+            Some("typed")
+        );
+        let source = agent
+            .lazy_account_transfer
+            .value()
+            .unwrap()
+            .pending()
+            .unwrap()
+            .source_state
+            .value()
+            .unwrap();
+        assert_eq!(
+            source.pending_settings.value().unwrap().updated_at.value(),
+            Some(&12.0)
+        );
+        assert_eq!(
+            source
+                .pending_settings_account_key
+                .value()
+                .unwrap()
+                .as_str(),
+            "source"
+        );
+        assert!(
+            matches!(agent.pending_settings_account_key.value(), Some(studio_runtime_store::StoredTransferValue::Known(key)) if key.as_str() == "target")
+        );
+    }
+
+    #[test]
+    fn enrollment_preserves_known_and_legacy_worker_defaults() {
+        for defaults in [
+            serde_json::json!({"model":"m","effort":null,"fastMode":false}),
+            serde_json::json!({"model":"legacy"}),
+        ] {
+            let mut agent: studio_runtime_store::AgentRecord =
+                serde_json::from_value(serde_json::json!({
+                    "id":"agent","rootId":"agent","provider":"codex","accountKey":"source",
+                    "epoch":0,"status":"idle","compactions":0,"workerDefaults":defaults
+                }))
+                .unwrap();
+            let id = "move".to_owned().try_into().unwrap();
+            let target = "target".to_owned().try_into().unwrap();
+            super::typed_enroll(
+                &mut agent,
+                &id,
+                &target,
+                studio_runtime_schema::ProviderKind::Codex,
+                true,
+            )
+            .unwrap();
+            let lazy = agent
+                .lazy_account_transfer
+                .value()
+                .and_then(|value| value.pending())
+                .unwrap();
+            let source = lazy.source_state.value().unwrap();
+            assert_eq!(
+                serde_json::to_value(&source.worker_defaults).unwrap(),
+                defaults
+            );
+        }
+    }
+
+    #[test]
+    fn enrollment_reads_typed_worker_defaults_without_projecting_agent() {
+        let mut agent: studio_runtime_store::AgentRecord =
+            serde_json::from_value(serde_json::json!({
+                "id":"agent","rootId":"agent","provider":"codex","accountKey":"source",
+                "epoch":0,"status":"idle","compactions":0,
+                "workerDefaults":{"model":"typed","effort":null,"fastMode":false}
+            }))
+            .unwrap();
+        // A stale extension must not replace the typed owner during enrollment.
+        agent.extra.insert(
+            "workerDefaults".into(),
+            serde_json::json!({"model":"stale"}),
+        );
+        let id = "move".to_owned().try_into().unwrap();
+        let target = "target".to_owned().try_into().unwrap();
+        super::typed_enroll(
+            &mut agent,
+            &id,
+            &target,
+            studio_runtime_schema::ProviderKind::Codex,
+            true,
+        )
+        .unwrap();
+        let lazy = agent
+            .lazy_account_transfer
+            .value()
+            .and_then(|value| value.pending())
+            .unwrap();
+        let source = lazy.source_state.value().unwrap();
+        let defaults = source.worker_defaults.value().unwrap();
+        assert_eq!(defaults.model.value().map(String::as_str), Some("typed"));
+    }
+
+    #[test]
+    fn enrollment_provider_change_writes_typed_settings() {
+        let mut agent: studio_runtime_store::AgentRecord =
+            serde_json::from_value(serde_json::json!({
+                "id":"agent","rootId":"agent","provider":"codex","accountKey":"source",
+                "epoch":0,"status":"idle","compactions":0,"cyberAccessProgram":"other",
+                "claudeOptions":{"configDir":"profile"}
+            }))
+            .unwrap();
+        let id = "move".to_owned().try_into().unwrap();
+        let target = "target".to_owned().try_into().unwrap();
+        super::typed_enroll(
+            &mut agent,
+            &id,
+            &target,
+            studio_runtime_schema::ProviderKind::Claude,
+            true,
+        )
+        .unwrap();
+        assert!(agent.claude_options.is_missing());
+        assert!(
+            matches!(agent.cyber_access_program.value(), Some(studio_runtime_store::StoredTransferValue::Known(value)) if value == "standard")
+        );
+        assert!(!agent.extra.contains_key("cyberAccessProgram"));
+        assert!(!agent.extra.contains_key("claudeOptions"));
+        assert!(!agent.extra.contains_key("nativeEffort"));
+        assert!(!agent.extra.contains_key("daybreakEnabled"));
     }
 
     #[test]

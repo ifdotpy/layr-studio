@@ -174,7 +174,7 @@ export const settingsFor = (
 const reviewSettingsFor = (agent: Agent): ReviewSettings => ({
   model: agent.reviewDefaults?.model ?? null,
   effort: agent.reviewDefaults?.effort ?? null,
-  ...(agent.reviewDefaults?.fastMode !== undefined
+  ...(agent.reviewDefaults?.fastMode != null
     ? { fast_mode: agent.reviewDefaults.fastMode }
     : {}),
 });

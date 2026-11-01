@@ -913,7 +913,7 @@ async fn vm_existing_reattach_restores_the_journal_without_launch_or_input_repla
                     .read_async("vm_reattach_plan", |connection| {
                         let mut plan = connection.prepare(&format!(
                             "EXPLAIN QUERY PLAN {}",
-                            super::super::vm_reattach::STARTUP_CANDIDATES
+                            super::super::vm_reattach::startup_candidates_sql()
                         ))?;
                         let rows = plan.query_map(
                             rusqlite::params![
@@ -926,7 +926,10 @@ async fn vm_existing_reattach_restores_the_journal_without_launch_or_input_repla
                         let details = rows.collect::<Result<Vec<_>, _>>()?.join(" ");
                         assert!(
                             details.contains("SEARCH runtime_agents")
-                                && details.contains("account_key=?"),
+                                && details.contains("account_key=?")
+                                && details.contains(
+                                    studio_runtime_store::domain::ONE_UNFINISHED_TURN_INDEX
+                                ),
                             "{details}"
                         );
                         Ok::<_, StoreError>(())

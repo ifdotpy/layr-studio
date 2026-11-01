@@ -1154,10 +1154,17 @@ fn can_delegate(
         return Ok(false);
     }
     let limit = root
-        .extra
-        .get("workerDefaults")
-        .and_then(|value| value.get("delegationDepth"))
-        .and_then(Value::as_u64)
+        .worker_defaults
+        .value()
+        .and_then(|value| match value {
+            studio_runtime_store::StoredWorkerDefaults::Known(value) => value
+                .delegation_depth
+                .value()
+                .map(|depth| depth.get() as u64),
+            studio_runtime_store::StoredWorkerDefaults::Unreadable(value) => {
+                value.get("delegationDepth").and_then(Value::as_u64)
+            }
+        })
         .filter(|value| (1..=3).contains(value))
         .unwrap_or(1);
     let mut cursor = actor.clone();

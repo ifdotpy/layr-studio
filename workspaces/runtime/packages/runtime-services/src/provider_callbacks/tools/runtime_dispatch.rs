@@ -1476,6 +1476,35 @@ mod account_identity_tests {
         );
     }
 
+    #[test]
+    fn empty_transfer_default_inherits_automatic_account() {
+        let defaults: studio_runtime_store::transfer_record::TransferWorkerDefaults =
+            serde_json::from_value(serde_json::json!({"accountKey":""})).unwrap();
+        let stored = studio_runtime_store::StoredWorkerDefaults::from(defaults);
+        let studio_runtime_store::StoredWorkerDefaults::Known(defaults) = stored else {
+            panic!("transfer defaults remain typed");
+        };
+        let accounts = accounts(&[("ready", ProviderKind::Codex, true)]);
+        let counts = Counts::new();
+        let mut available = |_: &str, _: &ManagedAccountIdentity, _: &str| Ok(true);
+        let selected = select_worker_account(WorkerAccountSelection {
+            accounts: &accounts,
+            request: WorkerAccountRequest {
+                parent_account_key: "parent",
+                requested_account_key: None,
+                default_account_key: defaults.account_key.value().map(String::as_str),
+                model: "gpt-5",
+                excluded_account_keys: &[],
+                project_account_keys: None,
+                project_account_groups: None,
+                active_agents: &counts,
+            },
+            model_available: &mut available,
+        })
+        .unwrap();
+        assert_eq!(selected.0, "ready");
+    }
+
     /// Workers prefer the project's account order (or the default order) over
     /// load; a full or unavailable preferred account falls back to the next one.
     #[test]
