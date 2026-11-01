@@ -1585,15 +1585,34 @@ impl SchedulerRepository {
         let agent_id = agent.id.0.clone();
         let agent_id = agent_id.as_str();
         let receipt_input = acceptance_input(agent_id, epoch, turn_id);
-        if completed_turn(transaction, agent_id, turn_id)? {
-            return Ok(false);
-        }
         let current_attempt = current_attempt(&agent, epoch);
         if matches!(
             authority,
             AttemptAuthority::Deleted | AttemptAuthority::Inactive
         ) {
             return Ok(false);
+        }
+        if completed_turn(transaction, agent_id, turn_id)? {
+            // A very short turn can end before its start response is read. Bind it
+            // and deliver its input now, or the input stays `dispatching` for good.
+            let attempt = agent
+                .start_attempt
+                .as_mut()
+                .ok_or_else(|| invalid_agent(agent_id))?;
+            if attempt.turn_id.is_some() {
+                return Ok(false);
+            }
+            attempt.turn_id = Some(turn_id.into());
+            deliver_attempt_events(transaction, agent_id, epoch, &event_ids, turn_id)?;
+            publish_agent(transaction, &agent)?;
+            ExecutionHistoryRepository::save_receipt(
+                transaction,
+                attempt_id,
+                ExecutionReceiptKind::StartResult,
+                receipt_input,
+                json!({"bound":true,"interrupt":false}),
+            )?;
+            return Ok(true);
         }
         let AcceptanceDecision::Bind { interrupt, .. } =
             acceptance_decision(&agent, epoch, turn_id, authority)
