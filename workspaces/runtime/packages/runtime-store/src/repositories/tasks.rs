@@ -115,7 +115,10 @@ mod typed_tests {
         let page =
             crate::WorkspaceViewsRepository::task_page(&db, &["agent".into()], None, None, 10)
                 .unwrap();
-        assert_eq!(page.into_iter().next().unwrap().decode(&db).unwrap(), value);
+        assert_eq!(
+            serde_json::to_value(page.into_iter().next().unwrap().decode(&db).unwrap()).unwrap(),
+            value
+        );
         assert_eq!(
             crate::projection_value(
                 &TaskRepository::get(&db, &TaskId::from("a"))

@@ -84,6 +84,9 @@ inherits = "ci"
 # Reviewer permissions stay read-only under yolo across preparation, turns, and monitors.
 # Command replay witnesses feed recorded management commands through decide and compare the canonical outcome.
 default-filter = '''
+    (package(=studio-runtime-services) & kind(lib) & test(=transcript_seq_backfill::tests::copy_check_does_not_admit_a_writer_or_retire_copies)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=transcript_seq_backfill::tests::fresh_store_keeps_transcript_copies)) |
+    (package(=studio-runtime-store) & test(=online_migration::driver_stops_resumes_and_reports_progress)) |
     (package(=studio-runtime-store) & kind(lib) & test(=path::tests::missing_state_directory_is_created)) |
     (package(=studio-runtime-server) & (test(templates_use_the_shared_delivery_layout_and_escape_paths) | test(systemd_verifies_rendered_unit_with_specifiers_in_path))) |
     (package(=studio-runtime-services) & kind(lib) & test(/^account_driver::tests::vm_/)) |
@@ -461,6 +464,9 @@ platform = 'cfg(target_os = "linux")'
 # Reviewer permissions stay read-only under yolo across preparation, turns, and monitors.
 # Command replay witnesses feed recorded management commands through decide and compare the canonical outcome.
 default-filter = '''
+    (package(=studio-runtime-services) & kind(lib) & test(=transcript_seq_backfill::tests::copy_check_does_not_admit_a_writer_or_retire_copies)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=transcript_seq_backfill::tests::fresh_store_keeps_transcript_copies)) |
+    (package(=studio-runtime-store) & test(=online_migration::driver_stops_resumes_and_reports_progress)) |
     (package(=studio-runtime-store) & kind(lib) & test(=path::tests::missing_state_directory_is_created)) |
     (package(=studio-runtime-server) & (test(templates_use_the_shared_delivery_layout_and_escape_paths) | test(systemd_verifies_rendered_unit_with_specifiers_in_path))) |
     (package(=studio-runtime-services) & kind(lib) & test(/^account_driver::tests::vm_/)) |
