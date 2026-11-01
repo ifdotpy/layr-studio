@@ -1,5 +1,19 @@
 import type { CommandResponse } from "../commands";
 import { DeliveryMomentInput } from "../generated/api";
+
+function memoryStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    get length() {
+      return values.size;
+    },
+    clear: () => values.clear(),
+    getItem: (key) => values.get(key) ?? null,
+    key: (index) => [...values.keys()][index] ?? null,
+    removeItem: (key) => void values.delete(key),
+    setItem: (key, value) => void values.set(key, String(value)),
+  };
+}
 import { afterEach, expect, it, vi } from "vitest";
 
 afterEach(() => {
@@ -50,7 +64,7 @@ it("settles a sent message when the answer lists the stream receipt row first", 
       },
     ],
   };
-  const command = createCommandClient(localStorage, async () => response);
+  const command = createCommandClient(memoryStorage(), async () => response);
   const buffer = {
     loadAll: async () => [],
     put: vi.fn(async () => undefined),
