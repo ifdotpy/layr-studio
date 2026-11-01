@@ -326,6 +326,8 @@ pub struct TransferSettings {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub model: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub permission_mode: Field<studio_runtime_schema::claude_permissions::PermissionMode>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub effort: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub native_effort: Field<String>,

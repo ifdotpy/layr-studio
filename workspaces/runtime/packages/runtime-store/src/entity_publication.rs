@@ -320,7 +320,7 @@ pub(crate) fn agent_team_root(connection: &Connection, id: &str) -> StoreResult<
 
 /// Enqueue roots only after the indexed row has actually changed.
 pub(crate) fn mark_agent_team_roots(id: &str, old_root: Option<&str>, new_root: Option<&str>) {
-    for root in old_root.as_deref().into_iter().chain(new_root) {
+    for root in old_root.into_iter().chain(new_root) {
         if root != id {
             push(Event::TeamRoot(root.to_owned()));
         }

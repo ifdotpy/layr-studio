@@ -32,12 +32,8 @@ fn templates_use_the_shared_delivery_layout_and_escape_paths() {
 #[cfg(target_os = "linux")]
 #[test]
 fn systemd_verifies_rendered_unit_with_specifiers_in_path() {
-    use std::{fs, os::unix::fs::PermissionsExt, process::Command};
-    if Command::new("systemd-analyze")
-        .arg("--version")
-        .output()
-        .is_err()
-    {
+    use std::{fs, os::unix::fs::PermissionsExt, process::ExitCode};
+    if super::manager("systemd-analyze", &["--version"]).is_err() {
         return;
     }
     let temp = tempfile::tempdir().unwrap();
@@ -51,15 +47,13 @@ fn systemd_verifies_rendered_unit_with_specifiers_in_path() {
     fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
     let unit = temp.path().join("fixture.service");
     fs::write(&unit, linux_unit(&layout, &root, temp.path()).unwrap()).unwrap();
-    let output = Command::new("systemd-analyze")
-        .args(["--user", "verify"])
-        .arg(&unit)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+    assert_eq!(
+        super::manager(
+            "systemd-analyze",
+            &["--user", "verify", unit.to_str().unwrap()]
+        )
+        .unwrap(),
+        ExitCode::SUCCESS
     );
 }
 

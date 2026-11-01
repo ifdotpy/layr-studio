@@ -59,10 +59,10 @@ mod m2026_11_01_plan_record;
 mod m2026_11_01_project_context;
 mod m2026_11_01_project_revisions;
 mod m2026_11_01_rate_limit_view;
-mod m2026_11_01_work_detail_policy;
 mod m2026_11_01_transfer_operations;
 mod m2026_11_01_transfer_pointers;
 mod m2026_11_01_transfer_summary;
+mod m2026_11_01_work_detail_policy;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;

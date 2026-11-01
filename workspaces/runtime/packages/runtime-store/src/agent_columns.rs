@@ -329,7 +329,12 @@ pub fn fixture_sql(batch: &str) -> String {
     let end = batch[start..]
         .find(';')
         .map_or(batch.len(), |offset| start + offset);
-    format!("{}{}{}", &batch[..start], agent_table_sql(), &batch[end..])
+    format!(
+        "{}{}; CREATE INDEX IF NOT EXISTS runtime_agent_live_root_v2 ON runtime_agents(root_id,id) WHERE deleted_at IS NULL{}",
+        &batch[..start],
+        agent_table_sql(),
+        &batch[end..]
+    )
 }
 
 /// `SELECT` of the declared (not generated) columns of `table`, for test
