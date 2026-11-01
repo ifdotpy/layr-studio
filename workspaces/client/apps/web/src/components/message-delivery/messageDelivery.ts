@@ -138,11 +138,9 @@ export function outgoingTranscript(
           deliveryStatus: entry.status,
           deliveryError: deliveryError(entry),
         });
-      if (
-        entry.receipt?.status === MessageSendStatus.delivered &&
-        entry.receipt.materialized === true
-      )
-        observed.push(entry.id);
+      // This only hides the duplicate display copy. The outbox separately
+      // retains its request until fresh receipt evidence reconciles it.
+      if (present.clientMessageId === entry.id) observed.push(entry.id);
       continue;
     }
     // An input outside the loaded page can replace its local card only after

@@ -92,10 +92,10 @@ it("matches transcript rows by receipt identity and retains edited text and atta
     { id: "lead:one", clientMessageId: "one", role: "user", text: "Same text" },
     { id: "lead:two", clientMessageId: "two", role: "user", text: "Same text" },
   ];
-  // Removed inference: transcript presence without a status does not retire the receipt.
+  // Transcript identity hides duplicate display copies without reconciling storage.
   assert.deepEqual(
     outgoingTranscript(batch, [receipt, { ...receipt, id: "two" }]).observed,
-    [],
+    ["one", "two"],
   );
   const edited: OutgoingMessage = {
     ...receipt,
@@ -331,7 +331,7 @@ it("updates a matching receipt without replacing existing transcript content", (
     receipt: { id: "one", status: "failed", error: "late receipt error" },
   };
   const result = outgoingTranscript([durable], [entry]);
-  assert.deepEqual(result.observed, []);
+  assert.deepEqual(result.observed, ["one"]);
   assert.equal(result.items.length, 1);
   assert.equal(required(result.items[0]).text, "server text");
   assert.deepEqual(required(result.items[0]).assets, [
@@ -387,7 +387,7 @@ it("restores attachments and requested delivery to a local transcript row", () =
     componentAttachment({ id: "asset-one" }),
   ]);
   assert.equal(required(result.items[0]).requestedDelivery, "current_turn");
-  assert.deepEqual(result.observed, []);
+  assert.deepEqual(result.observed, ["one"]);
 
   const existingDelivery: Message = {
     ...materializing,
@@ -435,7 +435,7 @@ it("shows failed and uncertain receipts until the transcript confirms their outc
       status,
     });
     assert.equal(required(result.items[0]).deliveryError, `${status} detail`);
-    assert.deepEqual(result.observed, []);
+    assert.deepEqual(result.observed, ["one"]);
 
     const alreadyLabeled: Message = {
       ...present,
@@ -476,7 +476,7 @@ it("shows failed and uncertain receipts until the transcript confirms their outc
         },
       ],
     );
-    assert.deepEqual(notYetObserved.observed, []);
+    assert.deepEqual(notYetObserved.observed, ["one"]);
     assert.deepEqual(required(notYetObserved.items[0]).deliveryStatus, {
       source: "server",
       status,
@@ -786,6 +786,7 @@ it("keeps a stored request actionable beside a cached delivered transcript row",
   };
   const row = {
     ...pending,
+    clientMessageId: "one",
     deliveryStatus: {
       source: "server" as const,
       status: MessageSendStatus.delivered,
@@ -795,5 +796,5 @@ it("keeps a stored request actionable beside a cached delivered transcript row",
   const result = outgoingTranscript([row], [entry]);
   assert.equal(result.items[0]?.deliveryStatus?.source, "server");
   assert.equal(result.items[0]?.localDelivery, true);
-  assert.deepEqual(result.observed, []);
+  assert.deepEqual(result.observed, ["one"]);
 });
