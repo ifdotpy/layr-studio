@@ -37,7 +37,9 @@ test("Usage resume notice", async ({ context: testContext }) => {
     await page.goto(fixtureOrigin(server) + `?dueAt=${dueAt}`);
     const notices = page.locator(".account-limit-recovery.inline");
     await notices.first().waitFor();
-    const notice = notices.filter({ hasText: "Usage limit reached" }).first();
+    const notice = notices
+      .filter({ hasText: "Limit reached. Resets at" })
+      .first();
     const authNotice = notices.nth(1);
     assert.equal(
       await notices
