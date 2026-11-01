@@ -609,6 +609,26 @@ pub struct AgentRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
+    pub pending_settings: studio_runtime_schema::queue_command::Field<
+        StoredTransferObject<crate::transfer_record::TransferSettings>,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub pending_settings_account_key: studio_runtime_schema::queue_command::Field<
+        StoredTransferValue<studio_runtime_schema::account_key::AccountKey>,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub updated_at: studio_runtime_schema::queue_command::Field<StoredTransferValue<f64>>,
+
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
     pub portable_history: studio_runtime_schema::queue_command::Field<
         StoredTransferObject<crate::transfer_record::PortableHistory>,
     >,
@@ -1155,6 +1175,9 @@ impl AgentRecord {
             native_failure_hold: Default::default(),
             prepare_attempt: Default::default(),
             worker_defaults: Default::default(),
+            pending_settings: Default::default(),
+            pending_settings_account_key: Default::default(),
+            updated_at: Default::default(),
             portable_history: Default::default(),
             account_history: Default::default(),
             cyber_access_program: Default::default(),
@@ -3645,6 +3668,43 @@ mod tests {
             Some(super::StoredTransferValue::Unreadable(_))
         ));
         assert_eq!(legacy.value().get("yoloMode"), Some(&json!("legacy")));
+    }
+
+    #[test]
+    fn updated_at_is_not_an_extension() {
+        let record = agent(
+            json!({"compactions":0,"id":"agent","rootId":"agent","epoch":2,"status":"idle","accountKey":"default","updatedAt":1.0}),
+        );
+        assert!(!record.extra.contains_key("updatedAt"));
+        assert_eq!(serde_json::to_value(record).unwrap()["updatedAt"], 1.0);
+    }
+
+    #[test]
+    fn pending_settings_are_not_extensions() {
+        let record = agent(json!({"compactions":0,"id":"agent","rootId":"agent",
+            "epoch":2,"status":"idle","accountKey":"default",
+            "pendingSettings":{"model":"m"},"pendingSettingsAccountKey":"default"}));
+        assert!(!record.extra.contains_key("pendingSettings"));
+        assert!(!record.extra.contains_key("pendingSettingsAccountKey"));
+        assert!(matches!(
+            record.pending_settings.value(),
+            Some(super::StoredTransferObject::Known(_))
+        ));
+        for raw in [json!([1, 2]), json!({"unknown":42})] {
+            let record = agent(json!({"compactions":0,"id":"agent","rootId":"agent",
+                "epoch":2,"status":"idle","accountKey":"default","pendingSettings":raw}));
+            assert!(matches!(
+                record.pending_settings.value(),
+                Some(super::StoredTransferObject::Unreadable(_))
+            ));
+            assert_eq!(record.value().get("pendingSettings"), Some(&raw));
+        }
+        let dto: studio_runtime_schema::agent_entity_nested::ExecutionSettingsDto =
+            serde_json::from_value(json!({"model":"m","accountKey":"target","updatedAt":1}))
+                .unwrap();
+        let settings: crate::transfer_record::TransferSettings = dto.into();
+        assert_eq!(settings.account_key.as_deref(), Some("target"));
+        assert_eq!(settings.updated_at.value(), Some(&1.0));
     }
 
     #[test]

@@ -343,9 +343,13 @@ where
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TransferSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub updated_at: Field<f64>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub provider: Field<studio_runtime_schema::ProviderKind>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -374,6 +378,22 @@ pub struct TransferSettings {
     pub yolo_mode: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub portable_history: Field<crate::records::StoredTransferObject<PortableHistory>>,
+}
+
+impl From<studio_runtime_schema::agent_entity_nested::ExecutionSettingsDto> for TransferSettings {
+    fn from(value: studio_runtime_schema::agent_entity_nested::ExecutionSettingsDto) -> Self {
+        Self {
+            account_key: value.account_key.value().cloned(),
+            updated_at: value.updated_at,
+            cyber_access_program: value.cyber_access_program,
+            daybreak_enabled: value.daybreak_enabled,
+            effort: value.effort,
+            fast_mode: value.fast_mode,
+            model: value.model,
+            native_effort: value.native_effort,
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

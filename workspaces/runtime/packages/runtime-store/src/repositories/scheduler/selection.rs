@@ -1161,7 +1161,17 @@ impl SchedulerRepository {
 
         let unsupported = if single_event.is_some() {
             None
-        } else if agent.extra.get("pendingSettings").is_some_and(truthy) {
+        } else if agent
+            .pending_settings
+            .value()
+            .is_some_and(|value| match value {
+                crate::StoredTransferObject::Known(value) => serde_json::to_value(value)
+                    .ok()
+                    .as_ref()
+                    .is_some_and(truthy),
+                crate::StoredTransferObject::Unreadable(value) => truthy(value),
+            })
+        {
             Some("pendingSettings are not supported by the Rust turn driver; apply settings first.")
         } else {
             events

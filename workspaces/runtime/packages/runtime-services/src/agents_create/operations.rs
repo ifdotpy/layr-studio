@@ -3347,7 +3347,10 @@ mod tests {
             live.permission_mode,
             Some(studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions)
         );
-        assert_eq!(live.extra["pendingSettings"]["model"], "later");
+        assert_eq!(
+            serde_json::to_value(&live.pending_settings).unwrap()["model"],
+            "later"
+        );
     }
 
     #[tokio::test]

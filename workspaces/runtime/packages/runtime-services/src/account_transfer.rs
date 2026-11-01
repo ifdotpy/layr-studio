@@ -1761,9 +1761,28 @@ pub fn typed_enroll(
             AgentStatus::Running | AgentStatus::Starting | AgentStatus::Approval
         );
     let lazy = !done && !active;
-    let pending = extra_field(agent, "pendingSettings")?;
-    let pending_account: Field<studio_runtime_schema::account_key::AccountKey> =
-        extra_field(agent, "pendingSettingsAccountKey")?;
+    let pending = match &agent.pending_settings {
+        Field::Missing => Field::Missing,
+        Field::Null => Field::Null,
+        Field::Value(studio_runtime_store::StoredTransferObject::Known(v)) => {
+            Field::Value(v.clone())
+        }
+        Field::Value(studio_runtime_store::StoredTransferObject::Unreadable(v)) => Field::Value(
+            serde_json::from_value(v.clone())
+                .map_err(|_| invalid("transfer agent", "/pendingSettings"))?,
+        ),
+    };
+    let pending_account = match &agent.pending_settings_account_key {
+        Field::Missing => Field::Missing,
+        Field::Null => Field::Null,
+        Field::Value(studio_runtime_store::StoredTransferValue::Known(v)) => {
+            Field::Value(v.clone())
+        }
+        Field::Value(studio_runtime_store::StoredTransferValue::Unreadable(v)) => Field::Value(
+            serde_json::from_value(v.clone())
+                .map_err(|_| invalid("transfer agent", "/pendingSettingsAccountKey"))?,
+        ),
+    };
     let pending_mismatch =
         pending.is_some() && pending_account.value().unwrap_or(&source) != &source;
     let blocked = lazy && pending_mismatch;
@@ -1778,7 +1797,7 @@ pub fn typed_enroll(
     };
     member.lazy = Field::Value(lazy);
     member.pending_settings = or_null(pending.clone());
-    member.source_pending_settings = or_null(pending);
+    member.source_pending_settings = or_null(pending.clone());
     member.source_claude_options = or_null(extra_field(agent, "claudeOptions")?);
     member.error = if blocked {
         Field::Value(
@@ -1819,7 +1838,7 @@ pub fn typed_enroll(
                 )
             }
         },
-        pending_settings: extra_field(agent, "pendingSettings")?,
+        pending_settings: pending,
         pending_settings_account_key: pending_account,
         claude_options: extra_field(agent, "claudeOptions")?,
         execution_settings_account_key: extra_field(agent, "executionSettingsAccountKey")?,
@@ -1847,22 +1866,17 @@ pub fn typed_enroll(
             studio_runtime_store::StoredTransferValue::Known("standard".into()),
         );
         agent.claude_options = Field::Missing;
-        for key in ["pendingSettings", "pendingSettingsAccountKey"] {
-            agent.extra.remove(key);
-        }
+        agent.pending_settings = Field::Missing;
+        agent.pending_settings_account_key = Field::Missing;
     }
-    let has_pending = agent
-        .extra
-        .get("pendingSettings")
-        .is_some_and(|value| !value.is_null());
-    agent.extra.insert(
-        "pendingSettingsAccountKey".into(),
-        if has_pending {
-            json!(target)
-        } else {
-            Value::Null
-        },
-    );
+    let has_pending = agent.pending_settings.is_some();
+    agent.pending_settings_account_key = if has_pending {
+        Field::Value(studio_runtime_store::StoredTransferValue::Known(
+            target.clone(),
+        ))
+    } else {
+        Field::Null
+    };
     if !has_pending {
         agent.execution_settings_account_key = Field::Value(source.as_str().to_owned());
     }
@@ -2495,6 +2509,63 @@ mod provider_receipt_tests {
                 .typed_preparation_failed("agent", &Field::Null)
                 .unwrap()
                 .changed
+        );
+    }
+
+    #[test]
+    fn enrollment_reads_typed_pending_settings_and_captures_source() {
+        let mut agent: studio_runtime_store::AgentRecord = serde_json::from_value(serde_json::json!({
+            "id":"agent","rootId":"agent","provider":"codex","accountKey":"source",
+            "epoch":0,"status":"idle","compactions":0,
+            "pendingSettings":{"model":"typed","updatedAt":12.0},"pendingSettingsAccountKey":"source"
+        })).unwrap();
+        agent.extra.insert(
+            "pendingSettings".into(),
+            serde_json::json!({"model":"stale"}),
+        );
+        let id = "move".to_owned().try_into().unwrap();
+        let target = "target".to_owned().try_into().unwrap();
+        let member = super::typed_enroll(
+            &mut agent,
+            &id,
+            &target,
+            studio_runtime_schema::ProviderKind::Codex,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            member
+                .pending_settings
+                .value()
+                .unwrap()
+                .model
+                .value()
+                .map(String::as_str),
+            Some("typed")
+        );
+        let source = agent
+            .lazy_account_transfer
+            .value()
+            .unwrap()
+            .pending()
+            .unwrap()
+            .source_state
+            .value()
+            .unwrap();
+        assert_eq!(
+            source.pending_settings.value().unwrap().updated_at.value(),
+            Some(&12.0)
+        );
+        assert_eq!(
+            source
+                .pending_settings_account_key
+                .value()
+                .unwrap()
+                .as_str(),
+            "source"
+        );
+        assert!(
+            matches!(agent.pending_settings_account_key.value(), Some(studio_runtime_store::StoredTransferValue::Known(key)) if key.as_str() == "target")
         );
     }
 

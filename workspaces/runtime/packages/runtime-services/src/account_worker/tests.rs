@@ -4258,10 +4258,7 @@ async fn scenario_new_thread_freezes_settings_and_accepts_context() {
                 let mut record = AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
                 record.thread_id = None;
                 record.extra.remove("nativeToolCatalog");
-                record.extra.insert(
-                    "pendingSettings".into(),
-                    json!({"model":"pending-model","effort":"high","nativeEffort":"high","fastMode":true}),
-                );
+                record.pending_settings = serde_json::from_value(json!({"model":"pending-model","effort":"high","nativeEffort":"high","fastMode":true})).unwrap();
                 AgentRepository::put(tx, &record)
             }).await?;
             Ok(())
@@ -6541,7 +6538,7 @@ async fn preparation_commit_rechecks_workspace_settings_and_input() {
                     if mutation == "workspace" {
                         row.workspace_mode = Some(studio_runtime_schema::records::WorkspaceMode::Image);
                     } else {
-                        row.extra.insert("pendingSettings".into(), json!({"model":"changed-model"}));
+                        row.pending_settings = serde_json::from_value(json!({"model":"changed-model"})).unwrap();
                     }
                     AgentRepository::put(tx, &row)?;
                 }
