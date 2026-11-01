@@ -362,7 +362,13 @@ fn answer(id: &str, legacy: &Legacy, request: &Request) -> StoreResult<Option<An
                             | Request::AgentQuestion { questions } => questions
                                 .iter()
                                 .any(|question| question.id == entry.id && question.is_secret),
-                            _ => false,
+                            Request::Exec { .. }
+                            | Request::Patch { .. }
+                            | Request::Permissions { .. }
+                            | Request::Elicitation { .. }
+                            | Request::ToolUse { .. }
+                            | Request::MonitorStart { .. }
+                            | Request::BrowserOpen(_) => false,
                         };
                         let (answer, digest) = match &entry.answer {
                             LegacyLeaf::Values(values)

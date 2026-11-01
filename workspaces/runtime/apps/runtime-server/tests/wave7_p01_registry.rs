@@ -2336,7 +2336,7 @@ async fn repeated_reconcile_does_not_retry_an_unavailable_account_before_backoff
     .await
     .unwrap();
     assert!(registry.reconcile(None).await.is_err());
-    let _ = registry.reconcile(None).await;
+    assert!(registry.reconcile(None).await.is_ok());
     assert_eq!(launcher.unavailable_attempts.load(Ordering::SeqCst), 1);
     tokio::time::advance(std::time::Duration::from_secs(2)).await;
     assert!(registry.reconcile(None).await.is_err());

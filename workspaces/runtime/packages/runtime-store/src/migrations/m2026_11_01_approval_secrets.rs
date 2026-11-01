@@ -17,7 +17,13 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 .filter(|q| q.is_secret)
                 .map(|q| q.id.clone())
                 .collect(),
-            _ => continue,
+            Request::Exec { .. }
+            | Request::Patch { .. }
+            | Request::Permissions { .. }
+            | Request::Elicitation { .. }
+            | Request::ToolUse { .. }
+            | Request::MonitorStart { .. }
+            | Request::BrowserOpen(_) => continue,
         };
         if legacy_exists {
             let raw: Option<String> = tx
@@ -38,7 +44,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             ApprovalState::Answering { answer, .. }
             | ApprovalState::Answered { answer, .. }
             | ApprovalState::Unknown { answer, .. } => answer,
-            _ => continue,
+            ApprovalState::Pending | ApprovalState::Closed { .. } => continue,
         };
         let Answer::Answers { answers } = &mut *answer else {
             continue;

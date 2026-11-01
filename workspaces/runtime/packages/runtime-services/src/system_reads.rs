@@ -315,7 +315,13 @@ pub fn ui_summary(
                 .first()
                 .map(|q| q.question.as_str())
                 .filter(|q| !q.is_empty()),
-            _ => None,
+            Request::Exec { .. }
+            | Request::Patch { .. }
+            | Request::Permissions { .. }
+            | Request::Elicitation { .. }
+            | Request::ToolUse { .. }
+            | Request::MonitorStart { .. }
+            | Request::BrowserOpen(_) => None,
         };
         if let Some(agent) = agents.get(request.agent.as_str()) {
             alert(
