@@ -99,7 +99,11 @@ async fn repair_report(
     reply.retain(|name, _| {
         matches!(
             name.as_str(),
-            "status" | "skippedRows" | "invalidSequence" | "scopeConfirmed" | "nativeHistoryConfirmed"
+            "status"
+                | "skippedRows"
+                | "invalidSequence"
+                | "scopeConfirmed"
+                | "nativeHistoryConfirmed"
         )
     });
     let evidence: crate::generated::ClaudeRepairReport =

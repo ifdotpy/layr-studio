@@ -3125,9 +3125,7 @@ async fn mutate(
 ) -> Result<Value, OperationError> {
     context
         .store
-        .transaction_with_error(move |tx| {
-            Ok(operation(tx)?)
-        })
+        .transaction_with_error(move |tx| Ok(operation(tx)?))
         .await
 }
 
