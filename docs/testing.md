@@ -270,6 +270,19 @@ Limits:
   by `layr retest run --full`. A saved pass is for speed, not evidence.
 - Doc tests are not run by `layr-retest`; the separate doctest steps stay as they are.
 
+### Build script paths
+
+Cargo stores `cargo:rerun-if-changed=` paths as printed. An absolute path differs in every
+line, so cargo marks the script dirty in a new line and rebuilds every crate after it (10
+crates, about 130 s, in a warm `target/` clone). Build scripts here print paths relative to
+their package. `rust-lint-policy.test.ts` rejects absolute paths in `build.rs` sources and
+in recorded outputs.
+
+Known limit: `tauri-build` prints absolute paths for `tauri.conf.json`, `capabilities` and
+the frontend files, and has no option to change that. In a new line it reruns the
+`studio-native-client` build script and recompiles that one crate. No crate depends on it,
+so the cost is one crate, not a chain.
+
 ### Disk
 
 - Each line that rebuilds writes about 6 GB of new build output.
