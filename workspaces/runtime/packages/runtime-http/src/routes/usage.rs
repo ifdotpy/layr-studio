@@ -1,6 +1,6 @@
 //! Local cost snapshots and persisted usage controls.
 
-use super::extractors::{ApiJson, QueryParams};
+use super::extractors::{ApiJson, TypedQuery};
 use super::manifest::{OperationStatus, RouteGroup, get, post};
 use axum::Json;
 use axum::extract::State;
@@ -39,13 +39,18 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CostsQuery {
+    account_key: Option<String>,
+}
 async fn costs(
     State(state): State<HttpState>,
-    params: QueryParams,
+    TypedQuery(params): TypedQuery<CostsQuery>,
 ) -> Result<Json<crate::generated::AccountCostResponse>, ApiError> {
     let account_key = params
-        .typed_value("account_key")
-        .and_then(Value::as_str)
+        .account_key
+        .as_deref()
         .filter(|value| !value.is_empty())
         .unwrap_or("default")
         .to_owned();
@@ -625,5 +630,20 @@ inventory::submit! {
             "turn-driver/capacity-retry",
             "turn-driver/usage-resume",
         ],
+    }
+}
+
+#[cfg(test)]
+mod typed_query_contract_tests {
+    use super::*;
+    #[test]
+    fn costsquery_decodes_and_rejects_invalid() {
+        fn decode(query: &str) -> bool {
+            let uri: axum::http::Uri = format!("/?{query}").parse().unwrap();
+            axum::extract::Query::<CostsQuery>::try_from_uri(&uri).is_ok()
+        }
+        assert!(decode("account_key=x"));
+        assert!(!decode("extra=x"));
+        assert!(!decode("extra=x"));
     }
 }

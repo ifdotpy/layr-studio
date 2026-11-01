@@ -18,7 +18,7 @@ use crate::error::ApiError;
 use crate::router::HttpState;
 use crate::validation::Registry;
 
-use super::extractors::QueryParams;
+use super::extractors::TypedQuery;
 use super::manifest::{OperationStatus, RouteGroup, get};
 
 pub(crate) fn routes() -> RouteGroup {
@@ -39,21 +39,83 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ChangesScope {
+    Chat,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChangesQuery {
+    agent: Option<String>,
+    scope: Option<ChangesScope>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum WorkspaceView {
+    Full,
+    Work,
+    Inbox,
+    Annotations,
+}
+impl WorkspaceView {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Work => "work",
+            Self::Inbox => "inbox",
+            Self::Annotations => "annotations",
+        }
+    }
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkspaceQuery {
+    agent: Option<String>,
+    view: Option<WorkspaceView>,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TaskQuery {
+    id: Option<String>,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TaskOutputQuery {
+    id: Option<String>,
+    agent: studio_runtime_schema::bounded_text::BoundedText<1, { usize::MAX }>,
+}
+#[derive(serde::Deserialize)]
+enum Timing {
+    #[serde(rename = "0")]
+    Off,
+    #[serde(rename = "1")]
+    On,
+}
+/// Largest exact integer accepted by the task page query.
+const TASK_QUERY_INTEGER_MAX: u64 = 9_007_199_254_740_991;
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkspaceTasksQuery {
+    agent: Option<String>,
+    cursor: Option<String>,
+    before: Option<String>,
+    limit:
+        Option<studio_runtime_schema::bounded_integer::BoundedInteger<0, TASK_QUERY_INTEGER_MAX>>,
+    #[serde(rename = "timing")]
+    _timing: Option<Timing>,
+}
+
 async fn changes(
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<ChangesQuery>,
     State(state): State<HttpState>,
 ) -> Result<Json<crate::generated::ChangesResponse>, ApiError> {
-    let agent = query.nonempty_str("agent").map(str::to_owned);
-    let scope = query.nonempty_str("scope").map(str::to_owned);
+    let agent = query.agent.filter(|value| !value.is_empty());
+    let chat = query.scope.is_some();
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
-    if scope.as_deref().is_some_and(|scope| scope != "chat") {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "Unknown changes scope",
-        ));
-    }
     let actor_id = agent.ok_or_else(invalid_request)?;
-    let chat = scope.is_some();
     // Reported changes come from the transcript; Git changes run after the read.
     let read = store
         .read_async("runtime-http/routes/workspace_views", move |transaction| {
@@ -92,11 +154,15 @@ async fn changes(
 }
 
 async fn workspace(
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<WorkspaceQuery>,
     State(state): State<HttpState>,
 ) -> Result<Json<studio_runtime_services::workspace_views::WorkspaceViewResponse>, ApiError> {
-    let agent = query.nonempty_str("agent").map(str::to_owned);
-    let view = query.nonempty_str("view").unwrap_or("full").to_owned();
+    let agent = query.agent.filter(|value| !value.is_empty());
+    let view = query
+        .view
+        .as_ref()
+        .map_or("full", WorkspaceView::as_str)
+        .to_owned();
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let validators = state.validators.clone();
     let value = store
@@ -380,14 +446,10 @@ fn project_task_records(
 }
 
 async fn task_detail(
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<TaskQuery>,
     State(state): State<HttpState>,
 ) -> Result<Json<Value>, ApiError> {
-    let id = query
-        .typed_value("id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
+    let id = query.id.unwrap_or_default();
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let task = store
         .read_async("runtime-http/routes/workspace_views", move |connection| {
@@ -410,17 +472,14 @@ async fn task_detail(
 }
 
 async fn task_output(
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<TaskOutputQuery>,
     State(state): State<HttpState>,
 ) -> Result<Json<Value>, ApiError> {
     let id = query
-        .nonempty_str("id")
-        .ok_or_else(invalid_request)?
-        .to_owned();
-    let owner = query
-        .nonempty_str("agent")
-        .ok_or_else(invalid_request)?
-        .to_owned();
+        .id
+        .filter(|id| !id.is_empty())
+        .ok_or_else(invalid_request)?;
+    let owner = query.agent.as_str().to_owned();
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let (task, agent) = store
         .read_async("task-output/owner", move |connection| {
@@ -444,19 +503,21 @@ async fn task_output(
 }
 
 async fn workspace_tasks(
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<WorkspaceTasksQuery>,
     State(state): State<HttpState>,
 ) -> Result<Json<Value>, ApiError> {
-    let agent = query.nonempty_str("agent").map(str::to_owned);
-    let limit = query
-        .typed_value("limit")
-        .and_then(Value::as_u64)
-        .unwrap_or(100)
-        .clamp(1, 100) as usize;
-    let cursor = parse_task_cursor(query.nonempty_str("cursor"), CursorKind::Current)
-        .map_err(|_| invalid_cursor("cursor"))?;
-    let before = parse_task_cursor(query.nonempty_str("before"), CursorKind::Before)
-        .map_err(|_| invalid_cursor("before"))?;
+    let agent = query.agent.filter(|value| !value.is_empty());
+    let limit = query.limit.map_or(100, |value| value.get()).clamp(1, 100) as usize;
+    let cursor = parse_task_cursor(
+        query.cursor.as_deref().filter(|value| !value.is_empty()),
+        CursorKind::Current,
+    )
+    .map_err(|_| invalid_cursor("cursor"))?;
+    let before = parse_task_cursor(
+        query.before.as_deref().filter(|value| !value.is_empty()),
+        CursorKind::Before,
+    )
+    .map_err(|_| invalid_cursor("before"))?;
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let result = store
         .read_async(
@@ -918,5 +979,102 @@ inventory::submit! {
             "workspace-state/git-changes",
             "workspace-state/snapshot",
         ],
+    }
+}
+
+#[cfg(test)]
+mod typed_query_tests {
+    use axum::extract::Query;
+    use serde::de::DeserializeOwned;
+
+    fn accepts<T: DeserializeOwned>(query: &str) -> bool {
+        let uri = format!("/?{query}").parse().unwrap();
+        Query::<T>::try_from_uri(&uri).is_ok()
+    }
+
+    #[tokio::test]
+    async fn registered_routes_reject_unknown_queries_after_decoding_valid_queries() {
+        use axum::{
+            body::Body,
+            http::{Request, StatusCode},
+        };
+        use tower::ServiceExt;
+        let app = crate::router::router(crate::router::HttpState::new(
+            "token".into(),
+            "fixture".into(),
+            "isolated".into(),
+            49171,
+            None,
+            None,
+            None,
+        ))
+        .unwrap();
+        for query in [
+            "/api/file?agent=a&path=b",
+            "/api/file-info?agent=a&path=b",
+            "/api/changes?agent=a&scope=chat",
+            "/api/workspace?agent=a&view=work",
+            "/api/task?id=a",
+            "/api/task/output?id=a&agent=a",
+            "/api/workspace/tasks?agent=a&limit=20",
+            "/api/project-locations?project=p&server=s",
+            "/api/work?agent=a",
+            "/api/queue?agent=a",
+            "/api/retained-worktrees?agent=a",
+            "/api/processes?agent=a",
+            "/api/processes/action?requestId=r&agent=a&accountKey=k&epoch=1",
+            "/api/monitor/log?id=a",
+            "/api/tool-requests?agent=a",
+        ] {
+            for (uri, invalid) in [
+                (query.to_owned(), false),
+                (format!("{query}&unknown=x"), true),
+            ] {
+                let request = Request::builder()
+                    .uri(&uri)
+                    .header("host", "127.0.0.1:49171")
+                    .header("x-canvas-token", "token")
+                    .extension(axum::extract::ConnectInfo(
+                        "127.0.0.1:12345".parse::<std::net::SocketAddr>().unwrap(),
+                    ))
+                    .body(Body::empty())
+                    .unwrap();
+                let status = app.clone().oneshot(request).await.unwrap().status();
+                if invalid {
+                    assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}");
+                } else {
+                    assert_ne!(status, StatusCode::BAD_REQUEST, "{uri}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn query_contracts() {
+        assert!(accepts::<super::ChangesQuery>("agent=a&scope=chat"));
+        assert!(!accepts::<super::ChangesQuery>("scope=other"));
+        assert!(!accepts::<super::ChangesQuery>(
+            "agent=a&scope=chat&unknown=x"
+        ));
+        assert!(accepts::<super::WorkspaceQuery>("agent=a&view=work"));
+        assert!(!accepts::<super::WorkspaceQuery>("view=other"));
+        assert!(!accepts::<super::WorkspaceQuery>(
+            "agent=a&view=work&unknown=x"
+        ));
+        assert!(accepts::<super::TaskQuery>("id=a"));
+        assert!(!accepts::<super::TaskQuery>("extra=x"));
+        assert!(!accepts::<super::TaskQuery>("id=a&unknown=x"));
+        assert!(accepts::<super::TaskOutputQuery>("id=a&agent=b"));
+        assert!(!accepts::<super::TaskOutputQuery>("agent="));
+        assert!(!accepts::<super::TaskOutputQuery>("id=a&agent=b&unknown=x"));
+        assert!(accepts::<super::WorkspaceTasksQuery>(
+            "agent=a&limit=50&timing=1"
+        ));
+        assert!(!accepts::<super::WorkspaceTasksQuery>(
+            "limit=9007199254740992"
+        ));
+        assert!(!accepts::<super::WorkspaceTasksQuery>(
+            "agent=a&limit=50&timing=1&unknown=x"
+        ));
     }
 }

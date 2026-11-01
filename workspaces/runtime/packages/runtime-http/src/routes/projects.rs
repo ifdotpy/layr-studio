@@ -1,6 +1,6 @@
 //! HTTP adapters for projects, locations and peer teams.
 
-use super::extractors::{ApiJson, QueryParams};
+use super::extractors::{ApiJson, TypedQuery};
 use super::manifest::{OperationStatus, RouteGroup, get, post};
 use axum::Json;
 use axum::extract::State;
@@ -1081,12 +1081,32 @@ fn location_reply(result: LocationResult) -> Result<LocationResult, ApiError> {
     Ok(result)
 }
 
+/// Maximum project and path query length in Unicode code points.
+const LOCATION_PATH_MAX_CHARS: usize = 4096;
+/// Maximum server and request ID query length in Unicode code points.
+const LOCATION_ID_MAX_CHARS: usize = 128;
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum LocationAction {
+    Info,
+    Matches,
+}
+#[derive(Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LocationQuery {
+    project: studio_runtime_schema::bounded_text::BoundedText<1, LOCATION_PATH_MAX_CHARS>,
+    server: studio_runtime_schema::bounded_text::BoundedText<1, LOCATION_ID_MAX_CHARS>,
+    action: Option<LocationAction>,
+    path: Option<studio_runtime_schema::bounded_text::BoundedText<0, LOCATION_PATH_MAX_CHARS>>,
+    #[serde(rename = "request_id")]
+    _request_id: Option<studio_runtime_schema::bounded_text::BoundedText<1, LOCATION_ID_MAX_CHARS>>,
+}
+
 async fn project_locations(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<LocationQuery>,
 ) -> Result<Json<crate::generated::ProjectLocationQueryResponse>, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
-    let query = Value::Object((*query.into_typed()).clone());
     let remote_request = remote_location_request(&store, &query).await?;
     if let Some((server, action, payload)) = remote_request {
         let driver = state.orchestration_driver.ok_or_else(ApiError::internal)?;
@@ -1128,19 +1148,16 @@ async fn project_locations(
         .map_err(ApiError::json);
     }
     let query = projects::LocationQuery {
-        project: query
-            .get("project")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        server: query
-            .get("server")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        action: query
-            .get("action")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        path: query.get("path").and_then(Value::as_str).map(str::to_owned),
+        project: Some(query.project.as_str().to_owned()),
+        server: Some(query.server.as_str().to_owned()),
+        action: query.action.map(|action| {
+            match action {
+                LocationAction::Info => "info",
+                LocationAction::Matches => "matches",
+            }
+            .to_owned()
+        }),
+        path: query.path.map(|path| path.as_str().to_owned()),
     };
     let value = projects::location_query(&store, query)
         .await
@@ -1165,12 +1182,9 @@ async fn project_locations(
 
 async fn remote_location_request(
     store: &studio_runtime_store::RuntimeStore,
-    query: &Value,
+    query: &LocationQuery,
 ) -> Result<Option<(String, String, Value)>, ApiError> {
-    let requested = query
-        .get("server")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+    let requested = query.server.as_str();
     let local = store.local_server_id().map_err(ApiError::stored)?;
     let server = if requested == "local" {
         local.as_deref().unwrap_or_default()
@@ -1180,11 +1194,7 @@ async fn remote_location_request(
     if server.is_empty() || local.as_deref() == Some(server) {
         return Ok(None);
     }
-    let project_id = query
-        .get("project")
-        .and_then(Value::as_str)
-        .filter(|id| !id.is_empty())
-        .map(str::to_owned);
+    let project_id = query.project.as_str().to_owned();
     let read_server = server.to_owned();
     let project = store
         .read_async("runtime-http/routes/projects/prepare-remote-location", move |db| {
@@ -1201,9 +1211,6 @@ async fn remote_location_request(
                     "The server is not paired or is revoked",
                 ));
             }
-            let project_id = project_id.ok_or_else(|| {
-                ApiError::new(StatusCode::BAD_REQUEST, "Select an existing project")
-            })?;
             studio_runtime_store::ProjectsRepository::get_record(db, &project_id)?
                 .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Select an existing project"))
         })
@@ -1221,11 +1228,11 @@ async fn remote_location_request(
 /// The peer request for a remote project location; may inspect the local
 /// checkout's Git origin, so it runs on a blocking thread.
 fn remote_location_action(
-    query: &Value,
+    query: &LocationQuery,
     project: &studio_runtime_schema::project_record::ProjectLive,
     server: String,
 ) -> Result<(String, String, Value), ApiError> {
-    let action = if query.get("action").and_then(Value::as_str) == Some("matches") {
+    let action = if matches!(query.action, Some(LocationAction::Matches)) {
         let origin = project
             .locations
             .iter()
@@ -1243,12 +1250,13 @@ fn remote_location_action(
             })?;
         (
             "location_matches".to_owned(),
-            json!({"origin":origin,"cwd":query.get("path")}),
+            json!({"origin":origin,"cwd":query.path.as_ref().map(|path| path.as_str())}),
         )
     } else {
         let path = query
-            .get("path")
-            .and_then(Value::as_str)
+            .path
+            .as_ref()
+            .map(|path| path.as_str())
             .filter(|path| !path.is_empty())
             .or_else(|| {
                 project
@@ -1464,13 +1472,30 @@ mod local_registration_tests {
         let project = serde_json::from_str::<studio_runtime_schema::project_record::ProjectLive>(
             r#"{"id":"project","path":"project:id","peerTeams":[],"locations":[{"serverId":"server","path":"/folder","projectId":"id","gitOrigin":"origin"}]}"#,
         ).unwrap();
-        let (_, action, payload) =
-            super::remote_location_action(&json!({}), &project, "server".into()).unwrap();
+        let (_, action, payload) = super::remote_location_action(
+            &axum::extract::Query::<super::LocationQuery>::try_from_uri(
+                &"/?project=project&server=server".parse().unwrap(),
+            )
+            .unwrap()
+            .0,
+            &project,
+            "server".into(),
+        )
+        .unwrap();
         assert_eq!(action, "location_info");
         assert_eq!(payload, json!({"cwd":"/folder"}));
-        let (_, action, payload) =
-            super::remote_location_action(&json!({"action":"matches"}), &project, "server".into())
-                .unwrap();
+        let (_, action, payload) = super::remote_location_action(
+            &axum::extract::Query::<super::LocationQuery>::try_from_uri(
+                &"/?project=project&server=server&action=matches"
+                    .parse()
+                    .unwrap(),
+            )
+            .unwrap()
+            .0,
+            &project,
+            "server".into(),
+        )
+        .unwrap();
         assert_eq!(action, "location_matches");
         assert_eq!(payload, json!({"origin":"origin","cwd":null}));
     }
@@ -1954,5 +1979,27 @@ mod local_registration_tests {
         assert_eq!(status, axum::http::StatusCode::OK, "{cleared}");
         assert!(cleared["workspacePolicy"].is_null());
         assert_eq!(cleared["workspacePolicyRevision"], 2);
+    }
+}
+
+#[cfg(test)]
+mod typed_query_tests {
+    use axum::extract::Query;
+    use serde::de::DeserializeOwned;
+
+    fn accepts<T: DeserializeOwned>(query: &str) -> bool {
+        let uri = format!("/?{query}").parse().unwrap();
+        Query::<T>::try_from_uri(&uri).is_ok()
+    }
+
+    #[test]
+    fn query_contracts() {
+        assert!(accepts::<super::LocationQuery>(
+            "project=p&server=s&action=matches"
+        ));
+        assert!(!accepts::<super::LocationQuery>("project=&server=s"));
+        assert!(!accepts::<super::LocationQuery>(
+            "project=p&server=s&action=matches&unknown=x"
+        ));
     }
 }

@@ -44,7 +44,7 @@ use studio_runtime_services::token_rate::TokenRateSnapshot as TokenRates;
 use studio_runtime_store::{Connection, RuntimeStore, SyncDocumentsRepository};
 use tokio::time::{Instant, Interval, interval_at};
 
-use super::extractors::{ApiHeaders, ApiJson, Caller, QueryParams};
+use super::extractors::{ApiHeaders, ApiJson, Caller, TypedQuery};
 use super::manifest::{OperationStatus, RouteGroup, get, post};
 use crate::error::ApiError;
 use crate::router::HttpState;
@@ -359,15 +359,69 @@ async fn sync_subscriptions(
     }))
 }
 
+/// Maximum stream selector or workspace ID length, in Unicode code points.
+const STREAM_SELECTOR_MAX_CHARS: usize = 4096;
+type StreamText = studio_runtime_schema::bounded_text::BoundedText<0, STREAM_SELECTOR_MAX_CHARS>;
+type StreamSequence = studio_runtime_schema::bounded_integer::BoundedInteger<
+    0,
+    { studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64 },
+>;
+type StreamResourceText =
+    studio_runtime_schema::bounded_text::BoundedText<0, MAX_SYNC_RESOURCE_QUERY_BYTES>;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SyncStreamQuery {
+    protocol: Option<StreamText>,
+    #[serde(rename = "scope")]
+    _scope: Option<StreamText>,
+    #[serde(rename = "after")]
+    _after: Option<StreamSequence>,
+    resources: Option<StreamResourceText>,
+    token_rates: Option<bool>,
+    reconnect: Option<bool>,
+    api_schema: Option<StreamText>,
+    since: Option<StreamResourceText>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StreamSubscriptionAdd {
+    resource: ResourceRef,
+    #[serde(
+        default,
+        deserialize_with = "studio_runtime_schema::http_ingress::deserialize_optional_object"
+    )]
+    since: Option<StreamCursor>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StreamCursor {
+    workspace_id: studio_runtime_schema::bounded_text::BoundedText<1, STREAM_SELECTOR_MAX_CHARS>,
+    seq: StreamSequence,
+    #[serde(default, deserialize_with = "stream_optional_value")]
+    terminal_generation: Option<StreamSequence>,
+}
+
+fn stream_optional_value<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
+
 async fn sync_stream(
-    query: QueryParams,
-    ApiHeaders(headers): ApiHeaders,
+    TypedQuery(query): TypedQuery<SyncStreamQuery>,
+    headers: ApiHeaders,
     request_headers: HeaderMap,
     Caller(principal): Caller,
     State(state): State<HttpState>,
 ) -> Response {
-    let protocol = query.typed_value("protocol").and_then(Value::as_str);
-    let header_protocol = headers.get("x-codex-sync-protocol").and_then(Value::as_str);
+    let protocol = query.protocol.as_ref().map(|value| value.as_str());
+    let header_protocol = match headers.one("x-codex-sync-protocol") {
+        Ok(value) => value,
+        Err(error) => return error.into_response(),
+    };
     if protocol.is_some_and(|value| value != SYNC_PROTOCOL_VERSION_TEXT)
         || header_protocol.is_some_and(|value| value != SYNC_PROTOCOL_VERSION_TEXT)
         || (protocol != Some(SYNC_PROTOCOL_VERSION_TEXT)
@@ -387,11 +441,7 @@ async fn sync_stream(
     let renderer_hash = request_headers
         .get(API_SCHEMA_HASH_HEADER)
         .and_then(|value| value.to_str().ok())
-        .or_else(|| {
-            query
-                .typed_value(crate::schema::API_SCHEMA_HASH_PARAM)
-                .and_then(Value::as_str)
-        });
+        .or_else(|| query.api_schema.as_ref().map(|value| value.as_str()));
     if renderer_hash.is_some_and(|value| value != server_hash) {
         return encoded_event_response(
             stream::iter([Ok(sse_event(
@@ -412,7 +462,7 @@ async fn sync_stream(
             return error.into_response();
         }
     }
-    let since = match parse_since(&query, &state, &resources) {
+    let since = match parse_since(&query, &resources) {
         Ok(since) => since,
         Err(error) => return error.into_response(),
     };
@@ -434,11 +484,26 @@ async fn sync_stream(
             Err(error) => return error.into_response(),
         };
     let mut initial_draft_sequence = 0;
-    let reconnect = headers.contains_key("last-event-id")
-        || query
-            .typed_value("reconnect")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+    let last_event_id = match headers.one("last-event-id") {
+        Ok(Some(value)) => match value.parse::<i64>() {
+            Ok(value)
+                if (0..=studio_runtime_schema::shared_values::MAX_SAFE_INTEGER)
+                    .contains(&value) =>
+            {
+                true
+            }
+            _ => {
+                return ApiError::validation(vec![
+                    Value::String("header".into()),
+                    Value::String("last-event-id".into()),
+                ])
+                .into_response();
+            }
+        },
+        Ok(None) => false,
+        Err(error) => return error.into_response(),
+    };
+    let reconnect = last_event_id || query.reconnect.unwrap_or(false);
     let reason = if reconnect {
         studio_runtime_services::diagnostics::record_sync_recovery(
             studio_runtime_services::diagnostics::SyncRecoveryKind::Reconnect,
@@ -615,14 +680,7 @@ async fn sync_stream(
     }
     // OpenAPI owns the omitted-selector compatibility default; the HTTP witness
     // keeps this native/signed-client behavior in parity with that contract.
-    let token_interest = match query
-        .typed_value("tokenRates")
-        .map(bool::deserialize)
-        .transpose()
-    {
-        Ok(interest) => interest.unwrap_or(true),
-        Err(_) => return ApiError::internal().into_response(),
-    };
+    let token_interest = query.token_rates.unwrap_or(true);
     let mut token_rates = token_interest.then(|| state.token_rates.subscribe());
     let mut last_token_rates = None;
     if let Some(receiver) = &mut token_rates {
@@ -903,37 +961,32 @@ pub(super) async fn transcript_initial_snapshot(
 }
 
 fn parse_since(
-    query: &QueryParams,
-    state: &HttpState,
+    query: &SyncStreamQuery,
     resources: &[SubscribedResource],
 ) -> Result<BTreeMap<String, SubscriptionCursor>, ApiError> {
     let mut since = BTreeMap::new();
     let invalid = || ApiError::validation(vec![json!("query"), json!("since")]);
-    let Some(raw) = query.typed_value("since").and_then(Value::as_str) else {
+    let Some(raw) = query.since.as_ref().map(|value| value.as_str()) else {
         return Ok(since);
     };
     if raw.len() > MAX_SYNC_RESOURCE_QUERY_BYTES {
         return Err(invalid());
     }
-    let values: Vec<Value> = serde_json::from_str(raw).map_err(|_| invalid())?;
+    let values: Vec<studio_runtime_schema::http_ingress::Object<StreamSubscriptionAdd>> =
+        serde_json::from_str(raw).map_err(|_| invalid())?;
     if values.len() > MAX_SYNC_RESOURCE_COUNT {
         return Err(invalid());
     }
-    for value in values {
-        if !state
-            .validators
-            .validate_component("SubscriptionAdd", &value)
-        {
-            return Err(invalid());
-        }
-        let addition: crate::generated::SubscriptionAdd =
-            serde_json::from_value(value).map_err(|_| invalid())?;
+    for studio_runtime_schema::http_ingress::Object(addition) in values {
         let resource = SubscribedResource::new(addition.resource).map_err(|_| invalid())?;
         if !resources.iter().any(|item| item.key == resource.key) {
             return Err(invalid());
         }
-        if let Some(cursor) = addition.since
-            && since.insert(resource.key, cursor).is_some()
+        if let Some(cursor) = addition.since.map(|cursor| SubscriptionCursor {
+            workspace_id: cursor.workspace_id.as_str().to_owned(),
+            seq: cursor.seq.get(),
+            terminal_generation: cursor.terminal_generation.map(|value| value.get()),
+        }) && since.insert(resource.key, cursor).is_some()
         {
             return Err(invalid());
         }
@@ -1016,7 +1069,7 @@ async fn attach_initial_entries(
     Ok(())
 }
 
-fn parse_resources(query: &QueryParams) -> Result<Vec<SubscribedResource>, ApiError> {
+fn parse_resources(query: &SyncStreamQuery) -> Result<Vec<SubscribedResource>, ApiError> {
     let invalid = || {
         ApiError::validation(vec![
             Value::String("query".to_owned()),
@@ -1024,8 +1077,9 @@ fn parse_resources(query: &QueryParams) -> Result<Vec<SubscribedResource>, ApiEr
         ])
     };
     let raw = query
-        .typed_value("resources")
-        .and_then(Value::as_str)
+        .resources
+        .as_ref()
+        .map(|value| value.as_str())
         .ok_or_else(invalid)?;
     if raw.len() > MAX_SYNC_RESOURCE_QUERY_BYTES {
         return Err(invalid());
@@ -2419,6 +2473,29 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stream_query_and_embedded_cursors_are_strict_and_bounded() {
+        let valid: axum::http::Uri = "/api/sync/stream?tokenRates=false&after=1".parse().unwrap();
+        assert!(axum::extract::Query::<super::SyncStreamQuery>::try_from_uri(&valid).is_ok());
+        let invalid: axum::http::Uri = "/api/sync/stream?after=-1".parse().unwrap();
+        assert!(axum::extract::Query::<super::SyncStreamQuery>::try_from_uri(&invalid).is_err());
+        assert!(serde_json::from_str::<studio_runtime_schema::http_ingress::Object<super::StreamSubscriptionAdd>>(r#"{"resource":{"kind":"state"},"since":{"workspaceId":"w","seq":1,"terminalGeneration":0}}"#).is_ok());
+        for raw in [
+            r#"{"resource":{"kind":"state"},"since":null}"#,
+            r#"{"resource":{"kind":"state"},"since":{"workspaceId":"w","seq":-1}}"#,
+            r#"{"resource":{"kind":"state"},"since":{"workspaceId":"w","seq":9007199254740992}}"#,
+            r#"{"resource":{"kind":"state"},"since":{"workspaceId":"","seq":1}}"#,
+            r#"{"resource":{"kind":"state"},"since":{"workspaceId":"w","seq":1,"terminalGeneration":null}}"#,
+            r#"{"resource":{"kind":"state"},"extra":true}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<
+                    studio_runtime_schema::http_ingress::Object<super::StreamSubscriptionAdd>,
+                >(raw)
+                .is_err()
+            );
+        }
+    }
     fn fixture_notification(
         id: &str,
         resources: &[serde_json::Value],

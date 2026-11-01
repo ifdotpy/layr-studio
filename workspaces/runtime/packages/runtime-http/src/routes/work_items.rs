@@ -1,6 +1,6 @@
 //! HTTP handlers for persisted work-item, plan and queue reads.
 
-use super::extractors::{ApiJson, QueryParams};
+use super::extractors::{ApiJson, TypedQuery};
 use super::manifest::{OperationStatus, RouteGroup, get, post};
 use axum::Json;
 use axum::extract::State;
@@ -39,11 +39,19 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WorkQuery {
+    agent: Option<String>,
+}
+
 pub(crate) async fn work(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<WorkQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let agent_id = query_string(&query, "agent")?;
+    let agent_id = query
+        .agent
+        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid request"))?;
     work_for_agent(state, agent_id).await.map(Json)
 }
 
@@ -83,9 +91,11 @@ pub(crate) async fn work_for_agent(state: HttpState, agent_id: String) -> Result
 
 pub(crate) async fn queue(
     State(state): State<HttpState>,
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<WorkQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let agent_id = query_string(&query, "agent")?;
+    let agent_id = query
+        .agent
+        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid request"))?;
     queue_for_agent(state, agent_id).await.map(Json)
 }
 
@@ -122,14 +132,6 @@ where
             read(connection, &agent, &validators)
         })
         .await
-}
-
-fn query_string(query: &QueryParams, name: &str) -> Result<String, ApiError> {
-    query
-        .typed_value(name)
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid request"))
 }
 
 fn invalid_stored(object: &'static str, id: &str) -> ApiError {
@@ -233,7 +235,7 @@ pub(crate) async fn annotation(
 }
 pub(crate) async fn organization(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Value>,
+    ApiJson(body): ApiJson<studio_runtime_services::organization_effects::OrganizationRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let result = store
@@ -337,5 +339,23 @@ mod annotation_body_tests {
         ] {
             assert!(serde_json::from_value::<AnnotationBody>(value).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod typed_query_tests {
+    use axum::extract::Query;
+    use serde::de::DeserializeOwned;
+
+    fn accepts<T: DeserializeOwned>(query: &str) -> bool {
+        let uri = format!("/?{query}").parse().unwrap();
+        Query::<T>::try_from_uri(&uri).is_ok()
+    }
+
+    #[test]
+    fn query_contracts() {
+        assert!(accepts::<super::WorkQuery>("agent=a"));
+        assert!(!accepts::<super::WorkQuery>("extra=x"));
+        assert!(!accepts::<super::WorkQuery>("agent=a&unknown=x"));
     }
 }

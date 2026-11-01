@@ -1,6 +1,6 @@
 //! HTTP adapter for the durable sync document operations.
 
-use super::extractors::{ApiJson, QueryParams};
+use super::extractors::{ApiJson, TypedQuery};
 use super::manifest::{OperationStatus, RouteGroup, get, post};
 use axum::Json;
 use axum::extract::State;
@@ -86,14 +86,48 @@ pub(crate) async fn protocol(
     >(response)?))
 }
 
+/// Maximum synchronization scope length, in Unicode code points.
+const SYNC_PULL_SCOPE_MAX_CHARS: usize = 299;
+/// Maximum synchronization priority ID length, in Unicode code points.
+const SYNC_PULL_PRIORITY_ID_MAX_CHARS: usize = 4096;
+type SyncCursor = studio_runtime_schema::bounded_integer::BoundedInteger<
+    0,
+    { studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64 },
+>;
+
+#[derive(serde::Deserialize)]
+enum SyncPullFlag {
+    #[serde(rename = "1")]
+    Enabled,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SyncPullQuery {
+    scope: Option<studio_runtime_schema::bounded_text::BoundedText<1, SYNC_PULL_SCOPE_MAX_CHARS>>,
+    after: Option<SyncCursor>,
+    limit: Option<
+        studio_runtime_schema::bounded_integer::BoundedInteger<
+            1,
+            { studio_runtime_schema::shared_values::SYNC_ENTITY_PAGE_LIMIT as u64 },
+        >,
+    >,
+    fresh: Option<SyncPullFlag>,
+    initial_high: Option<SyncCursor>,
+    reset: Option<SyncPullFlag>,
+    priority_id: Option<
+        studio_runtime_schema::bounded_text::BoundedText<0, SYNC_PULL_PRIORITY_ID_MAX_CHARS>,
+    >,
+}
+
 pub(crate) async fn pull(
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<SyncPullQuery>,
     State(state): State<HttpState>,
 ) -> Result<Response, ApiError> {
     let scope = query
-        .typed_value("scope")
-        .and_then(Value::as_str)
-        .unwrap_or(SYNC_ENTITY_SCOPE)
+        .scope
+        .as_ref()
+        .map_or(SYNC_ENTITY_SCOPE, |value| value.as_str())
         .to_owned();
     if scope != "drafts"
         && scope != SYNC_ENTITY_SCOPE
@@ -104,18 +138,17 @@ pub(crate) async fn pull(
             Value::String("scope".to_owned()),
         ]));
     }
-    let after = query_integer(&query, "after", 0)?.max(0);
+    let after = query.after.map_or(0, |value| value.get());
     let limit = sync_policy::effective_limit(
         &scope,
-        query_integer(&query, "limit", sync_policy::OTHER_PAGE_LIMIT)?,
+        query
+            .limit
+            .map_or(sync_policy::OTHER_PAGE_LIMIT, |value| value.get()),
     );
-    let fresh = query.typed_value("fresh").and_then(Value::as_str) == Some("1");
-    let initial_high = query_integer(&query, "initialHigh", 0)?.max(0);
-    let reset_support = query.typed_value("reset").and_then(Value::as_str) == Some("1");
-    let priority_id = query
-        .typed_value("priorityId")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
+    let fresh = query.fresh.is_some();
+    let initial_high = query.initial_high.map_or(0, |value| value.get());
+    let reset_support = query.reset.is_some();
+    let priority_id = query.priority_id.map(|value| value.as_str().to_owned());
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let validators = state.validators.clone();
     let state_dir = state.state_dir.clone();
@@ -973,18 +1006,6 @@ fn validate_draft_value(id: &str, payload: &Value) -> Result<(), ()> {
         .map_err(|_| ())
 }
 
-fn query_integer(query: &QueryParams, name: &str, default: i64) -> Result<i64, ApiError> {
-    match query.typed_value(name) {
-        None | Some(Value::Null) => Ok(default),
-        Some(value) => value.as_i64().ok_or_else(|| {
-            ApiError::validation(vec![
-                Value::String("query".to_owned()),
-                Value::String(name.to_owned()),
-            ])
-        }),
-    }
-}
-
 #[cfg(test)]
 mod vault_maintenance_tests {
     #![allow(clippy::unwrap_used, clippy::disallowed_methods)]
@@ -999,6 +1020,19 @@ mod vault_maintenance_tests {
     use serde_json::{Value, json};
     use std::sync::Arc;
     use studio_runtime_store::{ProjectsRepository, RuntimeStore, SyncDocumentsRepository};
+
+    #[test]
+    fn sync_pull_query_rejects_invalid_bounds_and_unknown_fields() {
+        fn valid(query: &str) -> bool {
+            let uri: axum::http::Uri = format!("/api/sync/pull?{query}").parse().unwrap();
+            axum::extract::Query::<super::SyncPullQuery>::try_from_uri(&uri).is_ok()
+        }
+        assert!(valid("scope=drafts&after=5&limit=10&fresh=1"));
+        assert!(!valid("limit=0"));
+        assert!(!valid("limit=501"));
+        assert!(!valid("fresh=0"));
+        assert!(!valid("extra=1"));
+    }
 
     #[test]
     fn draft_wire_matches_schema_boundaries() {

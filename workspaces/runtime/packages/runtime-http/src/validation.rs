@@ -28,8 +28,8 @@ pub(crate) struct RawRequest {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ValidatedRequest {
-    pub raw_body: Option<Bytes>,
     pub query: Arc<Map<String, Value>>,
+    #[cfg(test)]
     pub headers: Arc<Map<String, Value>>,
 }
 
@@ -48,6 +48,7 @@ struct OperationValidator {
     body_required: bool,
     query: Option<Part>,
     headers: Option<Part>,
+    typed_query: bool,
 }
 
 #[derive(Clone, Default)]
@@ -65,13 +66,85 @@ pub(crate) struct MatchedOperation {
 
 // Temporary migration marker; remove when every body uses a typed extractor.
 const TYPED_BODIES: &[(&str, &str)] = &[
+    ("POST", "/api/room/delete"),
+    ("POST", "/api/sync/notify"),
+    ("POST", "/api/studio-errors/dismiss"),
+    ("POST", "/api/claude/session"),
+    ("POST", "/api/claude/file-backups"),
+    ("POST", "/api/profiles"),
+    ("POST", "/api/complaints"),
+    ("POST", "/api/linux-vm/settings"),
+    ("POST", "/api/accounts/login"),
+    ("POST", "/api/browser/forward"),
+    ("POST", "/api/questions/defer"),
+    ("POST", "/api/questions/delete"),
+    ("POST", "/api/branch"),
+    ("POST", "/api/assets"),
+    ("POST", "/api/annotation"),
+    ("POST", "/api/accounts/default"),
+    ("POST", "/api/accounts/delete"),
+    ("POST", "/api/accounts/disconnect"),
+    ("POST", "/api/accounts/reconnect"),
+    ("POST", "/api/accounts/name"),
+    ("POST", "/api/accounts/group"),
+    ("POST", "/api/accounts/default-groups"),
+    ("POST", "/api/accounts/throttle"),
+    ("POST", "/api/accounts/register"),
+    ("POST", "/api/accounts/login/cancel"),
     ("POST", "/api/commands"),
     ("POST", "/api/limits/reset"),
     ("POST", "/api/processes/action"),
     ("POST", "/api/queue"),
     ("POST", "/api/orchestration/settings"),
+    ("POST", "/api/organization"),
     ("POST", "/api/sync/drafts"),
     ("POST", "/api/work"),
+];
+
+// Temporary migration marker; typed extractors own these query contracts.
+const TYPED_QUERIES: &[(&str, &str)] = &[
+    ("GET", "/api/messages"),
+    ("GET", "/api/agent-chat"),
+    ("GET", "/api/messages/receipts"),
+    ("GET", "/api/search"),
+    ("GET", "/api/search/item"),
+    ("GET", "/api/sync/pull"),
+    ("GET", "/api/sync/stream"),
+    ("GET", "/api/transcript"),
+    ("GET", "/api/transcript/blob"),
+    ("GET", "/api/transcript/item"),
+    ("GET", "/api/transcript/page"),
+    ("GET", "/api/transcript/search"),
+    ("GET", "/api/terminals/output"),
+    ("GET", "/api/file"),
+    ("GET", "/api/file-info"),
+    ("GET", "/api/work"),
+    ("GET", "/api/queue"),
+    ("GET", "/api/retained-worktrees"),
+    ("GET", "/api/monitor/log"),
+    ("GET", "/api/tool-requests"),
+    ("GET", "/api/changes"),
+    ("GET", "/api/workspace"),
+    ("GET", "/api/task"),
+    ("GET", "/api/task/output"),
+    ("GET", "/api/workspace/tasks"),
+    ("GET", "/api/project-locations"),
+    ("GET", "/api/processes"),
+    ("GET", "/api/processes/action"),
+    ("GET", "/api/limits"),
+    ("GET", "/api/agents/finder-view"),
+    ("GET", "/api/skills"),
+    ("GET", "/api/capabilities"),
+    ("GET", "/api/claude/repair-report"),
+    ("GET", "/api/accounts/claude/login"),
+    ("GET", "/api/analytics"),
+    ("GET", "/api/session-cost"),
+    ("GET", "/api/models"),
+    ("GET", "/api/complaint"),
+    ("GET", "/api/checkpoints"),
+    ("GET", "/api/directories"),
+    ("GET", "/api/costs"),
+    ("GET", "/api/diagnostics/usage-reconciliation"),
 ];
 
 #[derive(Debug, Clone)]
@@ -152,7 +225,6 @@ impl Registry {
             "RequestRecordResponse",
             "RequestEntityDto",
             "ResourceRef",
-            "SubscriptionAdd",
             "ResourceProgressEvent",
             "ResourceEntityTransferEvent",
             "EntityChangeBatch",
@@ -261,10 +333,11 @@ impl Registry {
             .as_ref()
             .and_then(|part| part.schema.get("properties"))
             .and_then(Value::as_object);
-        if let Some((name, _)) = raw
-            .query
-            .iter()
-            .find(|(name, _)| !query_names.is_some_and(|names| names.contains_key(*name)))
+        if !operation.typed_query
+            && let Some((name, _)) = raw
+                .query
+                .iter()
+                .find(|(name, _)| !query_names.is_some_and(|names| names.contains_key(*name)))
         {
             return Err(LocatedError {
                 location: vec![
@@ -273,14 +346,16 @@ impl Registry {
                 ],
             });
         }
-        if let Some((name, _)) = raw.query.iter().find(|(name, values)| {
-            values.len() > 1
-                && query_names
-                    .and_then(|names| names.get(*name))
-                    .and_then(|schema| schema.get("type"))
-                    .and_then(Value::as_str)
-                    != Some("array")
-        }) {
+        if !operation.typed_query
+            && let Some((name, _)) = raw.query.iter().find(|(name, values)| {
+                values.len() > 1
+                    && query_names
+                        .and_then(|names| names.get(*name))
+                        .and_then(|schema| schema.get("type"))
+                        .and_then(Value::as_str)
+                        != Some("array")
+            })
+        {
             return Err(LocatedError {
                 location: vec![
                     Value::String("query".to_owned()),
@@ -302,7 +377,14 @@ impl Registry {
                 None => {}
             }
         }
-        let mut query = Value::Object(parameter_object(raw.query, operation.query.as_ref()));
+        let mut query = Value::Object(parameter_object(
+            if operation.typed_query {
+                BTreeMap::new()
+            } else {
+                raw.query
+            },
+            operation.query.as_ref(),
+        ));
         if let Some(part) = &operation.query {
             validate_part(part, &mut query, None)?;
         }
@@ -356,8 +438,8 @@ impl Registry {
             validate_part(part, &mut headers, None)?;
         }
         Ok(ValidatedRequest {
-            raw_body,
             query: Arc::new(query.as_object().cloned().unwrap_or_default()),
+            #[cfg(test)]
             headers: Arc::new(headers.as_object().cloned().unwrap_or_default()),
         })
     }
@@ -465,7 +547,10 @@ fn compile_operation(
     path: &str,
     operation: &Value,
 ) -> Result<OperationValidator, String> {
-    let mut output = OperationValidator::default();
+    let mut output = OperationValidator {
+        typed_query: TYPED_QUERIES.contains(&(method, path)),
+        ..OperationValidator::default()
+    };
     let operation_id = operation
         .get("operationId")
         .and_then(Value::as_str)
@@ -480,6 +565,9 @@ fn compile_operation(
     }
     if let Some(parameters) = operation.get("parameters").and_then(Value::as_array) {
         for (index, parameter) in parameters.iter().enumerate() {
+            if output.typed_query && parameter.get("in").and_then(Value::as_str) == Some("query") {
+                continue;
+            }
             if let Some(schema) = parameter.get("schema") {
                 check_safe_integer_bounds(
                     document,
@@ -504,6 +592,9 @@ fn compile_operation(
         let mut header_validator_properties = Map::new();
         let mut header_required = Vec::new();
         for (index, parameter) in parameters.iter().enumerate() {
+            if output.typed_query && parameter.get("in").and_then(Value::as_str) == Some("query") {
+                continue;
+            }
             if parameter.get("$ref").is_some() || parameter.get("content").is_some() {
                 return Err("parameter references and content are unsupported".to_owned());
             }
@@ -572,13 +663,15 @@ fn compile_operation(
         let query_schema =
             json!({"type":"object","properties":query_properties,"required":query_required});
         let query_validator_schema = json!({"type":"object","properties":query_validator_properties,"required":query_required});
-        output.query = Some(compile_part(
-            query_schema,
-            query_validator_schema,
-            "query",
-            schema_registry,
-            definitions,
-        )?);
+        if !output.typed_query {
+            output.query = Some(compile_part(
+                query_schema,
+                query_validator_schema,
+                "query",
+                schema_registry,
+                definitions,
+            )?);
+        }
         if !header_properties.is_empty() {
             let header_schema =
                 json!({"type":"object","properties":header_properties,"required":header_required});
@@ -1607,12 +1700,11 @@ mod tests {
 
     #[test]
     fn query_scalars_are_converted_from_the_registered_parameter_schema() {
-        let registry = Registry::compile(&[("GET".to_owned(), "/api/sync/pull".to_owned())])
-            .expect("documented query schema compiles");
+        let registry = query_probe_registry();
         let validated = registry
             .validate_route(
                 "GET",
-                "/api/sync/pull",
+                "/query-probe",
                 RawRequest {
                     query: BTreeMap::from([
                         ("scope".to_owned(), vec!["state:entities:v1".to_owned()]),
@@ -1883,8 +1975,7 @@ mod tests {
 
     #[test]
     fn repeated_scalar_query_parameters_are_refused_even_when_empty() {
-        let registry = Registry::compile(&[("GET".to_owned(), "/api/agent-chat".to_owned())])
-            .expect("query schema compiles");
+        let registry = query_probe_registry();
         for values in [
             vec!["01".to_owned(), "2".to_owned()],
             vec![String::new(), String::new()],
@@ -1893,33 +1984,47 @@ mod tests {
             let error = registry
                 .validate_route(
                     "GET",
-                    "/api/agent-chat",
+                    "/query-probe",
                     RawRequest {
-                        query: BTreeMap::from([("before".to_owned(), values)]),
+                        query: BTreeMap::from([("after".to_owned(), values)]),
                         ..RawRequest::default()
                     },
                 )
                 .expect_err("a declared scalar must occur at most once");
-            assert_eq!(error.location, vec![json!("query"), json!("before")]);
+            assert_eq!(error.location, vec![json!("query"), json!("after")]);
         }
     }
 
     #[test]
     fn oversized_integer_query_parameter_returns_a_located_validation_error() {
-        let registry = Registry::compile(&[("GET".to_owned(), "/api/agent-chat".to_owned())])
-            .expect("query schema compiles");
+        let registry = query_probe_registry();
         let huge = "9".repeat(401);
         let error = registry
             .validate_route(
                 "GET",
-                "/api/agent-chat",
+                "/query-probe",
                 RawRequest {
-                    query: BTreeMap::from([("before".to_owned(), vec![huge])]),
+                    query: BTreeMap::from([("after".to_owned(), vec![huge])]),
                     ..RawRequest::default()
                 },
             )
             .expect_err("an integer outside the serde_json exact range is rejected");
-        assert_eq!(error.location, vec![json!("query"), json!("before")]);
+        assert_eq!(error.location, vec![json!("query"), json!("after")]);
+    }
+
+    fn query_probe_registry() -> Registry {
+        let document = json!({"components":{"schemas":{}},"paths":{"/query-probe":{}}});
+        let operation = json!({"parameters":[
+            {"name":"after","in":"query","schema":{"type":"integer","minimum":0,"maximum":MAX_SAFE_INTEGER}},
+            {"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":500}},
+            {"name":"scope","in":"query","schema":{"type":"string"}}
+        ]});
+        let validator =
+            compile_for_test(&document, "/query-probe", &operation).expect("query schema compiles");
+        Registry {
+            operations: Arc::new(BTreeMap::from([("GET /query-probe".to_owned(), validator)])),
+            ..Registry::default()
+        }
     }
 
     #[test]
