@@ -50,6 +50,7 @@ pub mod callback_runtime;
 pub mod capacity_retry;
 pub mod catalog_reads;
 pub mod change_notifications;
+pub mod chat_status;
 pub mod checkpoints;
 mod child_permissions;
 pub mod claude_bridge;

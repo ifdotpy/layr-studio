@@ -1487,7 +1487,8 @@ fn restore(snapshot: &ManagementSnapshot, agent: &Agent) -> Result<Decision, Man
         ));
     }
     let archive = &agent.record["agentArchive"];
-    if agent.record.get("deletedAt") != archive.get("at")
+    if agent.record.get("deletedAt").filter(|v| !v.is_null())
+        != archive.get("at").filter(|v| !v.is_null())
         || archive.get("epoch").and_then(Value::as_i64) != Some(agent.identity.epoch)
     {
         return Err(ManagementError::Invalid(

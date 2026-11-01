@@ -63,6 +63,14 @@ function source(
           projectPath: path,
           members: ["same"],
           radio: {
+            controls: {
+              busy: false,
+              inputBlocked: false,
+              canPass: false,
+              stopping: false,
+              speaking: false,
+              busyNotice: null,
+            },
             direct: true,
             active: null,
             error: null,

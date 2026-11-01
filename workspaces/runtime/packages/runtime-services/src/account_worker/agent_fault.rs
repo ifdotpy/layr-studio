@@ -355,7 +355,7 @@ pub(super) fn hold_agent(
             Ok(None) => Ok(HoldResult::Missing),
             Ok(Some(agent)) => {
                 if agent.status == AgentStatus::Paused
-                    || studio_runtime_store::truthy(agent.extra.get("nativeFailureHold"))
+                    || agent.native_failure_held()
                     || agent.start_outcome_hold.is_some()
                 {
                     return Ok(HoldResult::AlreadyHeld);
@@ -381,7 +381,7 @@ pub(super) fn hold_agent(
                     return Ok(HoldResult::Missing);
                 };
                 agent.status = AgentStatus::Failed;
-                agent.extra.insert("nativeFailureHold".into(), json!(true));
+                agent.set_native_failure_hold(true);
                 agent.auto_wake = Some(false);
                 agent.in_flight = Some(false);
                 agent.error = studio_runtime_schema::queue_command::Field::Value(

@@ -863,7 +863,7 @@ export default function App({ active = true }: { active?: boolean }) {
   const railGeometry = useEdgeRail(undefined, active && !!data && !room?.radio);
   const [railTools] = useState(createConversationMenuTools);
   const legacy = data?.chats.find((c) => c.id === opened);
-  const roomRoots = room ? roomLeadIds(room, agents) : [];
+  const roomRoots = room ? roomLeadIds(room) : [];
   const lead = room?.radio
     ? undefined
     : catalog.byId.get(

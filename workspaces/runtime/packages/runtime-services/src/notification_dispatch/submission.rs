@@ -462,7 +462,9 @@ fn peer_pair_allowed(
         return Ok(false);
     };
     for (id, agent) in [(left_id, &left), (right_id, &right)] {
-        if agent.get("isLead").is_some_and(|value| !value.is_boolean())
+        if agent
+            .get("isLead")
+            .is_some_and(|value| !value.is_null() && !value.is_boolean())
             || agent
                 .get("parentId")
                 .is_some_and(|value| !value.is_null() && !value.is_string())

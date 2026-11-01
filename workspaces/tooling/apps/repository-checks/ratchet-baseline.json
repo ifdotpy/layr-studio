@@ -229,10 +229,6 @@
       "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:2"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/managed_status_watch.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/monitor_policy.rs",
       "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
     },
@@ -2575,10 +2571,6 @@
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_executor.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:1"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/account_worker/preparation/pipeline.rs",
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:0"
     },
@@ -3061,10 +3053,6 @@
     {
       "file": "workspaces/client/apps/web/src/chatCreation.test.ts",
       "fingerprint": "a4fc2c6fe5816e16795ca4090209d675f02e5346505e127aabe49153c12acfe6:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/chatScope.test.ts",
-      "fingerprint": "83d82ab31733123b72cc0cdf363641970882e31a4062affc7563656c2ff8e4a4:0"
     },
     {
       "file": "workspaces/client/apps/web/src/components/AccountStartThrottle.test.ts",

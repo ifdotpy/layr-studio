@@ -655,7 +655,7 @@ async fn held_agent_keeps_its_unsent_input_and_a_message_starts_it_once() {
                     AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?.unwrap();
                 agent.auto_wake = Some(true);
                 agent.error = studio_runtime_schema::queue_command::Field::Null;
-                agent.extra.remove("nativeFailureHold");
+                agent.clear_native_failure_hold();
                 AgentRepository::put(tx, &agent)?;
                 Ok::<_, WorkerError>(())
             })

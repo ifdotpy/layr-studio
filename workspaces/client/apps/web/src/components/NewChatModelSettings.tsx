@@ -188,6 +188,7 @@ function ModelDraft({ server, projectId, path, onChange }: Props) {
   const availableModels = catalog.models.filter((row) =>
     isModelEnabled({ ...row, provider: row.provider || provider }, allowed),
   );
+  // Draft-only preview uses the model catalog filtered by the person's choices.
   const model = settings.model || defaultChatModel(provider, availableModels);
   const modelInfo = modelForValue(catalog.models, model);
   // A Claude orchestrator that keeps the default model starts at the default effort.

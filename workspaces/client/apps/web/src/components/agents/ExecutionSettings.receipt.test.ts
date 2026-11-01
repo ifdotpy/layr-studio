@@ -969,6 +969,20 @@ test("review settings use their canonical response without a refresh", async () 
   expect(h.refresh).not.toHaveBeenCalled();
 });
 
+test("null review Fast inherits the agent setting", () => {
+  const agent: Agent = {
+    ...initial,
+    fastMode: true,
+    reviewDefaults: { model: null, effort: null, fastMode: null },
+  };
+  const onDraftChange = vi.fn();
+  render(agent, false, onDraftChange).picker.onRole("review");
+  render(agent, false, onDraftChange).picker.onFast();
+  expect(onDraftChange).toHaveBeenCalledWith({
+    review_defaults: { model: null, effort: null, fast_mode: false },
+  });
+});
+
 for (const draft of [false, true]) {
   test(`inherited review reasoning stays hidden while Fast remains editable in ${draft ? "new chat drafts" : "saved settings"}`, async () => {
     const agent: Agent = {

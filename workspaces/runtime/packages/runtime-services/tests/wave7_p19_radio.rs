@@ -618,6 +618,28 @@ fn normalize(value: &mut Value) {
                 }
                 normalize(value);
             }
+            // Frozen Python room entities predate these fields. Validate the
+            // newly published controls before comparing the shared old contract.
+            if map.get("collection") == Some(&json!("room"))
+                && let Some(room) = map.get_mut("payload").and_then(|p| p.get_mut("value"))
+                && let Some(room) = room.as_object_mut()
+            {
+                room.remove("leadIds");
+                if let Some(radio) = room.get_mut("radio").and_then(Value::as_object_mut)
+                    && let Some(controls) = radio.remove("controls")
+                {
+                    let status = <studio_runtime_schema::room_record::Status as serde::Deserialize>::deserialize(&radio["status"]).expect("radio status");
+                    assert_eq!(
+                        controls,
+                        json!(
+                            studio_runtime_schema::radio_controls::RadioControls::derive(
+                                status,
+                                radio["active"].is_object()
+                            )
+                        )
+                    );
+                }
+            }
             if map.remove("interruptState").is_some() {
                 // Python stores the handoff intent as interruptRequested; Rust
                 // retains the durable pending/unknown delivery state separately.

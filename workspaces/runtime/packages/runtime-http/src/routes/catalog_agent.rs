@@ -83,6 +83,7 @@ async fn finder_view(
         .read_async("runtime-http/routes/catalog_agent", move |connection| {
             WorkspaceViewsRepository::agent(connection, &agent_id)
                 .map_err(|_| ApiError::internal())?
+                .map(Box::new)
                 .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "Unknown managed agent"))
         })
         .await?;
@@ -776,13 +777,14 @@ fn required_agent(agent: Option<&str>) -> Result<&str, ApiError> {
 async fn read_agent(
     state: &HttpState,
     agent_id: &str,
-) -> Result<studio_runtime_store::AgentRecord, ApiError> {
+) -> Result<Box<studio_runtime_store::AgentRecord>, ApiError> {
     let store = state.store.as_ref().ok_or_else(ApiError::internal)?;
     let agent_id = agent_id.to_owned();
     store
         .read_async("runtime-http/routes/catalog_agent", move |connection| {
             WorkspaceViewsRepository::agent(connection, &agent_id)
                 .map_err(|_| ApiError::internal())?
+                .map(Box::new)
                 .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "Unknown managed agent"))
         })
         .await

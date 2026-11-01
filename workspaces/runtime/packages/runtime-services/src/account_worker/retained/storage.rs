@@ -720,9 +720,18 @@ fn replay_pending(prior: &RetainedCall, stream: Option<&str>) -> Replay {
     if proven_not_sent(prior, stream) {
         return Replay::Retry(request.recovered().ticket);
     }
-    let mut receipt = prior
-        .call
-        .receipt(request.recovered().ticket, RequestResult::Unknown);
+    // A recorded reply to a transfer call is evidence even before the stream
+    // checkpoint commits it; the transfer must not stall on a replaced bridge.
+    let result = match prior
+        .outcome
+        .as_ref()
+        .filter(|_| prior.call.transfer.is_some())
+        .map(|outcome| &outcome.result)
+    {
+        Some(answer @ (RequestResult::Reply(_) | RequestResult::Rejected(_))) => answer.clone(),
+        _ => RequestResult::Unknown,
+    };
+    let mut receipt = prior.call.receipt(request.recovered().ticket, result);
     receipt.replayed = true;
     Replay::Return(receipt)
 }
@@ -1283,6 +1292,35 @@ mod replay_identity_tests {
             })
             .await
             .expect("recovery");
+    }
+
+    #[tokio::test]
+    async fn recorded_reply_without_commit_ack_replays_as_answered() {
+        let root = tempfile::tempdir().expect("root");
+        let store = database(root.path()).await;
+        store.transaction_with(|tx| {
+            let mut call = call();
+            call.actor = None;
+            call.method = Method::ThreadUnsubscribe;
+            call.params = json!({"threadId":"thread-1"});
+            call.transfer = Some(TransferAuthorization {
+                transfer_id: "move".into(), member: "agent-1".into(),
+                source_account: "default".into(), thread_id: "thread-1".into(),
+            });
+            let key = call.key();
+            let request = RecoveredRequest {
+                ticket: RequestTicket { generation: 4, id: RequestId::String(key.clone()), method: call.method },
+                operation_id: OperationId(key), thread_id: None, lightweight: true,
+                deadline_ms: 1000, unknown: true, remote_id: None,
+            };
+            let reply = json!({"status":"notLoaded"});
+            let outcome = RetainedOutcome {
+                result: RequestResult::Reply(reply.clone()), cursor: 93157, committed_ack: None,
+            };
+            let call = seed(tx, call, &request, true, Some(outcome))?;
+            assert!(matches!(replay_recorded(tx, &call)?, Ok(Replay::Return(receipt)) if receipt.result == RequestResult::Reply(reply)));
+            Ok::<_, WorkerError>(())
+        }).await.expect("replay");
     }
 
     #[tokio::test]

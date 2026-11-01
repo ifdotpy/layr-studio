@@ -9926,6 +9926,12 @@ export interface components {
       /** Text */
       text: string;
     };
+    /** @enum {string} */
+    ChatOperationalKind: "answer" | "error" | "working" | "paused" | "none";
+    ChatOperationalStatus: {
+      kind: components["schemas"]["ChatOperationalKind"];
+      label: string;
+    };
     /** ChatRead */
     ChatRead: {
       /** Messages */
@@ -18845,6 +18851,14 @@ export interface components {
       /** Revision */
       revision: string;
     };
+    RadioControls: {
+      busy: boolean;
+      busyNotice: string | null;
+      canPass: boolean;
+      inputBlocked: boolean;
+      speaking: boolean;
+      stopping: boolean;
+    };
     /**
      * RadioStatus
      * @enum {string}
@@ -20092,7 +20106,7 @@ export interface components {
     ReviewDefaultsDto: {
       /** Effort */
       effort: null | string;
-      fastMode?: boolean | undefined;
+      fastMode?: boolean | null | undefined;
       /** Model */
       model: null | string;
     };
@@ -20151,6 +20165,7 @@ export interface components {
       id: string;
       kind?: components["schemas"]["RoomKind"] | null | undefined;
       lastMessage?: components["schemas"]["RoomLastMessage"] | null | undefined;
+      leadIds?: string[] | undefined;
       /** Localmembers */
       localMembers?: string[] | null | undefined;
       /** Localparticipants */
@@ -20204,6 +20219,7 @@ export interface components {
       id: string;
       kind?: components["schemas"]["RoomKind"] | null | undefined;
       lastMessage?: components["schemas"]["RoomLastMessage"] | null | undefined;
+      leadIds?: string[] | undefined;
       /** Localmembers */
       localMembers?: string[] | null | undefined;
       /** Members */
@@ -20256,6 +20272,7 @@ export interface components {
     /** RoomRadio */
     RoomRadio: {
       active: components["schemas"]["RoomRadioActive"] | null;
+      controls: components["schemas"]["RadioControls"];
       /** Direct */
       direct?: boolean | null | undefined;
       /** Error */
@@ -27486,12 +27503,12 @@ export interface components {
        * Daybreakenabled
        * @default false
        */
-      daybreakEnabled?: boolean | undefined;
+      daybreakEnabled?: boolean | null | undefined;
       /**
        * Delegationdepth
        * @default 1
        */
-      delegationDepth?: number | undefined;
+      delegationDepth?: number | null | undefined;
       /** Effort */
       effort: null | string;
       /** Fastmode */
@@ -38787,6 +38804,14 @@ export const CapacityRetryStatus = {
 export type CapacityRetryStatus = components["schemas"]["CapacityRetryStatus"];
 export const ChatKind = { chat: "chat" } as const;
 export type ChatKind = components["schemas"]["ChatKind"];
+export const ChatOperationalKind = {
+  answer: "answer",
+  error: "error",
+  working: "working",
+  paused: "paused",
+  none: "none",
+} as const;
+export type ChatOperationalKind = components["schemas"]["ChatOperationalKind"];
 export const ClaudeRateStatus = {
   allowed: "allowed",
   allowed_warning: "allowed_warning",

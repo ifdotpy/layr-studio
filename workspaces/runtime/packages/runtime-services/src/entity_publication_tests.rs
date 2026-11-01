@@ -69,6 +69,127 @@ async fn agent_limit_failure_republishes_account_recovery() {
 }
 
 #[tokio::test]
+async fn room_roots_follow_live_agent_root_change() {
+    let (_dir, store) = store().await;
+    seed_chat(
+        &store,
+        chat(json!({"id":"child","rootId":"old","isLead":false})),
+    )
+    .await;
+    store.transaction(|tx| {
+        tx.execute("INSERT INTO runtime_rooms(id,record) VALUES('room',?1)", [json!({"id":"room","kind":"private","members":["child"]}).to_string()])?;
+        studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "room", "room", json!({"id":"room","kind":"private","members":["child"],"name":"Child","leadIds":["old"]}), false)?;
+        Ok(())
+    }).await.unwrap();
+    store.transaction(|tx| {
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','new') WHERE id='child'", [])?;
+        Ok(())
+    }).await.unwrap();
+    assert_eq!(
+        client_entity(&store, "room", "room").unwrap().1["leadIds"],
+        json!(["new"])
+    );
+}
+
+#[tokio::test]
+async fn startup_reprojects_legacy_room_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = studio_runtime_store::RuntimeStore::open(Some(dir.path()))
+        .await
+        .unwrap();
+    super::install(&store).await.unwrap();
+    seed_chat(
+        &store,
+        chat(json!({"id":"lead","rootId":"lead","isLead":true,"created":2})),
+    )
+    .await;
+    seed_chat(
+        &store,
+        chat(json!({"id":"z","rootId":"z","isLead":true,"created":1})),
+    )
+    .await;
+    seed_chat(
+        &store,
+        chat(json!({"id":"y","rootId":"y","isLead":true,"created":2})),
+    )
+    .await;
+    store
+        .transaction(|tx| {
+            tx.execute(
+                "INSERT INTO runtime_rooms(id,record) VALUES('room',?1)",
+                [json!({"id":"room","kind":"private","members":["lead","z","y"]}).to_string()],
+            )?;
+            studio_runtime_store::SyncDocumentsRepository::put_entity(
+                tx,
+                "room",
+                "room",
+                json!({"id":"room","kind":"private","members":["lead","z","y"],"name":"Lead","radio":{"teamId":"team","revision":1,"status":"blocked","speaker":null,"next":[],"active":{"agentId":"lead"},"error":null}}),
+                false,
+            )?;
+            tx.execute(
+                "DELETE FROM sync_entity_meta WHERE key='migration_catalog'",
+                [],
+            )?;
+            tx.execute("DELETE FROM runtime_payload_migrations WHERE name IN ('2026-11-01-room-lead-projection','2026-11-01-radio-controls-projection')", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(
+        client_entity(&store, "room", "room")
+            .unwrap()
+            .1
+            .get("leadIds")
+            .is_none()
+    );
+    drop(store);
+    let store = studio_runtime_store::RuntimeStore::open(Some(dir.path()))
+        .await
+        .unwrap();
+    assert_eq!(
+        client_entity(&store, "room", "room").unwrap().1["leadIds"],
+        json!(["z", "lead", "y"])
+    );
+    assert_eq!(
+        client_entity(&store, "room", "room").unwrap().1["radio"]["controls"]["inputBlocked"],
+        true
+    );
+    let seq = store
+        .test_read_transaction(|tx| {
+            tx.query_row(
+                "SELECT seq FROM sync_entities WHERE collection='room' AND id='room'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(StoreError::from)
+        })
+        .unwrap();
+    store.transaction(|tx| {
+        studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "room", "late", json!({"id":"late","kind":"private","members":["lead"],"radio":{"status":"idle","active":null}}), false)?;
+        tx.execute_batch("CREATE TRIGGER room_migration_schema_change AFTER INSERT ON runtime_rooms BEGIN SELECT 1; END;")?;
+        Ok(())
+    }).await.unwrap();
+    drop(store);
+    let store = studio_runtime_store::RuntimeStore::open(Some(dir.path()))
+        .await
+        .unwrap();
+    let after = store
+        .test_read_transaction(|tx| {
+            tx.query_row(
+                "SELECT seq FROM sync_entities WHERE collection='room' AND id='room'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(StoreError::from)
+        })
+        .unwrap();
+    assert_eq!(after, seq);
+    let late = client_entity(&store, "room", "late").unwrap().1;
+    assert!(late.get("leadIds").is_none());
+    assert!(late["radio"].get("controls").is_none());
+}
+
+#[tokio::test]
 async fn unreadable_summary_keeps_agent_and_exposes_reason() {
     let (_dir, store) = store().await;
     seed_chat(
