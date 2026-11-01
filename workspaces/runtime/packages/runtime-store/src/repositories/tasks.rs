@@ -105,6 +105,9 @@ mod typed_tests {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE runtime_tasks(id TEXT PRIMARY KEY,record TEXT NOT NULL)")
             .unwrap();
+        for index in TaskRepository::index_definitions() {
+            db.execute_batch(&index.create_sql).unwrap();
+        }
         let value = json!({"id":"a","agent":"agent","created":1.0,"status":"running","kind":"command","itemId":"item","turnId":"turn","type":"commandExecution","name":"commandExecution"});
         let record: TaskRecord = serde_json::from_str(&value.to_string()).unwrap();
         TaskRepository::put(&db, &record).unwrap();
@@ -116,8 +119,8 @@ mod typed_tests {
             crate::WorkspaceViewsRepository::task_page(&db, &["agent".into()], None, None, 10)
                 .unwrap();
         assert_eq!(
-            serde_json::to_value(page.into_iter().next().unwrap().decode(&db).unwrap()).unwrap(),
-            value
+            page.into_iter().next().unwrap().decode(&db).unwrap(),
+            record
         );
         assert_eq!(
             crate::projection_value(
