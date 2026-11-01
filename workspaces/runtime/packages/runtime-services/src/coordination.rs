@@ -698,10 +698,9 @@ fn require_not_excluded(
 ) -> Result<(), CoordinationError> {
     let account = agent.account_key.as_str();
     if root
-        .extra
-        .get("excludedAccountKeys")
-        .and_then(Value::as_array)
-        .is_some_and(|keys| keys.iter().any(|key| key.as_str() == Some(account)))
+        .excluded_account_keys
+        .value()
+        .is_some_and(|keys| keys.iter().any(|key| key == account))
     {
         return Err(CoordinationError::InvalidRequest(
             "This account is disabled for this chat",

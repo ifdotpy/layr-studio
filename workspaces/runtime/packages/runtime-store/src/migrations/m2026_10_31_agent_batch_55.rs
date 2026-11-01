@@ -7,7 +7,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         .map(|provider| format!("'{}'", provider.key()))
         .join(",");
     let max_revision = studio_runtime_schema::shared_values::MAX_SAFE_INTEGER;
-    let mut query = tx.prepare(&format!("SELECT id,record FROM runtime_agents WHERE json_valid(record) AND EXISTS (SELECT 1 FROM json_each(record) j WHERE j.key='complaintMisses' OR (j.key='imageWorkspace' AND j.type NOT IN ('true','false','null')) OR (j.key='maxAgents' AND (j.type NOT IN ('integer','real','null') OR (j.type IN ('integer','real') AND (j.atom < 0 OR j.atom > {max_revision} OR j.atom != CAST(j.atom AS INTEGER))))) OR (j.key IN ('error','lastCompletedTurnError') AND j.type NOT IN ('text','null')) OR (j.key='layrReady' AND j.type NOT IN ('true','false')) OR (j.key IN ('lastCompletedTurn','hostProjectPath','executionSettingsAccountKey','lastCompletedTurnStatus','nativeEffort','projectFolder') AND j.type NOT IN ('text','null')) OR (j.key='provider' AND (j.type NOT IN ('text','null') OR (j.type='text' AND j.value NOT IN ({providers})))) OR (j.key='created' AND (j.type NOT IN ('integer','real','null') OR j.atom < 0)) OR (j.key='queueMutationRevision' AND (j.type != 'integer' OR j.atom < 0 OR j.atom > {max_revision})) OR (j.key IN ('imageWorkspace','maxAgents','error','lastCompletedTurnError','layrReady','lastCompletedTurn','hostProjectPath','executionSettingsAccountKey','lastCompletedTurnStatus','nativeEffort','projectFolder','provider','created','queueMutationRevision') AND (SELECT count(*) FROM json_each(record) d WHERE d.key=j.key)>1))"))?;
+    let mut query = tx.prepare(&format!("SELECT id,record FROM runtime_agents WHERE json_valid(record) AND EXISTS (SELECT 1 FROM json_each(record) j WHERE j.key='complaintMisses' OR (j.key='excludedAccountKeys' AND (j.type NOT IN ('array','null') OR (j.type='array' AND EXISTS (SELECT 1 FROM json_each(j.value) item WHERE item.type != 'text')))) OR (j.key='imageWorkspace' AND j.type NOT IN ('true','false','null')) OR (j.key='maxAgents' AND (j.type NOT IN ('integer','real','null') OR (j.type IN ('integer','real') AND (j.atom < 0 OR j.atom > {max_revision} OR j.atom != CAST(j.atom AS INTEGER))))) OR (j.key IN ('error','lastCompletedTurnError') AND j.type NOT IN ('text','null')) OR (j.key='layrReady' AND j.type NOT IN ('true','false')) OR (j.key IN ('lastCompletedTurn','hostProjectPath','executionSettingsAccountKey','lastCompletedTurnStatus','nativeEffort','projectFolder') AND j.type NOT IN ('text','null')) OR (j.key='provider' AND (j.type NOT IN ('text','null') OR (j.type='text' AND j.value NOT IN ({providers})))) OR (j.key='created' AND (j.type NOT IN ('integer','real','null') OR j.atom < 0)) OR (j.key='queueMutationRevision' AND (j.type != 'integer' OR j.atom < 0 OR j.atom > {max_revision})) OR (j.key IN ('excludedAccountKeys','imageWorkspace','maxAgents','error','lastCompletedTurnError','layrReady','lastCompletedTurn','hostProjectPath','executionSettingsAccountKey','lastCompletedTurnStatus','nativeEffort','projectFolder','provider','created','queueMutationRevision') AND (SELECT count(*) FROM json_each(record) d WHERE d.key=j.key)>1))"))?;
     let rows = query.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
@@ -16,6 +16,24 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         let mut record: std::collections::BTreeMap<String, Box<serde_json::value::RawValue>> =
             serde_json::from_str(&raw)?;
         record.remove("complaintMisses");
+        if let Some(value) = record.get("excludedAccountKeys")
+            && serde_json::from_str::<Option<Vec<String>>>(value.get()).is_err()
+        {
+            if let Ok(items) =
+                serde_json::from_str::<Vec<Box<serde_json::value::RawValue>>>(value.get())
+            {
+                let keys: Vec<String> = items
+                    .iter()
+                    .filter_map(|item| serde_json::from_str(item.get()).ok())
+                    .collect();
+                record.insert(
+                    "excludedAccountKeys".into(),
+                    serde_json::value::RawValue::from_string(serde_json::to_string(&keys)?)?,
+                );
+            } else {
+                record.remove("excludedAccountKeys");
+            }
+        }
         if record
             .get("imageWorkspace")
             .is_some_and(|v| serde_json::from_str::<Option<bool>>(v.get()).is_err())
@@ -157,7 +175,7 @@ mod tests {
     fn agent_batch_55_normalizes_all_owned_fields() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(r#"CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-        INSERT INTO runtime_agents VALUES('legacy','{"id":"legacy","provider":"future","created":-1,"complaintMisses":9,"maxAgents":-1,"nativeEffort":42,"imageWorkspace":42,"projectFolder":42,"layrReady":"bad","queueMutationRevision":-1,"lastCompletedTurn":42,"hostProjectPath":42,"executionSettingsAccountKey":42,"lastCompletedTurnStatus":42,"error":{"error":{"message":"nested","code":42},"ignored":true},"lastCompletedTurnError":{"message":"previous","ignored":true}}');"#).unwrap();
+        INSERT INTO runtime_agents VALUES('legacy','{"id":"legacy","provider":"future","created":-1,"complaintMisses":9,"maxAgents":-1,"nativeEffort":42,"imageWorkspace":42,"projectFolder":42,"excludedAccountKeys":["blocked",42],"layrReady":"bad","queueMutationRevision":-1,"lastCompletedTurn":42,"hostProjectPath":42,"executionSettingsAccountKey":42,"lastCompletedTurnStatus":42,"error":{"error":{"message":"nested","code":42},"ignored":true},"lastCompletedTurnError":{"message":"previous","ignored":true}}');"#).unwrap();
         let tx = db.transaction().unwrap();
         super::apply(&tx).unwrap();
         super::apply(&tx).unwrap();
@@ -166,8 +184,22 @@ mod tests {
             .unwrap();
         assert_eq!(
             raw,
-            r#"{"error":{"message":"nested","code":"42"},"id":"legacy","lastCompletedTurnError":{"message":"previous"}}"#
+            r#"{"error":{"message":"nested","code":"42"},"excludedAccountKeys":["blocked"],"id":"legacy","lastCompletedTurnError":{"message":"previous"}}"#
         );
+        tx.execute(
+            "INSERT INTO runtime_agents VALUES('bad-list', ?1)",
+            [r#"{"id":"bad-list","excludedAccountKeys":"invalid"}"#],
+        )
+        .unwrap();
+        super::apply(&tx).unwrap();
+        let raw: String = tx
+            .query_row(
+                "SELECT record FROM runtime_agents WHERE id='bad-list'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(raw, r#"{"id":"bad-list"}"#);
         tx.execute("INSERT INTO runtime_agents VALUES('details', ?1)", [r#"{"id":"details","error":{"message":{"reason":"blocked"},"data":{"request":"one"},"additionalDetails":"detail","ignored":true}}"#]).unwrap();
         super::apply(&tx).unwrap();
         let raw: String = tx

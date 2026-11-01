@@ -433,6 +433,11 @@ pub struct AgentRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
+    pub excluded_account_keys: studio_runtime_schema::queue_command::Field<Vec<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
     pub role: studio_runtime_schema::queue_command::Field<
         studio_runtime_schema::creation_intent::AgentRole,
     >,
@@ -886,6 +891,7 @@ impl AgentRecord {
             effort: Default::default(),
             native_effort: Default::default(),
             project_folder: Default::default(),
+            excluded_account_keys: Default::default(),
             role: Default::default(),
             provider: Default::default(),
             created: Default::default(),
@@ -2953,6 +2959,14 @@ mod tests {
         assert_eq!(decoded.value()["error"]["data"]["id"], 1);
         let via_value = AgentRecord::from_value(serde_json::from_str(raw).unwrap()).unwrap();
         assert_eq!(via_value.value()["error"]["data"]["id"], 1);
+    }
+
+    #[test]
+    fn agent_excluded_accounts_are_strings() {
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"excludedAccountKeys":["blocked",42]}"#;
+        assert!(serde_json::from_str::<AgentRecord>(raw).is_err());
+        let valid = raw.replace(",42", "");
+        assert!(serde_json::from_str::<AgentRecord>(&valid).is_ok());
     }
 
     #[test]
