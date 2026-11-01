@@ -3096,10 +3096,6 @@
       "fingerprint": "a4fc2c6fe5816e16795ca4090209d675f02e5346505e127aabe49153c12acfe6:0"
     },
     {
-      "file": "workspaces/client/apps/web/src/chatScope.test.ts",
-      "fingerprint": "83d82ab31733123b72cc0cdf363641970882e31a4062affc7563656c2ff8e4a4:0"
-    },
-    {
       "file": "workspaces/client/apps/web/src/components/AccountStartThrottle.test.ts",
       "fingerprint": "52267d508df7d569aba04cdc59896349d716a9af4da62368ba0d7cb3493e1205:0"
     },

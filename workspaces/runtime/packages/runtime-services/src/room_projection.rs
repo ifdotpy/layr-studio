@@ -388,7 +388,7 @@ mod tests {
             shared_room_id: None,
             execution_mode: None,
         };
-        let room: RoomRecord = serde_json::from_value(json!({"id":"radio:x","kind":"private","members":["a","b","c"],"radio":{"teamId":"x","revision":0,"status":"idle","speaker":null,"next":[],"active":null,"error":null,"direct":false,"seen":{}}})).unwrap();
+        let room: RoomRecord = serde_json::from_str(r#"{"id":"radio:x","kind":"private","members":["a","b","c"],"radio":{"teamId":"x","revision":0,"status":"idle","speaker":null,"next":[],"active":null,"error":null,"direct":false,"seen":{}}}"#).unwrap();
         let first = RoomViewContext::new(
             vec![agent("b", 1.0), agent("a", 2.0), agent("c", 2.0)],
             vec![],
