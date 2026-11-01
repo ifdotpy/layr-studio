@@ -1352,7 +1352,6 @@ fn validate_agent_write_fields(
             .and_then(Value::as_str)
             .is_none_or(str::is_empty)
         || agent.get("status").and_then(Value::as_str).is_none()
-        || agent.get("events").and_then(Value::as_u64).is_none()
     {
         return Err(stored("runtime_agents", agent_id));
     }
@@ -3547,6 +3546,35 @@ mod tests {
             1234.5,
         );
         assert!(result.is_ok(), "{result:?}");
+    }
+
+    /// A new agent has no event counter yet; its first notification counts from zero.
+    #[test]
+    fn agent_without_event_counter_accepts_first_notification() {
+        let mut connection = database();
+        connection
+            .execute(
+                "UPDATE runtime_agents SET record=json_remove(record,'$.events') WHERE id='agent'",
+                [],
+            )
+            .expect("event counter removed");
+        let transaction = connection.transaction().expect("transaction begins");
+        let delta = json!({"method":"item/agentMessage/delta","params":{"threadId":"thread","turnId":"turn","itemId":"answer","delta":"hello"}});
+        assert_eq!(
+            dispatch(
+                &transaction,
+                &mut NotificationStreamBuffer::default(),
+                1,
+                &delta,
+                10.0
+            )
+            .expect("delta writes"),
+            DispatchOutcome::Written
+        );
+        let agent = NotificationDispatchRepository::agent_record(&transaction, "agent")
+            .expect("agent reads")
+            .expect("agent exists");
+        assert_eq!(agent["events"], 1);
     }
 
     #[test]

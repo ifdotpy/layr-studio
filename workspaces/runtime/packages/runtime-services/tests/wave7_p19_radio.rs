@@ -351,6 +351,7 @@ async fn seed(store: &RuntimeStore, snapshot: &Value) {
             }
             db.execute("INSERT OR IGNORE INTO runtime_agent_volatile(id) SELECT id FROM runtime_agents", [])?;
             studio_runtime_store::migrations::migrate_radio_room(db)?;
+            studio_runtime_store::migrations::migrate_room_record(db)?;
             studio_runtime_store::migrations::migrate_project_teams(db)?;
             studio_runtime_store::migrations::migrate_project_record_kind(db)?;
             for id in completed_turns {

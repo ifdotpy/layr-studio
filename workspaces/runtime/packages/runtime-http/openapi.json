@@ -8417,6 +8417,30 @@
             ],
             "default": null
           },
+          "claudeOptions": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "permissionMode": {
+                    "enum": [
+                      "default",
+                      "acceptEdits",
+                      "auto",
+                      "plan",
+                      "bypassPermissions"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Claude permission mode for the worker launch preview. Other session options remain private."
+          },
           "commandProgress": {
             "default": [],
             "items": {

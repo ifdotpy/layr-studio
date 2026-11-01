@@ -67,6 +67,8 @@ pub use m2026_10_30_project_teams::apply as migrate_project_teams;
 pub use m2026_10_30_radio_room::apply as migrate_radio_room;
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_31_project_record_kind::apply as migrate_project_record_kind;
+#[cfg(any(test, feature = "test-support"))]
+pub use m2026_10_31_room_record::apply as migrate_room_record;
 
 use std::path::Path;
 

@@ -2183,14 +2183,12 @@ pub async fn conversation(
                 MutationAdmission::Replay(reply) => return Ok(reply.agent),
                 MutationAdmission::Fresh(admitted) => admitted,
             };
-            let before = SyncDocumentsRepository::entity_sequence(tx)?;
             let resolved = settings.as_ref().ok_or(OperationError::Internal)?;
             target["pendingSettings"] = json!({"model":resolved.model,"effort":resolved.effort,
                 "nativeEffort":resolved.native_effort,"fastMode":resolved.fast_mode,
                 "daybreakEnabled":resolved.daybreak_enabled,"cyberAccessProgram":resolved.cyber_access_program});
             target["pendingSettingsAccountKey"] = json!(account);
             save_agent(tx, &target, &validate)?;
-            let target = crate::sync_documents::with_entity_delta(tx, before, target)?;
             crate::event_write::settle_request(tx, &admitted, Some(&request.id), &SettingsReply {agent:target.clone()}).map_err(MutationError::from)?;
             Ok(target)
         }).await;
@@ -2240,7 +2238,6 @@ pub async fn conversation(
             },
             None => None,
         };
-        let before = SyncDocumentsRepository::entity_sequence(tx)?;
         if (execution_requested || request.cwd.is_some())
             && (truthy(target.get("inFlight"))
                 || matches!(
@@ -2322,7 +2319,6 @@ pub async fn conversation(
         if let Some(yolo) = request.yolo_mode {
             update_team_yolo(tx, &request.id, yolo, &validate)?;
         }
-        let projection = crate::sync_documents::with_entity_delta(tx, before, projection)?;
         if let Some(admitted) = permission_admission {
             crate::event_write::settle_request(
                 tx,
@@ -3143,16 +3139,7 @@ async fn mutate(
     context: &Context<'_>,
     operation: impl FnOnce(&Transaction<'_>) -> Result<Value, OperationError> + Send + 'static,
 ) -> Result<Value, OperationError> {
-    context
-        .store
-        .transaction_with_error(move |tx| {
-            let before = SyncDocumentsRepository::entity_sequence(tx)?;
-            let result = operation(tx)?;
-            Ok(crate::sync_documents::with_entity_delta(
-                tx, before, result,
-            )?)
-        })
-        .await
+    context.store.transaction_with_error(operation).await
 }
 
 #[cfg(test)]
