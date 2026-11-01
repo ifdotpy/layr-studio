@@ -443,6 +443,17 @@ pub struct AgentViewContext {
     pub stall: Option<studio_runtime_schema::agent_progress::AgentStall>,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountChangeAgent {
+    #[serde(default)]
+    is_lead: Option<bool>,
+    #[serde(default)]
+    thread_id: Option<String>,
+    #[serde(default)]
+    in_flight: Option<bool>,
+}
+
 /// Minimal displayable record for an agent whose stored schema failed. Keep
 /// valid hierarchy and lead identity so the renderer does not detach a held
 /// child from its root or render a lead as a worker.
@@ -576,7 +587,8 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
     view.insert("kind".to_owned(), Value::String("agent".to_owned()));
     view.insert("source".to_owned(), Value::String("managed".to_owned()));
     let progress = crate::account_transfer::progress_view(record.get("accountTransfer")).ok()?;
-    let account_change = if !truthy(record.get("isLead")) {
+    let source = <AccountChangeAgent as serde::Deserialize>::deserialize(record).ok()?;
+    let account_change = if source.is_lead != Some(true) {
         studio_runtime_schema::agent_progress::AccountChange::Unavailable {
             reason: "Choose the lead chat to change its account".into(),
         }
@@ -590,8 +602,8 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
             reason: "Finish or cancel the current transfer first".into(),
         }
     } else if context.empty_lead
-        && !truthy(record.get("threadId"))
-        && !truthy(record.get("inFlight"))
+        && source.thread_id.as_deref().is_none_or(str::is_empty)
+        && source.in_flight != Some(true)
     {
         studio_runtime_schema::agent_progress::AccountChange::Select
     } else {
@@ -928,6 +940,17 @@ mod projection_plan_tests {
                 json!({"id":"c","leadId":"lead","leadName":"lead","author":"user","authorName":"You","title":"hello","recipient":recipient,"version":1,"status":"open","created":1.0,"updated":1.0,"readAt":null,"needsUserResponse":recipient == "user"})
             );
         }
+    }
+
+    #[test]
+    fn account_change_rejects_non_boolean_lead_identity() {
+        let malformed = json!({"compactions":0,"id":"lead","rootId":"lead","epoch":1,
+            "status":"idle","accountKey":"default","isLead":"yes","provider":"codex"});
+        let context = super::AgentViewContext {
+            empty_lead: true,
+            ..Default::default()
+        };
+        assert!(super::agent_entity_view(&malformed, &context).is_none());
     }
 
     #[test]
