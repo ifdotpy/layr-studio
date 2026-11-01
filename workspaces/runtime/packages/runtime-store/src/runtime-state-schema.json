@@ -1197,7 +1197,7 @@
       {
         "create_order": 251,
         "name": "request_results",
-        "sql": "CREATE TABLE request_results (\n           id TEXT PRIMARY KEY,\n           signature TEXT NOT NULL,\n           status TEXT NOT NULL DEFAULT 'applied' CHECK(\"status\" IN ('applied','rejected')),\n           ref_kind TEXT CHECK(\"ref_kind\" IN ('agent','annotation','complaint','message','project','room','work','outbox')),\n           ref_id TEXT,\n           ref_rev INTEGER,\n           result TEXT,\n           created INTEGER NOT NULL,\n           CHECK ((result IS NOT NULL AND ref_kind IS NULL AND ref_id IS NULL AND ref_rev IS NULL)\n               OR (result IS NULL AND ref_kind IS NOT NULL AND ref_id IS NOT NULL AND ref_rev IS NOT NULL)\n               OR (result IS NULL AND status = 'rejected' AND ref_kind IS NULL AND ref_id IS NULL AND ref_rev IS NULL))\n         )",
+        "sql": "CREATE TABLE request_results (\n           id TEXT PRIMARY KEY,\n           signature TEXT NOT NULL,\n           status TEXT NOT NULL DEFAULT 'applied',\n           ref_kind TEXT,\n           ref_id TEXT,\n           ref_rev INTEGER,\n           result TEXT,\n           created INTEGER NOT NULL,\n           CHECK ((result IS NOT NULL AND ref_kind IS NULL AND ref_id IS NULL AND ref_rev IS NULL)\n               OR (result IS NULL AND ref_kind IS NOT NULL AND ref_id IS NOT NULL AND ref_rev IS NOT NULL)\n               OR (result IS NULL AND status = 'rejected' AND ref_kind IS NULL AND ref_id IS NULL AND ref_rev IS NULL))\n         )",
         "table": "request_results",
         "type": "table"
       },
@@ -2424,6 +2424,34 @@
         "name": "work_owner_identity_update",
         "sql": "CREATE TRIGGER work_owner_identity_update AFTER UPDATE OF record ON runtime_agents\n         WHEN json_extract(OLD.record,'$.epoch') IS NOT json_extract(NEW.record,'$.epoch')\n           OR json_extract(OLD.record,'$.accountKey') IS NOT json_extract(NEW.record,'$.accountKey')\n           OR json_extract(OLD.record,'$.threadId') IS NOT json_extract(NEW.record,'$.threadId')\n           OR json_extract(OLD.record,'$.turnId') IS NOT json_extract(NEW.record,'$.turnId')\n         BEGIN SELECT sync_work_identity_change(NEW.id,NULL); END",
         "table": "runtime_agents",
+        "type": "trigger"
+      },
+      {
+        "create_order": 308,
+        "name": "enum_check_request_results_status_ins",
+        "sql": "CREATE TRIGGER \"enum_check_request_results_status_ins\" BEFORE INSERT ON \"request_results\" WHEN NEW.\"status\" NOT IN ('applied','rejected') BEGIN SELECT RAISE(ABORT,'request_results.status is outside its enum'); END",
+        "table": "request_results",
+        "type": "trigger"
+      },
+      {
+        "create_order": 309,
+        "name": "enum_check_request_results_status_upd",
+        "sql": "CREATE TRIGGER \"enum_check_request_results_status_upd\" BEFORE UPDATE OF \"status\" ON \"request_results\" WHEN NEW.\"status\" NOT IN ('applied','rejected') BEGIN SELECT RAISE(ABORT,'request_results.status is outside its enum'); END",
+        "table": "request_results",
+        "type": "trigger"
+      },
+      {
+        "create_order": 310,
+        "name": "enum_check_request_results_ref_kind_ins",
+        "sql": "CREATE TRIGGER \"enum_check_request_results_ref_kind_ins\" BEFORE INSERT ON \"request_results\" WHEN NEW.\"ref_kind\" NOT IN ('agent','annotation','complaint','message','project','room','work','outbox') BEGIN SELECT RAISE(ABORT,'request_results.ref_kind is outside its enum'); END",
+        "table": "request_results",
+        "type": "trigger"
+      },
+      {
+        "create_order": 311,
+        "name": "enum_check_request_results_ref_kind_upd",
+        "sql": "CREATE TRIGGER \"enum_check_request_results_ref_kind_upd\" BEFORE UPDATE OF \"ref_kind\" ON \"request_results\" WHEN NEW.\"ref_kind\" NOT IN ('agent','annotation','complaint','message','project','room','work','outbox') BEGIN SELECT RAISE(ABORT,'request_results.ref_kind is outside its enum'); END",
+        "table": "request_results",
         "type": "trigger"
       }
     ]
