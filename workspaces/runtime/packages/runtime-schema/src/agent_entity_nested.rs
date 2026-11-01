@@ -241,6 +241,29 @@ pub struct WorkspaceCleanupSummaryDto {
     pub path: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ActiveToolDto {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentActivity {
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<f64>")]
+    pub at: Field<f64>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<String>")]
+    pub phase: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<Vec<ActiveToolDto>>")]
+    pub tools: Field<Vec<ActiveToolDto>>,
+}
+
 fn object(
     value: &mut serde_json::Value,
 ) -> Result<&mut serde_json::Map<String, serde_json::Value>, String> {
@@ -290,7 +313,7 @@ fn nullable(
             _ => return Err(format!("{name} must use the double number format")),
         }
     }
-    let variants = if kind == "boolean" {
+    let variants = if kind == "boolean" || kind == "array" {
         serde_json::json!([value,{"type":"null"}])
     } else {
         serde_json::json!([{"type":"null"},value])
@@ -355,7 +378,7 @@ fn inline_nullable_reference(
     Ok(())
 }
 
-pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 12], String> {
+pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 14], String> {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
@@ -469,6 +492,16 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 12], Strin
         object(&mut inner)?.insert("type".into(), kind);
         *prop = serde_json::json!({"anyOf":[inner,{"type":"null"}]});
     }
+    let mut tool = ActiveToolDto::json_schema(&mut generator).to_value();
+    title(&mut tool, "ActiveToolDto")?;
+    for (name, label) in [("id", "Id"), ("type", "Type"), ("name", "Name")] {
+        title(property(&mut tool, name)?, label)?;
+    }
+    let mut activity = AgentActivity::json_schema(&mut generator).to_value();
+    title(&mut activity, "AgentActivity")?;
+    nullable(&mut activity, "at", "At", true)?;
+    nullable(&mut activity, "phase", "Phase", true)?;
+    nullable(&mut activity, "tools", "Tools", true)?;
     Ok([
         ("AgentOverview", overview),
         ("AgentSource", source),
@@ -482,6 +515,8 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 12], Strin
         ("WorkerDefaultsDto", defaults),
         ("ExecutionSettingsDto", settings),
         ("WorkspaceCleanupSummaryDto", cleanup),
+        ("ActiveToolDto", tool),
+        ("AgentActivity", activity),
     ])
 }
 
@@ -565,6 +600,33 @@ mod tests {
                 true
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn activity_schema_preserves_a_changed_tool_item_type() {
+        #[derive(JsonSchema)]
+        struct ChangedActivity {
+            #[schemars(with = "Option<Vec<String>>")]
+            tools: Field<Vec<String>>,
+        }
+        assert!(
+            ChangedActivity {
+                tools: Field::Missing
+            }
+            .tools
+            .is_missing()
+        );
+        let mut generator = schemars::generate::SchemaSettings::openapi3()
+            .for_serialize()
+            .into_generator();
+        let mut changed = ChangedActivity::json_schema(&mut generator).to_value();
+        nullable(&mut changed, "tools", "Tools", true).unwrap();
+        let published: serde_json::Value =
+            serde_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        assert_ne!(
+            changed["properties"]["tools"],
+            published["components"]["schemas"]["AgentActivity"]["properties"]["tools"]
         );
     }
 

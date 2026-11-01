@@ -207,6 +207,36 @@ pub struct AgentActivity {
     pub turn_id: Option<String>,
 }
 
+impl TryFrom<&AgentActivity> for studio_runtime_schema::agent_entity_nested::AgentActivity {
+    type Error = &'static str;
+
+    fn try_from(value: &AgentActivity) -> Result<Self, Self::Error> {
+        use studio_runtime_schema::{agent_entity_nested::ActiveToolDto, queue_command::Field};
+
+        let tools = value
+            .tools
+            .as_ref()
+            .map(|tools| {
+                tools
+                    .iter()
+                    .map(|tool| {
+                        Ok(ActiveToolDto {
+                            id: tool.id.clone().ok_or("active tool is missing id")?,
+                            kind: tool.kind.clone().ok_or("active tool is missing type")?,
+                            name: tool.name.clone().ok_or("active tool is missing name")?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, Self::Error>>()
+            })
+            .transpose()?;
+        Ok(Self {
+            at: value.at.map_or(Field::Missing, Field::Value),
+            phase: value.phase.clone().map_or(Field::Missing, Field::Value),
+            tools: tools.map_or(Field::Missing, Field::Value),
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentContextUsage {
@@ -4143,5 +4173,32 @@ mod agent_projection_tests {
             ));
             assert!(!error.to_string().contains("secret-value"));
         }
+    }
+}
+
+#[cfg(test)]
+mod activity_projection_tests {
+    use super::{AgentActiveTool, AgentActivity};
+    use studio_runtime_schema::agent_entity_nested::AgentActivity as WireActivity;
+
+    #[test]
+    fn activity_projection_requires_tool_identity_and_omits_storage_only_fields() {
+        let mut activity = AgentActivity {
+            phase: Some("running".into()),
+            dismissed: Some(true),
+            tools: Some(vec![AgentActiveTool {
+                id: Some("id".into()),
+                name: Some("tool".into()),
+                kind: Some("call".into()),
+            }]),
+            ..AgentActivity::default()
+        };
+        let projected = WireActivity::try_from(&activity).unwrap();
+        assert_eq!(
+            serde_json::to_value(projected).unwrap(),
+            serde_json::json!({"phase":"running","tools":[{"id":"id","name":"tool","type":"call"}]})
+        );
+        activity.tools.as_mut().unwrap()[0].id = None;
+        assert!(WireActivity::try_from(&activity).is_err());
     }
 }
