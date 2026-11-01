@@ -1,19 +1,31 @@
 //! Ordered limits persistence. The journal identity and the snapshot commit together.
 use super::*;
+use rusqlite::OptionalExtension;
+use studio_runtime_schema::json_object::JsonObject;
+use studio_runtime_schema::usage_limits::{UsageLimitsData, UsageLimitsResponse};
 use studio_runtime_store::account_state;
 use studio_runtime_store::{StoreError, SyncDocumentsRepository};
 
 pub(super) enum LimitsWrite {
     Snapshot(LimitsSnapshot),
-    Notification(LimitsUpdate),
+    Checking {
+        reset_at: f64,
+    },
+    Finish,
+    Notification {
+        scope: ConnectionScope,
+        cursor: u64,
+        observed_at: f64,
+        data: UsageLimitsData,
+    },
     ReadFailure {
         scope: Option<ConnectionScope>,
-        before: Value,
+        before: UsageLimitsResponse,
         value: LimitsSnapshot,
     },
     Read {
         scope: ConnectionScope,
-        before: Value,
+        before: UsageLimitsResponse,
         value: LimitsSnapshot,
     },
 }
@@ -21,40 +33,17 @@ pub(super) enum LimitsWrite {
 impl LimitsWrite {
     fn scope(&self) -> Option<&ConnectionScope> {
         match self {
-            Self::Snapshot(_) => None,
-            Self::Notification(update) => Some(&update.scope),
+            Self::Snapshot(_) | Self::Checking { .. } | Self::Finish => None,
+            Self::Notification { scope, .. } => Some(scope),
             Self::Read { scope, .. } => Some(scope),
             Self::ReadFailure { scope, .. } => scope.as_ref(),
         }
     }
 }
 
-// Fresh observations are durable even when their public content has not changed.
-#[derive(serde::Serialize)]
-struct Observation<'a> {
-    scope: &'a Value,
-    cursor: u64,
-    #[serde(flatten)]
-    times: ObservationTimes<'a>,
-}
-
-struct ObservationTimes<'a>(&'a Value);
-impl serde::Serialize for ObservationTimes<'_> {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(None)?;
-        for field in studio_runtime_store::account_state::LIMITS_OBSERVATION_TIME_FIELDS {
-            if let Some(value) = self.0.get(*field) {
-                map.serialize_entry(*field, value)?;
-            }
-        }
-        map.end()
-    }
-}
-
 pub(super) async fn persist(
     store: Arc<studio_runtime_store::RuntimeStore>,
-    cache: Arc<std::sync::Mutex<std::collections::BTreeMap<String, Value>>>,
+    cache: Arc<std::sync::Mutex<std::collections::BTreeMap<String, UsageLimitsResponse>>>,
     account: String,
     write: LimitsWrite,
     wake: Option<Arc<Notify>>,
@@ -88,7 +77,7 @@ fn commit(
     write: LimitsWrite,
     now: f64,
     session: Option<&dyn RetainedAccountSession>,
-) -> Result<(Option<Value>, bool), StoreError> {
+) -> Result<(Option<UsageLimitsResponse>, bool), StoreError> {
     // Check at the writer boundary as the session may retire while this write queues.
     if let Some(scope) = write.scope()
         && session
@@ -107,136 +96,322 @@ fn commit(
         }
         return Ok((None, false));
     }
-    let raw_stamp = account_state::limits_observation(tx, account)?;
-    let mut stamp: Value = raw_stamp
-        .map(|raw| serde_json::from_str(&raw))
-        .transpose()
-        .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?
-        .unwrap_or(Value::Null);
-    let old = studio_runtime_store::account_state::limits_snapshot_with_observation(
-        tx, account, &mut stamp,
-    )?;
-    let mut next_stamp = None;
+    let mut stamp =
+        account_state::LimitsStamp::read(account_state::limits_observation(tx, account)?)?;
+    let old = account_state::typed_limits_snapshot(tx, account, &stamp)?;
+    let mut stamp_changed = false;
+    let committed_view = tx.query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0", [account], |row| row.get::<_, String>(0)).optional()?.map(|payload| account_state::normalized_limits_view(account, payload.as_bytes(), now).0);
+    let mut checking = None;
+    let force_projection = matches!(
+        &write,
+        LimitsWrite::Checking { .. }
+            | LimitsWrite::Finish
+            | LimitsWrite::Read { .. }
+            | LimitsWrite::ReadFailure { .. }
+    );
     let value = match write {
-        LimitsWrite::Snapshot(value) => value,
-        LimitsWrite::ReadFailure { before, value, .. } => {
-            if old.as_ref().is_some_and(|old| *old != before) {
+        LimitsWrite::Snapshot(value) => value.response,
+        LimitsWrite::Finish => {
+            if !committed_view.as_ref().is_some_and(|view| {
+                matches!(
+                    view.projection.status,
+                    studio_runtime_schema::usage_limits::AccountLimitsStatus::Checking { .. }
+                )
+            }) {
                 return Ok((old, false));
             }
+            let Some(value) = old.clone() else {
+                return Ok((None, false));
+            };
             value
+        }
+        LimitsWrite::Checking { reset_at } => {
+            checking = Some(reset_at);
+            let Some(value) = old.clone() else {
+                return Ok((None, false));
+            };
+            value
+        }
+        LimitsWrite::ReadFailure { before, value, .. } => {
+            if old.as_ref().is_some_and(|old| *old != before) {
+                old.clone().unwrap_or_else(|| value.response.clone())
+            } else {
+                value.response
+            }
         }
         LimitsWrite::Read {
             scope,
             before,
             value,
         } => {
-            // An event committed during this read owns all provider extensions,
-            // including overage permission. Do not merge a stale read over it.
             if old.as_ref().is_some_and(|old| *old != before) {
-                return Ok((old, false));
-            }
-            let cursor = if stamp["scope"] == serde_json::json!(scope) {
-                stamp["cursor"].as_u64().unwrap_or(0)
+                old.clone().unwrap_or_else(|| value.response.clone())
             } else {
-                0
-            };
-            next_stamp = Some(serde_json::json!({"scope":scope,"cursor":cursor}));
-            value
+                stamp.cursor = if stamp.scope.as_ref() == Some(&scope) {
+                    stamp.cursor
+                } else {
+                    0
+                };
+                stamp.scope = Some(scope);
+                stamp_changed = true;
+                value.response
+            }
         }
-        LimitsWrite::Notification(update) => {
-            let scope = serde_json::json!(update.scope);
-            if stamp["scope"] == scope
-                && stamp["cursor"]
-                    .as_u64()
-                    .is_some_and(|cursor| cursor >= update.cursor)
-            {
+        LimitsWrite::Notification {
+            scope,
+            cursor,
+            observed_at,
+            data: incoming,
+        } => {
+            checking = committed_view
+                .as_ref()
+                .and_then(|view| match view.projection.status {
+                    studio_runtime_schema::usage_limits::AccountLimitsStatus::Checking {
+                        reset_at,
+                    } => Some(reset_at),
+                    studio_runtime_schema::usage_limits::AccountLimitsStatus::Current => None,
+                });
+            if stamp.scope.as_ref() == Some(&scope) && stamp.cursor >= cursor {
                 return Ok((old, false));
             }
-            if stamp["scope"]["connection"] == scope["connection"]
-                && stamp["scope"]["generation"]
-                    .as_u64()
-                    .is_some_and(|generation| generation > update.scope.generation)
-            {
+            if stamp.scope.as_ref().is_some_and(|old| {
+                old.connection == scope.connection && old.generation > scope.generation
+            }) {
                 return Ok((old, false));
             }
-            next_stamp = Some(serde_json::json!({"scope":scope,"cursor":update.cursor}));
-            // Old queued notifications cannot replace a more recent provider read.
+            stamp.scope = Some(scope);
+            stamp.cursor = cursor;
+            stamp_changed = true;
             if old
                 .as_ref()
-                .and_then(|old| old["at"].as_f64())
-                .is_some_and(|at| at > update.observed_at)
+                .and_then(|old| old.at)
+                .is_some_and(|at| at > observed_at)
             {
                 return Ok((old, false));
             }
-            let mut value = old.clone().unwrap_or_else(|| serde_json::json!({}));
-            let mut data = value
-                .get("data")
-                .and_then(Value::as_object)
-                .cloned()
-                .unwrap_or_default();
-            let incoming = update.data.as_object().ok_or_else(|| {
-                StoreError::SchemaMismatch("limits notification data must be an object".into())
-            })?;
-            let mut buckets = data
-                .get("rateLimitsByLimitId")
-                .and_then(Value::as_object)
-                .cloned()
-                .unwrap_or_default();
-            if let Some(incoming_buckets) = incoming
-                .get("rateLimitsByLimitId")
-                .and_then(Value::as_object)
-            {
-                buckets.extend(incoming_buckets.clone());
+            let mut value = old.clone().unwrap_or_else(|| UsageLimitsResponse {
+                account_key: account.to_owned(),
+                ..Default::default()
+            });
+            let mut data = value.data.take().map(|data| data.0).unwrap_or_default();
+            let mut buckets = data.rate_limits_by_limit_id.take().unwrap_or_default();
+            if let Some(new) = incoming.rate_limits_by_limit_id {
+                buckets.extend(new);
             }
-            if let Some(bucket) = incoming
-                .get("rateLimits")
-                .filter(|bucket| bucket.is_object())
-            {
-                let id = bucket["limitId"].as_str().unwrap_or("codex");
-                buckets.insert(id.to_owned(), bucket.clone());
+            if let Some(bucket) = &incoming.rate_limits {
+                buckets.insert(
+                    bucket.0.limit_id.clone().unwrap_or_else(|| "codex".into()),
+                    bucket.clone(),
+                );
             }
-            data.extend(incoming.clone());
-            data.insert("rateLimitsByLimitId".into(), Value::Object(buckets));
-            value["data"] = Value::Object(data);
-            value["accountKey"] = Value::String(account.to_owned());
-            value["at"] = serde_json::json!(update.observed_at);
-            value["error"] = Value::Null;
-            // A successful observation clears a previous read failure.
-            if let Some(object) = value.as_object_mut() {
-                object.remove("stale");
+            macro_rules! update { ($($field:ident),* $(,)?) => { $(if incoming.$field.is_some() { data.$field = incoming.$field; })* }; }
+            update!(
+                account_id,
+                rate_limit_reset_credits,
+                rate_limits,
+                signed_in,
+                source,
+                status,
+                claude_rate_limit
+            );
+            if incoming.ordinary_usage_allowed.is_some() {
+                data.ordinary_usage_allowed = incoming.ordinary_usage_allowed;
             }
-            LimitsSnapshot::read(account, value)
-                .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?
+            data.rate_limits_by_limit_id = Some(buckets);
+            value.data = Some(JsonObject(data));
+            value.at = Some(observed_at);
+            value.error = None;
+            value
         }
     };
-    let value = value.into_value();
     let identical = old.as_ref() == Some(&value);
-    if identical && next_stamp.is_none() {
+    if identical && !stamp_changed && !force_projection {
         return Ok((Some(value), false));
     }
-    let stamp = next_stamp.as_ref().unwrap_or(&stamp);
-    let observation = serde_json::to_string(&Observation {
-        scope: &stamp["scope"],
-        cursor: stamp["cursor"].as_u64().unwrap_or(0),
-        times: ObservationTimes(&value),
-    })?;
-    account_state::put_limits_observation(tx, account, &observation)?;
-    if identical {
+    stamp.set_times(&value);
+    account_state::put_limits_observation(tx, account, &stamp)?;
+    if identical && !force_projection {
         return Ok((Some(value), false));
     }
-    let raw = serde_json::value::RawValue::from_string(serde_json::to_string(&value)?)?;
-    let view = studio_runtime_schema::usage_limits::RateLimitView::read(&raw, account, now)?;
+    if !identical {
+        crate::continuation_runtime::stage_limits_changed_for_account(tx, account, &value, now)
+            .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
+    }
+    let mut view =
+        studio_runtime_schema::usage_limits::RateLimitView::from_observation(value.clone(), now);
+    populate_agents(tx, &mut view, now)?;
+    if let Some(reset_at) = checking {
+        mark_checking(&mut view, reset_at);
+    }
     SyncDocumentsRepository::put_entity(tx, "rateLimit", account, view, false)?;
-    crate::continuation_runtime::stage_limits_changed_for_account(tx, account, &value, now)
-        .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
     Ok((Some(value), true))
+}
+
+pub(crate) fn populate_agents(
+    tx: &studio_runtime_store::Transaction<'_>,
+    view: &mut studio_runtime_schema::usage_limits::RateLimitView,
+    now: f64,
+) -> Result<(), StoreError> {
+    let limits = crate::usage_resume::LimitsObservation::from_response(view.observation.clone());
+    view.projection.agents.clear();
+    for agent in studio_runtime_store::WorkspaceViewsRepository::agents(tx)? {
+        let account = if agent.account_key.is_empty() {
+            "default"
+        } else {
+            &agent.account_key
+        };
+        if account == limits.account_key() && !agent.is_deleted() {
+            view.projection.agents.insert(
+                agent.id.0.clone(),
+                crate::usage_resume::agent_limit_projection(&limits, &agent, now),
+            );
+        }
+    }
+    Ok(())
+}
+
+pub(super) async fn recovery_deadline(
+    store: Arc<studio_runtime_store::RuntimeStore>,
+    account: String,
+    attempted: f64,
+) -> Option<f64> {
+    store.read_async("account-session/recovery-deadline", move |db| {
+        use studio_runtime_schema::usage_limits::RecoveryTiming;
+        let payload: Option<String> = db.query_row(
+            "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0",
+            [&account], |row| row.get(0),
+        ).optional()?;
+        let Some(payload) = payload else { return Ok::<_, StoreError>(None) };
+        let (value, _) = account_state::normalized_limits_view(&account, payload.as_bytes(), attempted);
+        let checked = value.observation.read_at.into_iter().chain(value.observation.checked_at).fold(0.0, f64::max);
+        Ok(value.projection.agents.values().filter_map(|agent| {
+            match &agent.recovery.as_ref()?.timing {
+                RecoveryTiming::Waiting { reset_at } | RecoveryTiming::Unconfirmed { reset_at } => Some(*reset_at),
+                RecoveryTiming::Unknown | RecoveryTiming::Checking { .. } | RecoveryTiming::Confirmed { .. } => None,
+            }
+        }).filter(|reset| *reset > checked.max(attempted)).reduce(f64::min))
+    }).await.ok().flatten()
+}
+
+fn mark_checking(view: &mut studio_runtime_schema::usage_limits::RateLimitView, reset_at: f64) {
+    use studio_runtime_schema::usage_limits::{AccountLimitsStatus, RecoveryTiming};
+    view.projection.status = AccountLimitsStatus::Checking { reset_at };
+    for agent in view.projection.agents.values_mut() {
+        if let Some(recovery) = &mut agent.recovery
+            && matches!(recovery.timing, RecoveryTiming::Waiting { reset_at: at } | RecoveryTiming::Unconfirmed { reset_at: at } if at <= reset_at)
+        {
+            recovery.timing = RecoveryTiming::Checking { reset_at };
+        }
+    }
+}
+
+fn decoded_account_views(
+    tx: &studio_runtime_store::Transaction<'_>,
+    now: f64,
+) -> Result<
+    Vec<(
+        String,
+        studio_runtime_schema::usage_limits::RateLimitView,
+        bool,
+    )>,
+    StoreError,
+> {
+    let mut query = tx.prepare(
+        "SELECT id,substr(CAST(payload AS BLOB),1,?1) FROM sync_entities WHERE collection='rateLimit' AND deleted=0",
+    )?;
+    let rows = query.query_map(
+        [account_state::MAX_PERSISTED_DOCUMENT_BYTES as i64 + 1],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<Vec<u8>>>(1)?)),
+    )?;
+    rows.map(|row| {
+        let (account, payload) = row?;
+        let (view, unreadable) = account_state::normalized_limits_view(
+            &account,
+            payload.as_deref().unwrap_or_default(),
+            now,
+        );
+        Ok((account, view, unreadable))
+    })
+    .collect()
+}
+
+/// Recompute affected agent projections in the transaction that publishes them.
+pub(crate) fn publish_agent_change(
+    tx: &studio_runtime_store::Transaction<'_>,
+    agent_id: &str,
+    deleted: bool,
+) -> Result<(), StoreError> {
+    let now = timestamp().map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
+    let views = decoded_account_views(tx, now)?;
+    if views.is_empty() {
+        return Ok(());
+    }
+    let agent = if deleted {
+        None
+    } else {
+        studio_runtime_store::AgentRepository::get(tx, &agent_id.into())?
+    };
+    for (account, mut value, unreadable) in views {
+        if unreadable {
+            tx.execute(
+                "DELETE FROM sync_entities WHERE collection='rateLimit' AND id=?1",
+                [&account],
+            )?;
+            populate_agents(tx, &mut value, now)?;
+            SyncDocumentsRepository::put_entity(tx, "rateLimit", &account, value, false)?;
+            continue;
+        }
+        let matches = agent.as_ref().is_some_and(|agent| {
+            let key = if agent.account_key.is_empty() {
+                "default"
+            } else {
+                &agent.account_key
+            };
+            key == account
+        });
+        if matches {
+            let limits =
+                crate::usage_resume::LimitsObservation::from_response(value.observation.clone());
+            if let Some(agent) = &agent {
+                value.projection.agents.insert(
+                    agent_id.to_owned(),
+                    crate::usage_resume::agent_limit_projection(&limits, agent, now),
+                );
+            }
+        } else if value.projection.agents.remove(agent_id).is_none() {
+            continue;
+        }
+        if let studio_runtime_schema::usage_limits::AccountLimitsStatus::Checking { reset_at } =
+            value.projection.status
+        {
+            mark_checking(&mut value, reset_at);
+        }
+        SyncDocumentsRepository::put_entity(tx, "rateLimit", &account, value, false)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn seed_agents(tx: &studio_runtime_store::Transaction<'_>) -> Result<(), StoreError> {
+    let now = timestamp().map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
+    for (account, mut value, unreadable) in decoded_account_views(tx, now)? {
+        if unreadable {
+            tx.execute(
+                "DELETE FROM sync_entities WHERE collection='rateLimit' AND id=?1",
+                [&account],
+            )?;
+        }
+        value.projection.status = studio_runtime_schema::usage_limits::AccountLimitsStatus::Current;
+        populate_agents(tx, &mut value, now)?;
+        SyncDocumentsRepository::put_entity(tx, "rateLimit", &account, value, false)?;
+    }
+    Ok(())
 }
 
 pub(super) async fn read_for_resume(
     runtime: &AccountSessionRuntime,
     account: &str,
     after: f64,
-) -> Result<Value, AccountSessionError> {
+) -> Result<UsageLimitsResponse, AccountSessionError> {
     if let (Some(scope), Some(store)) = (runtime.current_scope(account), runtime.store.as_ref()) {
         let key = account.to_owned();
         let expected = scope.clone();
@@ -246,15 +421,11 @@ pub(super) async fn read_for_resume(
                 let Some(stamp) = stamp else {
                     return Ok(None);
                 };
-                let mut stamp: Value = serde_json::from_str(&stamp)
-                    .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
-                if stamp["scope"] != serde_json::json!(expected) {
+                let stamp = account_state::LimitsStamp::read(Some(stamp))?;
+                if stamp.scope.as_ref() != Some(&expected) {
                     return Ok(None);
                 }
-                let candidate =
-                    studio_runtime_store::account_state::limits_snapshot_with_observation(
-                        db, &key, &mut stamp,
-                    )?;
+                let candidate = account_state::typed_limits_snapshot(db, &key, &stamp)?;
                 Ok::<_, StoreError>(candidate)
             })
             .await
@@ -262,14 +433,14 @@ pub(super) async fn read_for_resume(
         let now = timestamp()?;
         if let Some(value) = candidate
             && runtime.current_scope(account).as_ref() == Some(&scope)
-            && crate::usage_resume::LimitsObservation::from_record(value.clone(), None).is_ok_and(
-                |observation| {
-                    observation.account_key() == account && observation.fresh_after(after, now)
-                },
-            )
+            && {
+                let observation =
+                    crate::usage_resume::LimitsObservation::from_response(value.clone());
+                observation.account_key() == account && observation.fresh_after(after, now)
+            }
         {
             return Ok(value);
         }
     }
-    runtime.read_limits(account).await
+    Ok(LimitsSnapshot::read(account, runtime.read_limits(account).await?)?.response)
 }

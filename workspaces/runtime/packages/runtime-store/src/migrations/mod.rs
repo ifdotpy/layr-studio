@@ -65,6 +65,7 @@ mod m2026_11_01_approval_secrets;
 mod m2026_11_01_chat_busy_deleted_index;
 mod m2026_11_01_chat_busy_indexes;
 mod m2026_11_01_legacy_question_history;
+mod m2026_11_01_normalize_limits;
 mod m2026_11_01_plan_record;
 mod m2026_11_01_project_context;
 mod m2026_11_01_project_revisions;
@@ -400,6 +401,22 @@ mod projection_copy_tests {
 // Explicit dependency order: provider leaves precede strict generated columns;
 // columns precede indexes; volatile data moves before its new triggers exist.
 static CATALOG: &[&dyn Migration] = &[
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-normalize-limits",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Rate-limit observations with provider extensions",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?
+                .as_secs_f64();
+            m2026_11_01_normalize_limits::apply(c.transaction, now)
+        },
+    },
     &SqlMigration {
         definition: MigrationDefinition {
             id: "2026-11-01-rate-limit-view",

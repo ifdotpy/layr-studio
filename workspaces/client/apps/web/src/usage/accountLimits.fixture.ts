@@ -20,6 +20,8 @@ export function projectedLimits(
   return {
     observation: { accountKey, at, data: { accountId: null } },
     projection: {
+      agents: {},
+      status: { kind: "current" },
       runway: {
         computedAt: at,
         validUntil: null,

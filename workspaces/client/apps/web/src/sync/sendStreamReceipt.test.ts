@@ -86,5 +86,7 @@ it("settles a sent message when the answer lists the stream receipt row first", 
     delivery: DeliveryMomentInput["queue"],
   });
   expect(result).toMatchObject({ kind: "server", status: "delivered" });
-  expect(buffer.delete).toHaveBeenCalledWith(expect.stringContaining("stable-id"));
+  expect(buffer.delete).toHaveBeenCalledWith(
+    expect.stringContaining("stable-id"),
+  );
 });

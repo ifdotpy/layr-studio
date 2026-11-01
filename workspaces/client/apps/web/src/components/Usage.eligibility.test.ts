@@ -1,5 +1,6 @@
 import {
   LimitColor,
+  Overage,
   ProviderKind as GeneratedApiProviderKind,
 } from "../generated/api.ts";
 import { createElement } from "react";
@@ -99,6 +100,26 @@ test("account limits omit model eligibility details and retain limits and refres
                 },
                 validUntil: now + 3600,
               },
+              agents: {
+                [agent.id]: {
+                  eligibility: {
+                    agentId: agent.id,
+                    accountKey: "claude",
+                    provider: "claude",
+                    model,
+                    state: fresh ? "blocked" : "stale",
+                    validUntil: fresh ? now + 60 : null,
+                    buckets: [{ id: "claude-fable", overageAllowed: false }],
+                    overage: Overage.rejected,
+                  },
+                  recovery: {
+                    title: "Usage limit reached",
+                    message: "Wait",
+                    action: { kind: "none" },
+                    timing: { kind: "waiting", resetAt: now + 3600 },
+                  },
+                },
+              },
               limits: {
                 accountKey: "claude",
                 at: now,
@@ -107,20 +128,6 @@ test("account limits omit model eligibility details and retain limits and refres
                     limitId: "claude",
                     primary: { usedPercent: 100, resetsAt: now + 3600 },
                   },
-                },
-                eligibility: {
-                  agentId: agent.id,
-                  accountKey: "claude",
-                  provider: "claude",
-                  model,
-                  allowed: false,
-                  canRun: false,
-                  fresh,
-                  checkedAt: now,
-                  validUntil: fresh ? now + 60 : now - 1,
-                  resetAt: now + 3600,
-                  buckets: [{ id: "claude-fable", overageAllowed: false }],
-                  overage: "rejected",
                 },
               },
             },

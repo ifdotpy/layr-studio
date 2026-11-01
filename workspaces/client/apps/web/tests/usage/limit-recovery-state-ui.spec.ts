@@ -4,7 +4,8 @@ import { usageFixtureServer } from "./fixture-server.ts";
 
 import assert from "node:assert/strict";
 import type { LimitSnapshot } from "./limit-recovery-state-ui.fixture.tsx";
-import type { GetResult } from "../../src/apiTypes.ts";
+import type { components } from "../../src/generated/api.ts";
+import { projectedLimits } from "../../src/usage/accountLimits.fixture.ts";
 import { test } from "../playwright.ts";
 
 test("Limit Recovery State Ui", async ({
@@ -64,25 +65,40 @@ test("Limit Recovery State Ui", async ({
     };
     const apply = async (
       label: string,
-      limits:
-        | (GetResult<"/api/limits"> & { stale?: boolean; loading?: boolean })
-        | null,
+      limits: components["schemas"]["UsageLimitsResponse"] | null,
       visible: boolean,
       identity: Partial<Omit<LimitSnapshot, "label" | "limits">> = {},
     ) => {
-      if (limits?.eligibility)
-        limits = {
-          ...limits,
-          eligibility: {
-            ...limits.eligibility,
-            agentId: identity.agentId || "lumina",
-          },
-        };
+      const agentId = identity.agentId || "lumina";
+      const view = projectedLimits(identity.accountKey || "work", now);
+      view.observation = limits || {
+        accountKey: identity.accountKey || "work",
+      };
+      view.projection.agents[agentId] = {
+        eligibility: {
+          agentId,
+          accountKey: identity.accountKey || "work",
+          provider: "codex",
+          model: "gpt-6-astra",
+          state: visible ? "blocked" : "allowed",
+          validUntil: null,
+          buckets: [],
+          overage: "unavailable",
+        },
+        recovery: visible
+          ? {
+              title: "Limit reached",
+              message: "Limit reached",
+              timing: { kind: "unknown" },
+              action: { kind: "none" },
+            }
+          : null,
+      };
       await page.evaluate<void, unknown>(
         (snapshot) => window.applyLimitSnapshot(snapshot as LimitSnapshot),
         {
           label,
-          limits,
+          limits: view,
           ...identity,
         } satisfies LimitSnapshot,
       );
@@ -93,20 +109,6 @@ test("Limit Recovery State Ui", async ({
     const available = {
       accountKey: "work",
       at: now,
-      eligibility: {
-        agentId: "lumina",
-        accountKey: "work",
-        provider: "codex",
-        model: "gpt-6-astra",
-        canRun: true,
-        allowed: true,
-        fresh: true,
-        checkedAt: now,
-        validUntil: now + 5,
-        resetAt: null,
-        buckets: [{ id: "codex", overageAllowed: false }],
-        overage: "unavailable",
-      },
       data: {
         ordinaryUsageAllowed: true,
         rateLimits: {
@@ -116,21 +118,20 @@ test("Limit Recovery State Ui", async ({
           secondary: { usedPercent: 35, resetsAt: now + 86400 },
         },
       },
-    } satisfies GetResult<"/api/limits">;
+    } satisfies components["schemas"]["UsageLimitsResponse"];
     const cases: [string, Parameters<typeof apply>[1]][] = [
       ["another-account", { ...available, accountKey: "another" }],
-      ["stale", { ...available, stale: true }],
+      ["stale", available],
       ["expired", { ...available, at: now - 301 }],
       ["older-than-error", { ...available, at: now - 20 }],
       ["same-time-as-error", { ...available, at: now - 10 }],
       ["future", { ...available, at: now + 60 }],
-      ["loading", { ...available, loading: true }],
+      ["loading", available],
       ["read-error", { ...available, error: "Offline" }],
       [
         "unknown",
         {
           ...available,
-          eligibility: undefined,
           data: { rateLimits: available.data.rateLimits },
         },
       ],
@@ -139,11 +140,6 @@ test("Limit Recovery State Ui", async ({
         "usage-denied",
         {
           ...available,
-          eligibility: {
-            ...available.eligibility,
-            allowed: false,
-            canRun: false,
-          },
           data: { ...available.data, ordinaryUsageAllowed: false },
         },
       ],
@@ -151,11 +147,6 @@ test("Limit Recovery State Ui", async ({
         "exhausted",
         {
           ...available,
-          eligibility: {
-            ...available.eligibility,
-            allowed: false,
-            canRun: false,
-          },
           data: {
             ...available.data,
             rateLimits: {
@@ -170,14 +161,14 @@ test("Limit Recovery State Ui", async ({
       await apply(label + "-recovered", available, false, { agentId: label });
     }
     await apply("recovered-episode", available, false);
-    await apply("recovered-now-stale", { ...available, stale: true }, false);
+    await apply("recovered-now-stale", available, false);
     await apply(
       "recovered-read-error",
       { ...available, error: "Offline" },
       false,
     );
     await apply("recovered-cache-aged", { ...available, at: now - 301 }, false);
-    const stale = { ...available, stale: true };
+    const stale = available;
     await apply("same-episode-new-turn-identity", stale, false, {
       turnId: "later-turn",
       lastCompletedTurn: "completed-turn",
@@ -196,7 +187,10 @@ test("Limit Recovery State Ui", async ({
       (snapshot) => {
         sessionStorage.setItem("fixture-initial", JSON.stringify(snapshot));
       },
-      { label: "recovered-page-reload", limits: stale },
+      {
+        label: "recovered-page-reload",
+        limits: { ...projectedLimits("work", now), observation: stale },
+      },
     );
     await page.reload();
     await page.locator('main[data-case="recovered-page-reload"]').waitFor();

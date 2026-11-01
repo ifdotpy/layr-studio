@@ -1,84 +1,120 @@
-//! Typed ingress for the workspace usage-limits schema. Provider extensions remain opaque.
+//! Typed ingress for the workspace usage-limits schema.
 use crate::StoredJsonInteger;
 use crate::json_object::JsonObject;
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
-#[derive(Deserialize)]
+#[derive(Clone, Default, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UsageLimitsResponse {
     pub account_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub at: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub checked_at: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<JsonObject<UsageLimitsData>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub processed_at: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub read_at: Option<f64>,
     #[serde(default, deserialize_with = "present_eligibility")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub eligibility: Option<JsonObject<UsageEligibility>>,
     #[serde(rename = "_syncEntities")]
-    pub sync_entities: Option<Vec<JsonObject<SyncEntity>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sync_entities: Option<Vec<JsonObject<UsageLimitsSyncEntity>>>,
     #[serde(rename = "_syncEntitiesAfter")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sync_entities_after: Option<StoredJsonInteger>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Default, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageLimitsData {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub account_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ordinary_usage_allowed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_limit_reset_credits: Option<JsonObject<RateLimitResetCredits>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_limits: Option<JsonObject<RateLimitBucket>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_limits_by_limit_id: Option<BTreeMap<String, JsonObject<RateLimitBucket>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub signed_in: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
-    #[serde(flatten)]
-    pub extensions: Map<String, Value>,
+    #[serde(
+        default,
+        deserialize_with = "present_claude_rate_limit",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub claude_rate_limit: Option<ClaudeRateLimit>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RateLimitBucket {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub individual_limit: Option<JsonObject<RateLimitIndividualLimit>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub limit_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub limit_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub plan_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub primary: Option<JsonObject<RateLimitWindow>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_limit_reached_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub secondary: Option<JsonObject<RateLimitWindow>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub spend_control_reached: Option<bool>,
     #[serde(
         default,
         deserialize_with = "studio_client_domain::json_object::optional_field"
     )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub credits: Option<BucketCredits>,
-    #[serde(flatten)]
-    pub extensions: Map<String, Value>,
+    #[serde(
+        default,
+        deserialize_with = "present_claude_rate_limit",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub claude_rate_limit: Option<ClaudeRateLimit>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BucketCredits {
     #[serde(
         default,
         deserialize_with = "studio_client_domain::json_object::optional_field"
     )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub unlimited: Option<bool>,
     #[serde(
         default,
         deserialize_with = "studio_client_domain::json_object::optional_field"
     )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub has_credits: Option<bool>,
     #[serde(
         default,
         deserialize_with = "studio_client_domain::json_object::optional_field"
     )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub balance: Option<BucketCreditBalance>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(untagged)]
 pub enum BucketCreditBalance {
     Text(String),
@@ -86,57 +122,192 @@ pub enum BucketCreditBalance {
     Boolean(bool),
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RateLimitIndividualLimit {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub remaining_percent: Option<f64>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RateLimitWindow {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub resets_at: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub used_percent: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub window_duration_mins: Option<f64>,
-    #[serde(flatten)]
-    pub extensions: Map<String, Value>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RateLimitResetCredits {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub available_count: Option<StoredJsonInteger>,
     #[serde(default)]
     pub credits: Vec<JsonObject<RateLimitResetCredit>>,
-    #[serde(flatten)]
-    pub extensions: Map<String, Value>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RateLimitResetCredit {
     pub id: String,
     pub reset_type: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub granted_at: Option<f64>,
     #[serde(
         default,
         deserialize_with = "studio_client_domain::json_object::optional_field"
     )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(
         default,
         deserialize_with = "studio_client_domain::json_object::optional_field"
     )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(flatten)]
-    pub extensions: Map<String, Value>,
 }
 
-#[derive(Deserialize)]
+/// Unknown provider evidence is retained only as an unsupported decision.
+#[derive(Clone, Serialize, schemars::JsonSchema, PartialEq)]
+#[serde(untagged)]
+pub enum ClaudeRateLimit {
+    Known(ClaudeRateInfo),
+    Unsupported(UnsupportedRateInfo),
+}
+
+#[derive(Clone, Serialize, schemars::JsonSchema, PartialEq)]
+pub struct UnsupportedRateInfo {
+    #[serde(rename = "type")]
+    kind: UnsupportedRateKind,
+}
+
+#[derive(Clone, Serialize, schemars::JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum UnsupportedRateKind {
+    Unsupported,
+}
+
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeRateInfo {
+    #[serde(deserialize_with = "string_enum")]
+    pub status: ClaudeRateStatus,
+    #[serde(
+        default,
+        deserialize_with = "present_claude_enum",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub rate_limit_type: Option<ClaudeRateType>,
+    #[serde(
+        default,
+        deserialize_with = "present_claude_enum",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub overage_status: Option<ClaudeRateStatus>,
+    #[serde(
+        default,
+        deserialize_with = "present_claude_field",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub utilization: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "present_claude_field",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub resets_at: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "present_claude_field",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub overage_resets_at: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "present_claude_field",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub is_using_overage: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "present_claude_field",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub overage_in_use: Option<bool>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaudeRateStatus {
+    Allowed,
+    AllowedWarning,
+    Rejected,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaudeRateType {
+    FiveHour,
+    SevenDay,
+    SevenDayOpus,
+    SevenDaySonnet,
+    SevenDayOverageIncluded,
+    Overage,
+}
+
+impl<'de> Deserialize<'de> for ClaudeRateLimit {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Input {
+            Known(ClaudeRateInfo),
+            Unsupported(serde::de::IgnoredAny),
+        }
+        Ok(match Input::deserialize(deserializer)? {
+            Input::Known(info) => Self::Known(info),
+            Input::Unsupported(_) => Self::Unsupported(UnsupportedRateInfo {
+                kind: UnsupportedRateKind::Unsupported,
+            }),
+        })
+    }
+}
+
+fn present_claude_field<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    Option::<T>::deserialize(deserializer)
+}
+
+fn string_enum<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<T, D::Error> {
+    let value = String::deserialize(deserializer)?;
+    T::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(value))
+}
+
+fn present_claude_enum<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    Option::<String>::deserialize(deserializer)?
+        .map(|value| T::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(value)))
+        .transpose()
+}
+
+fn present_claude_rate_limit<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<ClaudeRateLimit>, D::Error> {
+    Option::<ClaudeRateLimit>::deserialize(deserializer)
+}
+
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct SyncEntity {
+pub struct UsageLimitsSyncEntity {
     pub id: String,
     pub seq: StoredJsonInteger,
     pub payload: String,
@@ -144,34 +315,76 @@ pub struct SyncEntity {
     pub deleted: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UsageEligibility {
     pub account_key: String,
     pub agent_id: String,
-    pub allowed: bool,
     pub buckets: Vec<JsonObject<EligibilityBucket>>,
-    pub can_run: bool,
-    pub checked_at: f64,
-    pub fresh: bool,
     pub model: String,
     pub overage: Overage,
     pub provider: String,
-    #[serde(deserialize_with = "required_nullable")]
-    pub reset_at: Option<f64>,
+    #[serde(deserialize_with = "string_enum")]
+    pub state: EligibilityState,
     #[serde(deserialize_with = "required_nullable")]
     pub valid_until: Option<f64>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EligibilityState {
+    Stale,
+    Allowed,
+    Blocked,
+}
+
+#[derive(Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentLimitProjection {
+    pub eligibility: UsageEligibility,
+    pub recovery: Option<LimitRecovery>,
+}
+
+#[derive(Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LimitRecovery {
+    pub title: String,
+    pub message: String,
+    pub action: RecoveryAction,
+    pub timing: RecoveryTiming,
+}
+
+#[derive(Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RecoveryAction {
+    None,
+    Link { label: String, href: String },
+    AskOwner { request: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum RecoveryTiming {
+    Unknown,
+    Waiting { reset_at: f64 },
+    Checking { reset_at: f64 },
+    Confirmed { reset_at: f64 },
+    Unconfirmed { reset_at: f64 },
+}
+
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EligibilityBucket {
     pub id: String,
     pub overage_allowed: bool,
 }
 
-#[derive(Deserialize)]
-#[serde(try_from = "String")]
+#[derive(Clone, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case", try_from = "String")]
 pub enum Overage {
     Allowed,
     InUse,
@@ -192,16 +405,16 @@ impl TryFrom<String> for Overage {
 }
 
 /// The retained observation and its server-owned presentation travel together.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RateLimitView<'a> {
-    pub observation: &'a serde_json::value::RawValue,
+#[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RateLimitView {
+    pub observation: UsageLimitsResponse,
     pub projection: AccountLimitsProjection,
 }
 
-impl<'a> RateLimitView<'a> {
+impl RateLimitView {
     pub fn read(
-        observation: &'a serde_json::value::RawValue,
+        observation: &serde_json::value::RawValue,
         account: &str,
         now: f64,
     ) -> Result<Self, serde_json::Error> {
@@ -212,24 +425,47 @@ impl<'a> RateLimitView<'a> {
                 "rate-limit account identity mismatch",
             ));
         }
-        Ok(Self {
-            observation,
+        Ok(Self::from_observation(value, now))
+    }
+
+    pub fn from_observation(value: UsageLimitsResponse, now: f64) -> Self {
+        Self {
             projection: AccountLimitsProjection {
+                status: AccountLimitsStatus::Current,
                 runway: weekly_runway(&value, now),
                 reset: reset_projection(&value, now),
                 buckets: bucket_projection(&value, now),
+                agents: BTreeMap::new(),
             },
-        })
+            observation: value,
+        }
     }
 }
 
 /// Server-owned account presentation; each field is derived from the same observation.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AccountLimitsProjection {
+    pub status: AccountLimitsStatus,
     pub runway: WeeklyRunway,
     pub reset: ResetProjection,
     pub buckets: BucketProjection,
+    #[serde(default)]
+    pub agents: BTreeMap<String, AgentLimitProjection>,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum AccountLimitsStatus {
+    #[default]
+    Current,
+    Checking {
+        reset_at: f64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -758,7 +994,7 @@ fn present_eligibility<'de, D: Deserializer<'de>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     #[test]
     fn bucket_color_boundaries_are_server_owned() {
@@ -878,14 +1114,103 @@ mod tests {
     }
 
     #[test]
-    fn rate_limit_view_rejects_another_account_and_preserves_observation() {
+    fn eligibility_contract_is_owned_by_rust_schema() {
+        let schema = schemars::schema_for!(UsageEligibility);
+        let schema = serde_json::to_value(schema).unwrap();
+        assert!(schema["properties"]["state"].is_object());
+    }
+
+    #[test]
+    fn eligibility_cannot_claim_runnable_and_stale() {
+        let contradictory = json!({"accountKey":"a","agentId":"b","allowed":true,"canRun":true,"fresh":false,"buckets":[],"checkedAt":1,"model":"m","provider":"codex","overage":"unavailable","resetAt":null,"validUntil":null});
+        assert!(serde_json::from_value::<UsageEligibility>(contradictory).is_err());
+    }
+
+    #[test]
+    fn rate_limit_view_rejects_another_account_and_normalizes_observation() {
         let raw = serde_json::value::RawValue::from_string(
-            r#"{"accountKey":"a","data":{"vendor":{"unknown":[1,true]}}}"#.to_owned(),
+            r#"{"accountKey":"a","data":{"source":null,"rateLimits":{"secondary":null},"vendor":{"unknown":[1,true]}}}"#.to_owned(),
         )
         .unwrap();
         assert!(RateLimitView::read(&raw, "other", 100.0).is_err());
         let view = RateLimitView::read(&raw, "a", 100.0).unwrap();
-        assert_eq!(view.observation.get(), raw.get());
+        assert_eq!(view.observation.account_key, "a");
+        let data = view.observation.data.unwrap().0;
+        assert!(data.source.is_none());
+        assert!(data.rate_limits.unwrap().0.secondary.is_none());
+    }
+
+    #[test]
+    fn optional_nulls_normalize_to_absence_at_provider_boundary() {
+        let input = json!({"accountKey":"a","data":{"ordinaryUsageAllowed":null,"claudeRateLimit":{"status":"allowed","rateLimitType":null,"overageStatus":null,"resetsAt":null}}});
+        let response: UsageLimitsResponse = serde_json::from_value(input).unwrap();
+        let data = response.data.unwrap().0;
+        assert!(data.ordinary_usage_allowed.is_none());
+        assert!(
+            serde_json::to_value(&data)
+                .unwrap()
+                .get("ordinaryUsageAllowed")
+                .is_none()
+        );
+        assert!(matches!(
+            data.claude_rate_limit,
+            Some(ClaudeRateLimit::Known(_))
+        ));
+    }
+
+    #[test]
+    fn claude_rate_info_matches_bridge_owned_schema() {
+        let owner: Value =
+            serde_json::from_str(include_str!("schemas/claude-rate-limit.schema.json")).unwrap();
+        let rust = schemars::schema_for!(ClaudeRateInfo).to_value();
+        assert_eq!(
+            owner["properties"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .collect::<Vec<_>>(),
+            rust["properties"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .collect::<Vec<_>>(),
+            "ClaudeRateInfo must cover every field in the bridge-owned schema"
+        );
+        for (field, name) in [
+            ("status", "ClaudeRateStatus"),
+            ("overageStatus", "ClaudeRateStatus"),
+            ("rateLimitType", "ClaudeRateType"),
+        ] {
+            assert_eq!(
+                owner["properties"][field]["enum"], rust["$defs"][name]["enum"],
+                "{field}"
+            );
+        }
+        let validator = jsonschema::validator_for(&owner).unwrap();
+        for (name, spec) in owner["properties"].as_object().unwrap() {
+            let mut values = vec![
+                json!(null),
+                json!({"allowed":null}),
+                json!("unknown"),
+                json!(true),
+                json!(1.5),
+            ];
+            if let Some(variants) = spec.get("enum").and_then(Value::as_array) {
+                values.extend(variants.iter().cloned());
+            }
+            for value in values {
+                let mut record = json!({"status":"allowed"});
+                record[name] = value;
+                if name != "status" && record[name].is_null() {
+                    record.as_object_mut().unwrap().remove(name);
+                }
+                assert_eq!(
+                    serde_json::from_value::<ClaudeRateInfo>(record.clone()).is_ok(),
+                    validator.is_valid(&record),
+                    "bridge schema field {name}: {record}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -927,7 +1252,7 @@ mod tests {
             ("SyncEntity", "_deleted id payload seq"),
             (
                 "UsageEligibility",
-                "accountKey agentId allowed buckets canRun checkedAt fresh model overage provider resetAt validUntil",
+                "accountKey agentId buckets model overage provider state validUntil",
             ),
         ] {
             let actual = schema["$defs"][name]["properties"]
@@ -956,7 +1281,7 @@ mod tests {
                 "rateLimitsByLimitId":{"one":{"primary":{"usedPercent":2}}},
                 "rateLimitResetCredits":{"availableCount":2,"credits":[{"id":"x","status":"available","resetType":"manual","grantedAt":2,"expiresAt":3,"vendor":{}}]},"extension":{"arbitrary":[null,true]}},
             "_syncEntities":[{"id":"x","seq":1,"payload":"{}","_deleted":false}],"_syncEntitiesAfter":1,
-            "eligibility":{"accountKey":"a","agentId":"b","allowed":true,"buckets":[{"id":"x","overageAllowed":false}],"canRun":true,"checkedAt":1,"fresh":true,"model":"m","overage":"allowed","provider":"codex","resetAt":null,"validUntil":null}});
+            "eligibility":{"accountKey":"a","agentId":"b","buckets":[{"id":"x","overageAllowed":false}],"state":"allowed","model":"m","overage":"allowed","provider":"codex","validUntil":null}});
         let cases = [
             ("/data/rateLimits/primary/usedPercent", json!("2")),
             ("/data/rateLimits/primary", json!([2, 3, 4])),
@@ -1025,17 +1350,13 @@ mod tests {
             "/_syncEntities/0/_deleted",
             "/eligibility/accountKey",
             "/eligibility/agentId",
-            "/eligibility/allowed",
             "/eligibility/buckets",
             "/eligibility/buckets/0/id",
             "/eligibility/buckets/0/overageAllowed",
-            "/eligibility/canRun",
-            "/eligibility/checkedAt",
-            "/eligibility/fresh",
             "/eligibility/model",
             "/eligibility/overage",
             "/eligibility/provider",
-            "/eligibility/resetAt",
+            "/eligibility/state",
             "/eligibility/validUntil",
         ] {
             for value in [

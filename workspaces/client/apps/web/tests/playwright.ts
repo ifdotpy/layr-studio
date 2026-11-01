@@ -1936,10 +1936,12 @@ function entityValuesFromSnapshot(
         id: account,
         value:
           "observation" in value
-            ? value
+            ? (value as import("../src/generated/api.ts").components["schemas"]["RateLimitView"])
             : {
                 observation: value,
                 projection: {
+                  agents: {},
+                  status: { kind: "current" as const },
                   buckets: {
                     current: {
                       buckets: [],

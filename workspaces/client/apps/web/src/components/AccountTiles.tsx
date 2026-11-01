@@ -4,7 +4,6 @@ import {
 } from "../generated/api.ts";
 import type { components } from "../generated/api";
 import { useServerSync } from "../servers/ServerServicesContext";
-import { accountBuckets } from "../usage/accountBuckets";
 import { Badge, Radio, SegmentedControl, Tooltip } from "@mantine/core";
 import { Check, Sparkles } from "lucide-react";
 import { useEffect, useId, useState, type ReactNode } from "react";
@@ -166,7 +165,6 @@ export function useAccountLimitProjection(account: LimitAccount) {
 export function accountLimitView(
   account: LimitAccount,
   limits: AccountLimitsSnapshot | null,
-  now = Date.now() / 1000,
   signedInOnly = true,
   projection: AccountProjection | null = null,
 ) {
@@ -176,7 +174,7 @@ export function accountLimitView(
   const error = matching?.data ? null : matching?.error || null;
   const matchingProjection =
     matching && projection ? projection.projection : null;
-  const state = accountBuckets(matchingProjection?.buckets, now);
+  const state = matchingProjection?.buckets.current;
   return {
     limits: matching,
     buckets: state?.buckets ?? [],
@@ -196,13 +194,7 @@ export function useAccountLimitView(
 ) {
   const projection = useAccountLimitProjection(account);
   const limits = projection?.observation ?? null;
-  return accountLimitView(
-    account,
-    limits,
-    Date.now() / 1000,
-    signedInOnly,
-    projection,
-  );
+  return accountLimitView(account, limits, signedInOnly, projection);
 }
 /** The remaining limit of an account as short text, for account lists. */
 export function AccountRemainingText({ account }: { account: LimitAccount }) {

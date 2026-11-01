@@ -625,9 +625,7 @@ async fn run(
     let retained_session: Arc<
         dyn studio_runtime_services::account_session_runtime::RetainedAccountSession,
     > = Arc::new(account_session_broker.clone());
-    let account_session: Arc<
-        dyn studio_runtime_services::account_session_runtime::AccountSessionPort,
-    > = Arc::new(
+    let account_session_runtime =
         studio_runtime_services::account_session_runtime::AccountSessionRuntime::new(
             account_driver.clone(),
             Some(retained_session),
@@ -638,8 +636,11 @@ async fn run(
         )
         .with_limits(account_policy.clone())
         .with_store(Arc::clone(&store))
-        .with_continuation_wake(Arc::clone(&continuation_wake)),
-    );
+        .with_continuation_wake(Arc::clone(&continuation_wake));
+    account_session_runtime.restore_reset_deadlines().await?;
+    let account_session: Arc<
+        dyn studio_runtime_services::account_session_runtime::AccountSessionPort,
+    > = Arc::new(account_session_runtime);
     let session_binaries = Arc::new(Mutex::new(BTreeMap::<
         String,
         provider_ports::SessionExecutables,
@@ -1767,14 +1768,14 @@ async fn run_continuation_tick(
             let observation = if let Some(mut value) = fresh {
                 // A notification can commit between the read and this transaction.
                 // Prefer that newer snapshot, including a new rejection.
-                if let Some(current) = account_state::latest_limits_snapshot(tx, &account)?
-                    && current["at"].as_f64().unwrap_or(0.0) >= value["at"].as_f64().unwrap_or(0.0)
+                let stamp = account_state::LimitsStamp::read(account_state::limits_observation(tx, &account)?)?;
+                if let Some(current) = account_state::typed_limits_snapshot(tx, &account, &stamp)?
+                    && current.at.unwrap_or(0.0) >= value.at.unwrap_or(0.0)
                 {
                     value = current;
                 }
-                studio_runtime_services::usage_resume::LimitsObservation::from_record(value, None)
-                    .ok()
-                    .filter(|observation| observation.account_key() == account)
+                let observation = studio_runtime_services::usage_resume::LimitsObservation::from_response(value);
+                (observation.account_key() == account).then_some(observation)
             } else {
                 None
             };
