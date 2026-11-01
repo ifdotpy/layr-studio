@@ -1834,7 +1834,7 @@ mod tests {
             reply: first.clone(),
             references: Vec::new(),
         };
-        let mut legacy = serde_json::to_value(&old).unwrap();
+        let mut legacy = json!(&old);
         for delivery in legacy["reply"]["deliveries"]
             .as_object_mut()
             .unwrap()
