@@ -23,8 +23,14 @@ export type MessageDelivery =
 export function messageReceipt(
   response: CommandResponse,
 ): MessageDelivery | undefined {
-  return response.rows.find((row) => row.collection === "messageReceipt")
-    ?.payload as MessageDelivery | undefined;
+  // The rows can hold the stored stream row of the receipt too. It keeps the receipt under
+  // `value`, so only the receipt of the answer has an id and a status at the top.
+  return response.rows.find(
+    (row) =>
+      row.collection === "messageReceipt" &&
+      typeof row.payload.id === "string" &&
+      typeof row.payload.status === "string",
+  )?.payload as MessageDelivery | undefined;
 }
 
 /** Key of the saved client identity. One browser storage holds one client per server. */
