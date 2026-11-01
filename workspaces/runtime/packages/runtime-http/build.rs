@@ -204,6 +204,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             serde_with: None,
         };
     }
+    // The start-wait union is owned by agent_progress; its generated branches
+    // are no longer referenced by the mapped component.
+    analysis
+        .schemas
+        .retain(|name, _| !name.starts_with("AgentEntityStartWaitDtoVariant"));
     analysis
         .schemas
         .get_mut("MonitorState")
