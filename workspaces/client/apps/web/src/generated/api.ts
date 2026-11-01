@@ -4857,11 +4857,6 @@ export interface components {
        */
       complaintMisses?: number | undefined;
       /**
-       * Complaintspresented
-       * @default null
-       */
-      complaintsPresented?: string[] | undefined;
-      /**
        * Concurrency
        * @default null
        */

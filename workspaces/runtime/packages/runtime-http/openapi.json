@@ -7137,14 +7137,6 @@
             "title": "Complaintmisses",
             "type": "integer"
           },
-          "complaintsPresented": {
-            "default": null,
-            "items": {
-              "type": "string"
-            },
-            "title": "Complaintspresented",
-            "type": "array"
-          },
           "concurrency": {
             "default": null,
             "maximum": 9007199254740991,

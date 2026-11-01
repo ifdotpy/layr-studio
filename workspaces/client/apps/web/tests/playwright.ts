@@ -1539,7 +1539,6 @@ const entityWorkspaceKeys: (keyof WorkspaceEntityDto)[] = [
 
 const snapshotOnlyAgentKeys: Set<string> = new Set([
   "activeTools",
-  "complaintsPresented",
   "events",
   "executionSettingsAccountKey",
   "maxAgents",

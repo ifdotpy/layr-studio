@@ -2099,11 +2099,10 @@ pub(crate) fn commit(
         apply_patch(&mut frozen, &attempt.before_submit)?;
         frozen["nativeEffort"] = json!(attempt.snapshot.settings.native_effort);
     }
-    if let Some(compiled) = &context.compiled {
-        if compiled.epoch.0 != context.intent.thread_id {
-            return Err(refusal("preparation/thread-changed".into()));
-        }
-        frozen["complaintsPresented"] = json!(compiled.agent_patch.complaints_presented);
+    if let Some(compiled) = &context.compiled
+        && compiled.epoch.0 != context.intent.thread_id
+    {
+        return Err(refusal("preparation/thread-changed".into()));
     }
     frozen
         .as_object_mut()

@@ -1066,10 +1066,6 @@ impl SchedulerRepository {
         attempt.account_key = Some(account_key.into());
         attempt.connection_generation = Some(generation);
         attempt.thread_id = Some(thread_id.into());
-        agent
-            .extra
-            .entry("complaintsPresented".into())
-            .or_insert(json!([]));
         publish_agent(transaction, &agent)?;
         ExecutionHistoryRepository::save_receipt(
             transaction,
