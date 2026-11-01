@@ -8,6 +8,7 @@ pub mod agent_entity_native;
 pub mod agent_entity_nested;
 pub mod agent_entity_nested_extra;
 pub mod agent_entity_remote;
+pub mod agent_entity_transfer;
 pub mod agent_limits;
 pub mod agent_progress;
 pub mod annotation_command;

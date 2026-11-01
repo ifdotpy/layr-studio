@@ -1382,6 +1382,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         .into_iter()
         .chain(crate::agent_entity_nested::schemas()?)
         .chain(crate::agent_entity_nested_extra::schemas()?)
+        .chain(crate::agent_entity_transfer::schemas()?)
         .chain(crate::agent_entity_remote::schemas()?)
         .chain(crate::agent_entity_native::schemas()?)
         .chain(crate::desktop::schemas())

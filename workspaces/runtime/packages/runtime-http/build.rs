@@ -123,6 +123,30 @@ fn main() -> Result<(), Box<dyn Error>> {
             "studio_runtime_schema::agent_entity_nested::WorkspaceCleanupSummaryDto",
         ),
         (
+            "AccountTransferSummaryDto",
+            "studio_runtime_schema::agent_entity_transfer::AccountTransferSummaryDto",
+        ),
+        (
+            "AccountTransferBlockedDto",
+            "studio_runtime_schema::agent_entity_transfer::AccountTransferNoticeDto",
+        ),
+        (
+            "AccountTransferInterruptedDto",
+            "studio_runtime_schema::agent_entity_transfer::AccountTransferNoticeDto",
+        ),
+        (
+            "AccountTransferLeftOnSourceDto",
+            "studio_runtime_schema::agent_entity_transfer::AccountTransferLeftOnSourceDto",
+        ),
+        (
+            "AccountTransferScope",
+            "studio_runtime_schema::agent_entity_transfer::TransferScope",
+        ),
+        (
+            "AccountTransferStatus",
+            "studio_runtime_schema::agent_entity_transfer::TransferStatus",
+        ),
+        (
             "AgentEntityCapacityRetryDto",
             "studio_runtime_schema::agent_entity_nested_extra::AgentEntityCapacityRetryDto",
         ),
