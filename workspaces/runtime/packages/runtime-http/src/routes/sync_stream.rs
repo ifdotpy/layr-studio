@@ -337,10 +337,7 @@ async fn sync_subscriptions(
     for addition in request.add {
         let resource = SubscribedResource::new(addition.resource)?;
         if !resources.iter().any(|item| item.key == resource.key) {
-            if let Some(cursor) = addition.since
-                && super::subscriptions::cache_policy(&resource.resource, session.locality)
-                    == crate::generated::SubscriptionCachePolicy::Cache
-            {
+            if let Some(cursor) = addition.since {
                 since.insert(resource.key.clone(), cursor);
             }
             added.push(resource.clone());
@@ -484,17 +481,10 @@ async fn sync_stream(
             return error.into_response();
         }
     }
-    let mut since = match parse_since(&query, &resources) {
+    let since = match parse_since(&query, &resources) {
         Ok(since) => since,
         Err(error) => return error.into_response(),
     };
-    since.retain(|key, _| {
-        resources.iter().any(|resource| {
-            resource.key == *key
-                && super::subscriptions::cache_policy(&resource.resource, locality)
-                    == crate::generated::SubscriptionCachePolicy::Cache
-        })
-    });
     let cache_policies = cache_decisions(&resources, locality);
     let vault_readiness = match readiness_source(&state, &resources).await {
         Ok(source) => source,
