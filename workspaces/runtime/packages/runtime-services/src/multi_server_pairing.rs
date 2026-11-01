@@ -159,7 +159,7 @@ impl MultiServerBoundary {
         logins: &[String],
         now: f64,
     ) -> Result<PreparedAccessRequest, AccessError> {
-        let invite_id = text(request.body(), "inviteId").to_owned();
+        let invite_id = request.invite_id().to_owned();
         let invite_id_for_read = invite_id.clone();
         let client_id = request.client_id().to_owned();
         let (client, invite, auto_pair) = store
@@ -229,7 +229,7 @@ impl MultiServerBoundary {
         now: f64,
     ) -> Result<PreparedServerRequest, AccessError> {
         if !(request.is_orchestration() || request.is_name() || request.is_management_invite())
-            || text(request.body(), "requestId") != request.request_id()
+            || request.body_request_id() != request.request_id()
         {
             return Err(refused(
                 400,
@@ -438,16 +438,17 @@ impl MultiServerBoundary {
                 if let Some(client) = &decision.client_write {
                     tx.execute(
                         "UPDATE runtime_access_clients SET record=?1 WHERE id=?2",
-                        params![client.to_string(), request.client_id()],
+                        params![
+                            serde_json::to_string(client).map_err(StoreError::from)?,
+                            request.client_id()
+                        ],
                     )?;
                 }
                 Ok(DispatchPrincipal {
                     client_id: decision.principal.client_id().to_owned(),
                     kind: decision.principal.kind().to_owned(),
                     local_server: text(&identity, "serverId").to_owned(),
-                    grant: crate::principal::Grant::from_record(
-                        snapshot.client().unwrap_or(&Value::Null),
-                    ),
+                    grant: crate::principal::Grant::from_access_record(snapshot.client()),
                 })
             })
             .await
@@ -500,9 +501,7 @@ impl MultiServerBoundary {
             .lookup(
                 address,
                 logins,
-                request
-                    .is_auto_pairing()
-                    .then(|| text(request.body(), "origin")),
+                request.is_auto_pairing().then(|| request.origin()),
             )
             .await?;
         if address.parse::<std::net::IpAddr>().ok() != Some(owner.address()) {
@@ -599,7 +598,7 @@ impl MultiServerBoundary {
         store
             .transaction_with(move |tx| {
                 let client = read_record(tx, "runtime_access_clients", request.client_id())?;
-                let invite_id = text(request.body(), "inviteId");
+                let invite_id = request.invite_id();
                 let invite = if request.is_pairing() {
                     read_record(tx, "runtime_access_invites", invite_id)?
                 } else {
@@ -659,7 +658,10 @@ impl MultiServerBoundary {
                 if let Some(client) = decision.client_write {
                     tx.execute(
                         "UPDATE runtime_access_clients SET record=?1 WHERE id=?2",
-                        params![client.to_string(), request.client_id()],
+                        params![
+                            serde_json::to_string(&client).map_err(StoreError::from)?,
+                            request.client_id()
+                        ],
                     )?;
                     return Ok(identity.clone());
                 }
@@ -723,7 +725,6 @@ fn apply_pair(
         CallerAdmission::Fresh(admitted) => admitted,
         CallerAdmission::Replay(saved) => return pairing_reply(&saved, request.client_id()),
     };
-    let body = request.body();
     let mut result = identity.clone();
     let fields = result.as_object_mut().ok_or_else(|| {
         refused(
@@ -744,7 +745,7 @@ fn apply_pair(
     let mut client = if request.is_pairing() {
         auth::check_invite(
             snapshot.invite(),
-            body,
+            request.token(),
             Some(principal.tailscale_user()),
             now,
         )?;
@@ -760,7 +761,7 @@ fn apply_pair(
             .cloned()
             .ok_or_else(|| refused(403, "invite_unavailable", "The invitation is unavailable"))?;
         let grant = invite
-            .extra_str("grant")
+            .grant()
             .filter(|grant| *grant == crate::device_trust::GRANT_OBSERVE)
             .unwrap_or(crate::device_trust::GRANT_FULL)
             .to_owned();
@@ -774,33 +775,37 @@ fn apply_pair(
         })?;
         tx.execute(
             "UPDATE runtime_access_invites SET record=?1 WHERE id=?2",
-            params![invite, text(body, "inviteId")],
+            params![invite, request.invite_id()],
         )?;
-        let mut client = new_client(request, principal, now);
+        let mut client = new_client(request, principal, now)?;
         // The owner chose the grant when making the invitation; the device cannot.
         if principal.kind() == "ui" {
-            client["grant"] = json!(grant);
+            client.grant = studio_runtime_schema::queue_command::Field::Value(
+                if grant == crate::device_trust::GRANT_OBSERVE {
+                    studio_runtime_schema::multi_server_access::AccessGrant::Observe
+                } else {
+                    studio_runtime_schema::multi_server_access::AccessGrant::Full
+                },
+            );
         }
         client
     } else {
-        snapshot
-            .client()
-            .cloned()
-            .unwrap_or_else(|| new_client(request, principal, now))
+        match snapshot.client() {
+            Some(client) => client.clone(),
+            None => new_client(request, principal, now)?,
+        }
     };
     // This client-lifetime fence authorizes an authenticated pairing retry.
     // Its expiring response has a single owner in request_results.
     if request.is_pairing() {
-        client["pairingRequestId"] = json!(request.request_id());
-        client["pairingHash"] = json!(fingerprint);
+        client.pairing_request_id =
+            studio_runtime_schema::queue_command::Field::Value(request.request_id().to_owned());
+        client.pairing_hash = studio_runtime_schema::queue_command::Field::Value(fingerprint);
     }
-    auth::stored(
-        "PersistedAccessClient",
-        "runtime_access_clients",
-        request.client_id(),
-        &client.to_string(),
-    )?;
-    tx.execute("INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![request.client_id(),client.to_string()])?;
+    tx.execute("INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![request.client_id(),serde_json::to_string(&client).map_err(StoreError::from)?])?;
+    let _: studio_runtime_schema::multi_server_access::DevicePairReply =
+        <studio_runtime_schema::multi_server_access::DevicePairReply as serde::Deserialize>::deserialize(&result)
+            .map_err(|_| refused(503, "receipt_invalid", "The pairing receipt is invalid"))?;
     save_receipt(tx, &admitted, &result, now)?;
     if snapshot.client().is_none() {
         tx.execute(
@@ -818,18 +823,6 @@ fn apply_pair(
     }
     Ok(result)
 }
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DevicePairReply {
-    protocol: u64,
-    server_id: String,
-    client_id: String,
-    label: String,
-    origin: String,
-    public_key: String,
-    tailscale_user: String,
-    paired: bool,
-}
 
 fn pairing_reply(
     reply: &studio_runtime_store::multi_server_delivery::HttpAccessReply,
@@ -845,7 +838,8 @@ fn pairing_reply(
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(&reply.body)
         .map_err(|_| invalid())?;
-    let result: DevicePairReply = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
+    let result: studio_runtime_schema::multi_server_access::DevicePairReply =
+        serde_json::from_slice(&bytes).map_err(|_| invalid())?;
     if reply.status != 200
         || result.client_id != client
         || !result.paired
@@ -877,9 +871,74 @@ fn save_receipt(
     crate::event_write::settle_request(tx, admitted, None, &reply)
         .map_err(crate::multi_server_orchestration::replay_error)
 }
-fn new_client(request: &SignedRequest, principal: &VerifiedPrincipal, now: f64) -> Value {
-    let server = principal.kind() == "server";
-    json!({"id":request.client_id(),"clientId":request.client_id(),"serverId":if server {Some(request.client_id())} else {None},"kind":principal.kind(),"label":text(request.body(),"label"),"origin":if server {Some(text(request.body(),"origin"))}else{None},"publicKey":text(request.body(),"publicKey"),"tailscaleUser":principal.tailscale_user(),"status":"paired","created":now,"lastAccess":if request.is_pairing(){Some(now)}else{None},"revoked":null})
+fn new_client(
+    request: &SignedRequest,
+    principal: &VerifiedPrincipal,
+    now: f64,
+) -> Result<studio_runtime_schema::multi_server_access::PersistedAccessClient, AccessError> {
+    use studio_runtime_schema::{
+        multi_server_access::{AccessClientKind, AccessClientStatus, PersistedAccessClient},
+        queue_command::Field,
+    };
+    let invalid = || refused(400, "invalid_pairing", "Invalid pairing identity");
+    let kind = match principal.kind() {
+        "ui" => AccessClientKind::Ui,
+        "server" => AccessClientKind::Server,
+        _ => return Err(invalid()),
+    };
+    let server = kind == AccessClientKind::Server;
+    let timestamp = serde_json::Number::from_f64(now).ok_or_else(invalid)?;
+    Ok(PersistedAccessClient {
+        id: request
+            .client_id()
+            .to_owned()
+            .try_into()
+            .map_err(|_| invalid())?,
+        client_id: request
+            .client_id()
+            .to_owned()
+            .try_into()
+            .map_err(|_| invalid())?,
+        server_id: if server {
+            Field::Value(request.client_id().to_owned())
+        } else {
+            Field::Null
+        },
+        kind,
+        label: request
+            .label()
+            .to_owned()
+            .try_into()
+            .map_err(|_| invalid())?,
+        origin: if server {
+            Field::Value(request.origin().to_owned())
+        } else {
+            Field::Null
+        },
+        public_key: request
+            .public_key()
+            .to_owned()
+            .try_into()
+            .map_err(|_| invalid())?,
+        tailscale_user: Field::Value(principal.tailscale_user().to_owned()),
+        status: AccessClientStatus::Paired,
+        created: timestamp.clone().try_into().map_err(|_| invalid())?,
+        last_access: if request.is_pairing() {
+            Field::Value(timestamp)
+        } else {
+            Field::Null
+        },
+        revoked: Field::Null,
+        last_seen: Field::Missing,
+        auto_pair: Field::Missing,
+        reachability: Field::Missing,
+        alias: Field::Missing,
+        replaced_by: Field::Missing,
+        grant: Field::Missing,
+        pairing_request_id: Field::Missing,
+        pairing_hash: Field::Missing,
+        pairing_receipt: Field::Missing,
+    })
 }
 pub(crate) fn read_record(
     tx: &Transaction<'_>,

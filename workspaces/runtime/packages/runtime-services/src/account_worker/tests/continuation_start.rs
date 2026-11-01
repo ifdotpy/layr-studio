@@ -569,10 +569,30 @@ async fn limit_failure_refresh_publishes_account_entity_after_recording_failure_
                 |row| row.get(0),
             )
             .unwrap();
+        #[derive(serde::Deserialize)]
+        struct Entity {
+            value: View,
+        }
+        #[derive(serde::Deserialize)]
+        struct View {
+            observation: studio_runtime_schema::usage_limits::UsageLimitsResponse,
+        }
+        let entity: Entity = serde_json::from_str(&raw).unwrap();
         assert_eq!(
-            serde_json::from_str::<Value>(&raw).unwrap()["value"]["data"]["rateLimits"]["primary"]
-                ["usedPercent"],
-            100.0
+            entity
+                .value
+                .observation
+                .data
+                .unwrap()
+                .0
+                .rate_limits
+                .unwrap()
+                .0
+                .primary
+                .unwrap()
+                .0
+                .used_percent,
+            Some(100.0)
         );
         let cursor = peer
             .frame(

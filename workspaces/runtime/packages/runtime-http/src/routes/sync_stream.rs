@@ -44,7 +44,7 @@ use studio_runtime_services::token_rate::TokenRateSnapshot as TokenRates;
 use studio_runtime_store::{Connection, RuntimeStore, SyncDocumentsRepository};
 use tokio::time::{Instant, Interval, interval_at};
 
-use super::extractors::{ApiHeaders, ApiJson, Caller, QueryParams};
+use super::extractors::{ApiHeaders, ApiJson, Caller, TypedQuery};
 use super::manifest::{OperationStatus, RouteGroup, get, post};
 use crate::error::ApiError;
 use crate::router::HttpState;
@@ -53,10 +53,10 @@ use crate::schema::{API_SCHEMA_HASH_HEADER, api_schema_hash};
 /// P18's catalog route calls this after the shared boundary authenticates and validates.
 pub(crate) async fn notify_resources(
     state: HttpState,
-    body: Value,
+    body: studio_runtime_schema::resource_notification::ResourceNotifyRequest,
 ) -> Result<Json<crate::generated::ResourceNotifyAck>, ApiError> {
     let notifications = state.resource_notifications;
-    let request_id = body["requestId"].as_str().map(str::to_owned);
+    let request_id = body.request_id.as_str().to_owned();
     studio_runtime_process::blocking_pool::spawn_blocking(
         "runtime-http/routes/sync_stream",
         move || notifications.publish_once(&body),
@@ -71,7 +71,7 @@ pub(crate) async fn notify_resources(
         }
     })?;
     Ok(Json(crate::generated::ResourceNotifyAck {
-        request_id: request_id.ok_or_else(ApiError::internal)?,
+        request_id,
         accepted: true,
     }))
 }
@@ -89,12 +89,6 @@ pub(super) struct SubscribedResource {
 }
 
 impl SubscribedResource {
-    fn from_validated_value(value: Value) -> Result<Self, serde_json::Error> {
-        let key = value.to_string();
-        let resource = serde_json::from_value(value)?;
-        Ok(Self { resource, key })
-    }
-
     pub(super) fn new(resource: ResourceRef) -> Result<Self, ApiError> {
         let key = serde_json::to_string(&resource).map_err(|_| ApiError::internal())?;
         Ok(Self { resource, key })
@@ -201,35 +195,29 @@ fn authorize_resource(
 
 fn progress_resource(
     selector: studio_runtime_schema::progress_selector::ProgressSelector,
-) -> ResourceRef {
-    use studio_runtime_schema::progress_selector::{ProgressSelector, VaultJob};
-    match selector {
+) -> Result<ResourceRef, ApiError> {
+    use studio_runtime_schema::progress_selector::ProgressSelector;
+    use studio_runtime_schema::resource_ref::{RenameResource, RequestResource, VaultJobResource};
+    Ok(match selector {
         ProgressSelector::Auth { request_id } => {
-            ResourceRef::AuthProgressResource(crate::generated::AuthProgressResource {
-                kind: Default::default(),
-                request_id,
+            ResourceRef::AuthProgressResource(RequestResource {
+                request_id: request_id.try_into().map_err(|_| ApiError::internal())?,
             })
         }
         ProgressSelector::Vault { request_id, job } => {
-            ResourceRef::VaultJobProgressResource(crate::generated::VaultJobProgressResource {
-                kind: Default::default(),
-                request_id,
-                job: match job {
-                    VaultJob::Setup => crate::generated::VaultJobProgressResourceJob::Setup,
-                    VaultJob::Login => crate::generated::VaultJobProgressResourceJob::Login,
-                    VaultJob::Pull => crate::generated::VaultJobProgressResourceJob::Pull,
-                },
+            ResourceRef::VaultJobProgressResource(VaultJobResource {
+                request_id: request_id.try_into().map_err(|_| ApiError::internal())?,
+                job,
             })
         }
         ProgressSelector::Rename {
             request_id,
             agent_id,
-        } => ResourceRef::RenameProgressResource(crate::generated::RenameProgressResource {
-            kind: Default::default(),
-            request_id,
-            agent_id,
+        } => ResourceRef::RenameProgressResource(RenameResource {
+            request_id: request_id.try_into().map_err(|_| ApiError::internal())?,
+            agent_id: agent_id.try_into().map_err(|_| ApiError::internal())?,
         }),
-    }
+    })
 }
 
 struct SubscriptionChange {
@@ -371,15 +359,69 @@ async fn sync_subscriptions(
     }))
 }
 
+/// Maximum stream selector or workspace ID length, in Unicode code points.
+const STREAM_SELECTOR_MAX_CHARS: usize = 4096;
+type StreamText = studio_runtime_schema::bounded_text::BoundedText<0, STREAM_SELECTOR_MAX_CHARS>;
+type StreamSequence = studio_runtime_schema::bounded_integer::BoundedInteger<
+    0,
+    { studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64 },
+>;
+type StreamResourceText =
+    studio_runtime_schema::bounded_text::BoundedText<0, MAX_SYNC_RESOURCE_QUERY_BYTES>;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SyncStreamQuery {
+    protocol: Option<StreamText>,
+    #[serde(rename = "scope")]
+    _scope: Option<StreamText>,
+    #[serde(rename = "after")]
+    _after: Option<StreamSequence>,
+    resources: Option<StreamResourceText>,
+    token_rates: Option<bool>,
+    reconnect: Option<bool>,
+    api_schema: Option<StreamText>,
+    since: Option<StreamResourceText>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StreamSubscriptionAdd {
+    resource: ResourceRef,
+    #[serde(
+        default,
+        deserialize_with = "studio_runtime_schema::http_ingress::deserialize_optional_object"
+    )]
+    since: Option<StreamCursor>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StreamCursor {
+    workspace_id: studio_runtime_schema::bounded_text::BoundedText<1, STREAM_SELECTOR_MAX_CHARS>,
+    seq: StreamSequence,
+    #[serde(default, deserialize_with = "stream_optional_value")]
+    terminal_generation: Option<StreamSequence>,
+}
+
+fn stream_optional_value<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
+
 async fn sync_stream(
-    query: QueryParams,
-    ApiHeaders(headers): ApiHeaders,
+    TypedQuery(query): TypedQuery<SyncStreamQuery>,
+    headers: ApiHeaders,
     request_headers: HeaderMap,
     Caller(principal): Caller,
     State(state): State<HttpState>,
 ) -> Response {
-    let protocol = query.typed_value("protocol").and_then(Value::as_str);
-    let header_protocol = headers.get("x-codex-sync-protocol").and_then(Value::as_str);
+    let protocol = query.protocol.as_ref().map(|value| value.as_str());
+    let header_protocol = match headers.one("x-codex-sync-protocol") {
+        Ok(value) => value,
+        Err(error) => return error.into_response(),
+    };
     if protocol.is_some_and(|value| value != SYNC_PROTOCOL_VERSION_TEXT)
         || header_protocol.is_some_and(|value| value != SYNC_PROTOCOL_VERSION_TEXT)
         || (protocol != Some(SYNC_PROTOCOL_VERSION_TEXT)
@@ -399,11 +441,7 @@ async fn sync_stream(
     let renderer_hash = request_headers
         .get(API_SCHEMA_HASH_HEADER)
         .and_then(|value| value.to_str().ok())
-        .or_else(|| {
-            query
-                .typed_value(crate::schema::API_SCHEMA_HASH_PARAM)
-                .and_then(Value::as_str)
-        });
+        .or_else(|| query.api_schema.as_ref().map(|value| value.as_str()));
     if renderer_hash.is_some_and(|value| value != server_hash) {
         return encoded_event_response(
             stream::iter([Ok(sse_event(
@@ -415,7 +453,7 @@ async fn sync_stream(
         );
     }
 
-    let resources = match parse_resources(&query, &state) {
+    let resources = match parse_resources(&query) {
         Ok(resources) => resources,
         Err(error) => return error.into_response(),
     };
@@ -424,7 +462,7 @@ async fn sync_stream(
             return error.into_response();
         }
     }
-    let since = match parse_since(&query, &state, &resources) {
+    let since = match parse_since(&query, &resources) {
         Ok(since) => since,
         Err(error) => return error.into_response(),
     };
@@ -446,11 +484,26 @@ async fn sync_stream(
             Err(error) => return error.into_response(),
         };
     let mut initial_draft_sequence = 0;
-    let reconnect = headers.contains_key("last-event-id")
-        || query
-            .typed_value("reconnect")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+    let last_event_id = match headers.one("last-event-id") {
+        Ok(Some(value)) => match value.parse::<i64>() {
+            Ok(value)
+                if (0..=studio_runtime_schema::shared_values::MAX_SAFE_INTEGER)
+                    .contains(&value) =>
+            {
+                true
+            }
+            _ => {
+                return ApiError::validation(vec![
+                    Value::String("header".into()),
+                    Value::String("last-event-id".into()),
+                ])
+                .into_response();
+            }
+        },
+        Ok(None) => false,
+        Err(error) => return error.into_response(),
+    };
+    let reconnect = last_event_id || query.reconnect.unwrap_or(false);
     let reason = if reconnect {
         studio_runtime_services::diagnostics::record_sync_recovery(
             studio_runtime_services::diagnostics::SyncRecoveryKind::Reconnect,
@@ -501,7 +554,8 @@ async fn sync_stream(
     {
         match resource {
             ResourceRef::TranscriptResource(transcript) if entry.cursor.is_some() => {
-                transcript_sequences.insert(transcript.agent_id.clone(), entry.revision);
+                transcript_sequences
+                    .insert(transcript.agent_id.as_str().to_owned(), entry.revision);
             }
             ResourceRef::StateResource(_) if entry.cursor.is_some() => {
                 initial_entity_sequence = entry.revision
@@ -609,7 +663,7 @@ async fn sync_stream(
         }
         let resources = match selectors
             .into_iter()
-            .map(|selector| SubscribedResource::new(progress_resource(selector)))
+            .map(|selector| SubscribedResource::new(progress_resource(selector)?))
             .collect::<Result<Vec<_>, _>>()
         {
             Ok(resources) => resources,
@@ -626,14 +680,7 @@ async fn sync_stream(
     }
     // OpenAPI owns the omitted-selector compatibility default; the HTTP witness
     // keeps this native/signed-client behavior in parity with that contract.
-    let token_interest = match query
-        .typed_value("tokenRates")
-        .map(bool::deserialize)
-        .transpose()
-    {
-        Ok(interest) => interest.unwrap_or(true),
-        Err(_) => return ApiError::internal().into_response(),
-    };
+    let token_interest = query.token_rates.unwrap_or(true);
     let mut token_rates = token_interest.then(|| state.token_rates.subscribe());
     let mut last_token_rates = None;
     if let Some(receiver) = &mut token_rates {
@@ -723,7 +770,7 @@ pub(super) async fn append_progress_frames(
     for (resource, revision) in view.resources.iter().zip(&view.versions) {
         let value = match &resource.resource {
             ResourceRef::AuthProgressResource(r) => {
-                super::subscriptions::auth_progress(state, &r.request_id)
+                super::subscriptions::auth_progress(state, r.request_id.as_str())
                     .await
                     .unwrap_or(Value::Null)
             }
@@ -820,7 +867,7 @@ async fn append_auth_baseline(
             let value = serde_json::to_value(receipt).map_err(|_| ApiError::internal())?;
             let resource = progress_resource(ProgressSelector::Auth {
                 request_id: id.clone(),
-            });
+            })?;
             seen.insert(id);
             append_progress_frame(state, cursor, cursor.revision, &resource, &value, frames);
         }
@@ -832,7 +879,7 @@ async fn append_auth_baseline(
             .map_err(|_| ApiError::internal())?
         {
             if seen.insert(id.clone()) {
-                let resource = progress_resource(ProgressSelector::Auth { request_id: id });
+                let resource = progress_resource(ProgressSelector::Auth { request_id: id })?;
                 append_progress_frame(state, cursor, cursor.revision, &resource, &value, frames);
             }
         }
@@ -914,37 +961,32 @@ pub(super) async fn transcript_initial_snapshot(
 }
 
 fn parse_since(
-    query: &QueryParams,
-    state: &HttpState,
+    query: &SyncStreamQuery,
     resources: &[SubscribedResource],
 ) -> Result<BTreeMap<String, SubscriptionCursor>, ApiError> {
     let mut since = BTreeMap::new();
     let invalid = || ApiError::validation(vec![json!("query"), json!("since")]);
-    let Some(raw) = query.typed_value("since").and_then(Value::as_str) else {
+    let Some(raw) = query.since.as_ref().map(|value| value.as_str()) else {
         return Ok(since);
     };
     if raw.len() > MAX_SYNC_RESOURCE_QUERY_BYTES {
         return Err(invalid());
     }
-    let values: Vec<Value> = serde_json::from_str(raw).map_err(|_| invalid())?;
+    let values: Vec<studio_runtime_schema::http_ingress::Object<StreamSubscriptionAdd>> =
+        serde_json::from_str(raw).map_err(|_| invalid())?;
     if values.len() > MAX_SYNC_RESOURCE_COUNT {
         return Err(invalid());
     }
-    for value in values {
-        if !state
-            .validators
-            .validate_component("SubscriptionAdd", &value)
-        {
-            return Err(invalid());
-        }
-        let addition: crate::generated::SubscriptionAdd =
-            serde_json::from_value(value).map_err(|_| invalid())?;
+    for studio_runtime_schema::http_ingress::Object(addition) in values {
         let resource = SubscribedResource::new(addition.resource).map_err(|_| invalid())?;
         if !resources.iter().any(|item| item.key == resource.key) {
             return Err(invalid());
         }
-        if let Some(cursor) = addition.since
-            && since.insert(resource.key, cursor).is_some()
+        if let Some(cursor) = addition.since.map(|cursor| SubscriptionCursor {
+            workspace_id: cursor.workspace_id.as_str().to_owned(),
+            seq: cursor.seq.get(),
+            terminal_generation: cursor.terminal_generation.map(|value| value.get()),
+        }) && since.insert(resource.key, cursor).is_some()
         {
             return Err(invalid());
         }
@@ -963,7 +1005,9 @@ async fn attach_recent_transcripts(state: &HttpState, event: &mut ResourceChange
         .resources
         .iter()
         .filter_map(|resource| match resource {
-            ResourceRef::TranscriptResource(transcript) => Some(transcript.agent_id.clone()),
+            ResourceRef::TranscriptResource(transcript) => {
+                Some(transcript.agent_id.as_str().to_owned())
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -1025,10 +1069,7 @@ async fn attach_initial_entries(
     Ok(())
 }
 
-fn parse_resources(
-    query: &QueryParams,
-    state: &HttpState,
-) -> Result<Vec<SubscribedResource>, ApiError> {
+fn parse_resources(query: &SyncStreamQuery) -> Result<Vec<SubscribedResource>, ApiError> {
     let invalid = || {
         ApiError::validation(vec![
             Value::String("query".to_owned()),
@@ -1036,26 +1077,21 @@ fn parse_resources(
         ])
     };
     let raw = query
-        .typed_value("resources")
-        .and_then(Value::as_str)
+        .resources
+        .as_ref()
+        .map(|value| value.as_str())
         .ok_or_else(invalid)?;
     if raw.len() > MAX_SYNC_RESOURCE_QUERY_BYTES {
         return Err(invalid());
     }
-    let parsed: Value = serde_json::from_str(raw).map_err(|_| invalid())?;
-    let values = parsed.as_array().ok_or_else(invalid)?;
-    if values.len() > MAX_SYNC_RESOURCE_COUNT
-        || values
-            .iter()
-            .any(|resource| !state.validators.validate_component("ResourceRef", resource))
-    {
+    let values: Vec<ResourceRef> = serde_json::from_str(raw).map_err(|_| invalid())?;
+    if values.len() > MAX_SYNC_RESOURCE_COUNT {
         return Err(invalid());
     }
     let mut seen = BTreeSet::new();
     let mut resources = Vec::new();
     for value in values {
-        let resource =
-            SubscribedResource::from_validated_value(value.clone()).map_err(|_| invalid())?;
+        let resource = SubscribedResource::new(value).map_err(|_| invalid())?;
         let key = super::subscriptions::handler(&resource.resource)?.debug_key(&resource.resource);
         if seen.insert(key) {
             resources.push(resource);
@@ -1260,7 +1296,7 @@ async fn read_transcript_changes_typed(
         let ResourceRef::TranscriptResource(resource) = resource else {
             continue;
         };
-        let agent = resource.agent_id.clone();
+        let agent = resource.agent_id.as_str().to_owned();
         let scope = format!("transcript:{agent}");
         let after = if complete {
             sequences.get(&agent).copied()
@@ -1308,7 +1344,12 @@ async fn read_transcript_changes_typed(
                 .and_then(|document| {
                     serde_json::from_str::<TranscriptPageResponse>(&document.payload)
                         .ok()
-                        .map(|page| super::transcript::window_snapshot(page, resource.tail))
+                        .map(|page| {
+                            super::transcript::window_snapshot(
+                                page,
+                                resource.tail.map(|tail| tail.get()),
+                            )
+                        })
                 })
                 .map(Box::new);
             sequences.insert(agent.clone(), through);
@@ -1466,7 +1507,7 @@ fn attach_transcript_changes(
     let entries = std::mem::take(&mut event.resource_versions);
     for (resource, mut entry) in resources.into_iter().zip(entries) {
         if let ResourceRef::TranscriptResource(transcript) = &resource {
-            match updates.remove(&transcript.agent_id) {
+            match updates.remove(transcript.agent_id.as_str()) {
                 Some(TranscriptStreamUpdate::Unchanged) => continue,
                 Some(TranscriptStreamUpdate::Snapshot { revision, snapshot }) => {
                     entry.revision = revision;
@@ -1526,14 +1567,14 @@ async fn attach_transient_snapshots(
             ResourceRef::VoiceResource(resource) => {
                 let Some(store) = &state.store else { continue };
                 let after = voice_sequences
-                    .get(&resource.agent_id)
+                    .get(resource.agent_id.as_str())
                     .copied()
                     .unwrap_or_default();
                 if let Ok((cursor, payload)) =
                     studio_runtime_services::voice::stream_records(store, &resource.agent_id, after)
                         .await
                 {
-                    voice_sequences.insert(resource.agent_id.clone(), cursor);
+                    voice_sequences.insert(resource.agent_id.as_str().to_owned(), cursor);
                     entry.voice_records = payload
                         .and_then(|payload| serde_json::from_value(payload).ok())
                         .map(Some);
@@ -1639,19 +1680,19 @@ async fn subscription_frame(state: &mut ResourceStream, update: SubscriptionChan
         state
             .resources
             .iter()
-            .any(|resource| matches!(&resource.resource, ResourceRef::TerminalOutputResource(r) if r.terminal_id == *id))
+            .any(|resource| matches!(&resource.resource, ResourceRef::TerminalOutputResource(r) if r.terminal_id.as_str() == id))
     });
     state.voice_sequences.retain(|id, _| {
         state
             .resources
             .iter()
-            .any(|resource| matches!(&resource.resource, ResourceRef::VoiceResource(r) if r.agent_id == *id))
+            .any(|resource| matches!(&resource.resource, ResourceRef::VoiceResource(r) if r.agent_id.as_str() == id))
     });
     state.transcript_sequences.retain(|id, _| {
         state
             .resources
             .iter()
-            .any(|resource| matches!(&resource.resource, ResourceRef::TranscriptResource(r) if r.agent_id == *id))
+            .any(|resource| matches!(&resource.resource, ResourceRef::TranscriptResource(r) if r.agent_id.as_str() == id))
     });
     state.initial.push_back(sse_event(
         "subscriptions",
@@ -1725,7 +1766,7 @@ async fn subscription_frame(state: &mut ResourceStream, update: SubscriptionChan
             if let ResourceRef::TranscriptResource(transcript) = resource {
                 state
                     .transcript_sequences
-                    .insert(transcript.agent_id.clone(), entry.revision);
+                    .insert(transcript.agent_id.as_str().to_owned(), entry.revision);
             }
         }
         if !state.recent_tails_sent {
@@ -1761,7 +1802,7 @@ async fn next_live_delta(
         match live.recv().await {
             Ok(LiveEvent::Delta(delta))
                 if resources.iter().any(|resource| {
-                    matches!(&resource.resource, ResourceRef::TranscriptResource(transcript) if transcript.agent_id == delta.agent_id)
+                    matches!(&resource.resource, ResourceRef::TranscriptResource(transcript) if transcript.agent_id.as_str() == delta.agent_id)
                 }) =>
             {
                 return Some(LiveEvent::Delta(delta));
@@ -1787,7 +1828,7 @@ async fn live_frame(state: &ResourceStream, live: LiveEvent) -> Option<Event> {
         )),
         LiveEvent::Progress(selector) => {
             let (http, principal) = (state.http_state.as_ref()?, state.principal.as_ref()?);
-            let resource = progress_resource(selector);
+            let resource = progress_resource(selector).ok()?;
             authorize_resource(principal, &resource).ok()?;
             let resource = SubscribedResource::new(resource).ok()?;
             let cursor = http.sync_changes.snapshot();
@@ -2432,6 +2473,45 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stream_query_and_embedded_cursors_are_strict_and_bounded() {
+        let valid: axum::http::Uri = "/api/sync/stream?tokenRates=false&after=1".parse().unwrap();
+        assert!(axum::extract::Query::<super::SyncStreamQuery>::try_from_uri(&valid).is_ok());
+        let invalid: axum::http::Uri = "/api/sync/stream?after=-1".parse().unwrap();
+        assert!(axum::extract::Query::<super::SyncStreamQuery>::try_from_uri(&invalid).is_err());
+        assert!(serde_json::from_str::<studio_runtime_schema::http_ingress::Object<super::StreamSubscriptionAdd>>(r#"{"resource":{"kind":"state"},"since":{"workspaceId":"w","seq":1,"terminalGeneration":0}}"#).is_ok());
+        for raw in [
+            r#"{"resource":{"kind":"state"},"since":null}"#,
+            r#"{"resource":{"kind":"state"},"since":{"workspaceId":"w","seq":-1}}"#,
+            r#"{"resource":{"kind":"state"},"since":{"workspaceId":"w","seq":9007199254740992}}"#,
+            r#"{"resource":{"kind":"state"},"since":{"workspaceId":"","seq":1}}"#,
+            r#"{"resource":{"kind":"state"},"since":{"workspaceId":"w","seq":1,"terminalGeneration":null}}"#,
+            r#"{"resource":{"kind":"state"},"extra":true}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<
+                    studio_runtime_schema::http_ingress::Object<super::StreamSubscriptionAdd>,
+                >(raw)
+                .is_err()
+            );
+        }
+    }
+    fn fixture_notification(
+        id: &str,
+        resources: &[serde_json::Value],
+    ) -> studio_runtime_schema::resource_notification::ResourceNotifyRequest {
+        let resources = resources
+            .iter()
+            .cloned()
+            .map(|value| serde_json::from_value(value).expect("resource fixture"))
+            .collect();
+        studio_runtime_schema::resource_notification::ResourceNotifyRequest::new(
+            id.to_owned(),
+            resources,
+        )
+        .expect("notification fixture")
+    }
+
     async fn fixture_resource_content(state: HttpState, value: Value) -> Option<Vec<u8>> {
         crate::routes::subscriptions::resource_content(state, serde_json::from_value(value).ok()?)
             .await
@@ -2451,7 +2531,9 @@ mod tests {
             None,
             None,
         );
-        let body = json!({"requestId":"request", "resources":[{"kind":"models"}]});
+        let body: studio_runtime_schema::resource_notification::ResourceNotifyRequest =
+            serde_json::from_str(r#"{"requestId":"request","resources":[{"kind":"models"}]}"#)
+                .unwrap();
         for _ in 0..2 {
             let Json(ack) = notify_resources(state.clone(), body.clone()).await.unwrap();
             assert_eq!(ack.request_id, "request");
@@ -2460,7 +2542,10 @@ mod tests {
         assert!(
             notify_resources(
                 state,
-                json!({"requestId":"request", "resources":[{"kind":"accounts"}]})
+                serde_json::from_str(
+                    r#"{"requestId":"request","resources":[{"kind":"accounts"}]}"#
+                )
+                .unwrap()
             )
             .await
             .is_err()
@@ -3984,7 +4069,12 @@ mod tests {
             .expect("draft change");
         state
             .resource_notifications
-            .publish_once(&json!({"requestId":"interest-draft","resources":[{"kind":"drafts"}]}))
+            .publish_once(
+                &serde_json::from_str(
+                    r#"{"requestId":"interest-draft","resources":[{"kind":"drafts"}]}"#,
+                )
+                .expect("notification fixture"),
+            )
             .expect("draft hint");
         let frame = body.next().await.expect("resource change").expect("bytes");
         assert!(String::from_utf8_lossy(&frame).contains("event: resources"));
@@ -4928,7 +5018,7 @@ mod tests {
         assert!(batch["delta"].get("itemRevisions").is_none());
         assert_eq!(batch["through"], event["resourceVersions"][0]["revision"]);
         state.next_resources_frame_at = None;
-        http.resource_notifications.publish_once(&json!({"requestId":"preflush-empty","resources":[{"kind":"transcript","agentId":"open"}]})).expect("scoped preflush hint");
+        http.resource_notifications.publish_once(&serde_json::from_str(r#"{"requestId":"preflush-empty","resources":[{"kind":"transcript","agentId":"open"}]}"#).expect("notification fixture")).expect("scoped preflush hint");
         let updates = read_transcript_changes_typed(
             Some(store.clone()),
             &typed_resources(&state.resources),
@@ -5231,9 +5321,8 @@ mod tests {
             Some(store),
             None,
         );
-        let resource = ResourceRef::DraftsResource(crate::generated::DraftsResource {
-            kind: crate::generated::DraftsResourceKind::Drafts,
-        });
+        let resource =
+            ResourceRef::DraftsResource(studio_runtime_schema::resource_ref::EmptyResource {});
         let entry = draft_initial_snapshot(state, resource)
             .await
             .expect("snapshot");
@@ -5374,9 +5463,7 @@ mod tests {
             .expect("unrelated broad commit");
         state
             .resource_notifications
-            .publish_once(&json!({
-                "requestId":"unchanged-drafts", "resources":resources
-            }))
+            .publish_once(&fixture_notification("unchanged-drafts", &resources))
             .expect("redundant external hint");
         let unchanged = state
             .resource_notifications
@@ -5631,7 +5718,7 @@ mod tests {
             .await
             .expect("stored conversation revision");
         // A scoped external stream publication can precede the next stored item flush.
-        let publication = json!({"requestId":"stream-delta-1","resources":resources});
+        let publication = fixture_notification("stream-delta-1", &resources);
         assert!(
             state
                 .resource_notifications
@@ -5676,7 +5763,7 @@ mod tests {
             replay.resources.is_empty(),
             "a retried publication must not cause a repeated pull"
         );
-        state.resource_notifications.publish_once(&json!({"requestId":"other-chat-delta","resources":[{"kind":"transcript","agentId":"other"}]})).expect("other stream");
+        state.resource_notifications.publish_once(&serde_json::from_str(r#"{"requestId":"other-chat-delta","resources":[{"kind":"transcript","agentId":"other"}]}"#).expect("notification fixture")).expect("other stream");
         let unrelated = state
             .resource_notifications
             .changes_since_with_content(&resources, Some(replay.cursor.revision), |resource| {
@@ -6307,7 +6394,7 @@ mod tests {
             tx.execute("INSERT INTO runtime_access_settings(id,auto_pair) VALUES(1,0) ON CONFLICT(id) DO UPDATE SET auto_pair=0", [])?;
             Ok(())
         }).await.expect("settings change");
-        http.resource_notifications.publish_once(&json!({"requestId":"discovery-settings-change","resources":[{"kind":"multi-server"}]})).expect("committed discovery hint");
+        http.resource_notifications.publish_once(&serde_json::from_str(r#"{"requestId":"discovery-settings-change","resources":[{"kind":"multi-server"}]}"#).expect("notification fixture")).expect("committed discovery hint");
         let (frame, _) = next_frame(state).await.expect("discovery update");
         let event = event_document(frame).await;
         assert_eq!(
@@ -6456,6 +6543,41 @@ mod tests {
                 .await
                 .is_err(),
             "a stream without that chat open gets no frame"
+        );
+    }
+
+    /// Live deltas skip `SYNC_FRAME_MIN_INTERVAL`: one goes out while the resource and token
+    /// frame windows are still open.
+    #[tokio::test(start_paused = true)]
+    async fn live_delta_is_sent_while_frame_intervals_are_pending() {
+        let hub = Arc::new(ChangeNotificationHub::new());
+        let tokens = TokenRateHub::new();
+        let notifications = Arc::new(ResourceNotifications::new(hub.clone()));
+        let mut state = test_stream(
+            &hub,
+            &tokens,
+            notifications.clone(),
+            &[json!({"kind":"transcript","agentId":"a"})],
+        );
+        let window = Instant::now() + SYNC_FRAME_MIN_INTERVAL;
+        state.next_resources_frame_at = Some(window);
+        state.next_token_frame_at = Some(window);
+        hub.notify_one();
+        notifications.publish_live(LiveDelta {
+            agent_id: "a".into(),
+            item_id: "a:item".into(),
+            offset: 0,
+            text: "live".into(),
+        });
+        let started = Instant::now();
+        let (frame, _) = next_frame(state).await.expect("live frame");
+        assert!(
+            started.elapsed() < SYNC_FRAME_MIN_INTERVAL,
+            "a live delta waited for the frame interval"
+        );
+        assert_eq!(
+            event_document(frame).await,
+            json!({"agentId":"a","itemId":"a:item","offset":0,"text":"live"})
         );
     }
 
@@ -6777,7 +6899,12 @@ mod tests {
             "token-only changes produced an unrelated frame"
         );
         notifications
-            .publish_once(&json!({"requestId":"account-change","resources":[{"kind":"accounts"}]}))
+            .publish_once(
+                &serde_json::from_str(
+                    r#"{"requestId":"account-change","resources":[{"kind":"accounts"}]}"#,
+                )
+                .expect("notification fixture"),
+            )
             .expect("resource publication");
         let document = event_document(pending.await.expect("resource frame")).await;
         assert_eq!(document["resources"], json!([{"kind":"accounts"}]));
@@ -6825,7 +6952,12 @@ mod tests {
                         tokens.publish(step["body"].clone()).expect("rates");
                     }
                     "notify" => {
-                        notifications.publish_once(&json!({"requestId":index.to_string(),"resources":step["resources"]})).expect("notify");
+                        notifications
+                            .publish_once(&fixture_notification(
+                                &index.to_string(),
+                                step["resources"].as_array().expect("resources"),
+                            ))
+                            .expect("notify");
                     }
                     _ => {
                         let expected = expected.next().expect("fixture consumption");

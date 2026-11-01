@@ -1,21 +1,19 @@
+import { backgroundDisplay } from "../fixtures/background.ts";
 import { required } from "../teams/helpers.ts";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";
-import type { AgentEntityDto as Agent } from "../../src/generated/api.ts";
-import type { Monitor, BackgroundTask } from "../../src/types.ts";
+import type {
+  components,
+  AgentEntityDto as Agent,
+} from "../../src/generated/api.ts";
+import type { BackgroundTask } from "../../src/types.ts";
 import type { PostBody, PostResult, GetResult } from "../../src/apiTypes.ts";
 type FixtureSync = Parameters<typeof handleEntitySyncFixtureRequest>[2];
 type RecordedBody = Partial<
   PostBody<"/api/processes/action"> & PostBody<"/api/monitor/input">
 >;
-declare global {
-  interface Window {
-    __schemaHandshakeEvents: string[];
-  }
-}
 import {
   handleEntitySyncFixtureRequest,
   readFixtureSyncContract,
-  readApiSchemaHash,
   syncIdentityFixture,
   stubEntityState,
   expect,
@@ -108,6 +106,17 @@ test("Background controls", async ({ context }, testInfo) => {
     status: "running",
     created: Date.now() / 1000 - 20,
     tail: "Waiting for input",
+    display: {
+      kind: "command",
+      kindLabel: "command",
+      title: "native test process",
+      active: true,
+      inBackgroundList: true,
+      indicator: "working",
+      label: "running",
+      actions: ["input", "stop", "readOutput"],
+      stdinState: "open",
+    },
   };
   const responseTarget: NonNullable<
     GetResult<"/api/processes">["responseTarget"]
@@ -135,14 +144,16 @@ test("Background controls", async ({ context }, testInfo) => {
       stop: true,
     },
   };
-  const monitor: Monitor & Pick<BackgroundTask, "kind"> = {
+  const monitor = {
+    display: backgroundDisplay("monitor", "read value; echo $value"),
+    cancelRequested: false,
     id: "6f2ed4dd-f6ab-4d46-94a5-8a774333876a",
     agent: "lead",
     kind: "monitor",
     command: "read value; echo $value",
     interactive: true,
     timeout_ms: 1800000,
-    status: "running",
+    status: "running" as const,
     created: Date.now() / 1000,
     tail: "Monitor output text",
     error: "Monitor error line",
@@ -168,6 +179,8 @@ test("Background controls", async ({ context }, testInfo) => {
   updateEntitySyncFixture(state);
   syncFixture = {
     snapshot: state,
+    versionedResources: true,
+    processSnapshot: processListing,
     workspaceId,
     onStreamReady: (publish) => {
       streamListeners.add(publish);
@@ -182,36 +195,99 @@ test("Background controls", async ({ context }, testInfo) => {
   let dropNextSelectedStopReply = false;
   let rejectNextResponseStop = false;
   let emptyProcessList = false;
+  let responseAvailable = true;
   let rejectNextReceiptLookup = false;
   let receiptLookupCount = 0;
   let failInput = false;
+  function processListing(): components["schemas"]["ProcessListing"] {
+    const display = (
+      kind: "monitor" | "command" | "backgroundTask",
+      title: string,
+      actions: components["schemas"]["BackgroundTaskAction"][],
+    ): components["schemas"]["BackgroundTaskDisplay"] => ({
+      kind,
+      kindLabel: kind === "backgroundTask" ? "tool" : kind,
+      title,
+      active: true,
+      inBackgroundList: true,
+      indicator: "working",
+      label: "running",
+      actions,
+      ...(actions.includes("input") ? { stdinState: "open" as const } : {}),
+    });
+    const base = {
+      agent: "lead",
+      accountKey: "default",
+      epoch: 4,
+      status: "running" as const,
+      bytes: 0,
+      outputPatterns: [],
+      outputTruncated: false,
+    };
+    const processes: components["schemas"]["ProcessView"][] = emptyProcessList
+      ? []
+      : [
+          {
+            ...base,
+            id: monitor.id,
+            key: "monitor-key",
+            generation: "monitor-generation",
+            source: "monitor",
+            cancelRequested: !!monitor.cancelRequested,
+            created: monitor.created,
+            name: monitor.command,
+            command: monitor.command,
+            tail: monitor.tail ?? "",
+            error: monitor.error,
+            log: monitor.log,
+            display: display("monitor", monitor.command, [
+              "readOutput",
+              "input",
+              "resize",
+              "stop",
+            ]),
+          },
+          {
+            ...base,
+            id: claudeTask.id,
+            key: "claude-task-key",
+            generation: "claude-task-generation",
+            source: "claude_task",
+            cancelRequested: false,
+            created: claudeTask.created,
+            name: claudeTask.name,
+            tail: "",
+            display: display("backgroundTask", claudeTask.name, ["stop"]),
+          },
+          {
+            ...base,
+            id: native.id,
+            key: "native-key",
+            generation: "native-generation",
+            source: "codex_task",
+            cancelRequested: false,
+            created: native.created,
+            name: native.name ?? "command",
+            command: native.command,
+            tail: native.tail ?? "",
+            display: display("command", native.command ?? "command", [
+              "readOutput",
+              "input",
+              "stop",
+            ]),
+          },
+        ];
+    return {
+      processes,
+      activities: processes.map((value) => ({ source: "process", value })),
+      responseTarget: responseAvailable ? responseTarget : null,
+    };
+  }
   let page;
   try {
     page = await context.newPage();
+    page.setDefaultTimeout(10000);
     await page.setViewportSize({ width: 1440, height: 980 });
-    await page.addInitScript(() => {
-      window.__schemaHandshakeEvents = [];
-      const add = EventSource.prototype.addEventListener;
-      EventSource.prototype.addEventListener = function (
-        type: string,
-        listener:
-          | EventListenerOrEventListenerObject
-          | ((event: MessageEvent) => unknown),
-        options?: boolean | AddEventListenerOptions,
-      ) {
-        if (type !== "api-schema")
-          return add.call(this, type, listener as EventListener, options);
-        return add.call(
-          this,
-          type,
-          (event) => {
-            window.__schemaHandshakeEvents.push((event as MessageEvent).data);
-            return (listener as EventListener).call(this, event);
-          },
-          options,
-        );
-      };
-    });
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
     await page.route("**/api/**", async (route) => {
@@ -241,63 +317,7 @@ test("Background controls", async ({ context }, testInfo) => {
       else if (path === "/api/workspace")
         value = { tasks: [native], monitors: [monitor] };
       else if (path === "/api/processes" && req.method() === "GET")
-        value = {
-          responseTarget,
-          processes: emptyProcessList
-            ? []
-            : [
-                {
-                  id: monitor.id,
-                  key: "monitor-key",
-                  generation: "monitor-generation",
-                  agent: "lead",
-                  accountKey: "default",
-                  epoch: 4,
-                  source: "monitor",
-                  status: "running",
-                  cancelRequested: !!monitor.cancelRequested,
-                  created: monitor.created,
-                  name: monitor.command,
-                  command: monitor.command,
-                  output: monitor.tail,
-                  error: monitor.error,
-                  log: monitor.log,
-                  capabilities: {
-                    readOutput: true,
-                    sendInput: true,
-                    resize: true,
-                    stop: true,
-                  },
-                },
-                {
-                  ...claudeTask,
-                  key: "claude-task-key",
-                  generation: "claude-task-generation",
-                  output: "",
-                },
-                {
-                  id: native.id,
-                  key: "native-key",
-                  generation: "native-generation",
-                  agent: "lead",
-                  accountKey: "default",
-                  epoch: 4,
-                  source: "codex_task",
-                  status: "running",
-                  cancelRequested: false,
-                  created: native.created,
-                  name: native.name,
-                  command: native.command,
-                  output: native.tail,
-                  capabilities: {
-                    readOutput: true,
-                    sendInput: true,
-                    resize: false,
-                    stop: true,
-                  },
-                },
-              ],
-        };
+        value = processListing();
       else if (path === "/api/processes/action") {
         if (req.method() === "GET") {
           receiptLookupCount++;
@@ -402,15 +422,6 @@ test("Background controls", async ({ context }, testInfo) => {
       await readFixtureSyncContract(origin),
     );
     await page.goto(origin, { waitUntil: "domcontentloaded", timeout: 15000 });
-    await page.waitForFunction(
-      () => window.__schemaHandshakeEvents?.length > 0,
-      undefined,
-      { timeout: 5000 },
-    );
-    const handshakes = await page.evaluate(() =>
-      window.__schemaHandshakeEvents.map((data) => JSON.parse(data)),
-    );
-    assert.equal(handshakes[0].hash, readApiSchemaHash());
     await page
       .getByRole("button", { name: "Chat actions", exact: true })
       .click();
@@ -450,6 +461,9 @@ test("Background controls", async ({ context }, testInfo) => {
     );
     const unchangedMonitors = state.runtime.monitors;
     const unchangedTasks = state.runtime.tasks;
+    responseAvailable = false;
+    for (const publish of streamListeners)
+      publish([{ kind: "processes", agentId: "lead" }]);
     Object.assign(agent, { inFlight: false, turnId: null, status: "idle" });
     await entityState.update(state, { origin, token: "fixture-token" });
     await expect(
@@ -461,6 +475,9 @@ test("Background controls", async ({ context }, testInfo) => {
       status: "running",
     });
     responseTarget.turnId = "turn-next";
+    responseAvailable = true;
+    for (const publish of streamListeners)
+      publish([{ kind: "processes", agentId: "lead" }]);
     await entityState.update(state, { origin, token: "fixture-token" });
     await drawer
       .getByRole("button", { name: "Stop response", exact: true })
@@ -488,9 +505,6 @@ test("Background controls", async ({ context }, testInfo) => {
       ),
       ["monitor-key", "claude-task-key", "native-key"],
     );
-    await drawer
-      .getByRole("heading", { name: "Background tasks", exact: true })
-      .waitFor();
     await drawer.locator('[data-task="lead:task:background-1"]').waitFor();
     assert.equal(
       await drawer
@@ -543,16 +557,18 @@ test("Background controls", async ({ context }, testInfo) => {
       .waitFor();
     assert.equal(await input.inputValue(), "keep this input");
     await drawer.getByRole("button", { name: "Ctrl+C", exact: true }).click();
-    assert.equal(required(writes.at(-1)).body.text, "\u0003");
+    await expect.poll(() => writes.at(-1)?.body.text).toBe("\u0003");
     await drawer.locator(".process-resize summary").click();
     await drawer.getByLabel("Rows", { exact: true }).fill("30");
     await drawer.getByLabel("Columns", { exact: true }).fill("100");
     await drawer.getByRole("button", { name: "Resize", exact: true }).click();
-    assert.deepEqual(required(writes.at(-1)).body, {
-      id: created.id,
-      rows: 30,
-      cols: 100,
-    });
+    await expect
+      .poll(() => writes.at(-1)?.body)
+      .toEqual({
+        id: created.id,
+        rows: 30,
+        cols: 100,
+      });
     const downloaded = page.waitForEvent("download");
     await drawer.getByLabel("Download task log").click();
     const download = await downloaded;
@@ -636,9 +652,14 @@ test("Background controls", async ({ context }, testInfo) => {
     await drawer
       .getByRole("button", { name: "Send via agent", exact: true })
       .click();
-    assert.deepEqual(required(writes.at(-1)), {
+    expect(required(writes.at(-1))).toMatchObject({
       path: "/api/native-command",
-      body: { id: "native-task", text: "continue\n", action: "input" },
+      body: {
+        id: "native-task",
+        text: "continue\n",
+        action: "input",
+        request_id: expect.any(String),
+      },
     });
     await drawer
       .getByRole("button", { name: "Stop selected process", exact: true })

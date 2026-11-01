@@ -1,4 +1,7 @@
-import { ProviderKind as GeneratedApiProviderKind } from "../generated/api.ts";
+import {
+  LimitColor,
+  ProviderKind as GeneratedApiProviderKind,
+} from "../generated/api.ts";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
@@ -24,10 +27,6 @@ vi.mock("../servers/ServerServicesContext", () => ({
     getSnapshot: () => ({ data: undefined, status: "stale", error: null }),
   }),
   useServerResourceReads: () => vi.fn(),
-  useServerSessionCosts: () => ({
-    peekSessionCost: () => null,
-    storeSessionCost: vi.fn(),
-  }),
 }));
 vi.mock("./TokenRate", () => ({ default: () => null }));
 import Usage from "./Usage";
@@ -55,33 +54,76 @@ test("account limits omit model eligibility details and retain limits and refres
         createElement(Usage, {
           agent,
           stateDir: "fixture",
+          limits: null,
           opened: true,
           accountLabel: "Personal",
           reload: async () => {},
-          limits: {
-            accountKey: "claude",
-            at: now,
-            data: {
-              rateLimits: {
-                limitId: "claude",
-                primary: { usedPercent: 100, resetsAt: now + 3600 },
+          accounts: [
+            {
+              key: "claude",
+              label: "Personal",
+              provider: GeneratedApiProviderKind.claude,
+              loading: false,
+              reload: () => {},
+              buckets: {
+                current: {
+                  buckets: [
+                    {
+                      id: "claude",
+                      name: "Claude",
+                      shortName: "Claude",
+                      planType: null,
+                      creditsLabel: null,
+                      windows: [
+                        {
+                          label: "Primary",
+                          remaining: 0,
+                          reset: now + 3600,
+                          expired: false,
+                          color: LimitColor.error,
+                          warning: true,
+                        },
+                      ],
+                    },
+                  ],
+                  remaining: 0,
+                  color: LimitColor.error,
+                  low: true,
+                },
+                next: {
+                  buckets: [],
+                  remaining: null,
+                  color: LimitColor.paused,
+                  low: false,
+                },
+                validUntil: now + 3600,
+              },
+              limits: {
+                accountKey: "claude",
+                at: now,
+                data: {
+                  rateLimits: {
+                    limitId: "claude",
+                    primary: { usedPercent: 100, resetsAt: now + 3600 },
+                  },
+                },
+                eligibility: {
+                  agentId: agent.id,
+                  accountKey: "claude",
+                  provider: "claude",
+                  model,
+                  allowed: false,
+                  canRun: false,
+                  fresh,
+                  checkedAt: now,
+                  validUntil: fresh ? now + 60 : now - 1,
+                  resetAt: now + 3600,
+                  buckets: [{ id: "claude-fable", overageAllowed: false }],
+                  overage: "rejected",
+                },
               },
             },
-            eligibility: {
-              agentId: agent.id,
-              accountKey: "claude",
-              provider: "claude",
-              model,
-              allowed: false,
-              canRun: false,
-              fresh,
-              checkedAt: now,
-              validUntil: fresh ? now + 60 : now - 1,
-              resetAt: now + 3600,
-              buckets: [{ id: "claude-fable", overageAllowed: false }],
-              overage: "rejected",
-            },
-          },
+          ],
         }),
       ),
     );

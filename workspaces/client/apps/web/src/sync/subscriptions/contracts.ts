@@ -7,7 +7,7 @@ import type {
 } from "../../apiTypes.ts";
 
 export type ReviewTask = DeepReadonly<
-  KnownApiFields<components["schemas"]["WorkItem"]>
+  KnownApiFields<components["schemas"]["WorkDetail"]>
 >;
 export type WorkList = Omit<
   DeepReadonly<components["schemas"]["WorkList"]>,

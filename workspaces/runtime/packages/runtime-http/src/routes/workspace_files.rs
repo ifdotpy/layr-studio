@@ -1,13 +1,13 @@
 //! File metadata and bounded content reads for local workspaces.
 
 use super::extractors::ApiJson;
-use super::extractors::QueryParams;
+use super::extractors::TypedQuery;
 use super::manifest::{OperationStatus, RouteGroup, get, post};
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use base64::Engine;
-use serde_json::Value;
+use studio_runtime_schema::http_bounded_ingress as bounds;
 use studio_runtime_schema::shared_values::USER_ATTACHMENT_LIMIT_LABEL;
 use studio_runtime_services::payload_store::{self, PayloadStoreError};
 use studio_runtime_services::workspace_files::{self, WorkspaceContext, WorkspaceFilesError};
@@ -26,21 +26,31 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AssetUpload {
+    agent:
+        studio_runtime_schema::bounded_text::BoundedText<1, { bounds::ASSET_AGENT_ID_MAX_CHARS }>,
+    name: studio_runtime_schema::bounded_text::BoundedText<1, { bounds::ASSET_NAME_MAX_CHARS }>,
+    base64: Option<String>,
+    data: Option<String>,
+    id: Option<studio_runtime_schema::bounded_text::BoundedText<1, { bounds::ASSET_ID_MAX_CHARS }>>,
+}
+
 async fn upload_asset(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<crate::generated::AssetUpload>,
+    ApiJson(body): ApiJson<AssetUpload>,
 ) -> Result<Json<crate::generated::AssetRecord>, ApiError> {
     let encoded = body
         .base64
-        .flatten()
-        .or(body.data.flatten())
+        .or(body.data)
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Invalid file data"))?;
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let asset = payload_store::upload(
         &store,
-        &body.agent,
-        &body.name,
-        body.id.flatten().as_deref(),
+        body.agent.as_str(),
+        body.name.as_str(),
+        body.id.as_ref().map(|id| id.as_str()),
         &encoded,
     )
     .await
@@ -48,16 +58,22 @@ async fn upload_asset(
     super::generated_json::<crate::generated::AssetRecord>(asset).map(Json)
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct FileQuery {
+    agent: Option<String>,
+    path: Option<String>,
+    asset: Option<String>,
+}
+
 pub(crate) async fn file_info(
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<FileQuery>,
     State(state): State<HttpState>,
 ) -> Result<Json<crate::generated::FileInfo>, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
-    let agent_id = string_query(&query, "agent").map(str::to_owned);
-    let path = string_query(&query, "path").map(str::to_owned);
-    let asset_id = string_query(&query, "asset")
-        .filter(|asset| !asset.is_empty())
-        .map(str::to_owned);
+    let agent_id = query.agent;
+    let path = query.path;
+    let asset_id = query.asset.filter(|asset| !asset.is_empty());
     let target = file_target(&store, agent_id, path, asset_id).await?;
     let result = studio_runtime_process::blocking_pool::spawn_blocking(
         "runtime-http/routes/workspace_files",
@@ -74,15 +90,13 @@ pub(crate) async fn file_info(
 }
 
 pub(crate) async fn file_content(
-    query: QueryParams,
+    TypedQuery(query): TypedQuery<FileQuery>,
     State(state): State<HttpState>,
 ) -> Result<Json<crate::generated::FileContent>, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
-    let agent_id = string_query(&query, "agent").map(str::to_owned);
-    let path = string_query(&query, "path").map(str::to_owned);
-    let asset_id = string_query(&query, "asset")
-        .filter(|asset| !asset.is_empty())
-        .map(str::to_owned);
+    let agent_id = query.agent;
+    let path = query.path;
+    let asset_id = query.asset.filter(|asset| !asset.is_empty());
     let target = file_target(&store, agent_id, path, asset_id).await?;
     let result = studio_runtime_process::blocking_pool::spawn_blocking(
         "runtime-http/routes/workspace_files",
@@ -192,10 +206,6 @@ fn validate_agent(
         | other @ WorkspaceFilesError::MissingPath
         | other @ WorkspaceFilesError::InvalidPath => file_error(other),
     })
-}
-
-fn string_query<'a>(query: &'a QueryParams, name: &str) -> Option<&'a str> {
-    query.typed_value(name).and_then(Value::as_str)
 }
 
 fn invalid_stored(object: &str, id: &str) -> ApiError {
@@ -453,5 +463,38 @@ inventory::submit! {
         name: "workspace_files",
         routes: Some(routes),
         dependencies: &[],
+    }
+}
+
+#[cfg(test)]
+mod typed_query_tests {
+    use axum::extract::Query;
+    use serde::de::DeserializeOwned;
+
+    fn accepts<T: DeserializeOwned>(query: &str) -> bool {
+        let uri = format!("/?{query}").parse().unwrap();
+        Query::<T>::try_from_uri(&uri).is_ok()
+    }
+
+    #[test]
+    fn query_contracts() {
+        assert!(accepts::<super::FileQuery>("agent=a&path=b&asset=c"));
+        assert!(!accepts::<super::FileQuery>("extra=x"));
+        assert!(!accepts::<super::FileQuery>(
+            "agent=a&path=b&asset=c&unknown=x"
+        ));
+    }
+}
+
+#[cfg(test)]
+mod asset_ingress_tests {
+    #[test]
+    fn asset_is_closed_and_bounded() {
+        assert!(serde_json::from_str::<super::AssetUpload>(r#"{"agent":"a","name":"n"}"#).is_ok());
+        assert!(serde_json::from_str::<super::AssetUpload>(r#"{"agent":"","name":"n"}"#).is_err());
+        assert!(
+            serde_json::from_str::<super::AssetUpload>(r#"{"agent":"a","name":"n","extra":1}"#)
+                .is_err()
+        );
     }
 }

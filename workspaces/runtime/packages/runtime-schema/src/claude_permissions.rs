@@ -13,6 +13,18 @@ pub enum PermissionMode {
 }
 
 impl PermissionMode {
+    pub const fn from_full_access(enabled: bool) -> Self {
+        if enabled {
+            Self::BypassPermissions
+        } else {
+            Self::Default
+        }
+    }
+
+    pub const fn is_full_access(self) -> bool {
+        matches!(self, Self::BypassPermissions)
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Default => "default",

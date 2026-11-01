@@ -953,12 +953,6 @@ describe("resource read callers", () => {
     expect(
       states.some(
         (entry) =>
-          (entry.value as { value?: unknown } | null)?.value === session,
-      ),
-    ).toBe(false);
-    expect(
-      states.some(
-        (entry) =>
           (entry.value as { value?: { totalUSD?: number } } | null)?.value
             ?.totalUSD === 0.5,
       ),

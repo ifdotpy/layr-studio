@@ -5,7 +5,11 @@ import {
   AccountTransferStatus as GeneratedAccountTransferStatus,
 } from "../../generated/api";
 import { randomUUID } from "../../uuid";
-import { ProviderKind, providerLabel } from "../../generated/providerKind.ts";
+import {
+  ProviderKind,
+  providerLabel,
+  providerSupports,
+} from "../../generated/providerKind.ts";
 import { clearSettingsRequest, settingsRequestId } from "../settingsRequestId";
 import { isModelEnabled, useModelChoices } from "../models/modelChoices";
 import { useServerApi } from "../../servers/ServerServicesContext";
@@ -669,11 +673,11 @@ function ScopedExecutionSettings({
     if (
       !saving &&
       pendingYolo &&
-      (pendingYolo.value === (agent.yoloMode === true) ||
-        pendingYolo.baseline !== (agent.yoloMode === true))
+      (pendingYolo.value === (agent.permissionMode === "bypassPermissions") ||
+        pendingYolo.baseline !== (agent.permissionMode === "bypassPermissions"))
     )
       setPendingYolo(null);
-  }, [saving, pendingYolo, agent.yoloMode]);
+  }, [saving, pendingYolo, agent.permissionMode]);
   const [pending, setPending] = useState<{
     values: SettingsValue;
     baseline: SettingsValue;
@@ -1416,8 +1420,8 @@ function ScopedExecutionSettings({
       confirmed = true;
       if (!mounted.current) return;
       setPendingYolo({
-        value: canonical.yoloMode === true,
-        baseline: agent.yoloMode === true,
+        value: canonical.permissionMode === "bypassPermissions",
+        baseline: agent.permissionMode === "bypassPermissions",
       });
       refreshConfirmed(generation);
     } catch (failure) {
@@ -1559,6 +1563,7 @@ function ScopedExecutionSettings({
         roleSwitchId={roleSwitchId}
         readOnlyReason={readOnlyReason}
         provider={pickerProvider}
+        capabilityProvider={agent.provider || undefined}
         providers={pickerProviders}
         onProvider={setBrowsedProvider}
         accounts={inheritedUnavailable ? [] : connectedAccounts}
@@ -1737,11 +1742,14 @@ function ScopedExecutionSettings({
       )}
     </>
   );
-  const fullAccess = pendingYolo?.value ?? agent.yoloMode === true;
+  const fullAccess =
+    pendingYolo?.value ?? agent.permissionMode === "bypassPermissions";
   const askingNextTurn =
     (!!agent.inFlight || busy.has(agent.status ?? "")) && !fullAccess;
   const permissions =
-    agent.isLead && agent.provider === ProviderKind.Codex ? (
+    agent.isLead &&
+    agent.provider === ProviderKind.Codex &&
+    providerSupports(agent.provider, "approvals") ? (
       settingsRow ? (
         <div className="execution-setting">
           <Text size="sm" fw={500}>
@@ -1752,7 +1760,7 @@ function ScopedExecutionSettings({
             fullWidth
             aria-label="Full access without approval"
             value={fullAccess ? "full" : "ask"}
-            disabled={saving || !("yoloMode" in agent)}
+            disabled={saving || !("permissionMode" in agent)}
             data={[
               { value: "ask", label: "Ask" },
               { value: "full", label: "Full" },
@@ -1760,7 +1768,7 @@ function ScopedExecutionSettings({
             onChange={(value) => void changeYolo(value === "full")}
           />
           <Text size="xs" c="dimmed" className="execution-setting-description">
-            {!("yoloMode" in agent)
+            {!("permissionMode" in agent)
               ? "Available after the server update."
               : askingNextTurn
                 ? "Ask policy changes apply from the next turn."
@@ -1779,13 +1787,13 @@ function ScopedExecutionSettings({
             label="Full access without approval"
             aria-label="Full access without approval"
             checked={fullAccess}
-            disabled={saving || !("yoloMode" in agent)}
+            disabled={saving || !("permissionMode" in agent)}
             description={
-              !("yoloMode" in agent)
+              !("permissionMode" in agent)
                 ? "Available after the server update."
                 : askingNextTurn
                   ? "Ask policy changes apply from the next turn."
-                  : agent.yoloMode == null
+                  : agent.permissionMode == null
                     ? "The team uses normal Codex permissions."
                     : fullAccess
                       ? "Tools run without permission prompts."

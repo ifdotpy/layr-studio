@@ -49,7 +49,15 @@ fn preparation_settings(agent: &Value) -> Result<PreparationSettings> {
         effort: string("effort", true)?,
         native_effort: string("nativeEffort", true)?,
         fast_mode: boolean("fastMode", true)?,
-        yolo_mode: boolean("yoloMode", true)?,
+        yolo_mode: match string("permissionMode", true)? {
+            Field::Value(mode) => Field::Value(
+                mode
+                    == studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
+                        .as_str(),
+            ),
+            Field::Null => Field::Null,
+            Field::Missing => Field::Missing,
+        },
         profile_instructions: string("profileInstructions", true)?,
         role: string("role", true)?,
         daybreak_enabled: boolean("daybreakEnabled", false)?,

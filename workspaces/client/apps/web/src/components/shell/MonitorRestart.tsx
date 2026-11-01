@@ -7,11 +7,7 @@ import {
   useServerApi,
   useServerServices,
 } from "../../servers/ServerServicesContext";
-import type {
-  DisplayBackgroundTask,
-  DisplayProcessTask,
-} from "../backgroundTaskModel";
-import type { Monitor } from "../../types";
+import type { DisplayProcessTask } from "../backgroundTaskModel";
 
 type Restart = PostBody<"/api/monitor/restart">;
 export function restartPatterns(text: string): string[] {
@@ -24,11 +20,11 @@ export default function MonitorRestart({
   refresh,
 }: {
   task: Pick<
-    DisplayBackgroundTask,
+    DisplayProcessTask,
     "id" | "agent" | "command" | "cancelRequested"
-  > &
-    Pick<Monitor, "outputPatterns"> &
-    Partial<Pick<DisplayProcessTask, "epoch" | "accountKey">>;
+  > & { outputPatterns?: readonly string[] | undefined } & Partial<
+      Pick<DisplayProcessTask, "epoch" | "accountKey">
+    >;
   notify: (message: string) => void;
   refresh: () => Promise<void>;
 }) {

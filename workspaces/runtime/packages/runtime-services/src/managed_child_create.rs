@@ -460,7 +460,9 @@ pub(crate) async fn spawn_agents(
     environment: &dyn ManagedCreationEnvironment,
 ) -> Result<crate::managed_host_tools::DispatchedOperation, Error> {
     let actor_record = actor.record().clone();
-    if actor_record.extra.get("role").and_then(Value::as_str) == Some("reviewer") {
+    if actor_record.role.value().copied()
+        == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer)
+    {
         return Err(
             crate::managed_host_tools::Error::Invalid("Reviewers cannot create agents").into(),
         );
@@ -804,7 +806,9 @@ pub(crate) async fn spawn_agents(
             record["profileInstructions"] = json!(profile.instructions);
         }
         record["name"] = json!(name.trim());
-        record["yoloMode"] = root_value.get("yoloMode").cloned().unwrap_or(json!(true));
+        record["permissionMode"] = root_value.get("permissionMode").cloned().unwrap_or(json!(
+            studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
+        ));
         record["maxAgents"] = root_value
             .get("maxAgents")
             .cloned()
@@ -1144,7 +1148,9 @@ fn can_delegate(
     actor: &AgentRecord,
     root: &AgentRecord,
 ) -> Result<bool, crate::managed_host_tools::Error> {
-    if actor.extra.get("role").and_then(Value::as_str) == Some("reviewer") {
+    if actor.role.value().copied()
+        == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer)
+    {
         return Ok(false);
     }
     let limit = root
@@ -1380,7 +1386,7 @@ pub(crate) async fn request_review(
         )
         .into());
     }
-    if event_write::truthy(actor_record.extra.get("daybreakEnabled")) {
+    if actor_record.daybreak_enabled == Some(true) {
         return Err(crate::managed_host_tools::Error::Invalid(
             "Native review cannot select Daybreak. Delegate a review task to a subagent instead",
         )
@@ -1505,7 +1511,8 @@ pub(crate) async fn request_review(
         .map_err(map_create_error)?
         .value();
     record["provider"] = json!(ProviderKind::Codex.key());
-    record["yoloMode"] = json!(false);
+    record["permissionMode"] =
+        json!(studio_runtime_schema::claude_permissions::PermissionMode::Default);
     record["worktree"] = json!(false);
     record["workspaceMode"] = json!("shared");
     record["workspaceInGit"] = json!(false);

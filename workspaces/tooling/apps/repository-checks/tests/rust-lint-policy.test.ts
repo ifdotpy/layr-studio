@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -301,5 +309,107 @@ test("closed provider parsing opts into the Value restriction", () => {
   assert.match(
     read("workspaces/runtime/packages/runtime-schema/src/provider_kind.rs"),
     /#\[deny\(clippy::disallowed_types\)\]\s*impl FromStr for ProviderKind/,
+  );
+});
+
+// Cargo stores rerun-if-changed paths as printed. An absolute path differs in every layr
+// line, marks the script dirty and rebuilds every crate downstream of it.
+function absoluteRerunPaths(output: string): string[] {
+  return output
+    .split("\n")
+    .filter((line) => /^cargo:rerun-if-changed=(\/|[A-Za-z]:[\\/])/.test(line));
+}
+
+// Static view of a build script: it must not print a path built from an absolute base.
+function absoluteRerunSources(source: string): string[] {
+  return source
+    .split("\n")
+    .filter(
+      (line) =>
+        line.includes("cargo:rerun-if-changed=") &&
+        /\.display\(\)|canonicalize|CARGO_MANIFEST_DIR|manifest_dir/.test(line),
+    );
+}
+
+test("build scripts print relative rerun-if-changed paths", () => {
+  assert.deepEqual(
+    absoluteRerunPaths(
+      "cargo:rerun-if-changed=/repo/a.ts\ncargo:rerun-if-changed=a.ts",
+    ),
+    ["cargo:rerun-if-changed=/repo/a.ts"],
+    "known bad output must be rejected",
+  );
+  assert.equal(
+    absoluteRerunSources(
+      'println!("cargo:rerun-if-changed={}", dir.join("x").display());',
+    ).length,
+    1,
+    "known bad source must be rejected",
+  );
+  const found: string[] = [];
+  const walk = (directory: string) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (["node_modules", "target", ".git"].includes(entry.name)) continue;
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name === "build.rs")
+        for (const line of absoluteRerunSources(readFileSync(full, "utf8")))
+          found.push(`${path.relative(root, full)}: ${line.trim()}`);
+    }
+  };
+  walk(path.join(root, "workspaces"));
+  assert.deepEqual(found, []);
+  // The schema script rewrites the generator output, so also check recorded outputs of this
+  // checkout (paths inside the repository only) when a build exists. A warm target cache can
+  // hold older output dirs of the same package from before a fix; only the newest is live.
+  const builds = path.join(root, "target/debug/build");
+  const newest = new Map<string, { name: string; mtime: number }>();
+  if (existsSync(builds))
+    for (const name of readdirSync(builds)) {
+      // tauri-build prints absolute paths and has no option to change that (docs/testing.md).
+      if (name.startsWith("studio-native-client-")) continue;
+      const output = path.join(builds, name, "output");
+      if (!existsSync(output)) continue;
+      const mtime = statSync(output).mtimeMs;
+      const pkg = name.replace(/-[0-9a-f]+$/, "");
+      if (mtime > (newest.get(pkg)?.mtime ?? -1))
+        newest.set(pkg, { name, mtime });
+    }
+  for (const { name } of newest.values())
+    assert.deepEqual(
+      absoluteRerunPaths(
+        readFileSync(path.join(builds, name, "output"), "utf8"),
+      ).filter((line) =>
+        line.slice("cargo:rerun-if-changed=".length).startsWith(root),
+      ),
+      [],
+      name,
+    );
+  // Generated modules must not name absolute paths: a warm cache reuses them in other lines.
+  const absoluteModule =
+    /#\[path\s*=\s*"(\/|[A-Za-z]:[\\/])|include(_str|_bytes)?!\(\s*"(\/|[A-Za-z]:[\\/])/;
+  const walkOut = (directory: string): string[] =>
+    readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) return walkOut(full);
+      return entry.name.endsWith(".rs") &&
+        readFileSync(full, "utf8")
+          .split("\n")
+          .some((line) => absoluteModule.test(line))
+        ? [path.relative(builds, full)]
+        : [];
+    });
+  for (const { name } of newest.values()) {
+    const out = path.join(builds, name, "out");
+    assert.deepEqual(existsSync(out) ? walkOut(out) : [], [], name);
+  }
+  assert.ok(
+    absoluteModule.test('#[path = "/x/y.rs"] pub mod t;'),
+    "known bad module rejected",
+  );
+  assert.ok(
+    !absoluteModule.test(
+      'pub mod t { include!(concat!(env!("OUT_DIR"), "/t.rs")); }',
+    ),
   );
 });

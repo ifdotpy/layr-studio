@@ -2,7 +2,9 @@
 
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use serde::de::DeserializeOwned;
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
 use std::collections::HashMap;
 use studio_runtime_store::CachedSql;
 use studio_runtime_store::{StoreResult, system_reads as records};
@@ -476,26 +478,41 @@ impl RoomDirectory {
     pub(crate) fn projects(&self) -> &[ProjectAuthorityRow] {
         &self.projects
     }
-    pub(crate) fn for_room(
+    pub(crate) fn for_room_identity(
         &self,
         tx: &Connection,
-        room: &Value,
+        id: &str,
+        federated: bool,
         last: bool,
     ) -> Result<RoomViewContext, studio_runtime_store::StoreError> {
-        let id = room["id"].as_str().unwrap_or_default();
         let last_message = if last && records::exists(tx, "runtime_chat_messages")? {
             let row=tx.query_row_cached("SELECT id,seq,text,created,sender,deliveries FROM runtime_chat_messages WHERE room=?1 ORDER BY seq DESC LIMIT 1",[id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,String>(2)?,r.get::<_,f64>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?))).optional()?;
-            row.map(|(key,seq,text,created,sender,deliveries)|{
-                let deliveries:std::collections::BTreeMap<String,studio_runtime_schema::persistence::RecipientDelivery>=serde_json::from_str(&deliveries).map_err(|_|records::invalid("runtime_chat_messages",&key))?;
-                records::validate("runtime_chat_messages",&key,json!({"id":key,"seq":seq,"room":id,"text":text,"created":created,"sender":sender,"deliveries":deliveries}))?;
-                Ok::<Value,studio_runtime_store::StoreError>(json!({"seq":seq,"text":text.chars().take(180).collect::<String>(),"created":created,"sender":sender}))
-            }).transpose()?
+            row.map(|(key, seq, text, created, sender, deliveries)| {
+                let _deliveries: std::collections::BTreeMap<
+                    String,
+                    studio_runtime_schema::persistence::RecipientDelivery,
+                > = serde_json::from_str(&deliveries)
+                    .map_err(|_| records::invalid("runtime_chat_messages", &key))?;
+                let seq = studio_runtime_schema::room_record::ChatSequence::from_i64(seq)
+                    .ok_or_else(|| records::invalid("runtime_chat_messages", &key))?;
+                let created = serde_json::Number::from_f64(created)
+                    .ok_or_else(|| records::invalid("runtime_chat_messages", &key))?;
+                Ok::<_, studio_runtime_store::StoreError>(
+                    studio_runtime_schema::room_record::RoomLastMessage {
+                        seq,
+                        text: text.chars().take(180).collect(),
+                        created,
+                        sender,
+                    },
+                )
+            })
+            .transpose()?
         } else {
             None
         };
         Ok(RoomViewContext {
             last_message,
-            federation: if room["kind"] == "federated" {
+            federation: if federated {
                 records::get(tx, "runtime_federation_rooms", id)?
                     .map(|row| {
                         // The authoritative table schema was checked by get;
@@ -523,7 +540,7 @@ fn pending_attention(
     id: &str,
     record: &Value,
 ) -> StoreResult<(bool, bool)> {
-    if !table_exists(transaction, "runtime_requests")? {
+    if !table_exists(transaction, "approvals")? {
         return Ok((false, false));
     }
     let epoch = record
@@ -531,8 +548,8 @@ fn pending_attention(
         .and_then(Value::as_i64)
         .unwrap_or_default();
     transaction.query_row_cached(
-        "SELECT EXISTS(SELECT 1 FROM runtime_requests WHERE json_valid(record) AND json_extract(record,'$.agent')=?1 AND (json_extract(record,'$.epoch') IS NULL OR json_extract(record,'$.epoch')=?2) AND COALESCE(json_extract(record,'$.status'),'pending')='pending' AND COALESCE(json_extract(record,'$.deferred'),0)=0 AND json_extract(record,'$.method') IN ('item/tool/requestUserInput','mcpServer/elicitation/request')), \
-                EXISTS(SELECT 1 FROM runtime_requests WHERE json_valid(record) AND json_extract(record,'$.agent')=?1 AND (json_extract(record,'$.epoch') IS NULL OR json_extract(record,'$.epoch')=?2) AND COALESCE(json_extract(record,'$.status'),'pending')='pending' AND COALESCE(json_extract(record,'$.deferred'),0)=0 AND COALESCE(json_extract(record,'$.method'),'') NOT IN ('item/tool/requestUserInput','mcpServer/elicitation/request'))",
+        "SELECT EXISTS(SELECT 1 FROM approvals WHERE agent=?1 AND (epoch IS NULL OR epoch=?2) AND state='pending' AND COALESCE(deferral_active,0)=0 AND kind IN ('question','elicitation')), \
+                EXISTS(SELECT 1 FROM approvals WHERE agent=?1 AND (epoch IS NULL OR epoch=?2) AND state='pending' AND COALESCE(deferral_active,0)=0 AND kind NOT IN ('question','elicitation'))",
         rusqlite::params![id, epoch], |row| Ok((row.get(0)?, row.get(1)?)),
     ).map_err(Into::into)
 }
@@ -694,12 +711,11 @@ mod room_preparation_tests {
         )
         .expect("directory resolves");
         let connection = Connection::open_in_memory().expect("database");
-        let room = json!({"id":"room"});
         let first = directory
-            .for_room(&connection, &room, false)
+            .for_room_identity(&connection, "room", false, false)
             .expect("first room context");
         let second = directory
-            .for_room(&connection, &room, false)
+            .for_room_identity(&connection, "room", false, false)
             .expect("second room context");
 
         assert!(Arc::ptr_eq(&first.agents, &second.agents));

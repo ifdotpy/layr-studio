@@ -390,9 +390,5 @@
   {
     "file": "sync/uploads.ts",
     "callee": "syncPost"
-  },
-  {
-    "file": "usage/accountUsage.test.ts",
-    "callee": "localStorage"
   }
 ]

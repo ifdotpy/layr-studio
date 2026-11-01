@@ -3093,6 +3093,12 @@ export interface components {
        */
       account_key?: null | string | undefined;
     };
+    /** @description Server-owned account presentation; each field is derived from the same observation. */
+    AccountLimitsProjection: {
+      buckets: components["schemas"]["BucketProjection"];
+      reset: components["schemas"]["ResetProjection"];
+      runway: components["schemas"]["WeeklyRunway"];
+    };
     /** AccountLoginResponse */
     AccountLoginResponse: {
       /** Accountkey */
@@ -3780,20 +3786,6 @@ export interface components {
       agentModeSupported?: boolean | null | undefined;
       /** Cansend */
       canSend?: boolean | null | undefined;
-      /** @description Claude permission mode for the worker launch preview. Other session options remain private. */
-      claudeOptions?:
-        | {
-            /** @enum {string} */
-            permissionMode?:
-              | "default"
-              | "acceptEdits"
-              | "auto"
-              | "plan"
-              | "bypassPermissions"
-              | undefined;
-          }
-        | null
-        | undefined;
       /**
        * Commandprogress
        * @default []
@@ -3913,6 +3905,10 @@ export interface components {
         | undefined;
       /** Pendingsettingsaccountkey */
       pendingSettingsAccountKey?: null | string | undefined;
+      permissionMode?:
+        | ("default" | "acceptEdits" | "auto" | "plan" | "bypassPermissions")
+        | null
+        | undefined;
       /** Projectserverid */
       projectServerId?: null | string | undefined;
       queuedSettings?:
@@ -3967,8 +3963,6 @@ export interface components {
       worktree?: boolean | null | string | undefined;
       /** Worktreepreparation */
       worktreePreparation?: ("waiting" | "preparing") | null | undefined;
-      /** Yolomode */
-      yoloMode?: boolean | null | undefined;
     };
     /** AgentDetailResource */
     AgentDetailResource: {
@@ -4071,20 +4065,6 @@ export interface components {
       canSend?: boolean | null | undefined;
       capacityRetry?:
         | components["schemas"]["AgentEntityCapacityRetryDto"]
-        | null
-        | undefined;
-      /** @description Claude permission mode for the worker launch preview. Other session options remain private. */
-      claudeOptions?:
-        | {
-            /** @enum {string} */
-            permissionMode?:
-              | "default"
-              | "acceptEdits"
-              | "auto"
-              | "plan"
-              | "bypassPermissions"
-              | undefined;
-          }
         | null
         | undefined;
       /**
@@ -4248,6 +4228,10 @@ export interface components {
         | undefined;
       /** Pendingsettingsaccountkey */
       pendingSettingsAccountKey?: null | string | undefined;
+      permissionMode?:
+        | ("default" | "acceptEdits" | "auto" | "plan" | "bypassPermissions")
+        | null
+        | undefined;
       /** Pinned */
       pinned?: boolean | null | undefined;
       /** Project */
@@ -4344,8 +4328,6 @@ export interface components {
       worktree?: boolean | null | string | undefined;
       /** Worktreepreparation */
       worktreePreparation?: ("waiting" | "preparing") | null | undefined;
-      /** Yolomode */
-      yoloMode?: boolean | null | undefined;
     };
     /**
      * @description One epoch-scoped wait. `until` is a retry deadline in Unix seconds.
@@ -4457,6 +4439,8 @@ export interface components {
       /** Updatedat */
       updatedAt: number;
     };
+    /** @description Identity of the agent that owns the turn. */
+    AgentId: string;
     /** AgentInboxEntry */
     AgentInboxEntry: {
       /** Agent */
@@ -5309,6 +5293,10 @@ export interface components {
        * @default null
        */
       pendingSettingsAccountKey?: null | string | undefined;
+      permissionMode?:
+        | ("default" | "acceptEdits" | "auto" | "plan" | "bypassPermissions")
+        | null
+        | undefined;
       /**
        * Pinned
        * @default null
@@ -5668,109 +5656,8 @@ export interface components {
        * @default null
        */
       worktreeWarning?: null | string | undefined;
-      /**
-       * Yolomode
-       * @default null
-       */
-      yoloMode?: boolean | undefined;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
-    };
-    /** AgentRequest */
-    AgentRequest: {
-      /** Agent */
-      agent: string;
-      /**
-       * Answeredat
-       * @default null
-       */
-      answeredAt?: number | null | undefined;
-      /**
-       * Answeredby
-       * @default null
-       */
-      answeredBy?: null | string | undefined;
-      /**
-       * Answererror
-       * @default null
-       */
-      answerError?: null | string | undefined;
-      /**
-       * Answerhistory
-       * @default null
-       */
-      answerHistory?:
-        | components["schemas"]["AnswerHistoryEntry"][]
-        | null
-        | undefined;
-      /**
-       * Createdat
-       * @default null
-       */
-      createdAt?: number | null | undefined;
-      /**
-       * Decision
-       * @default null
-       */
-      decision?:
-        | ("answer" | "accept" | "decline" | "cancel")
-        | null
-        | undefined;
-      /**
-       * Deferred
-       * @default null
-       */
-      deferred?: boolean | null | undefined;
-      /**
-       * Deferredat
-       * @default null
-       */
-      deferredAt?: number | null | undefined;
-      /**
-       * Deferredby
-       * @default null
-       */
-      deferredBy?: null | string | undefined;
-      /** Id */
-      id: string;
-      /**
-       * Itemid
-       * @description Provider transcript item that asked the question, when known.
-       * @default null
-       */
-      itemId?: null | string | undefined;
-      /**
-       * Method
-       * @enum {string}
-       */
-      method:
-        | "agent/asyncQuestion"
-        | "item/tool/requestUserInput"
-        | "mcpServer/elicitation/request";
-      /**
-       * Questions
-       * @default []
-       */
-      questions?: components["schemas"]["QuestionEntry"][] | undefined;
-      /**
-       * Status
-       * @enum {string}
-       */
-      status:
-        | "pending"
-        | "blocked"
-        | "answered"
-        | "answering"
-        | "uncertain"
-        | "expired"
-        | "declined"
-        | "failed";
-      /**
-       * Turnid
-       * @description Native turn that asked the question, when known.
-       * @default null
-       */
-      turnId?: null | string | undefined;
     };
     /**
      * AgentResponse
@@ -5824,6 +5711,20 @@ export interface components {
       /** @default null */
       capacityRetry?:
         | components["schemas"]["AgentEntityCapacityRetryDto"]
+        | null
+        | undefined;
+      /** @description Claude permission mode for the worker launch preview. Other session options remain private. */
+      claudeOptions?:
+        | {
+            /** @enum {string} */
+            permissionMode?:
+              | "default"
+              | "acceptEdits"
+              | "auto"
+              | "plan"
+              | "bypassPermissions"
+              | undefined;
+          }
         | null
         | undefined;
       /**
@@ -6139,6 +6040,10 @@ export interface components {
        * @default null
        */
       pendingSettingsAccountKey?: null | string | undefined;
+      permissionMode?:
+        | ("default" | "acceptEdits" | "auto" | "plan" | "bypassPermissions")
+        | null
+        | undefined;
       /**
        * Pinned
        * @default null
@@ -6317,11 +6222,6 @@ export interface components {
        * @default null
        */
       worktreePreparation?: ("waiting" | "preparing") | null | undefined;
-      /**
-       * Yolomode
-       * @default null
-       */
-      yoloMode?: boolean | null | undefined;
     };
     /**
      * AgentRole
@@ -8252,6 +8152,24 @@ export interface components {
        */
       turnId?: null | string | undefined;
     };
+    /** @description The answer a person or policy gives. Its kind must fit the request kind. */
+    Answer:
+      | {
+          decision: components["schemas"]["Decision"];
+          /** @constant */
+          kind: "decision";
+        }
+      | {
+          answers: components["schemas"]["QuestionAnswer"][];
+          /** @constant */
+          kind: "answers";
+        }
+      | {
+          action: components["schemas"]["ElicitationAction"];
+          content: unknown;
+          /** @constant */
+          kind: "elicitation";
+        };
     /**
      * AnswerBody
      * @description Provider question answers may carry provider-specific answer fields.
@@ -8304,16 +8222,6 @@ export interface components {
       result?: string | null | undefined;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
-    };
-    /** AnswerHistoryEntry */
-    AnswerHistoryEntry: {
-      answer: components["schemas"]["JsonValue"];
-      /** Id */
-      id: string;
-      /** Issecret */
-      isSecret: boolean;
-      /** Question */
-      question: string;
     };
     /** AnswerResult */
     AnswerResult: {
@@ -8425,6 +8333,62 @@ export interface components {
        */
       typography?: "original" | "custom" | undefined;
     };
+    /** @description A row. `fire_at` is the durable expiry timer of a pending approval. */
+    Approval: {
+      agent: components["schemas"]["AgentId"];
+      created: components["schemas"]["Timestamp"];
+      deferral: components["schemas"]["Deferral"] | null;
+      /** @description Present for provider requests that Studio answers over a connection. */
+      delivery: components["schemas"]["Delivery"] | null;
+      detail: components["schemas"]["Detail"];
+      /**
+       * Format: uint64
+       * @description Agent epoch when the request was made. Absent on old rows.
+       */
+      epoch: number | null;
+      fire_at: components["schemas"]["Timestamp"] | null;
+      hidden: components["schemas"]["Hidden"] | null;
+      id: components["schemas"]["ApprovalId"];
+      request: components["schemas"]["Request"];
+      state: components["schemas"]["ApprovalState"];
+      /**
+       * @description None only for kinds in `RequestKind::TURN_OPTIONAL`: requests of the
+       *     agent itself (not of a provider turn).
+       */
+      turn: components["schemas"]["TurnId"] | null;
+    };
+    /** @description Identity of one approval. Equals the legacy request id after migration. */
+    ApprovalId: string;
+    ApprovalState:
+      | {
+          /** @constant */
+          kind: "pending";
+        }
+      | {
+          answer: components["schemas"]["Answer"];
+          command: components["schemas"]["CommandId"];
+          /** @constant */
+          kind: "answering";
+        }
+      | {
+          answer: components["schemas"]["Answer"];
+          at: components["schemas"]["Timestamp"];
+          by: components["schemas"]["Principal"];
+          /** @constant */
+          kind: "answered";
+        }
+      | {
+          answer: components["schemas"]["Answer"];
+          /** @constant */
+          kind: "unknown";
+          since: components["schemas"]["Timestamp"];
+        }
+      | {
+          at: components["schemas"]["Timestamp"];
+          /** @constant */
+          kind: "closed";
+          reason: components["schemas"]["CloseReason"];
+        };
     /** ApprovePeerRequest */
     ApprovePeerRequest: {
       /**
@@ -8596,6 +8560,71 @@ export interface components {
        */
       quietThresholdMs: number;
     };
+    /** @enum {string} */
+    BackgroundTaskAction:
+      | "stop"
+      | "approve"
+      | "input"
+      | "resize"
+      | "readOutput";
+    /** @description The server's presentation and action decisions for a task row. */
+    BackgroundTaskDisplay: {
+      actions: components["schemas"]["BackgroundTaskAction"][];
+      active: boolean;
+      inBackgroundList: boolean;
+      indicator: components["schemas"]["BackgroundTaskIndicator"];
+      kind: components["schemas"]["BackgroundTaskKind"];
+      kindLabel: components["schemas"]["BackgroundTaskKindLabel"];
+      label: components["schemas"]["BackgroundTaskLabel"];
+      stdinState?:
+        | components["schemas"]["ProcessStdinState"]
+        | null
+        | undefined;
+      title: string;
+    };
+    /** @enum {string} */
+    BackgroundTaskIndicator:
+      | "answer"
+      | "error"
+      | "working"
+      | "unread"
+      | "paused";
+    /**
+     * @description Renderer classification for an existing task or process.
+     * @enum {string}
+     */
+    BackgroundTaskKind: "monitor" | "command" | "tool" | "backgroundTask";
+    /** @enum {string} */
+    BackgroundTaskKindLabel:
+      | "monitor"
+      | "command"
+      | "backgroundCommand"
+      | "tool";
+    /** @enum {string} */
+    BackgroundTaskLabel:
+      | "running"
+      | "starting"
+      | "pending"
+      | "stopping"
+      | "approval"
+      | "completed"
+      | "failed"
+      | "cancelled"
+      | "interrupted"
+      | "lost"
+      | "waitingForExit"
+      | "unknown";
+    BackgroundTaskView:
+      | {
+          /** @constant */
+          source: "process";
+          value: components["schemas"]["ProcessView"];
+        }
+      | {
+          /** @constant */
+          source: "task";
+          value: components["schemas"]["TaskProjection"];
+        };
     /** BlockingPoolGroupMetrics */
     BlockingPoolGroupMetrics: {
       /** Closureavgms */
@@ -9217,6 +9246,11 @@ export interface components {
        */
       yoloMode?: boolean | null | undefined;
     };
+    /** @description A forward of the callback to another server. Only the hash of the token is stored. */
+    BrowserCallbackForward: {
+      expires_at: components["schemas"]["Timestamp"];
+      token_hash: string;
+    };
     /**
      * BrowserForward
      * @description The redirect port of a sign-in that a paired server approved for a window on this Mac.
@@ -9253,6 +9287,40 @@ export interface components {
        */
       status: "forwarding";
     };
+    /** @description How a sign-in ended after the person opened it. */
+    BrowserOutcome:
+      | ("signed_in" | "refused" | "provider_error" | "unknown" | "expired")
+      | "cancelled";
+    /**
+     * @description The step of a sign-in card. The approval state says who answered; the phase
+     *     says what happens in the paste mode, where the card waits after the answer.
+     */
+    BrowserPhase:
+      | {
+          /** @constant */
+          kind: "link";
+        }
+      | {
+          expires_at: components["schemas"]["Timestamp"];
+          /** @constant */
+          kind: "waiting";
+        }
+      | {
+          at: components["schemas"]["Timestamp"];
+          expires_at: components["schemas"]["Timestamp"];
+          /** @constant */
+          kind: "pasted";
+        }
+      | {
+          /**
+           * Format: uint16
+           * @description HTTP status the command answered, when it answered.
+           */
+          http: number | null;
+          /** @constant */
+          kind: "finished";
+          outcome: components["schemas"]["BrowserOutcome"];
+        };
     /** BrowserRecoveryRecordResponse */
     BrowserRecoveryRecordResponse: {
       /**
@@ -9380,6 +9448,15 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /** @description The loopback address the sign-in command listens on. */
+    BrowserRedirect: {
+      host: string;
+      path: string;
+      /** Format: uint16 */
+      port: number;
+    };
+    /** @description Where a sign-in link came from. */
+    BrowserSource: "vm" | "host";
     /** BrowserStatus */
     BrowserStatus: {
       /** Enabled */
@@ -9394,6 +9471,37 @@ export interface components {
        * @default null
        */
       skillRoot?: null | string | undefined;
+    };
+    BucketProjection: {
+      current: components["schemas"]["BucketState"];
+      next: components["schemas"]["BucketState"];
+      /** Format: double */
+      validUntil: number | null;
+    };
+    BucketState: {
+      buckets: components["schemas"]["BucketView"][];
+      color: components["schemas"]["LimitColor"];
+      low: boolean;
+      /** Format: double */
+      remaining: number | null;
+    };
+    BucketView: {
+      creditsLabel: string | null;
+      id: string;
+      name: string;
+      planType: string | null;
+      shortName: string;
+      windows: components["schemas"]["BucketWindowView"][];
+    };
+    BucketWindowView: {
+      color: components["schemas"]["LimitColor"];
+      expired: boolean;
+      label: string;
+      /** Format: double */
+      remaining: number | null;
+      /** Format: double */
+      reset: number | null;
+      warning: boolean;
     };
     /** BudgetWaitRecordResponse */
     BudgetWaitRecordResponse: {
@@ -10660,6 +10768,15 @@ export interface components {
       /** Text */
       text: string;
     };
+    CloseReason:
+      | (
+          | "turn_ended"
+          | "provider_resolved"
+          | "session_lost"
+          | "chat_deleted"
+          | "expired"
+        )
+      | "legacy";
     /**
      * CodexLoginReceipt
      * @description Known fields; AccountStore.login_receipts() passes persisted receipts through.
@@ -10749,6 +10866,8 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /** @description Identity of the outbox command that delivers an answer. */
+    CommandId: string;
     /**
      * CommandRequest
      * @description One write action. The owner is runtime-schema/src/command.rs.
@@ -12044,6 +12163,8 @@ export interface components {
       /** @description Disjoint cumulative token counts; tokens. */
       tokens: components["schemas"]["UsageTokens"];
     };
+    /** @enum {string} */
+    Decision: "accept" | "accept_for_session" | "decline" | "cancel";
     /**
      * DefaultAccountGroupsRequest
      * @description Replace the default account order of projects without their own order. An empty list removes it. Repeating a request sets the same value.
@@ -12051,6 +12172,12 @@ export interface components {
     DefaultAccountGroupsRequest: {
       /** Groups */
       groups: string[];
+    };
+    /** @description The user moved the question aside. `active` is false after it came back. */
+    Deferral: {
+      active: boolean;
+      at: components["schemas"]["Timestamp"];
+      by: components["schemas"]["Principal"];
     };
     /** DeleteAccountRequest */
     DeleteAccountRequest: {
@@ -12093,6 +12220,14 @@ export interface components {
       version?: string | undefined;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
+    };
+    /** @description What the server needs to send the answer back to the provider. */
+    Delivery: {
+      account: string;
+      connection: string;
+      rpc_id: components["schemas"]["RpcId"];
+      /** @description Absent on rows written before supervisor generations were recorded. */
+      supervisor: components["schemas"]["Supervisor"] | null;
     };
     /**
      * DeliveryMoment
@@ -12220,6 +12355,17 @@ export interface components {
       supervisorNotice: null | string;
       /** Supervisorrequired */
       supervisorRequired: boolean;
+    };
+    /** @description Display content and provider fields that no logic reads by name. */
+    Detail: {
+      /** @description Human text of a lost delivery. */
+      answer_error: string | null;
+      /** @description Text the browser host gave when it closed a browser request. */
+      host_close_reason: string | null;
+      /** @description Provider request params without the fields typed in `Request`. */
+      params: components["schemas"]["ProviderObject"];
+      /** @description Item body shown on the card (command run, file changes). */
+      preview: components["schemas"]["ProviderObject"] | null;
     };
     /** DevicePairRequest */
     DevicePairRequest: {
@@ -12561,6 +12707,8 @@ export interface components {
       /** Target */
       target?: null | string | undefined;
     };
+    /** @enum {string} */
+    ElicitationAction: "accept" | "decline" | "cancel";
     /** EmptyTransferRecoveryRecordResponse */
     EmptyTransferRecoveryRecordResponse: {
       /**
@@ -13642,6 +13790,13 @@ export interface components {
       found: true;
       result: components["schemas"]["ProcessActionResult"];
     };
+    /** @enum {string} */
+    Grant: "full" | "observe";
+    /** @description History stays: a hidden row is not shown in the default list. */
+    Hidden: {
+      at: components["schemas"]["Timestamp"];
+      by: components["schemas"]["Principal"];
+    };
     /** HistoricalInputProofRecordResponse */
     HistoricalInputProofRecordResponse: {
       /**
@@ -13929,6 +14084,11 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /**
+     * @description Account bucket colors and thresholds are selected by the server.
+     * @enum {string}
+     */
+    LimitColor: "paused" | "unread" | "answer" | "error";
     /** LimitResetResponse */
     LimitResetResponse: {
       /** Account Id */
@@ -14314,94 +14474,7 @@ export interface components {
       /** Text */
       text: string;
     };
-    /** ManagedProcessRecord */
-    ManagedProcessRecord: {
-      /** Accountkey */
-      accountKey: string;
-      /** Agent */
-      agent: string;
-      /**
-       * Bytes
-       * @default 0
-       */
-      bytes?: number | undefined;
-      /**
-       * Cancelrequested
-       * @default false
-       */
-      cancelRequested?: boolean | undefined;
-      capabilities: components["schemas"]["ProcessCapabilities"];
-      /**
-       * Command
-       * @default null
-       */
-      command?: null | string | undefined;
-      /** Created */
-      created: number;
-      /**
-       * Cwd
-       * @default null
-       */
-      cwd?: null | string | undefined;
-      /** Epoch */
-      epoch: number;
-      /**
-       * Error
-       * @default null
-       */
-      error?: null | string | undefined;
-      /** Generation */
-      generation: string;
-      /** Id */
-      id: string;
-      /** Key */
-      key: string;
-      /**
-       * Log
-       * @default null
-       */
-      log?: null | string | undefined;
-      /** Name */
-      name: string;
-      /**
-       * Output
-       * @default null
-       */
-      output?: null | string | undefined;
-      outputFile?: string | null | undefined;
-      outputPatterns?: string[] | undefined;
-      /**
-       * Outputtruncated
-       * @default false
-       */
-      outputTruncated?: boolean | undefined;
-      outputWakeBudget?:
-        | components["schemas"]["MonitorOutputWakeBudget"]
-        | null
-        | undefined;
-      /**
-       * Source
-       * @enum {string}
-       */
-      source: "monitor" | "codex_task" | "claude_task";
-      /** Status */
-      status: string;
-      /**
-       * Stdinclosed
-       * @default false
-       */
-      stdinClosed?: boolean | undefined;
-      /**
-       * Stdincloserequested
-       * @default false
-       */
-      stdinCloseRequested?: boolean | undefined;
-      /**
-       * Stdinerror
-       * @default null
-       */
-      stdinError?: null | string | undefined;
-    };
+    ManagedProcessRecord: components["schemas"]["ProcessView"];
     McpReconnectRequest: {
       id: string;
       name: string;
@@ -14690,11 +14763,7 @@ export interface components {
     };
     /** MonitorEntityDto */
     MonitorEntityDto: {
-      /**
-       * Agent
-       * @default null
-       */
-      agent?: null | string | undefined;
+      agent: string;
       /**
        * Bytes
        * @default null
@@ -14710,16 +14779,13 @@ export interface components {
        * @default null
        */
       command?: null | string | undefined;
-      /**
-       * Created
-       * @default null
-       */
-      created?: null | number | undefined;
+      created: number;
       /**
        * Cwd
        * @default null
        */
       cwd?: null | string | undefined;
+      display: components["schemas"]["BackgroundTaskDisplay"];
       /**
        * Durationms
        * @default null
@@ -14757,6 +14823,7 @@ export interface components {
        * @default null
        */
       name?: null | string | undefined;
+      outputFile?: string | null | undefined;
       outputPatterns?: string[] | undefined;
       /**
        * Outputtruncated
@@ -14777,8 +14844,7 @@ export interface components {
        * @default null
        */
       ruleId?: null | string | undefined;
-      /** @default null */
-      status?: components["schemas"]["TaskStatus"] | null | undefined;
+      status: components["schemas"]["MonitorState"];
       /**
        * Stdinclosed
        * @default null
@@ -17185,6 +17251,42 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /**
+     * @description Who acts. Local copy of the permissions work (`feat/principal-permissions`);
+     *     the second change to land unifies the two.
+     */
+    Principal:
+      | {
+          /** @constant */
+          kind: "owner";
+        }
+      | {
+          grant: components["schemas"]["Grant"];
+          id: string;
+          /** @constant */
+          kind: "device";
+        }
+      | {
+          /** @constant */
+          kind: "peer";
+          server: string;
+        }
+      | {
+          /** Format: uint64 */
+          epoch: number;
+          id: string;
+          /** @constant */
+          kind: "agent";
+        }
+      | {
+          /** @constant */
+          kind: "federated";
+          peer: string;
+        }
+      | {
+          /** @constant */
+          kind: "policy";
+        };
     ProcessActionResult: {
       /** @default [] */
       processes?: components["schemas"]["ProcessEntry"][] | undefined;
@@ -17196,15 +17298,10 @@ export interface components {
     };
     /** @enum {string} */
     ProcessActionStatus: "completed" | "partial" | "uncertain";
-    /** ProcessCapabilities */
     ProcessCapabilities: {
-      /** Readoutput */
       readOutput: boolean;
-      /** Resize */
       resize: boolean;
-      /** Sendinput */
       sendInput: boolean;
-      /** Stop */
       stop: boolean;
     };
     ProcessControlRequest:
@@ -17333,6 +17430,8 @@ export interface components {
        */
       kind: "processes";
     };
+    /** @description Numeric IDs remain numeric because process-control identities depend on their original shape. */
+    ProcessId: string | number;
     ProcessIdentity: {
       accountKey: string;
       agent: string;
@@ -17367,11 +17466,10 @@ export interface components {
       /** Rssmib */
       rssMiB: number;
     };
-    /** ProcessList */
-    ProcessList: {
-      /** Processes */
-      processes: components["schemas"]["ManagedProcessRecord"][];
-      /** @default null */
+    ProcessList: components["schemas"]["ProcessListing"];
+    ProcessListing: {
+      activities: components["schemas"]["BackgroundTaskView"][];
+      processes: components["schemas"]["ProcessView"][];
       responseTarget?:
         | components["schemas"]["ProcessResponseTarget"]
         | null
@@ -17405,6 +17503,13 @@ export interface components {
       threadId: string;
       turnId: string;
     };
+    /** @enum {string} */
+    ProcessSourceKind: "monitor" | "codex_task" | "claude_task";
+    ProcessStatus:
+      | components["schemas"]["TaskRecordStatus"]
+      | components["schemas"]["MonitorState"];
+    /** @enum {string} */
+    ProcessStdinState: "open" | "closeRequested" | "closed";
     /** ProcessTree */
     ProcessTree: {
       /** Kinds */
@@ -17417,6 +17522,54 @@ export interface components {
       rootPid: number;
       /** Totalrssmib */
       totalRssMiB: number;
+    };
+    /** @description Complete public process view; private native proof stays on the service record. */
+    ProcessView: {
+      accountKey: string;
+      agent: string;
+      /** Format: uint64 */
+      bytes: number;
+      cancelRequested: boolean;
+      command?: string | null | undefined;
+      /** Format: double */
+      created: number;
+      cwd?: string | null | undefined;
+      display: components["schemas"]["BackgroundTaskDisplay"];
+      /** Format: double */
+      durationMs?: number | null | undefined;
+      /** Format: uint64 */
+      epoch: number;
+      error?: string | null | undefined;
+      /** Format: int64 */
+      exitCode?: number | null | undefined;
+      /** Format: double */
+      finished?: number | null | undefined;
+      generation: string;
+      id: string;
+      key: string;
+      log?: string | null | undefined;
+      name: string;
+      outputFile?: string | null | undefined;
+      outputPatterns: string[];
+      outputTruncated: boolean;
+      outputWakeBudget?:
+        | components["schemas"]["ProcessWakeBudget"]
+        | null
+        | undefined;
+      processId?: components["schemas"]["ProcessId"] | null | undefined;
+      source: components["schemas"]["ProcessSourceKind"];
+      status: components["schemas"]["ProcessStatus"];
+      stdinError?: string | null | undefined;
+      tail: string;
+      /** Format: int64 */
+      timeout_ms?: number | null | undefined;
+    };
+    ProcessWakeBudget: {
+      paused: boolean;
+      /** Format: double */
+      tokens: number;
+      /** Format: uint64 */
+      totalSuppressedMatches: number;
     };
     /** ProfileBody */
     ProfileBody: {
@@ -18317,6 +18470,13 @@ export interface components {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
     /**
+     * @description Provider-owned content that Studio stores and shows as is (tolerant at the
+     *     provider boundary). Typed request fields are removed from `params`.
+     */
+    ProviderObject: {
+      [key: string]: unknown;
+    };
+    /**
      * ProviderUpdateNotice
      * @description A newer installed or upstream provider version is available.
      */
@@ -18454,6 +18614,22 @@ export interface components {
        */
       protocol: 1;
     };
+    Question: {
+      header: string | null;
+      id: string;
+      is_other: boolean | null;
+      is_secret: boolean;
+      /** @description Absent when the provider did not send the flag. */
+      multi_select: boolean | null;
+      options: components["schemas"]["QuestionOption"][];
+      question: string;
+    };
+    QuestionAnswer: {
+      answer: string[];
+      /** @description SHA-256 (hex) of the typed values of a secret question, which are stored as the redaction mark. */
+      digest?: string | null | undefined;
+      id: string;
+    };
     QuestionAnswerStrings: {
       answers: string[];
     };
@@ -18520,53 +18696,11 @@ export interface components {
       };
       decision: components["schemas"]["QuestionDecision"];
     };
-    /** QuestionEntry */
-    QuestionEntry: {
-      /**
-       * Header
-       * @description Short topic label of a native or asynchronous question.
-       * @default null
-       */
-      header?: null | string | undefined;
-      /** Id */
-      id: string;
-      /**
-       * Isother
-       * @description The provider also accepts a free-text answer.
-       * @default null
-       */
-      isOther?: boolean | null | undefined;
-      /** Issecret */
-      isSecret: boolean;
-      /**
-       * Multiselect
-       * @description The question accepts more than one choice.
-       * @default null
-       */
-      multiSelect?: boolean | null | undefined;
-      /**
-       * Options
-       * @description Choices offered by a native or asynchronous question; absent for form elicitation.
-       * @default null
-       */
-      options?: components["schemas"]["QuestionOption"][] | null | undefined;
-      /** Question */
-      question: string;
-    };
-    /** QuestionHistory */
-    QuestionHistory: {
-      /** Items */
-      items: components["schemas"]["AgentRequest"][];
-    };
-    /** QuestionOption */
     QuestionOption: {
-      /**
-       * Description
-       * @default null
-       */
-      description?: null | string | undefined;
-      /** Label */
+      description: string | null;
       label: string;
+      /** @description Markdown shown next to the option. */
+      preview: string | null;
     };
     QuestionSelections: {
       answers: {
@@ -18761,6 +18895,10 @@ export interface components {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
     RateLimitsDataDto: components["schemas"]["UsageLimitsData"];
+    RateLimitView: {
+      observation: components["schemas"]["AccountRateLimitsDto"];
+      projection: components["schemas"]["AccountLimitsProjection"];
+    };
     /** RateLimitWindow */
     RateLimitWindow: {
       /** Resetsat */
@@ -19041,6 +19179,75 @@ export interface components {
       /** Requestid */
       requestId: string;
     };
+    /** @description Fixed at creation. Decides which answers are allowed. */
+    Request:
+      | {
+          command: string;
+          cwd: string;
+          /** @constant */
+          kind: "exec";
+          reason: string | null;
+        }
+      | {
+          files: string[];
+          item: string;
+          /** @constant */
+          kind: "patch";
+          reason: string | null;
+        }
+      | {
+          /** @constant */
+          kind: "permissions";
+          requested: string[];
+        }
+      | {
+          /** @constant */
+          kind: "elicitation";
+          /** @description JSON schema chosen by the provider; shown as is. */
+          schema: unknown;
+        }
+      | {
+          /** @constant */
+          kind: "question";
+          questions: components["schemas"]["Question"][];
+        }
+      | {
+          input: unknown;
+          /** @constant */
+          kind: "tool_use";
+          tool: string;
+        }
+      | {
+          /** @constant */
+          kind: "agent_question";
+          questions: components["schemas"]["Question"][];
+        }
+      | {
+          command: string;
+          /** @constant */
+          kind: "monitor_start";
+          monitor: string;
+        }
+      | {
+          /** @description Identity of the guest request. 32 lowercase hex characters. */
+          bridge_id: string;
+          client_id: string | null;
+          /** @description Deadline of the guest request. */
+          expires_at: components["schemas"]["Timestamp"] | null;
+          forward: components["schemas"]["BrowserCallbackForward"] | null;
+          host: string;
+          /** @description Other chats that wait on this card. */
+          joined: components["schemas"]["AgentId"][];
+          /** @constant */
+          kind: "browser_open";
+          linux_user: string | null;
+          phase: components["schemas"]["BrowserPhase"];
+          redirect: components["schemas"]["BrowserRedirect"] | null;
+          scope: string | null;
+          source: components["schemas"]["BrowserSource"];
+          url: string;
+          user_code: string | null;
+        };
     /** RequestAnswerRecordResponse */
     RequestAnswerRecordResponse: {
       answer?: components["schemas"]["JsonValue"] | undefined;
@@ -19062,45 +19269,6 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
-    /** RequestEntityDto */
-    RequestEntityDto: {
-      /** Accountkey */
-      accountKey?: null | string | undefined;
-      /** Agent */
-      agent?: null | string | undefined;
-      /** At */
-      at?: null | number | undefined;
-      /** Connectionid */
-      connectionId?: null | string | undefined;
-      /** Created */
-      created?: null | number | undefined;
-      /** Createdat */
-      createdAt?: null | number | undefined;
-      /** Deferred */
-      deferred?: boolean | null | undefined;
-      /** Epoch */
-      epoch?: number | null | undefined;
-      /** Error */
-      error?: null | string | undefined;
-      /** Id */
-      id: string;
-      /** Method */
-      method?: null | string | undefined;
-      params?: components["schemas"]["RequestParamsDto"] | null | undefined;
-      preview?: components["schemas"]["RequestPreviewDto"] | null | undefined;
-      result?: components["schemas"]["JsonValue"] | null | undefined;
-      status?: components["schemas"]["RequestStatus"] | null | undefined;
-      /** Threadid */
-      threadId?: null | string | undefined;
-      /** Title */
-      title?: null | string | undefined;
-      /** Turnid */
-      turnId?: null | string | undefined;
-      /** Updated */
-      updated?: null | number | undefined;
-      /** Updatedat */
-      updatedAt?: null | number | undefined;
-    };
     /** RequestInboxEntry */
     RequestInboxEntry: {
       /** Agent */
@@ -19117,138 +19285,6 @@ export interface components {
       text: string;
       /** Title */
       title: string;
-    };
-    /**
-     * RequestParamsDto
-     * @description Known request UI fields and typed JSON-safe native protocol extensions.
-     */
-    RequestParamsDto: {
-      changes?: components["schemas"]["JsonValue"] | null | undefined;
-      /** Clientid */
-      clientId?: null | string | undefined;
-      /** Command */
-      command?: string[] | null | string | undefined;
-      /** Cwd */
-      cwd?: null | string | undefined;
-      /** Expiresat */
-      expiresAt?: null | number | undefined;
-      /** Host */
-      host?: null | string | undefined;
-      /** Linuxuser */
-      linuxUser?: null | string | undefined;
-      /** Message */
-      message?: null | string | undefined;
-      /** Paste */
-      paste?:
-        | {
-            [key: string]: components["schemas"]["JsonValue"] | undefined;
-          }
-        | null
-        | undefined;
-      /** Permissions */
-      permissions?:
-        | {
-            [key: string]: components["schemas"]["JsonValue"] | undefined;
-          }
-        | null
-        | undefined;
-      /** Phase */
-      phase?: null | string | undefined;
-      /** Questions */
-      questions?:
-        | components["schemas"]["RequestQuestionDto"][]
-        | null
-        | undefined;
-      /** Reason */
-      reason?: null | string | undefined;
-      /** Redirect */
-      redirect?:
-        | {
-            [key: string]: components["schemas"]["JsonValue"] | undefined;
-          }
-        | null
-        | undefined;
-      requestedSchema?:
-        | components["schemas"]["RequestSchemaDto"]
-        | null
-        | undefined;
-      /** Scope */
-      scope?: null | string | undefined;
-      /** Source */
-      source?: null | string | undefined;
-      /** Threadid */
-      threadId?: null | string | undefined;
-      /** Turnid */
-      turnId?: null | string | undefined;
-      /** Url */
-      url?: null | string | undefined;
-      /** Usercode */
-      userCode?: null | string | undefined;
-      /** Waiting */
-      waiting?:
-        | {
-            [key: string]: components["schemas"]["JsonValue"] | undefined;
-          }
-        | null
-        | undefined;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
-    };
-    /**
-     * RequestPreviewDto
-     * @description Known preview fields plus the native tool's provider-specific preview metadata.
-     */
-    RequestPreviewDto: {
-      changes?: components["schemas"]["JsonValue"] | null | undefined;
-      /** Command */
-      command?: string[] | null | string | undefined;
-      /** Cwd */
-      cwd?: null | string | undefined;
-      /** Permissions */
-      permissions?:
-        | {
-            [key: string]: components["schemas"]["JsonValue"] | undefined;
-          }
-        | null
-        | undefined;
-      /** Url */
-      url?: null | string | undefined;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
-    };
-    /**
-     * RequestQuestionDto
-     * @description Known question UI fields plus future native question protocol fields.
-     */
-    RequestQuestionDto: {
-      /** Id */
-      id: string;
-      /** Issecret */
-      isSecret?: boolean | null | undefined;
-      /** Multiselect */
-      multiSelect?: boolean | null | undefined;
-      /** Options */
-      options?:
-        | components["schemas"]["RequestQuestionOptionDto"][]
-        | null
-        | undefined;
-      /** Question */
-      question: string;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
-    };
-    /**
-     * RequestQuestionOptionDto
-     * @description Known labels plus provider-owned option metadata passed through verbatim.
-     */
-    RequestQuestionOptionDto: {
-      /** Description */
-      description?: null | string | undefined;
-      /** Label */
-      label?: null | string | undefined;
-      value?: components["schemas"]["JsonValue"] | null | undefined;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
     /** RequestRecordResponse */
     RequestRecordResponse: {
@@ -19434,44 +19470,6 @@ export interface components {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
     /**
-     * RequestSchemaDto
-     * @description A JSON Schema request; provider-defined top-level keywords pass through.
-     */
-    RequestSchemaDto: {
-      /** Properties */
-      properties: {
-        [key: string]: components["schemas"]["RequestSchemaPropertyDto"];
-      };
-      /** Required */
-      required?: string[] | null | undefined;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
-    };
-    /**
-     * RequestSchemaPropertyDto
-     * @description A JSON Schema property; arbitrary standard and future schema keywords pass through.
-     */
-    RequestSchemaPropertyDto: {
-      /** Enum */
-      enum?: components["schemas"]["JsonValue"][] | null | undefined;
-      /** Format */
-      format?: null | string | undefined;
-      /** Issecret */
-      isSecret?: boolean | null | undefined;
-      items?:
-        | components["schemas"]["RequestSchemaPropertyDto"]
-        | null
-        | undefined;
-      /** Title */
-      title?: null | string | undefined;
-      /** Type */
-      type?: string[] | null | string | undefined;
-      /** Writeonly */
-      writeOnly?: boolean | null | undefined;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
-    };
-    /**
      * RequestStatus
      * @enum {string}
      */
@@ -19491,6 +19489,27 @@ export interface components {
     RequiredAccountKeyRequest: {
       /** Account Key */
       account_key: string;
+    };
+    ResetCreditView: {
+      confirmLabel: string;
+      description: string | null;
+      enabled: boolean;
+      enabledAfter: boolean;
+      /** Format: double */
+      expiresAt: number | null;
+      id: string;
+      title: string;
+      /** Format: double */
+      validUntil: number | null;
+    };
+    ResetProjection: {
+      accountId: string | null;
+      /** Format: double */
+      availableCount: number | null;
+      countLabel: string;
+      credits: components["schemas"]["ResetCreditView"][];
+      emptyMessage: string | null;
+      present: boolean;
     };
     /** ResetRequest */
     ResetRequest: {
@@ -20271,6 +20290,19 @@ export interface components {
       | components["schemas"]["ToolRequestRecordResponse"];
     /** RootModel[ResourceNotifyAck] */
     RootModel_ResourceNotifyAck_: components["schemas"]["ResourceNotifyAck"];
+    /** @description JSON-RPC id of a provider request. The reply must use the same form. */
+    RpcId:
+      | {
+          /** @constant */
+          kind: "number";
+          /** Format: int64 */
+          value: number;
+        }
+      | {
+          /** @constant */
+          kind: "text";
+          value: string;
+        };
     /** RuleBody */
     RuleBody: {
       /**
@@ -20819,6 +20851,8 @@ export interface components {
     RuntimeStageMetrics: {
       stages: components["schemas"]["RuntimeStageHistogram"][];
     };
+    /** @enum {string} */
+    RunwayColor: "green" | "yellow" | "red" | "gray";
     /**
      * SafetyAction
      * @enum {string}
@@ -21348,7 +21382,6 @@ export interface components {
         | "input"
         | "message"
         | "move_send"
-        | "move_status"
         | "location_info"
         | "location_matches"
         | "stop"
@@ -21368,14 +21401,6 @@ export interface components {
         | "update.chunk"
         | "update.release"
         | "backup.put"
-        | "task"
-        | "complaint"
-        | "context"
-        | "directory"
-        | "chat_read"
-        | "move_manage"
-        | "move_interrupt"
-        | "move_spawn"
         | "exec"
         | "exec_receipt"
         | "browser_callback"
@@ -22875,6 +22900,13 @@ export interface components {
        */
       section?: string | undefined;
     };
+    /** @description The provider process generation that owns a request, under the supervisor. */
+    Supervisor: {
+      /** Format: uint64 */
+      generation: number;
+      handle: string | null;
+      state_dir: string | null;
+    };
     /** SupervisorDiagnostics */
     SupervisorDiagnostics: {
       /** Fallback */
@@ -23208,7 +23240,7 @@ export interface components {
           collection: "request";
           /** @constant */
           op: "upsert";
-          value: components["schemas"]["RequestEntityDto"];
+          value: components["schemas"]["Approval"];
         }
       | {
           /** @constant */
@@ -23257,7 +23289,7 @@ export interface components {
           collection: "rateLimit";
           /** @constant */
           op: "upsert";
-          value: components["schemas"]["AccountRateLimitsDto"];
+          value: components["schemas"]["RateLimitView"];
         }
       | {
           /** @constant */
@@ -23382,7 +23414,7 @@ export interface components {
           collection: "questionHistory";
           /** @constant */
           op: "upsert";
-          value: components["schemas"]["AgentRequest"];
+          value: components["schemas"]["Approval"];
         }
       | {
           /** @constant */
@@ -23403,7 +23435,7 @@ export interface components {
           collection: "workDetail";
           /** @constant */
           op: "upsert";
-          value: components["schemas"]["WorkItem"];
+          value: components["schemas"]["WorkDetail"];
         }
       | {
           /** @constant */
@@ -23640,7 +23672,7 @@ export interface components {
       collection: "questionHistory";
       /** Id */
       id: string;
-      value: components["schemas"]["AgentRequest"];
+      value: components["schemas"]["Approval"];
     };
     /** SyncQueueEntityPayload */
     SyncQueueEntityPayload: {
@@ -23661,7 +23693,7 @@ export interface components {
       collection: "rateLimit";
       /** Id */
       id: string;
-      value: components["schemas"]["AccountRateLimitsDto"];
+      value: components["schemas"]["RateLimitView"];
     };
     SyncRecoveryCounters: {
       gap: number;
@@ -23680,7 +23712,7 @@ export interface components {
       collection: "request";
       /** Id */
       id: string;
-      value: components["schemas"]["RequestEntityDto"];
+      value: components["schemas"]["Approval"];
     };
     /** SyncRetainedWorktreeEntityPayload */
     SyncRetainedWorktreeEntityPayload: {
@@ -23808,7 +23840,7 @@ export interface components {
       collection: "workDetail";
       /** Id */
       id: string;
-      value: components["schemas"]["WorkItem"];
+      value: components["schemas"]["WorkDetail"];
     };
     /** SyncWorkEntityPayload */
     SyncWorkEntityPayload: {
@@ -24019,18 +24051,17 @@ export interface components {
     };
     /** TaskEntityDto */
     TaskEntityDto: {
-      /** Agent */
-      agent?: null | string | undefined;
+      agent: string;
       /** Bytes */
       bytes?: number | null | undefined;
       /** Cancelrequested */
       cancelRequested?: boolean | null | undefined;
       /** Command */
       command?: null | string | undefined;
-      /** Created */
-      created?: null | number | undefined;
+      created: number;
       /** Cwd */
       cwd?: null | string | undefined;
+      display: components["schemas"]["BackgroundTaskDisplay"];
       /** Durationms */
       durationMs?: number | null | undefined;
       /**
@@ -24046,7 +24077,7 @@ export interface components {
       id: string;
       /** Interactive */
       interactive?: boolean | null | undefined;
-      kind?: components["schemas"]["TaskKind"] | null | undefined;
+      kind: components["schemas"]["TaskRecordKind"];
       /** Log */
       log?: null | string | undefined;
       /** Name */
@@ -24058,7 +24089,7 @@ export interface components {
       processId?: null | string | undefined;
       /** Query */
       query?: null | string | undefined;
-      status?: components["schemas"]["TaskStatus"] | null | undefined;
+      status: components["schemas"]["TaskRecordStatus"];
       /** Stdinclosed */
       stdinClosed?: boolean | null | undefined;
       /** Stdincloserequested */
@@ -24099,17 +24130,63 @@ export interface components {
       /** Id */
       id: string;
     };
-    /**
-     * TaskKind
-     * @enum {string}
-     */
-    TaskKind: "monitor" | "command" | "tool";
+    /** @enum {string} */
+    TaskKind: "command" | "tool";
     TaskOutputResponse: {
       id: string;
       outputFile: string;
       text: string;
       truncated: boolean;
     };
+    /** @description Bounded public task fields, serialized directly from the stored task. */
+    TaskProjection: {
+      agent: string;
+      command?: string | null | undefined;
+      /** Format: double */
+      created: number;
+      cwd?: string | null | undefined;
+      display: components["schemas"]["BackgroundTaskDisplay"];
+      /** Format: double */
+      durationMs?: number | null | undefined;
+      error?: string | null | undefined;
+      /** Format: int64 */
+      exitCode?: number | null | undefined;
+      /** Format: double */
+      finished?: number | null | undefined;
+      id: string;
+      interactive?: boolean | null | undefined;
+      kind: components["schemas"]["TaskKind"];
+      name: string;
+      outputFile?: string | null | undefined;
+      outputTruncated?: boolean | null | undefined;
+      processId?: components["schemas"]["ProcessId"] | null | undefined;
+      query?: string | null | undefined;
+      status: components["schemas"]["TaskStatus"];
+      tail?: string | null | undefined;
+      turnId: string;
+    };
+    /**
+     * TaskKind
+     * @enum {string}
+     */
+    TaskRecordKind: "command" | "tool";
+    /**
+     * TaskStatus
+     * @enum {string}
+     */
+    TaskRecordStatus:
+      | "starting"
+      | "approval"
+      | "pending"
+      | "unknown"
+      | "running"
+      | "completed"
+      | "failed"
+      | "interrupted"
+      | "lost";
+    TaskRecordView:
+      | components["schemas"]["TaskEntityDto"]
+      | components["schemas"]["MonitorEntityDto"];
     /** TaskResource */
     TaskResource: {
       /**
@@ -24130,22 +24207,17 @@ export interface components {
        */
       kind: "tasks";
     };
-    /**
-     * TaskStatus
-     * @enum {string}
-     */
+    /** @enum {string} */
     TaskStatus:
-      | "running"
       | "starting"
       | "approval"
-      | "queued"
-      | "waiting"
+      | "pending"
+      | "unknown"
+      | "running"
       | "completed"
       | "failed"
       | "interrupted"
-      | "cancelled"
-      | "lost"
-      | "unknown";
+      | "lost";
     TaskSubmissionRefusal: {
       errors: {
         message: string;
@@ -24381,6 +24453,11 @@ export interface components {
       /** Text */
       text: string;
     };
+    /**
+     * Format: double
+     * @description Unix seconds.
+     */
+    Timestamp: number;
     /**
      * TokenRateRecord
      * @description One active or completed agent turn's volatile token-rate snapshot.
@@ -25728,6 +25805,8 @@ export interface components {
      * @enum {string}
      */
     TransferStatus: "pending" | "completed" | "cancelled";
+    /** @description Provider turn identifier. A domain Turn table replaces this later. */
+    TurnId: string;
     /** TurnRecoveryRecordResponse */
     TurnRecoveryRecordResponse: {
       /**
@@ -26931,6 +27010,33 @@ export interface components {
       /** Id */
       id: string;
     };
+    /** @description Server-owned weekly allowance estimate, computed at `computed_at` (Unix seconds). */
+    WeeklyRunway: {
+      /** Format: double */
+      computedAt: number;
+      current: components["schemas"]["WeeklyRunwayState"];
+      next: components["schemas"]["WeeklyRunwayState"];
+      /** Format: double */
+      validUntil: number | null;
+    };
+    WeeklyRunwayState: {
+      color: components["schemas"]["RunwayColor"];
+      /** Format: double */
+      days: number | null;
+      unlimited: boolean;
+      windows: components["schemas"]["WeeklyRunwayWindow"][];
+    };
+    WeeklyRunwayWindow: {
+      /** Format: double */
+      days: number | null;
+      name: string;
+      /** Format: double */
+      remaining: number | null;
+      /** Format: double */
+      reset: number | null;
+      resetFirst: boolean;
+      unlimited: boolean;
+    };
     /**
      * WhoisStatus
      * @enum {string}
@@ -27363,6 +27469,16 @@ export interface components {
       resultId?: string | undefined;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
+    };
+    WorkDetail: components["schemas"]["WorkItem"] & {
+      policy: components["schemas"]["WorkDetailPolicy"];
+    };
+    /** @description Current server-owned dependency and acceptance policy for one work detail. */
+    WorkDetailPolicy: {
+      acceptAvailable: boolean;
+      blockedBy: string[];
+      displayStatus: components["schemas"]["WorkStatus"];
+      gateOverrideRequired: boolean;
     };
     /** WorkEntityDto */
     WorkEntityDto: {
@@ -38496,7 +38612,6 @@ export type PlanSummaryEntityDto =
   components["schemas"]["PlanSummaryEntityDto"];
 export type ProjectEntityDto = components["schemas"]["ProjectEntityDto"];
 export type QueueEntityDto = components["schemas"]["QueueEntityDto"];
-export type RequestEntityDto = components["schemas"]["RequestEntityDto"];
 export type RetainedWorktreeEntityDto =
   components["schemas"]["RetainedWorktreeEntityDto"];
 export type RoomEntityDto = components["schemas"]["RoomEntityDto"];
@@ -38621,6 +38736,54 @@ export const AttributionOperation = {
 } as const;
 export type AttributionOperation =
   components["schemas"]["AttributionOperation"];
+export const BackgroundTaskAction = {
+  stop: "stop",
+  approve: "approve",
+  input: "input",
+  resize: "resize",
+  readOutput: "readOutput",
+} as const;
+export type BackgroundTaskAction =
+  components["schemas"]["BackgroundTaskAction"];
+export const BackgroundTaskIndicator = {
+  answer: "answer",
+  error: "error",
+  working: "working",
+  unread: "unread",
+  paused: "paused",
+} as const;
+export type BackgroundTaskIndicator =
+  components["schemas"]["BackgroundTaskIndicator"];
+export const BackgroundTaskKind = {
+  monitor: "monitor",
+  command: "command",
+  tool: "tool",
+  backgroundTask: "backgroundTask",
+} as const;
+export type BackgroundTaskKind = components["schemas"]["BackgroundTaskKind"];
+export const BackgroundTaskKindLabel = {
+  monitor: "monitor",
+  command: "command",
+  backgroundCommand: "backgroundCommand",
+  tool: "tool",
+} as const;
+export type BackgroundTaskKindLabel =
+  components["schemas"]["BackgroundTaskKindLabel"];
+export const BackgroundTaskLabel = {
+  running: "running",
+  starting: "starting",
+  pending: "pending",
+  stopping: "stopping",
+  approval: "approval",
+  completed: "completed",
+  failed: "failed",
+  cancelled: "cancelled",
+  interrupted: "interrupted",
+  lost: "lost",
+  waitingForExit: "waitingForExit",
+  unknown: "unknown",
+} as const;
+export type BackgroundTaskLabel = components["schemas"]["BackgroundTaskLabel"];
 export const CapacityRetryCause = {
   serverOverloaded: "serverOverloaded",
   internalServerError: "internalServerError",
@@ -38657,6 +38820,13 @@ export const ComplaintStatus = {
   stopped: "stopped",
 } as const;
 export type ComplaintStatus = components["schemas"]["ComplaintStatus"];
+export const Decision = {
+  accept: "accept",
+  accept_for_session: "accept_for_session",
+  decline: "decline",
+  cancel: "cancel",
+} as const;
+export type Decision = components["schemas"]["Decision"];
 export const DeliveryMoment = {
   current_turn: "current_turn",
   next_turn: "next_turn",
@@ -38683,6 +38853,12 @@ export const DeliveryStatus = {
   uncertain: "uncertain",
 } as const;
 export type DeliveryStatus = components["schemas"]["DeliveryStatus"];
+export const ElicitationAction = {
+  accept: "accept",
+  decline: "decline",
+  cancel: "cancel",
+} as const;
+export type ElicitationAction = components["schemas"]["ElicitationAction"];
 export const ExecutionAction = {
   review: "review",
   compact: "compact",
@@ -38723,6 +38899,8 @@ export const ExecutionStatus = {
   not_applied: "not_applied",
 } as const;
 export type ExecutionStatus = components["schemas"]["ExecutionStatus"];
+export const Grant = { full: "full", observe: "observe" } as const;
+export type Grant = components["schemas"]["Grant"];
 export const HttpErrorKind = {
   handler_panic: "handler_panic",
   store_configuration: "store_configuration",
@@ -38740,6 +38918,13 @@ export const HttpErrorKind = {
 export type HttpErrorKind = components["schemas"]["HttpErrorKind"];
 export const InviteStatus = { open: "open", used: "used" } as const;
 export type InviteStatus = components["schemas"]["InviteStatus"];
+export const LimitColor = {
+  paused: "paused",
+  unread: "unread",
+  answer: "answer",
+  error: "error",
+} as const;
+export type LimitColor = components["schemas"]["LimitColor"];
 export const LiveUpdateState = {
   idle: "idle",
   applying: "applying",
@@ -38938,6 +39123,18 @@ export const ProcessKind = {
   other: "other",
 } as const;
 export type ProcessKind = components["schemas"]["ProcessKind"];
+export const ProcessSourceKind = {
+  monitor: "monitor",
+  codex_task: "codex_task",
+  claude_task: "claude_task",
+} as const;
+export type ProcessSourceKind = components["schemas"]["ProcessSourceKind"];
+export const ProcessStdinState = {
+  open: "open",
+  closeRequested: "closeRequested",
+  closed: "closed",
+} as const;
+export type ProcessStdinState = components["schemas"]["ProcessStdinState"];
 export const ProjectDeleteFailureCode = {
   project_not_found: "project_not_found",
   project_workspace_conflict: "project_workspace_conflict",
@@ -39041,6 +39238,13 @@ export const RoomStatus = {
   revoked: "revoked",
 } as const;
 export type RoomStatus = components["schemas"]["RoomStatus"];
+export const RunwayColor = {
+  green: "green",
+  yellow: "yellow",
+  red: "red",
+  gray: "gray",
+} as const;
+export type RunwayColor = components["schemas"]["RunwayColor"];
 export const SafetyAction = {
   wait: "wait",
   retry: "retry",
@@ -39168,24 +39372,32 @@ export const TailscaleStatus = {
   unavailable: "unavailable",
 } as const;
 export type TailscaleStatus = components["schemas"]["TailscaleStatus"];
-export const TaskKind = {
-  monitor: "monitor",
-  command: "command",
-  tool: "tool",
-} as const;
+export const TaskKind = { command: "command", tool: "tool" } as const;
 export type TaskKind = components["schemas"]["TaskKind"];
-export const TaskStatus = {
-  running: "running",
+export const TaskRecordKind = { command: "command", tool: "tool" } as const;
+export type TaskRecordKind = components["schemas"]["TaskRecordKind"];
+export const TaskRecordStatus = {
   starting: "starting",
   approval: "approval",
-  queued: "queued",
-  waiting: "waiting",
+  pending: "pending",
+  unknown: "unknown",
+  running: "running",
   completed: "completed",
   failed: "failed",
   interrupted: "interrupted",
-  cancelled: "cancelled",
   lost: "lost",
+} as const;
+export type TaskRecordStatus = components["schemas"]["TaskRecordStatus"];
+export const TaskStatus = {
+  starting: "starting",
+  approval: "approval",
+  pending: "pending",
   unknown: "unknown",
+  running: "running",
+  completed: "completed",
+  failed: "failed",
+  interrupted: "interrupted",
+  lost: "lost",
 } as const;
 export type TaskStatus = components["schemas"]["TaskStatus"];
 export const TerminalInputDelivery = {

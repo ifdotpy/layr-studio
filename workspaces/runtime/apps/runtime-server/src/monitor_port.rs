@@ -2058,15 +2058,16 @@ fn monitor_account<'a>(
 // Rule launch and existing probes intentionally use different precedence:
 // a boolean false overrides the policy only for an already-running probe.
 fn rule_liveness_approved(actor: &studio_runtime_store::AgentRecord) -> bool {
-    actor.extra.get("yoloMode") == Some(&Value::Bool(true))
+    actor
+        .permission_mode
+        .is_some_and(|mode| mode.is_full_access())
         || actor.approval_policy.as_deref() == Some("never")
 }
 
 fn probe_liveness_approved(actor: &studio_runtime_store::AgentRecord) -> bool {
     actor
-        .extra
-        .get("yoloMode")
-        .and_then(Value::as_bool)
+        .permission_mode
+        .map(|mode| mode.is_full_access())
         .or_else(|| {
             actor
                 .approval_policy
@@ -2150,25 +2151,32 @@ mod tests {
 
     #[test]
     fn monitor_actor_permissions_preserve_partial_json_precedence() {
-        for yolo in [Value::Null, json!(true), json!(false), json!("bad")] {
+        for mode in [
+            Value::Null,
+            json!("bypassPermissions"),
+            json!("default"),
+            json!("bad"),
+        ] {
             for policy in [Value::Null, json!("never"), json!("ask"), json!(3)] {
                 let mut raw = owner(Path::new("/"), true);
-                raw["yoloMode"] = yolo.clone();
+                raw["permissionMode"] = mode.clone();
                 raw["approvalPolicy"] = policy.clone();
                 let actor: studio_runtime_store::AgentRecord =
                     match serde_json::from_value(raw.clone()) {
                         Ok(actor) => actor,
-                        Err(_) if yolo.is_string() || policy.is_number() => continue,
+                        Err(_) if mode == "bad" || policy.is_number() => continue,
                         Err(error) => panic!("actor fixture: {error}"),
                     };
                 assert_eq!(
                     rule_liveness_approved(&actor),
-                    raw["yoloMode"] == true || raw["approvalPolicy"].as_str() == Some("never")
+                    raw["permissionMode"] == "bypassPermissions"
+                        || raw["approvalPolicy"].as_str() == Some("never")
                 );
                 assert_eq!(
                     probe_liveness_approved(&actor),
-                    raw["yoloMode"]
-                        .as_bool()
+                    raw["permissionMode"]
+                        .as_str()
+                        .map(|mode| mode == "bypassPermissions")
                         .or_else(|| raw["approvalPolicy"].as_str().map(|v| v == "never"))
                         == Some(true)
                 );

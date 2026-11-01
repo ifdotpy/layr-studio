@@ -35,8 +35,7 @@ window.launch = function (
     name: "Lead",
     cwd: "/fixture",
     provider: GeneratedApiProviderKind.claude,
-    yoloMode: yolo,
-    claudeOptions: { permissionMode: mode },
+    permissionMode: mode,
   } satisfies Agent;
   root.render(
     <MantineProvider>

@@ -4,8 +4,14 @@
 use std::net::IpAddr;
 
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
+use studio_runtime_schema::multi_server_access::{
+    AccessClientKind, AccessClientStatus, PersistedAccessClient,
+};
 use studio_runtime_schema::multi_server_protocol::{DiscoveryIdentity, PersistedAccessInvite};
+use studio_runtime_schema::queue_command::Field;
 use studio_runtime_store::StoreError;
 use subtle::ConstantTimeEq;
 use thiserror::Error;
@@ -159,29 +165,15 @@ pub(crate) fn schema(schema: &str, value: &Value) -> Result<(), AccessError> {
     }
 }
 pub(crate) fn discovery_identity(value: &Value) -> Result<DiscoveryIdentity, AccessError> {
-    schema("DiscoveryIdentity", value)?;
-    DiscoveryIdentity::deserialize(value)
+    studio_runtime_schema::http_ingress::Object::<DiscoveryIdentity>::deserialize(value)
+        .map(|object| object.0)
         .map_err(|_| refused(400, "invalid_request", "Invalid multi-server request"))
 }
-pub(crate) fn stored(
-    schema: &str,
+pub(crate) fn stored_client(
     table: &'static str,
     id: &str,
     raw: &str,
-) -> Result<Value, AccessError> {
-    let value = stored_value(table, id, raw)?;
-    let invalid = |location: String| AccessError::Stored {
-        table,
-        id: id.to_owned(),
-        location,
-    };
-    match studio_runtime_schema::first_error(schema, &value) {
-        Ok(None) => Ok(value),
-        Ok(Some((location, _))) => Err(invalid(location)),
-        Err(_) => Err(invalid("schema".into())),
-    }
-}
-fn stored_value(table: &'static str, id: &str, raw: &str) -> Result<Value, AccessError> {
+) -> Result<PersistedAccessClient, AccessError> {
     let invalid = |location: String| AccessError::Stored {
         table,
         id: id.to_owned(),
@@ -190,7 +182,18 @@ fn stored_value(table: &'static str, id: &str, raw: &str) -> Result<Value, Acces
     if raw.len() > remote_transport::MAX_RESPONSE_BYTES {
         return Err(invalid("record size".into()));
     }
-    serde_json::from_str(raw).map_err(|_| invalid("JSON".into()))
+    let mut decoder = serde_json::Deserializer::from_str(raw);
+    let decoded: studio_runtime_schema::http_ingress::Object<PersistedAccessClient> =
+        serde_path_to_error::deserialize(&mut decoder).map_err(|error| {
+            let path = error.path().to_string();
+            invalid(if path == "." {
+                String::new()
+            } else {
+                format!("/{path}")
+            })
+        })?;
+    decoder.end().map_err(|_| invalid("JSON".into()))?;
+    Ok(decoded.0)
 }
 pub(crate) fn text<'a>(value: &'a Value, field: &str) -> &'a str {
     value.get(field).and_then(Value::as_str).unwrap_or_default()
@@ -207,6 +210,20 @@ pub(crate) fn identifier(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b"_.:-".contains(&b))
 }
 
+use studio_runtime_schema::multi_server_ingress::{
+    AutoPairRequest, DevicePairRequest, ManagementRequest, PairKind, RenameServer,
+};
+
+#[derive(Clone)]
+enum SignedBody {
+    Pair(DevicePairRequest),
+    Auto(AutoPairRequest),
+    Rename(RenameServer),
+    Management(ManagementRequest),
+    Orchestration(Box<crate::orchestration_wire::OrchestrationRequest>),
+    Other,
+}
+
 /// Owned and bounded wire input. Header multiplicity is retained until checked.
 #[derive(Clone)]
 pub struct SignedRequest {
@@ -219,7 +236,7 @@ pub struct SignedRequest {
     nonce: String,
     request: String,
     signature: String,
-    body: Value,
+    body: SignedBody,
 }
 impl SignedRequest {
     pub fn from_headers(
@@ -252,12 +269,61 @@ impl SignedRequest {
             }
             values.push(value.clone());
         }
-        let body = if raw.is_empty() {
-            Value::Null
-        } else {
-            serde_json::from_slice(raw)
-                .map_err(|_| refused(400, "invalid_request", "Invalid JSON request"))?
+        let path = target.split('?').next().unwrap_or_default();
+        let invalid = |error: serde_json::Error| {
+            let message = if error.is_syntax() || error.is_eof() {
+                "Invalid JSON request"
+            } else {
+                "Invalid multi-server request"
+            };
+            refused(400, "invalid_request", message)
         };
+        let body =
+            match (method, path) {
+                ("POST", PAIR_PATH) => SignedBody::Pair(
+                    serde_json::from_slice::<
+                        studio_runtime_schema::http_ingress::Object<DevicePairRequest>,
+                    >(raw)
+                    .map_err(invalid)?
+                    .0,
+                ),
+                ("POST", AUTO_PAIR_PATH) => SignedBody::Auto(
+                    serde_json::from_slice::<
+                        studio_runtime_schema::http_ingress::Object<AutoPairRequest>,
+                    >(raw)
+                    .map_err(invalid)?
+                    .0,
+                ),
+                ("POST", NAME_PATH) => SignedBody::Rename(
+                    serde_json::from_slice::<
+                        studio_runtime_schema::http_ingress::Object<RenameServer>,
+                    >(raw)
+                    .map_err(invalid)?
+                    .0,
+                ),
+                ("POST", "/api/multi-server") => SignedBody::Management(
+                    serde_json::from_slice::<
+                        studio_runtime_schema::http_ingress::Object<ManagementRequest>,
+                    >(raw)
+                    .map_err(invalid)?
+                    .0,
+                ),
+                ("POST", "/api/servers/orchestration") => SignedBody::Orchestration(Box::new(
+                    serde_json::from_slice::<
+                        studio_runtime_schema::http_ingress::Object<
+                            crate::orchestration_wire::OrchestrationRequest,
+                        >,
+                    >(raw)
+                    .map_err(invalid)?
+                    .0,
+                )),
+                _ => {
+                    if !raw.is_empty() {
+                        serde_json::from_slice::<serde::de::IgnoredAny>(raw).map_err(invalid)?;
+                    }
+                    SignedBody::Other
+                }
+            };
         let mut request = Self {
             method: method.to_owned(),
             target: target.to_owned(),
@@ -273,26 +339,36 @@ impl SignedRequest {
         if !identifier(&request.client) || !identifier(&request.request) {
             return Err(refused(400, "invalid_id", "Invalid request or client ID"));
         }
-        if request.is_pairing() {
-            schema("DevicePairRequest", &request.body)?;
-        }
-        if request.is_auto_pairing() {
-            schema("AutoPairRequest", &request.body)?;
-        }
-        if request.is_name() {
-            schema("RenameServer", &request.body)?;
-        }
-        if request.method == "POST" && request.target.split('?').next() == Some("/api/multi-server")
-        {
-            if let Some(action) = SessionAction::of(text(&request.body, "action")) {
+        if let SignedBody::Management(body) = &request.body {
+            if let Some(action) = SessionAction::of(body.action()) {
                 return Err(action.refusal());
             }
-            schema("CreateInvite", &request.body)?;
+            if !matches!(body, ManagementRequest::CreateInvite { .. }) {
+                return Err(refused(
+                    400,
+                    "invalid_request",
+                    "Invalid multi-server request",
+                ));
+            }
         }
-        if request.is_auto_pairing()
-            || (request.is_pairing() && text(&request.body, "kind") == "server")
-        {
-            request.body["origin"] = json!(normalize_origin(text(&request.body, "origin"))?);
+        match &mut request.body {
+            SignedBody::Pair(body) if matches!(body.kind, PairKind::Server) => {
+                let origin = body.origin.value().map(|v| v.as_str()).unwrap_or_default();
+                let normalized = normalize_origin(origin)?;
+                if let studio_runtime_schema::queue_command::Field::Value(value) = &mut body.origin
+                {
+                    value.set_normalized(normalized);
+                }
+            }
+            SignedBody::Auto(body) => {
+                body.origin
+                    .set_normalized(normalize_origin(body.origin.as_str())?);
+            }
+            SignedBody::Pair(_)
+            | SignedBody::Rename(_)
+            | SignedBody::Management(_)
+            | SignedBody::Orchestration(_)
+            | SignedBody::Other => {}
         }
         Ok(request)
     }
@@ -302,8 +378,106 @@ impl SignedRequest {
     pub fn request_id(&self) -> &str {
         &self.request
     }
-    pub fn body(&self) -> &Value {
-        &self.body
+    pub fn orchestration_body(&self) -> Option<&crate::orchestration_wire::OrchestrationRequest> {
+        if let SignedBody::Orchestration(body) = &self.body {
+            Some(body)
+        } else {
+            None
+        }
+    }
+    pub fn management_body(&self) -> Option<&ManagementRequest> {
+        if let SignedBody::Management(body) = &self.body {
+            Some(body)
+        } else {
+            None
+        }
+    }
+    pub fn rename_body(&self) -> Option<&RenameServer> {
+        if let SignedBody::Rename(body) = &self.body {
+            Some(body)
+        } else {
+            None
+        }
+    }
+    pub fn body_request_id(&self) -> &str {
+        match &self.body {
+            SignedBody::Pair(body) => body.request_id.as_str(),
+            SignedBody::Auto(body) => body.request_id.as_str(),
+            SignedBody::Rename(body) => body.request_id.as_str(),
+            SignedBody::Management(body) => body.request_id().unwrap_or_default(),
+            SignedBody::Orchestration(body) => &body.request_id,
+            SignedBody::Other => "",
+        }
+    }
+    pub fn invite_id(&self) -> &str {
+        match &self.body {
+            SignedBody::Pair(body) => body.invite_id.as_str(),
+            SignedBody::Auto(_)
+            | SignedBody::Rename(_)
+            | SignedBody::Management(_)
+            | SignedBody::Orchestration(_)
+            | SignedBody::Other => "",
+        }
+    }
+    pub fn token(&self) -> &str {
+        match &self.body {
+            SignedBody::Pair(body) => body.token.as_str(),
+            SignedBody::Auto(_)
+            | SignedBody::Rename(_)
+            | SignedBody::Management(_)
+            | SignedBody::Orchestration(_)
+            | SignedBody::Other => "",
+        }
+    }
+    pub fn origin(&self) -> &str {
+        match &self.body {
+            SignedBody::Pair(body) => body.origin.value().map(|v| v.as_str()).unwrap_or_default(),
+            SignedBody::Auto(body) => body.origin.as_str(),
+            SignedBody::Rename(_)
+            | SignedBody::Management(_)
+            | SignedBody::Orchestration(_)
+            | SignedBody::Other => "",
+        }
+    }
+    pub fn public_key(&self) -> &str {
+        match &self.body {
+            SignedBody::Pair(body) => body.public_key.as_str(),
+            SignedBody::Auto(body) => body.public_key.as_str(),
+            SignedBody::Rename(_)
+            | SignedBody::Management(_)
+            | SignedBody::Orchestration(_)
+            | SignedBody::Other => "",
+        }
+    }
+    pub fn label(&self) -> &str {
+        match &self.body {
+            SignedBody::Pair(body) => body.label.as_str(),
+            SignedBody::Auto(body) => body.label.as_str(),
+            SignedBody::Rename(_)
+            | SignedBody::Management(_)
+            | SignedBody::Orchestration(_)
+            | SignedBody::Other => "",
+        }
+    }
+    fn pairing_identity(&self) -> &str {
+        match &self.body {
+            SignedBody::Pair(body) => body.client_id.as_str(),
+            SignedBody::Auto(body) => body.server_id.as_str(),
+            SignedBody::Rename(_)
+            | SignedBody::Management(_)
+            | SignedBody::Orchestration(_)
+            | SignedBody::Other => "",
+        }
+    }
+    fn pairing_kind(&self) -> &str {
+        match &self.body {
+            SignedBody::Pair(body) => body.kind.as_str(),
+            SignedBody::Auto(_) => "server",
+            SignedBody::Rename(_)
+            | SignedBody::Management(_)
+            | SignedBody::Orchestration(_)
+            | SignedBody::Other => "",
+        }
     }
     pub fn target(&self) -> &str {
         &self.target
@@ -326,7 +500,10 @@ impl SignedRequest {
     pub fn is_management_invite(&self) -> bool {
         self.method == "POST"
             && self.target.split('?').next() == Some("/api/multi-server")
-            && text(&self.body, "action") == "create_invite"
+            && matches!(
+                self.body,
+                SignedBody::Management(ManagementRequest::CreateInvite { .. })
+            )
     }
     pub fn is_orchestration(&self) -> bool {
         self.method == "POST" && self.target.split('?').next() == Some("/api/servers/orchestration")
@@ -514,10 +691,10 @@ pub(crate) fn origin_host(origin: &str) -> Result<String, AccessError> {
         .ok_or_else(|| refused(400, "invalid_origin", "Invalid Tailscale origin"))
 }
 
-/// Only constructed from validated stored records, preserving unknown fields.
+/// Only constructed from strict stored records and matching access identities.
 #[derive(Clone)]
 pub struct AccessSnapshot {
-    client: Option<Value>,
+    client: Option<PersistedAccessClient>,
     invite: Option<PersistedAccessInvite>,
     auto_pair: bool,
 }
@@ -530,28 +707,35 @@ impl AccessSnapshot {
         auto_pair: bool,
     ) -> Result<Self, AccessError> {
         let client = client
-            .map(|v| {
-                stored(
-                    "PersistedAccessClient",
-                    "runtime_access_clients",
-                    client_id,
-                    v,
-                )
-            })
+            .map(|v| stored_client("runtime_access_clients", client_id, v))
             .transpose()?;
         let invite = invite
             .map(|v| {
-                let value = stored_value("runtime_access_invites", invite_id, v)?;
-                PersistedAccessInvite::from_value(&value).map_err(|location| AccessError::Stored {
+                let invalid = |location| AccessError::Stored {
                     table: "runtime_access_invites",
                     id: invite_id.to_owned(),
                     location,
-                })
+                };
+                if v.len() > remote_transport::MAX_RESPONSE_BYTES {
+                    return Err(invalid("record size".into()));
+                }
+                let mut decoder = serde_json::Deserializer::from_str(v);
+                let decoded: studio_runtime_schema::http_ingress::Object<PersistedAccessInvite> =
+                    serde_path_to_error::deserialize(&mut decoder).map_err(|error| {
+                        let path = error.path().to_string();
+                        invalid(if path == "." {
+                            String::new()
+                        } else {
+                            format!("/{path}")
+                        })
+                    })?;
+                decoder.end().map_err(|_| invalid("JSON".into()))?;
+                Ok(decoded.0)
             })
             .transpose()?;
         if client
             .as_ref()
-            .is_some_and(|v| text(v, "id") != client_id || text(v, "clientId") != client_id)
+            .is_some_and(|v| v.id.as_str() != client_id || v.client_id.as_str() != client_id)
             || invite.as_ref().is_some_and(|v| v.invite_id() != invite_id)
         {
             return Err(refused(
@@ -566,7 +750,7 @@ impl AccessSnapshot {
             auto_pair,
         })
     }
-    pub(crate) fn client(&self) -> Option<&Value> {
+    pub(crate) fn client(&self) -> Option<&PersistedAccessClient> {
         self.client.as_ref()
     }
     pub(crate) fn invite(&self) -> Option<&PersistedAccessInvite> {
@@ -575,19 +759,19 @@ impl AccessSnapshot {
 }
 #[derive(Clone)]
 pub struct VerifiedPrincipal {
-    record: Value,
     client: String,
     request: String,
     server: String,
     kind: String,
+    public_key: String,
     login: String,
     fingerprint: String,
     pairing: bool,
     auto_pairing: bool,
 }
 impl VerifiedPrincipal {
-    pub fn value(&self) -> &Value {
-        &self.record
+    pub fn public_key(&self) -> &str {
+        &self.public_key
     }
     pub fn client_id(&self) -> &str {
         &self.client
@@ -616,7 +800,7 @@ impl VerifiedPrincipal {
 }
 pub struct AuthDecision {
     pub principal: VerifiedPrincipal,
-    pub client_write: Option<Value>,
+    pub client_write: Option<PersistedAccessClient>,
     pub unpaired_attempt: bool,
 }
 
@@ -660,10 +844,10 @@ pub fn authorize_at(
             )
         })?;
         let probe = discovery_identity(probe)?;
-        if owner.dns.as_deref() != Some(origin_host(text(&request.body, "origin"))?.as_str())
+        if owner.dns.as_deref() != Some(origin_host(request.origin())?.as_str())
             || probe.server_id != request.client
-            || probe.public_key != text(&request.body, "publicKey")
-            || probe.origin.as_deref().unwrap_or_default() != text(&request.body, "origin")
+            || probe.public_key != request.public_key()
+            || probe.origin.as_deref().unwrap_or_default() != request.origin()
             || probe
                 .tailscale_user
                 .as_deref()
@@ -687,8 +871,8 @@ pub fn authorize_at(
         }
     }
     if client
-        .and_then(|v| v.get("tailscaleUser"))
-        .and_then(Value::as_str)
+        .and_then(|v| v.tailscale_user.value())
+        .map(String::as_str)
         .is_some_and(|v| v != owner.login)
     {
         return Err(refused(
@@ -698,43 +882,26 @@ pub fn authorize_at(
         ));
     }
     let client_write = if !pairing && !auto {
-        client.cloned().map(|mut v| {
-            v["lastAccess"] = json!(now);
-            v
-        })
+        client
+            .cloned()
+            .map(|mut v| {
+                v.last_access = Field::Value(
+                    serde_json::Number::from_f64(now)
+                        .ok_or_else(|| refused(400, "invalid_request", "Invalid request time"))?,
+                );
+                Ok::<_, AccessError>(v)
+            })
+            .transpose()?
     } else {
         None
     };
-    let mut record = if pairing || auto {
-        json!({"clientId":request.client,"kind":kind,"publicKey":key})
-    } else {
-        client.cloned().unwrap_or(Value::Null)
-    };
-    if let Some(fields) = record.as_object_mut() {
-        fields.extend(serde_json::Map::from_iter([
-            ("clientId".to_owned(), json!(request.client)),
-            (
-                "serverId".to_owned(),
-                if kind == "server" {
-                    json!(request.client)
-                } else {
-                    Value::Null
-                },
-            ),
-            ("targetServerId".to_owned(), json!(local_server)),
-            ("requestId".to_owned(), json!(request.request)),
-            ("tailscaleUser".to_owned(), json!(owner.login)),
-            ("pairing".to_owned(), json!(pairing)),
-            ("autoPairing".to_owned(), json!(auto)),
-        ]));
-    }
     Ok(AuthDecision {
         principal: VerifiedPrincipal {
-            record,
             client: request.client.clone(),
             request: request.request.clone(),
             server: local_server.to_owned(),
             kind: kind.to_owned(),
+            public_key: key.to_owned(),
             login: owner.login.clone(),
             fingerprint,
             pairing,
@@ -797,7 +964,7 @@ fn verify_access<'a>(
     let pairing = request.is_pairing();
     let auto = request.is_auto_pairing();
     let client = snapshot.client.as_ref();
-    if client.is_some_and(|v| text(v, "status") == "revoked") {
+    if client.is_some_and(|v| v.status == AccessClientStatus::Revoked) {
         return Err(refused(
             403,
             "client_revoked",
@@ -813,12 +980,14 @@ fn verify_access<'a>(
     let fingerprint = request.fingerprint();
     let recovery = pairing
         && client.is_some_and(|v| {
-            text(v, "pairingRequestId") == request.request && text(v, "pairingHash") == fingerprint
+            v.pairing_request_id
+                .value()
+                .is_some_and(|s| s == &request.request)
+                && v.pairing_hash.value().is_some_and(|s| s == &fingerprint)
         });
     let (key, kind) = if pairing || auto {
-        let field = if pairing { "clientId" } else { "serverId" };
-        if text(&request.body, field) != request.client
-            || text(&request.body, "requestId") != request.request
+        if request.pairing_identity() != request.client
+            || request.body_request_id() != request.request
         {
             return Err(refused(
                 400,
@@ -826,16 +995,12 @@ fn verify_access<'a>(
                 "The pairing identity or protocol does not match",
             ));
         }
-        let kind = if auto {
-            "server"
-        } else {
-            text(&request.body, "kind")
-        };
+        let kind = request.pairing_kind();
         if kind == "server" {
-            origin_host(text(&request.body, "origin"))?;
+            origin_host(request.origin())?;
         }
         if pairing && !recovery {
-            check_invite(snapshot.invite.as_ref(), &request.body, None, now)?;
+            check_invite(snapshot.invite.as_ref(), request.token(), None, now)?;
         }
         if auto {
             if !snapshot.auto_pair {
@@ -846,9 +1011,9 @@ fn verify_access<'a>(
                 ));
             }
             if client.is_some_and(|v| {
-                text(v, "publicKey") != text(&request.body, "publicKey")
-                    || text(v, "kind") != "server"
-                    || text(v, "origin") != text(&request.body, "origin")
+                v.public_key.as_str() != request.public_key()
+                    || v.kind != AccessClientKind::Server
+                    || v.origin.value().map(String::as_str).unwrap_or_default() != request.origin()
             }) {
                 return Err(refused(
                     403,
@@ -857,10 +1022,10 @@ fn verify_access<'a>(
                 ));
             }
         }
-        (text(&request.body, "publicKey"), kind)
+        (request.public_key(), kind)
     } else {
         let c = client
-            .filter(|v| text(v, "status") == "paired")
+            .filter(|v| v.status == AccessClientStatus::Paired)
             .ok_or_else(|| {
                 refused(
                     403,
@@ -868,19 +1033,19 @@ fn verify_access<'a>(
                     "The client is not paired or is revoked",
                 )
             })?;
-        (text(c, "publicKey"), text(c, "kind"))
+        (c.public_key.as_str(), c.kind.as_str())
     };
     verify_request_signature(request, client)?;
     Ok((key, kind, recovery))
 }
 fn verify_request_signature(
     request: &SignedRequest,
-    client: Option<&Value>,
+    client: Option<&PersistedAccessClient>,
 ) -> Result<(), AccessError> {
     let key = if request.is_pairing() || request.is_auto_pairing() {
-        text(request.body(), "publicKey")
+        request.public_key()
     } else {
-        client.map(|v| text(v, "publicKey")).unwrap_or_default()
+        client.map(|v| v.public_key.as_str()).unwrap_or_default()
     };
     remote_transport::verify_signature(
         key,
@@ -901,7 +1066,7 @@ fn verify_request_signature(
 }
 pub(crate) fn check_invite(
     invite: Option<&PersistedAccessInvite>,
-    body: &Value,
+    token: &str,
     owner: Option<&str>,
     now: f64,
 ) -> Result<(), AccessError> {
@@ -916,7 +1081,7 @@ pub(crate) fn check_invite(
         invite
             .token_hash()
             .as_bytes()
-            .ct_eq(digest(text(body, "token").as_bytes()).as_bytes()),
+            .ct_eq(digest(token.as_bytes()).as_bytes()),
     ) {
         return Err(refused(
             403,
@@ -939,6 +1104,37 @@ mod snapshot_tests {
     use super::*;
 
     #[test]
+    fn generic_signed_request_checks_json_syntax_before_admission() {
+        let headers: Vec<_> = SIGNED_HEADERS
+            .iter()
+            .map(|name| ((*name).to_owned(), "valid".to_owned()))
+            .collect();
+        assert!(
+            SignedRequest::from_headers("POST", "/api/other", &headers, br#"{"x":[1,true]}"#)
+                .is_ok()
+        );
+        assert!(matches!(
+            SignedRequest::from_headers("POST", "/api/other", &headers, br#"{"x":]"#),
+            Err(AccessError::Refused {
+                code: "invalid_request",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn client_snapshot_rejects_mismatched_request_identity() {
+        let raw = r#"{"id":"peer","clientId":"different","kind":"server","label":"Peer","created":1,"publicKey":"key","status":"paired"}"#;
+        assert!(matches!(
+            AccessSnapshot::from_records("peer", Some(raw), "", None, false),
+            Err(AccessError::Refused {
+                code: "invalid_record",
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn trusted_owner_projection_keeps_string_user_ids_and_strict_tags() {
         let status = json!({"Self":{"UserID":"1","Tags":[]},"User":{"1":{"LoginName":" ÄBC "}},"BackendState":"Running"});
         let mut whois = json!({"Node":{"Tags":[],"Name":null,"DNSName":"fallback."},"UserProfile":{"LoginName":"äbc"}});
@@ -951,21 +1147,15 @@ mod snapshot_tests {
     }
 
     #[test]
-    fn invite_snapshot_retains_extensions_and_refuses_invalid_identity() {
-        let invite = json!({"inviteId":"i", "status":"open", "expires":9007199254740993_u64, "tokenHash":digest(b"secret"), "tailscaleUser":"owner", "extra":{"opaque":true}});
+    fn invite_snapshot_refuses_invalid_identity() {
+        let invite = json!({"inviteId":"i", "status":"open", "expires":9007199254740993_u64, "tokenHash":digest(b"secret"), "tailscaleUser":"owner", "grant":"observe"});
         let raw = invite.to_string();
         let snapshot = AccessSnapshot::from_records("c", None, "i", Some(&raw), false).unwrap();
-        check_invite(
-            snapshot.invite(),
-            &json!({"token":"secret"}),
-            Some("owner"),
-            1.0,
-        )
-        .unwrap();
+        check_invite(snapshot.invite(), "secret", Some("owner"), 1.0).unwrap();
         assert_eq!(
             serde_json::to_string(snapshot.invite().unwrap()).unwrap(),
             format!(
-                r#"{{"inviteId":"i","status":"open","expires":9007199254740993,"tokenHash":"{}","tailscaleUser":"owner","extra":{{"opaque":true}}}}"#,
+                r#"{{"inviteId":"i","status":"open","expires":9007199254740993,"tokenHash":"{}","tailscaleUser":"owner","grant":"observe"}}"#,
                 digest(b"secret")
             )
         );

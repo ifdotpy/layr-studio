@@ -993,7 +993,7 @@ pub(crate) mod tests {
             "status":"queued","name":"Review","cwd":cwd,"isLead":false,"autoWake":true,
             "inFlight":false,"created":2.0,"threadId":null,"turnId":null,"accountKey":"default",
             "provider":"codex","role":"reviewer","model":"gpt-6","effort":"medium",
-            "nativeEffort":"medium","fastMode":false,"yoloMode":false,"worktree":false,
+            "nativeEffort":"medium","fastMode":false,"permissionMode":"default","worktree":false,
             "workspaceMode":"shared","daybreakEnabled":false,
             "prompt":"Run a native code review: {\"type\": \"uncommittedChanges\"}",
             "nativeReview":{"target":{"type":"uncommittedChanges"},"requestId":"lead:review:r1",

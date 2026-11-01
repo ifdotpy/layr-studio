@@ -631,6 +631,7 @@ pub fn check_schema_parity(openapi: &Value, account_transfer: &Value) -> Result<
     crate::project_record::check_schema_parity()?;
     crate::continuation_snapshot::check_capacity_schema_parity()?;
     crate::request_record::check_schema_parity()?;
+    crate::room_record::check_schema_parity()?;
     crate::workspace_operation::check_schema_parity()?;
     crate::task_record::check_schema_parity()?;
     crate::transcript_record::check_schema_parity()?;
@@ -732,7 +733,10 @@ pub fn check_schema_parity(openapi: &Value, account_transfer: &Value) -> Result<
     let modes = serde_json::json!(crate::claude_permissions::PERMISSION_MODES);
     for path in [
         "/components/schemas/CreateAgentRequest/properties/permission_mode/enum",
-        "/components/schemas/AgentEntityDto/properties/claudeOptions/anyOf/0/properties/permissionMode/enum",
+        "/components/schemas/AgentEntityDto/properties/permissionMode/anyOf/0/enum",
+        "/components/schemas/AgentDetailEntityDto/properties/permissionMode/anyOf/0/enum",
+        "/components/schemas/AgentResponse/properties/permissionMode/anyOf/0/enum",
+        "/components/schemas/AgentRecordResponse/properties/permissionMode/anyOf/0/enum",
         "/components/schemas/ClaudeSettings/properties/permissionMode/enum",
         "/components/schemas/ClaudeSessionSettings/properties/permissionMode/anyOf/0/enum",
     ] {
@@ -747,6 +751,7 @@ pub fn check_schema_parity(openapi: &Value, account_transfer: &Value) -> Result<
     crate::agent_progress::check_schema_parity(openapi)?;
     crate::studio_errors::check_schema_parity(openapi)?;
     crate::queue_command::check_schema_parity(openapi)?;
+    crate::approvals::check_schema_parity(openapi)?;
     crate::question_answers::check_schema_parity(openapi)?;
     crate::claude_controls::check_schema_parity(openapi)?;
     crate::process_controls::check_schema_parity(openapi)?;
@@ -919,8 +924,9 @@ fn check_delivery_parity(openapi: &Value) -> Result<(), String> {
             let Some(property) = schema.pointer(&format!("/properties/{field}")) else {
                 continue;
             };
-            // Terminal input delivery is an unrelated status contract.
-            if name == "TerminalInputResult" {
+            // Terminal input delivery is an unrelated status contract. An approval's
+            // delivery names the provider connection that gets the answer.
+            if name == "TerminalInputResult" || name == "Approval" {
                 continue;
             }
             let reference = if matches!(name.as_str(), "ManagedMessageBody" | "CommandSendBody") {
@@ -1220,6 +1226,34 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         openapi["components"]["schemas"][alias] =
             serde_json::json!({"$ref":format!("#/components/schemas/{owner}")});
     }
+    // The rate-limit entity wraps the original observation and its typed view.
+    let mut runway_generator = schemars::generate::SchemaSettings::draft2020_12()
+        .for_serialize()
+        .with(|settings| settings.definitions_path = "/components/schemas".into())
+        .into_generator();
+    runway_generator.subschema_for::<crate::usage_limits::AccountLimitsProjection>();
+    for (name, schema) in runway_generator.take_definitions(true) {
+        openapi["components"]["schemas"][name] = schema;
+    }
+    openapi["components"]["schemas"]["RateLimitView"] = serde_json::json!({
+        "type":"object", "additionalProperties":false,
+        "properties":{
+            "observation":{"$ref":"#/components/schemas/AccountRateLimitsDto"},
+            "projection":{"$ref":"#/components/schemas/AccountLimitsProjection"}
+        }, "required":["observation","projection"]
+    });
+    openapi["components"]["schemas"]["SyncRateLimitEntityPayload"]["properties"]["value"] =
+        serde_json::json!({"$ref":"#/components/schemas/RateLimitView"});
+    if let Some(variants) = openapi["components"]["schemas"]["SyncEntity"]["oneOf"].as_array_mut() {
+        for variant in variants {
+            if variant["properties"]["collection"]["const"] == "rateLimit"
+                && variant["properties"]["op"]["const"] == "upsert"
+            {
+                variant["properties"]["value"] =
+                    serde_json::json!({"$ref":"#/components/schemas/RateLimitView"});
+            }
+        }
+    }
     crate::records::refresh_openapi(&mut openapi)?;
     crate::multi_server_protocol::refresh_openapi(&mut openapi);
     openapi["components"]["schemas"]["BackgroundShellPolicySettings"]["properties"]["quietThresholdMs"]
@@ -1254,6 +1288,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     openapi["components"]["schemas"]["AdmittedRequest"] = admitted_request_schema();
     openapi["components"]["schemas"]["ServerOperationRequest"]["properties"]["action"] = serde_json::json!({"type":"string","enum":crate::persistence::ServerOperationKind::VARIANTS});
     crate::task_command::apply_api_contract(&mut openapi);
+    crate::task_gate::apply_api_contract(&mut openapi);
     for (name, schema) in crate::studio_errors::schemas()? {
         openapi["components"]["schemas"][name] = schema;
     }
@@ -1272,6 +1307,10 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             .ok_or_else(|| format!("OpenAPI is missing Rust-owned {name}"))? = schema;
     }
     for (name, schema) in crate::process_controls::schemas() {
+        openapi["components"]["schemas"][name] = schema;
+    }
+    crate::process_controls::apply_background_views(&mut openapi);
+    for (name, schema) in crate::approvals::schemas() {
         openapi["components"]["schemas"][name] = schema;
     }
     openapi["components"]["schemas"]["AnswerBody"]["properties"]["decision"] =
@@ -1422,6 +1461,10 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-request-record.schema.json".into(),
             text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-request-record.schema.json", &serde_json::to_string_pretty(&crate::request_record::schema()).map_err(|error| error.to_string())?)?,
+        },
+        Rendered {
+            path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-room-record.schema.json".into(),
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-room-record.schema.json", &serde_json::to_string_pretty(&crate::room_record::schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: web("persistence.ts"),
@@ -1811,6 +1854,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             .into_generator();
         generator.subschema_for::<crate::supervisor_contract::HealthResult>();
         generator.subschema_for::<crate::persistence::RecipientDelivery>();
+        generator.subschema_for::<crate::approvals::Approval>();
         generator.subschema_for::<crate::provider_diagnostics::StdinTimingDiagnostic>();
         generator.subschema_for::<crate::provider_diagnostics::ReplyTimingDiagnostic>();
         generator.subschema_for::<studio_client_domain::protocol::Request>();
@@ -2231,7 +2275,10 @@ process.stdout.write(JSON.stringify(JSON.parse(input).map(([method, params]) => 
             read_json(&root, ACCOUNT_TRANSFER_SCHEMA_PATH).expect("account transfer schema");
         for path in [
             "/components/schemas/CreateAgentRequest/properties/permission_mode/enum",
-            "/components/schemas/AgentEntityDto/properties/claudeOptions/anyOf/0/properties/permissionMode/enum",
+            "/components/schemas/AgentEntityDto/properties/permissionMode/anyOf/0/enum",
+            "/components/schemas/AgentDetailEntityDto/properties/permissionMode/anyOf/0/enum",
+            "/components/schemas/AgentResponse/properties/permissionMode/anyOf/0/enum",
+            "/components/schemas/AgentRecordResponse/properties/permissionMode/anyOf/0/enum",
             "/components/schemas/ClaudeSettings/properties/permissionMode/enum",
             "/components/schemas/ClaudeSessionSettings/properties/permissionMode/anyOf/0/enum",
         ] {

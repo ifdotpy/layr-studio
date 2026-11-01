@@ -1,5 +1,4 @@
 import { watchServerName } from "./serverNames";
-import { createSessionCostCache } from "../usage/sessionCostCache";
 import { createUploads, UPLOAD_DATABASE_NAME } from "../sync/uploads";
 import { createServerAudio } from "../native/serverAudio";
 import { createRecordingStorage } from "../dictation/storage";
@@ -13,7 +12,6 @@ import { createChatCreationStore } from "../chatCreation";
 import { createFileActions } from "../fileActions";
 import { createFileDialogs } from "../native/fileDialogs";
 import { watchResourceReads } from "../sync/subscriptions/reads";
-import { createAccountLimitsCache } from "../usage/accountUsage";
 import { createBrowserDrafts } from "../sync/drafts";
 import { createOutbox } from "../sync/send";
 import { createSyncClient } from "../sync/client";
@@ -42,7 +40,6 @@ export function createServerServices(server: StudioServer) {
     return serverCredentialAdapter().fetch(owner, request);
   });
   const storage = preferenceStorageForServer(transport.owner.id);
-  const accountLimits = createAccountLimitsCache(storage);
   // The native core stores the projections of the local server; every other server keeps the page cache.
   const localNativeClient = () =>
     transport.owner.id === "local" && hasNativeClient();
@@ -62,7 +59,6 @@ export function createServerServices(server: StudioServer) {
     api.pending.observeClientSeq(sequence);
   });
   const audio = createServerAudio();
-  const sessionCosts = createSessionCostCache();
   const transcripts = createTranscriptCache();
   const tokenRates = createTokenRateCache();
   let runtime:
@@ -151,7 +147,6 @@ export function createServerServices(server: StudioServer) {
   return {
     owner: transport.owner,
     audio,
-    sessionCosts,
     chatCreations: createChatCreationStore(storage),
     recordings: createRecordingStorage(),
     localDrafts,
@@ -161,7 +156,6 @@ export function createServerServices(server: StudioServer) {
     ),
     fileDialogs: createFileDialogs(transport.owner.id),
     fileActions: createFileActions(transport.owner.id),
-    accountLimits,
     watchResourceReads: ((refs, read, failed, options) =>
       watchResourceReads(refs, read, failed, {
         ...options,

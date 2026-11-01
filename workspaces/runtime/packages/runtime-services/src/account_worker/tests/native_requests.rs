@@ -56,14 +56,7 @@ fn answers(runtime_session: RetainedSessionPort, state: &State) -> Arc<CallbackR
 
 fn cards(state: &State) -> Vec<Value> {
     let reader = state.bridge.store.test_reader().expect("reader");
-    let mut statement = reader
-        .prepare("SELECT record FROM runtime_requests ORDER BY rowid")
-        .expect("request query");
-    statement
-        .query_map([], |row| row.get::<_, String>(0))
-        .expect("request rows")
-        .map(|raw| serde_json::from_str(&raw.expect("request row")).expect("request JSON"))
-        .collect()
+    crate::provider_callbacks::legacy_view::views(&reader)
 }
 
 /// Wait for the card of `rpc`. The provider must not get an answer first.
@@ -222,7 +215,7 @@ async fn an_approval_card_carries_the_user_decision_and_resolution_closes_anothe
     // This witness exercises Ask; Full now accepts native tool approvals live.
     let actor = state.agent.clone();
     state.bridge.store.transaction(move |tx| {
-        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.yoloMode',json('false')) WHERE id=?1", [&actor])?;
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.permissionMode','default') WHERE id=?1", [&actor])?;
         Ok(())
     }).await.unwrap();
     peer.frame(approval("claude:approval-1")).await;
@@ -377,7 +370,7 @@ async fn live_permissions_codex_next_turn_reads_the_saved_ask_policy() {
     assert_eq!(full["params"]["sandboxPolicy"]["type"], "dangerFullAccess");
     let actor = state.agent.clone();
     state.bridge.store.transaction(move |tx| {
-        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.yoloMode',json('false')) WHERE id=?1", [&actor])?;
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.permissionMode','default') WHERE id=?1", [&actor])?;
         Ok(())
     }).await.unwrap();
     finish_turn(&state, &mut peer, &full).await;

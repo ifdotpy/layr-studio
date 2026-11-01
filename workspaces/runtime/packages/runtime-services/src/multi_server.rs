@@ -5,7 +5,13 @@ use rusqlite::OptionalExtension;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use studio_runtime_schema::multi_server_protocol::ACCESS_PROTOCOL_VERSION;
+use studio_runtime_schema::multi_server_protocol::{
+    ACCESS_PROTOCOL_VERSION, PersistedAccessInvite,
+};
+use studio_runtime_schema::{
+    multi_server_access::{AccessClientKind, AccessClientStatus, PersistedAccessClient},
+    queue_command::Field,
+};
 use studio_runtime_store::{MultiServerRepository, RuntimeStore, StoreError};
 use thiserror::Error;
 
@@ -67,27 +73,12 @@ fn snapshot_in_transaction(
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
         .map(|r| {
             let (id, raw) = r?;
-            let v = parse("runtime_access_invites", &id, &raw)?;
-            let invite_id = v
-                .get("inviteId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| invalid("runtime_access_invites", &id, "inviteId"))?;
-            let expires = v
-                .get("expires")
-                .and_then(Value::as_i64)
+            let v = decode_invite(&id, &raw)?;
+            let expires = v.expires.as_i64()
                 .ok_or_else(|| invalid("runtime_access_invites", &id, "expires"))?;
-            let created = v
-                .get("created")
-                .and_then(Value::as_i64)
+            let created = v.created.value().and_then(serde_json::Number::as_i64)
                 .ok_or_else(|| invalid("runtime_access_invites", &id, "created"))?;
-            let status = v
-                .get("status")
-                .and_then(Value::as_str)
-                .ok_or_else(|| invalid("runtime_access_invites", &id, "status"))?;
-            if !["open", "used"].contains(&status) {
-                return Err(invalid("runtime_access_invites", &id, "status"));
-            }
-            Ok(json!({"inviteId":invite_id,"expires":expires,"created":created,"status":status}))
+            Ok(json!({"inviteId":v.invite_id(),"expires":expires,"created":created,"status":v.status.as_str()}))
         })
         .collect::<Result<Vec<_>, StoreError>>()?;
     let auto_pair = tx
@@ -326,51 +317,27 @@ fn previous_local_identities(
 pub async fn manage(
     store: &RuntimeStore,
     identity: &Value,
-    body: &Value,
+    body: &studio_runtime_schema::multi_server_ingress::ManagementRequest,
     actor: &str,
 ) -> Result<Value, MultiServerError> {
-    let action = body
-        .get("action")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let server = body
-        .get("serverId")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let target = body
-        .get("clientId")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let request = body
-        .get("requestId")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let alias = body
-        .get("alias")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let auto = body
-        .get("autoPair")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    use studio_runtime_schema::multi_server_ingress::ManagementRequest;
     let identity = identity.clone();
     let body = body.clone();
     let actor = actor.to_owned();
     store.transaction_with(move |tx| -> Result<Value, MultiServerError> {
-        match action.as_str() {
-            "settings" => { tx.execute("UPDATE runtime_access_settings SET auto_pair=?1 WHERE id=1",[i64::from(auto)])?; audit_write(tx,"local",&actor,"settings")?; }
-            "revoke" => { let id=body.get("clientId").and_then(Value::as_str).unwrap_or_default(); let mut client=stored(tx,"runtime_access_clients",id)?.ok_or_else(||MultiServerError::Refused("client does not exist".into()))?; if client.get("status").and_then(Value::as_str)!=Some("revoked") { client["status"]=json!("revoked"); client["revoked"]=json!(unix_time()?); tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2",rusqlite::params![client.to_string(),id])?; audit_write(tx,id,&actor,"revoke")?; } }
-            "alias" => {
-                if !valid_identifier(&server) || !valid_identifier(&request) || !valid_alias(&alias) {
+        match &body {
+            ManagementRequest::Settings { auto_pair, .. } => { tx.execute("UPDATE runtime_access_settings SET auto_pair=?1 WHERE id=1",[i64::from(auto_pair.value().copied().unwrap_or(false))])?; audit_write(tx,"local",&actor,"settings")?; }
+            ManagementRequest::Revoke { client_id, .. } => { let id=client_id.as_str(); let mut client=stored(tx,"runtime_access_clients",id)?.ok_or_else(||MultiServerError::Refused("client does not exist".into()))?; if client.status != AccessClientStatus::Revoked { client.status=AccessClientStatus::Revoked; client.revoked=Field::Value(serde_json::Number::from_f64(unix_time()?).ok_or_else(|| invalid("runtime_access_clients",id,"revoked"))?); tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2",rusqlite::params![serde_json::to_string(&client).map_err(|_|invalid("runtime_access_clients",id,"record"))?,id])?; audit_write(tx,id,&actor,"revoke")?; } }
+            ManagementRequest::Alias { server_id, request_id, alias } => {
+                let server = server_id.as_str();
+                let request = request_id.as_str();
+                let alias_value = alias.clone();
+                let alias = alias.as_str();
+                if !valid_identifier(server) || !valid_identifier(request) {
                     return Err(MultiServerError::Refused("invalid server alias request".into()));
                 }
                 let local = server == "local" || server == identity["serverId"].as_str().unwrap_or_default();
-                let target = if local { "local" } else { server.as_str() };
+                let target = if local { "local" } else { server };
                 let prior=tx.query_row("SELECT server,alias FROM runtime_access_alias_requests WHERE id=?1",[&request],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).optional()?;
                 if let Some((saved_target,saved_alias)) = prior {
                     if saved_target != target || saved_alias != alias {
@@ -379,11 +346,11 @@ pub async fn manage(
                 } else {
                     let aliases = ensure_server_aliases(tx, &identity)?;
                     let local_id = identity["serverId"].as_str().unwrap_or_default();
-                    if !local && !aliases.contains_key(&server) {
+                    if !local && !aliases.contains_key(server) {
                         return Err(MultiServerError::Refused("server does not exist".into()));
                     }
                     let collision = aliases.iter().any(|(id, existing)| {
-                        existing == &alias && id != target && !(local && id == local_id)
+                        existing == alias && id != target && !(local && id == local_id)
                     });
                     if collision {
                         return Err(MultiServerError::Conflict("server alias is already in use".into()));
@@ -391,17 +358,19 @@ pub async fn manage(
                     if local {
                         tx.execute("INSERT INTO runtime_access_local_alias VALUES(1,?) ON CONFLICT(id) DO UPDATE SET alias=excluded.alias", [&alias])?;
                     } else {
-                        let mut peer = stored(tx, "runtime_access_clients", &server)?
+                        let mut peer = stored(tx, "runtime_access_clients", server)?
                             .ok_or_else(|| MultiServerError::Refused("server does not exist".into()))?;
-                        peer["alias"] = json!(alias);
-                        tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2", rusqlite::params![peer.to_string(), server])?;
+                        peer.alias = Field::Value(alias_value);
+                        tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2", rusqlite::params![serde_json::to_string(&peer).map_err(|_|invalid("runtime_access_clients",server,"record"))?, server])?;
                     }
                     tx.execute("INSERT INTO runtime_access_alias_requests VALUES(?,?,?)", rusqlite::params![request,target,alias])?;
                     audit_write(tx,target,&actor,"alias")?;
                 }
             }
-            "unrevoke" => { let prior=tx.query_row("SELECT client FROM runtime_access_unrevokes WHERE id=?1",[&request],|r|r.get::<_,String>(0)).optional()?; if let Some(saved)=prior {if saved!=target{return Err(MultiServerError::Conflict("request ID selected another server".into()));}} else {let v=stored(tx,"runtime_access_clients",&target)?.ok_or_else(||MultiServerError::Refused("select a revoked server".into()))?;if v.get("status").and_then(Value::as_str)!=Some("revoked")||v.get("kind").and_then(Value::as_str)!=Some("server"){return Err(MultiServerError::Refused("select a revoked server".into()));}tx.execute("DELETE FROM runtime_access_clients WHERE id=?1",[&target])?;tx.execute("DELETE FROM runtime_access_auto_attempts WHERE id=?1",[&target])?;tx.execute("INSERT INTO runtime_access_unrevokes VALUES(?1,?2)",rusqlite::params![request,target])?;audit_write(tx,&target,&actor,"unrevoke")?;} }
-            _ => return Err(MultiServerError::Refused(format!("unsupported local multi-server action: {action}"))),
+            ManagementRequest::Unrevoke { request_id, client_id } => { let request = request_id.as_str(); let target = client_id.as_str(); let prior=tx.query_row("SELECT client FROM runtime_access_unrevokes WHERE id=?1",[&request],|r|r.get::<_,String>(0)).optional()?; if let Some(saved)=prior {if saved!=target{return Err(MultiServerError::Conflict("request ID selected another server".into()));}} else {let v=stored(tx,"runtime_access_clients",target)?.ok_or_else(||MultiServerError::Refused("select a revoked server".into()))?;if v.status!=AccessClientStatus::Revoked || v.kind!=AccessClientKind::Server{return Err(MultiServerError::Refused("select a revoked server".into()));}tx.execute("DELETE FROM runtime_access_clients WHERE id=?1",[&target])?;tx.execute("DELETE FROM runtime_access_auto_attempts WHERE id=?1",[&target])?;tx.execute("INSERT INTO runtime_access_unrevokes VALUES(?1,?2)",rusqlite::params![request,target])?;audit_write(tx,target,&actor,"unrevoke")?;} }
+            ManagementRequest::AcceptInvite { .. } | ManagementRequest::CreateInvite { .. }
+            | ManagementRequest::Discover { .. } | ManagementRequest::Name { .. }
+            | ManagementRequest::UiInvite { .. } => return Err(MultiServerError::Refused(format!("unsupported local multi-server action: {}", body.action()))),
         }
         let clients=project_records(tx,"runtime_access_clients")?;
         let records=MultiServerRepository::audit(tx)?;
@@ -416,15 +385,23 @@ pub async fn manage(
 pub async fn create_invite(
     store: Arc<RuntimeStore>,
     identity: &Value,
-    body: &Value,
+    body: &studio_runtime_schema::multi_server_ingress::ManagementRequest,
     actor: &str,
     tailscale_user: Option<&str>,
 ) -> Result<Value, MultiServerError> {
-    let request_id = body
-        .get("requestId")
-        .and_then(Value::as_str)
-        .filter(|value| valid_identifier(value))
-        .ok_or_else(|| MultiServerError::Refused("Invalid request ID".into()))?;
+    use studio_runtime_schema::multi_server_ingress::ManagementRequest;
+    let ManagementRequest::CreateInvite {
+        request_id,
+        label,
+        grant,
+    } = body
+    else {
+        return Err(MultiServerError::Refused("Invalid pairing request".into()));
+    };
+    let request_id = request_id.as_str();
+    if !valid_identifier(request_id) {
+        return Err(MultiServerError::Refused("Invalid request ID".into()));
+    }
     let origin = identity
         .get("origin")
         .and_then(Value::as_str)
@@ -436,10 +413,10 @@ pub async fn create_invite(
         .get("label")
         .and_then(Value::as_str)
         .ok_or_else(|| MultiServerError::Refused("The local server label is unavailable".into()))?;
-    let label = match body.get("label") {
-        None | Some(Value::Null) => saved_label,
-        Some(Value::String(label)) => {
-            let label = label.trim();
+    let label = match label.value() {
+        None => saved_label,
+        Some(value) => {
+            let label = value.as_str().trim();
             if label.is_empty() || label.chars().count() > 80 {
                 return Err(MultiServerError::Refused(
                     "Server label must be 1 to 80 characters".into(),
@@ -447,27 +424,8 @@ pub async fn create_invite(
             }
             label
         }
-        Some(_) => {
-            return Err(MultiServerError::Refused(
-                "Server label must be 1 to 80 characters".into(),
-            ));
-        }
     };
-    // The owner picks the grant of the device that will use this invitation.
-    let grant = match body.get("grant") {
-        None | Some(Value::Null) => None,
-        Some(Value::String(grant))
-            if grant == crate::device_trust::GRANT_FULL
-                || grant == crate::device_trust::GRANT_OBSERVE =>
-        {
-            Some(grant.as_str())
-        }
-        Some(_) => {
-            return Err(MultiServerError::Refused(
-                "Grant must be full or observe".into(),
-            ));
-        }
-    };
+    let grant = grant.value().map(|value| value.as_str());
     let tailscale_user = tailscale_user
         .filter(|user| !user.is_empty() && user.len() <= 254)
         .ok_or_else(|| {
@@ -483,30 +441,19 @@ pub async fn create_invite(
     .map_err(|_| {
         MultiServerError::Refused("The local server credentials are unavailable".into())
     })?;
-    let fingerprint = studio_runtime_store::sha256_hex(
-        crate::remote_transport::canonical_json(body)
-            .map_err(|_| MultiServerError::Refused("Invalid pairing request".into()))?
-            .as_bytes(),
-    );
+    let fingerprint = invite_fingerprint(body)?;
     let request_id_for_read = request_id.to_owned();
     let prior = store
         .read_async("runtime-services/multi_server", move |tx| {
-            let saved: Option<(String, String)> = tx
+            let saved: Option<(String, String, String)> = tx
                 .query_row(
-                    "SELECT hash,record FROM runtime_access_invites WHERE request_id=?1",
+                    "SELECT id,hash,record FROM runtime_access_invites WHERE request_id=?1",
                     [&request_id_for_read],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .optional()?;
             saved
-                .map(|(hash, raw)| {
-                    let record: Value = serde_json::from_str(&raw).map_err(|_| {
-                        StoreError::SchemaMismatch(format!(
-                            "invalid stored object runtime_access_invites/{request_id_for_read}"
-                        ))
-                    })?;
-                    Ok::<_, StoreError>((hash, record))
-                })
+                .map(|(id, hash, raw)| decode_invite(&id, &raw).map(|record| (hash, record)))
                 .transpose()
         })
         .await?;
@@ -528,22 +475,38 @@ pub async fn create_invite(
             )
             .as_ref(),
         );
-        let mut invite = json!({
-            "protocol": ACCESS_PROTOCOL_VERSION,
-            "inviteId": invite_id,
-            "serverId": identity["serverId"],
-            "label": label,
-            "origin": origin,
-            "publicKey": identity["publicKey"],
-            "tailscaleUser": tailscale_user,
-            "expires": now as i64 + INVITATION_TTL_SECONDS,
-            "created": now,
-            "status": "open",
-            "tokenHash": studio_runtime_store::sha256_hex(token.as_bytes()),
-        });
-        if let Some(grant) = grant {
-            invite["grant"] = json!(grant);
-        }
+        use studio_runtime_schema::{multi_server_protocol::InviteStatus, queue_command::Field};
+        let invalid_invite =
+            |_| MultiServerError::Refused("Invalid local invitation identity".into());
+        let optional_identity = |name: &str| {
+            <Field<String> as serde::Deserialize>::deserialize(
+                identity.get(name).unwrap_or(&Value::Null),
+            )
+            .map_err(|_| MultiServerError::Refused("Invalid local invitation identity".into()))
+        };
+        let invite = PersistedAccessInvite {
+            protocol: Field::Value(ACCESS_PROTOCOL_VERSION),
+            invite_id: invite_id.clone().try_into().map_err(invalid_invite)?,
+            server_id: optional_identity("serverId")?,
+            label: Field::Value(label.to_owned()),
+            origin: Field::Value(origin.to_owned()),
+            public_key: optional_identity("publicKey")?,
+            tailscale_user: tailscale_user
+                .to_owned()
+                .try_into()
+                .map_err(invalid_invite)?,
+            expires: serde_json::Number::from(now as i64 + INVITATION_TTL_SECONDS)
+                .try_into()
+                .map_err(invalid_invite)?,
+            created: Field::Value(serde_json::Number::from_f64(now).ok_or_else(|| {
+                MultiServerError::Refused("Invalid local invitation time".into())
+            })?),
+            status: InviteStatus::Open,
+            token_hash: studio_runtime_store::sha256_hex(token.as_bytes())
+                .try_into()
+                .map_err(invalid_invite)?,
+            grant: grant.map_or(Field::Missing, |value| Field::Value(value.to_owned())),
+        };
         let invite_id = invite_id.clone();
         let request_id = request_id.to_owned();
         let fingerprint = fingerprint.clone();
@@ -553,7 +516,7 @@ pub async fn create_invite(
             .transaction_with(move |tx| {
                 tx.execute(
                 "INSERT INTO runtime_access_invites(id,request_id,hash,record) VALUES(?1,?2,?3,?4)",
-                rusqlite::params![invite_id, request_id, fingerprint, invite_for_write.to_string()],
+                rusqlite::params![invite_id, request_id, fingerprint, serde_json::to_string(&invite_for_write)?],
             )?;
                 audit_write(tx, "local", &actor, "create_invite")?;
                 Ok::<_, StoreError>(())
@@ -561,7 +524,7 @@ pub async fn create_invite(
             .await?;
         invite
     };
-    let invite_id = invite["inviteId"].as_str().unwrap_or_default();
+    let invite_id = invite.invite_id();
     let token_data = format!("invite-v1\n{invite_id}\n{request_id}");
     let token = URL_SAFE_NO_PAD.encode(
         hmac::sign(
@@ -571,16 +534,28 @@ pub async fn create_invite(
         .as_ref(),
     );
     let invitation = json!({
-        "protocol": invite["protocol"], "inviteId": invite["inviteId"],
-        "serverId": invite["serverId"], "label": invite["label"],
-        "origin": invite["origin"], "publicKey": invite["publicKey"],
-        "tailscaleUser": invite["tailscaleUser"], "expires": invite["expires"],
+        "protocol": invite.protocol, "inviteId": invite.invite_id,
+        "serverId": invite.server_id, "label": invite.label,
+        "origin": invite.origin, "publicKey": invite.public_key,
+        "tailscaleUser": invite.tailscale_user, "expires": invite.expires,
         "token": token,
     });
     Ok(json!({
         "invitation": invitation,
-        "expires": invite["expires"]
+        "expires": invite.expires
     }))
+}
+
+/// Preserve the canonical JSON bytes used by stored invite fingerprints before
+/// request bodies became typed, including omitted fields and explicit nulls.
+fn invite_fingerprint(
+    body: &studio_runtime_schema::multi_server_ingress::ManagementRequest,
+) -> Result<String, MultiServerError> {
+    let value = serde::Serialize::serialize(body, serde_json::value::Serializer)
+        .map_err(|_| MultiServerError::Refused("Invalid pairing request".into()))?;
+    let canonical = crate::remote_transport::canonical_json(&value)
+        .map_err(|_| MultiServerError::Refused("Invalid pairing request".into()))?;
+    Ok(studio_runtime_store::sha256_hex(canonical.as_bytes()))
 }
 
 fn project_records(tx: &rusqlite::Transaction<'_>, table: &str) -> Result<Vec<Value>, StoreError> {
@@ -589,75 +564,39 @@ fn project_records(tx: &rusqlite::Transaction<'_>, table: &str) -> Result<Vec<Va
     let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
     rows.map(|row| {
         let (id, raw) = row?;
-        let mut v = parse(table, &id, &raw)?;
-        let obj = v
-            .as_object_mut()
-            .ok_or_else(|| invalid(table, &id, "record"))?;
-        let allowed = [
-            "id",
-            "clientId",
-            "serverId",
-            "label",
-            "kind",
-            "origin",
-            "publicKey",
-            "tailscaleUser",
-            "status",
-            "created",
-            "lastAccess",
-            "revoked",
-            "reachability",
-            "lastSeen",
-            "autoPair",
-            "alias",
-            "replacedBy",
-        ];
-        obj.retain(|k, _| allowed.contains(&k.as_str()));
-        for key in ["id", "clientId", "label", "kind", "publicKey", "status"] {
-            if !obj.get(key).is_some_and(Value::is_string) {
-                return Err(invalid(table, &id, key));
-            }
+        let client = decode_client(table, &id, &raw)?;
+        let mut obj = serde_json::Map::new();
+        obj.insert("id".into(), json!(client.id));
+        obj.insert("clientId".into(), json!(client.client_id));
+        obj.insert("kind".into(), json!(client.kind));
+        obj.insert("label".into(), json!(client.label));
+        obj.insert("created".into(), json!(client.created));
+        obj.insert("publicKey".into(), json!(client.public_key));
+        obj.insert("status".into(), json!(client.status));
+        macro_rules! optional {
+            ($name:literal, $field:expr) => {
+                match $field {
+                    Field::Missing => {}
+                    Field::Null => {
+                        obj.insert($name.into(), Value::Null);
+                    }
+                    Field::Value(value) => {
+                        obj.insert($name.into(), json!(value));
+                    }
+                }
+            };
         }
-        if !["ui", "server"].contains(&obj["kind"].as_str().unwrap_or_default())
-            || !["paired", "revoked", "discovered", "unreachable"]
-                .contains(&obj["status"].as_str().unwrap_or_default())
-        {
-            return Err(invalid(table, &id, "kind/status"));
-        }
-        for key in [
-            "serverId",
-            "origin",
-            "tailscaleUser",
-            "reachability",
-            "alias",
-            "replacedBy",
-        ] {
-            if obj.get(key).is_some_and(|v| !v.is_null() && !v.is_string()) {
-                return Err(invalid(table, &id, key));
-            }
-        }
-        for key in ["created", "lastAccess", "revoked", "lastSeen"] {
-            if obj
-                .get(key)
-                .is_some_and(|v| !v.is_null() && v.as_f64().is_none_or(|n| !n.is_finite()))
-            {
-                return Err(invalid(table, &id, key));
-            }
-        }
-        if obj
-            .get("autoPair")
-            .is_some_and(|v| !v.is_null() && !v.is_boolean())
-        {
-            return Err(invalid(table, &id, "autoPair"));
-        }
-        if obj
-            .get("reachability")
-            .and_then(Value::as_str)
-            .is_some_and(|v| !["reachable", "unreachable", "unknown"].contains(&v))
-        {
-            return Err(invalid(table, &id, "reachability"));
-        }
-        Ok(v)
+        optional!("serverId", client.server_id);
+        optional!("origin", client.origin);
+        optional!("tailscaleUser", client.tailscale_user);
+        optional!("lastAccess", client.last_access);
+        optional!("revoked", client.revoked);
+        optional!("lastSeen", client.last_seen);
+        optional!("autoPair", client.auto_pair);
+        optional!("reachability", client.reachability);
+        optional!("alias", client.alias);
+        optional!("replacedBy", client.replaced_by);
+        Ok(Value::Object(obj))
     })
     .collect()
 }
@@ -765,22 +704,34 @@ fn stored(
     tx: &rusqlite::Transaction<'_>,
     table: &str,
     id: &str,
-) -> Result<Option<Value>, StoreError> {
+) -> Result<Option<PersistedAccessClient>, StoreError> {
     tx.query_row(
         &format!("SELECT record FROM {table} WHERE id=?1"),
         [id],
         |r| r.get::<_, String>(0),
     )
     .optional()?
-    .map(|raw| parse(table, id, &raw))
+    .map(|raw| decode_client(table, id, &raw))
     .transpose()
 }
-fn parse(table: &str, id: &str, raw: &str) -> Result<Value, StoreError> {
-    let v: Value = serde_json::from_str(raw).map_err(|_| invalid(table, id, "record"))?;
-    if !v.is_object() {
-        return Err(invalid(table, id, "record"));
+fn decode_client(table: &str, id: &str, raw: &str) -> Result<PersistedAccessClient, StoreError> {
+    let client = serde_json::from_str::<
+        studio_runtime_schema::http_ingress::Object<PersistedAccessClient>,
+    >(raw)
+    .map_err(|_| invalid(table, id, "record"))?
+    .0;
+    Ok(client)
+}
+fn decode_invite(id: &str, raw: &str) -> Result<PersistedAccessInvite, StoreError> {
+    let invite = serde_json::from_str::<
+        studio_runtime_schema::http_ingress::Object<PersistedAccessInvite>,
+    >(raw)
+    .map_err(|_| invalid("runtime_access_invites", id, "record"))?
+    .0;
+    if invite.invite_id() != id {
+        return Err(invalid("runtime_access_invites", id, "inviteId"));
     }
-    Ok(v)
+    Ok(invite)
 }
 fn invalid(t: &str, id: &str, field: &str) -> StoreError {
     StoreError::SchemaMismatch(format!("invalid stored object {t}/{id}: {field}"))
@@ -812,17 +763,83 @@ fn valid_identifier(value: &str) -> bool {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || b"_.:-".contains(&byte))
 }
-fn valid_alias(alias: &str) -> bool {
-    !alias.is_empty() && alias.len() <= 3 && alias.bytes().all(|b| b.is_ascii_uppercase())
-}
 
 #[cfg(test)]
 mod tests {
-    use super::{create_invite, manage};
+    use super::MultiServerError;
     use crate::federation_credentials::Credentials;
+    use serde::Deserialize;
     use serde_json::json;
     use std::sync::Arc;
     use studio_runtime_store::RuntimeStore;
+
+    async fn create_invite(
+        store: Arc<RuntimeStore>,
+        identity: &serde_json::Value,
+        body: &serde_json::Value,
+        actor: &str,
+        user: Option<&str>,
+    ) -> Result<serde_json::Value, MultiServerError> {
+        let request =
+            studio_runtime_schema::multi_server_ingress::ManagementRequest::deserialize(body)
+                .map_err(|_| MultiServerError::Refused("invalid test request".into()))?;
+        super::create_invite(store, identity, &request, actor, user).await
+    }
+    async fn manage(
+        store: &RuntimeStore,
+        identity: &serde_json::Value,
+        body: &serde_json::Value,
+        actor: &str,
+    ) -> Result<serde_json::Value, MultiServerError> {
+        let request =
+            studio_runtime_schema::multi_server_ingress::ManagementRequest::deserialize(body)
+                .map_err(|_| MultiServerError::Refused("invalid test request".into()))?;
+        super::manage(store, identity, &request, actor).await
+    }
+
+    #[test]
+    fn stored_invite_fingerprint_matches_legacy_canonical_json() {
+        use studio_runtime_schema::multi_server_ingress::ManagementRequest;
+
+        let wire =
+            r#"{"requestId":"stored-1","label":"Café","grant":"observe","action":"create_invite"}"#;
+        let old_body: serde_json::Value = serde_json::from_str(wire).unwrap();
+        let typed: ManagementRequest = serde_json::from_str(wire).unwrap();
+        let old_bytes = crate::remote_transport::canonical_json(&old_body).unwrap();
+        assert_eq!(
+            old_bytes,
+            r#"{"action":"create_invite","grant":"observe","label":"Café","requestId":"stored-1"}"#
+        );
+        let old_hash = studio_runtime_store::sha256_hex(old_bytes.as_bytes());
+        assert_eq!(
+            old_hash,
+            "016cd5bb32c6b282facf16337fee8493688172cab5a6bfbb0f1d1fa4af3360ca"
+        );
+        assert_eq!(super::invite_fingerprint(&typed).unwrap(), old_hash);
+
+        let missing = r#"{"action":"create_invite","requestId":"r"}"#;
+        let null = r#"{"action":"create_invite","requestId":"r","label":null}"#;
+        let missing_body: ManagementRequest = serde_json::from_str(missing).unwrap();
+        let null_body: ManagementRequest = serde_json::from_str(null).unwrap();
+        let serialized = serde_json::to_string(&missing_body).unwrap();
+        let serialized: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(
+            serialized,
+            json!({"action":"create_invite","requestId":"r"})
+        );
+        for (wire, typed) in [(missing, &missing_body), (null, &null_body)] {
+            let old: serde_json::Value = serde_json::from_str(wire).unwrap();
+            let old = crate::remote_transport::canonical_json(&old).unwrap();
+            assert_eq!(
+                super::invite_fingerprint(typed).unwrap(),
+                studio_runtime_store::sha256_hex(old.as_bytes())
+            );
+        }
+        assert_ne!(
+            super::invite_fingerprint(&missing_body).unwrap(),
+            super::invite_fingerprint(&null_body).unwrap()
+        );
+    }
 
     #[tokio::test]
     async fn invitation_uses_injected_owner_identity_and_exact_retry_is_stable() {

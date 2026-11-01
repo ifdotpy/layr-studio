@@ -33,7 +33,8 @@ pub fn assign_in_transaction(
     let current_actor = event_write::checked_agent(tx, &actor.id.0)?;
     if current_actor.id != current_actor.root_id
         || current_actor.is_lead != Some(true)
-        || current_actor.extra.get("role").and_then(Value::as_str) == Some("reviewer")
+        || current_actor.role.value().copied()
+            == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer)
         || current_actor.epoch != actor.epoch
         || current_actor.auto_wake != Some(true)
     {

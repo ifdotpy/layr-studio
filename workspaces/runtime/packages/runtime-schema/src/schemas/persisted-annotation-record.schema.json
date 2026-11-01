@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": true,
+  "additionalProperties": false,
   "properties": {
     "agent": {
       "type": ["string", "null"]
@@ -25,11 +25,17 @@
     "path": {
       "type": ["string", "null"]
     },
+    "rootId": {
+      "type": ["string", "null"]
+    },
     "text": {
+      "type": ["string", "null"]
+    },
+    "turnId": {
       "type": ["string", "null"]
     }
   },
   "required": ["id"],
-  "title": "AnnotationRecord",
+  "title": "AnnotationFields",
   "type": "object"
 }

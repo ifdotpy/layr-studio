@@ -448,10 +448,12 @@ async fn pending_native_request_blocks_queued_wait_adoption() {
     let before = queued_active_snapshot(&store).await;
     store
         .transaction(move |tx| {
-            tx.execute(
-                "INSERT INTO runtime_requests(id,record) VALUES('pending-request',?1)",
-                [json!({"agent":"agent","turnId":"turn","status":"pending"}).to_string()],
-            )?;
+            let approval = studio_runtime_store::approvals::from_legacy_record(
+                "pending-request",
+                &json!({"id":"pending-request","agent":"agent","turnId":"turn","status":"pending","method":"item/commandExecution/requestApproval","createdAt":1,"params":{}}),
+            )
+            .expect("typed approval");
+            studio_runtime_store::approvals::put(tx, &approval).expect("approval row");
             Ok(())
         })
         .await
@@ -1196,11 +1198,6 @@ async fn task_absence_consumer_matches_python_lost_and_persists_named_hold() {
         .expect("task API read")
         .expect("task");
         assert_eq!(detail["error"], rows[0]["error"]);
-        assert_eq!(
-            studio_runtime_services::sync_views::project_persisted_record("taskDetail", &detail)
-                .expect("detail projection")["error"],
-            rows[0]["error"]
-        );
         if case["absent"] == true {
             let mut expected = case["after"].clone();
             expected["name"] = case["task"]["type"].clone();

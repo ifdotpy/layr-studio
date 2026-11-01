@@ -16,6 +16,48 @@ pub(crate) const AGENT_SUMMARY_ATTENTION_FIELDS: [&str; 3] =
 /// Maximum last-answer text retained in an agent sync view. Unit: Unicode scalar values.
 pub(crate) const AGENT_SYNC_LAST_ANSWER_CHARS: usize = 4_000;
 pub(crate) const SYNC_TEXT_CHARS: usize = 12_000;
+/// Maximum items in a projected sync array. Unit: array elements.
+pub(crate) const SYNC_ARRAY_ITEMS: usize = 200;
+/// Maximum sidebar order entries in a sync view. Unit: array elements.
+const SYNC_SIDEBAR_ORDER_ITEMS: usize = 10_000;
+/// Maximum recursive sync projection depth. Unit: nested JSON levels.
+const SYNC_JSON_DEPTH: usize = 32;
+
+pub(crate) fn bound_opaque_json(value: &mut Value, field: &str, depth: usize) {
+    if depth > SYNC_JSON_DEPTH {
+        *value = Value::Null;
+        return;
+    }
+    match value {
+        Value::String(text) => *text = bound_sync_text(text, field),
+        Value::Array(items) => {
+            items.truncate(if field == "sidebarOrder" {
+                SYNC_SIDEBAR_ORDER_ITEMS
+            } else {
+                SYNC_ARRAY_ITEMS
+            });
+            for item in items {
+                bound_opaque_json(item, "", depth + 1);
+            }
+        }
+        Value::Object(fields) => {
+            for (name, item) in fields {
+                bound_opaque_json(item, name, depth + 1);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
+pub(crate) fn bound_raw_json(
+    raw: &serde_json::value::RawValue,
+    field: &str,
+    depth: usize,
+) -> Result<Box<serde_json::value::RawValue>, serde_json::Error> {
+    let mut value: Value = serde_json::from_str(raw.get())?;
+    bound_opaque_json(&mut value, field, depth);
+    serde_json::value::to_raw_value(&value)
+}
 
 const AGENT_SHORT_STRING_OBJECTS: &[&str] = &[
     "activity",
@@ -62,7 +104,7 @@ fn collect_schema_properties<'a>(
     properties: &mut BTreeMap<&'a str, &'a Value>,
     depth: usize,
 ) {
-    if depth > 32 {
+    if depth > SYNC_JSON_DEPTH {
         return;
     }
     let schema = schema_definition(schema, document);
@@ -118,7 +160,11 @@ fn schema_projection_properties() -> &'static SchemaProjectionProperties {
     })
 }
 
-pub(crate) fn bound_sync_text(text: &str, field: &str, agent_short_strings: bool) -> String {
+pub(crate) fn bound_sync_text(text: &str, field: &str) -> String {
+    bound_sync_text_mode(text, field, false)
+}
+
+fn bound_sync_text_mode(text: &str, field: &str, agent_short_strings: bool) -> String {
     let limit = if agent_short_strings {
         2_000
     } else {
@@ -134,7 +180,9 @@ pub(crate) fn bound_sync_text(text: &str, field: &str, agent_short_strings: bool
 }
 fn bound_sync_value(value: &Value, field: &str, agent_short_strings: bool) -> Value {
     match value {
-        Value::String(text) => Value::String(bound_sync_text(text, field, agent_short_strings)),
+        Value::String(text) => {
+            Value::String(bound_sync_text_mode(text, field, agent_short_strings))
+        }
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_) => {
             value.clone()
         }
@@ -150,7 +198,7 @@ fn project_schema_value(
     agent_record: bool,
     agent_short_strings: bool,
 ) -> Value {
-    if depth > 32 {
+    if depth > SYNC_JSON_DEPTH {
         return Value::Null;
     }
     let schema = schema_definition(schema, document);
@@ -210,7 +258,11 @@ fn project_schema_value(
         }
         Value::Array(items) => {
             let item_schema = schema.get("items").unwrap_or(&Value::Null);
-            let limit = if field == "sidebarOrder" { 10_000 } else { 200 };
+            let limit = if field == "sidebarOrder" {
+                SYNC_SIDEBAR_ORDER_ITEMS
+            } else {
+                SYNC_ARRAY_ITEMS
+            };
             Value::Array(
                 items
                     .iter()
@@ -235,31 +287,111 @@ fn project_schema_value(
     }
 }
 
+use studio_runtime_schema::process_controls::TaskProjection;
+
+pub fn project_task_record(record: &studio_runtime_store::TaskRecord) -> Option<TaskProjection> {
+    use studio_runtime_schema::task_record::ProcessId;
+    let id = record.id().as_ref();
+    if id.is_empty() {
+        return None;
+    }
+    let bounded = |text: &str, field| bound_sync_text(text, field);
+    let optional =
+        |value: &Option<String>, field| value.as_deref().map(|text| bounded(text, field));
+    let (tail, truncated) = record.tail.as_deref().map_or((None, false), |text| {
+        let summary = bounded(text, "tail");
+        if summary == text {
+            (Some(summary), false)
+        } else {
+            let length = summary.chars().count();
+            let suffix = text.chars().rev().take(length).collect::<String>();
+            (Some(suffix.chars().rev().collect()), true)
+        }
+    });
+    Some(TaskProjection {
+        display: crate::process_controls::task_record_display(record),
+        id: bounded(id, "id"),
+        agent: bounded(record.agent(), "agent"),
+        created: record.created_number().clone(),
+        kind: record.kind(),
+        status: record.status(),
+        turn_id: bounded(record.turn_id(), "turnId"),
+        name: bounded(&record.name, "name"),
+        command: optional(&record.command, "command"),
+        cwd: optional(&record.cwd, "cwd"),
+        duration_ms: record.duration_ms.clone(),
+        error: optional(&record.error, "error"),
+        exit_code: record.exit_code,
+        finished: record.finished,
+        interactive: record.interactive(),
+        output_file: optional(&record.output_file, "outputFile"),
+        output_truncated: if truncated {
+            Some(true)
+        } else {
+            record.output_truncated
+        },
+        process_id: record.process_id().map(|pid| match pid {
+            ProcessId::Text(text) => ProcessId::Text(bounded(text, "processId")),
+            ProcessId::Signed(value) => ProcessId::Signed(*value),
+            ProcessId::Unsigned(value) => ProcessId::Unsigned(*value),
+        }),
+        query: optional(&record.query, "query"),
+        tail,
+    })
+}
+
+/// Public work summary; archive is opaque server-produced JSON.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkProjection {
+    id: String,
+    #[serde(skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing")]
+    root_id: studio_runtime_schema::queue_command::Field<String>,
+    status: studio_runtime_schema::persistence::WorkStatus,
+    #[serde(skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing")]
+    title: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing")]
+    agent: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing")]
+    archive: studio_runtime_schema::queue_command::Field<studio_runtime_schema::raw_json::RawJson>,
+}
+
+pub fn project_work_record(
+    record: &studio_runtime_store::WorkItemRecord,
+) -> Option<WorkProjection> {
+    use studio_runtime_schema::queue_command::Field;
+    let id = record.id().as_ref();
+    if id.is_empty() {
+        return None;
+    }
+    let field = |value: &Field<String>, name| match value {
+        Field::Missing => Field::Missing,
+        Field::Null => Field::Null,
+        Field::Value(value) => Field::Value(bound_sync_text(value, name)),
+    };
+    Some(WorkProjection {
+        id: bound_sync_text(id, "id"),
+        status: record.status(),
+        root_id: field(record.root_id_field(), "rootId"),
+        title: field(record.title_field(), "title"),
+        agent: field(record.agent_field(), "agent"),
+        archive: match record.archive_field() {
+            Field::Missing => Field::Missing,
+            Field::Null => Field::Null,
+            Field::Value(raw) => Field::Value(studio_runtime_schema::raw_json::RawJson(
+                bound_raw_json(&raw.0, "archive", 1).ok()?,
+            )),
+        },
+    })
+}
+
 /// Filter a stored record through the committed renderer DTO schema.
 pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Value> {
     let schema_name = match collection {
         "agent" => "AgentEntityDto",
         "agentSummary" => "AgentSummaryEntityDto",
         "agentDetail" => "AgentDetailEntityDto",
-        "room" => "RoomEntityDto",
-        "task" => "TaskEntityDto",
-        "taskDetail" => "TaskDetailResponse",
-        "messageReceipt" => "MessageReceiptEntityDto",
-        "retainedWorktree" => "RetainedWorktreeEntityDto",
-        "questionHistory" => "AgentRequest",
-        "plan" => "PlanSummaryEntityDto",
-        "annotation" => "AnnotationEntityDto",
-        "monitor" => "MonitorEntityDto",
-        "complaint" => "ComplaintEntityDto",
-        "request" => "RequestEntityDto",
-        "rule" => "RuleEntityDto",
-        "project" => "ProjectEntityDto",
-        "peerTeam" => "PeerTeamEntityDto",
-        "event" => "EventEntityDto",
-        "work" => "WorkEntityDto",
-        "workspace" => "WorkspaceEntityDto",
-        "chat" => "ChatEntityDto",
-        "edge" => "EdgeEntityDto",
+
         _ => return None,
     };
     record
@@ -282,15 +414,6 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
             "path": intent.pointer("/effect/identity/cwd").or_else(|| intent.get("path")).or_else(|| record.get("cwd")).and_then(Value::as_str),
         });
     }
-    // Publish these fields only when set. The older view never published
-    // them, and the client reads a missing one as its default.
-    if let Some((_, field)) = UNSET_DEFAULT_FIELDS
-        .iter()
-        .find(|(owner, field)| *owner == collection && record.get(*field).is_some_and(unset))
-        && let Some(fields) = public_record.to_mut().as_object_mut()
-    {
-        fields.remove(*field);
-    }
     let mut projected = project_schema_value(
         &public_record,
         schema,
@@ -300,37 +423,12 @@ pub fn project_persisted_record(collection: &str, record: &Value) -> Option<Valu
         collection == "agent",
         false,
     );
-    if collection == "task"
-        && let Some(tail) = record.get("tail").and_then(Value::as_str)
-        && let Some(summary) = projected.get("tail").and_then(Value::as_str)
-        && summary != tail
-    {
-        // The canonical text projection owns the bound. A task tail keeps
-        // that many newest characters and advertises the omitted output.
-        let suffix = tail
-            .chars()
-            .rev()
-            .take(summary.chars().count())
-            .collect::<String>();
-        projected["tail"] = json!(suffix.chars().rev().collect::<String>());
-        projected["outputTruncated"] = json!(true);
-    }
     if matches!(collection, "agent" | "agentDetail")
         && let Some(gate) = record.get("taskDefaultGate")
     {
         projected["taskDefaultGate"] = gate.clone();
     }
     Some(projected)
-}
-
-/// `(collection, field)` pairs that a sync view publishes only when set: a
-/// monitor's output patterns (empty means none). The client reads a missing
-/// one as that default.
-const UNSET_DEFAULT_FIELDS: &[(&str, &str)] = &[("monitor", "outputPatterns")];
-
-/// Whether a field value is its unset default: null or an empty list.
-fn unset(value: &Value) -> bool {
-    value.is_null() || value.as_array().is_some_and(Vec::is_empty)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -571,7 +669,7 @@ pub struct RoomViewContext {
     pub agents: Arc<Vec<AgentAuthorityRow>>,
     pub peer_teams: Arc<Vec<PeerTeamRow>>,
     pub active_agent_indices: Arc<HashMap<String, usize>>,
-    pub last_message: Option<Value>,
+    pub last_message: Option<studio_runtime_schema::room_record::RoomLastMessage>,
     pub federation: Option<Value>,
 }
 
@@ -593,237 +691,91 @@ impl RoomViewContext {
     }
 }
 
-fn active_agent<'a>(context: &'a RoomViewContext, id: &str) -> Option<&'a AgentAuthorityRow> {
-    context
-        .active_agent_indices
-        .get(id)
-        .and_then(|index| context.agents.get(*index))
-}
-
-/// Build the viewer-independent renderer view for one persisted room.
-pub fn room_entity_view(record: &Value, context: &RoomViewContext) -> Option<Value> {
-    if studio_runtime_store::ProjectsRepository::room_retired(record) {
-        return None;
-    }
-    let kind = record.get("kind").and_then(Value::as_str)?;
-    let mut view = record.as_object()?.clone();
-
-    let members: Vec<String>;
-    if kind == "federated" {
-        let federation = context.federation.as_ref()?;
-        if federation.get("status").and_then(Value::as_str) != Some("approved")
-            || federation.get("localApproved").and_then(Value::as_bool) != Some(true)
-            || federation.get("remoteApproved").and_then(Value::as_bool) != Some(true)
-        {
-            return None;
-        }
-        let local = federation.get("localMembers").and_then(Value::as_array)?;
-        let mut selected = local.iter().filter_map(Value::as_str).collect::<Vec<_>>();
-        selected.sort_unstable();
-        selected.dedup();
-        if selected.is_empty()
-            || selected
-                .iter()
-                .any(|id| active_agent(context, id).is_none())
-        {
-            return None;
-        }
-        members = selected.into_iter().map(str::to_owned).collect();
-        view.insert("localMembers".to_owned(), json!(members));
-        view.insert(
-            "name".to_owned(),
-            record
-                .get("customName")
-                .filter(|name| truthy(Some(name)))
-                .or_else(|| federation.get("name"))
-                .cloned()
-                .unwrap_or(Value::Null),
-        );
-        view.insert(
-            "peerLabel".to_owned(),
-            federation.get("peerLabel").cloned().unwrap_or(Value::Null),
-        );
-    } else if kind == "broadcast" {
-        let root = record.get("rootId").and_then(Value::as_str)?;
-        members = context
-            .agents
-            .iter()
-            .filter(|agent| !agent.deleted_at.as_ref().is_some_and(Deletion::is_deleted))
-            .filter(|agent| root == "all" || agent.root_id.as_deref() == Some(root))
-            .filter_map(|agent| agent.id.clone())
-            .collect();
-        if root != "all" && active_agent(context, root).is_none() {
-            return None;
-        }
-        let name = if root == "all" {
-            "All agents".to_owned()
-        } else {
-            format!(
-                "{} · Broadcast",
-                active_agent(context, root)?.name.value_or(None)?
-            )
-        };
-        view.insert(
-            "name".to_owned(),
-            record
-                .get("customName")
-                .filter(|name| truthy(Some(name)))
-                .cloned()
-                .unwrap_or(Value::String(name)),
-        );
-    } else {
-        let stored = record.get("members").and_then(Value::as_array)?;
-        members = stored
-            .iter()
-            .map(Value::as_str)
-            .collect::<Option<Vec<_>>>()?
-            .into_iter()
-            .map(str::to_owned)
-            .collect();
-        if members.is_empty() || members.iter().any(|id| active_agent(context, id).is_none()) {
-            return None;
-        }
-        let name = members
-            .iter()
-            .filter_map(|id| active_agent(context, id))
-            .filter_map(|agent| agent.name.value_or(None).map(String::as_str))
-            .collect::<Vec<_>>()
-            .join(" ↔ ");
-        view.insert(
-            "name".to_owned(),
-            record
-                .get("customName")
-                .filter(|name| truthy(Some(name)))
-                .cloned()
-                .unwrap_or(Value::String(name)),
-        );
-        if kind == "private" && members.len() == 2 {
-            if let Some(team) = context
-                .peer_teams
-                .iter()
-                .find(|team| members.iter().all(|member| team.members.contains(member)))
-            {
-                view.insert("peerTeamId".to_owned(), json!(team.id));
-                view.insert("peerTeamName".to_owned(), json!(team.name));
-            } else {
-                view.remove("peerTeamId");
-                view.remove("peerTeamName");
-            }
-        }
-    }
-    view.insert("members".to_owned(), json!(members));
-    view.insert(
-        "lastMessage".to_owned(),
-        context.last_message.clone().unwrap_or(Value::Null),
-    );
-    project_persisted_record("room", &Value::Object(view))
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct ComplaintViewContext<'a> {
     pub agents: &'a [AgentAuthorityRow],
 }
 
-/// Build the viewer-independent renderer view for one stored complaint.
-pub fn complaint_entity_view(record: &Value, context: &ComplaintViewContext) -> Option<Value> {
-    let id = record.get("id").and_then(Value::as_str)?;
-    let author = record.get("author").and_then(Value::as_str);
-    let lead_id = record.get("leadId").and_then(Value::as_str);
-    let recipient = if record.get("recipient").and_then(Value::as_str) == Some("user") {
-        "user"
-    } else {
-        "lead"
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComplaintProjection {
+    id: String,
+    author: Option<String>,
+    lead_id: Option<String>,
+    status: studio_runtime_schema::complaint_record::ComplaintStatus,
+    created: Option<studio_runtime_schema::complaint_record::ComplaintSeconds>,
+    updated: Option<studio_runtime_schema::complaint_record::ComplaintSeconds>,
+    read_at: Option<studio_runtime_schema::complaint_record::ComplaintSeconds>,
+    title: String,
+    recipient: studio_runtime_schema::complaint_record::ComplaintRecipient,
+    version: Option<i64>,
+    needs_user_response: bool,
+    author_name: Option<String>,
+    lead_name: Option<String>,
+}
+
+pub fn project_complaint_record(
+    record: &studio_runtime_schema::complaint_record::ComplaintRecord,
+    context: &ComplaintViewContext,
+) -> Option<ComplaintProjection> {
+    use studio_runtime_schema::complaint_record::{
+        ComplaintRecipient, ComplaintSource, ComplaintStatus,
     };
-    let responses = record
-        .get("responses")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|response| response.get("author").and_then(Value::as_str).is_some())
-        .collect::<Vec<_>>();
-    let status = record.get("status").and_then(Value::as_str);
-    let responsible = if recipient == "user" {
-        Some("user")
-    } else {
-        lead_id
-    };
-    let needs_response = recipient == "user"
-        && !matches!(status, Some("resolved" | "declined"))
-        && ((record.get("sourceType").and_then(Value::as_str) == Some("user_task")
-            && status == Some("open"))
-            || !responses
+    if record.id.is_empty() {
+        return None;
+    }
+    let author = record.author.as_deref();
+    let lead = record.lead_id.as_deref();
+    let needs_user_response = record.recipient == ComplaintRecipient::User
+        && !matches!(
+            record.status,
+            ComplaintStatus::Resolved | ComplaintStatus::Declined
+        )
+        && ((record.source_type == Some(ComplaintSource::UserTask)
+            && record.status == ComplaintStatus::Open)
+            || !record
+                .responses
                 .iter()
-                .any(|response| response.get("author").and_then(Value::as_str) == responsible));
-    let agent_name = |key: Option<&str>, fallback: Option<&str>| {
-        let agent = key.and_then(|key| {
+                .any(|response| response.author == "user"));
+    let bound = |value: &str, field| bound_sync_text(value, field);
+    let name = |id: Option<&str>, fallback: Option<&str>, field| {
+        let value = id.and_then(|id| {
             context
                 .agents
                 .iter()
-                .find(|agent| agent.id.as_deref() == Some(key))
+                .find(|agent| agent.id.as_deref() == Some(id))
         });
-        match agent.map(|agent| &agent.name) {
-            None | Some(StoredField::Missing) => json!(fallback),
-            Some(name) => json!(name),
+        match value.map(|agent| &agent.name) {
+            None | Some(StoredField::Missing) => fallback.map(|name| bound(name, field)),
+            Some(StoredField::Null) => None,
+            Some(StoredField::Value(name)) => Some(bound(name, field)),
         }
     };
-    let mut view = Map::new();
-    view.insert("id".to_owned(), Value::String(id.to_owned()));
-    for field in ["leadId", "author", "status", "created", "updated", "readAt"] {
-        view.insert(
-            field.to_owned(),
-            record.get(field).cloned().unwrap_or(Value::Null),
-        );
-    }
-    view.insert(
-        "title".to_owned(),
-        Value::String(
-            record
-                .get("text")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .chars()
-                .take(140)
-                .collect(),
-        ),
-    );
-    view.insert("recipient".to_owned(), Value::String(recipient.to_owned()));
-    view.insert(
-        "version".to_owned(),
-        record.get("version").cloned().unwrap_or(Value::Null),
-    );
-    view.insert("needsUserResponse".to_owned(), Value::Bool(needs_response));
-    view.insert(
-        "authorName".to_owned(),
-        agent_name(
+    Some(ComplaintProjection {
+        id: bound(&record.id, "id"),
+        author: author.map(|value| bound(value, "author")),
+        lead_id: lead.map(|value| bound(value, "leadId")),
+        status: record.status,
+        created: record.created.clone(),
+        updated: record.updated.clone(),
+        read_at: record.read_at.clone(),
+        title: record
+            .text
+            .as_deref()
+            .unwrap_or_default()
+            .chars()
+            .take(140)
+            .collect(),
+        recipient: record.recipient,
+        version: record.version,
+        needs_user_response,
+        author_name: name(
             author,
-            author.map(|value| if value == "user" { "You" } else { value }),
+            author.map(|v| if v == "user" { "You" } else { v }),
+            "authorName",
         ),
-    );
-    view.insert("leadName".to_owned(), agent_name(lead_id, lead_id));
-    project_persisted_record("complaint", &Value::Object(view))
-}
-
-/// Build project renderer fields from persisted records and optional live context.
-pub fn project_entity_view(
-    record: &Value,
-    readiness: Option<&Value>,
-    sync: Option<&Value>,
-    vault: Option<&Value>,
-) -> Option<Value> {
-    let mut view = record.as_object()?.clone();
-
-    if let Some(readiness) = readiness.filter(|value| truthy(Some(value))) {
-        view.insert("layrReadiness".to_owned(), readiness.clone());
-        if readiness.get("state").and_then(Value::as_str) == Some("ready") {
-            if let Some(sync) = sync {
-                view.insert("layrSync".to_owned(), sync.clone());
-            }
-            if let Some(vault) = vault {
-                view.insert("vault".to_owned(), vault.clone());
-            }
-        }
-    }
-    project_persisted_record("project", &Value::Object(view))
+        lead_name: name(lead, lead, "leadName"),
+    })
 }
 
 #[derive(serde::Deserialize)]
@@ -881,6 +833,99 @@ mod projection_plan_tests {
         schema_projection_properties,
     };
     use serde_json::json;
+
+    #[test]
+    fn task_entity_payload_hash_is_stable_after_projection_move() {
+        #[derive(serde::Serialize)]
+        struct Entity<T> {
+            collection: &'static str,
+            id: &'static str,
+            value: T,
+        }
+        let raw = r#"{"id":"a:i","agent":"a","created":1,"itemId":"i","turnId":"turn","kind":"command","status":"running","type":"commandExecution","name":"commandExecution"}"#;
+        let task: studio_runtime_store::TaskRecord = serde_json::from_str(raw).unwrap();
+        let payload = serde_json::to_string(&Entity {
+            collection: "task",
+            id: "a:i",
+            value: super::project_task_record(&task).unwrap(),
+        })
+        .unwrap();
+        assert_eq!(
+            studio_runtime_store::sha256_hex(payload.as_bytes()),
+            "706ea379b3087203fa2bd28bc462b8833b4ed5a61b6b1f36bf890de419b6a642"
+        );
+    }
+
+    #[test]
+    fn complaint_projection_preserves_public_fields() {
+        let context = super::ComplaintViewContext::default();
+        for recipient in ["user", "lead"] {
+            let raw = format!(
+                r#"{{"id":"c","leadId":"lead","author":"user","text":"hello","recipient":"{recipient}","version":1,"status":"open","created":1.0,"updated":1.0,"readAt":null,"responses":[]}}"#
+            );
+            let record: studio_runtime_schema::complaint_record::ComplaintRecord =
+                serde_json::from_str(&raw).unwrap();
+            let encoded =
+                serde_json::to_string(&super::project_complaint_record(&record, &context).unwrap())
+                    .unwrap();
+            let actual: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(
+                actual,
+                json!({"id":"c","leadId":"lead","leadName":"lead","author":"user","authorName":"You","title":"hello","recipient":recipient,"version":1,"status":"open","created":1.0,"updated":1.0,"readAt":null,"needsUserResponse":recipient == "user"})
+            );
+        }
+    }
+
+    #[test]
+    fn opaque_archive_projection_bounds_nested_text_and_arrays() {
+        let raw = json!({"id":"w","status":"ready","archive":{"nested":{"long":"x".repeat(12_001),"items":vec![1; 201]}}});
+        let record: studio_runtime_store::WorkItemRecord =
+            serde::Deserialize::deserialize(&raw).unwrap();
+        let view = super::project_work_record(&record).unwrap();
+        let encoded = serde_json::to_string(&view).unwrap();
+        let view: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(
+            view["archive"]["nested"]["long"].as_str().unwrap().len(),
+            12_000
+        );
+        assert_eq!(
+            view["archive"]["nested"]["items"].as_array().unwrap().len(),
+            200
+        );
+    }
+
+    #[test]
+    fn work_projection_preserves_presence_and_opaque_archive() {
+        for raw in [
+            r#"{"id":"w","status":"ready"}"#,
+            r#"{"id":"w","status":"ready","agent":null,"rootId":"r","title":"work","archive":{"reason":"kept"}}"#,
+        ] {
+            let record: studio_runtime_store::WorkItemRecord = serde_json::from_str(raw).unwrap();
+            let expected: serde_json::Value = serde_json::from_str(raw).unwrap();
+            let encoded =
+                serde_json::to_string(&super::project_work_record(&record).unwrap()).unwrap();
+            let new: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(new, expected);
+        }
+    }
+
+    #[test]
+    fn task_projection_has_expected_public_fields() {
+        for length in [12, 2_100] {
+            let raw = json!({"id":"a:item", "agent":"a", "created":1.0, "itemId":"item", "kind":"command", "status":"running", "turnId":"turn", "type":"commandExecution", "name":"run", "tail":"雪".repeat(length), "outputTruncated":false, "command":"x".repeat(length), "sourceThreadId":"private", "interactive":true});
+            let task: studio_runtime_store::TaskRecord =
+                serde::Deserialize::deserialize(&raw).unwrap();
+            let encoded =
+                serde_json::to_string(&super::project_task_record(&task).unwrap()).unwrap();
+            let mut new: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            new.as_object_mut().unwrap().remove("display");
+            let limit = length.min(2_000);
+            assert_eq!(
+                new,
+                json!({"id":"a:item","agent":"a","created":1.0,"kind":"command","status":"running","turnId":"turn","name":"run","tail":"雪".repeat(limit),"outputTruncated":length > 2_000,"command":"x".repeat(limit),"interactive":true})
+            );
+        }
+    }
 
     #[test]
     fn retained_cleanup_admission_preserves_partial_legacy_fields() {
@@ -941,27 +986,43 @@ mod projection_plan_tests {
     }
 
     #[test]
+    fn complaint_projection_preserves_integer_seconds() {
+        let raw = r#"{"id":"c","author":null,"leadId":null,"text":null,"recipient":"lead","status":"open","created":1,"updated":2,"readAt":null,"version":null,"responses":[]}"#;
+        let record = serde_json::from_str(raw).unwrap();
+        let view =
+            super::project_complaint_record(&record, &super::ComplaintViewContext::default())
+                .unwrap();
+        let encoded = serde_json::to_string(&view).unwrap();
+        let actual: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(actual["created"], json!(1));
+        assert_eq!(actual["updated"], json!(2));
+        let stored = serde_json::to_string(&record).unwrap();
+        assert_eq!(
+            studio_runtime_store::sha256_hex(stored.as_bytes()),
+            "413cdeb2d2cd1fb25994cbbac3469ccb6fb478a625197a6ebd205b453f97e49a"
+        );
+    }
+
+    #[test]
     fn complaint_names_preserve_missing_and_null() {
+        let raw = r#"{"id":"complaint","author":"author","leadId":null,"text":"Question","recipient":"lead","status":"open","created":null,"updated":null,"readAt":null,"version":null,"responses":[]}"#;
+        let record: studio_runtime_schema::complaint_record::ComplaintRecord =
+            serde_json::from_str(raw).unwrap();
         for (agent, expected) in [
             (r#"{"id":"author"}"#, json!("author")),
             (r#"{"id":"author","name":null}"#, json!(null)),
             (r#"{"id":"author","name":"Author"}"#, json!("Author")),
         ] {
             let agents = [serde_json::from_str(agent).expect("typed agent")];
-            let view = super::complaint_entity_view(
-                &json!({"id":"complaint","author":"author","text":"Question"}),
+            let view = super::project_complaint_record(
+                &record,
                 &super::ComplaintViewContext { agents: &agents },
             )
             .expect("complaint view");
-            assert_eq!(view["authorName"], expected);
+            let encoded = serde_json::to_string(&view).unwrap();
+            let actual: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(actual["authorName"], expected);
         }
-    }
-
-    #[test]
-    fn project_with_extension_status_is_projected() {
-        let view =
-            super::project_entity_view(&json!({"id": "project", "status": 42}), None, None, None);
-        assert!(view.is_some());
     }
 
     /// The agent view publishes no team budget or token count, also when an
@@ -992,11 +1053,12 @@ mod projection_plan_tests {
         }
 
         let monitor = |patterns| {
-            project_persisted_record(
-                "monitor",
-                &json!({"id":"monitor","agent":"lead","status":"running","outputPatterns":patterns}),
-            )
-            .expect("monitor view")
+            let raw = crate::monitor_policy::complete_test_monitor(
+                json!({"id":"monitor","agent":"lead","status":"running","outputPatterns":patterns}),
+            );
+            let record = serde::Deserialize::deserialize(&raw).unwrap();
+            let view = crate::sync_policy::project_monitor_record(&record).unwrap();
+            serde::Serialize::serialize(&view, serde_json::value::Serializer).unwrap()
         };
         let unset = monitor(json!([]));
         assert!(unset.get("outputPatterns").is_none(), "{unset}");

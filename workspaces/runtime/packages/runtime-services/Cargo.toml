@@ -26,7 +26,7 @@ icu_normalizer = { version = "=2.4.0", default-features = false, features = ["co
 nix = { workspace = true, features = ["signal"] }
 notify = { workspace = true }
 process-wrap = { workspace = true }
-regex = "=1.13.1"
+regex.workspace = true
 ring = { workspace = true }
 rustls = { workspace = true }
 rustls-pki-types = { workspace = true }
@@ -71,6 +71,7 @@ process-wrap = { workspace = true }
 socket2 = "=0.6.5"
 
 [dev-dependencies]
+strum.workspace = true
 studio-test-deps = { path = "../test-deps" }
 studio-runtime-services = { path = ".", features = ["test-support"] }
 studio-runtime-store = { path = "../runtime-store", features = ["test-support"] }

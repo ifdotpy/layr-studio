@@ -13,8 +13,14 @@ fn fixtures() -> Vec<Value> {
         crate::turn_fixtures::load(include_bytes!("wave7_p08_input.json"));
     captured
         .into_iter()
-        .map(|value| {
+        .map(|mut value| {
             let _ = value.database;
+            if let Some(agent) = value.case.get_mut("agent") {
+                crate::turn_fixtures::current_agent(agent);
+            }
+            if let Some(source) = value.case.pointer_mut("/frozen/source") {
+                crate::turn_fixtures::current_source(source);
+            }
             value.case
         })
         .collect()
@@ -29,8 +35,9 @@ async fn seeded(path: &Path, case: &Value) -> RuntimeStore {
 }
 
 async fn seed(store: RuntimeStore, case: &Value) -> RuntimeStore {
-    let agent = studio_runtime_store::AgentRecord::from_value(case["agent"].clone())
-        .expect("fixture agent");
+    let agent_fixture = case["agent"].clone();
+    let agent =
+        studio_runtime_store::AgentRecord::from_value(agent_fixture).expect("fixture agent");
     let attempt = case["attempt"].to_string();
     store.transaction(move |tx| {
         studio_runtime_store::AgentRepository::put(tx, &agent)?;
@@ -108,15 +115,7 @@ async fn fresh_freeze_matches_python_capture_and_legacy_retry_stays_held() {
             case["frozen"]
         );
         let agent = row(&db, "runtime_agents", "agent");
-        let mut projected = case["frozen"].clone();
-        if let Some(source) = projected.get_mut("source").and_then(Value::as_object_mut) {
-            for field in ["effort", "fastMode", "nativeEffort", "parentId"] {
-                if source.get(field).is_some_and(Value::is_null) {
-                    source.remove(field);
-                }
-            }
-        }
-        assert_eq!(agent["startAttempt"]["claudeInputRequest"], projected);
+        assert_eq!(agent["startAttempt"]["claudeInputRequest"], case["frozen"]);
         assert!(agent.get("claudePreInputRetry").is_none());
         drop(db);
         drop(store);
@@ -346,7 +345,14 @@ async fn retry_attempt_owner_preserves_nullable_identity_and_frozen_receipt() {
         "attempt",
     );
     assert_eq!(saved["future"], json!({"opaque":[1,null]}));
-    assert_eq!(saved["claudeInputRequest"], case["frozen"]);
+    let mut expected = case["frozen"].clone();
+    expected["source"]["role"] = json!("orchestrator");
+    expected["source"]
+        .as_object_mut()
+        .unwrap()
+        .remove("yoloMode");
+    expected["source"]["permissionMode"] = Value::Null;
+    assert_eq!(saved["claudeInputRequest"], expected);
 }
 
 #[tokio::test]

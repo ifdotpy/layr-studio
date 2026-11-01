@@ -1371,7 +1371,8 @@ fn vm_result_needs_merge(lead_id: &str, owner: &AgentRecord) -> bool {
         && (owner.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
             || owner.workspace_mode
                 == Some(studio_runtime_schema::records::WorkspaceMode::LayrNative))
-        && owner.extra.get("role").and_then(Value::as_str) != Some("reviewer")
+        && owner.role.value().copied()
+            != Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer)
 }
 
 pub async fn prepare_vm_accept(
@@ -1551,8 +1552,8 @@ pub enum WorkWrite {
 
 /// Convert the shared ingress command once. Filesystem and VM preparation remain
 /// owned by the HTTP driver; authenticated actor selection stays with the caller.
-pub fn task_command(
-    command: studio_runtime_schema::task_command::TaskCommand,
+pub fn task_command<const DESCRIPTION_MAX: usize, const CANCEL_MAX: usize>(
+    command: studio_runtime_schema::task_command::TaskCommand<DESCRIPTION_MAX, CANCEL_MAX>,
     actor_id: String,
     state_dir: PathBuf,
 ) -> Result<WorkWrite, Error> {
@@ -1574,11 +1575,13 @@ pub fn task_command(
             gate,
         } => WorkWrite::Create(CreateWork {
             actor_id,
-            title,
-            description: description.unwrap_or_default(),
+            title: title.as_str().to_owned(),
+            description: description
+                .map(|value| value.as_str().to_owned())
+                .unwrap_or_default(),
             owner,
             status,
-            dependencies,
+            dependencies: dependencies.as_slice().to_vec(),
             result_schema: provided(result_schema),
             gate,
         }),
@@ -1595,15 +1598,15 @@ pub fn task_command(
         } => WorkWrite::Mutate(WorkMutation::Update {
             task_id,
             version: version.map(|value| value.get()),
-            title,
-            description,
+            title: title.map(|value| value.as_str().to_owned()),
+            description: description.map(|value| value.as_str().to_owned()),
             owner: match owner {
                 Field::Missing => None,
                 Field::Null => Some(None),
                 Field::Value(value) => Some(Some(value)),
             },
             status,
-            dependencies,
+            dependencies: dependencies.map(|value| value.as_slice().to_vec()),
             result_schema: provided(result_schema),
             gate,
         }),
@@ -1614,7 +1617,7 @@ pub fn task_command(
         } => WorkWrite::Mutate(WorkMutation::Cancel {
             task_id,
             version: version.map(|value| value.get()),
-            reason,
+            reason: reason.as_str().to_owned(),
         }),
         TaskCommand::Reject {
             task_id,
@@ -1623,7 +1626,7 @@ pub fn task_command(
         } => WorkWrite::Mutate(WorkMutation::Reject {
             task_id,
             version: version.map(|value| value.get()),
-            reason: result,
+            reason: result.as_str().to_owned(),
         }),
         TaskCommand::Claim {
             task_id,
@@ -1645,9 +1648,9 @@ pub fn task_command(
             task_id,
             version: version.map(|value| value.get()),
             result,
-            checks,
-            revision,
-            files,
+            checks: checks.as_str().to_owned(),
+            revision: revision.as_str().to_owned(),
+            files: files.as_slice().to_vec(),
             state_dir,
             prepared_gate_workspace: None,
             prepared_files: None,
@@ -1662,11 +1665,11 @@ pub fn task_command(
         } => WorkWrite::Accept(AcceptWork {
             task_id,
             version: version.map(|value| value.get()),
-            reason: result,
-            override_reason,
+            reason: result.as_str().to_owned(),
+            override_reason: override_reason.map(|value| value.as_str().to_owned()),
             merged_result_id: None,
         }),
-        TaskCommand::List | TaskCommand::SetDefaultGate { .. } => {
+        TaskCommand::List { .. } | TaskCommand::SetDefaultGate { .. } => {
             return Err(Error::InvalidRequest("Expected a task mutation"));
         }
     })
@@ -4935,7 +4938,7 @@ mod actor_tests {
 
     #[tokio::test]
     async fn reviewer_archive_non_reviewer_child_result_is_not_archived() {
-        let (store, _root) = reviewer_archive_store("worker").await;
+        let (store, _root) = reviewer_archive_store("implementer").await;
 
         accepted_archive_tick(Arc::clone(&store), 10.0)
             .await
@@ -5489,7 +5492,7 @@ mod actor_tests {
         workspace_mode: &str,
     ) {
         let mut connection = database();
-        for (id, role) in [("lead", "lead"), ("worker", "reviewer")] {
+        for (id, role) in [("lead", "orchestrator"), ("worker", "reviewer")] {
             let record = json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
                 "id":id,"rootId":"lead","epoch":2,"status":"running","autoWake":true,
                 "inFlight":true,"agentMode":"multi","concurrency":8,"executionMode":execution_mode,"workspaceMode":workspace_mode,

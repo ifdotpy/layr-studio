@@ -67,7 +67,10 @@ pub async fn upload(
     encoded: &str,
 ) -> Result<Value, PayloadStoreError> {
     let stripped_name = crate::event_write::python_strip(name);
-    if stripped_name.is_empty() || stripped_name.chars().count() > 255 {
+    if stripped_name.is_empty()
+        || stripped_name.chars().count()
+            > studio_runtime_schema::http_bounded_ingress::ASSET_NAME_MAX_CHARS
+    {
         return Err(PayloadStoreError::InvalidFilename);
     }
     let name = Path::new(stripped_name)
@@ -272,7 +275,7 @@ pub(crate) fn valid_asset_record(
         && Uuid::parse_str(row_id).is_ok_and(|parsed| parsed.to_string() == row_id)
         && !record.agent().is_empty()
         && crate::event_write::python_strip(name) == name
-        && name.chars().count() <= 255
+        && name.chars().count() <= studio_runtime_schema::http_bounded_ingress::ASSET_NAME_MAX_CHARS
         && Path::new(name).file_name().and_then(|part| part.to_str()) == Some(name)
         && Path::new(&expected_path).is_absolute()
         && record.path() == expected_path

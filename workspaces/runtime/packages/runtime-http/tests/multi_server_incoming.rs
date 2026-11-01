@@ -550,6 +550,19 @@ async fn phone_owner_session_may_request_ui_access_and_signed_principals_may_not
             );
         }
     }
+    let malformed = serde_json::json!({"action":"ui_invite", "requestId":"malformed-restricted"});
+    assert_eq!(
+        send(request(
+            &malformed,
+            Some("defghijklmnopqrstuvwxyz012345678"),
+            ""
+        ))
+        .await,
+        (
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({"error":"Invalid multi-server request", "code":"invalid_request"})
+        )
+    );
     assert_eq!(audit_rows(), before, "no refused request writes state");
 }
 

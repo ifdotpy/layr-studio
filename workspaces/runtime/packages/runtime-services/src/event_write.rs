@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) use studio_runtime_process::clock::monotonic_ns;
 
 use rusqlite::OptionalExtension;
-use serde_json::{Value, json};
+use serde_json::Value;
 use studio_runtime_schema::annotation_command::AnnotationData;
 use studio_runtime_schema::delivery::DeliveryMoment;
 use studio_runtime_schema::persistence::{RequestIdentity, RequestReferenceKind};
@@ -463,21 +463,22 @@ fn enqueue(
                 .get("remoteEpoch")
                 .and_then(Value::as_i64)
                 .unwrap_or(0);
-            let payload = json!({
-                "link":link,
-                "worker":agent.id.0,
-                "kind":kind,
-                "text":event.text,
-                "delivery":delivery,
-                "parentEpoch":parent_epoch,
-                "epoch":remote_epoch,
-                "controlEpoch":agent.epoch,
-            });
+            use studio_runtime_schema::queue_command::Field;
+            let payload = crate::orchestration_worker::InputPayload {
+                link,
+                worker: Field::Value(agent.id.0.clone()),
+                kind: kind.to_owned(),
+                text: event.text,
+                delivery: Field::Value(delivery.as_str().to_owned()),
+                parent_epoch,
+                epoch: Field::Value(remote_epoch),
+                control_epoch: Field::Value(agent.epoch),
+                anchor: Field::Missing,
+            };
             crate::multi_server_orchestration::enqueue_in_transaction(
                 transaction,
                 &server,
-                "input",
-                &payload,
+                crate::orchestration_wire::OrchestrationCommand::Input(payload),
                 &request_id,
                 created as i64,
             )
@@ -521,38 +522,41 @@ fn enqueue(
             let mut stored = event.clone();
             stored.status = "stored_only".to_owned();
             EventWriteRepository::insert_event(transaction, &stored)?;
-            let mut payload = json!({
-                "link": link,
-                "parentEpoch": parent_epoch,
-                "kind": event.kind,
-                "text": event.text,
-                "delivery": delivery,
-            });
-            payload[crate::multi_server_orchestration::REMOTE_ANCHOR_INPUT_FIELD] =
-                Value::Bool(true);
+            use studio_runtime_schema::queue_command::Field;
+            let payload = crate::orchestration_worker::InputPayload {
+                link,
+                parent_epoch,
+                kind: event.kind.clone(),
+                text: event.text,
+                delivery: Field::Value(delivery.as_str().to_owned()),
+                anchor: Field::Value(true),
+                worker: Field::Missing,
+                epoch: Field::Missing,
+                control_epoch: Field::Missing,
+            };
             crate::multi_server_orchestration::enqueue_in_transaction(
                 transaction,
                 &server,
-                "input",
-                &payload,
+                crate::orchestration_wire::OrchestrationCommand::Input(payload),
                 &request_id,
                 created as i64,
             )
             .map_err(|_| EventWriteError::Conflict("Remote anchor input could not be queued"))?;
             return Ok(true);
         }
-        let payload = json!({
-            "link": link,
-            "parentEpoch": parent_epoch,
-            "kind": event.kind,
-            "text": event.text,
-            "delivery": delivery,
-        });
+        let payload = crate::orchestration_worker::EventPayload {
+            link,
+            parent_epoch,
+            kind: event.kind.clone(),
+            text: event.text,
+            delivery: studio_runtime_schema::queue_command::Field::Value(
+                delivery.as_str().to_owned(),
+            ),
+        };
         crate::multi_server_orchestration::enqueue_in_transaction(
             transaction,
             &server,
-            "event",
-            &payload,
+            crate::orchestration_wire::OrchestrationCommand::Event(payload),
             &request_id,
             created as i64,
         )

@@ -337,8 +337,11 @@ async fn claude_control_settings_ingress_and_exact_receipt_replay() {
     let body = json!({"id":"agent","action":"settings","request_id":studio_runtime_schema::persistence::RequestIdentity::issue_root(),"settings":{"permissionMode":"plan","thinking":false,"autoCompactWindow":null}});
     let result = post(&app, "/api/claude/session", body.clone()).await;
     assert_eq!(result.0, 200, "{result:?}");
-    assert_eq!(agent(&store)["claudeOptions"], body["settings"]);
-    assert_eq!(agent(&store)["yoloMode"], false);
+    assert_eq!(
+        agent(&store)["claudeOptions"],
+        json!({"thinking":false,"autoCompactWindow":null})
+    );
+    assert_eq!(agent(&store)["permissionMode"], "plan");
     let calls = native.calls.lock().unwrap().clone();
     assert_eq!(
         calls

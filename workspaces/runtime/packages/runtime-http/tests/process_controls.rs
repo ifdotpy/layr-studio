@@ -459,11 +459,17 @@ async fn transferred_monitor_panel_keeps_source_controls_and_guarded_stop() {
         let (_root, app, port, id) = transferred_monitor_fixture(behavior).await;
         let (status, list) = call(&app, "GET", "/api/processes?agent=owner", Value::Null).await;
         assert_eq!(status, 200, "{list}");
-        let process = &list["processes"][0];
-        assert_eq!(process["accountKey"], "target");
-        assert_eq!(process["capabilities"]["sendInput"], true, "{list}");
-        assert_eq!(process["capabilities"]["resize"], true, "{list}");
-        assert_eq!(process["capabilities"]["stop"], true, "{list}");
+        let listing: studio_runtime_schema::process_controls::ProcessListing =
+            serde::Deserialize::deserialize(list.clone()).unwrap();
+        let process = &listing.processes[0];
+        assert_eq!(process.account_key, "target");
+        for action in [
+            studio_runtime_schema::process_controls::BackgroundTaskAction::Input,
+            studio_runtime_schema::process_controls::BackgroundTaskAction::Resize,
+            studio_runtime_schema::process_controls::BackgroundTaskAction::Stop,
+        ] {
+            assert!(process.display.actions.contains(&action), "{list}");
+        }
         for input in [
             json!({"id":id,"text":"hello"}),
             json!({"id":id,"rows":30,"cols":100}),
@@ -472,10 +478,18 @@ async fn transferred_monitor_panel_keeps_source_controls_and_guarded_stop() {
             assert_eq!(status, 200, "{result}");
         }
         let body = json!({"action":"stop_selected","requestId":studio_runtime_schema::persistence::RequestIdentity::issue_root(),"agent":"owner","accountKey":"target","epoch":1,
-        "process":{"key":process["key"],"generation":process["generation"],"agent":"owner","accountKey":"target","epoch":1}});
+        "process":{"key":process.key,"generation":process.generation,"agent":"owner","accountKey":"target","epoch":1}});
         let (status, result) = call(&app, "POST", "/api/processes/action", body.clone()).await;
         assert_eq!(status, 200, "{result}");
-        assert_eq!(result["processes"][0]["status"], "requested", "{result}");
+        let typed_result: studio_runtime_schema::process_controls::ProcessActionResult =
+            serde::Deserialize::deserialize(result.clone()).unwrap();
+        assert!(
+            matches!(
+                typed_result.processes[0].outcome,
+                studio_runtime_schema::process_controls::ProcessOutcome::Requested
+            ),
+            "{result}"
+        );
         let calls = port.calls.lock().unwrap().clone();
         assert_eq!(
             calls,
@@ -530,16 +544,27 @@ async fn transferred_monitor_panel_refuses_unproven_or_changed_source_ownership(
         }).await.unwrap();
         let (status, list) = call(&app, "GET", "/api/processes?agent=owner", Value::Null).await;
         assert_eq!(status, 200, "{case}: {list}");
-        let process = &list["processes"][0];
-        for capability in ["sendInput", "resize", "stop"] {
-            assert_eq!(process["capabilities"][capability], false, "{case}: {list}");
+        let listing: studio_runtime_schema::process_controls::ProcessListing =
+            serde::Deserialize::deserialize(list.clone()).unwrap();
+        let process = &listing.processes[0];
+        for action in [
+            studio_runtime_schema::process_controls::BackgroundTaskAction::Input,
+            studio_runtime_schema::process_controls::BackgroundTaskAction::Resize,
+            studio_runtime_schema::process_controls::BackgroundTaskAction::Stop,
+        ] {
+            assert!(!process.display.actions.contains(&action), "{case}: {list}");
         }
-        let body = json!({"action":"stop_selected","requestId":"refused-stop","agent":"owner","accountKey":"target","epoch":process["epoch"],
-            "process":{"key":process["key"],"generation":process["generation"],"agent":"owner","accountKey":"target","epoch":process["epoch"]}});
+        let body = json!({"action":"stop_selected","requestId":"refused-stop","agent":"owner","accountKey":"target","epoch":process.epoch,
+            "process":{"key":process.key,"generation":process.generation,"agent":"owner","accountKey":"target","epoch":process.epoch}});
         let (status, result) = call(&app, "POST", "/api/processes/action", body).await;
         assert_eq!(status, 200, "{case}: {result}");
-        assert_eq!(
-            result["processes"][0]["status"], "stale",
+        let typed_result: studio_runtime_schema::process_controls::ProcessActionResult =
+            serde::Deserialize::deserialize(result.clone()).unwrap();
+        assert!(
+            matches!(
+                typed_result.processes[0].outcome,
+                studio_runtime_schema::process_controls::ProcessOutcome::Stale { .. }
+            ),
             "{case}: {result}"
         );
         assert!(port.calls.lock().unwrap().is_empty(), "{case}");

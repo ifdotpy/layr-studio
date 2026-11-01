@@ -23,6 +23,16 @@ pub enum AgentRole {
 }
 
 impl AgentRole {
+    pub const fn inferred(native_review: bool, is_lead: bool) -> Self {
+        if native_review {
+            Self::Reviewer
+        } else if is_lead {
+            Self::Orchestrator
+        } else {
+            Self::Implementer
+        }
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Orchestrator => "orchestrator",

@@ -11,6 +11,39 @@ use serde_json::Value;
 /// environment policy but accepts argv and does not perform the native exec
 /// shell startup. Apply Codex's login/rc startup inside the command sandbox.
 pub fn monitor_command(command: &str, config: &Value, guest: bool) -> Result<Vec<String>, String> {
+    let login = config["allow_login_shell"].as_bool().unwrap_or(true);
+    let snapshot = config["features"]["shell_snapshot"]
+        .as_bool()
+        .unwrap_or(true);
+    let environment = config["shell_environment_policy"]["set"]
+        .as_object()
+        .map(|set| {
+            set.iter()
+                .map(|(key, value)| (key.clone(), value_as_text(value)))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    shell_command(command, guest, login, snapshot, &environment)
+}
+
+pub(crate) fn exec_command(
+    command: &str,
+    environment: &std::collections::BTreeMap<String, String>,
+) -> Result<Vec<String>, String> {
+    let environment = environment
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect::<Vec<_>>();
+    shell_command(command, false, true, true, &environment)
+}
+
+fn shell_command(
+    command: &str,
+    guest: bool,
+    login: bool,
+    snapshot: bool,
+    environment: &[(String, String)],
+) -> Result<Vec<String>, String> {
     let shell = if guest {
         PathBuf::from("/bin/bash")
     } else {
@@ -30,7 +63,6 @@ pub fn monitor_command(command: &str, config: &Value, guest: bool) -> Result<Vec
             command.into(),
         ]);
     }
-    let login = config["allow_login_shell"].as_bool().unwrap_or(true);
     if !login {
         return Ok(vec![
             shell.to_string_lossy().into_owned(),
@@ -38,9 +70,6 @@ pub fn monitor_command(command: &str, config: &Value, guest: bool) -> Result<Vec
             command.into(),
         ]);
     }
-    let snapshot = config["features"]["shell_snapshot"]
-        .as_bool()
-        .unwrap_or(true);
     if !snapshot || !matches!(name.as_str(), "bash" | "zsh") {
         return Ok(vec![
             shell.to_string_lossy().into_owned(),
@@ -54,14 +83,9 @@ pub fn monitor_command(command: &str, config: &Value, guest: bool) -> Result<Vec
         "if [ -z \"$BASH_ENV\" ] && [ -r \"$HOME/.bashrc\" ]; then . \"$HOME/.bashrc\"; fi"
     };
     let mut lines = vec![format!("{{ {startup}; }} >/dev/null 2>&1")];
-    if let Some(set) = config["shell_environment_policy"]["set"].as_object() {
-        for (key, value) in set {
-            if valid_environment_key(key) {
-                lines.push(format!(
-                    "export {key}={}",
-                    shell_quote(&value_as_text(value))
-                ));
-            }
+    for (key, value) in environment {
+        if valid_environment_key(key) {
+            lines.push(format!("export {key}={}", shell_quote(value)));
         }
     }
     #[cfg(target_os = "macos")]

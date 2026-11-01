@@ -372,6 +372,47 @@ pub struct AgentRecord {
     pub name: Option<String>,
     #[serde(deserialize_with = "deserialize_optional_safe_counter")]
     pub compactions: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compactions_observed_only: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fast_mode: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daybreak_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs_title: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manual_name: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_agents_explicit: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mode_supported: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub prompt: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub profile_id: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub profile_instructions: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub effort: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub role: studio_runtime_schema::queue_command::Field<
+        studio_runtime_schema::creation_intent::AgentRole,
+    >,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree_ready: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -736,6 +777,18 @@ impl AgentRecord {
             cwd: None,
             name: None,
             compactions: None,
+            compactions_observed_only: None,
+            fast_mode: None,
+            daybreak_enabled: None,
+            needs_title: None,
+            manual_name: None,
+            max_agents_explicit: None,
+            agent_mode_supported: None,
+            prompt: Default::default(),
+            profile_id: Default::default(),
+            profile_instructions: Default::default(),
+            effort: Default::default(),
+            role: Default::default(),
             worktree_ready: None,
             approval_policy: None,
             native_response_turn: None,
@@ -983,10 +1036,11 @@ mod plan_typed_tests {
             json!({"id":"a"}),
             json!({"id":"a","rootId":"r","text":"","version":1.5,"updated":null}),
             json!({"id":"a","rootId":"r","text":"","version":1,"updated":null,"native":[]}),
+            json!({"id":"a","rootId":"r","text":"","version":1,"updated":null,"future":[1]}),
         ] {
             assert!(PlanRecord::deserialize(invalid).is_err());
         }
-        let value = json!({"id":"different-from-row","rootId":"r","text":"x","version":1.0,"updated":null,"native":null,"future":[1]});
+        let value = json!({"id":"different-from-row","rootId":"r","text":"x","version":1.0,"updated":null,"native":{"plan":[{"future":[1]}]}});
         let record = PlanRecord::deserialize(value.clone()).unwrap();
         assert_eq!(record.into_value(), value);
     }
@@ -996,7 +1050,7 @@ mod plan_typed_tests {
         let db = rusqlite::Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE runtime_plans(id TEXT PRIMARY KEY,record TEXT NOT NULL)")
             .unwrap();
-        let value = json!({"id":"payload-id","rootId":"root","text":"x","version":1.0,"updated":null,"future":true});
+        let value = json!({"id":"payload-id","rootId":"root","text":"x","version":1.0,"updated":null,"steps":[{"future":true}]});
         let record = PlanRecord::from_value(value.clone()).unwrap();
         let key = AgentId::from("row-id");
         Table::<PlanRecord>::new(&db).put_at(&key, &record).unwrap();
@@ -1045,7 +1099,7 @@ mod annotation_typed_tests {
         }
         for value in [
             json!({"id":"a"}),
-            json!({"id":"a","line":1.0,"created":null,"extra":[1]}),
+            json!({"id":"a","line":1.0,"created":null}),
         ] {
             let record = AnnotationRecord::deserialize(value.clone()).unwrap();
             assert_eq!(record.into_value(), value);
@@ -1067,13 +1121,13 @@ mod annotation_typed_tests {
     }
 
     #[test]
-    fn annotation_store_preserves_identity_extensions_and_rejects_duplicate() {
+    fn annotation_store_preserves_identity_and_rejects_duplicate() {
         let db = rusqlite::Connection::open_in_memory().unwrap();
         db.execute_batch(
             "CREATE TABLE runtime_annotations(id TEXT PRIMARY KEY,record TEXT NOT NULL)",
         )
         .unwrap();
-        let value = json!({"id":"a","line":-1.0,"created":null,"future":{"x":1}});
+        let value = json!({"id":"a","line":-1.0,"created":null,"rootId":"r"});
         let record = AnnotationRecord::from_value(value.clone()).unwrap();
         Table::<AnnotationRecord>::new(&db).put(&record).unwrap();
         assert_eq!(
@@ -1164,7 +1218,16 @@ impl JsonRecord for RequestRecord {
     fn encode_stored(&self, _connection: &Connection, row_id: &str) -> StoreResult<String> {
         if self.id != row_id
             || !self.created_at.is_finite()
-            || !self.params.get().trim_start().starts_with('{')
+            || serde_json::from_str::<studio_runtime_schema::request_projection::RequestParams>(
+                self.params.get(),
+            )
+            .is_err()
+            || self.preview.as_ref().is_some_and(|value| {
+                serde_json::from_str::<studio_runtime_schema::request_projection::RequestPreview>(
+                    value.get(),
+                )
+                .is_err()
+            })
         {
             return Err(crate::StoreError::InvalidStoredObject {
                 table: Self::TABLE,
@@ -1210,6 +1273,25 @@ mod request_typed_tests {
             super::validation_counts::CHECKS.with(|count| count.get()),
             0,
             "typed default must not build a generic JSON value"
+        );
+    }
+
+    #[test]
+    fn request_write_rejects_malformed_known_provider_fields() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE runtime_requests(id TEXT PRIMARY KEY, record TEXT NOT NULL)",
+        )
+        .unwrap();
+        let mut record: RequestRecord = serde_json::from_str(r#"{"id":"r","agent":"a","method":"agent/asyncQuestion","status":"pending","createdAt":1,"params":{}}"#).unwrap();
+        record.params =
+            serde_json::value::RawValue::from_string(r#"{"command":42}"#.into()).unwrap();
+        assert!(Table::new(&db).put(&record).is_err());
+        assert!(
+            Table::<RequestRecord>::new(&db)
+                .get(&"r".into())
+                .unwrap()
+                .is_none()
         );
     }
 
@@ -1777,6 +1859,21 @@ impl WorkItemRecord {
     }
     pub fn owner(&self) -> Option<&str> {
         self.0.owner()
+    }
+    pub fn agent_field(&self) -> &studio_runtime_schema::queue_command::Field<String> {
+        self.0.agent_field()
+    }
+    pub fn archive_field(
+        &self,
+    ) -> &studio_runtime_schema::queue_command::Field<studio_runtime_schema::raw_json::RawJson>
+    {
+        self.0.archive_field()
+    }
+    pub fn root_id_field(&self) -> &studio_runtime_schema::queue_command::Field<String> {
+        self.0.root_id_field()
+    }
+    pub fn title_field(&self) -> &studio_runtime_schema::queue_command::Field<String> {
+        self.0.title_field()
     }
     pub fn root_id(&self) -> Option<&str> {
         self.0.root_id()
@@ -2660,6 +2757,70 @@ mod tests {
         let unknown = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"permissionMode":"unknown"}"#;
         assert!(serde_json::from_str::<AgentRecord>(valid).is_ok());
         assert!(serde_json::from_str::<AgentRecord>(unknown).is_err());
+    }
+
+    #[test]
+    fn agent_compactions_observed_only_is_boolean() {
+        let valid = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"compactionsObservedOnly":false}"#;
+        let invalid = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"compactionsObservedOnly":"false"}"#;
+        let record: AgentRecord = serde_json::from_str(valid).unwrap();
+        assert_eq!(record.value()["compactionsObservedOnly"], false);
+        assert!(serde_json::from_str::<AgentRecord>(invalid).is_err());
+    }
+
+    #[test]
+    fn agent_settings_flags_are_boolean() {
+        for field in [
+            "fastMode",
+            "daybreakEnabled",
+            "needsTitle",
+            "manualName",
+            "maxAgentsExplicit",
+            "agentModeSupported",
+        ] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"{field}":"false"}}"#
+            );
+            assert!(
+                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                "{field}"
+            );
+            let valid = raw.replace("\"false\"", "false");
+            let record: AgentRecord = serde_json::from_str(&valid).unwrap();
+            assert_eq!(record.value()[field], false, "{field}");
+        }
+    }
+
+    #[test]
+    fn agent_text_settings_are_strings_with_distinct_null_and_absence() {
+        for field in ["prompt", "profileId", "profileInstructions", "effort"] {
+            let raw = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"{field}":42}}"#
+            );
+            assert!(
+                serde_json::from_str::<AgentRecord>(&raw).is_err(),
+                "{field}"
+            );
+            let null = raw.replace("42", "null");
+            let record: AgentRecord = serde_json::from_str(&null).unwrap();
+            assert_eq!(record.value().get(field), Some(&Value::Null), "{field}");
+            let missing = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0}"#;
+            let record: AgentRecord = serde_json::from_str(missing).unwrap();
+            assert!(record.value().get(field).is_none(), "{field}");
+        }
+    }
+
+    #[test]
+    fn agent_role_is_closed_and_preserves_null() {
+        let bad = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"role":"future"}"#;
+        let null = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"role":null}"#;
+        assert!(serde_json::from_str::<AgentRecord>(bad).is_err());
+        let agent: AgentRecord = serde_json::from_str(null).unwrap();
+        assert!(
+            serde_json::to_string(&agent)
+                .unwrap()
+                .contains("\"role\":null")
+        );
     }
 
     #[test]

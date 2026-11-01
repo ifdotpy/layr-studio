@@ -2076,6 +2076,27 @@
         "title": "AccountKeyRequest",
         "type": "object"
       },
+      "AccountLimitsProjection": {
+        "additionalProperties": false,
+        "description": "Server-owned account presentation; each field is derived from the same observation.",
+        "properties": {
+          "buckets": {
+            "$ref": "#/components/schemas/BucketProjection"
+          },
+          "reset": {
+            "$ref": "#/components/schemas/ResetProjection"
+          },
+          "runway": {
+            "$ref": "#/components/schemas/WeeklyRunway"
+          }
+        },
+        "required": [
+          "runway",
+          "reset",
+          "buckets"
+        ],
+        "type": "object"
+      },
       "AccountLoginResponse": {
         "additionalProperties": false,
         "properties": {
@@ -3701,30 +3722,6 @@
             ],
             "title": "Cansend"
           },
-          "claudeOptions": {
-            "anyOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "permissionMode": {
-                    "enum": [
-                      "default",
-                      "acceptEdits",
-                      "auto",
-                      "plan",
-                      "bypassPermissions"
-                    ],
-                    "type": "string"
-                  }
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Claude permission mode for the worker launch preview. Other session options remain private."
-          },
           "commandProgress": {
             "default": [],
             "items": {
@@ -4212,6 +4209,23 @@
             ],
             "title": "Pendingsettingsaccountkey"
           },
+          "permissionMode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "default",
+                  "acceptEdits",
+                  "auto",
+                  "plan",
+                  "bypassPermissions"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "projectServerId": {
             "anyOf": [
               {
@@ -4450,17 +4464,6 @@
               }
             ],
             "title": "Worktreepreparation"
-          },
-          "yoloMode": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Yolomode"
           }
         },
         "required": [
@@ -4786,30 +4789,6 @@
                 "type": "null"
               }
             ]
-          },
-          "claudeOptions": {
-            "anyOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "permissionMode": {
-                    "enum": [
-                      "default",
-                      "acceptEdits",
-                      "auto",
-                      "plan",
-                      "bypassPermissions"
-                    ],
-                    "type": "string"
-                  }
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Claude permission mode for the worker launch preview. Other session options remain private."
           },
           "commandProgress": {
             "default": [],
@@ -5507,6 +5486,23 @@
             ],
             "title": "Pendingsettingsaccountkey"
           },
+          "permissionMode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "default",
+                  "acceptEdits",
+                  "auto",
+                  "plan",
+                  "bypassPermissions"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "pinned": {
             "anyOf": [
               {
@@ -5969,17 +5965,6 @@
               }
             ],
             "title": "Worktreepreparation"
-          },
-          "yoloMode": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Yolomode"
           }
         },
         "required": [
@@ -6305,6 +6290,10 @@
         ],
         "title": "AgentEntityUsageResumeDto",
         "type": "object"
+      },
+      "AgentId": {
+        "description": "Identity of the agent that owns the turn.",
+        "type": "string"
       },
       "AgentInboxEntry": {
         "additionalProperties": false,
@@ -7543,6 +7532,23 @@
             "default": null,
             "title": "Pendingsettingsaccountkey"
           },
+          "permissionMode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "default",
+                  "acceptEdits",
+                  "auto",
+                  "plan",
+                  "bypassPermissions"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "pinned": {
             "default": null,
             "title": "Pinned",
@@ -8081,11 +8087,6 @@
             ],
             "default": null,
             "title": "Worktreewarning"
-          },
-          "yoloMode": {
-            "default": null,
-            "title": "Yolomode",
-            "type": "boolean"
           }
         },
         "required": [
@@ -8095,216 +8096,6 @@
           "status"
         ],
         "title": "AgentRecordResponse",
-        "type": "object"
-      },
-      "AgentRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "agent": {
-            "title": "Agent",
-            "type": "string"
-          },
-          "answerError": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Answererror"
-          },
-          "answerHistory": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/AnswerHistoryEntry"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Answerhistory"
-          },
-          "answeredAt": {
-            "anyOf": [
-              {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "default": null,
-            "title": "Answeredat"
-          },
-          "answeredBy": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Answeredby"
-          },
-          "createdAt": {
-            "anyOf": [
-              {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "default": null,
-            "title": "Createdat"
-          },
-          "decision": {
-            "anyOf": [
-              {
-                "enum": [
-                  "answer",
-                  "accept",
-                  "decline",
-                  "cancel"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Decision"
-          },
-          "deferred": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Deferred"
-          },
-          "deferredAt": {
-            "anyOf": [
-              {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "default": null,
-            "title": "Deferredat"
-          },
-          "deferredBy": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Deferredby"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "itemId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "description": "Provider transcript item that asked the question, when known.",
-            "title": "Itemid"
-          },
-          "method": {
-            "enum": [
-              "agent/asyncQuestion",
-              "item/tool/requestUserInput",
-              "mcpServer/elicitation/request"
-            ],
-            "title": "Method",
-            "type": "string"
-          },
-          "questions": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/QuestionEntry"
-            },
-            "title": "Questions",
-            "type": "array"
-          },
-          "status": {
-            "enum": [
-              "pending",
-              "blocked",
-              "answered",
-              "answering",
-              "uncertain",
-              "expired",
-              "declined",
-              "failed"
-            ],
-            "title": "Status",
-            "type": "string"
-          },
-          "turnId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "description": "Native turn that asked the question, when known.",
-            "title": "Turnid"
-          }
-        },
-        "required": [
-          "id",
-          "agent",
-          "method",
-          "status"
-        ],
-        "title": "AgentRequest",
         "type": "object"
       },
       "AgentResponse": {
@@ -8440,6 +8231,30 @@
               }
             ],
             "default": null
+          },
+          "claudeOptions": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "permissionMode": {
+                    "enum": [
+                      "default",
+                      "acceptEdits",
+                      "auto",
+                      "plan",
+                      "bypassPermissions"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Claude permission mode for the worker launch preview. Other session options remain private."
           },
           "commandProgress": {
             "default": [],
@@ -9193,6 +9008,23 @@
             "default": null,
             "title": "Pendingsettingsaccountkey"
           },
+          "permissionMode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "default",
+                  "acceptEdits",
+                  "auto",
+                  "plan",
+                  "bypassPermissions"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "pinned": {
             "anyOf": [
               {
@@ -9682,18 +9514,6 @@
             ],
             "default": null,
             "title": "Worktreepreparation"
-          },
-          "yoloMode": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Yolomode"
           }
         },
         "required": [
@@ -15499,6 +15319,64 @@
         "title": "AnnotationRecord",
         "type": "object"
       },
+      "Answer": {
+        "description": "The answer a person or policy gives. Its kind must fit the request kind.",
+        "oneOf": [
+          {
+            "properties": {
+              "decision": {
+                "$ref": "#/components/schemas/Decision"
+              },
+              "kind": {
+                "const": "decision",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "decision"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "answers": {
+                "items": {
+                  "$ref": "#/components/schemas/QuestionAnswer"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "const": "answers",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "answers"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "action": {
+                "$ref": "#/components/schemas/ElicitationAction"
+              },
+              "content": true,
+              "kind": {
+                "const": "elicitation",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "action",
+              "content"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "AnswerBody": {
         "additionalProperties": {
           "$ref": "#/components/schemas/JsonValue"
@@ -15599,34 +15477,6 @@
           "id"
         ],
         "title": "AnswerBody",
-        "type": "object"
-      },
-      "AnswerHistoryEntry": {
-        "additionalProperties": false,
-        "properties": {
-          "answer": {
-            "$ref": "#/components/schemas/JsonValue"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "isSecret": {
-            "title": "Issecret",
-            "type": "boolean"
-          },
-          "question": {
-            "title": "Question",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "question",
-          "isSecret",
-          "answer"
-        ],
-        "title": "AnswerHistoryEntry",
         "type": "object"
       },
       "AnswerResult": {
@@ -15796,6 +15646,211 @@
         },
         "title": "AppearancePreferences",
         "type": "object"
+      },
+      "Approval": {
+        "description": "A row. `fire_at` is the durable expiry timer of a pending approval.",
+        "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/AgentId"
+          },
+          "created": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "deferral": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Deferral"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delivery": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Delivery"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present for provider requests that Studio answers over a connection."
+          },
+          "detail": {
+            "$ref": "#/components/schemas/Detail"
+          },
+          "epoch": {
+            "description": "Agent epoch when the request was made. Absent on old rows.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "fire_at": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hidden": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Hidden"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "$ref": "#/components/schemas/ApprovalId"
+          },
+          "request": {
+            "$ref": "#/components/schemas/Request"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ApprovalState"
+          },
+          "turn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TurnId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "None only for kinds in `RequestKind::TURN_OPTIONAL`: requests of the\nagent itself (not of a provider turn)."
+          }
+        },
+        "required": [
+          "id",
+          "agent",
+          "turn",
+          "created",
+          "epoch",
+          "request",
+          "delivery",
+          "detail",
+          "state",
+          "deferral",
+          "fire_at",
+          "hidden"
+        ],
+        "type": "object"
+      },
+      "ApprovalId": {
+        "description": "Identity of one approval. Equals the legacy request id after migration.",
+        "type": "string"
+      },
+      "ApprovalState": {
+        "oneOf": [
+          {
+            "properties": {
+              "kind": {
+                "const": "pending",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The answer is stored and its delivery command exists.",
+            "properties": {
+              "answer": {
+                "$ref": "#/components/schemas/Answer"
+              },
+              "command": {
+                "$ref": "#/components/schemas/CommandId"
+              },
+              "kind": {
+                "const": "answering",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "answer",
+              "command"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "answer": {
+                "$ref": "#/components/schemas/Answer"
+              },
+              "at": {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              "by": {
+                "$ref": "#/components/schemas/Principal"
+              },
+              "kind": {
+                "const": "answered",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "answer",
+              "by",
+              "at"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Delivery was lost. Nobody knows whether the provider got the answer.",
+            "properties": {
+              "answer": {
+                "$ref": "#/components/schemas/Answer"
+              },
+              "kind": {
+                "const": "unknown",
+                "type": "string"
+              },
+              "since": {
+                "$ref": "#/components/schemas/Timestamp"
+              }
+            },
+            "required": [
+              "kind",
+              "answer",
+              "since"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "at": {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              "kind": {
+                "const": "closed",
+                "type": "string"
+              },
+              "reason": {
+                "$ref": "#/components/schemas/CloseReason"
+              }
+            },
+            "required": [
+              "kind",
+              "reason",
+              "at"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "ApprovePeerRequest": {
         "additionalProperties": false,
@@ -16160,6 +16215,152 @@
         ],
         "title": "BackgroundShellPolicySettings",
         "type": "object"
+      },
+      "BackgroundTaskAction": {
+        "enum": [
+          "stop",
+          "approve",
+          "input",
+          "resize",
+          "readOutput"
+        ],
+        "type": "string"
+      },
+      "BackgroundTaskDisplay": {
+        "additionalProperties": false,
+        "description": "The server's presentation and action decisions for a task row.",
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/BackgroundTaskAction"
+            },
+            "type": "array"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "inBackgroundList": {
+            "type": "boolean"
+          },
+          "indicator": {
+            "$ref": "#/components/schemas/BackgroundTaskIndicator"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/BackgroundTaskKind"
+          },
+          "kindLabel": {
+            "$ref": "#/components/schemas/BackgroundTaskKindLabel"
+          },
+          "label": {
+            "$ref": "#/components/schemas/BackgroundTaskLabel"
+          },
+          "stdinState": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProcessStdinState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "kindLabel",
+          "title",
+          "active",
+          "indicator",
+          "label",
+          "inBackgroundList",
+          "actions"
+        ],
+        "type": "object"
+      },
+      "BackgroundTaskIndicator": {
+        "enum": [
+          "answer",
+          "error",
+          "working",
+          "unread",
+          "paused"
+        ],
+        "type": "string"
+      },
+      "BackgroundTaskKind": {
+        "description": "Renderer classification for an existing task or process.",
+        "enum": [
+          "monitor",
+          "command",
+          "tool",
+          "backgroundTask"
+        ],
+        "type": "string"
+      },
+      "BackgroundTaskKindLabel": {
+        "enum": [
+          "monitor",
+          "command",
+          "backgroundCommand",
+          "tool"
+        ],
+        "type": "string"
+      },
+      "BackgroundTaskLabel": {
+        "enum": [
+          "running",
+          "starting",
+          "pending",
+          "stopping",
+          "approval",
+          "completed",
+          "failed",
+          "cancelled",
+          "interrupted",
+          "lost",
+          "waitingForExit",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "BackgroundTaskView": {
+        "oneOf": [
+          {
+            "properties": {
+              "source": {
+                "const": "process",
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/components/schemas/ProcessView"
+              }
+            },
+            "required": [
+              "source",
+              "value"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "source": {
+                "const": "task",
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/components/schemas/TaskProjection"
+              }
+            },
+            "required": [
+              "source",
+              "value"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "BlockingPoolGroupMetrics": {
         "additionalProperties": false,
@@ -17746,6 +17947,23 @@
         "title": "BranchResponse",
         "type": "object"
       },
+      "BrowserCallbackForward": {
+        "additionalProperties": false,
+        "description": "A forward of the callback to another server. Only the hash of the token is stored.",
+        "properties": {
+          "expires_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "token_hash": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token_hash",
+          "expires_at"
+        ],
+        "type": "object"
+      },
       "BrowserForward": {
         "additionalProperties": false,
         "description": "The redirect port of a sign-in that a paired server approved for a window on this Mac.",
@@ -17840,6 +18058,113 @@
         ],
         "title": "BrowserForwardResult",
         "type": "object"
+      },
+      "BrowserOutcome": {
+        "description": "How a sign-in ended after the person opened it.",
+        "oneOf": [
+          {
+            "enum": [
+              "signed_in",
+              "refused",
+              "provider_error",
+              "unknown",
+              "expired"
+            ],
+            "type": "string"
+          },
+          {
+            "const": "cancelled",
+            "description": "The person declined in the waiting phase. No address was pasted.",
+            "type": "string"
+          }
+        ]
+      },
+      "BrowserPhase": {
+        "description": "The step of a sign-in card. The approval state says who answered; the phase\nsays what happens in the paste mode, where the card waits after the answer.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "description": "The link is shown. Nobody opened it.",
+            "properties": {
+              "kind": {
+                "const": "link",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "Paste mode: the person opened the link and the card waits for the address of the\npage that did not load. `expires_at` is the end of the guest lease.",
+            "properties": {
+              "expires_at": {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              "kind": {
+                "const": "waiting",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "expires_at"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "A pasted address is on its way to the command. A second paste is refused.",
+            "properties": {
+              "at": {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              "expires_at": {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              "kind": {
+                "const": "pasted",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "expires_at",
+              "at"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "http": {
+                "description": "HTTP status the command answered, when it answered.",
+                "format": "uint16",
+                "maximum": 65535,
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "kind": {
+                "const": "finished",
+                "type": "string"
+              },
+              "outcome": {
+                "$ref": "#/components/schemas/BrowserOutcome"
+              }
+            },
+            "required": [
+              "kind",
+              "outcome",
+              "http"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "BrowserRecoveryRecordResponse": {
         "additionalProperties": {
@@ -17996,6 +18321,45 @@
         "title": "BrowserRecoveryRequestRecordResponse",
         "type": "object"
       },
+      "BrowserRedirect": {
+        "additionalProperties": false,
+        "description": "The loopback address the sign-in command listens on.",
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "port": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "host",
+          "port",
+          "path"
+        ],
+        "type": "object"
+      },
+      "BrowserSource": {
+        "description": "Where a sign-in link came from.",
+        "oneOf": [
+          {
+            "const": "vm",
+            "description": "The guest service of the Linux VM on this Mac.",
+            "type": "string"
+          },
+          {
+            "const": "host",
+            "description": "The browser host of commands that run on this server.",
+            "type": "string"
+          }
+        ]
+      },
       "BrowserStatus": {
         "additionalProperties": false,
         "properties": {
@@ -18032,6 +18396,142 @@
           "enabled"
         ],
         "title": "BrowserStatus",
+        "type": "object"
+      },
+      "BucketProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "current": {
+            "$ref": "#/components/schemas/BucketState"
+          },
+          "next": {
+            "$ref": "#/components/schemas/BucketState"
+          },
+          "validUntil": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "current",
+          "validUntil",
+          "next"
+        ],
+        "type": "object"
+      },
+      "BucketState": {
+        "additionalProperties": false,
+        "properties": {
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/BucketView"
+            },
+            "type": "array"
+          },
+          "color": {
+            "$ref": "#/components/schemas/LimitColor"
+          },
+          "low": {
+            "type": "boolean"
+          },
+          "remaining": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "buckets",
+          "remaining",
+          "color",
+          "low"
+        ],
+        "type": "object"
+      },
+      "BucketView": {
+        "additionalProperties": false,
+        "properties": {
+          "creditsLabel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "planType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "shortName": {
+            "type": "string"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/BucketWindowView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "shortName",
+          "planType",
+          "creditsLabel",
+          "windows"
+        ],
+        "type": "object"
+      },
+      "BucketWindowView": {
+        "additionalProperties": false,
+        "properties": {
+          "color": {
+            "$ref": "#/components/schemas/LimitColor"
+          },
+          "expired": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "remaining": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "reset": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "warning": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "label",
+          "remaining",
+          "reset",
+          "expired",
+          "color",
+          "warning"
+        ],
         "type": "object"
       },
       "BudgetWaitRecordResponse": {
@@ -20860,6 +21360,25 @@
         "title": "ClaudeTurn",
         "type": "object"
       },
+      "CloseReason": {
+        "oneOf": [
+          {
+            "enum": [
+              "turn_ended",
+              "provider_resolved",
+              "session_lost",
+              "chat_deleted",
+              "expired"
+            ],
+            "type": "string"
+          },
+          {
+            "const": "legacy",
+            "description": "Migrated row whose answer was never recorded. Nothing is inferred.",
+            "type": "string"
+          }
+        ]
+      },
       "CodexLoginReceipt": {
         "additionalProperties": {
           "$ref": "#/components/schemas/JsonValue"
@@ -21051,6 +21570,10 @@
         ],
         "title": "CodexLoginReceipt",
         "type": "object"
+      },
+      "CommandId": {
+        "description": "Identity of the outbox command that delivers an answer.",
+        "type": "string"
       },
       "CommandRequest": {
         "description": "One write action. The owner is runtime-schema/src/command.rs.",
@@ -23756,6 +24279,15 @@
         ],
         "type": "object"
       },
+      "Decision": {
+        "enum": [
+          "accept",
+          "accept_for_session",
+          "decline",
+          "cancel"
+        ],
+        "type": "string"
+      },
       "DefaultAccountGroupsRequest": {
         "additionalProperties": false,
         "description": "Replace the default account order of projects without their own order. An empty list removes it. Repeating a request sets the same value.",
@@ -23774,6 +24306,26 @@
           "groups"
         ],
         "title": "DefaultAccountGroupsRequest",
+        "type": "object"
+      },
+      "Deferral": {
+        "description": "The user moved the question aside. `active` is false after it came back.",
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "by": {
+            "$ref": "#/components/schemas/Principal"
+          }
+        },
+        "required": [
+          "active",
+          "at",
+          "by"
+        ],
         "type": "object"
       },
       "DeleteAccountRequest": {
@@ -23880,6 +24432,38 @@
           }
         },
         "title": "DeliveredModeRecordResponse",
+        "type": "object"
+      },
+      "Delivery": {
+        "description": "What the server needs to send the answer back to the provider.",
+        "properties": {
+          "account": {
+            "type": "string"
+          },
+          "connection": {
+            "type": "string"
+          },
+          "rpc_id": {
+            "$ref": "#/components/schemas/RpcId"
+          },
+          "supervisor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Supervisor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Absent on rows written before supervisor generations were recorded."
+          }
+        },
+        "required": [
+          "rpc_id",
+          "account",
+          "connection",
+          "supervisor"
+        ],
         "type": "object"
       },
       "DeliveryMoment": {
@@ -24302,6 +24886,47 @@
           "stateDir"
         ],
         "title": "DesktopResponse",
+        "type": "object"
+      },
+      "Detail": {
+        "description": "Display content and provider fields that no logic reads by name.",
+        "properties": {
+          "answer_error": {
+            "description": "Human text of a lost delivery.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "host_close_reason": {
+            "description": "Text the browser host gave when it closed a browser request.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "params": {
+            "$ref": "#/components/schemas/ProviderObject",
+            "description": "Provider request params without the fields typed in `Request`."
+          },
+          "preview": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderObject"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Item body shown on the card (command run, file changes)."
+          }
+        },
+        "required": [
+          "params",
+          "preview",
+          "answer_error",
+          "host_close_reason"
+        ],
         "type": "object"
       },
       "DevicePairRequest": {
@@ -25198,6 +25823,14 @@
         ],
         "title": "EdgeEntityDto",
         "type": "object"
+      },
+      "ElicitationAction": {
+        "enum": [
+          "accept",
+          "decline",
+          "cancel"
+        ],
+        "type": "string"
       },
       "EmptyTransferRecoveryRecordResponse": {
         "additionalProperties": {
@@ -27832,6 +28465,29 @@
         ],
         "type": "object"
       },
+      "Grant": {
+        "enum": [
+          "full",
+          "observe"
+        ],
+        "type": "string"
+      },
+      "Hidden": {
+        "description": "History stays: a hidden row is not shown in the default list.",
+        "properties": {
+          "at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "by": {
+            "$ref": "#/components/schemas/Principal"
+          }
+        },
+        "required": [
+          "at",
+          "by"
+        ],
+        "type": "object"
+      },
       "HistoricalInputProofRecordResponse": {
         "additionalProperties": {
           "$ref": "#/components/schemas/JsonValue"
@@ -28501,6 +29157,16 @@
         },
         "title": "LazyAccountTransferSourceRecordResponse",
         "type": "object"
+      },
+      "LimitColor": {
+        "description": "Account bucket colors and thresholds are selected by the server.",
+        "enum": [
+          "paused",
+          "unread",
+          "answer",
+          "error"
+        ],
+        "type": "string"
       },
       "LimitResetResponse": {
         "additionalProperties": false,
@@ -29504,199 +30170,7 @@
         "type": "object"
       },
       "ManagedProcessRecord": {
-        "additionalProperties": false,
-        "properties": {
-          "accountKey": {
-            "title": "Accountkey",
-            "type": "string"
-          },
-          "agent": {
-            "title": "Agent",
-            "type": "string"
-          },
-          "bytes": {
-            "default": 0,
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "title": "Bytes",
-            "type": "integer"
-          },
-          "cancelRequested": {
-            "default": false,
-            "title": "Cancelrequested",
-            "type": "boolean"
-          },
-          "capabilities": {
-            "$ref": "#/components/schemas/ProcessCapabilities"
-          },
-          "command": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Command"
-          },
-          "created": {
-            "title": "Created",
-            "type": "number"
-          },
-          "cwd": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Cwd"
-          },
-          "epoch": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "title": "Epoch",
-            "type": "integer"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Error"
-          },
-          "generation": {
-            "title": "Generation",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "log": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Log"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "output": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Output"
-          },
-          "outputFile": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "outputPatterns": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "outputTruncated": {
-            "default": false,
-            "title": "Outputtruncated",
-            "type": "boolean"
-          },
-          "outputWakeBudget": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/MonitorOutputWakeBudget"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "source": {
-            "enum": [
-              "monitor",
-              "codex_task",
-              "claude_task"
-            ],
-            "title": "Source",
-            "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "stdinCloseRequested": {
-            "default": false,
-            "title": "Stdincloserequested",
-            "type": "boolean"
-          },
-          "stdinClosed": {
-            "default": false,
-            "title": "Stdinclosed",
-            "type": "boolean"
-          },
-          "stdinError": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Stdinerror"
-          }
-        },
-        "required": [
-          "id",
-          "key",
-          "generation",
-          "agent",
-          "accountKey",
-          "epoch",
-          "source",
-          "status",
-          "created",
-          "name",
-          "capabilities"
-        ],
-        "title": "ManagedProcessRecord",
-        "type": "object"
+        "$ref": "#/components/schemas/ProcessView"
       },
       "McpReconnectRequest": {
         "additionalProperties": false,
@@ -30419,16 +30893,7 @@
         "additionalProperties": false,
         "properties": {
           "agent": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Agent"
+            "type": "string"
           },
           "bytes": {
             "anyOf": [
@@ -30469,16 +30934,7 @@
             "title": "Command"
           },
           "created": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "default": null,
-            "title": "Created"
+            "type": "number"
           },
           "cwd": {
             "anyOf": [
@@ -30491,6 +30947,9 @@
             ],
             "default": null,
             "title": "Cwd"
+          },
+          "display": {
+            "$ref": "#/components/schemas/BackgroundTaskDisplay"
           },
           "durationMs": {
             "anyOf": [
@@ -30584,6 +31043,12 @@
             "default": null,
             "title": "Name"
           },
+          "outputFile": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "outputPatterns": {
             "items": {
               "type": "string"
@@ -30637,15 +31102,7 @@
             "title": "Ruleid"
           },
           "status": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/TaskStatus"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
+            "$ref": "#/components/schemas/MonitorState"
           },
           "stdinCloseRequested": {
             "anyOf": [
@@ -30711,7 +31168,11 @@
           }
         },
         "required": [
-          "id"
+          "id",
+          "agent",
+          "created",
+          "status",
+          "display"
         ],
         "title": "MonitorEntityDto",
         "type": "object"
@@ -35834,6 +36295,110 @@
         "title": "PreparedContextRecordResponse",
         "type": "object"
       },
+      "Principal": {
+        "description": "Who acts. Local copy of the permissions work (`feat/principal-permissions`);\nthe second change to land unifies the two.",
+        "oneOf": [
+          {
+            "properties": {
+              "kind": {
+                "const": "owner",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "grant": {
+                "$ref": "#/components/schemas/Grant"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "device",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "grant"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "peer",
+                "type": "string"
+              },
+              "server": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "server"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "epoch": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "agent",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "epoch"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "federated",
+                "type": "string"
+              },
+              "peer": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "peer"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Automatic answers, such as full access mode.",
+            "properties": {
+              "kind": {
+                "const": "policy",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "ProcessActionResult": {
         "additionalProperties": true,
         "properties": {
@@ -35881,19 +36446,15 @@
         "additionalProperties": false,
         "properties": {
           "readOutput": {
-            "title": "Readoutput",
             "type": "boolean"
           },
           "resize": {
-            "title": "Resize",
             "type": "boolean"
           },
           "sendInput": {
-            "title": "Sendinput",
             "type": "boolean"
           },
           "stop": {
-            "title": "Stop",
             "type": "boolean"
           }
         },
@@ -35903,7 +36464,6 @@
           "resize",
           "stop"
         ],
-        "title": "ProcessCapabilities",
         "type": "object"
       },
       "ProcessControlRequest": {
@@ -36274,6 +36834,23 @@
         "type": "object",
         "unevaluatedProperties": true
       },
+      "ProcessId": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "format": "int64",
+            "type": "integer"
+          },
+          {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        ],
+        "description": "Numeric IDs remain numeric because process-control identities depend on their original shape."
+      },
       "ProcessIdentity": {
         "additionalProperties": false,
         "properties": {
@@ -36358,13 +36935,21 @@
         "type": "object"
       },
       "ProcessList": {
+        "$ref": "#/components/schemas/ProcessListing"
+      },
+      "ProcessListing": {
         "additionalProperties": false,
         "properties": {
+          "activities": {
+            "items": {
+              "$ref": "#/components/schemas/BackgroundTaskView"
+            },
+            "type": "array"
+          },
           "processes": {
             "items": {
-              "$ref": "#/components/schemas/ManagedProcessRecord"
+              "$ref": "#/components/schemas/ProcessView"
             },
-            "title": "Processes",
             "type": "array"
           },
           "responseTarget": {
@@ -36375,14 +36960,13 @@
               {
                 "type": "null"
               }
-            ],
-            "default": null
+            ]
           }
         },
         "required": [
-          "processes"
+          "processes",
+          "activities"
         ],
-        "title": "ProcessList",
         "type": "object"
       },
       "ProcessReceipt": {
@@ -36488,6 +37072,32 @@
         ],
         "type": "object"
       },
+      "ProcessSourceKind": {
+        "enum": [
+          "monitor",
+          "codex_task",
+          "claude_task"
+        ],
+        "type": "string"
+      },
+      "ProcessStatus": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/TaskRecordStatus"
+          },
+          {
+            "$ref": "#/components/schemas/MonitorState"
+          }
+        ]
+      },
+      "ProcessStdinState": {
+        "enum": [
+          "open",
+          "closeRequested",
+          "closed"
+        ],
+        "type": "string"
+      },
       "ProcessTree": {
         "additionalProperties": false,
         "properties": {
@@ -36526,6 +37136,196 @@
           "totalRssMiB"
         ],
         "title": "ProcessTree",
+        "type": "object"
+      },
+      "ProcessView": {
+        "additionalProperties": false,
+        "description": "Complete public process view; private native proof stays on the service record.",
+        "properties": {
+          "accountKey": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "bytes": {
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cancelRequested": {
+            "type": "boolean"
+          },
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created": {
+            "format": "double",
+            "type": "number"
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "display": {
+            "$ref": "#/components/schemas/BackgroundTaskDisplay"
+          },
+          "durationMs": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "epoch": {
+            "format": "uint64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "exitCode": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "finished": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "generation": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "log": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "outputFile": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outputPatterns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "outputTruncated": {
+            "type": "boolean"
+          },
+          "outputWakeBudget": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProcessWakeBudget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "processId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProcessId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "$ref": "#/components/schemas/ProcessSourceKind"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProcessStatus"
+          },
+          "stdinError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tail": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "generation",
+          "agent",
+          "accountKey",
+          "epoch",
+          "source",
+          "status",
+          "cancelRequested",
+          "created",
+          "name",
+          "tail",
+          "bytes",
+          "outputTruncated",
+          "outputPatterns",
+          "display"
+        ],
+        "type": "object"
+      },
+      "ProcessWakeBudget": {
+        "additionalProperties": false,
+        "properties": {
+          "paused": {
+            "type": "boolean"
+          },
+          "tokens": {
+            "format": "double",
+            "type": "number"
+          },
+          "totalSuppressedMatches": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "paused",
+          "tokens",
+          "totalSuppressedMatches"
+        ],
         "type": "object"
       },
       "ProcessesResource": {
@@ -38976,6 +39776,11 @@
         ],
         "type": "object"
       },
+      "ProviderObject": {
+        "additionalProperties": true,
+        "description": "Provider-owned content that Studio stores and shows as is (tolerant at the\nprovider boundary). Typed request fields are removed from `params`.",
+        "type": "object"
+      },
       "ProviderUpdateNotice": {
         "additionalProperties": false,
         "description": "A newer installed or upstream provider version is available.",
@@ -39341,6 +40146,79 @@
         "title": "PullResult",
         "type": "object"
       },
+      "Question": {
+        "properties": {
+          "header": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "is_other": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "is_secret": {
+            "type": "boolean"
+          },
+          "multi_select": {
+            "description": "Absent when the provider did not send the flag.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionOption"
+            },
+            "type": "array"
+          },
+          "question": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "question",
+          "header",
+          "options",
+          "is_secret",
+          "multi_select",
+          "is_other"
+        ],
+        "type": "object"
+      },
+      "QuestionAnswer": {
+        "properties": {
+          "answer": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "digest": {
+            "description": "SHA-256 (hex) of the typed values of a secret question, which are stored as the redaction mark.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "answer"
+        ],
+        "type": "object"
+      },
       "QuestionAnswerStrings": {
         "properties": {
           "answers": {
@@ -39538,126 +40416,30 @@
         ],
         "type": "object"
       },
-      "QuestionEntry": {
-        "additionalProperties": false,
-        "properties": {
-          "header": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "description": "Short topic label of a native or asynchronous question.",
-            "title": "Header"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "isOther": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "The provider also accepts a free-text answer.",
-            "title": "Isother"
-          },
-          "isSecret": {
-            "title": "Issecret",
-            "type": "boolean"
-          },
-          "multiSelect": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "The question accepts more than one choice.",
-            "title": "Multiselect"
-          },
-          "options": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/QuestionOption"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "Choices offered by a native or asynchronous question; absent for form elicitation.",
-            "title": "Options"
-          },
-          "question": {
-            "title": "Question",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "question",
-          "isSecret"
-        ],
-        "title": "QuestionEntry",
-        "type": "object"
-      },
-      "QuestionHistory": {
-        "additionalProperties": false,
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/AgentRequest"
-            },
-            "title": "Items",
-            "type": "array"
-          }
-        },
-        "required": [
-          "items"
-        ],
-        "title": "QuestionHistory",
-        "type": "object"
-      },
       "QuestionOption": {
-        "additionalProperties": false,
         "properties": {
           "description": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Description"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "label": {
-            "title": "Label",
             "type": "string"
+          },
+          "preview": {
+            "description": "Markdown shown next to the option.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
-          "label"
+          "label",
+          "description",
+          "preview"
         ],
-        "title": "QuestionOption",
         "type": "object"
       },
       "QuestionSelections": {
@@ -40276,6 +41058,22 @@
           }
         },
         "title": "RateLimitResetCredits",
+        "type": "object"
+      },
+      "RateLimitView": {
+        "additionalProperties": false,
+        "properties": {
+          "observation": {
+            "$ref": "#/components/schemas/AccountRateLimitsDto"
+          },
+          "projection": {
+            "$ref": "#/components/schemas/AccountLimitsProjection"
+          }
+        },
+        "required": [
+          "observation",
+          "projection"
+        ],
         "type": "object"
       },
       "RateLimitWindow": {
@@ -41065,6 +41863,287 @@
         "title": "RenameServer",
         "type": "object"
       },
+      "Request": {
+        "description": "Fixed at creation. Decides which answers are allowed.",
+        "oneOf": [
+          {
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "cwd": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "exec",
+                "type": "string"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "command",
+              "cwd",
+              "reason"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "files": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "item": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "patch",
+                "type": "string"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "item",
+              "files",
+              "reason"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "permissions",
+                "type": "string"
+              },
+              "requested": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "kind",
+              "requested"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "elicitation",
+                "type": "string"
+              },
+              "schema": {
+                "description": "JSON schema chosen by the provider; shown as is."
+              }
+            },
+            "required": [
+              "kind",
+              "schema"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "question",
+                "type": "string"
+              },
+              "questions": {
+                "items": {
+                  "$ref": "#/components/schemas/Question"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "kind",
+              "questions"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Claude tool permission.",
+            "properties": {
+              "input": true,
+              "kind": {
+                "const": "tool_use",
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "tool",
+              "input"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Today `agent/asyncQuestion`.",
+            "properties": {
+              "kind": {
+                "const": "agent_question",
+                "type": "string"
+              },
+              "questions": {
+                "items": {
+                  "$ref": "#/components/schemas/Question"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "kind",
+              "questions"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Today `monitor/approve`.",
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "monitor_start",
+                "type": "string"
+              },
+              "monitor": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "monitor",
+              "command"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "Today `browser/open`.",
+            "properties": {
+              "bridge_id": {
+                "description": "Identity of the guest request. 32 lowercase hex characters.",
+                "type": "string"
+              },
+              "client_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "expires_at": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Timestamp"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Deadline of the guest request."
+              },
+              "forward": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/BrowserCallbackForward"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "host": {
+                "type": "string"
+              },
+              "joined": {
+                "description": "Other chats that wait on this card.",
+                "items": {
+                  "$ref": "#/components/schemas/AgentId"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "const": "browser_open",
+                "type": "string"
+              },
+              "linux_user": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "phase": {
+                "$ref": "#/components/schemas/BrowserPhase"
+              },
+              "redirect": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/BrowserRedirect"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "scope": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source": {
+                "$ref": "#/components/schemas/BrowserSource"
+              },
+              "url": {
+                "type": "string"
+              },
+              "user_code": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "url",
+              "bridge_id",
+              "host",
+              "source",
+              "redirect",
+              "client_id",
+              "scope",
+              "linux_user",
+              "user_code",
+              "expires_at",
+              "joined",
+              "forward",
+              "phase"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "RequestAnswerRecordResponse": {
         "additionalProperties": {
           "$ref": "#/components/schemas/JsonValue"
@@ -41090,227 +42169,6 @@
           }
         },
         "title": "RequestAnswerRecordResponse",
-        "type": "object"
-      },
-      "RequestEntityDto": {
-        "additionalProperties": false,
-        "properties": {
-          "accountKey": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Accountkey"
-          },
-          "agent": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Agent"
-          },
-          "at": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "At"
-          },
-          "connectionId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Connectionid"
-          },
-          "created": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "Created"
-          },
-          "createdAt": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "Createdat"
-          },
-          "deferred": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deferred"
-          },
-          "epoch": {
-            "anyOf": [
-              {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Epoch"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Error"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "method": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Method"
-          },
-          "params": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RequestParamsDto"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "preview": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RequestPreviewDto"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "result": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/JsonValue"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "status": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RequestStatus"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "threadId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Threadid"
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Title"
-          },
-          "turnId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Turnid"
-          },
-          "updated": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "Updated"
-          },
-          "updatedAt": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "Updatedat"
-          }
-        },
-        "required": [
-          "id"
-        ],
-        "title": "RequestEntityDto",
         "type": "object"
       },
       "RequestInboxEntry": {
@@ -41350,450 +42208,6 @@
           "request"
         ],
         "title": "RequestInboxEntry",
-        "type": "object"
-      },
-      "RequestParamsDto": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
-        },
-        "description": "Known request UI fields and typed JSON-safe native protocol extensions.",
-        "properties": {
-          "changes": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/JsonValue"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "clientId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Clientid"
-          },
-          "command": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Command"
-          },
-          "cwd": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Cwd"
-          },
-          "expiresAt": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "Expiresat"
-          },
-          "host": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Host"
-          },
-          "linuxUser": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Linuxuser"
-          },
-          "message": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Message"
-          },
-          "paste": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Paste"
-          },
-          "permissions": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Permissions"
-          },
-          "phase": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Phase"
-          },
-          "questions": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/RequestQuestionDto"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Questions"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Reason"
-          },
-          "redirect": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Redirect"
-          },
-          "requestedSchema": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RequestSchemaDto"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "scope": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Scope"
-          },
-          "source": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Source"
-          },
-          "threadId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Threadid"
-          },
-          "turnId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Turnid"
-          },
-          "url": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Url"
-          },
-          "userCode": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Usercode"
-          },
-          "waiting": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Waiting"
-          }
-        },
-        "title": "RequestParamsDto",
-        "type": "object"
-      },
-      "RequestPreviewDto": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
-        },
-        "description": "Known preview fields plus the native tool's provider-specific preview metadata.",
-        "properties": {
-          "changes": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/JsonValue"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "command": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Command"
-          },
-          "cwd": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Cwd"
-          },
-          "permissions": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Permissions"
-          },
-          "url": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Url"
-          }
-        },
-        "title": "RequestPreviewDto",
-        "type": "object"
-      },
-      "RequestQuestionDto": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
-        },
-        "description": "Known question UI fields plus future native question protocol fields.",
-        "properties": {
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "isSecret": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Issecret"
-          },
-          "multiSelect": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Multiselect"
-          },
-          "options": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/RequestQuestionOptionDto"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Options"
-          },
-          "question": {
-            "title": "Question",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "question"
-        ],
-        "title": "RequestQuestionDto",
-        "type": "object"
-      },
-      "RequestQuestionOptionDto": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
-        },
-        "description": "Known labels plus provider-owned option metadata passed through verbatim.",
-        "properties": {
-          "description": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Description"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Label"
-          },
-          "value": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/JsonValue"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "title": "RequestQuestionOptionDto",
         "type": "object"
       },
       "RequestRecordResponse": {
@@ -42027,135 +42441,6 @@
         "title": "RequestRecordResponse",
         "type": "object"
       },
-      "RequestSchemaDto": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
-        },
-        "description": "A JSON Schema request; provider-defined top-level keywords pass through.",
-        "properties": {
-          "properties": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/RequestSchemaPropertyDto"
-            },
-            "title": "Properties",
-            "type": "object"
-          },
-          "required": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Required"
-          }
-        },
-        "required": [
-          "properties"
-        ],
-        "title": "RequestSchemaDto",
-        "type": "object"
-      },
-      "RequestSchemaPropertyDto": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
-        },
-        "description": "A JSON Schema property; arbitrary standard and future schema keywords pass through.",
-        "properties": {
-          "enum": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/JsonValue"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enum"
-          },
-          "format": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Format"
-          },
-          "isSecret": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Issecret"
-          },
-          "items": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RequestSchemaPropertyDto"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Title"
-          },
-          "type": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Type"
-          },
-          "writeOnly": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Writeonly"
-          }
-        },
-        "title": "RequestSchemaPropertyDto",
-        "type": "object"
-      },
       "RequestStatus": {
         "enum": [
           "pending",
@@ -42185,6 +42470,102 @@
           "account_key"
         ],
         "title": "RequiredAccountKeyRequest",
+        "type": "object"
+      },
+      "ResetCreditView": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmLabel": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "enabledAfter": {
+            "type": "boolean"
+          },
+          "expiresAt": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "validUntil": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "confirmLabel",
+          "description",
+          "expiresAt",
+          "enabled",
+          "validUntil",
+          "enabledAfter"
+        ],
+        "type": "object"
+      },
+      "ResetProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "accountId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "availableCount": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "countLabel": {
+            "type": "string"
+          },
+          "credits": {
+            "items": {
+              "$ref": "#/components/schemas/ResetCreditView"
+            },
+            "type": "array"
+          },
+          "emptyMessage": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "present": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "present",
+          "accountId",
+          "availableCount",
+          "countLabel",
+          "emptyMessage",
+          "credits"
+        ],
         "type": "object"
       },
       "ResetRequest": {
@@ -44508,6 +44889,44 @@
         "$ref": "#/components/schemas/ResourceNotifyAck",
         "title": "RootModel[ResourceNotifyAck]"
       },
+      "RpcId": {
+        "description": "JSON-RPC id of a provider request. The reply must use the same form.",
+        "oneOf": [
+          {
+            "properties": {
+              "kind": {
+                "const": "number",
+                "type": "string"
+              },
+              "value": {
+                "format": "int64",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "kind",
+              "value"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "text",
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "value"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "RuleBody": {
         "additionalProperties": false,
         "allOf": [
@@ -45746,6 +46165,15 @@
           "stages"
         ],
         "type": "object"
+      },
+      "RunwayColor": {
+        "enum": [
+          "green",
+          "yellow",
+          "red",
+          "gray"
+        ],
+        "type": "string"
       },
       "SafetyAction": {
         "enum": [
@@ -47005,7 +47433,6 @@
               "input",
               "message",
               "move_send",
-              "move_status",
               "location_info",
               "location_matches",
               "stop",
@@ -47025,14 +47452,6 @@
               "update.chunk",
               "update.release",
               "backup.put",
-              "task",
-              "complaint",
-              "context",
-              "directory",
-              "chat_read",
-              "move_manage",
-              "move_interrupt",
-              "move_spawn",
               "exec",
               "exec_receipt",
               "browser_callback",
@@ -50849,6 +51268,34 @@
         "title": "SummaryTarget",
         "type": "object"
       },
+      "Supervisor": {
+        "description": "The provider process generation that owns a request, under the supervisor.",
+        "properties": {
+          "generation": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "handle": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state_dir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "generation",
+          "state_dir",
+          "handle"
+        ],
+        "type": "object"
+      },
       "SupervisorDiagnostics": {
         "additionalProperties": false,
         "properties": {
@@ -51661,7 +52108,7 @@
                 "type": "string"
               },
               "value": {
-                "$ref": "#/components/schemas/RequestEntityDto"
+                "$ref": "#/components/schemas/Approval"
               }
             },
             "required": [
@@ -51808,7 +52255,7 @@
                 "type": "string"
               },
               "value": {
-                "$ref": "#/components/schemas/AccountRateLimitsDto"
+                "$ref": "#/components/schemas/RateLimitView"
               }
             },
             "required": [
@@ -52118,7 +52565,7 @@
                 "type": "string"
               },
               "value": {
-                "$ref": "#/components/schemas/AgentRequest"
+                "$ref": "#/components/schemas/Approval"
               }
             },
             "required": [
@@ -52181,7 +52628,7 @@
                 "type": "string"
               },
               "value": {
-                "$ref": "#/components/schemas/WorkItem"
+                "$ref": "#/components/schemas/WorkDetail"
               }
             },
             "required": [
@@ -52856,7 +53303,7 @@
             "type": "string"
           },
           "value": {
-            "$ref": "#/components/schemas/AgentRequest"
+            "$ref": "#/components/schemas/Approval"
           }
         },
         "required": [
@@ -52902,7 +53349,7 @@
             "type": "string"
           },
           "value": {
-            "$ref": "#/components/schemas/AccountRateLimitsDto"
+            "$ref": "#/components/schemas/RateLimitView"
           }
         },
         "required": [
@@ -52970,7 +53417,7 @@
             "type": "string"
           },
           "value": {
-            "$ref": "#/components/schemas/RequestEntityDto"
+            "$ref": "#/components/schemas/Approval"
           }
         },
         "required": [
@@ -53289,7 +53736,7 @@
             "type": "string"
           },
           "value": {
-            "$ref": "#/components/schemas/WorkItem"
+            "$ref": "#/components/schemas/WorkDetail"
           }
         },
         "required": [
@@ -53853,15 +54300,7 @@
         "additionalProperties": false,
         "properties": {
           "agent": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Agent"
+            "type": "string"
           },
           "bytes": {
             "anyOf": [
@@ -53899,15 +54338,7 @@
             "title": "Command"
           },
           "created": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "Created"
+            "type": "number"
           },
           "cwd": {
             "anyOf": [
@@ -53919,6 +54350,9 @@
               }
             ],
             "title": "Cwd"
+          },
+          "display": {
+            "$ref": "#/components/schemas/BackgroundTaskDisplay"
           },
           "durationMs": {
             "anyOf": [
@@ -53988,14 +54422,7 @@
             "title": "Interactive"
           },
           "kind": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/TaskKind"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/TaskRecordKind"
           },
           "log": {
             "anyOf": [
@@ -54063,14 +54490,7 @@
             "title": "Query"
           },
           "status": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/TaskStatus"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/TaskRecordStatus"
           },
           "stdinCloseRequested": {
             "anyOf": [
@@ -54143,7 +54563,12 @@
           }
         },
         "required": [
-          "id"
+          "id",
+          "agent",
+          "created",
+          "status",
+          "display",
+          "kind"
         ],
         "title": "TaskEntityDto",
         "type": "object"
@@ -54261,11 +54686,9 @@
       },
       "TaskKind": {
         "enum": [
-          "monitor",
           "command",
           "tool"
         ],
-        "title": "TaskKind",
         "type": "string"
       },
       "TaskOutputResponse": {
@@ -54291,6 +54714,162 @@
           "truncated"
         ],
         "type": "object"
+      },
+      "TaskProjection": {
+        "description": "Bounded public task fields, serialized directly from the stored task.",
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created": {
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "display": {
+            "$ref": "#/components/schemas/BackgroundTaskDisplay"
+          },
+          "durationMs": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "exitCode": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "finished": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "interactive": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TaskKind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "outputFile": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outputTruncated": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "processId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProcessId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "query": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "tail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "turnId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "display",
+          "id",
+          "agent",
+          "created",
+          "kind",
+          "status",
+          "turnId",
+          "name"
+        ],
+        "type": "object"
+      },
+      "TaskRecordKind": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "enum": [
+          "command",
+          "tool"
+        ],
+        "title": "TaskKind",
+        "type": "string"
+      },
+      "TaskRecordStatus": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "enum": [
+          "starting",
+          "approval",
+          "pending",
+          "unknown",
+          "running",
+          "completed",
+          "failed",
+          "interrupted",
+          "lost"
+        ],
+        "title": "TaskStatus",
+        "type": "string"
+      },
+      "TaskRecordView": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/TaskEntityDto"
+          },
+          {
+            "$ref": "#/components/schemas/MonitorEntityDto"
+          }
+        ]
       },
       "TaskResource": {
         "additionalProperties": false,
@@ -54321,19 +54900,16 @@
       },
       "TaskStatus": {
         "enum": [
-          "running",
           "starting",
           "approval",
-          "queued",
-          "waiting",
+          "pending",
+          "unknown",
+          "running",
           "completed",
           "failed",
           "interrupted",
-          "cancelled",
-          "lost",
-          "unknown"
+          "lost"
         ],
-        "title": "TaskStatus",
         "type": "string"
       },
       "TaskSubmissionRefusal": {
@@ -54968,6 +55544,11 @@
         ],
         "title": "TextBlobResponse",
         "type": "object"
+      },
+      "Timestamp": {
+        "description": "Unix seconds.",
+        "format": "double",
+        "type": "number"
       },
       "TokenRateRecord": {
         "additionalProperties": false,
@@ -57850,6 +58431,10 @@
           "cancelled"
         ],
         "title": "TransferStatus",
+        "type": "string"
+      },
+      "TurnId": {
+        "description": "Provider turn identifier. A domain Turn table replaces this later.",
         "type": "string"
       },
       "TurnRecoveryRecordResponse": {
@@ -61037,6 +61622,111 @@
         "title": "WebPushSubscription",
         "type": "object"
       },
+      "WeeklyRunway": {
+        "additionalProperties": false,
+        "description": "Server-owned weekly allowance estimate, computed at `computed_at` (Unix seconds).",
+        "properties": {
+          "computedAt": {
+            "format": "double",
+            "type": "number"
+          },
+          "current": {
+            "$ref": "#/components/schemas/WeeklyRunwayState"
+          },
+          "next": {
+            "$ref": "#/components/schemas/WeeklyRunwayState"
+          },
+          "validUntil": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "computedAt",
+          "validUntil",
+          "current",
+          "next"
+        ],
+        "type": "object"
+      },
+      "WeeklyRunwayState": {
+        "additionalProperties": false,
+        "properties": {
+          "color": {
+            "$ref": "#/components/schemas/RunwayColor"
+          },
+          "days": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "unlimited": {
+            "type": "boolean"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/WeeklyRunwayWindow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "color",
+          "days",
+          "unlimited",
+          "windows"
+        ],
+        "type": "object"
+      },
+      "WeeklyRunwayWindow": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "remaining": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "reset": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "resetFirst": {
+            "type": "boolean"
+          },
+          "unlimited": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "remaining",
+          "reset",
+          "days",
+          "unlimited",
+          "resetFirst"
+        ],
+        "type": "object"
+      },
       "WhoisStatus": {
         "enum": [
           "pending",
@@ -61247,6 +61937,7 @@
         "description": "One tagged owner consumed by both HTTP and agent mutation adapters.\n\n```compile_fail\nuse studio_runtime_schema::task_command::TaskCommand;\nlet command = TaskCommand::Cancel { task_id: \"task\".into(), version: None };\n// A cancellation always carries its reason.\n```\n\n```compile_fail\nuse studio_runtime_schema::task_command::Version;\nlet version = Version(-1); // Ingress validation cannot be bypassed.\n```",
         "oneOf": [
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "list",
@@ -61271,6 +61962,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "create",
@@ -61374,6 +62066,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "update",
@@ -61496,6 +62189,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "cancel",
@@ -61541,6 +62235,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "reject",
@@ -61586,6 +62281,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "claim",
@@ -61632,6 +62328,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "submit",
@@ -61694,6 +62391,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "accept",
@@ -61748,6 +62446,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "const": "set_default_gate",
@@ -62268,6 +62967,52 @@
           "created"
         ],
         "title": "WorkDecisionRecordResponse",
+        "type": "object"
+      },
+      "WorkDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WorkItem"
+          },
+          {
+            "properties": {
+              "policy": {
+                "$ref": "#/components/schemas/WorkDetailPolicy"
+              }
+            },
+            "required": [
+              "policy"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "WorkDetailPolicy": {
+        "additionalProperties": false,
+        "description": "Current server-owned dependency and acceptance policy for one work detail.",
+        "properties": {
+          "acceptAvailable": {
+            "type": "boolean"
+          },
+          "blockedBy": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "displayStatus": {
+            "$ref": "#/components/schemas/WorkStatus"
+          },
+          "gateOverrideRequired": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "blockedBy",
+          "displayStatus",
+          "acceptAvailable",
+          "gateOverrideRequired"
+        ],
         "type": "object"
       },
       "WorkEntityDto": {
