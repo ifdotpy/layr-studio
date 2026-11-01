@@ -5,8 +5,18 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "collection", rename_all = "camelCase", deny_unknown_fields)]
 pub enum SyncEntityPayload {
-    Edge { id: String, value: EdgeEntity },
-    Chat { id: String, value: ChatEntity },
+    Edge {
+        id: String,
+        value: EdgeEntity,
+    },
+    Chat {
+        id: String,
+        value: ChatEntity,
+    },
+    WorkRelease {
+        id: String,
+        value: WorkReleaseEntity,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -40,6 +50,23 @@ pub struct ChatEntity {
 #[serde(rename_all = "lowercase")]
 pub enum ChatKind {
     Chat,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename = "WorkReleaseEntityDto")]
+pub struct WorkReleaseEntity {
+    pub id: String,
+    pub task_id: String,
+    pub root_id: String,
+    #[schemars(with = "u64")]
+    pub index: crate::recovery_record::NonnegativeInteger,
+    #[schemars(schema_with = "json_value_schema")]
+    pub value: serde_json::Value,
+}
+
+fn json_value_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({"$ref":"#/components/schemas/JsonValue"})
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -146,6 +173,41 @@ mod tests {
     }
 
     #[test]
+    fn work_release_previous_wire_fixtures() {
+        let base = json!({"id":"r","taskId":"t","rootId":"root","index":1,"value":null});
+        let mut cases = vec![(base.clone(), true)];
+        for (field, value, valid) in [
+            ("index", json!(1.0), true),
+            ("index", json!(-1), false),
+            ("index", json!(1.5), false),
+            ("taskId", json!(null), false),
+            ("value", json!({"open":true}), true),
+            ("extra", json!(true), false),
+        ] {
+            let mut row = base.clone();
+            row[field] = value;
+            cases.push((row, valid));
+        }
+        let mut missing = base;
+        missing.as_object_mut().unwrap().remove("value");
+        cases.push((missing, false));
+        for (value, valid) in cases {
+            let payload = json!({"collection":"workRelease","id":"r","value":value});
+            assert_eq!(
+                serde_json::from_value::<SyncEntityPayload>(payload.clone()).is_ok(),
+                valid,
+                "{payload}"
+            );
+            assert_eq!(
+                crate::validate_sync_entity_payload_strict("workRelease", "r", false, &payload)
+                    .unwrap(),
+                valid,
+                "{payload}"
+            );
+        }
+    }
+
+    #[test]
     fn migrated_payloads_use_the_serde_validator() {
         let source = include_str!("lib.rs");
         let body = source
@@ -155,7 +217,7 @@ mod tests {
             .split("fn sync_entity_envelope_matches(")
             .next()
             .unwrap();
-        let dispatch = "if matches!(collection, \"edge\" | \"chat\") {";
+        let dispatch = "if matches!(collection, \"edge\" | \"chat\" | \"workRelease\") {";
         let owner = "serde_json::from_value::<sync_entity_payload::SyncEntityPayload>";
         let owns_payloads = |text: &str| text.contains(dispatch) && text.contains(owner);
         assert!(owns_payloads(body));

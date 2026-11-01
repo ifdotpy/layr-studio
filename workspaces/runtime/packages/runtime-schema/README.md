@@ -23,7 +23,7 @@
   `cargo check -p studio-runtime-store -p studio-runtime-http` from the
   workspace root.
 
-The `sync_entity_payload` module owns migrated sync payload variants. Live edge and chat
+The `sync_entity_payload` module owns migrated sync payload variants. Live edge, chat, and work-release
 payloads use serde validation; remaining variants continue to use their OpenAPI
 schemas until migrated. Stored entity normalization still strips historical extra
 fields and handles tombstones before validation.

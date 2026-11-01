@@ -54147,11 +54147,9 @@
         "properties": {
           "collection": {
             "const": "workRelease",
-            "title": "Collection",
             "type": "string"
           },
           "id": {
-            "title": "Id",
             "type": "string"
           },
           "value": {
@@ -54163,7 +54161,6 @@
           "id",
           "value"
         ],
-        "title": "SyncWorkReleaseEntityPayload",
         "type": "object"
       },
       "SyncWorkResultEntityPayload": {
@@ -63692,6 +63689,7 @@
             "type": "string"
           },
           "index": {
+            "format": "uint64",
             "minimum": 0,
             "type": "integer"
           },
@@ -63712,7 +63710,6 @@
           "index",
           "value"
         ],
-        "title": "WorkReleaseEntityDto",
         "type": "object"
       },
       "WorkResource": {

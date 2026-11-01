@@ -23916,14 +23916,12 @@ export interface components {
       id: string;
       value: components["schemas"]["WorkEntityDto"];
     };
-    /** SyncWorkReleaseEntityPayload */
     SyncWorkReleaseEntityPayload: {
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
       collection: "workRelease";
-      /** Id */
       id: string;
       value: components["schemas"]["WorkReleaseEntityDto"];
     };
@@ -27706,9 +27704,9 @@ export interface components {
       /** Tasks */
       tasks: components["schemas"]["WorkItem"][];
     };
-    /** WorkReleaseEntityDto */
     WorkReleaseEntityDto: {
       id: string;
+      /** Format: uint64 */
       index: number;
       rootId: string;
       taskId: string;
