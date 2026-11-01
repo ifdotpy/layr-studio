@@ -824,7 +824,6 @@ mod tests {
             .expect("count")
     }
 
-<<<<<<< head
     /// Seed an outbox entry of `kind` for the agent `workspace` with `status`.
     async fn seed_entry(store: &RuntimeStore, kind: &'static str, status: &'static str) {
         store
@@ -965,8 +964,8 @@ mod tests {
         .await;
         assert_eq!(status, 403);
         assert_eq!(entry_row(&store).await.0, "unknown");
-||||||| base
-=======
+    }
+
     /// Records the lifecycle effects that a command stages in its transaction.
     struct StagingPorts(
         Arc<
@@ -1088,7 +1087,6 @@ mod tests {
             .await
             .expect("draft count");
         assert_eq!(drafts, 0);
->>>>>>> origin/main
     }
 
     #[tokio::test]

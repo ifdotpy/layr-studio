@@ -1165,7 +1165,6 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
-<<<<<<< head
             id: "2026-11-01-outbox-cancelled",
             introduced: NOVEMBER_1,
             target: MigrationTarget::Canvas,
@@ -1173,8 +1172,9 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_01_outbox_cancelled::apply(c.transaction),
-||||||| base
-=======
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
             id: "2026-11-01-access-invite-created",
             introduced: NOVEMBER_1,
             target: MigrationTarget::Canvas,
@@ -1182,7 +1182,6 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_01_access_invite_created::apply(c.transaction),
->>>>>>> origin/main
     },
     &SqlMigration {
         definition: MigrationDefinition {

@@ -10990,6 +10990,7 @@ export interface components {
       target: string;
     };
     CommandResolveBody: {
+      /** @enum {string} */
       action: "retry" | "delivered" | "discard";
     };
     CommandResponse: {
