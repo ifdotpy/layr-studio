@@ -444,7 +444,7 @@ impl SchedulerRepository {
                 .as_deref()
                 .is_some_and(|value| !value.is_empty())
             || agent.extra.get("capacityRetry").is_some_and(truthy)
-            || agent.extra.get("usageResume").is_some_and(truthy)
+            || agent.usage_resume_truthy()
             || agent
                 .extra
                 .get("manualRecoveryDeliveryHold")

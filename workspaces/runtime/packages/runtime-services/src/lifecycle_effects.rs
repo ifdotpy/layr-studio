@@ -1375,6 +1375,7 @@ pub(crate) fn notify_parent_of_failed_turn(
     let Some(agent) = AgentRepository::get(tx, &AgentId::from(agent_id))? else {
         return Ok(());
     };
+    let usage_resume = agent.usage_resume_value()?;
     let retrying = |value: Option<&Value>| {
         value.is_some_and(|retry| {
             retry.get("turnId") == Some(&json!(turn_id))
@@ -1390,7 +1391,7 @@ pub(crate) fn notify_parent_of_failed_turn(
         || agent.auto_wake != Some(true)
         || !reports_turns(&agent)
         || retrying(agent.extra.get("capacityRetry"))
-        || retrying(agent.extra.get("usageResume"))
+        || retrying(usage_resume.as_ref())
     {
         return Ok(());
     }

@@ -593,7 +593,7 @@ impl SchedulerRepository {
                 .is_some_and(truthy)
             || agent.extra.get("authWait").is_some_and(truthy)
             || agent.extra.get("capacityRetry").is_some_and(truthy)
-            || agent.extra.get("usageResume").is_some_and(truthy)
+            || agent.usage_resume_truthy()
             || agent.start_outcome_hold.is_some()
             || agent
                 .native_release

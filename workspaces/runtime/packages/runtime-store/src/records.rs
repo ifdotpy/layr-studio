@@ -563,6 +563,13 @@ pub struct AgentRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
+    pub usage_resume: studio_runtime_schema::queue_command::Field<
+        StoredTransferObject<studio_runtime_schema::continuation_snapshot::UsageContinuation>,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
     pub native_failure_hold: studio_runtime_schema::queue_command::Field<NativeFailureHold>,
     #[serde(
         default,
@@ -724,6 +731,37 @@ impl From<crate::transfer_record::TransferWorkerDefaults> for StoredWorkerDefaul
 }
 
 impl AgentRecord {
+    pub fn set_usage_resume(&mut self, value: Value) {
+        use studio_runtime_schema::queue_command::Field;
+        if value.is_null() {
+            self.usage_resume = Field::Null;
+        } else {
+            let known = value
+                .is_object()
+                .then(|| serde_json::from_value(value.clone()))
+                .transpose();
+            self.usage_resume = Field::Value(match known {
+                Ok(Some(known)) => StoredTransferObject::Known(known),
+                _ => StoredTransferObject::Unreadable(value),
+            });
+        }
+    }
+
+    pub fn usage_resume_value(&self) -> Result<Option<Value>, serde_json::Error> {
+        self.usage_resume
+            .value()
+            .map(serde_json::to_value)
+            .transpose()
+    }
+
+    pub fn usage_resume_truthy(&self) -> bool {
+        match self.usage_resume.value() {
+            Some(StoredTransferObject::Known(_)) => true,
+            Some(StoredTransferObject::Unreadable(value)) => crate::truthy(Some(value)),
+            None => false,
+        }
+    }
+
     pub fn set_native_failure_hold(&mut self, value: bool) {
         self.native_failure_hold =
             studio_runtime_schema::queue_command::Field::Value(NativeFailureHold::Boolean(value));
@@ -1089,6 +1127,7 @@ impl AgentRecord {
             in_flight: None,
             auto_wake: None,
             usage_resume_enabled: None,
+            usage_resume: Default::default(),
             native_failure_hold: Default::default(),
             prepare_attempt: Default::default(),
             worker_defaults: Default::default(),
@@ -3582,6 +3621,31 @@ mod tests {
             Some(super::StoredTransferValue::Unreadable(_))
         ));
         assert_eq!(legacy.value().get("yoloMode"), Some(&json!("legacy")));
+    }
+
+    #[test]
+    fn usage_resume_is_not_an_extension() {
+        let record = agent(json!({"compactions":0,"id":"agent","rootId":"agent",
+            "epoch":2,"status":"idle","accountKey":"default","usageResume":{
+                "id":"resume","accountKey":"default","threadId":"thread","turnId":"turn",
+                "epoch":2,"failedAt":1,"status":"scheduled"}}));
+        assert!(!record.extra.contains_key("usageResume"));
+        assert!(matches!(
+            record.usage_resume.value(),
+            Some(super::StoredTransferObject::Known(_))
+        ));
+        assert!(record.usage_resume_truthy());
+        for value in [json!({"future":true}), json!([1]), json!(false)] {
+            let mut legacy = agent(json!({"compactions":0,"id":"agent","rootId":"agent",
+                "epoch":2,"status":"idle","accountKey":"default"}));
+            legacy.set_usage_resume(value.clone());
+            assert!(matches!(
+                legacy.usage_resume.value(),
+                Some(super::StoredTransferObject::Unreadable(_))
+            ));
+            assert_eq!(legacy.usage_resume_value().unwrap(), Some(value.clone()));
+            assert_eq!(legacy.usage_resume_truthy(), crate::truthy(Some(&value)));
+        }
     }
 
     #[test]

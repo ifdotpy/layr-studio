@@ -211,16 +211,17 @@ pub fn disable_usage_resume(
         serde_json::from_str(&raw).map_err(|_| invalid("runtime_usage_resumes", resume_id))?;
     let mut resume = decode_resume(raw_value, resume_id)
         .ok_or_else(|| invalid("runtime_usage_resumes", resume_id))?;
-    let is_current = agent
-        .extra
-        .get("usageResume")
+    let embedded = agent
+        .usage_resume_value()
+        .map_err(|_| invalid("runtime_agents", agent_id))?;
+    let is_current = embedded
+        .as_ref()
         .and_then(|value| value.get("id"))
         .and_then(Value::as_str)
         == Some(resume_id);
     if is_current {
-        let embedded = agent
-            .extra
-            .get("usageResume")
+        let embedded = embedded
+            .as_ref()
             .ok_or_else(|| invalid("runtime_agents", agent_id))?;
         if decode_resume(embedded.clone(), resume_id).is_none() {
             return Err(invalid("runtime_agents", agent_id));
@@ -241,14 +242,10 @@ pub fn disable_usage_resume(
                 ],
             )?;
         }
-        agent.extra.insert("usageResume".to_owned(), json!(resume));
+        agent.set_usage_resume(json!(resume));
         AgentRepository::put(transaction, &agent)?;
     } else {
-        return Ok(agent
-            .extra
-            .get("usageResume")
-            .cloned()
-            .unwrap_or(Value::Null));
+        return Ok(embedded.unwrap_or(Value::Null));
     }
     Ok(json!(resume))
 }
@@ -283,18 +280,16 @@ pub fn cancel_usage_resume(
         serde_json::from_str(&raw).map_err(|_| invalid("runtime_usage_resumes", resume_id))?;
     let mut resume = decode_resume(raw_value, resume_id)
         .ok_or_else(|| invalid("runtime_usage_resumes", resume_id))?;
-    if agent
-        .extra
-        .get("usageResume")
+    let embedded = agent
+        .usage_resume_value()
+        .map_err(|_| invalid("runtime_agents", agent_id))?;
+    if embedded
+        .as_ref()
         .and_then(|value| value.get("id"))
         .and_then(Value::as_str)
         != Some(resume_id)
     {
-        return Ok(agent
-            .extra
-            .get("usageResume")
-            .cloned()
-            .unwrap_or(Value::Null));
+        return Ok(embedded.unwrap_or(Value::Null));
     }
     if !matches!(
         resume.status,
@@ -312,7 +307,7 @@ pub fn cancel_usage_resume(
             agent_id
         ],
     )?;
-    agent.extra.insert("usageResume".to_owned(), json!(resume));
+    agent.set_usage_resume(json!(resume));
     AgentRepository::put(transaction, &agent)?;
     Ok(json!(resume))
 }

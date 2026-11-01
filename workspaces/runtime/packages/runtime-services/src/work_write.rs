@@ -2434,7 +2434,10 @@ fn continuation_work_pending(agent: &AgentRecord) -> bool {
     };
 
     let capacity = agent.extra.get("capacityRetry").unwrap_or(&Value::Null);
-    let usage = agent.extra.get("usageResume").unwrap_or(&Value::Null);
+    let Ok(usage_value) = agent.usage_resume_value() else {
+        return true;
+    };
+    let usage = usage_value.as_ref().unwrap_or(&Value::Null);
     let restart = agent.restart_recovery.as_deref();
     matches(capacity, &["scheduled", "starting", "unknown"], "turnId")
         || matches(usage, &["scheduled", "started", "unknown"], "turnId")

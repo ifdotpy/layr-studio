@@ -543,9 +543,18 @@ fn persist_request(
     let mut agents = decision.agent_records()?;
     for (id, agent) in &mut agents {
         let prior = AgentRepository::get(tx, &AgentId::from(id.as_str()))?;
+        let prior_resume = prior
+            .as_ref()
+            .map(|agent| agent.usage_resume_value())
+            .transpose()
+            .map_err(|_| TransferError::Stored {
+                object: "usage resume",
+                pointer: "/".into(),
+            })?
+            .flatten();
         if let Some(prior) = &prior
             && prior.account_key != agent.account_key
-            && let Some(resume) = prior.extra.get("usageResume")
+            && let Some(resume) = prior_resume.as_ref()
             && let Ok(ResumeIdentity {
                 id: resume_id,
                 status: Some(ResumeString::Text("scheduled" | "started")),
@@ -577,7 +586,7 @@ fn persist_request(
                     pointer: "/".into(),
                 },
             })?;
-            agent.extra.insert("usageResume".into(), cancelled);
+            agent.set_usage_resume(cancelled);
         }
         if prior.as_ref() == Some(agent) {
             continue;
@@ -1796,7 +1805,7 @@ mod request_tests {
             "taskClaims":[]});
         run_async(store.transaction_with_error(move |tx| {
             let mut lead = AgentRepository::get(tx, &AgentId::from("lead"))?.expect("lead exists");
-            lead.extra.insert("usageResume".into(), resume.clone());
+            lead.set_usage_resume(resume.clone());
             lead.usage_resume_enabled = Some(true);
             AgentRepository::put(tx, &lead)?;
             tx.execute(
