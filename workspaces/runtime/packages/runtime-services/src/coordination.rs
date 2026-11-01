@@ -54,7 +54,6 @@ pub struct GroupMessageReply {
     pub author: String,
     pub text: String,
     pub at: f64,
-    #[serde(serialize_with = "studio_runtime_schema::delivery::serialize_recipient_deliveries")]
     pub deliveries: BTreeMap<String, studio_runtime_schema::persistence::RecipientDelivery>,
     pub status: studio_runtime_schema::delivery::MessageSendStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
