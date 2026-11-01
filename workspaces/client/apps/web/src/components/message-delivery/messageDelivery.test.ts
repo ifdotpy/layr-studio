@@ -80,7 +80,7 @@ it("matches transcript rows by receipt identity and retains edited text and atta
       ],
       [receipt],
     ).observed,
-    ["one"],
+    [],
   );
   // Equal text does not identify a message. Both independent sends remain visible.
   assert.equal(
@@ -168,7 +168,9 @@ it("retires delivered local cards outside the page only with exact saved input p
   assert.deepEqual(outgoingTranscript([original], [delivered]).items, [
     { ...original, deliveryStatus: delivered.status, deliveryError: undefined },
   ]);
-  assert.deepEqual(outgoingTranscript([original], [delivered]).observed, []);
+  assert.deepEqual(outgoingTranscript([original], [delivered]).observed, [
+    "one",
+  ]);
 });
 
 it("normalizes legacy next-turn rows without rewriting their retry payload", () => {
@@ -329,7 +331,7 @@ it("updates a matching receipt without replacing existing transcript content", (
     receipt: { id: "one", status: "failed", error: "late receipt error" },
   };
   const result = outgoingTranscript([durable], [entry]);
-  assert.deepEqual(result.observed, ["one"]);
+  assert.deepEqual(result.observed, []);
   assert.equal(result.items.length, 1);
   assert.equal(required(result.items[0]).text, "server text");
   assert.deepEqual(required(result.items[0]).assets, [
@@ -593,14 +595,11 @@ it("labels every generated message send status", () => {
     in_flight: "Sending…",
     transport_failed: "Could not contact server",
     receipt_expired: "Delivery outcome unknown",
-    uncertain: "Delivery unconfirmed",
     removed: "Removed from device",
   } as const;
   for (const [kind, label] of Object.entries(localLabels)) {
     const state =
-      kind === "transport_failed" ||
-      kind === "receipt_expired" ||
-      kind === "uncertain"
+      kind === "transport_failed" || kind === "receipt_expired"
         ? ({ kind, error: "offline" } as const)
         : { kind: kind as "stored" | "in_flight" | "removed" };
     assert.equal(
@@ -765,13 +764,36 @@ it("lets the durable outbox state replace an in-flight send copy", () => {
       ),
       [],
     );
-  // An observed send stays hidden whatever its local state is.
+  // A cached observation cannot hide a retained device command.
   assert.deepEqual(
     localCards([stored], { steer: sending }, new Set(["steer"])),
-    [],
+    [{ label: "Stored on device", retryControls: true }],
   );
 });
 
 it("keeps a stored request visible when a cached projection marks it observed", () => {
   assert.equal(mergeOutgoing([receipt], {}, new Set([receipt.id])).length, 1);
+});
+
+it("keeps a stored request actionable beside a cached delivered transcript row", () => {
+  const entry: OutgoingMessage = {
+    ...receipt,
+    receipt: undefined,
+    status: {
+      source: "device",
+      state: { kind: "transport_failed", error: "offline" },
+    },
+  };
+  const row = {
+    ...pending,
+    deliveryStatus: {
+      source: "server" as const,
+      status: MessageSendStatus.delivered,
+    },
+    materialized: true,
+  };
+  const result = outgoingTranscript([row], [entry]);
+  assert.equal(result.items[0]?.deliveryStatus?.source, "server");
+  assert.equal(result.items[0]?.localDelivery, true);
+  assert.deepEqual(result.observed, []);
 });

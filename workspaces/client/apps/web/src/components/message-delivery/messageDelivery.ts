@@ -26,7 +26,6 @@ const deviceLabels: Record<
   in_flight: "Sending…",
   transport_failed: "Could not contact server",
   receipt_expired: "Delivery outcome unknown",
-  uncertain: "Delivery unconfirmed",
   removed: "Removed from device",
 };
 
@@ -102,8 +101,7 @@ export function mergeOutgoing(
 function deliveryError(entry: OutgoingMessage) {
   return entry.status.source === "device" &&
     (entry.status.state.kind === "transport_failed" ||
-      entry.status.state.kind === "receipt_expired" ||
-      entry.status.state.kind === "uncertain")
+      entry.status.state.kind === "receipt_expired")
     ? entry.status.state.error
     : entry.receipt?.error;
 }
@@ -131,6 +129,8 @@ export function outgoingTranscript(
             entry.body.delivery ?? DeliveryMoment.CurrentTurn,
           ),
         };
+      if (entry.status.source === "device")
+        shown = { ...shown, localDelivery: true };
       updates.set(present.id, shown);
       if (!shown.deliveryStatus || entry.status.source === "server")
         updates.set(present.id, {
@@ -139,9 +139,8 @@ export function outgoingTranscript(
           deliveryError: deliveryError(entry),
         });
       if (
-        present.deliveryStatus?.source === "server" &&
-        !explicitQueue(present) &&
-        present.materialized !== false
+        entry.receipt?.status === MessageSendStatus.delivered &&
+        entry.receipt.materialized === true
       )
         observed.push(entry.id);
       continue;

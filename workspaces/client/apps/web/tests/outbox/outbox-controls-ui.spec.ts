@@ -143,7 +143,6 @@ for (const [device, viewport] of [
               command,
               getStreamSession: () => ({ workspaceId: identity.workspaceId }),
             } as never,
-            storage: sessionStorage,
             watchResourceConnection: () => () => {},
           });
           const body = {
