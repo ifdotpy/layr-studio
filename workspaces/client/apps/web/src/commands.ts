@@ -7,7 +7,7 @@
 import type { components } from "./generated/api.ts";
 import type { PendingCommands } from "./pendingCommands.ts";
 import { randomUUID } from "./uuid.ts";
-import { MAX_MANAGED_MESSAGE_CODEPOINTS } from "./generated/sharedValues";
+import { MAX_MANAGED_MESSAGE_CODEPOINTS } from "./generated/sharedValues.ts";
 
 export function sendsTextFile(text: string, explicit = false): boolean {
   return explicit || Array.from(text).length > MAX_MANAGED_MESSAGE_CODEPOINTS;
