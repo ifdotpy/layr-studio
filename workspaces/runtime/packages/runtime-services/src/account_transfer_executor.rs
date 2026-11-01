@@ -471,6 +471,33 @@ mod reconnect_read_tests {
             serde_json::to_vec(&after).unwrap(),
             serde_json::to_vec(&before).unwrap()
         );
+        store.transaction(|tx| {
+            let mut operation = studio_runtime_store::AccountTransferRepository::get(tx, "move")?.unwrap();
+            operation["members"]["member"]["providerReadReceipts"][OPERATION]["result"]["value"] = Value::Null;
+            studio_runtime_store::AccountTransferRepository::put(tx, "move", &operation.to_string())
+        }).await.unwrap();
+        let (_, null_reply) = session_reply(
+            &ProviderReadContext {
+                store: &store,
+                session: &session,
+                transfer: "move",
+                agent: "member",
+                account: "source",
+                now: 2.0,
+            },
+            ProviderReadCall {
+                actor: None,
+                transfer_source_thread: Some("source-thread".into()),
+                operation: OPERATION.into(),
+                method: Method::ThreadUnsubscribe,
+                params: json!({"threadId":"source-thread"}),
+                deadline: Duration::from_secs(1),
+            },
+        )
+        .await
+        .expect("null reply replays");
+        assert_eq!(null_reply, Value::Null);
+        assert_eq!(session.0.load(Ordering::SeqCst), 0);
         for field in ["sourceAccountKey", "sourceThreadId"] {
             let mut changed = before.clone();
             let member = changed.members.get_mut("member").unwrap();
@@ -597,11 +624,19 @@ async fn session_reply(
                 "The provider rejected a transfer read",
             ));
         }
-        let value = result
-            .value()
-            .ok_or(TransferError::Refused("Invalid saved provider receipt"))?;
-        let value: Value = serde_json::from_str(value.get())
-            .map_err(|_| TransferError::Refused("Invalid saved provider receipt"))?;
+        let value: Value = match result {
+            studio_runtime_store::transfer_record::ProviderResult::Inline {
+                value: None, ..
+            } => Value::Null,
+            studio_runtime_store::transfer_record::ProviderResult::Inline {
+                value: Some(value),
+                ..
+            } => serde_json::from_str(value.get())
+                .map_err(|_| TransferError::Refused("Invalid saved provider receipt"))?,
+            studio_runtime_store::transfer_record::ProviderResult::Blob { .. } => {
+                return Err(TransferError::Refused("Invalid saved provider receipt"));
+            }
+        };
         let stored_ticket = saved
             .receipt
             .ticket

@@ -15,6 +15,7 @@ pub(super) enum StoredTransferHold {
 #[serde(rename_all = "camelCase")]
 struct LegacyOwner {
     lead_id: Option<String>,
+    status: Option<String>,
 }
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
@@ -63,6 +64,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         if crate::schema::table_exists(tx, "runtime_agents")?
             && let Ok(LegacyOwner {
                 lead_id: Some(lead),
+                status,
             }) = serde_json::from_str::<LegacyOwner>(&raw)
         {
             let marker = serde_json::to_string(&UnreadableTransferSummary {
@@ -70,7 +72,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 reason,
                 original: None,
             })?;
-            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.accountTransfer',json(?2)) WHERE id=?1 AND json_valid(record)", params![lead, marker])?;
+            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.accountTransfer',json(?2)) WHERE id=?1 AND json_valid(record) AND (?3='pending' OR json_extract(record,'$.accountTransfer.id')=?4)", params![lead, marker, status, id])?;
         }
     }
     Ok(())
@@ -99,6 +101,26 @@ mod tests {
             [],
         )
         .unwrap();
+        let historical = r#"{"id":"old","leadId":"other","targetAccountKey":"target","status":"completed","created":1,"members":{},"futureField":true}"#;
+        db.execute(
+            "INSERT INTO runtime_account_transfers VALUES('old',?1)",
+            [historical],
+        )
+        .unwrap();
+        db.execute("INSERT INTO runtime_agents VALUES('other','{\"id\":\"other\",\"accountTransfer\":{\"id\":\"new\",\"status\":\"pending\"}}')", []).unwrap();
+        let cancelled = r#"{"id":"cancelled","leadId":"other","targetAccountKey":"target","status":"cancelled","created":2,"members":{},"futureField":true}"#;
+        db.execute(
+            "INSERT INTO runtime_account_transfers VALUES('cancelled',?1)",
+            [cancelled],
+        )
+        .unwrap();
+        let owned = r#"{"id":"owned","leadId":"third","targetAccountKey":"target","status":"completed","created":3,"members":{},"futureField":true}"#;
+        db.execute(
+            "INSERT INTO runtime_account_transfers VALUES('owned',?1)",
+            [owned],
+        )
+        .unwrap();
+        db.execute("INSERT INTO runtime_agents VALUES('third','{\"id\":\"third\",\"accountTransfer\":{\"id\":\"owned\",\"status\":\"completed\"}}')", []).unwrap();
         let tx = db.transaction().unwrap();
         super::apply(&tx).unwrap();
         super::apply(&tx).unwrap();
@@ -119,5 +141,37 @@ mod tests {
         );
         let marker: String = tx.query_row("SELECT json_extract(record,'$.accountTransfer.kind') FROM runtime_agents WHERE id='lead'", [], |row| row.get(0)).unwrap();
         assert_eq!(marker, "unreadable");
+        let old_original: String = tx
+            .query_row(
+                "SELECT record->>'$.original' FROM runtime_account_transfers WHERE id='old'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(old_original, historical);
+        let current: String = tx
+            .query_row(
+                "SELECT record->>'$.accountTransfer.id' FROM runtime_agents WHERE id='other'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(current, "new");
+        let cancelled_original: String = tx
+            .query_row(
+                "SELECT record->>'$.original' FROM runtime_account_transfers WHERE id='cancelled'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(cancelled_original, cancelled);
+        let owned_kind: String = tx
+            .query_row(
+                "SELECT record->>'$.accountTransfer.kind' FROM runtime_agents WHERE id='third'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(owned_kind, "unreadable");
     }
 }

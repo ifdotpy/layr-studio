@@ -169,28 +169,6 @@ pub fn owns_reading_member(
             .is_some_and(|lazy| lazy.id.as_str() == transfer_id))
 }
 
-fn snapshot_agents(
-    snapshot: &Snapshot,
-) -> Result<std::collections::BTreeMap<String, studio_runtime_store::AgentRecord>, TransferError> {
-    let operation = snapshot.record();
-    let mut ids = operation
-        .members
-        .0
-        .iter()
-        .map(|(id, _)| id.clone())
-        .collect::<Vec<_>>();
-    let lead = operation.lead_id.as_str();
-    if !ids.iter().any(|id| id == lead) {
-        ids.push(lead.into());
-    }
-    ids.into_iter()
-        .map(|id| {
-            let value = snapshot.agent_record(&id)?;
-            Ok((id, value))
-        })
-        .collect()
-}
-
 /// The account worker calls this once during startup before admitting turns.
 pub async fn recover(store: &RuntimeStore, now: f64) -> Result<usize, TransferError> {
     store
@@ -378,9 +356,7 @@ pub async fn request(
                 }
                 let active_id = active.id.as_str();
                 let snapshot = load(tx, active_id)?;
-                let mut operation = snapshot.record().clone();
-                let agents = snapshot_agents(&snapshot)?;
-                operation.add_team_request(
+                let decision = snapshot.add_team_request(
                     id.clone(),
                     lead.clone(),
                     target
@@ -388,23 +364,6 @@ pub async fn request(
                         .try_into()
                         .map_err(|_| TransferError::Refused("Invalid transfer target"))?,
                 )?;
-                let raw = serde_json::to_string(&operation)
-                    .map_err(|_| TransferError::Refused("Invalid transfer"))?;
-                let mut decision = Snapshot::read_typed(
-                    operation.clone(),
-                    raw.len(),
-                    agents.iter().map(|(id, agent)| {
-                        Ok((
-                            id.clone(),
-                            serde_json::to_string(agent)
-                                .map_err(|_| TransferError::Refused("Invalid transfer agent"))?,
-                        ))
-                    }),
-                )?
-                .decide(Command::Restart)?;
-                decision.operation = operation;
-                decision.replace_agent_records(agents)?;
-                decision.changed = true;
                 return persist_request(tx, decision, now, Some(&id));
             }
 
@@ -533,7 +492,7 @@ fn persist_request(
     request_id: Option<&str>,
 ) -> Result<Value, TransferError> {
     if !decision.changed {
-        return serde_json::to_value(decision.typed_public_view()?)
+        return serde_json::to_value(decision.typed_public_view())
             .map_err(|_| TransferError::Refused("Invalid transfer response"));
     }
     let operation = &decision.operation;
@@ -554,7 +513,7 @@ fn persist_request(
         .and_then(|(op, _)| op.created.as_f64());
     decision.stamp(now, previous_created)?;
     if let Some(request_id) = request_id {
-        let saved = decision.typed_public_view()?;
+        let saved = decision.typed_public_view();
         decision.operation.save_response(request_id, saved)?;
     }
     let raw = decision.encoded()?;
@@ -621,7 +580,7 @@ fn persist_request(
         )
         .map_err(|_| TransferError::Refused("Cannot enqueue transfer continuation"))?;
     }
-    serde_json::to_value(decision.typed_public_view()?)
+    serde_json::to_value(decision.typed_public_view())
         .map_err(|_| TransferError::Refused("Invalid transfer response"))
 }
 
@@ -1430,6 +1389,14 @@ mod request_tests {
         assert_eq!(original, raw);
         let marker: String = db.query_row("SELECT json_extract(record,'$.accountTransfer.kind') FROM runtime_agents WHERE id='lead'", [], |row| row.get(0)).unwrap();
         assert_eq!(marker, "unreadable");
+        drop(db);
+        drop(store);
+        let reopened =
+            run_async(RuntimeStore::open(Some(root.path()))).expect("second store reopen");
+        assert_eq!(
+            run_async(recover(&reopened, 11.0)).expect("held operation remains skipped"),
+            0
+        );
     }
 
     #[test]

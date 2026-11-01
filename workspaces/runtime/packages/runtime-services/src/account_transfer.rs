@@ -252,19 +252,19 @@ use studio_runtime_store::transfer_record::TransferStatus;
 pub fn progress_view(
     summary: Option<&studio_runtime_store::transfer_record::AgentTransferState>,
     can_cancel: bool,
-) -> Result<studio_runtime_schema::agent_progress::AccountTransferProgress, TransferError> {
+) -> studio_runtime_schema::agent_progress::AccountTransferProgress {
     use studio_runtime_schema::agent_progress::{
         AccountTransferActions as Actions, AccountTransferProgress as Progress,
         MovingTransferActions, WaitingTransferActions,
     };
     let Some(summary) = summary else {
-        return Ok(Progress::None);
+        return Progress::None;
     };
     let summary = match summary {
         studio_runtime_store::transfer_record::AgentTransferState::Unreadable(value) => {
-            return Ok(Progress::Unreadable {
+            return Progress::Unreadable {
                 reason: value.reason.clone(),
-            });
+            };
         }
         studio_runtime_store::transfer_record::AgentTransferState::Summary(value) => value,
     };
@@ -273,7 +273,7 @@ pub fn progress_view(
     let status = &summary.status;
     let waiting = summary.waiting.value().cloned();
     let can_retry = summary.can_retry.value() == Some(&true);
-    Ok(match status {
+    match status {
         TransferStatus::Completed => Progress::Completed {
             id,
             target_account_key,
@@ -320,7 +320,7 @@ pub fn progress_view(
                 }
             }
         }
-    })
+    }
 }
 
 /// Validated snapshot with original member insertion order retained for the UI.
@@ -445,14 +445,28 @@ impl Snapshot {
     }
     pub fn typed_public_view(
         &self,
-    ) -> Result<studio_runtime_store::transfer_record::SavedTransferResponse, TransferError> {
-        Ok(public_view_record(&self.operation))
+    ) -> studio_runtime_store::transfer_record::SavedTransferResponse {
+        public_view_record(&self.operation)
     }
     pub fn lead_id(&self) -> &str {
         &self.operation.lead_id
     }
     pub(crate) fn record(&self) -> &studio_runtime_store::transfer_record::TransferRecord {
         &self.operation
+    }
+    pub(crate) fn add_team_request(
+        mut self,
+        id: String,
+        lead: String,
+        target: studio_runtime_schema::account_key::AccountKey,
+    ) -> Result<Decision, TransferError> {
+        self.operation.add_team_request(id, lead, target)?;
+        Ok(Decision {
+            operation: self.operation,
+            agents: self.agents,
+            followups: Vec::new(),
+            changed: true,
+        })
     }
     pub(crate) fn can_cancel(&self) -> bool {
         self.pending() && check_cancel(&self.operation, &self.agents).is_ok()
@@ -897,34 +911,17 @@ impl Snapshot {
         if let Some(saved) = member.provider_intent.value() {
             let saved_params: Value = serde_json::from_str(saved.params.get())
                 .map_err(|_| invalid("provider payload", "/"))?;
-            if saved.operation == intent.operation
+            if !(saved.operation == intent.operation
                 && saved.account.is_missing()
                 && saved.scope == intent.scope
                 && saved.method == intent.method
-                && saved_params == params_value
+                && saved_params == params_value)
             {
-                if self.phase(agent)? == Phase::Reading {
-                    let mut op = self.operation.clone();
-                    let member = op
-                        .members
-                        .get_mut(agent)
-                        .ok_or(TransferError::Refused("Unknown transfer member"))?;
-                    member.phase = if member.lazy.value() == Some(&true) {
-                        Phase::LazySubmitted
-                    } else {
-                        Phase::Submitted
-                    };
-                    member.native_method = Field::Value(intent.method);
-                    member.native_params = Field::Value(intent.params);
-                    return Ok(self.decision(op, self.agents.clone(), vec![]));
-                }
-                return Ok(self.decision(self.operation.clone(), self.agents.clone(), vec![]));
+                return Err(TransferError::Refused(
+                    "The transfer provider intent changed; inspect its receipt",
+                ));
             }
-            return Err(TransferError::Refused(
-                "The transfer provider intent changed; inspect its receipt",
-            ));
-        }
-        if !member.provider_intent.is_missing() {
+        } else if !member.provider_intent.is_missing() {
             return Err(TransferError::Refused(
                 "The transfer provider intent changed; inspect its receipt",
             ));
@@ -941,7 +938,9 @@ impl Snapshot {
         };
         member.native_method = Field::Value(intent.method.clone());
         member.native_params = Field::Value(intent.params.clone());
-        member.provider_intent = Field::Value(intent);
+        if member.provider_intent.is_missing() {
+            member.provider_intent = Field::Value(intent);
+        }
         Ok(self.decision(op, self.agents.clone(), vec![]))
     }
 
@@ -2122,8 +2121,8 @@ impl Decision {
 
     pub fn typed_public_view(
         &self,
-    ) -> Result<studio_runtime_store::transfer_record::SavedTransferResponse, TransferError> {
-        Ok(public_view_record(&self.operation))
+    ) -> studio_runtime_store::transfer_record::SavedTransferResponse {
+        public_view_record(&self.operation)
     }
 
     /// Atomically maintained renderer summary; a newer operation owns its lead.
@@ -2435,10 +2434,7 @@ mod provider_receipt_tests {
         let snapshot =
             super::Snapshot::read(&base.to_string(), [("agent".into(), agent.to_string())])
                 .unwrap();
-        assert_eq!(
-            snapshot.typed_public_view().unwrap().scope,
-            TransferScope::Team
-        );
+        assert_eq!(snapshot.typed_public_view().scope, TransferScope::Team);
     }
 
     #[test]
@@ -2477,7 +2473,7 @@ mod provider_receipt_tests {
         let raw = r#"{"id":"move","leadId":"agent","targetAccountKey":"target","status":"pending","created":1,"members":{"agent":{"phase":"waiting","sourceAccountKey":"source"}}}"#;
         let agent = serde_json::json!({"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0});
         let snapshot = super::Snapshot::read(raw, [("agent".into(), agent.to_string())]).unwrap();
-        assert_eq!(snapshot.typed_public_view().unwrap().total, 1);
+        assert_eq!(snapshot.typed_public_view().total, 1);
         let mut agent = snapshot.agent_record("agent").unwrap();
         let id = "move".to_owned().try_into().unwrap();
         let target = "target".to_owned().try_into().unwrap();
@@ -2492,7 +2488,7 @@ mod provider_receipt_tests {
         assert_eq!(member.phase, super::Phase::Lazy);
         assert_eq!(agent.account_transfer_id.value().unwrap().as_str(), "move");
         let mut decision = snapshot.decide(super::Command::Restart).unwrap();
-        assert_eq!(decision.typed_public_view().unwrap().total, 1);
+        assert_eq!(decision.typed_public_view().total, 1);
         let mut agents = decision.agent_records().unwrap();
         agents.insert("agent".into(), agent);
         decision.replace_agent_records(agents).unwrap();
@@ -2796,7 +2792,7 @@ mod provider_receipt_tests {
             decision.agents["agent"].get("accountTransfer").unwrap(),
         )
         .unwrap();
-        let progress = progress_view(Some(&summary), snapshot.can_cancel()).unwrap();
+        let progress = progress_view(Some(&summary), snapshot.can_cancel());
         let encoded = serde_json::to_value(progress).unwrap();
         assert!(!matches!(
             encoded["actions"].as_str(),

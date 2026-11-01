@@ -266,10 +266,17 @@ struct ProviderReadReceiptWire {
 }
 impl Serialize for ProviderReadReceipt {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        ProviderReadReceiptWire {
-            certainty: self.receipt.certainty.clone(),
-            receipt: self.receipt.clone(),
-            result: self.result.clone(),
+        #[derive(Serialize)]
+        struct Wire<'a> {
+            certainty: &'a ReceiptCertainty,
+            receipt: &'a ProviderReceipt,
+            #[serde(skip_serializing_if = "Field::is_missing")]
+            result: &'a Field<ProviderResult>,
+        }
+        Wire {
+            certainty: &self.receipt.certainty,
+            receipt: &self.receipt,
+            result: &self.result,
         }
         .serialize(serializer)
     }

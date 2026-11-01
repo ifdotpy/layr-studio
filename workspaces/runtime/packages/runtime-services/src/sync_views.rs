@@ -609,7 +609,6 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
                 summary.as_ref(),
                 matches!(observation, TransferObservation::Cancellable),
             )
-            .ok()?
         }
     };
     if let Some(summary) = view

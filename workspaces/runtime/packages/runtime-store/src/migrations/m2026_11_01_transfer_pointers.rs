@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn unknown_lazy_field_becomes_visible_unreadable_hold() {
         let mut db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch(r#"CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL); INSERT INTO runtime_agents VALUES('lead','{"id":"lead","accountTransferId":"move","lazyAccountTransfer":{"id":"move","sourceAccountKey":"source","unexpected":true}}');"#).unwrap();
+        db.execute_batch(r#"CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL); INSERT INTO runtime_agents VALUES('lead','{"id":"lead","accountTransferId":"move","lazyAccountTransfer":{"id":"move","sourceAccountKey":"source","sourceState":{"pendingSettings":{"nested":{"value":42}}},"unexpected":true}}');"#).unwrap();
         let tx = db.transaction().unwrap();
         super::apply(&tx).unwrap();
         let raw: String = tx
@@ -151,7 +151,7 @@ mod tests {
         let original: String = tx.query_row("SELECT record->'$.lazyAccountTransfer.original' FROM runtime_agents WHERE id='lead'", [], |row| row.get(0)).unwrap();
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&original).unwrap(),
-            serde_json::json!({"id":"move","sourceAccountKey":"source","unexpected":true})
+            serde_json::json!({"id":"move","sourceAccountKey":"source","sourceState":{"pendingSettings":{"nested":{"value":42}}},"unexpected":true})
         );
     }
 }
