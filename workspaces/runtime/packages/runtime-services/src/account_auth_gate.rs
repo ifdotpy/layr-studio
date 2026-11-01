@@ -360,7 +360,7 @@ mod tests {
         )
         .unwrap();
         for id in ["busy", "idle"] {
-            let record = json!({"id":id,"epoch":1,"status":"failed","error":"held",
+            let record = json!({"id":id,"provider":"codex","epoch":1,"status":"failed","error":"held",
                 "autoWake":1,"accountKey":"default"});
             db.execute(
                 "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",

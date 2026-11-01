@@ -764,7 +764,7 @@ mod busy_candidate_tests {
         db.execute_batch(&studio_runtime_store::domain::tables_sql())
             .unwrap();
         for id in ["busy", "idle"] {
-            let record = json!({"id":id,"status":"running","inFlight":true});
+            let record = json!({"id":id,"provider":"codex","status":"running","inFlight":true});
             db.execute(
                 "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
                 rusqlite::params![id, record.to_string()],
