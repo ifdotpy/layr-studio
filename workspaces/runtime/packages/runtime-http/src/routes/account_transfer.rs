@@ -49,28 +49,14 @@ async fn selection(
     ApiJson(body): ApiJson<AccountSelectionRequest>,
 ) -> Result<Json<generated::AgentResponse>, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
-    let driver = state.account_driver.clone();
-    let policy = state.account_policy.clone();
-    let accounts = studio_runtime_process::blocking_pool::spawn_blocking(
-        "runtime-http/routes/account_transfer",
-        move || {
-            if let Some(driver) = driver {
-                driver.snapshot().map_err(|_| ())
-            } else if let Some(policy) = policy {
-                Ok(policy.accounts())
-            } else {
-                Err(())
-            }
-        },
-    )
-    .await
-    .map_err(|_| ApiError::internal())?
-    .map_err(|_| {
-        error(TransferError::Stored {
-            object: "account registry",
-            pointer: "/".into(),
-        })
-    })?;
+    let accounts = crate::bounded_entities::accounts(&state)
+        .await
+        .map_err(|_| {
+            error(TransferError::Stored {
+                object: "account registry",
+                pointer: "/".into(),
+            })
+        })?;
     let accounts_value = accounts.clone();
     let accounts = move || Ok::<_, TransferError>(accounts_value.clone());
     let value = studio_runtime_services::account_selection::select(
@@ -166,19 +152,9 @@ async fn transfer(
         {
             return super::generated_json::<generated::TransferResponse>(saved).map(Json);
         }
-        let accounts = if let Some(driver) = state.account_driver.clone() {
-            studio_runtime_process::blocking_pool::spawn_blocking(
-                "runtime-http/routes/account_transfer",
-                move || driver.snapshot(),
-            )
+        let accounts = crate::bounded_entities::accounts(&state)
             .await
-            .map_err(|_| ApiError::internal())?
-            .map_err(|_| ApiError::internal())?
-        } else if let Some(policy) = &state.account_policy {
-            policy.accounts()
-        } else {
-            return Err(error(TransferError::Refused("Unknown account")));
-        };
+            .map_err(|_| ApiError::internal())?;
         if !accounts.known_account_keys.contains(target) {
             return Err(error(TransferError::Refused("Unknown account")));
         }
@@ -198,14 +174,11 @@ async fn transfer(
             .account_profile(target)
             .map(|(_, provider)| provider.key().to_owned())
             .or_else(|| {
-                state.account_policy.as_ref().and_then(|policy| {
-                    policy
-                        .accounts()
-                        .accounts
-                        .into_iter()
-                        .find(|account| account.id.as_str() == Some(target))
-                        .and_then(|account| account.provider.as_str().map(str::to_owned))
-                })
+                accounts
+                    .accounts
+                    .iter()
+                    .find(|account| account.id.as_str() == Some(target))
+                    .and_then(|account| account.provider.as_str().map(str::to_owned))
             })
             .or_else(|| (target == "default").then(|| ProviderKind::Codex.key().to_owned()))
             .ok_or_else(|| error(TransferError::Refused("Unknown account provider")))?;
@@ -295,6 +268,132 @@ mod replay_tests {
     use studio_runtime_services::account_policy::AccountPolicyState;
     use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore};
     use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn admission_uses_refreshed_driver_credentials_for_selection_and_transfer() {
+        let root = tempfile::tempdir().unwrap();
+        let signed_in = root.path().join("signed-in");
+        let signed_out = root.path().join("signed-out");
+        std::fs::create_dir_all(&signed_in).unwrap();
+        std::fs::create_dir_all(&signed_out).unwrap();
+        std::fs::write(
+            signed_in.join("auth.json"),
+            br#"{"OPENAI_API_KEY":"fixture"}"#,
+        )
+        .unwrap();
+        let registry = root.path().join("accounts.json");
+        std::fs::write(&registry, json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"signed-in","logins":{},"accounts":{
+            "signed-in":{"id":"signed-in","provider":"codex","home":signed_in,"label":"In","source":"fixture","status":"signedOut"},
+            "signed-out":{"id":"signed-out","provider":"codex","home":signed_out,"label":"Out","source":"fixture","status":"ready"}}}).to_string()).unwrap();
+        let driver = Arc::new(
+            studio_runtime_services::account_driver::AccountDriver::open(registry).unwrap(),
+        );
+        let stored = driver.snapshot().unwrap();
+        let refreshed = driver.listing_snapshot().unwrap();
+        for (key, before, after) in [
+            ("signed-in", "signedOut", "ready"),
+            ("signed-out", "ready", "signedOut"),
+        ] {
+            assert_eq!(
+                stored
+                    .accounts
+                    .iter()
+                    .find(|row| row.id.as_str() == Some(key))
+                    .unwrap()
+                    .status
+                    .as_str(),
+                Some(before)
+            );
+            assert_eq!(
+                refreshed
+                    .accounts
+                    .iter()
+                    .find(|row| row.id.as_str() == Some(key))
+                    .unwrap()
+                    .status
+                    .as_str(),
+                Some(after)
+            );
+        }
+        let state_dir = root.path().join("state");
+        std::fs::create_dir(&state_dir).unwrap();
+        let store = Arc::new(RuntimeStore::open(Some(&state_dir)).await.unwrap());
+        for id in ["select-in", "select-out", "move-in", "move-out"] {
+            let agent = AgentRecord::from_value(json!({"compactions":0,"id":id,"rootId":id,"epoch":1,"status":"idle","isLead":true,"accountKey":"source","provider":"codex","serverId":"local","model":"gpt-6-astra","cwd":root.path()})).unwrap();
+            store
+                .transaction(move |tx| AgentRepository::put(tx, &agent))
+                .await
+                .unwrap();
+        }
+        let state = crate::HttpState::new(
+            "token".into(),
+            "fixture".into(),
+            root.path().display().to_string(),
+            49171,
+            None,
+            Some(store),
+            None,
+        )
+        .with_account_driver(driver);
+        let app = crate::router(state).unwrap();
+        let mut results = Vec::new();
+        for (route, id, account, expected) in [
+            ("/api/agents/account", "select-in", "signed-in", 200),
+            ("/api/agents/account", "select-out", "signed-out", 400),
+            ("/api/agents/account-transfer", "move-in", "signed-in", 200),
+            (
+                "/api/agents/account-transfer",
+                "move-out",
+                "signed-out",
+                400,
+            ),
+        ] {
+            let request_id = if id == "move-out" {
+                "5a300f72-4ea6-4d30-8a0e-9b2c13c4226c"
+            } else {
+                "5a300f72-4ea6-4d30-8a0e-9b2c13c4226b"
+            };
+            let body = json!({"id":id,"account_key":account,"request_id":request_id});
+            let body = if route == "/api/agents/account" {
+                json!({"id":id,"account_key":account})
+            } else {
+                body
+            };
+            let request = Request::builder()
+                .method("POST")
+                .uri(route)
+                .header("host", "127.0.0.1:49171")
+                .header("content-type", "application/json")
+                .header("x-canvas-token", "token")
+                .header(crate::API_SCHEMA_HASH_HEADER, crate::api_schema_hash())
+                .extension(ConnectInfo(
+                    "127.0.0.1:12345".parse::<std::net::SocketAddr>().unwrap(),
+                ))
+                .body(Body::from(body.to_string()))
+                .unwrap();
+            let response = app.clone().oneshot(request).await.unwrap();
+            let status = response.status();
+            let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+            if expected == 400 {
+                assert!(
+                    String::from_utf8_lossy(&bytes).contains("not available"),
+                    "{route} {id}: {}",
+                    String::from_utf8_lossy(&bytes)
+                );
+            }
+            results.push((
+                format!("{route} {id}: {}", String::from_utf8_lossy(&bytes)),
+                status.as_u16(),
+                expected,
+            ));
+        }
+        assert!(
+            results
+                .iter()
+                .all(|(_, actual, expected)| actual == expected),
+            "{results:?}"
+        );
+    }
 
     #[tokio::test]
     async fn exact_transfer_retry_survives_destination_disconnect() {
