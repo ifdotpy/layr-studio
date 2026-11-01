@@ -1,5 +1,6 @@
 //! Closed stored project records used by project and radio admission.
 use crate::persistence::{AdmittedRequest, ProjectRemovalReason, WorkEffectStatus};
+use crate::queue_command::Field;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -53,8 +54,9 @@ pub struct ProjectLive {
     pub updated: Option<serde_json::Number>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sidebar_hidden: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub peer_teams_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[schemars(with = "Option<u64>")]
+    pub peer_teams_revision: Field<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub organization_revision: Option<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -174,4 +176,40 @@ pub(crate) fn check_schema_parity() -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn peer_teams_revision_preserves_missing_and_null() {
+        for (raw, expected) in [
+            (
+                r#"{"recordKind":"live","id":"p","path":"/p"}"#,
+                Field::Missing,
+            ),
+            (
+                r#"{"recordKind":"live","id":"p","path":"/p","peerTeamsRevision":null}"#,
+                Field::Null,
+            ),
+            (
+                r#"{"recordKind":"live","id":"p","path":"/p","peerTeamsRevision":3}"#,
+                Field::Value(3),
+            ),
+        ] {
+            let ProjectRecord::Live(project) = serde_json::from_str(raw).unwrap() else {
+                panic!("live")
+            };
+            assert_eq!(project.peer_teams_revision, expected);
+            let encoded = serde_json::to_value(ProjectRecord::Live(project)).unwrap();
+            assert_eq!(
+                encoded.get("peerTeamsRevision"),
+                serde_json::from_str::<serde_json::Value>(raw)
+                    .unwrap()
+                    .get("peerTeamsRevision")
+            );
+        }
+        check_schema_parity().unwrap();
+    }
 }

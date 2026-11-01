@@ -378,7 +378,20 @@ async fn held_claude_start_survives_restart_and_starts_once() {
         // Keep the disposable directory while releasing its only store owner.
         state.retained = true;
         drop(state);
-        let store = RuntimeStore::open(Some(&root)).await.unwrap();
+        // A cancelled writer job keeps the state lease until its thread has run it,
+        // so the new owner waits for the lease as a restarted server does.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
+        let store = loop {
+            match RuntimeStore::open(Some(&root)).await {
+                Ok(store) => break store,
+                Err(studio_runtime_store::StoreError::AlreadyOwned)
+                    if tokio::time::Instant::now() < deadline =>
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+                Err(error) => panic!("the state did not open again: {error}"),
+            }
+        };
         State {
             bridge: test_bridge(Arc::new(store)).await,
             agent,

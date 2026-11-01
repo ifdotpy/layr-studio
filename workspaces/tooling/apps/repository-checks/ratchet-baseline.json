@@ -2497,10 +2497,6 @@
       "fingerprint": "c561134022751e5032b017f28ce8ce13cf637826a234d7119c8baab02fb0a488:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-schema/src/command.rs",
-      "fingerprint": "2bd70344c5c99098351126ec4b5ce6b94e385d52a20fc8e9f3627ad0ae7ec87d:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-schema/src/complaints.rs",
       "fingerprint": "0f89f9483053f6b324fcaf680ef12f2dcf5eb4b0280839063cdd7f3e290207b4:0"
     },

@@ -128,6 +128,17 @@ export async function fixture(
   let autoPair = true;
   let staleSettingsReceipts = false;
   const pairs: string[] = [];
+  // The same snapshot the HTTP route returns and the stream attaches (sync_stream.rs).
+  const accessSnapshot = () => ({
+    protocol: 1 as const,
+    identity: invitation,
+    clients: accessClients,
+    settings: { aliases, autoPair },
+    servers: discoveredPeers.map(
+      ({ invitation: _invitation, ...peer }) => peer,
+    ),
+    invites: [],
+  });
   const streams = new Set<ServerResponse>();
   const subscriptions = new Map<ServerResponse, ResourceRef[]>();
   const nonces = new Set<string | undefined>();
@@ -327,6 +338,7 @@ export async function fixture(
     }
     if (
       handleEntitySyncFixtureRequest(request, response, {
+        discoverySnapshot: accessSnapshot,
         snapshot,
         workspaceId,
         subscriptionUpdate: bodyFor("/api/sync/subscriptions"),
@@ -485,9 +497,7 @@ export async function fixture(
         }
       }
       json({
-        protocol: 1,
-        identity: invitation,
-        clients: accessClients,
+        ...accessSnapshot(),
         // An exact retry can return an earlier snapshot. GET stays current.
         settings: {
           aliases,
@@ -496,10 +506,6 @@ export async function fixture(
               ? !autoPair
               : autoPair,
         },
-        servers: discoveredPeers.map(
-          ({ invitation: _invitation, ...peer }) => peer,
-        ),
-        invites: [],
       });
       return;
     }

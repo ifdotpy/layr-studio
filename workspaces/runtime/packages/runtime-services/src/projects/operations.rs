@@ -1,91 +1,57 @@
 use super::*;
 use crate::event_write::{CallerAdmission, RequestKey, begin_request};
 use std::sync::Arc;
+use studio_runtime_schema::peer_team_ingress::TeamMutation;
 
 pub async fn peer_team_write(
     store: Arc<RuntimeStore>,
-    body: Value,
+    body: TeamMutation,
     default_account: String,
     known_accounts: Vec<crate::account_policy::PublicAccount>,
 ) -> Result<Value, ProjectsError> {
-    let action = body
-        .get("action")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    if !matches!(action.as_str(), "save" | "delete" | "move") {
-        return Err(ProjectsError::Invalid("unknown peer team action"));
-    }
-    let path_value = body.get("path").cloned();
+    let path_value = Some(body.path().to_owned());
     let revision = body
-        .get("expected_revision")
-        .and_then(Value::as_u64)
+        .expected_revision()
+        .as_u64()
         .ok_or(ProjectsError::Invalid("peer team revision is invalid"))?;
-    let raw_request = body
-        .get("request_id")
-        .and_then(Value::as_str)
-        .ok_or(ProjectsError::Invalid("peer team request ID is required"))?;
-    let request_id = python_strip(raw_request).to_owned();
+    let request_id = python_strip(body.request_id()).to_owned();
     if request_id.is_empty() || request_id.chars().count() > 255 {
         return Err(ProjectsError::Invalid("peer team request ID is invalid"));
     }
     let team_id = body
-        .get("team_id")
-        .and_then(Value::as_str)
+        .team_id()
         .map(|value| {
             Uuid::parse_str(value)
                 .map(|id| id.to_string())
                 .map_err(|_| ProjectsError::Invalid("peer team ID is invalid"))
         })
         .transpose()?;
-    let member = body
-        .get("member")
-        .and_then(Value::as_str)
-        .map(|value| python_strip(value).to_owned());
-    if (action != "move" || body.get("team_id").is_some_and(|value| !value.is_null()))
-        && team_id.is_none()
-    {
+    if !matches!(&body, TeamMutation::Move(_)) && team_id.is_none() {
         return Err(ProjectsError::Invalid("peer team ID is invalid"));
     }
-    let name = if action == "save" {
-        let value = body
-            .get("name")
-            .and_then(Value::as_str)
-            .ok_or(ProjectsError::Invalid("peer team name is invalid"))?;
-        let value = python_strip(value);
-        if value.is_empty() || value.chars().count() > 80 {
-            return Err(ProjectsError::Invalid("peer team name is invalid"));
+    let (name, members) = match &body {
+        TeamMutation::Save(v) => {
+            let name = python_strip(&v.name);
+            if name.is_empty() || name.chars().count() > 80 {
+                return Err(ProjectsError::Invalid("peer team name is invalid"));
+            }
+            if v.members.len() < 2
+                || v.members.iter().any(String::is_empty)
+                || v.members
+                    .iter()
+                    .collect::<std::collections::HashSet<_>>()
+                    .len()
+                    != v.members.len()
+            {
+                return Err(ProjectsError::Invalid(
+                    "select at least two different lead chats",
+                ));
+            }
+            (Some(name.to_owned()), v.members.clone())
         }
-        Some(value.to_owned())
-    } else {
-        None
+        TeamMutation::Delete(_) | TeamMutation::Move(_) => (None, Vec::new()),
     };
-    let members = body
-        .get("members")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    if action == "save"
-        && (members.len() < 2
-            || members
-                .iter()
-                .any(|value| value.as_str().is_none_or(str::is_empty))
-            || members
-                .iter()
-                .collect::<std::collections::HashSet<_>>()
-                .len()
-                != members.len())
-    {
-        return Err(ProjectsError::Invalid(
-            "select at least two different lead chats",
-        ));
-    }
-    let signature = sha256_hex(
-        studio_runtime_schema::json_compat::python_json_compact(
-            &json!({"operation":"peer-team","body":body}),
-        )
-        .as_bytes(),
-    );
+    let signature = sha256_hex(&serde_json::to_vec(&body).map_err(StoreError::from)?);
     let key = format!("peer-team:{request_id}");
     let (prepared, path) = super::prepare_path(store.clone(), path_value, false).await?;
     store.transaction_with(move |tx| {
@@ -114,23 +80,23 @@ pub async fn peer_team_write(
         let mut statement = tx.prepare_cached("SELECT id FROM sync_entities WHERE collection='peerTeam' AND json_extract(payload,'$.value.projectPath')=?1")?;
         previous_ids.extend(statement.query_map([&path], |row| row.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?);
         drop(statement);
-        match action.as_str() {
-            "save" => {
+        match body {
+            TeamMutation::Save(_) => {
                 let team_id = team_id.as_deref().ok_or(ProjectsError::Invalid("peer team ID is invalid"))?;
                 for member in &members {
-                    let id = member.as_str().unwrap_or_default();
+                    let id = member.as_str();
                     if !agents.get(id).is_some_and(|agent| is_project_lead(agent, &path, &prepared)) { return Err(ProjectsError::Invalid("select live lead chats from this project only")); }
                 }
                 if teams.iter().any(|team| team.get("id").and_then(Value::as_str) != Some(team_id)
-                    && team.get("members").and_then(Value::as_array).is_some_and(|existing| existing.iter().any(|member| members.contains(member)))) {
+                    && team.get("members").and_then(Value::as_array).is_some_and(|existing| existing.iter().any(|member| member.as_str().is_some_and(|member| members.iter().any(|selected| selected == member))))) {
                     return Err(ProjectsError::Invalid("a chat already belongs to another peer team"));
                 }
                 let selected = json!({"id":team_id,"name":name,"members":members});
                 if let Some(old) = teams.iter_mut().find(|team| team.get("id").and_then(Value::as_str) == Some(team_id)) { *old = selected; } else { teams.push(selected); }
             }
-            "delete" => teams.retain(|team| team.get("id").and_then(Value::as_str) != team_id.as_deref()),
-            "move" => {
-                let member = member.as_deref().ok_or(ProjectsError::Invalid("peer team member is required"))?;
+            TeamMutation::Delete(_) => teams.retain(|team| team.get("id").and_then(Value::as_str) != team_id.as_deref()),
+            TeamMutation::Move(movement) => {
+                let member = python_strip(&movement.member);
                 if member.is_empty() || member.chars().count() > 255 || !agents.get(member).is_some_and(|agent| is_project_lead(agent, &path, &prepared)) { return Err(ProjectsError::Invalid("select a live lead chat from this project only")); }
                 let source = teams.iter().position(|team| team.get("members").and_then(Value::as_array).is_some_and(|items| items.iter().any(|item| item.as_str() == Some(member))));
                 let target = team_id.as_deref().and_then(|id| teams.iter().position(|team| team.get("id").and_then(Value::as_str) == Some(id)));
@@ -144,7 +110,6 @@ pub async fn peer_team_write(
                 { list.push(json!(member)); }
                 teams.retain(|team| team.get("members").and_then(Value::as_array).is_some_and(|items| items.len() >= 2));
             }
-            _ => return Err(ProjectsError::Invalid("unknown peer team action")),
         }
         project["peerTeams"] = json!(teams);
         project["peerTeamsRevision"] = json!(current + 1);
@@ -262,72 +227,50 @@ pub(crate) fn refresh_project_rooms(
     drop(statement);
     for id in ids {
         ProjectsRepository::refresh_private_room(tx, &id)?;
-        let raw = tx.query_row(
-            "SELECT record FROM runtime_rooms WHERE id=?1",
-            [&id],
-            |row| row.get::<_, String>(0),
-        )?;
-        let room: Value = serde_json::from_str(&raw).map_err(|_| ProjectsError::InvalidStored {
-            table: "runtime_rooms",
-            id: id.clone(),
-        })?;
+        let room =
+            studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(tx)
+                .get(&id)?
+                .ok_or_else(|| ProjectsError::InvalidStored {
+                    table: "runtime_rooms",
+                    id: id.clone(),
+                })?;
         crate::radio_runtime::publish_room(tx, &room, prepared)?;
     }
     Ok(())
 }
 
-pub(super) async fn reorder(store: &RuntimeStore, mut body: Value) -> Result<Value, ProjectsError> {
-    let request_id = python_strip(
-        body.get("request_id")
-            .and_then(Value::as_str)
-            .ok_or(ProjectsError::Invalid("request ID is required"))?,
-    );
-    if request_id.is_empty() || request_id.chars().count() > 255 {
+pub async fn reorder(
+    store: &RuntimeStore,
+    body: studio_runtime_schema::project_ingress::SidebarReorder,
+) -> Result<Value, ProjectsError> {
+    let request_id = python_strip(body.request_id.as_str());
+    if request_id.is_empty() {
         return Err(ProjectsError::Invalid("request ID is invalid"));
     }
     let expected = body
-        .get("expected_revision")
-        .and_then(Value::as_u64)
+        .expected_revision
+        .as_u64()
         .ok_or(ProjectsError::Invalid("sidebar revision is invalid"))?;
-    let groups = body
-        .get("groups")
-        .filter(|value| value.is_object())
-        .ok_or(ProjectsError::Invalid("sidebar groups are invalid"))?;
-    let Some(group_map) = groups.as_object() else {
-        return Err(ProjectsError::Invalid("sidebar groups are invalid"));
-    };
-    let total = group_map
-        .values()
-        .filter_map(Value::as_array)
-        .map(Vec::len)
-        .sum::<usize>();
-    if group_map.len() > 500
+    let groups = &body.groups;
+    let total = groups.values().map(Vec::len).sum::<usize>();
+    if groups.len() > 500
         || total > 10_000
         || serde_json::to_string(groups).map_or(true, |value| value.len() > 5_000_000)
-        || group_map.iter().any(|(key, items)| {
+        || groups.iter().any(|(key, items)| {
             key.chars().count() > 4096
-                || items.as_array().is_none_or(|items| {
-                    items.len() > 10_000
-                        || items.iter().any(|item| {
-                            item.as_str().is_none_or(|item| item.chars().count() > 4096)
-                        })
-                        || items.iter().collect::<std::collections::HashSet<_>>().len()
-                            != items.len()
-                })
+                || items.len() > 10_000
+                || items.iter().any(|item| item.chars().count() > 4096)
+                || items.iter().collect::<std::collections::HashSet<_>>().len() != items.len()
         })
     {
         return Err(ProjectsError::Invalid("sidebar order is invalid"));
     }
-    let signature = sha256_hex(
-        studio_runtime_schema::json_compat::python_json_compact(
-            &json!({"operation":"sidebar-order","body":body}),
-        )
-        .as_bytes(),
-    );
+    // New typed requests use deterministic serde JSON; pre-deployment signatures can differ.
+    let signature = sidebar_signature(&body)?;
     let key = format!("sidebar-order:{request_id}");
     let request_id = request_id.to_owned();
-    let groups = body["groups"].take();
-    let migration = body.get("migration").and_then(Value::as_bool) == Some(true);
+    let migration = body.migration.value() == Some(&true);
+    let groups = body.groups;
     store
         .transaction_with(move |tx| -> Result<Value, ProjectsError> {
             let server = RuntimeStore::transaction_local_server_id(tx)?
@@ -378,4 +321,33 @@ pub(super) async fn reorder(store: &RuntimeStore, mut body: Value) -> Result<Val
             Ok(result)
         })
         .await
+}
+
+fn sidebar_signature(
+    body: &studio_runtime_schema::project_ingress::SidebarReorder,
+) -> Result<String, ProjectsError> {
+    Ok(sha256_hex(
+        &serde_json::to_vec(body).map_err(StoreError::from)?,
+    ))
+}
+
+#[cfg(test)]
+mod sidebar_signature_tests {
+    use super::sidebar_signature;
+    use studio_runtime_schema::project_ingress::SidebarReorder;
+
+    #[test]
+    fn equivalent_requests_have_the_same_signature() {
+        let a: SidebarReorder = serde_json::from_str(r#"{"action":"reorder","request_id":"r","expected_revision":1,"groups":{"b":["2"],"a":["1"]}}"#).unwrap();
+        let b: SidebarReorder = serde_json::from_str(r#"{"groups":{"a":["1"],"b":["2"]},"expected_revision":1,"request_id":"r","action":"reorder"}"#).unwrap();
+        let changed: SidebarReorder = serde_json::from_str(r#"{"action":"reorder","request_id":"r","expected_revision":2,"groups":{"a":["1"],"b":["2"]}}"#).unwrap();
+        assert_eq!(
+            sidebar_signature(&a).unwrap(),
+            sidebar_signature(&b).unwrap()
+        );
+        assert_ne!(
+            sidebar_signature(&a).unwrap(),
+            sidebar_signature(&changed).unwrap()
+        );
+    }
 }

@@ -76,15 +76,25 @@ impl ControlId {
         &self.0
     }
 }
+impl TryFrom<String> for ControlId {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.is_empty() || value.len() > CONTROL_ID_MAX_BYTES {
+            Err("invalid control identity length")
+        } else {
+            Ok(Self(value))
+        }
+    }
+}
 impl<'de> Deserialize<'de> for ControlId {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = String::deserialize(deserializer)?;
-        if value.is_empty() || value.len() > CONTROL_ID_MAX_BYTES {
-            return Err(serde::de::Error::custom(format!(
+        Self::try_from(value).map_err(|_| {
+            serde::de::Error::custom(format!(
                 "control identity must contain 1..={CONTROL_ID_MAX_BYTES} UTF-8 bytes"
-            )));
-        }
-        Ok(Self(value))
+            ))
+        })
     }
 }
 
@@ -149,6 +159,30 @@ pub enum ClaudeControlCommand {
         request_id: ControlId,
         settings: ClaudeSettings,
     },
+}
+
+/// Read-only session actions and the identity-bearing stop action.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ClaudeSessionRead {
+    State {
+        id: ControlId,
+    },
+    Commands {
+        id: ControlId,
+    },
+    StopTask {
+        id: ControlId,
+        task_id: ControlId,
+        request_id: ControlId,
+    },
+}
+impl ClaudeSessionRead {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::State { id } | Self::Commands { id } | Self::StopTask { id, .. } => id.as_str(),
+        }
+    }
 }
 impl ClaudeControlCommand {
     pub fn id(&self) -> &str {

@@ -74,14 +74,6 @@ fn now() -> Result<f64, ResetError> {
         .map_err(|_| ResetError::Invalid("The system clock is unavailable"))
 }
 
-fn required(data: &Value, name: &'static str, message: &'static str) -> Result<String, ResetError> {
-    data.get(name)
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty() && value.chars().count() <= 1024)
-        .map(str::to_owned)
-        .ok_or(ResetError::Invalid(message))
-}
-
 fn from_record(value: Value) -> Result<Attempt, ResetError> {
     serde_json::from_value(value)
         .map_err(|_| ResetError::Invalid("The reset attempt record is invalid"))
@@ -313,30 +305,21 @@ fn response(attempt: &Attempt, limits: Value) -> Value {
 pub async fn consume_reset(
     store: &RuntimeStore,
     session: &dyn AccountSessionPort,
-    data: &Value,
+    data: &studio_runtime_schema::limit_reset_request::ResetRequest,
 ) -> Result<Value, ResetError> {
     let account_key = data
-        .get("account_key")
-        .and_then(Value::as_str)
-        .unwrap_or("default");
+        .account_key
+        .as_deref()
+        .unwrap_or(studio_runtime_schema::limit_reset_request::DEFAULT_RESET_ACCOUNT_KEY);
     if account_key.is_empty() {
         return Err(ResetError::Invalid("Supply an account key"));
     }
     // Python codex_limit_resets.py serializes limit refresh and redemption. Keep
     // concurrent retries from racing their durable outcome transitions.
     let _guard = RESET_REQUEST_LOCK.lock().await;
-    let account = required(
-        data,
-        "account_id",
-        "Supply the account id from current usage",
-    )?;
-    let credit = required(data, "credit_id", "Supply an exact reset credit id")?;
-    let request_id = match data.get("request_id").and_then(Value::as_str) {
-        Some(value) => Uuid::parse_str(value)
-            .map_err(|_| ResetError::Invalid("Supply a UUID request_id"))?
-            .to_string(),
-        None => RequestIdentity::issue_root(),
-    };
+    let account = data.account_id.as_str().to_owned();
+    let credit = data.credit_id.as_str().to_owned();
+    let request_id = data.request_id.canonical();
     let mut attempt = read_attempts(store, &request_id, &account, &credit).await?;
     let limits = session
         .read_limits(account_key)
@@ -531,6 +514,7 @@ mod tests {
         AccountSessionError, AccountSessionFuture, AccountSessionPort, ConnectionScope,
         ProviderRequest, ProviderResponse, RequestCertainty, SessionReceipt,
     };
+    use serde::Deserialize;
     use serde_json::{Value, json};
     use std::collections::VecDeque;
     use std::future::Future;
@@ -686,7 +670,9 @@ mod tests {
         session: &dyn AccountSessionPort,
         data: &Value,
     ) -> Result<Value, super::ResetError> {
-        run_async(consume_reset_async(store, session, data))
+        let typed = studio_runtime_schema::limit_reset_request::ResetRequest::deserialize(data)
+            .map_err(|_| super::ResetError::Invalid("Invalid reset request"))?;
+        run_async(consume_reset_async(store, session, &typed))
     }
 
     fn read_attempts(

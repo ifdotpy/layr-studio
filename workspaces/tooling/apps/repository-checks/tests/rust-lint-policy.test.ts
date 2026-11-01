@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -302,4 +309,70 @@ test("closed provider parsing opts into the Value restriction", () => {
     read("workspaces/runtime/packages/runtime-schema/src/provider_kind.rs"),
     /#\[deny\(clippy::disallowed_types\)\]\s*impl FromStr for ProviderKind/,
   );
+});
+
+// Cargo stores rerun-if-changed paths as printed. An absolute path differs in every layr
+// line, marks the script dirty and rebuilds every crate downstream of it.
+function absoluteRerunPaths(output: string): string[] {
+  return output
+    .split("\n")
+    .filter((line) => /^cargo:rerun-if-changed=(\/|[A-Za-z]:[\\/])/.test(line));
+}
+
+// Static view of a build script: it must not print a path built from an absolute base.
+function absoluteRerunSources(source: string): string[] {
+  return source
+    .split("\n")
+    .filter(
+      (line) =>
+        line.includes("cargo:rerun-if-changed=") &&
+        /\.display\(\)|canonicalize|CARGO_MANIFEST_DIR|manifest_dir/.test(line),
+    );
+}
+
+test("build scripts print relative rerun-if-changed paths", () => {
+  assert.deepEqual(
+    absoluteRerunPaths(
+      "cargo:rerun-if-changed=/repo/a.ts\ncargo:rerun-if-changed=a.ts",
+    ),
+    ["cargo:rerun-if-changed=/repo/a.ts"],
+    "known bad output must be rejected",
+  );
+  assert.equal(
+    absoluteRerunSources(
+      'println!("cargo:rerun-if-changed={}", dir.join("x").display());',
+    ).length,
+    1,
+    "known bad source must be rejected",
+  );
+  const found: string[] = [];
+  const walk = (directory: string) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (["node_modules", "target", ".git"].includes(entry.name)) continue;
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name === "build.rs")
+        for (const line of absoluteRerunSources(readFileSync(full, "utf8")))
+          found.push(`${path.relative(root, full)}: ${line.trim()}`);
+    }
+  };
+  walk(path.join(root, "workspaces"));
+  assert.deepEqual(found, []);
+  // The schema script rewrites the generator output, so also check recorded outputs of this
+  // checkout (paths inside the repository only) when a build exists.
+  const builds = path.join(root, "target/debug/build");
+  if (existsSync(builds))
+    for (const name of readdirSync(builds)) {
+      // tauri-build prints absolute paths and has no option to change that (docs/testing.md).
+      if (name.startsWith("studio-native-client-")) continue;
+      const output = path.join(builds, name, "output");
+      if (existsSync(output))
+        assert.deepEqual(
+          absoluteRerunPaths(readFileSync(output, "utf8")).filter((line) =>
+            line.slice("cargo:rerun-if-changed=".length).startsWith(root),
+          ),
+          [],
+          name,
+        );
+    }
 });
