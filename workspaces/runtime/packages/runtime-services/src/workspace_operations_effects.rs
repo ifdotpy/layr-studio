@@ -82,9 +82,7 @@ pub async fn checkpoint_after_turn(
             if Repository::operation(tx, &transaction_operation_id)?.is_some() {
                 return Ok((false, transaction_snapshot));
             }
-            if idle.is_err() {
-                return Ok((false, transaction_snapshot));
-            }
+            idle?;
             let reserved = CheckpointsRepository::reserve_checkpoint(
                 tx,
                 &transaction_snapshot,

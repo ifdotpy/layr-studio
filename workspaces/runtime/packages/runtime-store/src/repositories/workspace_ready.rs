@@ -295,6 +295,12 @@ fn conflicts(
 pub const ARCHIVED_PROVISION_RELEASE: &str =
     "Worker archived; files at the provisioning destination were kept";
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProvisionResult<'a> {
+    checkpoint_error: &'a str,
+}
+
 pub struct WorkspaceReadyRepository;
 impl WorkspaceReadyRepository {
     pub fn journal(connection: &rusqlite::Connection, id: &str) -> StoreResult<Option<Value>> {
@@ -503,6 +509,11 @@ impl WorkspaceReadyRepository {
         operation["phase"] = json!("completed");
         operation["updated"] = json!(now);
         operation["error"] = Value::Null;
+        if let Err(reason) = checkpoint {
+            operation["result"] = serde_json::to_value(ProvisionResult {
+                checkpoint_error: reason,
+            })?;
+        }
         tx.execute(
             "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
             params![plan.id, operation.to_string()],
