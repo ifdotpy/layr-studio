@@ -1194,11 +1194,9 @@ fn publish_direct(
         publish_work_detail(transaction, id, &record, validate)?;
         return publish_work_summary(transaction, id, raw);
     }
-    let record = serde_json::from_str::<Value>(raw)?;
-    match project_persisted_record(collection, &record) {
-        Some(projected) => put_projection(transaction, collection, id, projected, false, validate),
-        None => Ok(()),
-    }
+    Err(StoreError::RecordContract(
+        "unsupported direct sync collection",
+    ))
 }
 
 fn publish_work_summary(transaction: &Transaction<'_>, id: &str, raw: &str) -> StoreResult<()> {
