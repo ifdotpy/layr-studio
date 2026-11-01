@@ -33,19 +33,6 @@ enum LocationAdmission {
 }
 
 #[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProjectAliasesPatch<'a> {
-    project_aliases: &'a [studio_runtime_schema::project_record::ProjectAlias],
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProjectLocationsPatch<'a> {
-    locations: &'a [studio_runtime_schema::project_record::ProjectLocation],
-    locations_revision: u64,
-}
-
-#[derive(serde::Serialize)]
 struct RegistrationPatch {
     registration: RegistrationStatus,
 }
@@ -667,7 +654,7 @@ async fn local_project_registration(
                 return Ok(());
             }
             if physical_id_for_write != project_id_for_write
-                && let Some(physical) = studio_runtime_store::ProjectsRepository::get_record(
+                && let Some(mut physical) = studio_runtime_store::ProjectsRepository::get_record(
                     tx,
                     &physical_id_for_write,
                 )?
@@ -686,15 +673,11 @@ async fn local_project_registration(
                     project_id: project_id_for_write.clone(),
                     name: name_for_write,
                 });
-                studio_runtime_store::ProjectsRepository::patch_project(
-                    tx,
-                    &physical_id_for_write,
-                    &ProjectAliasesPatch {
-                        project_aliases: &aliases,
-                    },
-                )?;
+                physical.project_aliases =
+                    studio_runtime_schema::queue_command::Field::Value(aliases);
+                studio_runtime_store::ProjectsRepository::put_live(tx, &physical)?;
             }
-            let logical =
+            let mut logical =
                 studio_runtime_store::ProjectsRepository::get_record(tx, &project_id_for_write)?
                     .ok_or_else(|| {
                         ApiError::new(StatusCode::BAD_REQUEST, "The project is unavailable")
@@ -715,19 +698,16 @@ async fn local_project_registration(
                     requested_path: studio_runtime_schema::queue_command::Field::Missing,
                 });
             }
-            studio_runtime_store::ProjectsRepository::patch_project(
-                tx,
-                &project_id_for_write,
-                &ProjectLocationsPatch {
-                    locations: &locations,
-                    locations_revision: logical
-                        .locations_revision
-                        .value()
-                        .copied()
-                        .unwrap_or(0)
-                        .saturating_add(1),
-                },
-            )?;
+            logical.locations = studio_runtime_schema::queue_command::Field::Value(locations);
+            logical.locations_revision = studio_runtime_schema::queue_command::Field::Value(
+                logical
+                    .locations_revision
+                    .value()
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_add(1),
+            );
+            studio_runtime_store::ProjectsRepository::put_live(tx, &logical)?;
             studio_runtime_store::ProjectsRepository::patch_project(
                 tx,
                 &project_id_for_write,

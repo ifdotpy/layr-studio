@@ -284,6 +284,25 @@ impl ProjectsRepository {
             .collect()
     }
 
+    pub fn put_live(transaction: &Transaction<'_>, project: &ProjectLive) -> StoreResult<()> {
+        let record = serde_json::to_string(project)?;
+        let stored: String = transaction.query_row(
+            "INSERT INTO runtime_projects(id,record) VALUES (?1,json_set(?2,'$.recordKind','live')) \
+             ON CONFLICT(id) DO UPDATE SET record=excluded.record RETURNING record",
+            params![project.id, record],
+            |row| row.get(0),
+        )?;
+        let record = serde_json::value::RawValue::from_string(stored)?;
+        SyncDocumentsRepository::put_entity(
+            transaction,
+            "project",
+            &project.id,
+            record,
+            project.sidebar_hidden.value() == Some(&true),
+        )?;
+        Ok(())
+    }
+
     pub fn put_project(transaction: &Transaction<'_>, project: &Value) -> StoreResult<()> {
         let id = project
             .get("id")
@@ -521,6 +540,43 @@ inventory::submit! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typed_project_write_preserves_missing_null_and_empty() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_projects(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+            CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
+            CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE durable_rows(seq INTEGER);
+            CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);").unwrap();
+        let tx = db.transaction().unwrap();
+        let project: ProjectLive = serde_json::from_str(
+            r#"{"id":"p","path":"/p","name":null,"peerTeams":[],"locations":null}"#,
+        )
+        .unwrap();
+        ProjectsRepository::put_live(&tx, &project).unwrap();
+        let saved: String = tx
+            .query_row(
+                "SELECT record FROM runtime_projects WHERE id='p'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let value: Value = serde_json::from_str(&saved).unwrap();
+        assert_eq!(
+            value,
+            json!({"recordKind":"live","id":"p","path":"/p","name":null,"peerTeams":[],"locations":null})
+        );
+        let restored = ProjectsRepository::get_record(&tx, "p").unwrap().unwrap();
+        ProjectsRepository::put_live(&tx, &restored).unwrap();
+        let again: String = tx
+            .query_row(
+                "SELECT record FROM runtime_projects WHERE id='p'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(saved, again);
+    }
 
     #[test]
     fn sidebar_hide_retains_pending_location_owner() {
