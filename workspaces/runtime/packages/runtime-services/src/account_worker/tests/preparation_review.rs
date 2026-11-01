@@ -619,8 +619,9 @@ async fn continuation_gate_refuses_a_preexisting_admission_hold() {
                     let mut row =
                         AgentRepository::get(tx, &AgentId::from(update_agent_id.as_str()))?
                             .unwrap();
-                    row.extra
-                        .insert("accountTransferId".into(), json!("transfer"));
+                    row.account_transfer_id = studio_runtime_schema::queue_command::Field::Value(
+                        "transfer".to_owned().try_into().unwrap(),
+                    );
                     AgentRepository::put(tx, &row)
                 })
                 .await?;

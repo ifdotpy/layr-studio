@@ -177,7 +177,7 @@ pub struct ProviderReadReceipt {
     pub result: Field<ProviderResult>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TransferClaudeOptions {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -192,14 +192,14 @@ pub struct TransferClaudeOptions {
     pub launch_args: Field<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClaudeCustomModel {
     pub id: String,
     pub label: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TransferSettings {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -230,7 +230,7 @@ pub struct TransferSettings {
     pub portable_history: Field<PortableHistory>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HistorySource {
     pub agent_id: String,
@@ -239,7 +239,7 @@ pub struct HistorySource {
     pub thread_id: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PortableHistory {
     pub version: u64,
@@ -543,7 +543,7 @@ pub struct AgentTransferSummary {
     pub waiting: Field<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TransferWorkerDefaults {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -562,9 +562,105 @@ pub struct TransferWorkerDefaults {
     pub cyber_access_program: Field<String>,
 }
 
+/// Stable identity of an account transfer, shared with its lazy hold.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(transparent)]
+pub struct TransferId(studio_runtime_schema::bounded_text::BoundedText<1, 200>);
+impl TransferId {
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+impl TryFrom<String> for TransferId {
+    type Error = &'static str;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Ok(Self(value.try_into()?))
+    }
+}
+
+/// The pending lazy hold, or a migrated record that could not be decoded.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum LazyTransferState {
+    Unreadable(UnreadableTransferSummary),
+    Pending(LazyTransfer),
+}
+impl LazyTransferState {
+    pub fn pending(&self) -> Option<&LazyTransfer> {
+        match self {
+            Self::Pending(value) => Some(value),
+            Self::Unreadable(_) => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LazyTransfer {
+    pub id: TransferId,
+    pub source_account_key: AccountKey,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub source_thread_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub source_state: Field<LazySourceState>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub source_state_exact: Field<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LazySourceState {
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub account_key: Field<AccountKey>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub provider: Field<studio_runtime_schema::ProviderKind>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub model: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub effort: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub native_effort: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub fast_mode: Field<bool>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub daybreak_enabled: Field<bool>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub cyber_access_program: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub worker_defaults: Field<TransferWorkerDefaults>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub pending_settings: Field<TransferSettings>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub pending_settings_account_key: Field<AccountKey>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub claude_options: Field<TransferClaudeOptions>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub execution_settings_account_key: Field<AccountKey>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub status: Field<crate::AgentStatus>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub error: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub native_failure_hold: Field<bool>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_transfer_pointers_are_owned_by_typed_fields() {
+        let raw = serde_json::json!({"id":"lead","rootId":"lead","epoch":1,"status":"idle","accountKey":"source","compactions":0,
+            "accountTransferId":"move", "lazyAccountTransfer":{"id":"move","sourceAccountKey":"source","sourceThreadId":null,"sourceState":{},"sourceStateExact":true}});
+        let agent = crate::AgentRecord::from_value(raw.clone()).unwrap();
+        assert!(!agent.extra.contains_key("accountTransferId"));
+        assert!(!agent.extra.contains_key("lazyAccountTransfer"));
+        assert_eq!(agent.value()["accountTransferId"], raw["accountTransferId"]);
+        assert_eq!(
+            agent.value()["lazyAccountTransfer"],
+            raw["lazyAccountTransfer"]
+        );
+    }
 
     #[test]
     fn ordered_members_and_null_fields_round_trip() {
