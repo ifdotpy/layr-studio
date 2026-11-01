@@ -2141,6 +2141,7 @@ export function handleEntitySyncFixtureRequest(
       | import("../src/generated/api.ts").components["schemas"]["SyncSubscriptionRequest"]
       | undefined;
     progress?: (resource: ResourceRef) => ResourceProgress | undefined;
+    processSnapshot?: () => import("../src/generated/api.ts").components["schemas"]["ProcessListing"];
     onStreamReady?: (
       notify: (
         resources: ResourceRef[],
@@ -2248,6 +2249,14 @@ export function handleEntitySyncFixtureRequest(
         const key = JSON.stringify(resource);
         const next = (resourceRevisions.get(key) || 0) + (advance ? 1 : 0);
         resourceRevisions.set(key, next || 1);
+        if (resource.kind === "processes" && fixture.processSnapshot) {
+          return {
+            resource,
+            revision: next || 1,
+            replyKind: "snapshot",
+            viewSnapshot: { processes: fixture.processSnapshot() },
+          };
+        }
         if (
           resource.kind === "state" &&
           fixture.snapshot.runtime.viewScopedAgents &&
@@ -2343,7 +2352,12 @@ export function handleEntitySyncFixtureRequest(
       "X-Accel-Buffering": "no",
     });
     const sessionId = randomUUID();
-    response.write(protocol3SseEvent("session", { sessionId }));
+    response.write(
+      protocol3SseEvent("session", {
+        sessionId,
+        workspaceId: identity.workspaceId,
+      }),
+    );
     response.write(apiSchemaHandshakeSse());
 
     const writeFrame = (
