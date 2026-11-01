@@ -345,9 +345,9 @@ pub fn project_task_record(record: &studio_runtime_store::TaskRecord) -> Option<
 #[serde(rename_all = "camelCase")]
 pub struct WorkProjection {
     id: String,
-    status: studio_runtime_schema::persistence::WorkStatus,
     #[serde(skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing")]
     root_id: studio_runtime_schema::queue_command::Field<String>,
+    status: studio_runtime_schema::persistence::WorkStatus,
     #[serde(skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing")]
     title: studio_runtime_schema::queue_command::Field<String>,
     #[serde(skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing")]
