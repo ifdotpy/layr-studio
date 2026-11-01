@@ -843,11 +843,11 @@ pub(crate) fn encoded_len(value: &Value) -> usize {
 }
 
 /// The identity fields of a stored agent that a capture must still match.
-/// A missing field stays `None`; a present `null` is `Some(Value::Null)`.
+/// Thread null and absence are equivalent; account and epoch preserve exact identity.
 #[derive(serde::Deserialize)]
 struct CaptureIdentity {
-    #[serde(rename = "threadId", default, deserialize_with = "present")]
-    thread_id: Option<Value>,
+    #[serde(rename = "threadId", default)]
+    thread_id: Option<String>,
     #[serde(rename = "accountKey", default, deserialize_with = "present")]
     account_key: Option<Value>,
     #[serde(default, deserialize_with = "present")]
@@ -886,7 +886,9 @@ pub(crate) fn check_identity(canvas: &Connection, agent: &Value) -> Result<(), C
         .map(|r| serde_json::from_str(&r).map_err(StoreError::from))
         .transpose()?
         .ok_or(CaptureError::StaleIdentity)?;
-    if current.thread_id.as_ref() != agent.get("threadId")
+    let expected: CaptureIdentity =
+        serde::Deserialize::deserialize(agent.clone()).map_err(StoreError::from)?;
+    if current.thread_id != expected.thread_id
         || current.account_key.as_ref() != agent.get("accountKey")
         || current.epoch.as_ref() != agent.get("epoch")
     {

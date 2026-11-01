@@ -564,7 +564,10 @@ fn worker_defaults(root: &AgentRecord) -> Value {
             json!(DEFAULT_DELEGATION_DEPTH),
         ),
     ]);
-    if let Some(supplied) = root.extra.get("workerDefaults").and_then(Value::as_object) {
+    let supplied = root.worker_defaults.value().and_then(|value| {
+        serde::Serialize::serialize(&(value), serde_json::value::Serializer).ok()
+    });
+    if let Some(supplied) = supplied.as_ref().and_then(Value::as_object) {
         defaults.extend(supplied.clone());
     }
     Value::Object(defaults)
@@ -1531,7 +1534,8 @@ mod tests {
         .await
         .expect("status snapshot");
         let storage: crate::disk_space::StorageReport =
-            serde_json::from_value(first["storage"].clone()).expect("typed filesystem report");
+            serde::Deserialize::deserialize(first["storage"].clone())
+                .expect("typed filesystem report");
         assert!(!storage.filesystems.is_empty());
         assert!(storage.filesystems.iter().any(|volume| {
             volume

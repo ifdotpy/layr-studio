@@ -812,10 +812,7 @@ fn import_one(
 ) -> Result<String> {
     // On a store volume that ignores case, README and Readme would become one file. The earlier
     // state passed this check: only the entries of changed folders can collide.
-    #[cfg(target_os = "macos")]
-    if !crate::sys::case_sensitive(&repo.p.work_dir()) {
-        fsutil::refuse_case_collisions(&repo.p.work_dir(), changes.names.iter().map(|n| n.as_str()))?;
-    }
+    fsutil::refuse_case_collisions(&repo.p.work_dir(), changes.names.iter().map(|n| n.as_str()))?;
     let work = repo.p.work_dir().join(ids::new_id());
     let res = (|| -> Result<StateRec> {
         let (name, email, msg, time) = commit_info(raw);
@@ -884,7 +881,7 @@ fn thin_import(
         let data = cat.object(oid, "blob")?;
         place_blob(work, mode, path, &data, None, source.as_ref())?;
     }
-    let d = crate::thin::Diff { write: changes.write.iter().map(|w| w.0.clone()).collect(), removed: changes.removed.clone() };
+    let d = crate::thin::Diff { write: changes.write.iter().map(|w| w.0.clone()).collect(), removed: changes.removed.clone(), whole: Default::default() };
     let id = ids::new_id();
     crate::thin::write_layer(work, &repo.p.delta_path(&id), &d, base, false, None)?;
     Ok(Some(id))
@@ -980,17 +977,17 @@ pub fn build_index(repo: &Repo, state: &str, commit: &str, prev_state: Option<&s
             }
             let root = work_tree(repo, &src, &paths, &mut keep)?;
             // Changed paths are hashed again: see FORGET_CHANGED.
+            let _t = crate::trace::span(format!("git index update of {} changed paths", paths.len()));
             run(&root, &FORGET_CHANGED, Some(&input))?;
             run(&root, &["update-index", "--add", "--remove", "-z", "--stdin"], Some(&input))?;
-            // Unchanged files share size and time with the previous state: their stat data stay
-            // valid. A thin state has no complete folder to refresh against.
-            if !is_thin(repo, state) {
-                run(&root, &["update-index", "-q", "--refresh"], None)?;
-            }
+            // Unchanged files share size and time with the previous state, and the index
+            // compares only those (core.checkStat=minimal, core.trustctime=false): their stat
+            // data stay valid across a snapshot, so no refresh of every tracked file is needed.
         }
         _ => {
             let root = repo.complete(src, &mut keep)?;
             run(&root, &["read-tree", commit], None)?;
+            let _t = crate::trace::span("git index refresh");
             run(&root, &["update-index", "-q", "--refresh"], None)?;
         }
     }
@@ -1294,7 +1291,7 @@ fn object_of_once(repo: &Repo, state: &str, path: &str) -> Result<Option<String>
 /// The commit of a state in the git store, if it has one: the commit a record names (import,
 /// push, git-sync), or else the history commit made for the state without a record
 /// (`history_commit`).
-fn commit_of(repo: &Repo, state: &str) -> Result<Option<String>> {
+pub fn commit_of(repo: &Repo, state: &str) -> Result<Option<String>> {
     if let Some(c) = recorded_commit(repo, state)? {
         return Ok(Some(c));
     }
@@ -1384,7 +1381,12 @@ fn export_history_once(repo: &Repo, state: &str) -> Result<(String, Vec<(String,
         // A history commit made earlier without a record: a record of this export names it.
         if let Some(c) = history_commit(repo, &s)? {
             made.push((s.clone(), c.clone()));
-            known.insert(s, c);
+            known.insert(s.clone(), c);
+            // Its parents have history commits too. The record names them all, so later pushes,
+            // their secret check and `foreign_base` stop at them.
+            for p in repo.state(&s)?.parents.iter().rev() {
+                stack.push((p.clone(), false));
+            }
             continue;
         }
         let rec = repo.state(&s)?;
@@ -1431,11 +1433,15 @@ fn commit_tree(
     let res = (|| -> Result<String> {
         let mut paths: Vec<String> = Vec::new();
         let mut full: Option<PathBuf> = None;
+        // True when the index is a copy of the index of the base: its entries for unchanged
+        // files have valid stat data, so no refresh of every tracked file is needed.
+        let mut inherited = false;
         match base {
             Some((ast, ac)) => {
                 let ai = index_path(repo, ast);
                 // gc may remove a kept index at any time: then the tree of the commit is read.
-                if !ai.exists() || std::fs::copy(&ai, &tmp_idx).is_err() {
+                inherited = ai.exists() && std::fs::copy(&ai, &tmp_idx).is_ok();
+                if !inherited {
                     let out = base_cmd(&s).env("GIT_INDEX_FILE", &tmp_idx).args(["read-tree", ac]).output()?;
                     if !out.status.success() {
                         bail!("git read-tree failed");
@@ -1481,6 +1487,7 @@ fn commit_tree(
             None => work_tree(repo, &src, &paths, &mut keep)?,
         };
         // Changed paths are hashed again: see FORGET_CHANGED.
+        let _t = crate::trace::span(format!("git index update of {} changed paths", paths.len()));
         for args in [&FORGET_CHANGED[..], &["update-index", "--add", "--remove", "-z", "--stdin"]] {
             let mut c = base_cmd(&s);
             c.env("GIT_INDEX_FILE", &tmp_idx).env("GIT_WORK_TREE", &root).args(args);
@@ -1546,16 +1553,17 @@ fn commit_tree(
         let commit = String::from_utf8_lossy(&out.stdout).trim().to_string();
         git_out(&s, &["update-ref", refname, &commit])?;
         // Keep the index for the next export and for lines made from this state.
-        keep_index(repo, &state.id, &tmp_idx)?;
+        keep_index(repo, &state.id, &tmp_idx, inherited)?;
         Ok(commit)
     })();
     let _ = std::fs::remove_file(&tmp_idx);
     res
 }
 
-/// Keep `idx` as the index of `state` unless it has one. The file appears complete or not at
+/// Keep `idx` as the index of `state` unless it has one. An index that is not a copy of an
+/// earlier index gets its stat data from one refresh. The file appears complete or not at
 /// all: other processes copy kept indexes without the project lock.
-fn keep_index(repo: &Repo, state: &str, idx: &Path) -> Result<()> {
+fn keep_index(repo: &Repo, state: &str, idx: &Path, inherited: bool) -> Result<()> {
     let dst = index_path(repo, state);
     if dst.exists() {
         return Ok(());
@@ -1566,7 +1574,9 @@ fn keep_index(repo: &Repo, state: &str, idx: &Path) -> Result<()> {
         let _ = std::fs::remove_file(&tmp);
     }
     r.context("keep the git index of the exported state")?;
-    let _ = refresh_index(repo, state);
+    if !inherited {
+        let _ = refresh_index(repo, state);
+    }
     Ok(())
 }
 
@@ -1617,6 +1627,7 @@ fn refresh_index(repo: &Repo, state: &str) -> Result<()> {
     if is_thin(repo, state) {
         return Ok(());
     }
+    let _t = crate::trace::span("git index refresh");
     let s = store(repo);
     let root = repo.state_root(state)?;
     base_cmd(&s)

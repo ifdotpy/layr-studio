@@ -916,9 +916,7 @@ mod tests {
         let mut agent = AgentRepository::get(&transaction, &AgentId::from("agent"))
             .expect("agent reads")
             .expect("agent remains");
-        agent
-            .extra
-            .insert("nativeFailureHold".to_owned(), json!(true));
+        agent.set_native_failure_hold(true);
         AgentRepository::put(&transaction, &agent).expect("hold persists");
         assert!(
             !SchedulerRepository::mark_submitted_identity(

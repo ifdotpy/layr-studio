@@ -41,6 +41,14 @@ const room: Room = {
   peerTeamId: "t",
   members: ["a", "b"],
   radio: {
+    controls: {
+      busy: false,
+      inputBlocked: false,
+      canPass: false,
+      stopping: false,
+      speaking: false,
+      busyNotice: null,
+    },
     teamId: "t",
     revision: 1,
     status: "idle",

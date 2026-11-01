@@ -182,7 +182,8 @@ pub fn bind_submitted(
             .and_then(Value::as_u64)
             != Some(binding.generation)
         || current.get("accountKey").and_then(Value::as_str) != Some(transport.account_key.as_str())
-        || current.get("threadId") != rows.agent.get("threadId")
+        || current.get("threadId").and_then(Value::as_str)
+            != rows.agent.get("threadId").and_then(Value::as_str)
         || current.get("claudeInputRequest").is_none_or(Value::is_null)
         || current
             .get("nativeOperationId")

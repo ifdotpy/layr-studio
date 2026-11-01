@@ -218,7 +218,6 @@ export function useSnapshot(
   const refresh = useCallback(
     async (
       credentialsOnly = replicated.current,
-      onProjection?: (projection: Snapshot, workspaceId: string) => void,
       resetRecovery = true,
     ): Promise<void> => {
       if (resetRecovery) {
@@ -235,7 +234,7 @@ export function useSnapshot(
       const request = ++generation.current;
       try {
         const session = await refreshSession();
-        if (request !== generation.current && !onProjection) return;
+        if (request !== generation.current) return;
         if (request === generation.current) {
           sessionToken.current = session.token;
           setData((old) =>
@@ -245,15 +244,7 @@ export function useSnapshot(
           );
         }
         if (!credentialsOnly) {
-          let projectionWorkspaceId = "";
-          const projection = await refreshProjection({
-            onWorkspaceId: (id) => {
-              projectionWorkspaceId = id;
-            },
-          });
-          // A mutation readback owns its result even when another refresh wins
-          // the render generation. Its caller verifies the workspace identity.
-          onProjection?.(projection, projectionWorkspaceId);
+          const projection = await refreshProjection({});
           if (request !== generation.current) return;
           setData({ ...projection, token: session.token });
         }
@@ -288,7 +279,7 @@ export function useSnapshot(
               !document.hidden &&
               navigator.onLine !== false
             )
-              void refresh(credentialsOnly, undefined, false);
+              void refresh(credentialsOnly, false);
           }, delay);
         }
       }
@@ -330,7 +321,7 @@ export function useSnapshot(
       retryInitialization.current = undefined;
       setWorkspaceId(storage.workspaceId);
       try {
-        await refresh(true, undefined, false);
+        await refresh(true, false);
       } catch (error) {
         if (stopped) return;
         dispatchProjectionStatus({
@@ -344,7 +335,7 @@ export function useSnapshot(
       recovery = new ReadRecoveryBudget();
       startupExhausted.current = false;
       credentialRecovery.current = new ReadRecoveryBudget();
-      if (initialized) await refresh(true, undefined, false);
+      if (initialized) await refresh(true, false);
       else await initialize();
     };
     retryInitialization.current = restart;

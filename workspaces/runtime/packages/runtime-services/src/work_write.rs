@@ -190,8 +190,10 @@ async fn run_accepted_archive(
     now: f64,
     timing: ArchiveTiming,
 ) -> Result<ArchiveRun, WorkWriteError> {
-    let intent: ArchiveIntent =
-        serde_json::from_str(&encoded_intent).map_err(studio_runtime_store::StoreError::from)?;
+    // Archive intents of older builds lack the typed identity; they are left as they are.
+    let Ok(intent) = serde_json::from_str::<ArchiveIntent>(&encoded_intent) else {
+        return Ok(ArchiveRun::Skipped);
+    };
     let task_id_for_read = task_id.clone();
     let Some(work) = store
         .read_async("runtime-services/work_write", move |connection| {
@@ -948,7 +950,7 @@ fn accepted_archive_preflight(
         let canonical = archive_marker["by"] == root_id
             && archive_marker["reason"] == "Accepted task result is on main"
             && archive_marker["epoch"] == owner.epoch
-            && archive_marker.get("at") == owner_value.get("deletedAt")
+            && archive_marker.get("at") == owner_value.get("deletedAt").filter(|v| !v.is_null())
             && archive_marker["at"].as_f64().unwrap_or_default() >= intent.created
             && archive_marker["cleanupPending"] == false
             && !event_write::truthy(archive_marker.get("cleanupPending"));
@@ -2434,7 +2436,10 @@ fn continuation_work_pending(agent: &AgentRecord) -> bool {
     };
 
     let capacity = agent.extra.get("capacityRetry").unwrap_or(&Value::Null);
-    let usage = agent.extra.get("usageResume").unwrap_or(&Value::Null);
+    let Ok(usage_value) = agent.usage_resume_value() else {
+        return true;
+    };
+    let usage = usage_value.as_ref().unwrap_or(&Value::Null);
     let restart = agent.restart_recovery.as_deref();
     matches(capacity, &["scheduled", "starting", "unknown"], "turnId")
         || matches(usage, &["scheduled", "started", "unknown"], "turnId")
@@ -5815,6 +5820,22 @@ mod actor_tests {
             .expect("review event count reads");
         assert_eq!(count, 0);
         tx.commit().expect("transaction commits");
+    }
+
+    #[tokio::test]
+    async fn accepted_archive_skips_intent_of_an_older_shape() {
+        let dir = tempfile::tempdir().expect("state");
+        let store = Arc::new(RuntimeStore::open(Some(dir.path())).await.expect("store"));
+        let old = json!({"status":"pending","attempts":0,"created":1.0}).to_string();
+        let run = super::run_accepted_archive(
+            &store,
+            "old".into(),
+            old,
+            1000.0,
+            super::ArchiveTiming::Immediate,
+        )
+        .await;
+        assert!(matches!(run, Ok(super::ArchiveRun::Skipped)));
     }
 }
 

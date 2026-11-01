@@ -74,9 +74,8 @@ pub fn save(ctx: &Ctx, args: &[String]) -> Result<i32> {
     let msg = a.get("--note").unwrap_or("").to_string();
     for l in lines {
         repo.authorize_line(ctx, &l, crate::repo::LineOp::Save)?;
-        #[cfg(target_os = "macos")]
         if a.has("--caches") {
-            prepare_cache_copies(repo, &l)?;
+            prepare_caches(repo, &l, a.get("--cache"))?;
         } else {
             repo.prepare_save(&l)?;
         }
@@ -150,17 +149,34 @@ pub fn save(ctx: &Ctx, args: &[String]) -> Result<i32> {
     Ok(0)
 }
 
-/// On APFS a snapshot copies every file, and a save with caches took minutes under the store
-/// lock for build output. This copies the line's caches before the lock: one copy for the
-/// state's cache (none when the head already has it) and one for the cache overlay. Under the
-/// lock a snapshot takes a copy with one rename, and unused copies go to the trash.
-#[cfg(target_os = "macos")]
-fn prepare_cache_copies(repo: &Repo, l: &Line) -> Result<()> {
+/// A cache folder that a tool made as a plain folder becomes a cache by a copy of all its files,
+/// and on APFS a snapshot copies every file too: a save with caches took a minute under the
+/// store lock for build output. This does both before the lock, for the selected caches (`only`:
+/// `--cache`): the plain folder becomes a cache, then (APFS) one copy for the state's cache (none
+/// when the head already has it) and one for the cache overlay. Under the lock a conversion finds
+/// a cache already, a snapshot takes a copy with one rename, and unused copies go to the trash.
+/// The files of a cache are build output: a copy from a moment before the lock is as good.
+fn prepare_caches(repo: &Repo, l: &Line, only: Option<&str>) -> Result<()> {
     let w = repo.working(l);
+    let (u, g) = repo.owner_ids(l);
+    let only = only.map(|o| o.trim_matches('/'));
     for p in repo.line_cache_paths(l)?.0 {
-        let cp = fsutil::safe_join(&w, &p)?;
-        if !btrfs::is_subvolume(&cp) {
+        if only.is_some_and(|o| o != p) {
             continue;
+        }
+        crate::repo::convert_cache(&w, &p, u, g)?;
+        #[cfg(target_os = "macos")]
+        prepare_cache_copy(repo, l, &w, &p)?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn prepare_cache_copy(repo: &Repo, l: &Line, w: &Path, p: &str) -> Result<()> {
+    {
+        let cp = fsutil::safe_join(w, p)?;
+        if !btrfs::is_subvolume(&cp) {
+            return Ok(());
         }
         let name = format!("{}@{}", l.head, p.replace('/', "%2F"));
         let copies = if repo.p.cache_path(&l.head, &name).exists() { 1 } else { 2 };
@@ -273,7 +289,7 @@ pub fn undo(ctx: &Ctx, args: &[String]) -> Result<i32> {
             let mut found = None;
             for r in repo.p.db.records(5000)? {
                 let local = r.lines.keys().all(|lid| {
-                    repo.p.db.line_by_id(lid).ok().flatten().map(|l| repo.p.line_path(&l.name).exists()).unwrap_or(false)
+                    repo.p.db.line_by_id(lid).ok().flatten().map(|l| repo.working(&l).exists()).unwrap_or(false)
                         || r.op == "line.delete"
                 });
                 if r.actor.uid == ctx.caller.uid
@@ -340,6 +356,22 @@ pub fn undo_record(ctx: &Ctx, repo: &Repo, id: &str, force: bool) -> Result<i32>
         return Err(exit(1, "permission denied: only the project admin or the user who made it can undo this operation"));
     }
     let _queue_lock = if r.data.get("queue_change").is_some() { Some(super::queue::require_lock(repo)?) } else { None };
+    // Before the lock: the automatic state of each line's folder and the trees that the undo
+    // reads (seconds to minutes each under the lock). Errors only lose the preparation.
+    for (lid, ch) in &r.lines {
+        if let Ok(Some(l)) = repo.p.db.line_by_id(lid) {
+            let _ = repo.prepare_save(&l);
+        }
+        for s in [&ch.working_before, &ch.working_after].into_iter().flatten() {
+            let _ = repo.state_root(s);
+        }
+    }
+    let r2 = undo_locked(ctx, repo, &r, force);
+    repo.discard_prepared();
+    r2
+}
+
+fn undo_locked(ctx: &Ctx, repo: &Repo, r: &Record, force: bool) -> Result<i32> {
     let _lock = repo.p.lock()?;
     let mut rec = Record::new("undo");
     rec.data = serde_json::json!({"undo": r.id, "op": r.op});
@@ -465,8 +497,8 @@ pub fn undo_record(ctx: &Ctx, repo: &Repo, id: &str, force: bool) -> Result<i32>
             (Some(b), Some(l)) if alive => {
                 // Save the current content, then restore the old pointers and content.
                 wb = repo.working_state(ctx, l, "before undo")?;
-                if b.name != l.name {
-                    crate::fsutil::rename_tree(repo.p.line_path(&l.name), repo.p.line_path(&b.name))?;
+                if b.name != l.name && repo.p.moved_path(&l.id).is_none() {
+                    crate::fsutil::rename_tree(repo.p.line_path(&l.name), repo.p.default_line_path(&b.name))?;
                 }
                 let mut l2 = l.clone();
                 l2.name = b.name.clone();
@@ -512,6 +544,11 @@ pub fn undo_record(ctx: &Ctx, repo: &Repo, id: &str, force: bool) -> Result<i32>
                     machine: repo.p.store.machine.id.clone(),
                 };
                 repo.materialize(&l, &src, &w)?;
+                if let Some(staged) = r.data.get("staged_state").and_then(|v| v.as_str()) {
+                    // The index of the deleted line comes back with it.
+                    repo.snapshot_state(staged, &repo.p.stage_path(&l.id), false)?;
+                    repo.mark_stage(&l)?;
+                }
             }
             (None, Some(l)) if alive => {
                 // The operation created the line: delete it (content saved first).
@@ -568,7 +605,7 @@ fn restore_working(repo: &Repo, line: &Line, state: &str) -> Result<()> {
     let gone: Vec<&str> =
         list.iter().flat_map(|c| c.old_path.as_deref().into_iter().chain(c.new.is_none().then_some(c.path.as_str()))).collect();
     let write: Vec<&str> = list.iter().filter(|c| c.new.is_some()).map(|c| c.path.as_str()).collect();
-    fsutil::replace_entries(&target, &w, &gone, &write, own)
+    fsutil::replace_work_entries(&target, &w, &gone, &write, own)
 }
 
 pub fn op(ctx: &Ctx, args: &[String]) -> Result<i32> {
@@ -871,8 +908,20 @@ pub fn try_command(
 /// Retention. Kept: line heads and their history, tags, remote refs, park entries, the newest
 /// export per branch, conflict sources, automatic states (the newest N per line and
 /// one per hour for a day), and every state that a record inside the undo window names.
-pub fn retention_plan(repo: &Repo) -> Result<(BTreeSet<String>, Vec<String>)> {
+/// The automatic-state and undo-window rules do not keep an automatic state that a push already
+/// holds (`pushed_work`): only build output would go, and a build makes it again.
+/// `pushed` caches `pushed_work` answers: states never change, so a plan before the store lock
+/// answers most of them for the plan under it.
+pub fn retention_plan(repo: &Repo, pushed: &mut BTreeMap<String, bool>) -> Result<(BTreeSet<String>, Vec<String>)> {
     let db = &repo.p.db;
+    let mut held = |id: &str| -> Result<bool> {
+        if let Some(v) = pushed.get(id) {
+            return Ok(*v);
+        }
+        let v = pushed_work(repo, id)?;
+        pushed.insert(id.to_string(), v);
+        Ok(v)
+    };
     let mut roots: Vec<String> = Vec::new();
     let now = ids::now_ms();
     let keep_auto = repo.p.config_u64("retention.auto", 50) as usize;
@@ -887,6 +936,10 @@ pub fn retention_plan(repo: &Repo) -> Result<(BTreeSet<String>, Vec<String>)> {
         let autos = db.line_states(&l.id, StateKind::Auto)?;
         let mut buckets: BTreeSet<i64> = BTreeSet::new();
         for (i, s) in autos.iter().enumerate() {
+            // The newest automatic state of a line stays: it is the line's latest undo point.
+            if i > 0 && held(&s.id)? {
+                continue;
+            }
             if i < keep_auto {
                 keep.insert(s.id.clone());
             } else if now - s.time < hourly * 3600 * 1000 && buckets.insert(s.time / 3_600_000) {
@@ -921,19 +974,18 @@ pub fn retention_plan(repo: &Repo) -> Result<(BTreeSet<String>, Vec<String>)> {
             }
         }
         for s in &r.states {
-            keep.insert(s.id.clone());
+            if !held(&s.id)? {
+                keep.insert(s.id.clone());
+            }
         }
         for ch in r.lines.values() {
-            for x in [
-                ch.before.as_ref().map(|b| b.head.clone()),
-                ch.after.as_ref().map(|b| b.head.clone()),
-                ch.working_before.clone(),
-                ch.working_after.clone(),
-            ]
-            .into_iter()
-            .flatten()
-            {
+            for x in [ch.before.as_ref().map(|b| b.head.clone()), ch.after.as_ref().map(|b| b.head.clone())].into_iter().flatten() {
                 keep.insert(x);
+            }
+            for x in [ch.working_before.clone(), ch.working_after.clone()].into_iter().flatten() {
+                if !held(&x)? {
+                    keep.insert(x);
+                }
             }
         }
     }
@@ -980,18 +1032,37 @@ pub fn retention_plan(repo: &Repo) -> Result<(BTreeSet<String>, Vec<String>)> {
     Ok((keep, delete))
 }
 
+/// True for an automatic state without caches whose parent has a git commit (pushed or imported)
+/// and whose paths that are not ignored equal that parent: a push holds all its work.
+fn pushed_work(repo: &Repo, id: &str) -> Result<bool> {
+    let Some(s) = repo.p.db.state(id)? else { return Ok(false) };
+    if s.kind != StateKind::Auto || !s.caches.is_empty() || !repo.p.has_state(id) {
+        return Ok(false);
+    }
+    // The parent holds all the work of the state when only ignored files (build output) differ;
+    // the parent stays as long as anything names it, pushed or not.
+    let Some(parent) = s.parents.first() else { return Ok(false) };
+    if !repo.p.has_state(parent) {
+        return Ok(false);
+    }
+    Ok(repo.unsaved_paths(parent, &s)?.is_empty())
+}
+
 pub fn run_gc(ctx: &Ctx, repo: &Repo, dry: bool) -> Result<Vec<String>> {
-    let _lock = repo.p.lock()?;
-    let (_keep, delete) = retention_plan(repo)?;
+    // The comparisons of automatic states with their parents take seconds to minutes: a first
+    // plan without the lock makes them, and the plan under the lock reuses them.
+    let mut pushed = BTreeMap::new();
+    let (_keep, delete) = retention_plan(repo, &mut pushed)?;
     if dry {
         return Ok(delete);
     }
+    let _lock = repo.p.lock()?;
+    let (_keep, delete) = retention_plan(repo, &mut pushed)?;
     for expired in repo.p.db.expired_refs(ids::now_ms())? {
         let mut rec = Record::new("ref.expire");
         rec.data = serde_json::json!({"ref_change": crate::model::RefChange { name:expired.name.clone(),before:Some(expired),after:None }});
         repo.commit_record(ctx, rec)?;
     }
-    let mut deleted = Vec::new();
     for id in &delete {
         let s = repo.p.db.state(id)?;
         if let Some(s) = &s {
@@ -999,11 +1070,13 @@ pub fn run_gc(ctx: &Ctx, repo: &Repo, dry: bool) -> Result<Vec<String>> {
                 let _ = repo.p.trash(&repo.p.cache_path(id, snap));
             }
         }
-        if repo.p.delete_state(id).is_ok() {
-            deleted.push(id.clone());
-        }
     }
+    let deleted = repo.p.delete_states(&delete);
     let caches = trash_excess_caches(repo)?;
+    // Cache overlay lines of deleted lines: their states go below (docs/cache-overlays.md).
+    if let Err(e) = repo.drop_orphan_cache_lines(ctx) {
+        eprintln!("warning: cache overlay lines of deleted lines stay until the next gc: {e:#}");
+    }
     // Overlays with a history limit and folder overlays with an LRU limit (docs/cache-overlays.md).
     for name in repo.overlay_names()? {
         repo.after_overlay_move(ctx, &name);
@@ -1097,14 +1170,17 @@ pub fn trash_excess_caches(repo: &Repo) -> Result<Vec<String>> {
 }
 
 pub fn gc(ctx: &Ctx, args: &[String]) -> Result<i32> {
+    crate::store::EMPTY_TRASH_FULLY.store(true, std::sync::atomic::Ordering::SeqCst);
     if args.iter().any(|v| v == "--remote" || v.starts_with("--remote=")) {
         return crate::store_remote::command(ctx, "gc", args);
     }
-    let spec = Spec::new().flag("-n|--dry-run").flag("-q|--quiet");
+    let spec = Spec::new().flag("-n|--dry-run").flag("-q|--quiet").flag("--dedup");
     let a = parse(&spec, args)?;
     let h = here(ctx)?;
     h.repo.require(ctx, "gc")?;
     let v = run_gc(ctx, &h.repo, a.has("-n"))?;
+    // After the project lock is released: hashing and comparing cache files takes long.
+    let shared = if a.has("--dedup") { Some(crate::dedup::run(&h.repo, a.has("-n"))?) } else { None };
     // Saved scans of removed or changed trees go too.
     #[cfg(target_os = "macos")]
     if !a.has("-n") {
@@ -1122,6 +1198,10 @@ pub fn gc(ctx: &Ctx, args: &[String]) -> Result<i32> {
             for (_, name) in caches.iter().take(50) {
                 outln!(ctx, "\t{name}");
             }
+        }
+        if let Some(r) = shared {
+            let verb = if a.has("-n") { "would share" } else { "shared" };
+            outln!(ctx, "{verb} {} of disk in {} cache file(s), {:.1} s", human_size(r.bytes), r.files, r.seconds);
         }
     }
     Ok(0)
@@ -1154,7 +1234,7 @@ pub fn fsck(ctx: &Ctx, args: &[String]) -> Result<i32> {
             outln!(ctx, "records: {err:#}");
         }
     }
-    // Snapshots without a record (a crash between the snapshot and the record).
+    // Snapshots without a record: a save that stopped between its snapshot and its record.
     for e in std::fs::read_dir(repo.p.states_dir())?.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
         let id = name.split('@').next().unwrap_or(&name).to_string();
@@ -1164,7 +1244,7 @@ pub fn fsck(ctx: &Ctx, args: &[String]) -> Result<i32> {
                 btrfs::delete_tree(&e.path())?;
                 outln!(ctx, "deleted snapshot without record: {name}");
             } else {
-                outln!(ctx, "snapshot without record: {name} (use --repair)");
+                outln!(ctx, "snapshot without record (leftover of an interrupted save): {name} (use --repair)");
             }
         }
     }
@@ -1174,7 +1254,9 @@ pub fn fsck(ctx: &Ctx, args: &[String]) -> Result<i32> {
     for id in ids_v {
         if !repo.p.has_state(&id) {
             problems += 1;
-            outln!(ctx, "state {} is marked present but missing", ids::short(&id));
+            let deleted = repo.p.db.state(&id)?.and_then(|s| s.line).is_some_and(|l| repo.p.db.line_deleted(&l).unwrap_or(false));
+            let note = if deleted { " (of a deleted line)" } else { "" };
+            outln!(ctx, "state {} is marked present but missing{note}", ids::short(&id));
             if a.has("--repair") {
                 repo.p.db.set_present(&id, false)?;
             }
@@ -1236,8 +1318,19 @@ fn fsck_overlays(ctx: &Ctx, repo: &Repo, repair: bool) -> Result<usize> {
         for l in o.lines()? {
             if !o.p.has_state(&l.head) {
                 problems += 1;
-                outln!(ctx, "overlay {name}: the head of line {} is missing", l.name);
+                let deleted = match l.name.strip_prefix("line-") {
+                    Some(id) => repo.p.db.line_deleted(id)?,
+                    None => false,
+                };
+                let note = if deleted { " (of a deleted line)" } else { "" };
+                outln!(ctx, "overlay {name}: the head of line {}{note} is missing", l.name);
             }
+        }
+    }
+    // Cache overlay lines of deleted lines go (also when their heads exist), as at gc.
+    if repair {
+        for (name, line) in repo.drop_orphan_cache_lines(ctx)? {
+            outln!(ctx, "overlay {name}: deleted line {line} (of a deleted line)");
         }
     }
     for l in repo.lines()? {

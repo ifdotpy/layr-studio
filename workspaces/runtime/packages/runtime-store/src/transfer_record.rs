@@ -82,20 +82,7 @@ impl TransferPhase {
         )
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TransferStatus {
-    Pending,
-    Completed,
-    Cancelled,
-}
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TransferScope {
-    #[default]
-    Team,
-    Subagents,
-}
+pub use studio_runtime_schema::agent_entity_transfer::{TransferScope, TransferStatus};
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum InterruptOutcome {
@@ -296,7 +283,7 @@ impl<'de> Deserialize<'de> for ProviderReadReceipt {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TransferClaudeOptions {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -305,7 +292,11 @@ pub struct TransferClaudeOptions {
     pub binary_path: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub config_dir: Field<String>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    #[serde(
+        default,
+        skip_serializing_if = "Field::is_missing",
+        deserialize_with = "deserialize_object_vec_field"
+    )]
     pub custom_models: Field<Vec<ClaudeCustomModel>>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub launch_args: Field<String>,
@@ -318,9 +309,34 @@ pub struct ClaudeCustomModel {
     pub label: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+fn deserialize_object_vec_field<'de, D, T>(deserializer: D) -> Result<Field<Vec<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let value = Option::<Vec<serde_json::Value>>::deserialize(deserializer)?;
+    match value {
+        None => Ok(Field::Null),
+        Some(values) => values
+            .into_iter()
+            .map(|value| {
+                if !value.is_object() {
+                    return Err(serde::de::Error::custom("expected an object"));
+                }
+                serde::Deserialize::deserialize(value).map_err(serde::de::Error::custom)
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Field::Value),
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TransferSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub updated_at: Field<f64>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub provider: Field<studio_runtime_schema::ProviderKind>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -348,7 +364,34 @@ pub struct TransferSettings {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub yolo_mode: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub portable_history: Field<PortableHistory>,
+    pub portable_history: Field<crate::records::StoredTransferObject<PortableHistory>>,
+}
+
+impl From<studio_runtime_schema::agent_entity_nested::ExecutionSettingsDto> for TransferSettings {
+    fn from(value: studio_runtime_schema::agent_entity_nested::ExecutionSettingsDto) -> Self {
+        Self {
+            account_key: value.account_key.value().cloned(),
+            updated_at: value.updated_at,
+            cyber_access_program: value.cyber_access_program,
+            daybreak_enabled: value.daybreak_enabled,
+            effort: value.effort,
+            fast_mode: value.fast_mode,
+            model: value.model,
+            native_effort: value.native_effort,
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DestinationSettings {
+    #[serde(flatten)]
+    pub settings: TransferSettings,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub pending_settings: Field<TransferSettings>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub pending_settings_account_key: Field<AccountKey>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -356,8 +399,10 @@ pub struct TransferSettings {
 pub struct HistorySource {
     pub agent_id: String,
     pub account_key: AccountKey,
-    pub epoch: Option<i64>,
-    pub thread_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub epoch: Field<i64>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub thread_id: Field<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -368,8 +413,54 @@ pub struct PortableHistory {
     pub sha256: String,
     pub bytes: u64,
     pub counts: BTreeMap<String, u64>,
+    #[serde(deserialize_with = "crate::records::deserialize_object")]
     pub source: HistorySource,
     pub transfer_id: String,
+}
+
+/// A historical account move. Unknown legacy shapes remain in the enclosing raw variant.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TransferAccountHistoryEntry {
+    pub account_key: AccountKey,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub thread_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub provider: Field<studio_runtime_schema::ProviderKind>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub transfer_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub target_account_key: Field<AccountKey>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub target_provider: Field<studio_runtime_schema::ProviderKind>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub target_thread_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub at: Field<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub portable_history: Field<crate::records::StoredTransferObject<PortableHistory>>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub tool_refresh_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub result: Field<serde_json::Value>,
+}
+
+impl TransferAccountHistoryEntry {
+    pub fn new(account_key: AccountKey) -> Self {
+        Self {
+            account_key,
+            thread_id: Field::Missing,
+            provider: Field::Missing,
+            transfer_id: Field::Missing,
+            target_account_key: Field::Missing,
+            target_provider: Field::Missing,
+            target_thread_id: Field::Missing,
+            at: Field::Missing,
+            portable_history: Field::Missing,
+            tool_refresh_id: Field::Missing,
+            result: Field::Missing,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -444,7 +535,7 @@ pub struct TransferMember {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub settings: Field<TransferSettings>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub target_settings: Field<TransferSettings>,
+    pub target_settings: Field<DestinationSettings>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub pending_settings: Field<TransferSettings>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -480,7 +571,7 @@ pub struct TransferMember {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub provider_receipts: Field<Vec<ProviderReceipt>>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub portable_history: Field<PortableHistory>,
+    pub portable_history: Field<crate::records::StoredTransferObject<PortableHistory>>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub source_empty_proof: Field<SourceEmptyProof>,
 }
@@ -775,25 +866,25 @@ pub struct AgentTransferSummary {
     pub target_account_key: AccountKey,
     pub status: TransferStatus,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub updated: Field<serde_json::Number>,
+    pub updated: Field<f64>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub scope: Field<TransferScope>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub finish_history: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub total: Field<usize>,
+    pub total: Field<studio_runtime_schema::AgentCounter>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub completed: Field<usize>,
+    pub completed: Field<studio_runtime_schema::AgentCounter>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub moved: Field<usize>,
+    pub moved: Field<studio_runtime_schema::AgentCounter>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub native_history_pending: Field<usize>,
+    pub native_history_pending: Field<studio_runtime_schema::AgentCounter>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub moving_now: Field<usize>,
+    pub moving_now: Field<studio_runtime_schema::AgentCounter>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub can_finish_history: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub waiting_count: Field<usize>,
+    pub waiting_count: Field<studio_runtime_schema::AgentCounter>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub needs_attention: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -810,7 +901,59 @@ pub struct AgentTransferSummary {
     pub waiting: Field<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+impl From<AgentTransferSummary>
+    for studio_runtime_schema::agent_entity_transfer::AccountTransferSummaryDto
+{
+    fn from(summary: AgentTransferSummary) -> Self {
+        use studio_runtime_schema::agent_entity_transfer::{
+            AccountTransferLeftOnSourceDto, AccountTransferNoticeDto,
+        };
+        fn map<T, U>(field: Field<T>, f: impl FnOnce(T) -> U) -> Field<U> {
+            match field {
+                Field::Missing => Field::Missing,
+                Field::Null => Field::Null,
+                Field::Value(value) => Field::Value(f(value)),
+            }
+        }
+        let notice = |n: TransferNotice| AccountTransferNoticeDto {
+            id: n.id,
+            name: n.name,
+            reason: n.reason,
+        };
+        Self {
+            id: Field::Value(summary.id.as_str().to_owned()),
+            target_account_key: Field::Value(summary.target_account_key.as_str().to_owned()),
+            status: Field::Value(summary.status),
+            updated: summary.updated,
+            scope: summary.scope,
+            finish_history: summary.finish_history,
+            total: summary.total,
+            completed: summary.completed,
+            moved: summary.moved,
+            native_history_pending: summary.native_history_pending,
+            moving_now: summary.moving_now,
+            can_finish_history: summary.can_finish_history,
+            waiting_count: summary.waiting_count,
+            needs_attention: summary.needs_attention,
+            can_retry: summary.can_retry,
+            interrupted: map(summary.interrupted, |v| v.into_iter().map(notice).collect()),
+            blocked: map(summary.blocked, |v| v.into_iter().map(notice).collect()),
+            left_on_source: map(summary.left_on_source, |v| {
+                v.into_iter()
+                    .map(|n| AccountTransferLeftOnSourceDto {
+                        id: n.id,
+                        name: n.name,
+                        reason: n.reason,
+                        provider: n.provider,
+                    })
+                    .collect()
+            }),
+            waiting: summary.waiting,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TransferWorkerDefaults {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -822,9 +965,9 @@ pub struct TransferWorkerDefaults {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub daybreak_enabled: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub account_key: Field<AccountKey>,
+    pub account_key: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub delegation_depth: Field<i64>,
+    pub delegation_depth: Field<studio_runtime_schema::agent_entity_nested::WorkerDelegationDepth>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub cyber_access_program: Field<String>,
 }
@@ -913,6 +1056,59 @@ pub struct LazySourceState {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn destination_settings_preserve_pending_and_reject_unknown_fields() {
+        let value = serde_json::json!({"model":"model", "pendingSettings":{"model":"queued"}, "pendingSettingsAccountKey":"account"});
+        let settings: super::DestinationSettings =
+            serde::Deserialize::deserialize(value.clone()).unwrap();
+        assert_eq!(
+            serde::Serialize::serialize(&(settings), serde_json::value::Serializer).unwrap(),
+            value
+        );
+        assert!(
+            <super::DestinationSettings as serde::Deserialize>::deserialize(
+                serde_json::json!({"unexpected":true})
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn public_summary_projects_typed_transfer() {
+        let summary: super::AgentTransferSummary = serde_json::from_str(r#"{"id":"move","targetAccountKey":"target","status":"pending","total":2,"updated":1,"canCancel":true,"blocked":[{"id":"a","provider":"codex","reason":"busy"}],"leftOnSource":[{"id":"b","provider":"claude"}]}"#)
+        .unwrap();
+        let dto: studio_runtime_schema::agent_entity_transfer::AccountTransferSummaryDto =
+            summary.into();
+        assert_eq!(dto.total.value().expect("total").as_i64(), 2);
+        let blocked = dto
+            .blocked
+            .value()
+            .expect("blocked notices")
+            .first()
+            .expect("blocked notice");
+        assert_eq!(blocked.id, "a");
+        assert_eq!(blocked.reason.value().map(String::as_str), Some("busy"));
+        let left = dto
+            .left_on_source
+            .value()
+            .expect("left notices")
+            .first()
+            .expect("left notice");
+        assert_eq!(left.id, "b");
+        assert_eq!(
+            left.provider.value(),
+            Some(&studio_runtime_schema::ProviderKind::Claude)
+        );
+        let actual = serde::Serialize::serialize(&(dto), serde_json::value::Serializer).unwrap();
+        assert!(
+            actual
+                .as_object()
+                .expect("summary object")
+                .get("canCancel")
+                .is_none()
+        );
+    }
+
     #[test]
     fn read_receipt_rejects_conflicting_certainty_and_result_shapes() {
         let scope = serde_json::json!({"account":"source","connection":"conn","generation":1});
@@ -1009,6 +1205,32 @@ mod tests {
     fn unknown_member_field_is_rejected() {
         let json = r#"{"id":"transfer","leadId":"lead","targetAccountKey":"target","status":"pending","created":1.0,"members":{"lead":{"phase":"waiting","sourceAccountKey":"source","unexpected":1}}}"#;
         assert!(serde_json::from_str::<TransferRecord>(json).is_err());
+    }
+
+    #[test]
+    fn transfer_snapshot_preserves_legacy_portable_history_array() {
+        let input = serde_json::json!({"id":"transfer","leadId":"lead","targetAccountKey":"target",
+            "status":"pending","created":1.0,"members":{"lead":{"phase":"waiting",
+            "sourceAccountKey":"source","settings":{"portableHistory":[1,"legacy"]}}}});
+        let record: TransferRecord = serde::Deserialize::deserialize(input.clone()).unwrap();
+        let history = record
+            .members
+            .get("lead")
+            .unwrap()
+            .settings
+            .value()
+            .unwrap()
+            .portable_history
+            .value()
+            .unwrap();
+        assert!(matches!(
+            history,
+            crate::StoredTransferObject::Unreadable(_)
+        ));
+        assert_eq!(
+            serde::Serialize::serialize(&(record), serde_json::value::Serializer).unwrap(),
+            input
+        );
     }
 
     #[test]

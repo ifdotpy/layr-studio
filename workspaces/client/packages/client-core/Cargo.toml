@@ -13,6 +13,7 @@ crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 studio-client-domain = { path = "../client-domain" }
+studio-request-signing = { path = "../../../runtime/packages/request-signing" }
 studio-runtime-schema = { path = "../../../runtime/packages/runtime-schema" }
 libc.workspace = true
 ring.workspace = true

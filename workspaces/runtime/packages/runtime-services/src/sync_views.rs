@@ -725,7 +725,16 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
             )
         }
     };
-    if let Some(summary) = view
+    if let Some(summary) = record.get("accountTransfer").and_then(|value| {
+        <studio_runtime_store::transfer_record::AgentTransferSummary as serde::Deserialize>::deserialize(
+            value.clone(),
+        )
+        .ok()
+    }) {
+        let dto =
+            studio_runtime_schema::agent_entity_transfer::AccountTransferSummaryDto::from(summary);
+        view.insert("accountTransfer".into(), serde::Serialize::serialize(&(dto), serde_json::value::Serializer).ok()?);
+    } else if let Some(summary) = view
         .get_mut("accountTransfer")
         .and_then(Value::as_object_mut)
     {
@@ -1048,7 +1057,7 @@ mod projection_plan_tests {
         invalid_agent_view, openapi_document, project_persisted_record,
         schema_projection_properties,
     };
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     #[test]
     fn task_entity_payload_hash_is_stable_after_projection_move() {
@@ -1235,21 +1244,46 @@ mod projection_plan_tests {
     fn agent_entity_publishes_transfer_actions_from_progress() {
         let lead = json!({"id":"lead","rootId":"lead","epoch":1,"isLead":true,"provider":"codex",
             "accountTransfer":{"id":"move","targetAccountKey":"target","status":"pending",
-                "blocked":[{"id":"lead","reason":"History unavailable"}],"canRetry":true,"canCancel":true,"movingNow":0}});
+                "blocked":[{"id":"lead","reason":"History unavailable","provider":"codex"}],"canRetry":true,"canCancel":true,"movingNow":0}});
         let context = super::AgentViewContext {
             transfer: super::TransferObservation::Cancellable,
             ..Default::default()
         };
         let view = super::agent_entity_view(&lead, &context).unwrap();
-        assert_eq!(view["accountTransferProgress"]["kind"], "blocked");
-        assert_eq!(
-            view["accountTransferProgress"]["actions"],
-            json!("retry_cancel")
-        );
+        let progress = view
+            .get("accountTransferProgress")
+            .and_then(Value::as_object)
+            .expect("transfer progress");
+        assert_eq!(progress.get("kind"), Some(&json!("blocked")));
+        assert_eq!(progress.get("actions"), Some(&json!("retry_cancel")));
+        let summary = view
+            .get("accountTransfer")
+            .and_then(Value::as_object)
+            .expect("transfer summary");
+        let blocked = summary
+            .get("blocked")
+            .and_then(Value::as_array)
+            .expect("blocked notices")
+            .first()
+            .and_then(Value::as_object)
+            .expect("blocked notice");
+        assert_eq!(blocked.get("id"), Some(&json!("lead")));
+        assert!(blocked.get("provider").is_none());
+        assert!(summary.get("canCancel").is_none());
         for collection in ["agentSummary", "agentDetail"] {
             let projected = project_persisted_record(collection, &view).unwrap();
-            assert_eq!(projected["accountTransferProgress"]["kind"], "blocked");
-            assert_eq!(projected["accountChange"]["kind"], "unavailable");
+            assert_eq!(
+                projected
+                    .get("accountTransferProgress")
+                    .and_then(|value| value.get("kind")),
+                Some(&json!("blocked"))
+            );
+            assert_eq!(
+                projected
+                    .get("accountChange")
+                    .and_then(|value| value.get("kind")),
+                Some(&json!("unavailable"))
+            );
         }
     }
 
