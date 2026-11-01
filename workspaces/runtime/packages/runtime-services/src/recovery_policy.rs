@@ -87,7 +87,12 @@ impl RecoverySnapshot {
         self.agent.as_ref()
     }
     pub(crate) fn turn_epoch_matches(&self) -> bool {
-        self.typed.turn_epoch.as_ref().unwrap_or(&self.typed.epoch) == &self.typed.epoch
+        self.typed
+            .turn_epoch
+            .as_ref()
+            .unwrap_or(&self.typed.epoch)
+            .get()
+            == self.typed.epoch.get()
     }
     pub fn start_attempt(&self) -> &Value {
         self.agent
@@ -386,7 +391,7 @@ fn eligibility(a: &Value, typed: &RecoveryAgentRecord) -> Eligibility {
     let c = &a["connectionRecovery"];
     let inactive = !typed.in_flight.unwrap_or(false);
     let stopped = inactive && !typed.auto_wake.unwrap_or(false);
-    let turn_epoch = typed.turn_epoch.as_ref().unwrap_or(&typed.epoch) == &typed.epoch;
+    let turn_epoch = typed.turn_epoch.as_ref().unwrap_or(&typed.epoch).get() == typed.epoch.get();
     let orphan_busy = typed.in_flight.unwrap_or(false)
         && !typed.turn_id.as_deref().is_some_and(|s| !s.is_empty())
         && !has(a, "startAttempt")
