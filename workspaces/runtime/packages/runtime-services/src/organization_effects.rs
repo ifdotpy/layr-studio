@@ -119,11 +119,7 @@ pub fn apply(tx: &Transaction<'_>, body: &OrganizationRequest) -> Result<Value, 
             .ok_or(EventWriteError::InvalidRequest(
                 "Supply the current chat folder revision",
             ))?;
-        let current_folder = agent
-            .extra
-            .get("projectFolder")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
+        let current_folder = agent.project_folder.value().cloned();
         let replay = current_folder == desired
             && (revision == current || current.checked_sub(1) == Some(revision));
         if !replay
@@ -146,10 +142,10 @@ pub fn apply(tx: &Transaction<'_>, body: &OrganizationRequest) -> Result<Value, 
         }
         match desired {
             Some(folder) => {
-                agent.extra.insert("projectFolder".into(), json!(folder));
+                agent.project_folder = studio_runtime_schema::queue_command::Field::Value(folder);
             }
             None => {
-                agent.extra.insert("projectFolder".into(), Value::Null);
+                agent.project_folder = studio_runtime_schema::queue_command::Field::Null;
             }
         }
     }
@@ -324,7 +320,7 @@ mod tests {
         let agent = AgentRecord::from_value(json!({"compactions":0,
             "id":CHAT,"rootId":CHAT,"epoch":1,"status":"idle","name":"Organized chat",
             "provider":"codex","model":"gpt-6","prompt":"Start","cwd":"/fixture",
-            "accountKey":"default","isLead":true,"autoWake":false,"threadId":"thread-1",
+            "accountKey":"default","isLead":true,"autoWake":false,"threadId":"thread-1","projectFolder":"folder-a",
             "lastCompletedTurn":"turn-1","lastCompletedTurnStatus":"completed"
         }))
         .expect("valid persisted agent");
@@ -338,11 +334,14 @@ mod tests {
             .expect("the chat is seeded and published");
         assert_ne!(client_view(&store)["archived"], true);
 
-        organize(
-            &store,
-            r#"{"id":"organized-chat","archived":true,"pinned":true}"#,
-        )
-        .await;
+        let clear_folder = r#"{"id":"organized-chat","project_path":"/fixture","project_folder":null,"expected_folder":"folder-a","expected_revision":0}"#;
+        organize(&store, clear_folder).await;
+        organize(&store, clear_folder).await;
+        let view = client_view(&store);
+        assert_eq!(view["projectFolder"], Value::Null);
+        assert_eq!(view["projectFolderRevision"], 1);
+
+        organize(&store, r#"{"id":"organized-chat","archived":true,"pinned":true}"#).await;
         let view = client_view(&store);
         assert_eq!(view["archived"], true, "an archive reaches the client");
         assert_eq!(view["pinned"], true, "a pin reaches the client");
