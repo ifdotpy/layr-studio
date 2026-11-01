@@ -1414,6 +1414,15 @@ impl AccountRegistry {
                 }
                 AccountPageDispatch::Exhausted | AccountPageDispatch::Full => return Ok(()),
                 AccountPageDispatch::StartFailed(error) => {
+                    let delay = self
+                        .worker_retry_delay
+                        .get(&account)
+                        .copied()
+                        .unwrap_or(RETRY_DELAY);
+                    self.worker_retry_at
+                        .insert(account.clone(), tokio::time::Instant::now() + delay);
+                    self.worker_retry_delay
+                        .insert(account, next_retry_delay(delay));
                     failure.get_or_insert(error);
                     return Ok(());
                 }
