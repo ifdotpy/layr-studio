@@ -11,6 +11,16 @@ pub enum Grant {
 }
 
 impl Grant {
+    pub fn from_access_record(
+        record: Option<&studio_runtime_schema::multi_server_access::PersistedAccessClient>,
+    ) -> Self {
+        match record.and_then(|record| record.grant.value()) {
+            Some(studio_runtime_schema::multi_server_access::AccessGrant::Observe) => Self::Observe,
+            Some(studio_runtime_schema::multi_server_access::AccessGrant::Full) | None => {
+                Self::Full
+            }
+        }
+    }
     /// A trust-list record without a `grant` field is `Full` (the default at pairing).
     pub fn from_record(record: &serde_json::Value) -> Self {
         match record.get("grant").and_then(serde_json::Value::as_str) {

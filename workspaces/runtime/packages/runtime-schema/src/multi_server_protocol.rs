@@ -134,6 +134,9 @@ impl InviteStatus {
 #[serde(transparent)]
 pub struct NonNegativeNumber(serde_json::Number);
 impl NonNegativeNumber {
+    pub fn as_f64(&self) -> Option<f64> {
+        self.0.as_f64()
+    }
     pub fn as_i64(&self) -> Option<i64> {
         self.0.as_i64()
     }

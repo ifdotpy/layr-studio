@@ -23,6 +23,13 @@ use std::sync::Arc;
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use studio_runtime_schema::{
+    multi_server_access::{
+        AccessClientKind, AccessClientStatus, AccessGrant, PersistedAccessClient,
+    },
+    multi_server_protocol::NonNegativeNumber,
+    queue_command::Field,
+};
 use studio_runtime_store::{RuntimeStore, StoreError};
 
 use crate::multi_server_auth::{self as auth, AccessError, refused};
@@ -31,8 +38,7 @@ use crate::multi_server_orchestration::{ExchangeOutcome, OrchestrationDriver};
 /// The orchestration action that carries the list. The reply is the receiver's list.
 pub const ACTION: &str =
     studio_runtime_schema::persistence::ServerOperationKind::DeviceTrust.as_str();
-pub const GRANT_FULL: &str = "full";
-pub const GRANT_OBSERVE: &str = "observe";
+pub use studio_runtime_schema::multi_server_access::{GRANT_FULL, GRANT_OBSERVE};
 /// Most entries in one list message (a count of rows).
 const MAX_ENTRIES: usize = 4096;
 const DEVICE_LABEL: &str = "Device";
@@ -66,40 +72,37 @@ pub struct TrustList {
     pub entries: Vec<Entry>,
 }
 
-/// The grant of a stored row. A row without a grant is `full`.
-pub fn grant_of(record: &Value) -> &'static str {
-    match record.get("grant").and_then(Value::as_str) {
-        Some(GRANT_OBSERVE) => GRANT_OBSERVE,
-        _ => GRANT_FULL,
-    }
-}
-
 /// The shared form of a stored row, or `None` for a row that is not shared.
-pub fn entry_of(record: &Value) -> Option<Entry> {
-    let text = |key: &str| record.get(key).and_then(Value::as_str);
-    let kind = text("kind")?;
-    let revoked = match text("status")? {
-        "paired" => false,
-        "revoked" => true,
-        _ => return None,
+fn entry_of(record: &PersistedAccessClient) -> Option<Entry> {
+    let revoked = match record.status {
+        AccessClientStatus::Paired => false,
+        AccessClientStatus::Revoked => true,
+        AccessClientStatus::Discovered | AccessClientStatus::Unreachable => return None,
     };
-    if !matches!(kind, "ui" | "server") || (kind == "server" && revoked) {
+    let device = record.kind == AccessClientKind::Ui;
+    if !device && revoked {
         return None;
     }
-    let device = kind == "ui";
     Some(Entry {
-        id: text("id")?.to_owned(),
-        kind: kind.to_owned(),
-        label: text("label")?.to_owned(),
-        public_key: text("publicKey")?.to_owned(),
+        id: record.id.as_str().to_owned(),
+        kind: record.kind.as_str().to_owned(),
+        label: record.label.as_str().to_owned(),
+        public_key: record.public_key.as_str().to_owned(),
         origin: if device {
             None
         } else {
-            text("origin").map(str::to_owned)
+            record.origin.value().cloned()
         },
-        grant: device.then(|| grant_of(record).to_owned()),
+        grant: device.then(|| {
+            if record.grant.value() == Some(&AccessGrant::Observe) {
+                GRANT_OBSERVE
+            } else {
+                GRANT_FULL
+            }
+            .to_owned()
+        }),
         revoked,
-        created: record.get("created").and_then(Value::as_f64).unwrap_or(0.0),
+        created: record.created.as_f64().unwrap_or(0.0),
     })
 }
 
@@ -144,51 +147,74 @@ fn checked(entry: &Entry, local_server: &str) -> Option<Entry> {
     Some(entry)
 }
 
-fn new_record(entry: &Entry, now: f64) -> Value {
+fn new_record(entry: &Entry, now: f64) -> Option<PersistedAccessClient> {
     let server = entry.kind == "server";
-    let mut record = json!({
-        "id": entry.id,
-        "clientId": entry.id,
-        "serverId": if server { Some(entry.id.clone()) } else { None },
-        "kind": entry.kind,
-        "label": entry.label,
-        "origin": entry.origin,
-        "publicKey": entry.public_key,
-        "tailscaleUser": Value::Null,
-        "status": if entry.revoked { "revoked" } else { "paired" },
-        "created": entry.created,
-        "lastAccess": Value::Null,
-        "revoked": if entry.revoked { json!(now) } else { Value::Null },
-    });
-    if let Some(grant) = &entry.grant {
-        record["grant"] = json!(grant);
-    }
-    record
+    Some(PersistedAccessClient {
+        id: entry.id.clone().try_into().ok()?,
+        client_id: entry.id.clone().try_into().ok()?,
+        server_id: if server {
+            Field::Value(entry.id.clone())
+        } else {
+            Field::Null
+        },
+        kind: if server {
+            AccessClientKind::Server
+        } else {
+            AccessClientKind::Ui
+        },
+        label: entry.label.clone().try_into().ok()?,
+        origin: entry.origin.clone().map_or(Field::Null, Field::Value),
+        public_key: entry.public_key.clone().try_into().ok()?,
+        tailscale_user: Field::Null,
+        status: if entry.revoked {
+            AccessClientStatus::Revoked
+        } else {
+            AccessClientStatus::Paired
+        },
+        created: NonNegativeNumber::try_from(serde_json::Number::from_f64(entry.created)?).ok()?,
+        last_access: Field::Null,
+        revoked: if entry.revoked {
+            Field::Value(serde_json::Number::from_f64(now)?)
+        } else {
+            Field::Null
+        },
+        grant: match entry.grant.as_deref() {
+            Some(GRANT_FULL) => Field::Value(AccessGrant::Full),
+            Some(GRANT_OBSERVE) => Field::Value(AccessGrant::Observe),
+            _ => Field::Missing,
+        },
+        last_seen: Field::Missing,
+        auto_pair: Field::Missing,
+        reachability: Field::Missing,
+        alias: Field::Missing,
+        replaced_by: Field::Missing,
+        pairing_request_id: Field::Missing,
+        pairing_hash: Field::Missing,
+        pairing_receipt: Field::Missing,
+    })
 }
 
-/// The row to store after a merge of `entry` into `local`, or `None` when the row stays.
-/// `entry` must come from `checked`.
-pub fn merge_into(local: Option<&Value>, entry: &Entry, now: f64) -> Option<Value> {
-    let status = local
-        .and_then(|record| record.get("status"))
-        .and_then(Value::as_str);
-    match (local, status) {
-        // A tombstone is final.
-        (Some(_), Some("revoked")) => None,
-        (Some(record), Some("paired")) => {
-            let same = record.get("publicKey").and_then(Value::as_str)
-                == Some(entry.public_key.as_str())
-                && record.get("kind").and_then(Value::as_str) == Some(entry.kind.as_str());
-            if !(same && entry.revoked && entry.kind == "ui") {
+fn merge_into(
+    local: Option<&PersistedAccessClient>,
+    entry: &Entry,
+    now: f64,
+) -> Option<PersistedAccessClient> {
+    match local {
+        Some(record) if record.status == AccessClientStatus::Paired => {
+            if !(record.public_key.as_str() == entry.public_key
+                && record.kind.as_str() == entry.kind
+                && entry.revoked
+                && entry.kind == "ui")
+            {
                 return None;
             }
             let mut record = record.clone();
-            record["status"] = json!("revoked");
-            record["revoked"] = json!(now);
+            record.status = AccessClientStatus::Revoked;
+            record.revoked = Field::Value(serde_json::Number::from_f64(now)?);
             Some(record)
         }
-        (Some(_), _) => None,
-        (None, _) => Some(new_record(entry, now)),
+        Some(_) => None,
+        None => new_record(entry, now),
     }
 }
 
@@ -200,8 +226,13 @@ pub fn read_entries(tx: &Transaction<'_>) -> Result<Vec<Entry>, StoreError> {
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows
         .iter()
-        .filter_map(|raw| serde_json::from_str::<Value>(raw).ok())
-        .filter_map(|record| entry_of(&record))
+        .filter_map(|raw| {
+            serde_json::from_str::<
+                    studio_runtime_schema::http_ingress::Object<PersistedAccessClient>,
+                >(raw)
+                .ok()
+        })
+        .filter_map(|record| entry_of(&record.0))
         .collect())
 }
 
@@ -225,9 +256,13 @@ pub fn apply(
                 |row| row.get(0),
             )
             .optional()?;
-        let local = match raw.as_deref().map(serde_json::from_str::<Value>) {
+        let local = match raw.as_deref().map(
+            serde_json::from_str::<
+                studio_runtime_schema::http_ingress::Object<PersistedAccessClient>,
+            >,
+        ) {
             None => None,
-            Some(Ok(record)) => Some(record),
+            Some(Ok(record)) => Some(record.0),
             // A row this code cannot read is never replaced by a merge.
             Some(Err(_)) => continue,
         };
@@ -237,7 +272,7 @@ pub fn apply(
         tx.execute(
             "INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2) \
              ON CONFLICT(id) DO UPDATE SET record=excluded.record",
-            params![entry.id, record.to_string()],
+            params![entry.id, serde_json::to_string(&record)?],
         )?;
         tx.execute(
             "INSERT INTO runtime_access_audit(client,actor,action,created) VALUES(?1,?2,?3,?4)",
@@ -466,6 +501,13 @@ mod tests {
                 Ok(()) => true,
                 Err(_) => false,
             }
+        }
+    }
+
+    fn grant_of(record: &Value) -> &'static str {
+        match record.get("grant").and_then(Value::as_str) {
+            Some(GRANT_OBSERVE) => GRANT_OBSERVE,
+            _ => GRANT_FULL,
         }
     }
 

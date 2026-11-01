@@ -8,6 +8,10 @@ use std::sync::Arc;
 use studio_runtime_schema::multi_server_protocol::{
     ACCESS_PROTOCOL_VERSION, PersistedAccessInvite,
 };
+use studio_runtime_schema::{
+    multi_server_access::{AccessClientKind, AccessClientStatus, PersistedAccessClient},
+    queue_command::Field,
+};
 use studio_runtime_store::{MultiServerRepository, RuntimeStore, StoreError};
 use thiserror::Error;
 
@@ -323,10 +327,11 @@ pub async fn manage(
     store.transaction_with(move |tx| -> Result<Value, MultiServerError> {
         match &body {
             ManagementRequest::Settings { auto_pair, .. } => { tx.execute("UPDATE runtime_access_settings SET auto_pair=?1 WHERE id=1",[i64::from(auto_pair.value().copied().unwrap_or(false))])?; audit_write(tx,"local",&actor,"settings")?; }
-            ManagementRequest::Revoke { client_id, .. } => { let id=client_id.as_str(); let mut client=stored(tx,"runtime_access_clients",id)?.ok_or_else(||MultiServerError::Refused("client does not exist".into()))?; if client.get("status").and_then(Value::as_str)!=Some("revoked") { client["status"]=json!("revoked"); client["revoked"]=json!(unix_time()?); tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2",rusqlite::params![client.to_string(),id])?; audit_write(tx,id,&actor,"revoke")?; } }
+            ManagementRequest::Revoke { client_id, .. } => { let id=client_id.as_str(); let mut client=stored(tx,"runtime_access_clients",id)?.ok_or_else(||MultiServerError::Refused("client does not exist".into()))?; if client.status != AccessClientStatus::Revoked { client.status=AccessClientStatus::Revoked; client.revoked=Field::Value(serde_json::Number::from_f64(unix_time()?).ok_or_else(|| invalid("runtime_access_clients",id,"revoked"))?); tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2",rusqlite::params![serde_json::to_string(&client).map_err(|_|invalid("runtime_access_clients",id,"record"))?,id])?; audit_write(tx,id,&actor,"revoke")?; } }
             ManagementRequest::Alias { server_id, request_id, alias } => {
                 let server = server_id.as_str();
                 let request = request_id.as_str();
+                let alias_value = alias.clone();
                 let alias = alias.as_str();
                 if !valid_identifier(server) || !valid_identifier(request) {
                     return Err(MultiServerError::Refused("invalid server alias request".into()));
@@ -355,14 +360,14 @@ pub async fn manage(
                     } else {
                         let mut peer = stored(tx, "runtime_access_clients", server)?
                             .ok_or_else(|| MultiServerError::Refused("server does not exist".into()))?;
-                        peer["alias"] = json!(alias);
-                        tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2", rusqlite::params![peer.to_string(), server])?;
+                        peer.alias = Field::Value(alias_value);
+                        tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2", rusqlite::params![serde_json::to_string(&peer).map_err(|_|invalid("runtime_access_clients",&server,"record"))?, server])?;
                     }
                     tx.execute("INSERT INTO runtime_access_alias_requests VALUES(?,?,?)", rusqlite::params![request,target,alias])?;
                     audit_write(tx,target,&actor,"alias")?;
                 }
             }
-            ManagementRequest::Unrevoke { request_id, client_id } => { let request = request_id.as_str(); let target = client_id.as_str(); let prior=tx.query_row("SELECT client FROM runtime_access_unrevokes WHERE id=?1",[&request],|r|r.get::<_,String>(0)).optional()?; if let Some(saved)=prior {if saved!=target{return Err(MultiServerError::Conflict("request ID selected another server".into()));}} else {let v=stored(tx,"runtime_access_clients",target)?.ok_or_else(||MultiServerError::Refused("select a revoked server".into()))?;if v.get("status").and_then(Value::as_str)!=Some("revoked")||v.get("kind").and_then(Value::as_str)!=Some("server"){return Err(MultiServerError::Refused("select a revoked server".into()));}tx.execute("DELETE FROM runtime_access_clients WHERE id=?1",[&target])?;tx.execute("DELETE FROM runtime_access_auto_attempts WHERE id=?1",[&target])?;tx.execute("INSERT INTO runtime_access_unrevokes VALUES(?1,?2)",rusqlite::params![request,target])?;audit_write(tx,target,&actor,"unrevoke")?;} }
+            ManagementRequest::Unrevoke { request_id, client_id } => { let request = request_id.as_str(); let target = client_id.as_str(); let prior=tx.query_row("SELECT client FROM runtime_access_unrevokes WHERE id=?1",[&request],|r|r.get::<_,String>(0)).optional()?; if let Some(saved)=prior {if saved!=target{return Err(MultiServerError::Conflict("request ID selected another server".into()));}} else {let v=stored(tx,"runtime_access_clients",target)?.ok_or_else(||MultiServerError::Refused("select a revoked server".into()))?;if v.status!=AccessClientStatus::Revoked || v.kind!=AccessClientKind::Server{return Err(MultiServerError::Refused("select a revoked server".into()));}tx.execute("DELETE FROM runtime_access_clients WHERE id=?1",[&target])?;tx.execute("DELETE FROM runtime_access_auto_attempts WHERE id=?1",[&target])?;tx.execute("INSERT INTO runtime_access_unrevokes VALUES(?1,?2)",rusqlite::params![request,target])?;audit_write(tx,target,&actor,"unrevoke")?;} }
             ManagementRequest::AcceptInvite { .. } | ManagementRequest::CreateInvite { .. }
             | ManagementRequest::Discover { .. } | ManagementRequest::Name { .. }
             | ManagementRequest::UiInvite { .. } => return Err(MultiServerError::Refused(format!("unsupported local multi-server action: {}", body.action()))),
@@ -550,75 +555,39 @@ fn project_records(tx: &rusqlite::Transaction<'_>, table: &str) -> Result<Vec<Va
     let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
     rows.map(|row| {
         let (id, raw) = row?;
-        let mut v = parse(table, &id, &raw)?;
-        let obj = v
-            .as_object_mut()
-            .ok_or_else(|| invalid(table, &id, "record"))?;
-        let allowed = [
-            "id",
-            "clientId",
-            "serverId",
-            "label",
-            "kind",
-            "origin",
-            "publicKey",
-            "tailscaleUser",
-            "status",
-            "created",
-            "lastAccess",
-            "revoked",
-            "reachability",
-            "lastSeen",
-            "autoPair",
-            "alias",
-            "replacedBy",
-        ];
-        obj.retain(|k, _| allowed.contains(&k.as_str()));
-        for key in ["id", "clientId", "label", "kind", "publicKey", "status"] {
-            if !obj.get(key).is_some_and(Value::is_string) {
-                return Err(invalid(table, &id, key));
-            }
+        let client = decode_client(table, &id, &raw)?;
+        let mut obj = serde_json::Map::new();
+        obj.insert("id".into(), json!(client.id));
+        obj.insert("clientId".into(), json!(client.client_id));
+        obj.insert("kind".into(), json!(client.kind));
+        obj.insert("label".into(), json!(client.label));
+        obj.insert("created".into(), json!(client.created));
+        obj.insert("publicKey".into(), json!(client.public_key));
+        obj.insert("status".into(), json!(client.status));
+        macro_rules! optional {
+            ($name:literal, $field:expr) => {
+                match $field {
+                    Field::Missing => {}
+                    Field::Null => {
+                        obj.insert($name.into(), Value::Null);
+                    }
+                    Field::Value(value) => {
+                        obj.insert($name.into(), json!(value));
+                    }
+                }
+            };
         }
-        if !["ui", "server"].contains(&obj["kind"].as_str().unwrap_or_default())
-            || !["paired", "revoked", "discovered", "unreachable"]
-                .contains(&obj["status"].as_str().unwrap_or_default())
-        {
-            return Err(invalid(table, &id, "kind/status"));
-        }
-        for key in [
-            "serverId",
-            "origin",
-            "tailscaleUser",
-            "reachability",
-            "alias",
-            "replacedBy",
-        ] {
-            if obj.get(key).is_some_and(|v| !v.is_null() && !v.is_string()) {
-                return Err(invalid(table, &id, key));
-            }
-        }
-        for key in ["created", "lastAccess", "revoked", "lastSeen"] {
-            if obj
-                .get(key)
-                .is_some_and(|v| !v.is_null() && v.as_f64().is_none_or(|n| !n.is_finite()))
-            {
-                return Err(invalid(table, &id, key));
-            }
-        }
-        if obj
-            .get("autoPair")
-            .is_some_and(|v| !v.is_null() && !v.is_boolean())
-        {
-            return Err(invalid(table, &id, "autoPair"));
-        }
-        if obj
-            .get("reachability")
-            .and_then(Value::as_str)
-            .is_some_and(|v| !["reachable", "unreachable", "unknown"].contains(&v))
-        {
-            return Err(invalid(table, &id, "reachability"));
-        }
-        Ok(v)
+        optional!("serverId", client.server_id);
+        optional!("origin", client.origin);
+        optional!("tailscaleUser", client.tailscale_user);
+        optional!("lastAccess", client.last_access);
+        optional!("revoked", client.revoked);
+        optional!("lastSeen", client.last_seen);
+        optional!("autoPair", client.auto_pair);
+        optional!("reachability", client.reachability);
+        optional!("alias", client.alias);
+        optional!("replacedBy", client.replaced_by);
+        Ok(Value::Object(obj))
     })
     .collect()
 }
@@ -726,22 +695,23 @@ fn stored(
     tx: &rusqlite::Transaction<'_>,
     table: &str,
     id: &str,
-) -> Result<Option<Value>, StoreError> {
+) -> Result<Option<PersistedAccessClient>, StoreError> {
     tx.query_row(
         &format!("SELECT record FROM {table} WHERE id=?1"),
         [id],
         |r| r.get::<_, String>(0),
     )
     .optional()?
-    .map(|raw| parse(table, id, &raw))
+    .map(|raw| decode_client(table, id, &raw))
     .transpose()
 }
-fn parse(table: &str, id: &str, raw: &str) -> Result<Value, StoreError> {
-    let v: Value = serde_json::from_str(raw).map_err(|_| invalid(table, id, "record"))?;
-    if !v.is_object() {
-        return Err(invalid(table, id, "record"));
-    }
-    Ok(v)
+fn decode_client(table: &str, id: &str, raw: &str) -> Result<PersistedAccessClient, StoreError> {
+    let client = serde_json::from_str::<
+        studio_runtime_schema::http_ingress::Object<PersistedAccessClient>,
+    >(raw)
+    .map_err(|_| invalid(table, id, "record"))?
+    .0;
+    Ok(client)
 }
 fn decode_invite(id: &str, raw: &str) -> Result<PersistedAccessInvite, StoreError> {
     let invite = serde_json::from_str::<
