@@ -65,8 +65,11 @@ async fn claude_turn_freezes_exact_input_before_native_write() {
         .run(move |s| async move {
             scheduler::lifecycle_transaction_with(s.as_ref(), move |tx| {
                 let mut row = AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
-                row.extra.insert("provider".into(), json!("claude"));
-                row.extra.insert("nativeEffort".into(), json!("medium"));
+                row.provider = studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_schema::ProviderKind::Claude,
+                );
+                row.native_effort =
+                    studio_runtime_schema::queue_command::Field::Value("medium".into());
                 row.extra.insert("claudeOptions".into(), json!({}));
                 AgentRepository::put(tx, &row)?;
                 Ok(())

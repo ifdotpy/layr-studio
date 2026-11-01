@@ -218,7 +218,7 @@ fn identity() -> ConnectionIdentity {
     }
 }
 fn base_agent() -> Value {
-    json!({"compactions":0,"id":"agent","rootId":"agent","epoch":1,"accountKey":"default","threadId":"thread",
+    json!({"compactions":0,"capacity":{"kind":"automatic","max":64},"naming":"automatic","id":"agent","rootId":"agent","epoch":1,"accountKey":"default","threadId":"thread",
         "provider":"codex","model":"gpt-fixture","yoloMode":true,"status":"waiting","autoWake":true,
         "inFlight":false,
         "startAttempt":{"id":"attempt","events":["event"],"submitted":true},

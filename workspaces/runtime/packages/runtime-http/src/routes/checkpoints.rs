@@ -144,7 +144,7 @@ async fn restore_owned(
                         return Err(ApiError::new(StatusCode::BAD_REQUEST, "Preview this checkpoint before restore"));
                     }
                     let op_id = format!("restore:{agent_id}:{checkpoint_id}:{}", &studio_runtime_store::sha256_hex(expected_tree.as_bytes())[..32]);
-                    let own_reservation = (snapshot.agent.extra.get("workspaceReservationId").and_then(Value::as_str) == Some(op_id.as_str())).then_some(op_id.as_str());
+                    let own_reservation = (snapshot.agent.workspace_reservation_id.value().map(String::as_str) == Some(op_id.as_str())).then_some(op_id.as_str());
                     checkpoints::ensure_restore_available(&snapshot, own_reservation).map_err(map_error)?;
                     let current_tree = checkpoints::snapshot_tree(&store, snapshot.agent.cwd.as_deref().ok_or_else(ApiError::internal)?).map_err(map_error)?;
                     let signature = studio_runtime_store::sha256_hex(
@@ -699,10 +699,7 @@ async fn settle_restore_failure(
             let owner = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))
                 .map_err(ApiError::stored)?
                 .ok_or_else(ApiError::internal)?;
-            if owner
-                .extra
-                .get("workspaceReservationId")
-                .and_then(Value::as_str)
+            if owner.workspace_reservation_id.value().map(String::as_str)
                 != Some(operation_id.as_str())
                 || operation
                     .source
@@ -733,20 +730,20 @@ async fn settle_restore_failure(
                 .map_err(ApiError::stored)?
             {
                 if unknown {
-                    agent
-                        .extra
-                        .insert("workspaceOperation".into(), json!("restore_recovery"));
+                    agent.workspace_operation = studio_runtime_schema::queue_command::Field::Value(
+                        "restore_recovery".into(),
+                    );
                     agent.set_status(studio_runtime_store::AgentStatus::Interrupted);
                     agent.auto_wake = Some(false);
-                    agent.extra.insert("error".into(), json!(message));
-                } else if agent
-                    .extra
-                    .get("workspaceReservationId")
-                    .and_then(Value::as_str)
+                    agent.error = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_schema::provider_errors::AgentError::Message(message),
+                    );
+                } else if agent.workspace_reservation_id.value().map(String::as_str)
                     == Some(operation_id.as_str())
                 {
-                    agent.extra.remove("workspaceReservationId");
-                    agent.extra.insert("workspaceOperation".into(), Value::Null);
+                    agent.workspace_reservation_id =
+                        studio_runtime_schema::queue_command::Field::Missing;
+                    agent.workspace_operation = studio_runtime_schema::queue_command::Field::Null;
                 }
                 AgentRepository::put(tx, &agent).map_err(ApiError::stored)?;
             }

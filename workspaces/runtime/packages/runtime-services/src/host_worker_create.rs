@@ -191,7 +191,9 @@ pub fn prepare(
             created,
             None,
         );
-        value["needsTitle"] = json!(false);
+        if value["naming"] != "manual" {
+            value["naming"] = json!("automatic");
+        }
         value["model"] = json!(settings.model);
         value["effort"] = json!(settings.effort);
         value["fastMode"] = json!(settings.fast_mode);
@@ -302,7 +304,6 @@ pub fn prepare_work_item(
     draft["autoWake"] = json!(true);
     if let Some(object) = draft.as_object_mut() {
         object.remove("concurrency");
-        object.remove("maxAgentsExplicit");
     }
     draft["workspaceInGit"] = json!(
         body.get("_workspaceInGit")
@@ -351,12 +352,12 @@ pub fn recheck(
 ) -> Result<(), CreateError> {
     for (index, draft) in drafts.iter().enumerate() {
         recheck_record(transaction, draft)?;
-        let frozen = field(draft, "_p02CreationIdentity").ok_or(CreateError::IdentityChanged)?;
+        let frozen = draft
+            .extra
+            .get("_p02CreationIdentity")
+            .ok_or(CreateError::IdentityChanged)?;
         let observed = identity_value(&accounts[index]);
-        if frozen != &observed
-            || field(draft, "provider").and_then(Value::as_str)
-                != Some(accounts[index].provider.key())
-        {
+        if frozen != &observed || draft.provider.value() != Some(&accounts[index].provider) {
             return Err(CreateError::IdentityChanged);
         }
     }
@@ -394,8 +395,8 @@ pub fn recheck_worker(
 ) -> Result<(), CreateError> {
     recheck_record(transaction, draft)?;
     let observed = identity_value(account);
-    if field(draft, "_p02CreationIdentity") != Some(&observed)
-        || field(draft, "provider").and_then(Value::as_str) != Some(account.provider.key())
+    if draft.extra.get("_p02CreationIdentity") != Some(&observed)
+        || draft.provider.value() != Some(&account.provider)
     {
         return Err(CreateError::IdentityChanged);
     }
@@ -407,29 +408,39 @@ pub fn recheck_worker(
     let parent =
         studio_runtime_store::AgentRepository::get(transaction, &AgentId::from(parent_id))?
             .ok_or(CreateError::IdentityChanged)?;
-    let frozen_cwd = field(draft, "_p02ParentCwd");
-    let frozen_account = field(draft, "_p02ParentAccountKey");
+    let frozen_cwd = draft.extra.get("_p02ParentCwd");
+    let frozen_account = draft.extra.get("_p02ParentAccountKey");
     if parent.cwd.as_deref() != frozen_cwd.and_then(Value::as_str)
         || Some(parent.account_key.as_str()) != frozen_account.and_then(Value::as_str)
-        || field(&parent, "projectId").and_then(Value::as_str)
-            != field(draft, "_p02ParentProjectId").and_then(Value::as_str)
-        || field(&parent, "projectServerId").and_then(Value::as_str)
-            != field(draft, "_p02ParentProjectServerId").and_then(Value::as_str)
+        || parent.extra.get("projectId").and_then(Value::as_str)
+            != draft
+                .extra
+                .get("_p02ParentProjectId")
+                .and_then(Value::as_str)
+        || parent.extra.get("projectServerId").and_then(Value::as_str)
+            != draft
+                .extra
+                .get("_p02ParentProjectServerId")
+                .and_then(Value::as_str)
     {
         return Err(CreateError::IdentityChanged);
     }
     let _guest_cwd = frozen_cwd
         .and_then(Value::as_str)
         .ok_or(CreateError::IdentityChanged)?;
-    let project_path = field(draft, "_p02ParentProjectPath")
+    let project_path = draft
+        .extra
+        .get("_p02ParentProjectPath")
         .and_then(Value::as_str)
         .ok_or(CreateError::IdentityChanged)?;
     if parent.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
-        && field(&parent, "hostProjectPath").and_then(Value::as_str) != Some(project_path)
+        && parent.host_project_path.value().map(String::as_str) != Some(project_path)
     {
         return Err(CreateError::IdentityChanged);
     }
-    let frozen_project = field(draft, "_p02ProjectBinding")
+    let frozen_project = draft
+        .extra
+        .get("_p02ProjectBinding")
         .filter(|value| !value.is_null())
         .cloned();
     let current_project =
@@ -481,13 +492,11 @@ fn recheck_parent_epoch(
     if root.is_lead != Some(true)
         || root.deleted_at.is_some()
         || root.auto_wake == Some(false)
-        || field(&root, "concurrency").and_then(Value::as_i64) == Some(0)
+        || root.extra.get("concurrency").and_then(Value::as_i64) == Some(0)
     {
         return Err(CreateError::IdentityChanged);
     }
-    let max_agents = field(&root, "maxAgents")
-        .and_then(Value::as_i64)
-        .unwrap_or(DEFAULT_MAX_TEAM_AGENTS);
+    let max_agents = root.capacity.max();
     let active = studio_runtime_store::AgentIndexedReads::active_team_members(
         transaction,
         &draft.root_id.0,
@@ -550,7 +559,10 @@ fn validate_agent(record: &AgentRecord) -> Result<(), CreateError> {
             id: record.id.0.clone(),
         });
     }
-    required_string(record, "provider")?;
+    record
+        .provider
+        .value()
+        .ok_or(CreateError::InvalidCreation("provider"))?;
     record
         .cwd
         .as_deref()
@@ -571,16 +583,6 @@ fn validate_agent(record: &AgentRecord) -> Result<(), CreateError> {
         });
     }
     Ok(())
-}
-
-fn field<'a>(record: &'a AgentRecord, key: &str) -> Option<&'a Value> {
-    record.extra.get(key)
-}
-
-fn required_string<'a>(record: &'a AgentRecord, key: &'static str) -> Result<&'a str, CreateError> {
-    field(record, key)
-        .and_then(Value::as_str)
-        .ok_or(CreateError::InvalidCreation(key))
 }
 
 fn required_string_value<'a>(value: &'a Value, key: &'static str) -> Result<&'a str, CreateError> {
@@ -717,6 +719,64 @@ mod tests {
         worker_draft_fixture_with_options(name, prompt, "implementer", true, false, false)
     }
 
+    #[test]
+    fn parent_recheck_enforces_configured_team_limit() {
+        let mut fixture = worker_draft_fixture("worker", "prompt");
+        fixture
+            .database
+            .execute(
+                "UPDATE runtime_agents SET record=json_set(record,'$.capacity.max',0) WHERE id=?1",
+                [&fixture.parent_id.0],
+            )
+            .unwrap();
+        let tx = fixture.database.transaction().unwrap();
+        assert!(matches!(
+            recheck_parent_epoch(&tx, &fixture.draft, 0),
+            Err(CreateError::InvalidCreation("team active agent limit"))
+        ));
+        tx.execute(
+            "UPDATE runtime_agents SET record=json_set(record,'$.capacity.max',70) WHERE id=?1",
+            [&fixture.parent_id.0],
+        )
+        .unwrap();
+        let parent: String = tx
+            .query_row(
+                "SELECT record FROM runtime_agents WHERE id=?1",
+                [&fixture.parent_id.0],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut child: Value = serde_json::from_str(&parent).unwrap();
+        for n in 0..64 {
+            let id = format!("limit-worker-{n}");
+            child["id"] = json!(id);
+            child["isLead"] = json!(false);
+            tx.execute(
+                "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                rusqlite::params![id, child.to_string()],
+            )
+            .unwrap();
+        }
+        assert!(
+            studio_runtime_store::AgentIndexedReads::active_team_members(&tx, &fixture.parent_id.0)
+                .unwrap()
+                > DEFAULT_MAX_TEAM_AGENTS
+        );
+        assert!(
+            recheck_parent_epoch(&tx, &fixture.draft, 0).is_ok(),
+            "configured limit above default admits the worker"
+        );
+        tx.execute(
+            "UPDATE runtime_agents SET record=json_remove(record,'$.capacity') WHERE id=?1",
+            [&fixture.parent_id.0],
+        )
+        .unwrap();
+        assert!(matches!(
+            recheck_parent_epoch(&tx, &fixture.draft, 0),
+            Err(CreateError::InvalidCreation("team active agent limit"))
+        ));
+    }
+
     fn worker_draft_fixture_with_options(
         name: &str,
         prompt: &str,
@@ -762,7 +822,8 @@ mod tests {
             None,
         );
         parent["autoWake"] = json!(true);
-        parent["maxAgents"] = json!(DEFAULT_MAX_TEAM_AGENTS);
+        crate::agents_create::set_capacity(&mut parent, DEFAULT_MAX_TEAM_AGENTS, false)
+            .expect("valid capacity");
         database
             .execute(
                 "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
@@ -830,14 +891,14 @@ mod tests {
             Some(&studio_runtime_schema::creation_intent::AgentRole::Reviewer)
         );
         assert_eq!(
-            field(&fixture.draft, "worktree").and_then(Value::as_bool),
+            fixture.draft.extra.get("worktree").and_then(Value::as_bool),
             Some(false)
         );
         assert_eq!(
             fixture.draft.workspace_mode,
             Some(studio_runtime_schema::records::WorkspaceMode::Shared)
         );
-        assert_eq!(field(&fixture.draft, "workerBaseRef"), Some(&Value::Null));
+        assert_eq!(fixture.draft.extra.get("workerBaseRef"), Some(&Value::Null));
         assert_eq!(fixture.draft.fast_mode, Some(true));
         assert_eq!(fixture.draft.daybreak_enabled, Some(false));
     }
@@ -879,7 +940,7 @@ mod tests {
         .expect("review uses its validated target directory");
         assert_eq!(draft.cwd.as_deref(), canonical_target.to_str());
         assert_eq!(
-            field(&draft, "_p02ParentCwd").and_then(Value::as_str),
+            draft.extra.get("_p02ParentCwd").and_then(Value::as_str),
             Some(fixture.cwd.as_str())
         );
         let tx = fixture.database.transaction().expect("recheck transaction");
@@ -960,11 +1021,14 @@ mod tests {
         )
         .expect("prepare VM worker draft");
         assert_eq!(
-            field(&draft, "_p02ParentCwd").and_then(Value::as_str),
+            draft.extra.get("_p02ParentCwd").and_then(Value::as_str),
             Some(guest_cwd)
         );
         assert_eq!(
-            field(&draft, "_p02ParentProjectPath").and_then(Value::as_str),
+            draft
+                .extra
+                .get("_p02ParentProjectPath")
+                .and_then(Value::as_str),
             Some(host_path.as_str())
         );
         let tx = fixture.database.transaction().expect("recheck transaction");
@@ -1051,9 +1115,9 @@ mod tests {
         let accounts = accounts();
         let drafts =
             prepare(&body(), directory.path(), ids, &accounts, &Catalog).expect("checked drafts");
-        assert!(field(&drafts[0], "_p02CreationIdentity").is_some());
+        assert!(drafts[0].extra.contains_key("_p02CreationIdentity"));
         let persisted = persisted_record(&drafts[0]).expect("persistable typed record");
-        assert!(field(&persisted, "_p02CreationIdentity").is_none());
+        assert!(!persisted.extra.contains_key("_p02CreationIdentity"));
         for (draft, id) in drafts.iter().zip(IDS) {
             assert_eq!(draft.id.0, id);
             assert_eq!(draft.root_id.0, id);
@@ -1070,7 +1134,7 @@ mod tests {
                     .expect("canonical temporary directory")
                     .to_str()
             );
-            assert_eq!(field(draft, "workerBaseRef"), Some(&Value::Null));
+            assert_eq!(draft.extra.get("workerBaseRef"), Some(&Value::Null));
             assert_eq!(
                 draft.model.as_deref(),
                 Some(if id == IDS[0] {
@@ -1079,7 +1143,7 @@ mod tests {
                     "model-two"
                 })
             );
-            assert_eq!(draft.needs_title, Some(false));
+            assert_eq!(draft.naming.needs_title(), Some(false));
         }
     }
 

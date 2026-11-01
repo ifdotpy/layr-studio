@@ -156,7 +156,7 @@ pub(crate) async fn run(
     let reviewer = record.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
         && record.role.value().copied()
             == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer)
-        && studio_runtime_store::truthy(record.extra.get("layrReady"));
+        && record.layr_ready == Some(true);
     if !reviewer {
         return crate::host_exec::refused(REFUSAL.into());
     }

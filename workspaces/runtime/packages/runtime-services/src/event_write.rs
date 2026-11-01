@@ -750,7 +750,6 @@ mod tests {
         agent.account_key = "other".into();
         assert!(!super::recovery_pending(&agent));
     }
-    use std::collections::BTreeMap;
     use studio_runtime_schema::delivery::DeliveryMoment;
     use studio_runtime_store::request_results::RequestResultError;
     use studio_runtime_store::{
@@ -813,10 +812,9 @@ mod tests {
             root_id: AgentId::from("a"),
             epoch: 3,
             status: AgentStatus::Idle,
-            extra: BTreeMap::from([(
-                "provider".to_owned(),
-                json!(studio_runtime_schema::ProviderKind::Codex),
-            )]),
+            provider: studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_schema::ProviderKind::Codex,
+            ),
             ..AgentRecord::test_defaults()
         };
         AgentRepository::put(&connection, &agent).expect("agent writes");

@@ -282,10 +282,9 @@ async fn preparation_transaction_failpoints_roll_back_every_row() {
             let attempt = a.start_attempt.take().expect("valid recovery fixture");
             a.status = studio_runtime_store::AgentStatus::Interrupted;
             a.auto_wake = Some(false);
-            a.extra.insert(
-                "error".into(),
-                json!(studio_runtime_store::PROVIDER_DISCONNECTED_TURN_ERROR),
-            );
+            a.set_error_receipt(json!(
+                studio_runtime_store::PROVIDER_DISCONNECTED_TURN_ERROR
+            ))?;
             a.disconnect_recovery = Some(Box::new(
                 studio_runtime_schema::recovery_record::RecoveryFields {
                     epoch: Some(
@@ -691,17 +690,9 @@ async fn legacy_start_absence_matches_python_writes_and_visible_wait() {
             case["name"]
         );
         let mut after = snapshot(&store).record().clone();
-        if case["result"]["status"] == "unconfirmed" {
-            assert_eq!(
-                after["startRecoveryCheck"]["reason"],
-                "start-outcome-unconfirmed"
-            );
-            after
-                .as_object_mut()
-                .expect("record")
-                .remove("startRecoveryCheck");
-        }
+        assert!(after.get("startRecoveryCheck").is_none());
         let mut expected = case["after"].clone();
+        crate::agent_view_fixtures::materialize_agent_defaults(&mut expected);
         crate::normalize_agent_nulls(&mut expected);
         crate::normalize_agent_nulls(&mut after);
         if let Some(created) = expected
@@ -863,7 +854,18 @@ async fn start_absence_failpoints_roll_back_restore_wait_and_hold() {
                 },
             )
             .await;
-            assert!(result.is_err(), "{name}/{table}/{timing}");
+            if name == "waiting" {
+                assert_eq!(
+                    result.expect("waiting is read-only").outcome,
+                    RecoveryOutcome::Applied(
+                        studio_runtime_services::recovery::RecoveryReceipt::Unknown(
+                            json!({"status":"unconfirmed"})
+                        )
+                    )
+                );
+            } else {
+                assert!(result.is_err(), "{name}/{table}/{timing}: {result:?}");
+            }
             drop(store);
             let reopened = open_store(root.path()).await;
             assert_eq!(

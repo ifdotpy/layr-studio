@@ -130,10 +130,11 @@ pub(super) async fn agents(state: &State, kind: ProviderKind, others: usize) -> 
                 let mut template =
                     AgentRepository::get(tx, &AgentId::from(first.as_str()))?.unwrap();
                 if kind == ProviderKind::Claude {
-                    template.extra.insert("provider".into(), json!("claude"));
-                    template
-                        .extra
-                        .insert("nativeEffort".into(), json!("medium"));
+                    template.provider = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_schema::ProviderKind::Claude,
+                    );
+                    template.native_effort =
+                        studio_runtime_schema::queue_command::Field::Value("medium".into());
                     template.extra.insert("claudeOptions".into(), json!({}));
                 }
                 AgentRepository::put(tx, &template)?;
@@ -536,7 +537,11 @@ async fn held_start_wakes_nothing_until_an_account_change() {
                     let mut row =
                         AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
                     row.status = studio_runtime_store::AgentStatus::Failed;
-                    row.extra.insert("error".into(), json!(reason));
+                    row.error = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_schema::provider_errors::AgentError::Message(
+                            (reason).to_string(),
+                        ),
+                    );
                     Ok(AgentRepository::put(tx, &row)?)
                 })
                 .await

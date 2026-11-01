@@ -51,7 +51,7 @@ export default {
       "src/sync/drafts.publication.test.ts",
       "src/sync/transcriptCache.test.ts",
       "src/sync/entityProjectionObserver.test.ts",
-      "src/sync/localFrontend.test.ts",
+      "src/sync/subscriptionCache.test.ts",
       "src/sync/draftReplication.test.ts",
       "src/sync/client.draftServer.test.ts",
       "src/sync/client.entityServer.test.ts",

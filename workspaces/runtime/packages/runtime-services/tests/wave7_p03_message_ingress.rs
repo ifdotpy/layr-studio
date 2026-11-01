@@ -147,6 +147,18 @@ impl Fixture {
             tx.execute("UPDATE runtime_agents SET record=json_remove(record,'$.turnId') WHERE json_type(record,'$.turnId')='null'", [])?;
             tx.execute("UPDATE sync_entities SET hash=sync_entity_hash(payload) WHERE payload IS NOT NULL", [])?;
             studio_runtime_store::migrations::migrate_2026_10_20(tx)?;
+            studio_runtime_store::migrations::normalize_agent_fixtures(tx)?;
+            let projections = {
+                let mut query = tx.prepare("SELECT id,payload FROM sync_entities WHERE collection='agent' AND deleted=0 AND payload IS NOT NULL")?;
+                let rows = query.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            for (id, raw) in projections {
+                let mut payload: Value = serde_json::from_str(&raw)?;
+                crate::agent_view_fixtures::normalize_legacy_agent(payload.get_mut("value").expect("agent projection"));
+                let raw = payload.to_string();
+                tx.execute("UPDATE sync_entities SET payload=?1,hash=sync_entity_hash(?1) WHERE collection='agent' AND id=?2", (&raw, &id))?;
+            }
             for field in studio_runtime_store::agent_volatile::AGENT_VOLATILE_FIELDS {
                 tx.execute(&format!("UPDATE runtime_agent_volatile SET \"{field}\"=NULL WHERE \"{field}\"='null'"), [])?;
             }
@@ -177,9 +189,8 @@ async fn send(
                 let mut agent =
                     studio_runtime_store::AgentRepository::get(tx, &room_for_write.into())?
                         .expect("agent");
-                agent
-                    .extra
-                    .insert("workspaceOperation".into(), json!(operation));
+                agent.workspace_operation =
+                    studio_runtime_schema::queue_command::Field::Value(operation);
                 studio_runtime_store::AgentRepository::put(tx, &agent)?;
                 studio_runtime_services::agents_create::publish_agent(
                     tx,
@@ -518,6 +529,12 @@ fn assert_json(actual: &Value, expected: &Value, path: &str) {
                         b.remove(key);
                     }
                 }
+                let mut expected = Value::Object(b);
+                crate::agent_view_fixtures::normalize_legacy_agent(&mut expected);
+                b = expected
+                    .as_object()
+                    .expect("normalized agent object")
+                    .clone();
             }
             assert_eq!(
                 a.keys().collect::<Vec<_>>(),
@@ -996,13 +1013,13 @@ async fn voice_delivery_prepares_workspace_admission() {
                 let mut other = studio_runtime_store::AgentRepository::get(tx, &"agent".into())?
                     .expect("agent");
                 other.id = "other".into();
-                other.extra.insert(
-                    "workspaceOperation".into(),
-                    json!(if operation == "unrelated" {
+                other.workspace_operation = studio_runtime_schema::queue_command::Field::Value(
+                    if operation == "unrelated" {
                         "restore"
                     } else {
                         operation
-                    }),
+                    }
+                    .into(),
                 );
                 if operation == "unrelated" {
                     other.cwd = Some(root.to_string_lossy().into_owned());
@@ -1125,9 +1142,8 @@ async fn late_operation_paths_use_the_prepared_canonical_relation() {
             .prepare()
             .await
             .expect("prepare");
-        other
-            .extra
-            .insert("workspaceOperation".into(), json!("capture"));
+        other.workspace_operation =
+            studio_runtime_schema::queue_command::Field::Value("capture".into());
         store
             .transaction({
                 let other = other.clone();

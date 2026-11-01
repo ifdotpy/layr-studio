@@ -30,10 +30,9 @@ impl Admission for MessageNativeAdmission {
             .and_then(Value::as_str)
             .unwrap_or("default");
         if root
-            .extra
-            .get("excludedAccountKeys")
-            .and_then(Value::as_array)
-            .is_some_and(|keys| keys.iter().any(|key| key.as_str() == Some(account)))
+            .excluded_account_keys
+            .value()
+            .is_some_and(|keys| keys.iter().any(|key| key == account))
         {
             return Err(NativeError::Invalid("account-excluded"));
         }
@@ -95,7 +94,7 @@ impl Admission for MessageNativeAdmission {
             let global_limit = usize::try_from(global_limit)
                 .map_err(|_| NativeError::Invalid("review/global-concurrency"))?;
             let active = tx
-                .prepare(studio_runtime_store::RESERVED_TURN_INPUT)?
+                .prepare(studio_runtime_store::reserved_turn_input())?
                 .query_map([], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
                 })?
@@ -215,5 +214,36 @@ fn admission_error(error: crate::coordination::CoordinationError) -> NativeError
         | CoordinationError::Conflict(_)
         | CoordinationError::InvalidStored { .. }
         | CoordinationError::Store(_) => NativeError::Invalid("admission"),
+    }
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+    use serde_json::json;
+    use studio_runtime_store::RuntimeStore;
+
+    #[tokio::test]
+    async fn excluded_account_refuses_native_actions() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        store
+            .transaction_with(|tx| {
+                let agent = json!({"id":"lead","rootId":"lead","epoch":1,"status":"idle",
+                "compactions":0,"accountKey":"blocked","provider":"codex","excludedAccountKeys":["blocked"]});
+                AgentRepository::put(tx, &AgentRecord::from_value(agent.clone()).unwrap())?;
+                let admission = MessageNativeAdmission::new(Arc::new(
+                    crate::message_admission::PreparedAdmission::default(),
+                ));
+                for action in [Action::Compact, Action::Review] {
+                    assert!(matches!(
+                        admission.check(tx, &agent, action),
+                        Err(NativeError::Invalid("account-excluded"))
+                    ));
+                }
+                Ok::<_, studio_runtime_store::StoreError>(())
+            })
+            .await
+            .unwrap();
     }
 }

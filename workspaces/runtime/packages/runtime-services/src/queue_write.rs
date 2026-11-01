@@ -162,9 +162,7 @@ pub fn action(
             let (target_id, row) = target_row(body, rows)?;
             if recover_failed
                 && (agent
-                    .extra
-                    .get("error")
-                    .and_then(Value::as_str)
+                    .error_text()
                     .is_some_and(crate::account_auth_gate::is_hold_reason)
                     || !SchedulerRepository::proven_unsent_pending_batch(
                         transaction,
@@ -230,20 +228,16 @@ pub fn action(
     let mut agent = agent;
     if recover_failed {
         agent.status = AgentStatus::Queued;
-        agent.extra.insert("error".into(), Value::Null);
+        agent.error = studio_runtime_schema::queue_command::Field::Null;
         agent.start_attempt = None;
     }
     if updated.items != current.items || recover_failed {
-        let revision = match agent.extra.get("queueMutationRevision") {
-            None => 0,
-            Some(value) => value
-                .as_i64()
-                .filter(|revision| *revision >= 0)
-                .ok_or_else(|| invalid_stored("runtime_agents", agent_id))?,
-        };
-        agent
-            .extra
-            .insert("queueMutationRevision".to_owned(), json!(revision + 1));
+        let revision = agent.queue_mutation_revision.unwrap_or(0);
+        let next = revision + 1;
+        if next > studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64 {
+            return Err(invalid_stored("runtime_agents", agent_id));
+        }
+        agent.queue_mutation_revision = Some(next);
         AgentRepository::put(transaction, &agent)?;
     }
     if recover_failed {
@@ -433,6 +427,16 @@ pub fn queue_snapshot(
             .and_then(Value::as_str)
             .unwrap_or("<event>")
             .to_owned();
+        let status = item["status"]
+            .as_str()
+            .and_then(|value| {
+                value
+                    .parse::<studio_runtime_schema::persistence::EventStatus>()
+                    .ok()
+            })
+            .map(studio_runtime_schema::delivery::MessageSendStatus::from)
+            .ok_or_else(|| invalid_stored("runtime_events", &id))?;
+        item["status"] = json!(status);
         for field in ["delivery", "requestedDelivery"] {
             let raw = item[field]
                 .as_str()
@@ -448,13 +452,7 @@ pub fn queue_snapshot(
             return Err(invalid_stored("runtime_events", &id));
         }
     }
-    let revision_number = match agent.extra.get("queueMutationRevision") {
-        None => 0,
-        Some(value) => value
-            .as_i64()
-            .filter(|value| *value >= 0)
-            .ok_or_else(|| invalid_stored("runtime_agents", &agent.id.0))?,
-    };
+    let revision_number = agent.queue_mutation_revision.unwrap_or(0);
     let bytes = serde_json::to_vec(&json!([agent.epoch, revision_number, items]))?;
     let revision = studio_runtime_store::sha256_hex(&bytes);
     Ok(QueueSnapshot { items, revision })

@@ -774,6 +774,13 @@ mod connection_recovery_identity_tests {
     use serde_json::json;
 
     #[test]
+    fn capacity_normalization_keeps_connection_recovery_identity() {
+        let old = json!({"id":"a","epoch":4,"accountKey":"acct","threadId":"t","turnId":"u","maxAgents":80,"maxAgentsExplicit":true});
+        let new = json!({"id":"a","epoch":4,"accountKey":"acct","threadId":"t","turnId":"u","capacity":{"kind":"explicit","max":80}});
+        assert_eq!(connection_recovery_id(&old), connection_recovery_id(&new));
+    }
+
+    #[test]
     fn a_new_disconnect_cannot_reuse_an_old_connection_recovery_receipt() {
         let first = json!({
             "id":"agent-1", "epoch":4, "accountKey":"acct", "threadId":"thread-1",

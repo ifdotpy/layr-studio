@@ -70,6 +70,12 @@ fn corpus() -> &'static Value {
                         && fields.contains_key("status")
                     {
                         fields.entry("compactions").or_insert(json!(0));
+                        fields.entry("capacity").or_insert_with(|| {
+                            json!(studio_runtime_store::AgentCapacity::default())
+                        });
+                        fields
+                            .entry("naming")
+                            .or_insert_with(|| json!(studio_runtime_store::AgentNaming::default()));
                         for key in [
                             "parentId",
                             "threadId",

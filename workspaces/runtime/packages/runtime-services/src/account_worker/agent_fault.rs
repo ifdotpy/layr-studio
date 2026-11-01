@@ -384,7 +384,11 @@ pub(super) fn hold_agent(
                 agent.extra.insert("nativeFailureHold".into(), json!(true));
                 agent.auto_wake = Some(false);
                 agent.in_flight = Some(false);
-                agent.extra.insert("error".into(), json!(message));
+                agent.error = studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_schema::provider_errors::AgentError::Message(
+                        (message).to_string(),
+                    ),
+                );
                 AgentRepository::put(tx, &agent)?;
                 Ok(HoldResult::Placed)
             }

@@ -344,14 +344,21 @@ fn minutes(seconds: f64) -> i64 {
     (seconds / 60.0).floor() as i64
 }
 
+/// Candidate agents of a stalled turn: an active status and a busy chat (an
+/// unfinished turn). The turn rows decide busy, not the agent `in_flight` column.
+fn stalled_turn_candidates_sql() -> String {
+    format!(
+        "SELECT id FROM runtime_agents WHERE deleted_at IS NULL AND status IN ('running','paused') AND {}",
+        studio_runtime_store::domain::chat_busy_sql("runtime_agents.id")
+    )
+}
+
 fn stalled_turns(
     tx: &Transaction<'_>,
     now: f64,
     found: &mut Vec<Finding>,
 ) -> Result<(), StoreError> {
-    let mut statement = tx.prepare_cached(
-        "SELECT id FROM runtime_agents WHERE deleted_at IS NULL AND status IN ('running','paused') AND COALESCE(in_flight,0)=1",
-    )?;
+    let mut statement = tx.prepare_cached(&stalled_turn_candidates_sql())?;
     let ids = statement
         .query_map([], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
@@ -742,5 +749,44 @@ mod observation_tests {
                 serde_json::from_str::<Value>(raw).is_ok()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod busy_candidate_tests {
+    use super::*;
+
+    #[test]
+    fn stalled_turn_candidates_are_busy_chats_only() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(studio_runtime_store::agent_columns::agent_table_sql())
+            .unwrap();
+        db.execute_batch(&studio_runtime_store::domain::tables_sql())
+            .unwrap();
+        for id in ["busy", "idle"] {
+            let record = json!({"id":id,"provider":"codex","status":"running","inFlight":true});
+            db.execute(
+                "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                rusqlite::params![id, record.to_string()],
+            )
+            .unwrap();
+        }
+        db.execute(
+            "INSERT INTO turns(id,chat,state) VALUES('t1','busy','starting')",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO turns(id,chat,state) VALUES('t0','idle','completed')",
+            [],
+        )
+        .unwrap();
+        let mut statement = db.prepare(&stalled_turn_candidates_sql()).unwrap();
+        let ids = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(ids, ["busy"]);
     }
 }

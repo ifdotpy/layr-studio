@@ -1,3 +1,4 @@
+import { isMessagePending } from "../messageSendStatus";
 import { outboxRequests } from "../browserPersistence";
 import { AgentSource as GeneratedApiAgentSource } from "../generated/api.ts";
 import { DeliveryMoment } from "../generated/deliveryMoment";
@@ -14,9 +15,7 @@ import {
   saveRemovedMessage,
 } from "./removedMessages";
 
-export const isSendingMessage = (message: Message) =>
-  message.role === "user" &&
-  ["sending", "reserved", "dispatching"].includes(message.deliveryStatus || "");
+export const isSendingMessage = isMessagePending;
 
 type Queue =
   paths["/api/queue"]["get"]["responses"][200]["content"]["application/json"];
@@ -77,7 +76,7 @@ export function createSendingMessageRemoval(
     saveRemovedMessage(scope.stateDir, kind, chat, message, localStorage);
     const clientId = message.clientMessageId;
     let cancelled = clientId ? await stopRemovedMessage(clientId) : false;
-    if (kind === "agent" && clientId && message.deliveryStatus === "sending") {
+    if (kind === "agent" && clientId && !cancelled) {
       const suffix = JSON.stringify([
         scope.stateDir,
         scope.workspaceId,
@@ -130,7 +129,7 @@ export function createSendingMessageRemoval(
       chat,
       {
         ...message,
-        deliveryStatus: cancelled ? "cancelled" : "uncertain",
+        deliveryStatus: { source: "device", state: { kind: "removed" } },
       },
       localStorage,
     );
@@ -158,7 +157,15 @@ export function createSendingMessageRemoval(
         );
     };
     for (const entry of outgoing) {
-      if (entry.status !== "sending") continue;
+      if (
+        !isSendingMessage({
+          id: entry.id,
+          role: "user",
+          text: entry.body.text,
+          deliveryStatus: entry.status,
+        })
+      )
+        continue;
       include({
         chat: entry.body.room,
         kind: data.threads.some(
@@ -175,7 +182,7 @@ export function createSendingMessageRemoval(
           text: entry.body.text,
           assets: entry.attachments,
           at: entry.created / 1000,
-          deliveryStatus: "sending",
+          deliveryStatus: entry.status,
         },
       });
     }
@@ -207,7 +214,7 @@ export function createSendingMessageRemoval(
                 text: row.text,
                 assets: row.assets,
                 at: row.created,
-                deliveryStatus: "sending",
+                deliveryStatus: { source: "server", status: row.status },
               },
             });
           }

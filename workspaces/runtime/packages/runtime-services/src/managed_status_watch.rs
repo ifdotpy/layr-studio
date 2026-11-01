@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use studio_runtime_schema::agent_limits::{
-    DEFAULT_GLOBAL_CONCURRENCY, DEFAULT_MAX_TEAM_AGENTS, DEFAULT_SUBAGENT_CONCURRENCY,
-    MAX_SUBAGENT_CONCURRENCY, MIN_GLOBAL_CONCURRENCY, MIN_SUBAGENT_CONCURRENCY,
+    DEFAULT_GLOBAL_CONCURRENCY, DEFAULT_SUBAGENT_CONCURRENCY, MAX_SUBAGENT_CONCURRENCY,
+    MIN_GLOBAL_CONCURRENCY, MIN_SUBAGENT_CONCURRENCY,
 };
 use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind, RequestIdentity};
 use studio_runtime_store::outbox::{Outbox, OutboxError, OutboxRow};
@@ -579,7 +579,7 @@ fn capacity_snapshot(
     let (global_active, team_active): (i64, i64) = connection.query_row(
         &format!(
             "SELECT count(*), count(*) FILTER (WHERE root_id=?1 AND id<>?1) FROM ({})",
-            studio_runtime_store::RESERVED_TURN_INPUT
+            studio_runtime_store::reserved_turn_input()
         ),
         [&root.id.0],
         |row| Ok((row.get(0)?, row.get(1)?)),
@@ -613,11 +613,7 @@ fn capacity_snapshot(
                 DEFAULT_SUBAGENT_CONCURRENCY
             }
         });
-    let root_max_agents = root
-        .extra
-        .get("maxAgents")
-        .and_then(Value::as_i64)
-        .unwrap_or(DEFAULT_MAX_TEAM_AGENTS);
+    let root_max_agents = root.capacity.max();
     let mut queued = Vec::new();
     for agent in team
         .iter()
@@ -696,7 +692,7 @@ fn agent_status_record(agent: &AgentRecord) -> Value {
         "inFlight": agent.in_flight,
         "parentId": agent.parent_id,
         "kind": "agent",
-        "error": clip_value(agent.extra.get("error")),
+        "error": clip_text(agent.error.value().map(|error| error.diagnostic_text()).unwrap_or_default()),
     });
     if agent.status == AgentStatus::Parked
         && agent
@@ -731,6 +727,10 @@ fn clip_value(value: Option<&Value>) -> Value {
                 .unwrap_or_else(|| value.to_string())
         })
         .unwrap_or_default();
+    clip_text(raw)
+}
+
+fn clip_text(raw: String) -> Value {
     let mut bytes = raw.into_bytes();
     bytes.truncate(600);
     while std::str::from_utf8(&bytes).is_err() {
@@ -1496,7 +1496,7 @@ mod tests {
                     json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,
                         "id":"lead","rootId":"lead","epoch":3,"status":"running",
                         "isLead":true,"autoWake":true,"cwd":cwd,
-                        "concurrency":2,"maxAgents":8,
+                        "concurrency":2,"capacity":{"kind":"automatic","max":8},
                         "workerDefaults":{"model":"gpt-fixture","effort":"high","fastMode":false}
                     }),
                     json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"queued","rootId":"lead","epoch":4,"status":"queued","autoWake":false,"cwd":cwd}),
@@ -1540,6 +1540,7 @@ mod tests {
                 .any(|rule| rule.purpose == crate::disk_space::StoragePurpose::Workspace)
         }));
         assert_eq!(first["capacity"]["teamLimit"], 2);
+        assert_eq!(first["capacity"]["maxAgents"], 8);
         assert_eq!(first["capacity"]["teamActive"], 1);
         assert_eq!(
             first["capacity"]["queued"][0]["reasons"],

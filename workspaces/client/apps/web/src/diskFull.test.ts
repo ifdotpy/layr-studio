@@ -48,6 +48,11 @@ it("recognizes disk-full errors from providers and Studio", () => {
     JSON.stringify({ message: "database or disk is full" }),
     { message: "Write failed", codexErrorInfo: "diskFull" },
     { message: "Disk is full.", data: { diskFull: true } },
+    {
+      message: "Write failed",
+      codexErrorInfo: "diskFull",
+      data: { diskFull: true },
+    },
   ])
     assert.equal(isDiskFullError(value), true, JSON.stringify(value));
   for (const value of [

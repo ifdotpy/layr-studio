@@ -112,20 +112,20 @@ use sqlite_actor::{ActorResponseDisposition, SqliteActor};
 
 pub use path::{NATIVE_LAYR_DIRECTORY, resolve_state_dir};
 pub use records::{
-    ActiveExecutionView, AgentDraft, AgentExecutionMode, AgentId, AgentRecord, AgentRepository,
-    AgentSandbox, AgentStatus, AnnotationRecord, ChatMessage, ChatMessageId, CheckpointRecord,
-    ComplaintRecord, CredentialCopy, EventMetadataRecord, ExecutionRunRecord, InterruptOutcome,
-    JsonRecord, LegacyWorkReply, MessageRepository, MonitorRecord, NativeRelease,
-    NativeReleaseScope, NativeReviewThread, PlanRecord, QueueEvent, QueueEventId,
-    QueueEventRepository, RecordKeyMode, RecordOrder, RecordPredicate, RecordQueryShape,
-    RequestRecord, RuleRecord, StartAttemptAction, StartAttemptView, StartIdentity,
-    StartInterruptView, StartOutcomeHold, StoredStartOutcomeHold, StoredTitleJob, Table, TaskId,
-    TaskRecord, TaskRepository, TerminalRecord, TitleJob, ToolResultRecord, TranscriptAssetId,
-    TranscriptAssetRecord, TranscriptItemId, TranscriptItemRecord, UnknownAgentStatus,
-    UsageResumeRecord, VmAuthBootstrap, VmLaunch, WorkItemRecord, WorkStatus,
+    ActiveExecutionView, AgentCapacity, AgentDraft, AgentExecutionMode, AgentId, AgentNaming,
+    AgentRecord, AgentRepository, AgentSandbox, AgentStatus, AnnotationRecord, ChatMessage,
+    ChatMessageId, CheckpointRecord, ComplaintRecord, CredentialCopy, EventMetadataRecord,
+    ExecutionRunRecord, InterruptOutcome, JsonRecord, LegacyWorkReply, MessageRepository,
+    MonitorRecord, NativeRelease, NativeReleaseScope, NativeReviewThread, PlanRecord, QueueEvent,
+    QueueEventId, QueueEventRepository, RecordKeyMode, RecordOrder, RecordPredicate,
+    RecordQueryShape, RequestRecord, RuleRecord, StartAttemptAction, StartAttemptView,
+    StartIdentity, StartInterruptView, StartOutcomeHold, StoredStartOutcomeHold, StoredTitleJob,
+    Table, TaskId, TaskRecord, TaskRepository, TerminalRecord, TitleJob, ToolResultRecord,
+    TranscriptAssetId, TranscriptAssetRecord, TranscriptItemId, TranscriptItemRecord,
+    UnknownAgentStatus, UsageResumeRecord, VmAuthBootstrap, VmLaunch, WorkItemRecord, WorkStatus,
     WorkspaceOperationRecord, decode_agent_record, encode_open_record,
 };
-pub use repositories::agent_indexed_reads::{AgentIndexedReads, RESERVED_TURN_INPUT};
+pub use repositories::agent_indexed_reads::{AgentIndexedReads, reserved_turn_input};
 pub use repositories::agent_move::{AgentMoveRepository, MoveRecord};
 pub use repositories::claude_records::ClaudeAttemptRecord;
 pub use repositories::claude_retry::{ClaudeRetryRecords, ClaudeRetryRepository};

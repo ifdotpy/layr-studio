@@ -9,7 +9,11 @@ async fn change_agent(state: &State, key: &'static str, value: Value) {
             store
                 .transaction_with(move |tx| {
                     let mut row = AgentRepository::get(tx, &AgentId::from(id.as_str()))?.unwrap();
-                    row.extra.insert(key.into(), value);
+                    if key == "nativeRelease" {
+                        row.native_release = Some(serde::Deserialize::deserialize(value).unwrap());
+                    } else {
+                        row.extra.insert(key.into(), value);
+                    }
                     AgentRepository::put(tx, &row)?;
                     Ok::<_, WorkerError>(())
                 })
@@ -357,7 +361,7 @@ async fn missing_native_effort_uses_shared_catalog_published_after_construction(
                 .transaction_with(move |tx| {
                     let mut agent =
                         AgentRepository::get(tx, &AgentId::from(update_id.as_str()))?.unwrap();
-                    agent.extra.remove("nativeEffort");
+                    agent.native_effort = studio_runtime_schema::queue_command::Field::Missing;
                     AgentRepository::put(tx, &agent)
                 })
                 .await?;
@@ -506,7 +510,7 @@ async fn cold_and_expired_catalogs_hold_the_attempt_without_failing_it() {
                     .transaction_with(move |tx| {
                         let mut row =
                             AgentRepository::get(tx, &AgentId::from(id.as_str()))?.unwrap();
-                        row.extra.remove("nativeEffort");
+                        row.native_effort = studio_runtime_schema::queue_command::Field::Missing;
                         AgentRepository::put(tx, &row)?;
                         Ok::<_, WorkerError>(())
                     })

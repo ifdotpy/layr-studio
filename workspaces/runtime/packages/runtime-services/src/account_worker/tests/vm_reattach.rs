@@ -105,6 +105,10 @@ async fn edit_actor(state: &State, changes: Value) {
                         match key.as_str() {
                             "epoch" => record.epoch = value.as_i64().unwrap(),
                             "accountKey" => record.account_key = value.as_str().unwrap().to_owned(),
+                            "provider" => {
+                                record.provider =
+                                    serde::Deserialize::deserialize(value.clone()).unwrap()
+                            }
                             "threadId" => record.thread_id = value.as_str().map(str::to_owned),
                             "turnId" => record.turn_id = value.as_str().map(str::to_owned),
                             "cwd" => record.cwd = value.as_str().map(str::to_owned),
@@ -841,11 +845,9 @@ record.thread_id = Some("fake-thread-0".to_string());
 record.turn_id = Some("vm-turn".to_string());
 record.workspace_mode = Some(studio_runtime_schema::records::WorkspaceMode::Layr);
 record.cwd = Some("/home/studio/project".into());
-for (key, value) in [
-                ("layrReady",json!(true)),
-                ("provider",json!("claude")),("executionSettingsAccountKey",json!("default")),
-
-            ] { record.extra.insert(key.into(), value); }
+record.layr_ready = Some(true);
+record.provider = serde::Deserialize::deserialize(json!("claude")).unwrap();
+record.execution_settings_account_key = serde::Deserialize::deserialize(json!("default")).unwrap();
             record.start_attempt = Some(Box::new(studio_runtime_store::StartAttemptView { id: Some("existing-vm-attempt".into()), epoch: Some(epoch), account_key: Some("default".into()), submitted: Some(true), events: Some(vec!["annotation:input".into()]), thread_id: Some("fake-thread-0".into()), turn_id: Some("vm-turn".into()), connection_generation: Some(1), connection_id: Some("previous-backend".into()), request_ticket: Some("original-native-start".into()), ..Default::default() }));
             AgentRepository::put(tx,&record)?;
             studio_runtime_store::ExecutionHistoryRepository::record(tx,&record)?;
@@ -902,7 +904,7 @@ async fn vm_existing_reattach_restores_the_journal_without_launch_or_input_repla
                     .read_async("vm_reattach_plan", |connection| {
                         let mut plan = connection.prepare(&format!(
                             "EXPLAIN QUERY PLAN {}",
-                            super::super::vm_reattach::STARTUP_CANDIDATES
+                            super::super::vm_reattach::startup_candidates_sql()
                         ))?;
                         let rows = plan.query_map(
                             rusqlite::params![
@@ -915,7 +917,10 @@ async fn vm_existing_reattach_restores_the_journal_without_launch_or_input_repla
                         let details = rows.collect::<Result<Vec<_>, _>>()?.join(" ");
                         assert!(
                             details.contains("SEARCH runtime_agents")
-                                && details.contains("account_key=?"),
+                                && details.contains("account_key=?")
+                                && details.contains(
+                                    studio_runtime_store::domain::ONE_UNFINISHED_TURN_INDEX
+                                ),
                             "{details}"
                         );
                         Ok::<_, StoreError>(())

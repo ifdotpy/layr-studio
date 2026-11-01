@@ -1808,6 +1808,114 @@ mod vault_maintenance_tests {
     }
 
     #[tokio::test]
+    async fn parent_catalog_upgrade_reseeds_agent_capacity_on_sync() {
+        use axum::{
+            body::Body,
+            extract::ConnectInfo,
+            http::{Request, StatusCode},
+        };
+        use futures_util::StreamExt;
+        use tower::ServiceExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(RuntimeStore::open(Some(directory.path())).await.unwrap());
+        studio_runtime_services::entity_publication::install(&store)
+            .await
+            .unwrap();
+        store.transaction(|tx| {
+            tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", rusqlite::params!["agent-1", json!({"id":"agent-1","rootId":"agent-1","accountKey":"default","provider":"codex","epoch":0,"compactions":0,"status":"idle","capacity":{"kind":"explicit","max":80}}).to_string()])?;
+            Ok(())
+        }).await.unwrap();
+        let make_app = |store: Arc<RuntimeStore>| {
+            crate::router::router(crate::router::HttpState::new(
+                "token".into(),
+                "workspace".into(),
+                directory.path().display().to_string(),
+                4321,
+                None,
+                Some(store),
+                None,
+            ))
+            .unwrap()
+        };
+        let request = |uri: &str| {
+            let mut request = Request::builder()
+                .method("GET")
+                .uri(uri)
+                .header("host", "127.0.0.1:4321")
+                .header("origin", "http://127.0.0.1:4321")
+                .header("x-canvas-token", "token")
+                .header("x-canvas-workspace", "workspace")
+                .body(Body::empty())
+                .unwrap();
+            request.extensions_mut().insert(ConnectInfo(
+                "127.0.0.1:4321".parse::<std::net::SocketAddr>().unwrap(),
+            ));
+            request
+        };
+        let response = make_app(store.clone())
+            .oneshot(request("/api/sync/pull"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(sync_policy::has_complete_entity_seed(&store.test_reader().unwrap()).unwrap());
+        store.transaction(|tx| {
+            tx.execute("UPDATE runtime_agents SET record=json_set(json_remove(record,'$.capacity','$.naming'),'$.maxAgents',80,'$.maxAgentsExplicit',json('true'),'$.needsTitle',json('true')) WHERE id='agent-1'", [])?;
+            tx.execute("UPDATE sync_entities SET hash=sync_entity_hash(json_remove(payload,'$.value.capacity','$.value.naming')), payload=json_remove(payload,'$.value.capacity','$.value.naming') WHERE collection IN ('agent','agentDetail') AND id='agent-1'", [])?;
+            Ok(())
+        }).await.unwrap();
+        drop(store);
+        studio_runtime_store::migrations::test_apply_catalog_before_capacity(
+            &directory.path().join("canvas.sqlite3"),
+        )
+        .unwrap();
+        let parent = rusqlite::Connection::open(directory.path().join("canvas.sqlite3")).unwrap();
+        assert!(sync_policy::has_complete_entity_seed(&parent).unwrap());
+        let marker: String = parent
+            .query_row(
+                "SELECT value FROM sync_entity_meta WHERE key='migration_catalog'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!marker.is_empty());
+        drop(parent);
+        let store = Arc::new(RuntimeStore::open(Some(directory.path())).await.unwrap());
+        let response = make_app(store.clone())
+            .oneshot(request("/api/sync/pull"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let response = make_app(store.clone()).oneshot(request("/api/sync/stream?protocol=4&resources=%5B%7B%22kind%22%3A%22agentDetail%22%2C%22agentId%22%3A%22agent-1%22%7D%5D&tokenRates=false")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let mut stream = response.into_body().into_data_stream();
+        stream.next().await.unwrap().unwrap();
+        let frame = stream.next().await.unwrap().unwrap();
+        let frame = std::str::from_utf8(&frame).unwrap();
+        let body: Value = serde_json::from_str(
+            frame
+                .lines()
+                .find_map(|line| line.strip_prefix("data: "))
+                .unwrap(),
+        )
+        .unwrap();
+        let document = body["resourceVersions"][0]["entityChanges"]["documents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|document| document["collection"] == "agentDetail" && document["id"] == "agent-1")
+            .unwrap_or_else(|| panic!("agent projection served: {body}"));
+        assert_eq!(
+            document["value"]["capacity"],
+            json!({"kind":"explicit","max":80})
+        );
+        assert!(document["value"].get("maxAgents").is_none());
+        assert_eq!(document["value"]["naming"], "pending_title");
+        assert!(document["value"].get("manualName").is_none());
+        assert!(sync_policy::has_complete_entity_seed(&store.test_reader().unwrap()).unwrap());
+    }
+
+    #[tokio::test]
     async fn cold_entity_pull_reuses_complete_seed_without_scanning_source_rows() {
         const ENTITY_COUNT: usize = 2_000;
         let directory = tempfile::tempdir().expect("isolated state directory");

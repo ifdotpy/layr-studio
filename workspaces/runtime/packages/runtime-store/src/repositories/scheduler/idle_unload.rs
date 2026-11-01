@@ -18,7 +18,7 @@ const ACTIVE_SOURCE_CLEANUP_PHASES: &str = "'planned','submitted'";
 fn agent_in_use(connection: &Connection) -> StoreResult<String> {
     let mut checks = vec![
         format!("COALESCE(status,'') IN ({ACTIVE_AGENT_STATUSES})"),
-        "COALESCE(in_flight,0)!=0".to_owned(),
+        crate::domain::chat_busy_sql("runtime_agents.id"),
         "COALESCE(turn_id,'')!=''".to_owned(),
         format!(
             "COALESCE(json_array_length({}),0)>0",

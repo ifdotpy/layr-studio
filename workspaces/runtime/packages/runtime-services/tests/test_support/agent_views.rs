@@ -3,6 +3,35 @@
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+#[allow(dead_code)]
+pub(crate) fn materialize_agent_defaults(value: &mut Value) {
+    let fields = value.as_object_mut().expect("agent fixture");
+    fields
+        .entry("capacity")
+        .or_insert_with(|| serde_json::json!(studio_runtime_store::AgentCapacity::default()));
+    fields
+        .entry("naming")
+        .or_insert_with(|| serde_json::json!(studio_runtime_store::AgentNaming::default()));
+}
+
+pub(crate) fn normalize_legacy_agent(value: &mut Value) {
+    let mut db = rusqlite::Connection::open_in_memory().expect("fixture database");
+    db.execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL)")
+        .expect("fixture agents");
+    db.execute(
+        "INSERT INTO runtime_agents VALUES('fixture',?1)",
+        [value.to_string()],
+    )
+    .expect("fixture agent");
+    let tx = db.transaction().expect("fixture transaction");
+    studio_runtime_store::migrations::normalize_agent_fixtures(&tx)
+        .expect("normalize legacy agent");
+    let normalized: String = tx
+        .query_row("SELECT record FROM runtime_agents", [], |row| row.get(0))
+        .expect("normalized agent");
+    *value = serde_json::from_str(&normalized).expect("normalized agent JSON");
+}
+
 /// Frozen Python snapshots predate the two view collections. Validate their
 /// generated field ownership and values before comparing the legacy snapshot.
 pub(crate) fn assert_agent_view_projections(db: &rusqlite::Connection) {

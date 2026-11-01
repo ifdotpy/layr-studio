@@ -18,6 +18,7 @@ import type { ServerAccessRequest } from "./accessContract";
 import { readServers, setLocalServerDetails } from "./registry";
 import { serverCredentialAdapter } from "./transport";
 import { refreshServerName } from "./serverNames";
+import { adoptTrustedServers } from "./trustedServers";
 export const DISCOVERY_REFRESH_EVENT = "studio-server-discovery-refresh";
 export function useServerDiscovery(
   enabled: boolean,
@@ -104,6 +105,10 @@ export function useServerDiscovery(
       });
     setSnapshot(next);
     setCheckedAt(Date.now() / 1000);
+    if (next && localAvailable)
+      void adoptTrustedServers(next).catch((failure) =>
+        setError(errorText(failure)),
+      );
   };
   const effectiveSnapshot = snapshot
     ? {

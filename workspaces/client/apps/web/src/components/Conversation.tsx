@@ -1,3 +1,5 @@
+import { serverStatus } from "../messageSendStatus";
+import { MessageSendStatus } from "../generated/api.ts";
 import {
   AgentSource as GeneratedApiAgentSource,
   AgentStatus as GeneratedApiAgentStatus,
@@ -37,7 +39,7 @@ import MessageQueue, {
 } from "./MessageQueue";
 import { useMessageQueue } from "./useMessageQueue";
 import { useMessageReceipts } from "./useMessageReceipts";
-import { receiptOutgoing, receiptTranscript } from "../sync/messageReceipts";
+import { receiptTranscript } from "../sync/messageReceipts";
 import { useVisibleChatResult, type ChatReadProof } from "./useChatReadState";
 import {
   NativeError,
@@ -79,7 +81,6 @@ import { useDisplayPhase } from "./useDisplayPhase";
 import {
   outgoingTranscript,
   deliveryLabel,
-  applySendingOverlay,
   messageRenderKey,
   explicitQueue,
   dispatchedMessage,
@@ -437,24 +438,29 @@ export default function Conversation(p: {
   const outgoing = (p.outgoing || []).filter(
     (entry) => entry.body.room === p.id,
   );
+  const removed = useRemovedMessages(p.data.stateDir, kind, p.id);
   const receiptIds = [
     ...new Set([
       ...outgoing
         .filter(
           (entry) =>
-            ["accepted", "uncertain"].includes(entry.status) &&
-            (entry.receipt?.status !== "delivered" ||
+            (entry.status.source === "device" ||
+              serverStatus(entry.status) === MessageSendStatus.queued ||
+              serverStatus(entry.status) === MessageSendStatus.sending ||
+              serverStatus(entry.status) === MessageSendStatus.uncertain) &&
+            (entry.receipt?.status !== MessageSendStatus.delivered ||
               entry.receipt.materialized !== true),
         )
         .map((entry) => entry.id),
-      ...history
+      ...[...history, ...removed.restored]
         .filter(
           (item) =>
             item.role === "user" &&
-            (item.pending ||
-              ["pending", "reserved", "dispatching", "uncertain"].includes(
-                item.deliveryStatus || "",
-              )),
+            (item.deliveryStatus?.source === "device" ||
+              serverStatus(item.deliveryStatus) === MessageSendStatus.queued ||
+              serverStatus(item.deliveryStatus) === MessageSendStatus.sending ||
+              serverStatus(item.deliveryStatus) ===
+                MessageSendStatus.uncertain),
         )
         .map(
           (item) =>
@@ -475,39 +481,44 @@ export default function Conversation(p: {
     () =>
       outgoingTranscript(
         receiptTranscript(history, p.id || "", receipts),
-        (p.outgoing || [])
-          .filter((entry) => entry.body.room === p.id)
-          .map((entry) => receiptOutgoing(entry, receipts.get(entry.id))),
+        (p.outgoing || []).filter((entry) => entry.body.room === p.id),
       ),
     [history, p.outgoing, p.id, receipts],
   );
-  const removed = useRemovedMessages(p.data.stateDir, kind, p.id);
   const items = useMemo(
     () =>
-      [
-        ...delivery.items.map((message) => {
-          if (!isSendingMessage(message)) return message;
-          // A stale receipt must not make a restored display copy send again.
-          return (
-            removed.restored.find(
-              (copy) =>
-                message.id === copy.id ||
-                (copy.clientMessageId &&
-                  copy.clientMessageId === message.clientMessageId),
-            ) || message
-          );
-        }),
-        ...removed.restored.filter(
-          (copy) =>
-            !delivery.items.some(
-              (message) =>
-                message.id === copy.id ||
-                (copy.clientMessageId &&
-                  copy.clientMessageId === message.clientMessageId),
-            ),
-        ),
-      ].filter((message) => !removed.hidden(message)),
-    [delivery.items, removed.hidden, removed.restored],
+      receiptTranscript(
+        [
+          ...delivery.items.map((message) => {
+            if (
+              !isSendingMessage(message) ||
+              message.deliveryStatus?.source === "server"
+            )
+              return message;
+            // Keep the device removal fact until the server supplies a status.
+            return (
+              removed.restored.find(
+                (copy) =>
+                  message.id === copy.id ||
+                  (copy.clientMessageId &&
+                    copy.clientMessageId === message.clientMessageId),
+              ) || message
+            );
+          }),
+          ...removed.restored.filter(
+            (copy) =>
+              !delivery.items.some(
+                (message) =>
+                  message.id === copy.id ||
+                  (copy.clientMessageId &&
+                    copy.clientMessageId === message.clientMessageId),
+              ),
+          ),
+        ].filter((message) => !removed.hidden(message)),
+        p.id || "",
+        receipts,
+      ),
+    [delivery.items, removed.hidden, removed.restored, p.id, receipts],
   );
   const historyAgentId = p.id;
   const promptRecall = usePromptRecall(
@@ -820,9 +831,6 @@ export default function Conversation(p: {
               item.role === "user" &&
               explicitQueue(item) &&
               !dispatchedMessage(item) &&
-              ["sending", "pending", "queued", "accepted"].includes(
-                item.deliveryStatus || (item.pending ? "pending" : ""),
-              ) &&
               !messageQueue.items.some(
                 (row) =>
                   row.id === item.clientMessageId ||
@@ -836,11 +844,12 @@ export default function Conversation(p: {
             ...(item.assets ? { assets: item.assets } : {}),
             requestedDelivery: item.requestedDelivery,
             localDelivery: true,
+            deliveryStatus: item.deliveryStatus,
           })),
       ].filter(
         (entry) =>
           (("localDelivery" in entry && entry.localDelivery === true) ||
-            explicitQueue(entry)) &&
+            ("status" in entry && entry.status === MessageSendStatus.queued)) &&
           !items.some(
             (item) =>
               item.role === "user" &&
@@ -990,6 +999,9 @@ export default function Conversation(p: {
         original = {
           ...message,
           ...fullFields,
+          deliveryStatus: fullFields.deliveryStatus
+            ? { source: "server", status: fullFields.deliveryStatus }
+            : message.deliveryStatus,
           threadId: fullFields.threadId ?? message.threadId,
           role: fullFields.role || message.role,
           text:
@@ -1176,11 +1188,7 @@ export default function Conversation(p: {
   const transcriptItems = useMemo(
     () =>
       [
-        ...items
-          .filter((item) => !queueEntry(item))
-          .map((item): Message =>
-            applySendingOverlay(item, Boolean(sendingEntry(item))),
-          ),
+        ...items.filter((item) => !queueEntry(item)),
         ...sending
           .filter(
             (entry) => !items.some((item) => sendingEntry(item) === entry),
@@ -1191,9 +1199,11 @@ export default function Conversation(p: {
             role: "user",
             text: entry.text,
             ...("assets" in entry ? { assets: entry.assets } : {}),
-            pending: true,
             localDelivery: true,
-            deliveryStatus: "sending",
+            deliveryStatus:
+              "localDelivery" in entry && entry.localDelivery
+                ? entry.deliveryStatus
+                : { source: "server", status: entry.status },
           })),
       ].filter((message) => !removed.hidden(message)),
     [items, queue, sending, p.id, removed.hidden],
@@ -1279,9 +1289,11 @@ export default function Conversation(p: {
     }));
     input.current?.focus({ preventScroll: true });
   });
-  const removeMessage = useMessageAction((m: Message) => {
+  const removeMessage = useMessageAction(async (m: Message) => {
     try {
-      removed.remove(m);
+      if (!m.clientMessageId) return;
+      await changeOutbox(m.clientMessageId, "cancel");
+      p.onObserved?.([m.clientMessageId]);
       p.notify("Message removed from this device. Delivery was not cancelled.");
     } catch (error) {
       p.notify(`Could not remove this message: ${errorText(error)}`);
@@ -1295,9 +1307,10 @@ export default function Conversation(p: {
       data-found={highlighted === m.id || undefined}
       className={`message ${m.role === "user" ? "user" : "assistant"} ${p.room ? "bubble " + (m.sender !== first ? "outgoing" : "incoming") : ""}`}
     >
-      {["sending", "reserved", "dispatching"].includes(
-        m.deliveryStatus || "",
-      ) && (
+      {((m.deliveryStatus?.source === "device" &&
+        (m.deliveryStatus.state.kind === "stored" ||
+          m.deliveryStatus.state.kind === "in_flight")) ||
+        serverStatus(m.deliveryStatus) === MessageSendStatus.sending) && (
         <span
           className="message-delivery-status message-delivery-inline"
           role="status"
@@ -1326,9 +1339,12 @@ export default function Conversation(p: {
         </span>
       )}
       {deliveryLabel(m) &&
-        !["sending", "reserved", "dispatching", "accepted"].includes(
-          m.deliveryStatus || "",
-        ) && (
+        !(
+          m.deliveryStatus?.source === "device" &&
+          (m.deliveryStatus.state.kind === "stored" ||
+            m.deliveryStatus.state.kind === "in_flight")
+        ) &&
+        serverStatus(m.deliveryStatus) !== MessageSendStatus.sending && (
           <div className="message-delivery-heading">
             <span
               className="message-label message-delivery-status"
@@ -1337,12 +1353,11 @@ export default function Conversation(p: {
               {deliveryLabel(m)}
             </span>
             {m.role === "user" &&
-              (["uncertain", "failed", "cancelled"].includes(
-                m.deliveryStatus || "",
-              ) ||
-                (m.localDelivery &&
-                  m.deliveryStatus === "pending" &&
-                  !queueEntry(m))) && (
+              m.localDelivery &&
+              (serverStatus(m.deliveryStatus) === MessageSendStatus.uncertain ||
+                serverStatus(m.deliveryStatus) === MessageSendStatus.failed ||
+                serverStatus(m.deliveryStatus) ===
+                  MessageSendStatus.cancelled) && (
                 <ActionIcon
                   size="sm"
                   variant="subtle"
@@ -1389,12 +1404,17 @@ export default function Conversation(p: {
         !(
           p.offlineSendPending &&
           m.localDelivery &&
-          m.deliveryStatus === "queued"
+          m.deliveryStatus?.source === "device" &&
+          m.deliveryStatus.state.kind === "transport_failed"
         ) &&
-        ["failed", "uncertain", "queued"].includes(m.deliveryStatus || "") && (
+        (serverStatus(m.deliveryStatus) === MessageSendStatus.failed ||
+          serverStatus(m.deliveryStatus) === MessageSendStatus.uncertain ||
+          (m.deliveryStatus?.source === "device" &&
+            (m.deliveryStatus.state.kind === "transport_failed" ||
+              m.deliveryStatus.state.kind === "receipt_expired"))) && (
           <div className="message-delivery-error">
             <p>{m.deliveryError}</p>
-            {m.deliveryStatus === "failed" && (
+            {serverStatus(m.deliveryStatus) === MessageSendStatus.failed && (
               <Button
                 size="compact-xs"
                 variant="subtle"
@@ -1427,7 +1447,7 @@ export default function Conversation(p: {
         }
         onCopy={() => void copy(m.text)}
         onQuote={
-          !p.room && !m.pending
+          !p.room && !explicitQueue(m)
             ? () => {
                 const excerpt = selectedExcerpt(scroll.current);
                 quote(excerpt?.messageId === m.id ? excerpt.text : m.text);
@@ -1437,12 +1457,13 @@ export default function Conversation(p: {
         }
         onEdit={
           !p.room &&
-          !m.pending &&
+          !explicitQueue(m) &&
           managed &&
           m.role === "user" &&
           m.turnId &&
           m.turnStatus !== "uncertain" &&
-          (!m.deliveryStatus || m.deliveryStatus === "accepted")
+          (!m.deliveryStatus ||
+            serverStatus(m.deliveryStatus) === MessageSendStatus.delivered)
             ? () => void editMessage(m)
             : undefined
         }
@@ -1450,7 +1471,7 @@ export default function Conversation(p: {
         editDisabled={branching || !!editLoading || m.turnId === agent?.turnId}
         onBranch={
           !p.room &&
-          !m.pending &&
+          !explicitQueue(m) &&
           managed &&
           m.role === "assistant" &&
           m.turnId &&
@@ -1463,7 +1484,7 @@ export default function Conversation(p: {
         branchDisabled={m.turnId === agent?.turnId && !!agent?.inFlight}
         onAnotherAnswer={
           !p.room &&
-          !m.pending &&
+          !explicitQueue(m) &&
           managed &&
           m.role === "assistant" &&
           m.turnId &&

@@ -22,6 +22,7 @@ vi.mock("react", () => ({
   useLayoutEffect: vi.fn(),
 }));
 vi.mock("../servers/ServerServicesContext", () => ({
+  useServerServices: () => null,
   useServerApi: () => ({
     refreshSession: mocks.refreshSession,
     saved: (_key: string, fallback: unknown) => fallback,

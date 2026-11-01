@@ -101,8 +101,8 @@ async fn transfer_completes_before_next_turn_on_destination() {
     let state = State::new().await;
     edit_agent(&state, |row| {
         row.account_key = "source".into();
-        row.extra
-            .insert("executionSettingsAccountKey".into(), json!("source"));
+        row.execution_settings_account_key =
+            studio_runtime_schema::queue_command::Field::Value("source".into());
     })
     .await;
     let source_home = state.root.join("source-home");
@@ -416,8 +416,8 @@ async fn lazy_member_moves_its_history_before_its_input_is_claimed() {
     let state = State::new().await;
     edit_agent(&state, |row| {
         row.account_key = "source".to_string();
-        row.extra
-            .insert("executionSettingsAccountKey".into(), json!("source"));
+        row.execution_settings_account_key =
+            studio_runtime_schema::queue_command::Field::Value("source".into());
     })
     .await;
     let requested = request_transfer(&state, "default").await;

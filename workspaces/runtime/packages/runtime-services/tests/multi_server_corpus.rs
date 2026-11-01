@@ -413,10 +413,9 @@ async fn received_remote_event_replays_cached_receipt_after_restart_without_dupl
         root_id: AgentId::from("test-parent"),
         epoch: 3,
         status: AgentStatus::Idle,
-        extra: std::collections::BTreeMap::from([(
-            "provider".into(),
-            json!(studio_runtime_schema::ProviderKind::Codex),
-        )]),
+        provider: studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::ProviderKind::Codex,
+        ),
         ..AgentRecord::test_defaults()
     };
     parent.auto_wake = Some(true);
@@ -661,10 +660,9 @@ async fn moved_worker_send_reaches_a_local_descendant_once() {
         root_id: AgentId::from("move-parent"),
         epoch: 3,
         status: AgentStatus::Idle,
-        extra: std::collections::BTreeMap::from([(
-            "provider".into(),
-            json!(studio_runtime_schema::ProviderKind::Codex),
-        )]),
+        provider: studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::ProviderKind::Codex,
+        ),
         ..AgentRecord::test_defaults()
     };
     parent.auto_wake = Some(true);
@@ -691,10 +689,9 @@ async fn moved_worker_send_reaches_a_local_descendant_once() {
         root_id: AgentId::from("move-parent"),
         epoch: 4,
         status: AgentStatus::Idle,
-        extra: std::collections::BTreeMap::from([(
-            "provider".into(),
-            json!(studio_runtime_schema::ProviderKind::Codex),
-        )]),
+        provider: studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::ProviderKind::Codex,
+        ),
         ..AgentRecord::test_defaults()
     };
     worker.auto_wake = Some(true);
@@ -725,10 +722,9 @@ async fn moved_worker_send_reaches_a_local_descendant_once() {
         root_id: AgentId::from("move-parent"),
         epoch: 1,
         status: AgentStatus::Idle,
-        extra: std::collections::BTreeMap::from([(
-            "provider".into(),
-            json!(studio_runtime_schema::ProviderKind::Codex),
-        )]),
+        provider: studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::ProviderKind::Codex,
+        ),
         ..AgentRecord::test_defaults()
     };
     child.auto_wake = Some(true);
@@ -819,10 +815,9 @@ async fn remote_worker_call_refuses_stopped_parent_without_writes() {
         root_id: AgentId::from("stopped-parent"),
         epoch: 4,
         status: AgentStatus::Idle,
-        extra: std::collections::BTreeMap::from([(
-            "provider".into(),
-            json!(studio_runtime_schema::ProviderKind::Codex),
-        )]),
+        provider: studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::ProviderKind::Codex,
+        ),
         ..AgentRecord::test_defaults()
     };
     parent.auto_wake = Some(false);
@@ -847,10 +842,9 @@ async fn remote_worker_call_refuses_stopped_parent_without_writes() {
         root_id: AgentId::from("stopped-parent"),
         epoch: 2,
         status: AgentStatus::Idle,
-        extra: std::collections::BTreeMap::from([(
-            "provider".into(),
-            json!(studio_runtime_schema::ProviderKind::Codex),
-        )]),
+        provider: studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::ProviderKind::Codex,
+        ),
         ..AgentRecord::test_defaults()
     };
     worker.auto_wake = Some(true);
@@ -928,10 +922,9 @@ async fn remote_stop_receiver_replays_exact_request_and_rejects_superseded_contr
         root_id: AgentId::from("remote-parent"),
         epoch: 2,
         status: AgentStatus::Idle,
-        extra: std::collections::BTreeMap::from([(
-            "provider".into(),
-            json!(studio_runtime_schema::ProviderKind::Codex),
-        )]),
+        provider: studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::ProviderKind::Codex,
+        ),
         ..AgentRecord::test_defaults()
     };
     parent.auto_wake = Some(true);
@@ -957,10 +950,9 @@ async fn remote_stop_receiver_replays_exact_request_and_rejects_superseded_contr
         root_id: AgentId::from("remote-parent"),
         epoch: 4,
         status: AgentStatus::Idle,
-        extra: std::collections::BTreeMap::from([(
-            "provider".into(),
-            json!(studio_runtime_schema::ProviderKind::Codex),
-        )]),
+        provider: studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::ProviderKind::Codex,
+        ),
         ..AgentRecord::test_defaults()
     };
     worker.auto_wake = Some(true);
@@ -1152,10 +1144,9 @@ async fn stopping_remote_proxy_persists_and_replays_the_same_signed_intent() {
         root_id: AgentId::from("remote-stop-proxy"),
         epoch: 6,
         status: AgentStatus::Idle,
-        extra: std::collections::BTreeMap::from([(
-            "provider".into(),
-            json!(studio_runtime_schema::ProviderKind::Codex),
-        )]),
+        provider: studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::ProviderKind::Codex,
+        ),
         ..AgentRecord::test_defaults()
     };
     proxy.auto_wake = Some(true);
@@ -1289,10 +1280,9 @@ async fn child_result_requires_link_membership_and_updates_proxy() {
         root_id: AgentId::from("result-parent"),
         epoch: 3,
         status: AgentStatus::Idle,
-        extra: std::collections::BTreeMap::from([(
-            "provider".into(),
-            json!(studio_runtime_schema::ProviderKind::Codex),
-        )]),
+        provider: studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::ProviderKind::Codex,
+        ),
         ..AgentRecord::test_defaults()
     };
     parent.auto_wake = Some(true);
@@ -1317,10 +1307,9 @@ async fn child_result_requires_link_membership_and_updates_proxy() {
         root_id: AgentId::from("result-parent"),
         epoch: 2,
         status: AgentStatus::Idle,
-        extra: std::collections::BTreeMap::from([(
-            "provider".into(),
-            json!(studio_runtime_schema::ProviderKind::Codex),
-        )]),
+        provider: studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::ProviderKind::Codex,
+        ),
         ..AgentRecord::test_defaults()
     };
     child.last_answer = Some("old".into());
@@ -1346,8 +1335,8 @@ async fn child_result_requires_link_membership_and_updates_proxy() {
         .unwrap();
     assert_eq!(proxy.last_answer.as_deref(), Some("done"));
     assert_eq!(
-        proxy.extra.get("lastCompletedTurn"),
-        Some(&json!("child-result-1"))
+        proxy.last_completed_turn.value().map(String::as_str),
+        Some("child-result-1")
     );
     drop(connection);
     let structured = json!({"requestId":"child-result-structured","operation":[],"action":"event","payload":{"link":"result-link","parentEpoch":3,"kind":"child_result","text":json!({"agent_id":"result-child","result":{"ok":true}}).to_string()}});
@@ -2186,10 +2175,9 @@ async fn exec_event_owner_checks_accept_the_receipt_form_like_python() {
                 root_id: AgentId::from("fixture-lead"),
                 epoch: 1,
                 status: AgentStatus::Idle,
-                extra: std::collections::BTreeMap::from([(
-                    "provider".into(),
-                    json!(studio_runtime_schema::ProviderKind::Codex),
-                )]),
+                provider: studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_schema::ProviderKind::Codex,
+                ),
                 ..AgentRecord::test_defaults()
             };
             record.auto_wake = Some(true);

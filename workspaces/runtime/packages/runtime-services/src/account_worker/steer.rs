@@ -39,7 +39,8 @@ pub(super) fn claim(
 ) -> Result<Option<(TurnIntent, String)>, WorkerError> {
     let owned = AgentRepository::get(tx, &AgentId::from(agent_id))?.is_some_and(|agent| {
         agent.account_key.as_str() == account
-            && (agent.extra.get("provider").and_then(Value::as_str) != Some("claude")
+            && (agent.provider.value().copied()
+                != Some(studio_runtime_providers::ProviderKind::Claude)
                 || claude_steer_receipts)
     });
     if !owned {
@@ -60,10 +61,12 @@ pub(super) fn claim(
         epoch,
         attempt_id: steer_id.into(),
         account_key: claimed.agent.account_key.clone(),
-        provider: studio_runtime_providers::ProviderKind::of_field(
-            claimed.agent.extra.get("provider"),
-        )
-        .map_err(|_| StoreError::RecordContract("agent provider"))?,
+        provider: claimed
+            .agent
+            .provider
+            .value()
+            .copied()
+            .ok_or(StoreError::RecordContract("agent provider"))?,
         thread_id: Some(claimed.thread_id.clone()),
         cwd: claimed.agent.cwd.clone(),
         model: claimed.agent.model.clone(),
@@ -417,7 +420,8 @@ pub(super) async fn claim_for_wake(
             else {
                 return Ok(None);
             };
-            if record.extra.get("provider").and_then(Value::as_str) == Some("claude")
+            if record.provider.value().copied()
+                == Some(studio_runtime_providers::ProviderKind::Claude)
                 && !claude_steer_receipts
             {
                 return Ok(Some(false));

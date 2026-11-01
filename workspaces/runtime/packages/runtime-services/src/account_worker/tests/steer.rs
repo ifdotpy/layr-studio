@@ -54,7 +54,7 @@ async fn running_turn_with_peer(
                     let mut record = AgentRepository::get(tx, &AgentId::from(agent.as_str()))?
                         .expect("agent");
                     assert_eq!(record.status, studio_runtime_store::AgentStatus::Running);
-                    record.extra.insert("provider".into(), json!(provider));
+                    record.provider = studio_runtime_schema::queue_command::Field::Value(provider.parse().unwrap());
                     AgentRepository::put(tx, &record)?;
                     tx.execute(
                         "INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch,turn_id,error) \
@@ -136,7 +136,9 @@ async fn set_provider(state: &State, provider: &'static str) {
                 .transaction_with(move |tx| {
                     let mut record =
                         AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.expect("agent");
-                    record.extra.insert("provider".into(), json!(provider));
+                    record.provider = studio_runtime_schema::queue_command::Field::Value(
+                        provider.parse().unwrap(),
+                    );
                     AgentRepository::put(tx, &record)
                 })
                 .await?;
@@ -1197,10 +1199,10 @@ async fn running_turn_with_followup(
                 .transaction_with(move |tx| {
                     let mut record = AgentRepository::get(tx, &AgentId::from(agent.as_str()))?
                         .expect("agent");
-                    record.extra.insert("provider".into(), json!(provider));
+                    record.provider = studio_runtime_schema::queue_command::Field::Value(provider.parse().unwrap());
                     AgentRepository::put(tx, &record)?;
                     if sender != agent {
-                        let mut outsider = record.clone();
+                        let mut outsider = record;
                         outsider.id = AgentId::from(sender);
                         outsider.root_id = AgentId::from(sender);
                         outsider.status = studio_runtime_store::AgentStatus::Completed;

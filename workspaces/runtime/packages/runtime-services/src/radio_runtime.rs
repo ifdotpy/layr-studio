@@ -438,7 +438,7 @@ pub async fn create_with(
                     draft
                         .extra
                         .insert("sharedRoomId".to_owned(), json!(room_id));
-                    draft.needs_title = Some(false);
+                    draft.naming.set_needs_title(Some(false));
                     records::validate("runtime_agents", id.as_ref(), draft.value())?;
                 }
                 Ok::<_, ProjectsError>((path, name, namespace, room_id, ids, drafts, creation))

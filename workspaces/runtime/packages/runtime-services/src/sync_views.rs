@@ -4,6 +4,8 @@ use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, OnceLock};
 use studio_runtime_schema::provider_errors::is_misalignment_policy_violation;
+use studio_runtime_store::entity_publication::WorkHistoryKind;
+use studio_runtime_store::{StoreError, StoreResult};
 
 use crate::event_write::truthy;
 use crate::submit_gates::{AgentAuthorityRow, Deletion, PeerTeamRow, StoredField};
@@ -383,6 +385,101 @@ pub fn project_work_record(
             )),
         },
     })
+}
+
+/// Work detail document: source metadata with empty history lists, the
+/// submission refusal, and the server policy. `metadata` is validated before
+/// the policy is attached. Serializes as one flat object, `policy` last.
+#[derive(serde::Serialize)]
+pub struct WorkDetailView {
+    #[serde(flatten)]
+    pub metadata: Value,
+    pub policy: studio_runtime_schema::task_gate::WorkDetailPolicy,
+}
+
+/// One work collection row. Serializes as the bare document it wraps.
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+pub enum WorkView {
+    Summary(WorkProjection),
+    Detail(WorkDetailView),
+    Entry(Value),
+}
+
+pub fn work_detail_view(
+    item: &studio_runtime_store::WorkItemRecord,
+    record: &Value,
+    refusal: Value,
+    statuses: &BTreeMap<String, studio_runtime_store::WorkStatus>,
+) -> StoreResult<WorkDetailView> {
+    let mut metadata = Value::Object(
+        record
+            .as_object()
+            .ok_or(StoreError::RecordContract(
+                "work detail source is not an object",
+            ))?
+            .iter()
+            .filter(|(field, _)| {
+                !matches!(
+                    field.as_str(),
+                    "results" | "decisions" | "releases" | "policy"
+                ) && !crate::work_policy::PRIVATE_WORK_FIELDS.contains(&field.as_str())
+            })
+            .map(|(field, value)| (field.clone(), value.clone()))
+            .collect(),
+    );
+    for field in ["results", "decisions", "releases"] {
+        metadata[field] = json!([]);
+    }
+    metadata["submissionRefusal"] = refusal;
+    Ok(WorkDetailView {
+        metadata,
+        policy: crate::work_policy::detail_policy(item, statuses),
+    })
+}
+
+/// One history entry, keyed `{task}:{index}`. None when the index is absent.
+pub fn work_history_view(
+    id: &str,
+    record: &Value,
+    kind: WorkHistoryKind,
+    index: usize,
+) -> Option<Value> {
+    let value = record[kind.field()].as_array()?.get(index)?;
+    Some(json!({
+        "id": format!("{id}:{index}"), "taskId": id, "rootId": record["rootId"],
+        "index": index, "value": value,
+    }))
+}
+
+/// Every work collection row for one record: summary, detail, then each
+/// result, decision and release entry. Publication writes these rows, except
+/// that metadata-only writes skip history and the per-index diff writes only
+/// the changed entries.
+pub fn work_views(
+    item: &studio_runtime_store::WorkItemRecord,
+    record: &Value,
+    refusal: Value,
+    statuses: &BTreeMap<String, studio_runtime_store::WorkStatus>,
+) -> StoreResult<Vec<(&'static str, WorkView)>> {
+    let id: &str = item.id().as_ref();
+    let mut rows = Vec::new();
+    if let Some(summary) = project_work_record(item) {
+        rows.push(("work", WorkView::Summary(summary)));
+    }
+    rows.push((
+        "workDetail",
+        WorkView::Detail(work_detail_view(item, record, refusal, statuses)?),
+    ));
+    for kind in WorkHistoryKind::ALL {
+        let length = record[kind.field()].as_array().map_or(0, Vec::len);
+        for index in 0..length {
+            if let Some(entry) = work_history_view(id, record, kind, index) {
+                rows.push((kind.collection(), WorkView::Entry(entry)));
+            }
+        }
+    }
+    Ok(rows)
 }
 
 /// Filter a stored record through the committed renderer DTO schema.
@@ -1020,6 +1117,85 @@ mod projection_plan_tests {
     }
 
     #[test]
+    fn removed_agent_diagnostics_are_not_projected() {
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"checkpointError":"legacy","complaintsPresented":["c"],"workspaceBackend":null}"#;
+        let record = serde_json::from_str(raw).unwrap();
+        let projected =
+            super::agent_entity_view(&record, &super::AgentViewContext::default()).unwrap();
+        assert!(projected.get("checkpointError").is_none());
+        assert!(projected.get("complaintsPresented").is_none());
+        assert!(projected.get("workspaceBackend").is_none());
+        assert_eq!(
+            studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
+            "b2ae13a4c60b1d7373b79ab982292d2d02ec8c576b257f881cb777bd35d3178d"
+        );
+    }
+
+    #[test]
+    fn removed_compaction_flag_changes_agent_projection() {
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"compactionsObservedOnly":false}"#;
+        let record = serde_json::from_str(raw).unwrap();
+        let projected =
+            super::agent_entity_view(&record, &super::AgentViewContext::default()).unwrap();
+        assert!(projected.get("compactionsObservedOnly").is_none());
+        assert_eq!(
+            studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
+            "b2ae13a4c60b1d7373b79ab982292d2d02ec8c576b257f881cb777bd35d3178d"
+        );
+    }
+
+    #[test]
+    fn agent_projection_uses_canonical_capacity() {
+        let record = serde_json::json!({"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{"kind":"explicit","max":80}});
+        let projected =
+            super::agent_entity_view(&record, &super::AgentViewContext::default()).unwrap();
+        assert_eq!(projected["capacity"], record["capacity"]);
+        assert!(projected.get("maxAgents").is_none());
+        assert!(projected.get("maxAgentsExplicit").is_none());
+    }
+
+    #[test]
+    fn canonical_naming_states_project_to_agent() {
+        for naming in ["automatic", "pending_title", "manual"] {
+            let record = serde_json::json!({"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"naming":naming});
+            let view =
+                super::agent_entity_view(&record, &super::AgentViewContext::default()).unwrap();
+            assert_eq!(view["naming"], naming);
+            assert!(view.get("manualName").is_none());
+        }
+    }
+
+    #[test]
+    fn chat_organization_flags_project_with_canonical_capacity() {
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"archived":true,"pinned":true}"#;
+        let agent: studio_runtime_store::AgentRecord = serde_json::from_str(raw).unwrap();
+        let projected =
+            super::agent_entity_view(&agent.value(), &super::AgentViewContext::default()).unwrap();
+        assert_eq!(
+            studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
+            "69870ccec982e294904c5df141fbc2d9d3f1358ccf49d5e275a02bf299f55a73"
+        );
+    }
+
+    #[test]
+    fn legacy_image_metadata_does_not_change_agent_projection_hash() {
+        let before = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"authResumeAttempt":1,"turnRecovery":{"outcome":"idle"},"lastContextRepairWait":{"status":"superseded"},"lastContextRepairCheck":{"phase":"waiting"},"completedWorkerTurns":2,"supervisorRestore":{"status":"not_restored"},"countedWorkerTurn":true,"imageWorkspaceBaseError":"old","imageWorkspaceBaseRef":"main","imageWorkspaceCreatedAt":2,"imageWorkspaceError":"old","imageWorkspaceHasGit":true,"imageWorkspaceNoticeSent":true,"imageWorkspaceNoticeText":"old","imageWorkspaceRelative":".","imageWorkspaceStartCommit":"abc","imageWorkspaceSubpath":"."}"#;
+        let after = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"authResumeAttempt":1}"#;
+        let context = super::AgentViewContext::default();
+        let project = |raw: &str| {
+            let record = serde_json::from_str(raw).unwrap();
+            serde_json::to_vec(&super::agent_entity_view(&record, &context).unwrap()).unwrap()
+        };
+        let legacy = project(before);
+        let normalized = project(after);
+        assert_eq!(legacy, normalized);
+        assert_eq!(
+            studio_runtime_store::sha256_hex(&normalized),
+            "b2ae13a4c60b1d7373b79ab982292d2d02ec8c576b257f881cb777bd35d3178d"
+        );
+    }
+
+    #[test]
     fn complaint_projection_preserves_public_fields() {
         let context = super::ComplaintViewContext::default();
         for recipient in ["user", "lead"] {
@@ -1264,5 +1440,62 @@ mod projection_plan_tests {
             property
         ));
         assert!(std::ptr::eq(plan, schema_projection_properties()));
+    }
+}
+
+#[cfg(test)]
+mod work_views_tests {
+    use super::work_views;
+    use serde_json::{Value, json};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn work_views_build_results_decisions_and_releases() {
+        let raw_text = r#"{"id":"w","rootId":"lead","title":"work","status":"review","results":[{"id":"r0"},{"id":"r1"}],"decisions":[{"id":"d0"}],"releases":[{"id":"x0"}]}"#;
+        let raw: Value = serde_json::from_str(raw_text).unwrap();
+        let item: studio_runtime_store::WorkItemRecord = serde_json::from_str(raw_text).unwrap();
+        let refusal = json!({"reason": "none"});
+        let views = work_views(&item, &raw, refusal, &BTreeMap::new()).unwrap();
+        let collections: Vec<&str> = views.iter().map(|(collection, _)| *collection).collect();
+        assert_eq!(
+            collections,
+            [
+                "work",
+                "workDetail",
+                "workResult",
+                "workResult",
+                "workDecision",
+                "workRelease"
+            ]
+        );
+        let texts: Vec<String> = views
+            .iter()
+            .map(|(_, view)| serde_json::to_string(view).unwrap())
+            .collect();
+        assert_eq!(
+            texts[0],
+            r#"{"id":"w","rootId":"lead","status":"review","title":"work"}"#
+        );
+        // Metadata keys sort first; the policy object is always last.
+        assert!(texts[1].starts_with(
+            r#"{"decisions":[],"id":"w","releases":[],"results":[],"rootId":"lead","status":"review","submissionRefusal":{"reason":"none"},"title":"work","policy":{"#
+        ));
+        assert!(texts[1].contains(r#""acceptAvailable":true"#));
+        assert_eq!(
+            texts[2],
+            r#"{"id":"w:0","index":0,"rootId":"lead","taskId":"w","value":{"id":"r0"}}"#
+        );
+        assert_eq!(
+            texts[3],
+            r#"{"id":"w:1","index":1,"rootId":"lead","taskId":"w","value":{"id":"r1"}}"#
+        );
+        assert_eq!(
+            texts[4],
+            r#"{"id":"w:0","index":0,"rootId":"lead","taskId":"w","value":{"id":"d0"}}"#
+        );
+        assert_eq!(
+            texts[5],
+            r#"{"id":"w:0","index":0,"rootId":"lead","taskId":"w","value":{"id":"x0"}}"#
+        );
     }
 }

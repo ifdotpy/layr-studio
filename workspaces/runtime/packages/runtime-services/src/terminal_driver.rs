@@ -1209,7 +1209,7 @@ pub fn publish_terminal(
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)]
 mod tests {
-    use std::collections::{BTreeMap, VecDeque};
+    use std::collections::VecDeque;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Mutex, mpsc};
@@ -1344,11 +1344,6 @@ mod tests {
             })
             .await
             .expect("receipt target schema");
-        let mut extra = BTreeMap::new();
-        extra.insert(
-            "provider".to_owned(),
-            serde_json::json!(studio_runtime_schema::ProviderKind::Codex),
-        );
         let agent = AgentRecord {
             account_key: "default".into(),
             cwd: Some(root.to_string_lossy().into_owned()),
@@ -1356,7 +1351,9 @@ mod tests {
             root_id: AgentId::from("agent"),
             epoch: 0,
             status: AgentStatus::Running,
-            extra,
+            provider: studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_schema::ProviderKind::Codex,
+            ),
             ..AgentRecord::test_defaults()
         };
         store

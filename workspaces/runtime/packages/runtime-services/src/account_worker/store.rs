@@ -418,8 +418,7 @@ fn completed_attempt(
     attempt: &studio_runtime_store::StartAttemptView,
 ) -> bool {
     attempt.turn_id.as_deref().is_some_and(|turn| {
-        !turn.is_empty()
-            && agent.extra.get("lastCompletedTurn").and_then(Value::as_str) == Some(turn)
+        !turn.is_empty() && agent.last_completed_turn.value().map(String::as_str) == Some(turn)
     })
 }
 /// Hold reason of an agent whose thread request outcome is unknown after a
@@ -2902,8 +2901,11 @@ pub(super) fn interrupt_intent(
     let Some(a) = AgentRepository::get(connection, &AgentId::from(agent))? else {
         return Ok(None);
     };
-    let provider = studio_runtime_providers::ProviderKind::of_field(a.extra.get("provider"))
-        .map_err(|_| WorkerError::PreparationRefused("agent/provider".into()))?;
+    let provider = a
+        .provider
+        .value()
+        .copied()
+        .ok_or_else(|| WorkerError::PreparationRefused("agent/provider".into()))?;
     let Some(attempt) = a.start_attempt.as_ref() else {
         return Ok(None);
     };
@@ -4565,7 +4567,9 @@ fn hold_before_claim(
     agent.extra.insert("nativeFailureHold".into(), json!(true));
     agent.auto_wake = Some(false);
     agent.in_flight = Some(false);
-    agent.extra.insert("error".into(), json!(reason));
+    agent.error = studio_runtime_schema::queue_command::Field::Value(
+        studio_runtime_schema::provider_errors::AgentError::Message((reason).to_string()),
+    );
     agent.start_outcome_hold = Some(studio_runtime_store::StoredStartOutcomeHold::Known(
         studio_runtime_store::StartOutcomeHold::Held {
             reason: Some(reason.into()),

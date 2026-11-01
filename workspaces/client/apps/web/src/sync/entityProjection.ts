@@ -173,7 +173,7 @@ function emptyEntityValues(): EntityValues {
  * Shape validation remains necessary because a mismatched server response or
  * storage corruption can still damage a row before it reaches the cache.
  */
-function parseEntityPayload(parsed: unknown): SyncEntityPayload | null {
+export function parseEntityPayload(parsed: unknown): SyncEntityPayload | null {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
     return null;
   const candidate = parsed as Record<string, unknown>;
@@ -181,6 +181,7 @@ function parseEntityPayload(parsed: unknown): SyncEntityPayload | null {
     typeof candidate.collection !== "string" ||
     !entityCollections.has(candidate.collection) ||
     typeof candidate.id !== "string" ||
+    candidate.id.length === 0 ||
     candidate.value === null ||
     typeof candidate.value !== "object" ||
     Array.isArray(candidate.value)

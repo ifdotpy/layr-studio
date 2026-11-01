@@ -341,8 +341,6 @@ fn receipt_events(id: &str, receipt: &SteerPayload) -> StoreResult<String> {
 
 /// The running turn and thread that may receive input, or `None`.
 fn steer_turn(agent: &AgentRecord) -> Option<(String, String)> {
-    let text = |key: &str| agent.extra.get(key).and_then(Value::as_str);
-    let flag = |key: &str| agent.extra.get(key).is_some_and(truthy);
     let turn = agent.turn_id.as_deref().filter(|turn| !turn.is_empty())?;
     let thread = agent
         .thread_id
@@ -352,11 +350,15 @@ fn steer_turn(agent: &AgentRecord) -> Option<(String, String)> {
     let eligible = agent.status == AgentStatus::Running
         && agent.auto_wake == Some(true)
         && agent.in_flight == Some(true)
-        && !flag("remoteWorker")
-        && !flag("remoteAnchor")
+        && !agent.extra.get("remoteWorker").is_some_and(truthy)
+        && !agent.extra.get("remoteAnchor").is_some_and(truthy)
         && agent.execution_mode != Some(crate::AgentExecutionMode::Vm)
         && continuation_allowed(agent)
-        && text("steerRejectedTurnId") != Some(turn)
+        && agent
+            .extra
+            .get("steerRejectedTurnId")
+            .and_then(Value::as_str)
+            != Some(turn)
         && attempt.turn_id.as_deref() == Some(turn)
         && attempt.thread_id.as_deref() == Some(thread)
         && attempt.epoch == Some(agent.epoch)

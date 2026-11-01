@@ -6,21 +6,15 @@ use crate::{
 use rusqlite::{OptionalExtension, Transaction};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
-use studio_runtime_schema::persistence::{DeliveryStatus, EventStatus, RecipientDelivery};
+use studio_runtime_schema::delivery::{MessageRecipientDelivery, MessageSendStatus};
+use studio_runtime_schema::persistence::{EventStatus, RecipientDelivery};
 use studio_runtime_schema::queue_command::Field;
 use studio_runtime_store::{SyncDocumentsRepository, system_reads as records};
 
 #[derive(serde::Serialize)]
-#[serde(untagged)]
-pub enum ReceiptStatus {
-    Event(EventStatus),
-    Delivery(DeliveryStatus),
-}
-
-#[derive(serde::Serialize)]
 pub struct MessageReceipt {
     pub id: String,
-    pub status: ReceiptStatus,
+    pub status: studio_runtime_schema::delivery::MessageSendStatus,
     pub error: Option<String>,
     pub materialized: bool,
 }
@@ -79,22 +73,12 @@ pub fn delivery_receipts(
                 &id,
                 json!({"id":id,"status":status,"error":error}),
             )?;
-            let status = status
-                .parse::<EventStatus>()
-                .map(ReceiptStatus::Event)
-                .or_else(|()| {
-                    status
-                        .parse::<DeliveryStatus>()
-                        .map(ReceiptStatus::Delivery)
-                })
-                .map_err(|()| {
-                    studio_runtime_store::StoreError::RecordContract(
-                        "invalid message receipt status",
-                    )
-                })?;
             if let Some(raw) = metadata {
                 records::decode("runtime_event_meta", &id, &raw)?;
             }
+            let status =
+                studio_runtime_schema::delivery::MessageSendStatus::from_persisted(&status)
+                    .ok_or_else(|| records::invalid("runtime_events", &id))?;
             let item = item_id
                 .zip(item)
                 .map(|(key, raw)| {
@@ -213,7 +197,7 @@ pub struct ChatMessage {
     pub sender: String,
     pub text: String,
     pub created: f64,
-    pub deliveries: BTreeMap<String, RecipientDelivery>,
+    pub deliveries: BTreeMap<String, MessageRecipientDelivery>,
     pub sender_name: Value,
 }
 
@@ -488,11 +472,23 @@ fn message_deliveries(
     connection: &rusqlite::Connection,
     id: &str,
     deliveries: &str,
-) -> Result<BTreeMap<String, RecipientDelivery>, studio_runtime_store::StoreError> {
-    let mut deliveries: BTreeMap<String, RecipientDelivery> = serde_json::from_str(deliveries)
+) -> Result<BTreeMap<String, MessageRecipientDelivery>, studio_runtime_store::StoreError> {
+    let saved: BTreeMap<String, RecipientDelivery> = serde_json::from_str(deliveries)
         .map_err(|_| records::invalid("runtime_chat_messages", id))?;
+    let mut deliveries: BTreeMap<String, MessageRecipientDelivery> = saved
+        .into_iter()
+        .map(|(recipient, delivery)| {
+            (
+                recipient,
+                MessageRecipientDelivery {
+                    status: delivery.status.into(),
+                    error: delivery.error,
+                },
+            )
+        })
+        .collect();
     for (recipient, delivery) in &mut deliveries {
-        if delivery.status != DeliveryStatus::Queued {
+        if delivery.status != MessageSendStatus::Queued {
             continue;
         }
         if let Some(event) = connection
@@ -508,16 +504,6 @@ fn message_deliveries(
             )
             .optional()?
         {
-            let status = match event.0 {
-                EventStatus::Delivered => DeliveryStatus::Delivered,
-                EventStatus::Failed => DeliveryStatus::Failed,
-                EventStatus::Cancelled => DeliveryStatus::Cancelled,
-                EventStatus::StoredOnly => DeliveryStatus::StoredOnly,
-                EventStatus::Pending
-                | EventStatus::Reserved
-                | EventStatus::Dispatching
-                | EventStatus::Uncertain => continue,
-            };
             let event_id = format!("chat:{id}:{recipient}");
             records::validate(
                 "runtime_events",
@@ -531,7 +517,7 @@ fn message_deliveries(
                     ),
                 ])),
             )?;
-            delivery.status = status;
+            delivery.status = event.0.into();
             delivery.error = event.1;
         }
     }
@@ -543,7 +529,54 @@ mod delivery_tests {
     use super::*;
 
     #[test]
-    fn typed_deliveries_reconcile_terminal_errors_without_rewriting_active_events() {
+    fn message_receipt_serializes_the_shared_status() {
+        use studio_runtime_schema::delivery::MessageSendStatus;
+        let receipt = MessageReceipt {
+            id: "one".into(),
+            status: MessageSendStatus::Sending,
+            error: None,
+            materialized: false,
+        };
+        assert_eq!(
+            serde_json::to_string(&receipt).expect("receipt serializes"),
+            r#"{"id":"one","status":"sending","error":null,"materialized":false}"#
+        );
+        for (stored, expected) in [
+            ("pending", MessageSendStatus::Queued),
+            ("reserved", MessageSendStatus::Sending),
+            ("dispatching", MessageSendStatus::Sending),
+            ("delivered", MessageSendStatus::Delivered),
+            ("uncertain", MessageSendStatus::Uncertain),
+            ("failed", MessageSendStatus::Failed),
+            ("cancelled", MessageSendStatus::Cancelled),
+            ("stored_only", MessageSendStatus::StoredOnly),
+        ] {
+            assert_eq!(MessageSendStatus::from_persisted(stored), Some(expected));
+        }
+        assert!(MessageSendStatus::from_persisted("future-status").is_none());
+        let message = ChatMessage {
+            seq: 1,
+            id: "one".into(),
+            room: "room".into(),
+            sender: "user".into(),
+            text: "hello".into(),
+            created: 1.0,
+            sender_name: Value::Null,
+            deliveries: BTreeMap::from([(
+                "agent".into(),
+                MessageRecipientDelivery {
+                    status: MessageSendStatus::Queued,
+                    error: None,
+                },
+            )]),
+        };
+        let encoded = serde_json::to_string(&message).expect("message serializes");
+        let value: Value = serde_json::from_str(&encoded).expect("message JSON");
+        assert_eq!(value["deliveries"]["agent"]["status"], "queued");
+    }
+
+    #[test]
+    fn typed_deliveries_project_active_events_and_terminal_errors() {
         let db = rusqlite::Connection::open_in_memory().expect("database");
         db.execute_batch(
             "CREATE TABLE runtime_events(id TEXT,status TEXT,error TEXT);
@@ -557,14 +590,39 @@ mod delivery_tests {
             "done":{"status":"accepted","error":"saved"}
         });
         let deliveries = message_deliveries(&db, "m", &saved.to_string()).expect("typed states");
-        assert_eq!(deliveries["failed"].status, DeliveryStatus::Failed);
+        assert_eq!(deliveries["failed"].status, MessageSendStatus::Failed);
         assert_eq!(
             deliveries["failed"].error.as_deref(),
             Some("provider refused")
         );
-        assert_eq!(deliveries["active"].status, DeliveryStatus::Queued);
-        assert_eq!(deliveries["done"].status, DeliveryStatus::Accepted);
+        assert_eq!(deliveries["active"].status, MessageSendStatus::Sending);
+        assert_eq!(deliveries["done"].status, MessageSendStatus::Delivered);
         assert_eq!(deliveries["done"].error.as_deref(), Some("saved"));
+    }
+
+    #[test]
+    fn recipient_projection_preserves_uncertain_event() {
+        let db = rusqlite::Connection::open_in_memory().expect("database");
+        db.execute_batch("CREATE TABLE runtime_events(id TEXT,status TEXT,error TEXT); INSERT INTO runtime_events VALUES('chat:m:agent','uncertain',NULL);").expect("event");
+        let deliveries = message_deliveries(
+            &db,
+            "m",
+            &json!({"agent":{"status":"queued","error":null}}).to_string(),
+        )
+        .expect("deliveries");
+        let message = ChatMessage {
+            seq: 1,
+            id: "m".into(),
+            room: "room".into(),
+            sender: "user".into(),
+            text: "text".into(),
+            created: 1.0,
+            sender_name: Value::Null,
+            deliveries,
+        };
+        let encoded = serde_json::to_string(&message).expect("encode");
+        let value: Value = serde_json::from_str(&encoded).expect("decode");
+        assert_eq!(value["deliveries"]["agent"]["status"], "uncertain");
     }
 
     #[test]

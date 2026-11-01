@@ -233,15 +233,15 @@ async fn capture_before_restore_inner(
         move || {
             if snapshot
                 .agent
-                .extra
-                .get("workspaceOperation")
-                .and_then(Value::as_str)
+                .workspace_operation
+                .value()
+                .map(String::as_str)
                 != Some("restore")
                 || snapshot
                     .agent
-                    .extra
-                    .get("workspaceReservationId")
-                    .and_then(Value::as_str)
+                    .workspace_reservation_id
+                    .value()
+                    .map(String::as_str)
                     != Some(read_operation.as_str())
             {
                 return Err(CheckpointsError::ActivityChanged);
@@ -299,12 +299,7 @@ async fn capture_before_restore_inner(
     .await
     .map_err(|_| CheckpointsError::Worker)??;
     let (commit, reference) = commit_stage;
-    let parent_id = snapshot
-        .agent
-        .extra
-        .get("checkpointHistoryHead")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
+    let parent_id = snapshot.agent.checkpoint_history_head.value().cloned();
     let parent_boundary = snapshot
         .parent_checkpoint
         .as_ref()
@@ -312,12 +307,7 @@ async fn capture_before_restore_inner(
         .and_then(Value::as_i64);
     let root_id = snapshot.agent.root_id.0.clone();
     let thread_id = snapshot.agent.thread_id.clone();
-    let turn_id = snapshot
-        .agent
-        .extra
-        .get("lastCompletedTurn")
-        .cloned()
-        .unwrap_or(Value::Null);
+    let turn_id = snapshot.agent.last_completed_turn.value().cloned();
     let transaction_operation_id = operation_id;
     let transaction_agent_id = agent_id;
     let transaction_checkpoint_id = checkpoint_id;
@@ -464,15 +454,15 @@ async fn capture_reserved(
         move || {
             if snapshot
                 .agent
-                .extra
-                .get("workspaceReservationId")
-                .and_then(Value::as_str)
+                .workspace_reservation_id
+                .value()
+                .map(String::as_str)
                 != Some(preflight_operation_id.as_str())
                 || snapshot
                     .agent
-                    .extra
-                    .get("workspaceOperation")
-                    .and_then(Value::as_str)
+                    .workspace_operation
+                    .value()
+                    .map(String::as_str)
                     != Some(kind.as_str())
             {
                 return Err(CheckpointsError::ActivityChanged);
@@ -527,12 +517,7 @@ async fn capture_reserved(
                 let reference =
                     format!("refs/codex-agents/checkpoints/{git_agent_id}/{git_checkpoint_id}");
                 git(&cwd, &["update-ref", &reference, &commit], &[], None, 0)?;
-                let parent_id = snapshot
-                    .agent
-                    .extra
-                    .get("checkpointHistoryHead")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned);
+                let parent_id = snapshot.agent.checkpoint_history_head.value().cloned();
                 let parent_boundary = snapshot
                     .parent_checkpoint
                     .as_ref()
@@ -540,12 +525,7 @@ async fn capture_reserved(
                     .and_then(Value::as_i64);
                 let root_id = snapshot.agent.root_id.0.clone();
                 let thread_id = snapshot.agent.thread_id.clone();
-                let turn_id = snapshot
-                    .agent
-                    .extra
-                    .get("lastCompletedTurn")
-                    .cloned()
-                    .unwrap_or(Value::Null);
+                let turn_id = snapshot.agent.last_completed_turn.value().cloned();
                 Ok::<_, CheckpointsError>((
                     parent_id,
                     parent_boundary,
@@ -723,7 +703,7 @@ pub fn ensure_workspace_agent_available(
         return Err(CheckpointsError::DeletedAgent);
     }
     if agent.workspace_mode == Some(studio_runtime_schema::records::WorkspaceMode::Image)
-        || agent.extra.get("imageWorkspace") == Some(&Value::Bool(true))
+        || agent.image_workspace.value() == Some(&true)
     {
         return Err(CheckpointsError::ExecutionWorkspace);
     }
@@ -1080,6 +1060,19 @@ mod tests {
     use super::{CheckpointsError, ensure_workspace_idle};
     use serde_json::json;
     use studio_runtime_store::{StoredCheckpointObject, WorkspaceSnapshot};
+
+    #[test]
+    fn image_workspace_blocks_checkpoint_operations() {
+        let raw = r#"{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"imageWorkspace":true}"#;
+        let image: studio_runtime_store::AgentRecord = serde_json::from_str(raw).unwrap();
+        assert!(matches!(
+            super::ensure_workspace_agent_available(&image),
+            Err(CheckpointsError::ExecutionWorkspace)
+        ));
+        let ordinary: studio_runtime_store::AgentRecord =
+            serde_json::from_str(&raw.replace("true", "false")).unwrap();
+        assert!(super::ensure_workspace_agent_available(&ordinary).is_ok());
+    }
 
     #[test]
     fn capture_reservation_allows_its_owner_but_keeps_other_activity_blocked() -> std::io::Result<()>

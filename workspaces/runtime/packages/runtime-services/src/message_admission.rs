@@ -92,9 +92,9 @@ impl MessageAdmission for PreparedAdmission {
                     }
                 })?;
             let Some(operation) = other
-                .extra
-                .get("workspaceOperation")
-                .and_then(Value::as_str)
+                .workspace_operation
+                .value()
+                .map(String::as_str)
                 .filter(|operation| !operation.is_empty())
             else {
                 continue;
@@ -136,9 +136,7 @@ impl MessageAdmission for PreparedAdmission {
             unsupported_operation |= !matches!(operation, "checkpoint" | "capture");
             let mut blocker = json!({"agentId":id,"operation":operation});
             let record = other
-                .extra
-                .get("workspaceReservationId")
-                .and_then(Value::as_str)
+                .workspace_reservation_id.value().map(String::as_str)
                 .map(|id| studio_runtime_store::workspace_operations::WorkspaceOperationsRepository::operation(tx, id))
                 .transpose()?
                 .flatten();
@@ -249,11 +247,7 @@ fn provision_destination(
     tx: &Transaction<'_>,
     agent: &AgentRecord,
 ) -> Result<Option<std::path::PathBuf>, CoordinationError> {
-    let Some(id) = agent
-        .extra
-        .get("workspaceReservationId")
-        .and_then(Value::as_str)
-    else {
+    let Some(id) = agent.workspace_reservation_id.value().map(String::as_str) else {
         return Ok(None);
     };
     let Some(record) =

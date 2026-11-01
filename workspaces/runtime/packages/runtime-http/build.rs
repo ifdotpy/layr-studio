@@ -42,6 +42,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut analysis = analyzer.analyze()?;
     analysis
         .schemas
+        .get_mut("AgentCapacity")
+        .ok_or("missing agent capacity schema")?
+        .schema_type = SchemaType::Primitive {
+        rust_type: "studio_runtime_schema::agent_limits::AgentCapacity".to_owned(),
+        serde_with: None,
+    };
+    analysis
+        .schemas
         .get_mut("ResourceRef")
         .ok_or("missing resource identity schema")?
         .schema_type = SchemaType::Primitive {

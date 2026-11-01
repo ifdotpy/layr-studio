@@ -4,9 +4,12 @@
 //! (tombstones and finished agents dominate it). This module owns those
 //! indexes; the query-plan test below fails when a query stops using its index.
 
+use std::sync::LazyLock;
+
 use rusqlite::{Connection, params};
 
 use crate::StoreResult;
+use crate::domain::unfinished_turn_sql;
 
 /// Statuses that occupy a capacity slot; the unit is a status name. Deleting an
 /// agent leaves it `paused`, so a slot also requires `CAPACITY_LIVE`.
@@ -25,36 +28,39 @@ pub const LIVE_ROOT_INDEX: &str = "runtime_agent_live_root_v2";
 /// Agents by account key, live agents (`deleted_at IS NULL`) first.
 pub const ACCOUNT_INDEX: &str = "runtime_agent_account";
 /// Agents by provider thread within an account.
-/// Agents with a running or reserved turn, by team root.
+/// Agents with a running or reserved turn, by team root. The index holds the
+/// status part only: a partial index cannot read `turns`, so a busy chat with
+/// another status is found through `turns` in [`reserved_turn_input`].
 pub const ACTIVE_INDEX: &str = "runtime_agent_active";
-/// SQL predicate: the agent may hold a running or reserved turn. One owner for
-/// [`ACTIVE_INDEX`] and the query that reads it.
-macro_rules! active_turn {
+/// SQL predicate: the agent status may hold a running or reserved turn. One owner
+/// for [`ACTIVE_INDEX`] and the query that reads it.
+macro_rules! active_status {
     () => {
-        "(in_flight=1 OR status IN ('running','starting','approval'))"
+        "status IN ('running','starting','approval')"
     };
 }
 /// SQL listing `(id, root_id)` of the agents that hold a running or reserved
-/// turn: in flight, active status, or a start reservation whose input events
-/// are still reserved. It reads [`ACTIVE_INDEX`].
-pub const RESERVED_TURN_INPUT: &str = concat!(
-    "SELECT id,root_id FROM runtime_agents INDEXED BY runtime_agent_active WHERE ",
-    active_turn!(),
-    " AND (in_flight=1 OR status IN ('running','starting','approval') OR EXISTS (\
-       SELECT 1 FROM json_each(runtime_agents.record,'$.startAttempt.events') AS input \
-       JOIN runtime_events AS event ON event.id=input.value \
-       WHERE event.agent=runtime_agents.id \
-       AND event.epoch=json_extract(runtime_agents.record,'$.startAttempt.epoch') \
-       AND event.status IN ('reserved','dispatching','uncertain'))) \
-     UNION \
-     SELECT a.id,a.root_id FROM turns t JOIN runtime_agents a ON a.id=t.chat \
-       WHERE t.attempt_active_at_reservation=1 AND EXISTS (\
-       SELECT 1 FROM json_each(a.record,'$.startAttempt.events') AS input \
-       JOIN runtime_events AS event ON event.id=input.value \
-       WHERE event.agent=a.id \
-       AND event.epoch=json_extract(a.record,'$.startAttempt.epoch') \
-       AND event.status IN ('reserved','dispatching','uncertain')) ORDER BY 1"
-);
+/// turn: an active status, an unfinished turn of the chat, or a start reservation
+/// whose input events are still reserved. It reads [`ACTIVE_INDEX`] and `turns`.
+pub fn reserved_turn_input() -> &'static str {
+    static SQL: LazyLock<String> = LazyLock::new(|| {
+        format!(
+            "SELECT id,root_id FROM runtime_agents INDEXED BY runtime_agent_active WHERE {active} \
+             UNION SELECT a.id,a.root_id FROM turns t JOIN runtime_agents a ON a.id=t.chat \
+               WHERE {unfinished} \
+             UNION SELECT a.id,a.root_id FROM turns t JOIN runtime_agents a ON a.id=t.chat \
+               WHERE t.attempt_active_at_reservation=1 AND EXISTS (\
+               SELECT 1 FROM json_each(a.record,'$.startAttempt.events') AS input \
+               JOIN runtime_events AS event ON event.id=input.value \
+               WHERE event.agent=a.id \
+               AND event.epoch=json_extract(a.record,'$.startAttempt.epoch') \
+               AND event.status IN ('reserved','dispatching','uncertain')) ORDER BY 1",
+            active = active_status!(),
+            unfinished = unfinished_turn_sql("t."),
+        )
+    });
+    &SQL
+}
 /// Agents holding a workspace operation, by working directory.
 pub const WORKSPACE_OPERATION_INDEX: &str = "runtime_agent_workspace_operation";
 /// SQL predicate: the agent row holds a workspace operation. One owner for
@@ -81,7 +87,7 @@ impl AgentIndexedReads {
             ),
             (ROOT_INDEX, "root_id)".to_owned()),
             (ACCOUNT_INDEX, "account_key,deleted_at)".to_owned()),
-            (ACTIVE_INDEX, concat!("root_id) WHERE ", active_turn!()).to_owned()),
+            (ACTIVE_INDEX, concat!("root_id) WHERE ", active_status!()).to_owned()),
             (LIVE_ROOT_INDEX, "root_id,id) WHERE deleted_at IS NULL".to_owned()),
             (
                 WORKSPACE_OPERATION_INDEX,
@@ -288,6 +294,7 @@ fn prefix_upper(prefix: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::ONE_UNFINISHED_TURN_INDEX;
     use serde_json::{Value, json};
 
     /// The agents table of the column format with this module's indexes.
@@ -302,6 +309,12 @@ mod tests {
         connection
             .execute_batch(&crate::domain::tables_sql())
             .expect("domain tables create");
+        // The reservation branch of the reserved turn query reads the event table.
+        connection
+            .execute_batch(
+                "CREATE TABLE runtime_events(id TEXT PRIMARY KEY, agent TEXT, epoch INTEGER, status TEXT)",
+            )
+            .expect("event table creates");
         AgentIndexedReads::prepare_index(&connection).expect("indexes create");
         connection
     }
@@ -354,6 +367,37 @@ mod tests {
             insert(&connection, agent);
         }
         connection
+    }
+
+    #[test]
+    fn reserved_turn_input_finds_a_busy_chat_through_its_unfinished_turn() {
+        let connection = database();
+        insert(
+            &connection,
+            json!({"id":"busy","provider":"codex","rootId":"busy","status":"paused"}),
+        );
+        connection
+            .execute(
+                "INSERT INTO turns(id,chat,state) VALUES('t','busy','starting')",
+                [],
+            )
+            .expect("turn inserts");
+        let rows = connection
+            .prepare(reserved_turn_input())
+            .expect("query prepares")
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("query runs")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("rows");
+        assert_eq!(rows, ["busy"]);
+    }
+
+    #[test]
+    fn reserved_turn_input_uses_the_active_index_and_the_unfinished_turn_index() {
+        let connection = database();
+        let details = plan(&connection, reserved_turn_input(), &[]);
+        assert!(details.contains(ACTIVE_INDEX), "{details}");
+        assert!(details.contains(ONE_UNFINISHED_TURN_INDEX), "{details}");
     }
 
     #[test]

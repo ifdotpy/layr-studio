@@ -433,7 +433,7 @@ test("composer-stability-ui", async ({ browser: fixtureBrowser }) => {
       await firstSend.fulfill({
         json: sendReply({
           id: firstMessage.id,
-          status: "sent",
+          status: "delivered",
         } satisfies MessageDelivery),
       });
       await page.waitForFunction(

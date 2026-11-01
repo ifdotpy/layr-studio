@@ -172,7 +172,9 @@ pub(super) fn save_actor(tx: &Transaction<'_>, actor: &Value) -> Result<(), Call
         .as_str()
         .ok_or(CallbackError::Stored("runtime_agents/id".into()))?;
     records::validate("runtime_agents", id, actor.clone())?;
-    if !studio_runtime_store::agent_volatile::update(tx, id, actor)? {
+    let typed = studio_runtime_store::AgentRecord::from_value(actor.clone())
+        .map_err(|_| CallbackError::Stored("runtime_agents".into()))?;
+    if !studio_runtime_store::Table::<studio_runtime_store::AgentRecord>::new(tx).update(&typed)? {
         return Err(CallbackError::Stale);
     }
     crate::agents_create::publish_agent(tx, actor)?;

@@ -2369,9 +2369,8 @@ impl RuntimeOrchestrationEffects {
                             })
                             .unwrap_or_default(),
                     );
-                    proxy
-                        .extra
-                        .insert("lastCompletedTurn".to_owned(), json!(key_for_write));
+                    proxy.last_completed_turn =
+                        studio_runtime_schema::queue_command::Field::Value(key_for_write.clone());
                     studio_runtime_store::AgentRepository::put(tx, &proxy)?;
                 }
                 let existing: Option<(String, String, String, f64, i64)> = tx

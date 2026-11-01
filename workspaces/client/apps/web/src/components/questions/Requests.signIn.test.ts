@@ -18,6 +18,7 @@ vi.mock("../../servers/ServerServicesContext", () => ({
   useServerStorage: () => controls.storage,
 }));
 vi.mock("../../api", () => ({
+  ApiError: class extends Error {},
   errorText: (error: unknown) =>
     String(error instanceof Error ? error.message : error),
 }));

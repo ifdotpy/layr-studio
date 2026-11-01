@@ -1,5 +1,6 @@
 use super::*;
 use crate::CachedSql;
+use crate::domain::chat_busy_sql;
 use std::sync::LazyLock;
 
 #[derive(serde::Serialize, serde::Deserialize, PartialEq)]
@@ -147,12 +148,17 @@ fn account_wake_index_eligibility(a: &str) -> String {
 /// `ch`). An index predicate cannot read another table, so the account wake
 /// index leaves these terms out and the queries add them (`exact`).
 fn chat_has(a: &str, condition: &str) -> String {
-    let id = if a.is_empty() {
+    let id = agent_id(a);
+    format!("EXISTS(SELECT 1 FROM chats ch WHERE ch.id={id} AND {condition})")
+}
+
+/// The chat id column of the agent row `a` (`""` or an alias with its dot).
+fn agent_id(a: &str) -> String {
+    if a.is_empty() {
         "runtime_agents.id".to_owned()
     } else {
         format!("{a}id")
-    };
-    format!("EXISTS(SELECT 1 FROM chats ch WHERE ch.id={id} AND {condition})")
+    }
 }
 
 fn account_wake_queued_candidate(a: &str, exact: bool) -> String {
@@ -161,9 +167,13 @@ fn account_wake_queued_candidate(a: &str, exact: bool) -> String {
     } else {
         String::new()
     };
+    let idle = if exact {
+        format!("AND NOT {} ", chat_busy_sql(&agent_id(a)))
+    } else {
+        String::new()
+    };
     format!(
-        "({a}status='queued' {auto_wake}\
-         AND COALESCE({a}in_flight,0)=0 \
+        "({a}status='queued' {auto_wake}{idle}\
          AND COALESCE({a}native_failure_hold,0)=0)"
     )
 }
@@ -173,7 +183,8 @@ fn account_wake_queued_candidate(a: &str, exact: bool) -> String {
 fn account_wake_steer_candidate(a: &str, exact: bool) -> String {
     let chat = if exact {
         format!(
-            "AND {} AND NOT {} ",
+            "AND {} AND {} AND NOT {} ",
+            chat_busy_sql(&agent_id(a)),
             chat_has(a, "ch.auto_wake=1"),
             chat_has(a, "ch.execution_mode='vm'")
         )
@@ -181,7 +192,7 @@ fn account_wake_steer_candidate(a: &str, exact: bool) -> String {
         String::new()
     };
     format!(
-        "({a}status='running' AND {a}in_flight=1 \
+        "({a}status='running' \
          AND {a}turn_id IS NOT NULL \
          AND COALESCE({a}steer_rejected_turn_id,'')<>{a}turn_id \
          AND COALESCE({a}native_failure_hold,0)=0 {chat})"
@@ -432,15 +443,14 @@ impl SchedulerRepository {
                 .disconnect_recovery
                 .as_deref()
                 .is_some_and(|value| !value.is_empty())
-            || [
-                "capacityRetry",
-                "usageResume",
-                "manualRecoveryDeliveryHold",
-                "remoteWorker",
-                "remoteAnchor",
-            ]
-            .iter()
-            .any(|key| agent.extra.get(*key).is_some_and(truthy))
+            || agent.extra.get("capacityRetry").is_some_and(truthy)
+            || agent.extra.get("usageResume").is_some_and(truthy)
+            || agent
+                .extra
+                .get("manualRecoveryDeliveryHold")
+                .is_some_and(truthy)
+            || agent.extra.get("remoteWorker").is_some_and(truthy)
+            || agent.extra.get("remoteAnchor").is_some_and(truthy)
             || agent
                 .native_release
                 .as_ref()
@@ -503,12 +513,7 @@ impl SchedulerRepository {
         {
             return Ok(false);
         }
-        let Some(reason) = agent
-            .extra
-            .get("error")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-        else {
+        let Some(reason) = agent.error_text().filter(|value| !value.is_empty()) else {
             return Ok(false);
         };
         let original = claim_result::<HistoricalAgentSnapshot>(&saved)?.agent;
@@ -523,6 +528,14 @@ impl SchedulerRepository {
                 .value()
                 .is_some_and(|current| current.as_str() == role),
         };
+        let provider_matches = match &original.provider {
+            HistoricalField::Missing => agent.provider.is_missing(),
+            HistoricalField::Null => matches!(
+                agent.provider,
+                studio_runtime_schema::queue_command::Field::Null
+            ),
+            HistoricalField::Present(provider) => agent.provider.value() == Some(provider),
+        };
         if original.id != agent.id
             || original.root_id != agent.root_id
             || original.epoch != agent.epoch
@@ -533,8 +546,7 @@ impl SchedulerRepository {
             || original.workspace_mode != agent.workspace_mode
             || original.cwd != agent.cwd
             || original.parent_id != agent.parent_id
-            || historical_text(&original.provider, |provider| provider.key().to_owned()).as_ref()
-                != agent.extra.get("provider")
+            || !provider_matches
             || !role_matches
             || historical_text(&original.real_cwd, Clone::clone).as_ref()
                 != agent.extra.get("realCwd")
@@ -867,18 +879,19 @@ impl SchedulerRepository {
 
     /// Return queued local agents with pending events in the current epoch.
     pub fn pending_agents(connection: &Connection) -> StoreResult<Vec<(String, i64)>> {
-        let mut statement = connection.prepare_cached(
+        let mut statement = connection.prepare_cached(&format!(
             "SELECT a.id,json_extract(a.record,'$.epoch') FROM runtime_agents a \
              WHERE a.status='queued' \
              AND EXISTS(SELECT 1 FROM chats ch WHERE ch.id=a.id AND ch.auto_wake=1) \
-             AND COALESCE(a.in_flight,0)=0 \
+             AND NOT {} \
              AND COALESCE(a.native_failure_hold,0)=0 \
              AND COALESCE(a.remote_worker,0)=0 \
              AND COALESCE(a.remote_anchor,0)=0 \
              AND EXISTS(SELECT 1 FROM runtime_events e WHERE e.agent=a.id \
                         AND e.epoch=json_extract(a.record,'$.epoch') AND e.status='pending') \
              ORDER BY a.rowid",
-        )?;
+            chat_busy_sql("a.id")
+        ))?;
         let rows = statement.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
@@ -1163,9 +1176,9 @@ impl SchedulerRepository {
             agent
                 .extra
                 .insert("nativeFailureHold".to_owned(), Value::Bool(true));
-            agent
-                .extra
-                .insert("error".to_owned(), Value::String(reason.to_owned()));
+            agent.error = studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_schema::provider_errors::AgentError::Message(reason.to_owned()),
+            );
             agent.start_outcome_hold = Some(crate::StoredStartOutcomeHold::Known(
                 crate::StartOutcomeHold::Held {
                     reason: Some(reason.into()),
@@ -1545,10 +1558,9 @@ impl SchedulerRepository {
         if let Some(mut record) = load_agent(tx, agent)?
             && record.epoch == epoch
         {
-            record.extra.insert(
-                "error".into(),
-                json!(format!("Queued input could not be delivered: {reason}")),
-            );
+            record.set_error_receipt(json!(format!(
+                "Queued input could not be delivered: {reason}"
+            )))?;
             publish_agent(tx, &record)?;
             EventWriteRepository::set_agent_sync_lifecycle(
                 tx,

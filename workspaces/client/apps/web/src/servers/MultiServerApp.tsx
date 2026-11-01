@@ -439,7 +439,14 @@ function MultiServerShell({
   );
   useEffect(() => {
     for (const [id, instance] of serviceInstances.current) {
-      if (services.get(id) !== instance) instance.close();
+      const next = services.get(id);
+      // A replacement may open the old cache before this cleanup effect runs.
+      if (next !== instance)
+        instance.close(
+          !next ||
+            next.owner.origin !== instance.owner.origin ||
+            next.owner.credentialId !== instance.owner.credentialId,
+        );
     }
     serviceInstances.current = services;
   }, [services]);

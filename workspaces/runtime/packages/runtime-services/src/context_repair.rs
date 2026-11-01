@@ -203,10 +203,13 @@ pub(crate) fn source_terminal_attempt(
 }
 
 fn archive_previous_repair(agent: &mut Value) -> Result<(), RepairError> {
-    let previous = agent.get("contextRepair").cloned().unwrap_or(Value::Null);
-    if !previous.is_object() {
+    let Some(previous) = agent
+        .get("contextRepair")
+        .filter(|value| value.is_object())
+        .cloned()
+    else {
         return Ok(());
-    }
+    };
     if previous["phase"] == ContextRepairPhase::Completed.as_str()
         || studio_runtime_store::truthy(previous.get("rpcMethod"))
     {
@@ -225,8 +228,6 @@ fn archive_previous_repair(agent: &mut Value) -> Result<(), RepairError> {
             .as_array_mut()
             .ok_or(RepairError::Invalid("agent.contextRepairHistory"))?
             .push(previous);
-    } else {
-        agent["lastContextRepairCheck"] = previous;
     }
     Ok(())
 }
@@ -2023,6 +2024,14 @@ mod item_read_identity_tests {
 mod repair_history_tests {
     use super::{ContextRepairPhase, archive_previous_repair};
     use serde_json::json;
+
+    #[test]
+    fn undispatched_repair_does_not_create_an_unused_diagnostic() {
+        let mut agent = serde_json::from_str(r#"{"contextRepair":{"phase":"preparing"}}"#).unwrap();
+        archive_previous_repair(&mut agent).unwrap();
+        assert!(agent.get("lastContextRepairCheck").is_none());
+        assert!(agent.get("contextRepairHistory").is_none());
+    }
 
     #[test]
     fn completed_repair_is_kept_in_the_history_used_by_late_callbacks() {

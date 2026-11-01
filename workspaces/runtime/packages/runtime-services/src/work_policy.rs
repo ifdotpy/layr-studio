@@ -39,10 +39,15 @@ pub fn work_statuses(records: &[WorkItemRecord]) -> BTreeMap<String, WorkStatus>
         .collect()
 }
 
+/// Work record fields that hold private effect state (request admissions,
+/// replies, retry bookkeeping). Client views of work omit them.
+pub const PRIVATE_WORK_FIELDS: [&str; 4] =
+    ["archiveIntent", "vmSubmit", "vmAccept", "resultFailures"];
+
 pub fn work_item_view(item: &WorkItemRecord, statuses: &BTreeMap<String, WorkStatus>) -> Value {
     let mut view = item.value();
     if let Some(fields) = view.as_object_mut() {
-        for private in ["archiveIntent", "vmSubmit", "vmAccept", "resultFailures"] {
+        for private in PRIVATE_WORK_FIELDS {
             fields.remove(private);
         }
     }

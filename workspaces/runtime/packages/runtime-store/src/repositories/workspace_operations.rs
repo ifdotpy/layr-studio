@@ -1,7 +1,6 @@
 //! Narrow persistence for workspace completion receipts, lineage and recovery writes.
 use crate::{
-    AgentRecord, AgentRepository, CheckpointsRepository, StoreError, StoreResult, Table,
-    WorkspaceOperationRecord,
+    AgentRecord, AgentRepository, StoreError, StoreResult, Table, WorkspaceOperationRecord,
 };
 use rusqlite::{Connection, Transaction, params};
 use serde_json::Value;
@@ -66,13 +65,6 @@ impl WorkspaceOperationsRepository {
             .query_map([agent], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(HistoryRows { checkpoints, items })
-    }
-    pub fn checkpoint_error(tx: &Transaction<'_>, agent: &str, error: &str) -> StoreResult<()> {
-        let Some(mut a) = CheckpointsRepository::agent(tx, agent)? else {
-            return Ok(());
-        };
-        a.record["checkpointError"] = Value::String(error.into());
-        AgentRepository::put(tx, &AgentRecord::from_value(a.record)?)
     }
     pub fn put_operation(
         tx: &Transaction<'_>,

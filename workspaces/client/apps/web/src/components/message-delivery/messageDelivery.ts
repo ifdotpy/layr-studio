@@ -4,49 +4,42 @@ import {
 } from "../../generated/deliveryMoment";
 import type { Message } from "../../types";
 import type { OutboxEntry, OutgoingMessage } from "../../sync/send";
+import { MessageSendStatus } from "../../generated/api";
+import { serverStatus } from "../../messageSendStatus";
+import type { DeliveryState } from "../../sync/send";
 
-const deliveryLabels: Record<string, string> = {
+const deliveryLabels: Record<MessageSendStatus, string> = {
+  queued: "Queued",
   sending: "Sending…",
-  reserved: "Starting…",
-  dispatching: "Sending…",
-  pending: "Queued",
-  queued: "Waiting to send",
-  paused: "Retries paused",
+  delivered: "Sent",
   uncertain: "Delivery unconfirmed",
   failed: "Not sent",
-  accepted: "Sent",
   cancelled: "Cancelled",
+  stored_only: "Stored",
 };
 
-export function explicitQueue(item: Record<string, unknown>) {
-  if (item.localDelivery && item.deliveryStatus === "queued") return false;
+const deviceLabels: Record<
+  Extract<DeliveryState, { source: "device" }>["state"]["kind"],
+  string
+> = {
+  stored: "Stored on device",
+  in_flight: "Sending…",
+  transport_failed: "Could not contact server",
+  receipt_expired: "Delivery outcome unknown",
+  removed: "Removed from device",
+};
+
+export function explicitQueue(item: Message) {
   return (
-    ["pending", "queued"].includes(
-      String(item.deliveryStatus || item.status),
-    ) || item.pending === true
+    (item.deliveryStatus?.source === "device" &&
+      (item.deliveryStatus.state.kind === "stored" ||
+        item.deliveryStatus.state.kind === "in_flight")) ||
+    serverStatus(item.deliveryStatus) === MessageSendStatus.queued
   );
 }
 
 export function dispatchedMessage(item: Message) {
-  const deliveryStatus = item.deliveryStatus;
-  return (
-    item.materialized === true ||
-    ["reserved", "dispatching", "delivered", "sent"].includes(
-      typeof deliveryStatus === "string" ? deliveryStatus : "",
-    ) ||
-    (!item.localDelivery && item.materialized !== false && !item.pending)
-  );
-}
-
-export function applySendingOverlay(
-  item: Message,
-  hasSendingReceipt: boolean,
-): Message {
-  // A restored display copy is already materialized and deliberately marked
-  // uncertain. A stale outbox receipt must not make it actionable again.
-  return hasSendingReceipt && item.materialized !== true
-    ? { ...item, pending: true, deliveryStatus: "sending" }
-    : item;
+  return !explicitQueue(item);
 }
 
 // Hidden scheduler inputs keep their original slots and the full queue revision.
@@ -89,23 +82,28 @@ export function mergeOutgoing(
   observed: ReadonlySet<string>,
 ) {
   const stored = new Map(outbox.map((entry) => [entry.id, entry]));
-  const visibleSends = new Map(
-    outbox
-      .filter(
-        (entry) =>
-          entry.displayPending === true ||
-          (entry.displayPending !== false && entry.status !== "accepted"),
-      )
-      .map((entry) => [entry.id, entry as OutgoingMessage]),
-  );
+  const visibleSends = new Map(outbox.map((entry) => [entry.id, entry]));
   // The outbox owns delivery state once it stores a message. A local copy
-  // shows only before that, or as "sending" while the stored entry is queued.
+  // shows only before that.
   for (const entry of Object.values(local)) {
     const owner = stored.get(entry.id);
-    if (!owner || (entry.status === "sending" && owner.status === "queued"))
+    if (
+      !owner ||
+      (entry.status.source === "server" && owner.status.source === "device")
+    )
       visibleSends.set(entry.id, entry);
   }
-  return [...visibleSends.values()].filter((entry) => !observed.has(entry.id));
+  return [...visibleSends.values()].filter(
+    (entry) => stored.has(entry.id) || !observed.has(entry.id),
+  );
+}
+
+function deliveryError(entry: OutgoingMessage) {
+  return entry.status.source === "device" &&
+    (entry.status.state.kind === "transport_failed" ||
+      entry.status.state.kind === "receipt_expired")
+    ? entry.status.state.error
+    : entry.receipt?.error;
 }
 
 export function outgoingTranscript(
@@ -121,7 +119,7 @@ export function outgoingTranscript(
       let shown =
         !present.assets?.length &&
         entry.attachments?.length &&
-        (present.pending || present.materialized === false)
+        present.materialized === false
           ? { ...present, assets: entry.attachments }
           : present;
       if (!shown.requestedDelivery && entry.body.delivery)
@@ -131,22 +129,27 @@ export function outgoingTranscript(
             entry.body.delivery ?? DeliveryMoment.CurrentTurn,
           ),
         };
-      updates.set(present.id, shown);
       if (
-        ["failed", "uncertain"].includes(entry.status) &&
-        !present.deliveryStatus
+        entry.status.source === "device" ||
+        entry.receipt?.status === MessageSendStatus.uncertain
       )
+        shown = { ...shown, localDelivery: true };
+      updates.set(present.id, shown);
+      if (!shown.deliveryStatus)
         updates.set(present.id, {
           ...shown,
           deliveryStatus: entry.status,
-          deliveryError: entry.error,
+          deliveryError: deliveryError(entry),
         });
-      // Keep the local receipt until a durable transcript record replaces it.
+      // This only hides the duplicate display copy. The outbox separately
+      // retains its request until fresh receipt evidence reconciles it.
       if (
-        !present.pending &&
-        present.materialized !== false &&
-        (!["failed", "uncertain"].includes(entry.status) ||
-          present.deliveryStatus)
+        (present.clientMessageId === entry.id &&
+          present.materialized === true &&
+          serverStatus(present.deliveryStatus) ===
+            MessageSendStatus.delivered) ||
+        (entry.receipt?.status === MessageSendStatus.delivered &&
+          entry.receipt.materialized === true)
       )
         observed.push(entry.id);
       continue;
@@ -154,8 +157,8 @@ export function outgoingTranscript(
     // An input outside the loaded page can replace its local card only after
     // the server confirms both delivery and the exact saved transcript input.
     if (
-      entry.status === "accepted" &&
-      entry.receipt?.status === "delivered" &&
+      serverStatus(entry.status) === MessageSendStatus.delivered &&
+      entry.receipt?.status === MessageSendStatus.delivered &&
       entry.receipt.materialized === true
     ) {
       observed.push(entry.id);
@@ -169,13 +172,8 @@ export function outgoingTranscript(
       text: entry.displayText ?? entry.body.text,
       assets: entry.attachments || [],
       at: entry.created / 1000,
-      deliveryStatus:
-        entry.status === "accepted"
-          ? ["queued", "pending"].includes(entry.receipt?.status || "")
-            ? "pending"
-            : "accepted"
-          : entry.status,
-      deliveryError: entry.error,
+      deliveryStatus: entry.status,
+      deliveryError: deliveryError(entry),
       localDelivery: true,
       requestedDelivery: normalizeDelivery(
         entry.body.delivery ?? DeliveryMoment.CurrentTurn,
@@ -189,7 +187,10 @@ export function outgoingTranscript(
 }
 
 export function deliveryLabel(item: Message) {
-  const status = item.deliveryStatus || (item.pending ? "pending" : undefined);
-  if (status === "sending" && item.pending) return "Waiting for agent";
-  return status ? deliveryLabels[status] || "" : "";
+  const delivery = item.deliveryStatus;
+  return !delivery
+    ? ""
+    : delivery.source === "server"
+      ? deliveryLabels[delivery.status]
+      : deviceLabels[delivery.state.kind];
 }

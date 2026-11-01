@@ -200,6 +200,14 @@
     "callee": "syncGet"
   },
   {
+    "file": "indexedDb.ts",
+    "callee": "indexedDB.deleteDatabase"
+  },
+  {
+    "file": "indexedDb.ts",
+    "callee": "indexedDB.open"
+  },
+  {
     "file": "native/serverCredentials.test.ts",
     "callee": "new NativeServerCredentials().fetch"
   },
@@ -228,6 +236,14 @@
     "callee": "adapter.fetch"
   },
   {
+    "file": "servers/excludedServers.ts",
+    "callee": "globalThis.localStorage"
+  },
+  {
+    "file": "servers/excludedServers.ts",
+    "callee": "globalThis.localStorage"
+  },
+  {
     "file": "servers/mutationIdentity.test.ts",
     "callee": "globalThis.fetch"
   },
@@ -238,6 +254,14 @@
   {
     "file": "servers/routes.ts",
     "callee": "fetch"
+  },
+  {
+    "file": "servers/routes.ts",
+    "callee": "localStorage.getItem"
+  },
+  {
+    "file": "servers/routes.ts",
+    "callee": "localStorage.setItem"
   },
   {
     "file": "servers/serverNames.ts",

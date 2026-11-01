@@ -157,6 +157,7 @@ pub fn actor(store: &RuntimeStore, context: &CallbackContext) -> Value {
 }
 pub fn normalized_actor(value: &Value) -> Value {
     let mut record = value.clone();
+    crate::agent_view_fixtures::normalize_legacy_agent(&mut record);
     for field in studio_runtime_store::agent_volatile::AGENT_VOLATILE_FIELDS {
         let default = template()["agents"][0]
             .get(field)
@@ -179,6 +180,7 @@ pub async fn put_actor(store: &RuntimeStore, value: &Value) {
     store
         .transaction_with::<_, studio_runtime_store::StoreError>(move |tx| {
             let mut record: Value = serde_json::from_str(&record).expect("actor JSON");
+            crate::agent_view_fixtures::normalize_legacy_agent(&mut record);
             let previous = studio_runtime_store::agent_volatile::merged_record(tx, &id)?
                 .expect("actor exists");
             for field in studio_runtime_store::agent_volatile::AGENT_VOLATILE_FIELDS {
@@ -354,11 +356,14 @@ pub fn assert_writes(before: &Value, store: &RuntimeStore, expected: &Value) {
     }
     // fe1e1f249 retires yoloMode from the published agent projection. These
     // fixtures write the old record after migration, without permissionMode.
-    if let Some(rows) = expected
-        .get_mut("sync_entities")
-        .and_then(|change| change.get_mut("added"))
-        .and_then(Value::as_array_mut)
-    {
+    for kind in ["added", "removed"] {
+        let Some(rows) = expected
+            .get_mut("sync_entities")
+            .and_then(|change| change.get_mut(kind))
+            .and_then(Value::as_array_mut)
+        else {
+            continue;
+        };
         for row in rows {
             let Some(row) = row.as_array_mut() else {
                 continue;
@@ -366,14 +371,15 @@ pub fn assert_writes(before: &Value, store: &RuntimeStore, expected: &Value) {
             if row.first().and_then(Value::as_str) != Some("agent") {
                 continue;
             }
-            let Some(fields) = row
-                .get_mut(2)
-                .and_then(|payload| payload.get_mut("value"))
-                .and_then(Value::as_object_mut)
-            else {
+            let Some(value) = row.get_mut(2).and_then(|payload| payload.get_mut("value")) else {
                 continue;
             };
-            if let Some(mode) = fields.remove("yoloMode") {
+            crate::agent_view_fixtures::normalize_legacy_agent(value);
+            if kind == "added"
+                && let Some(mode) = value
+                    .as_object_mut()
+                    .and_then(|fields| fields.remove("yoloMode"))
+            {
                 assert!(mode.is_boolean(), "frozen yoloMode");
             }
         }
@@ -458,11 +464,18 @@ pub async fn seed_case(store: &RuntimeStore, case: &Value) {
                     }
                     for row in change["removed"].as_array().unwrap() {
                         if table == "sync_entities" {
+                            let mut value = row.get(2).and_then(|payload| payload.get("value"))
+                                .expect("projection value").clone();
+                            if row.get(0).and_then(Value::as_str) == Some("agent")
+                                && row.get(3).and_then(Value::as_i64) != Some(1)
+                            {
+                                crate::agent_view_fixtures::normalize_legacy_agent(&mut value);
+                            }
                             studio_runtime_store::SyncDocumentsRepository::put_entity(
                                 tx,
                                 row[0].as_str().unwrap(),
                                 row[1].as_str().unwrap(),
-                                row[2]["value"].clone(),
+                                value.clone(),
                                 row[3] == 1,
                             )?;
                             if row[0] == "agent" {
@@ -470,7 +483,7 @@ pub async fn seed_case(store: &RuntimeStore, case: &Value) {
                                 // both current projections from that same view, too.
                                 for collection in ["agentSummary", "agentDetail"] {
                                     let value = studio_runtime_services::sync_policy::project_persisted_record(
-                                        collection, &row[2]["value"],
+                                        collection, &value,
                                     ).expect("frozen agent view has id");
                                     studio_runtime_store::SyncDocumentsRepository::put_entity(
                                         tx, collection, row[1].as_str().unwrap(), value, row[3] == 1,
@@ -483,6 +496,7 @@ pub async fn seed_case(store: &RuntimeStore, case: &Value) {
                     }
                 }
             }
+            studio_runtime_store::migrations::normalize_agent_fixtures(tx)?;
             for (table, rows) in case["counters"].as_object().unwrap() {
                 tx.execute(&format!("DELETE FROM {table}"), [])?;
                 for row in rows.as_array().unwrap() {

@@ -1262,25 +1262,6 @@ fn publish_work_metadata(
 ) -> StoreResult<()> {
     #[cfg(test)]
     work_publication_probe::metadata(id);
-    let mut detail = Value::Object(
-        record
-            .as_object()
-            .ok_or(StoreError::RecordContract(
-                "work detail source is not an object",
-            ))?
-            .iter()
-            .filter(|(field, _)| {
-                !matches!(
-                    field.as_str(),
-                    "results" | "decisions" | "releases" | "policy"
-                )
-            })
-            .map(|(field, value)| (field.clone(), value.clone()))
-            .collect(),
-    );
-    for field in ["results", "decisions", "releases"] {
-        detail[field] = json!([]);
-    }
     let refusal =
         crate::work_write::current_submission_refusal(transaction, record).map_err(|error| {
             match error {
@@ -1295,13 +1276,6 @@ fn publish_work_metadata(
                 }
             }
         })?;
-    detail["submissionRefusal"] = refusal;
-    if !validate("workDetail", id, &detail, false) {
-        return Err(StoreError::InvalidSyncObject {
-            scope: "workDetail".to_owned(),
-            id: id.to_owned(),
-        });
-    }
     let item = studio_runtime_store::WorkItemsRepository::work_record(transaction, id)?
         .ok_or(StoreError::RecordContract("work detail source is missing"))?;
     let mut statuses = BTreeMap::new();
@@ -1312,17 +1286,15 @@ fn publish_work_metadata(
             statuses.insert(dependency.clone(), record.status());
         }
     }
-    #[derive(serde::Serialize)]
-    struct WorkDetail<'a> {
-        #[serde(flatten)]
-        metadata: &'a Value,
-        policy: studio_runtime_schema::task_gate::WorkDetailPolicy,
+    let detail = crate::sync_views::work_detail_view(&item, record, refusal, &statuses)?;
+    // Validation sees the metadata without the policy, as before.
+    if !validate("workDetail", id, &detail.metadata, false) {
+        return Err(StoreError::InvalidSyncObject {
+            scope: "workDetail".to_owned(),
+            id: id.to_owned(),
+        });
     }
-    let projected = WorkDetail {
-        metadata: &detail,
-        policy: crate::work_policy::detail_policy(&item, &statuses),
-    };
-    SyncDocumentsRepository::put_entity(transaction, "workDetail", id, projected, false)?;
+    SyncDocumentsRepository::put_entity(transaction, "workDetail", id, detail, false)?;
     Ok(())
 }
 
@@ -1363,12 +1335,8 @@ fn publish_work_history(
         };
         for index in indices {
             let entry_id = format!("{id}:{index}");
-            match record[kind.field()]
-                .as_array()
-                .and_then(|items| items.get(index))
-            {
-                Some(value) => {
-                    let entry = json!({"id":entry_id,"taskId":id,"rootId":record["rootId"],"index":index,"value":value});
+            match crate::sync_views::work_history_view(id, record, kind, index) {
+                Some(entry) => {
                     #[cfg(test)]
                     work_publication_probe::history(id, serde_json::to_vec(&entry)?.len());
                     put_projection(
@@ -4732,5 +4700,95 @@ mod tests {
                 result.expect("maintain project projection");
             }
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod work_parity_tests {
+    use super::{EntityChanges, publish_entity_changes};
+    use crate::sync_views::{WorkView, work_views};
+    use serde::Deserialize;
+    use serde_json::{Value, json, value::RawValue};
+    use std::collections::{BTreeMap, BTreeSet};
+    use studio_runtime_store::{RuntimeStore, StoreError, WorkItemsRepository};
+
+    #[tokio::test]
+    async fn published_work_rows_equal_work_views() {
+        let root = tempfile::tempdir().expect("isolated state directory");
+        let store = RuntimeStore::open(Some(root.path()))
+            .await
+            .expect("open isolated runtime store");
+        let raw = json!({
+            "id": "w", "rootId": "lead", "title": "work", "status": "review",
+            "results": [{"id": "r0"}, {"id": "r1"}],
+            "decisions": [{"id": "d0"}],
+            "releases": [{"id": "x0"}],
+        })
+        .to_string();
+        let source = raw.clone();
+        let published = store
+            .transaction(move |transaction| {
+                transaction.execute(
+                    "INSERT INTO runtime_work(id,record) VALUES('w',?1)",
+                    [&source],
+                )?;
+                publish_entity_changes(
+                    transaction,
+                    &EntityChanges {
+                        work: BTreeSet::from(["w".to_owned()]),
+                        ..Default::default()
+                    },
+                    None,
+                    &|_, _, _, _| true,
+                )?;
+                #[derive(Deserialize)]
+                struct Stored {
+                    value: Box<RawValue>,
+                }
+                let mut statement = transaction.prepare(
+                    "SELECT collection,id,payload FROM sync_entities WHERE deleted=0 AND collection IN ('work','workDetail','workResult','workDecision','workRelease')",
+                )?;
+                let rows = statement
+                    .query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                let mut out = BTreeMap::new();
+                for (collection, id, payload) in rows {
+                    let stored: Stored = serde_json::from_str(&payload)?;
+                    out.insert((collection, id), stored.value.get().to_owned());
+                }
+                Ok::<_, StoreError>(out)
+            })
+            .await
+            .expect("publish work rows");
+
+        let expected = store
+            .transaction(move |transaction| {
+                let record: Value = serde_json::from_str(&raw)?;
+                let item =
+                    WorkItemsRepository::work_record(transaction, "w")?.expect("stored work item");
+                let refusal = crate::work_write::current_submission_refusal(transaction, &record)
+                    .expect("submission refusal");
+                let mut out = BTreeMap::new();
+                for (collection, view) in work_views(&item, &record, refusal, &BTreeMap::new())? {
+                    let id = match &view {
+                        WorkView::Entry(entry) => entry["id"].as_str().unwrap().to_owned(),
+                        WorkView::Summary(_) | WorkView::Detail(_) => "w".to_owned(),
+                    };
+                    out.insert((collection.to_owned(), id), serde_json::to_string(&view)?);
+                }
+                Ok::<_, StoreError>(out)
+            })
+            .await
+            .expect("work views");
+
+        assert_eq!(expected.len(), 6);
+        assert_eq!(published, expected);
     }
 }

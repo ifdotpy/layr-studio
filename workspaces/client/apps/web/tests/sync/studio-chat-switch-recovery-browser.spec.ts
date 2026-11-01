@@ -183,10 +183,15 @@ test("selected Studio chat recovers after slow cursor preparation without reload
             res.end();
             return;
           }
-          stream.write(protocol3SseEvent("subscriptions", { gen: update.gen }));
+          stream.write(
+            protocol3SseEvent("subscriptions", {
+              gen: update.gen,
+              cachePolicies: [],
+            }),
+          );
           if (update.add.length)
             stream.write(baseline(update.add.map((entry) => entry.resource)));
-          json({ gen: update.gen });
+          json({ gen: update.gen, cachePolicies: [] });
         });
         return;
       }
