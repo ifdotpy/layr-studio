@@ -981,7 +981,14 @@ pub fn save(tx: &Transaction<'_>, record: &ProcessActionRecord) -> Result<(), Er
     .map_err(StoreError::from)?;
     Ok(())
 }
-pub fn receipt(connection: &Connection, query: &Value) -> Result<ProcessReceipt, Error> {
+pub struct ReceiptIdentity {
+    pub request_id: String,
+    pub agent: String,
+    pub account_key: String,
+    pub epoch: i64,
+}
+
+pub fn receipt(connection: &Connection, query: &ReceiptIdentity) -> Result<ProcessReceipt, Error> {
     let exists:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_process_actions')",[],|r|r.get(0)).map_err(StoreError::from)?;
     if !exists {
         return input_receipt(connection, query);
@@ -989,7 +996,7 @@ pub fn receipt(connection: &Connection, query: &Value) -> Result<ProcessReceipt,
     let record: Option<String> = connection
         .query_row(
             "SELECT record FROM runtime_process_actions WHERE id=?",
-            [text(query, "requestId", "")],
+            [&query.request_id],
             |row| row.get(0),
         )
         .optional()
@@ -1000,15 +1007,18 @@ pub fn receipt(connection: &Connection, query: &Value) -> Result<ProcessReceipt,
         .transpose()
         .map_err(StoreError::from)?;
     if let Some(record) = record
-        && record.scope_agent == query["agent"]
-        && record.scope_account_key == query["accountKey"]
-        && query["epoch"].as_f64() == record.scope_epoch.as_f64()
+        && record.scope_agent == query.agent
+        && record.scope_account_key == query.account_key
+        && Some(query.epoch as f64) == record.scope_epoch.as_f64()
     {
         return Ok(ProcessReceipt::found(record.result));
     }
     input_receipt(connection, query)
 }
-fn input_receipt(connection: &Connection, query: &Value) -> Result<ProcessReceipt, Error> {
+fn input_receipt(
+    connection: &Connection,
+    query: &ReceiptIdentity,
+) -> Result<ProcessReceipt, Error> {
     crate::monitor_http_input::read(connection, query).map_err(|error| match error {
         crate::monitor_policy::MonitorError::Expired => Error::Expired,
         crate::monitor_policy::MonitorError::Store(error) => Error::Store(error),

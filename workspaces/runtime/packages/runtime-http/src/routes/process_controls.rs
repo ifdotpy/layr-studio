@@ -1,6 +1,6 @@
 //! Shared process panel with exact-owner checks and retained stop receipts.
 use super::{
-    extractors::{ApiJson, QueryParams},
+    extractors::{ApiJson, TypedQuery},
     manifest::{OperationStatus, RouteGroup, get, post},
 };
 use crate::{error::ApiError, router::HttpState};
@@ -153,21 +153,38 @@ async fn held_response_proof(
     .ok()?;
     controls::HeldResponseProof::observe(owner, scope, &reply)
 }
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProcessListQuery {
+    agent: studio_runtime_schema::bounded_text::BoundedText<1, 200>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct ReceiptQuery {
+    request_id: studio_runtime_schema::bounded_text::BoundedText<1, 200>,
+    agent: studio_runtime_schema::bounded_text::BoundedText<1, 200>,
+    account_key: studio_runtime_schema::bounded_text::BoundedText<1, 200>,
+    epoch: studio_runtime_schema::bounded_integer::BoundedInteger<0, 9_007_199_254_740_991>,
+}
+
 async fn listing(
     State(state): State<HttpState>,
-    params: QueryParams,
+    TypedQuery(params): TypedQuery<ProcessListQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let scope = params
-        .nonempty_str("agent")
-        .ok_or_else(|| invalid("Supply an agent ID"))?
-        .to_owned();
+    let scope = params.agent.as_str().to_owned();
     Ok(Json(read_listing(state, scope).await?))
 }
 async fn receipt(
     State(state): State<HttpState>,
-    params: QueryParams,
+    TypedQuery(params): TypedQuery<ReceiptQuery>,
 ) -> Result<Json<ProcessReceipt>, ApiError> {
-    let query = Value::Object((*params.into_typed()).clone());
+    let query = controls::ReceiptIdentity {
+        request_id: params.request_id.as_str().to_owned(),
+        agent: params.agent.as_str().to_owned(),
+        account_key: params.account_key.as_str().to_owned(),
+        epoch: params.epoch.get(),
+    };
     let store = store(&state)?;
     let value = store
         .read_async("runtime-http/routes/process_controls", move |connection| {
@@ -787,3 +804,30 @@ async fn background_command(
     })
 }
 inventory::submit! {crate::routes::manifest::RouteModuleRegistration {name:"process_controls",routes:Some(routes),dependencies:&["provider-session/native-request","provider-session/monitor-commands"]}}
+
+#[cfg(test)]
+mod typed_query_tests {
+    use axum::extract::Query;
+    use serde::de::DeserializeOwned;
+
+    fn accepts<T: DeserializeOwned>(query: &str) -> bool {
+        let uri = format!("/?{query}").parse().unwrap();
+        Query::<T>::try_from_uri(&uri).is_ok()
+    }
+
+    #[test]
+    fn query_contracts() {
+        assert!(accepts::<super::ProcessListQuery>("agent=a"));
+        assert!(!accepts::<super::ProcessListQuery>("agent="));
+        assert!(!accepts::<super::ProcessListQuery>("agent=a&unknown=x"));
+        assert!(accepts::<super::ReceiptQuery>(
+            "agent=a&accountKey=b&requestId=c&epoch=1"
+        ));
+        assert!(!accepts::<super::ReceiptQuery>(
+            "agent=a&accountKey=b&requestId=c&epoch=-1"
+        ));
+        assert!(!accepts::<super::ReceiptQuery>(
+            "agent=a&accountKey=b&requestId=c&epoch=1&unknown=x"
+        ));
+    }
+}

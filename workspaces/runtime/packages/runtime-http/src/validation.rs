@@ -91,6 +91,21 @@ const TYPED_QUERIES: &[(&str, &str)] = &[
     ("GET", "/api/transcript/page"),
     ("GET", "/api/transcript/search"),
     ("GET", "/api/terminals/output"),
+    ("GET", "/api/file"),
+    ("GET", "/api/file-info"),
+    ("GET", "/api/work"),
+    ("GET", "/api/queue"),
+    ("GET", "/api/retained-worktrees"),
+    ("GET", "/api/monitor/log"),
+    ("GET", "/api/tool-requests"),
+    ("GET", "/api/changes"),
+    ("GET", "/api/workspace"),
+    ("GET", "/api/task"),
+    ("GET", "/api/task/output"),
+    ("GET", "/api/workspace/tasks"),
+    ("GET", "/api/project-locations"),
+    ("GET", "/api/processes"),
+    ("GET", "/api/processes/action"),
 ];
 
 #[derive(Debug, Clone)]
