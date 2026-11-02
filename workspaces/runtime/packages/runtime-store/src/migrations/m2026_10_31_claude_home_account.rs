@@ -139,10 +139,11 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             let moved = fields
                 .iter()
                 .any(|field| record.get(*field).and_then(Value::as_str) == Some(LOCAL));
-            if table == "runtime_agents" && moved {
-                if let Some(thread) = record.get("threadId").and_then(Value::as_str) {
-                    threads.insert(thread.to_owned());
-                }
+            if table == "runtime_agents"
+                && moved
+                && let Some(thread) = record.get("threadId").and_then(Value::as_str)
+            {
+                threads.insert(thread.to_owned());
             }
             for field in fields {
                 swap(&mut record, field, &plan.target);
@@ -256,7 +257,7 @@ fn copy_file(from: &Path, to: &Path, counts: &mut (usize, usize)) -> StoreResult
     };
     if let Err(error) = std::io::copy(&mut input, &mut output) {
         drop(output);
-        let _ = std::fs::remove_file(to);
+        std::fs::remove_file(to).ok();
         return Err(error.into());
     }
     counts.0 += 1;
