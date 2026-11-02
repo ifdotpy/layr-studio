@@ -596,12 +596,7 @@ pub(super) fn prepare_files_with_git_policy(
                         "init",
                         &project,
                         "--from",
-<<<<<<< head
                         staging.to_str().unwrap_or_default(),
-                        "--include-ignored",
-=======
-                        staging.path().to_str().unwrap_or_default(),
->>>>>>> origin/main
                     ],
                 )
                 .map_err(|error| {

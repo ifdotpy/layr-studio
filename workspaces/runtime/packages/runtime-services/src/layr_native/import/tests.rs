@@ -498,18 +498,10 @@ mod lifecycle_tests {
         let ready =
             super::super::runtime::prepare_files(state.path(), &record).expect("native import");
         let main = PathBuf::from(ready["cwd"].as_str().expect("main"));
-<<<<<<< head
         let remotes = super::super::run(state.path(), &main, &["git", "remote", "-v"])
             .expect("Git bridge remotes");
         assert!(!remotes.lines().any(|line| line.split_whitespace().next() == Some("local")), "staging remote remains: {remotes}");
-        assert_eq!(
-            super::super::run(state.path(), &main, &["show", "head:data/file"])
-                .expect("versioned ignored data"),
-            "ignored data"
-        );
-=======
         assert!(super::super::run(state.path(), &main, &["show", "head:data/file"]).is_err());
->>>>>>> origin/main
         assert!(
             super::super::run(state.path(), &main, &["show", "head:node_modules/warm"]).is_err()
         );
