@@ -476,15 +476,15 @@ impl CaptureSnapshot {
                     None => Repo::usage_response(
                         db,
                         text(&meta["agentId"]),
-                        &meta["threadId"],
-                        &json!(response_id),
+                        meta["threadId"].as_str(),
+                        response_id,
                     )?,
                 };
             }
             rows.prior_usage = Repo::usage_prior(
                 db,
                 text(&meta["agentId"]),
-                &meta["threadId"],
+                meta["threadId"].as_str(),
                 prepared.at,
                 domain(observation),
             )?;
@@ -504,7 +504,7 @@ impl CaptureSnapshot {
             }
         }
         if prepared.method == "analytics/rateLimits" {
-            rows.last_limit = Repo::last_limit(db, &meta["accountKey"])?;
+            rows.last_limit = Repo::last_limit(db, meta["accountKey"].as_str())?;
         }
         Self::from_records(prepared, rows)
     }
@@ -1761,7 +1761,7 @@ pub async fn capture_limit(
     }
     store
         .analytics_projection_transaction(move |tx| {
-            let previous = Repo::last_limit(tx, &json!(account))?;
+            let previous = Repo::last_limit(tx, Some(&account))?;
             if previous.as_ref().map(limit_content) != Some(limit_content(&value)) {
                 tx.execute_cached(
                     "INSERT INTO analytics_limits(account,at,record) VALUES (?,?,?)",
