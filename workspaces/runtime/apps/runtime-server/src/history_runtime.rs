@@ -1601,7 +1601,7 @@ mod tests {
             .expect("initial profile");
         watcher.watch_registrations.clear();
         let mut both = first.clone();
-        both.insert("second".into(), other.clone());
+        both.insert("second".into(), other);
         watcher.watch_profiles(both).expect("added account");
         assert_eq!(
             watcher.watch_registrations,
