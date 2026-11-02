@@ -27,7 +27,7 @@ fn nullable<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
 pub struct ReviewDefaultsDto {
     #[serde(deserialize_with = "nullable")]
     pub model: Option<String>,
-    #[serde(deserialize_with = "nullable")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fast_mode: Option<bool>,
@@ -103,9 +103,9 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn review_defaults_preserves_required_nullable_and_optional_boolean() {
+    fn review_defaults_preserves_model_and_optional_settings() {
         for value in [
-            json!({"model":null,"effort":null}),
+            json!({"model":null}),
             json!({"model":"m","effort":"e","fastMode":false}),
         ] {
             let dto: ReviewDefaultsDto = serde_json::from_value(value.clone()).unwrap();
@@ -115,7 +115,7 @@ mod tests {
             serde_json::from_str(r#"{"model":null,"effort":null,"fastMode":null}"#).unwrap();
         assert_eq!(
             serde_json::to_value(null_fast).unwrap(),
-            json!({"model":null,"effort":null})
+            json!({"model":null})
         );
         for value in [
             json!({"effort":null}),

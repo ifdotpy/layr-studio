@@ -99,7 +99,6 @@
         "turnId": "turn-2"
       },
       "reviewDefaults": {
-        "effort": null,
         "model": null
       },
       "role": "orchestrator",
@@ -122,10 +121,6 @@
       "turnEpoch": 0,
       "turnId": "turn-2",
       "usageResumeEnabled": true,
-      "workerBaseBehindMain": null,
-      "workerBaseCommit": null,
-      "workerBaseMainRef": null,
-      "workerBaseRef": null,
       "workerDefaults": {
         "daybreakEnabled": false,
         "delegationDepth": 1,
@@ -139,7 +134,6 @@
       "workspaceModeExplicit": false,
       "worktree": false,
       "worktreeReady": false,
-      "worktreeWarning": null,
       "yoloMode": true
     }
   ],
@@ -413,7 +407,6 @@
           "provider": "codex",
           "readStateSupported": true,
           "reviewDefaults": {
-            "effort": null,
             "model": null
           },
           "role": "orchestrator",

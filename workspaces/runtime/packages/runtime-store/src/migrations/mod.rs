@@ -81,6 +81,7 @@ mod m2026_11_01_transfer_operations;
 mod m2026_11_01_transfer_pointers;
 mod m2026_11_01_transfer_summary;
 mod m2026_11_01_work_detail_policy;
+mod m2026_11_02_agent_worker_base_ref;
 mod m2026_11_02_legacy_vm_transfers;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -114,7 +115,14 @@ pub fn normalize_agent_fixtures(tx: &rusqlite::Transaction<'_>) -> crate::StoreR
     m2026_10_31_agent_core::apply(tx)?;
     m2026_10_31_agent_batch_55::apply(tx)?;
     m2026_11_01_agent_capacity::apply(tx)?;
-    m2026_11_01_agent_naming::apply(tx)
+    m2026_11_01_agent_naming::apply(tx)?;
+    m2026_11_02_agent_worker_base_ref::apply(tx)
+}
+
+/// Apply the creation-field catalog step to historical test rows inserted after startup.
+#[cfg(any(test, feature = "test-support"))]
+pub fn normalize_agent_creation_fixtures(tx: &rusqlite::Transaction<'_>) -> crate::StoreResult<()> {
+    m2026_11_02_agent_worker_base_ref::apply(tx)
 }
 
 use std::path::Path;
@@ -420,6 +428,16 @@ mod projection_copy_tests {
 // Explicit dependency order: provider leaves precede strict generated columns;
 // columns precede indexes; volatile data moves before its new triggers exist.
 static CATALOG: &[&dyn Migration] = &[
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-02-agent-worker-base-ref",
+            introduced: NOVEMBER_2,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with null worker base references or review efforts",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_02_agent_worker_base_ref::apply(c.transaction),
+    },
     &SqlMigration {
         definition: MigrationDefinition {
             id: "2026-11-02-legacy-vm-transfers",

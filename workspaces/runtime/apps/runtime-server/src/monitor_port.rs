@@ -3167,22 +3167,22 @@ mod tests {
 
     #[tokio::test]
     async fn queued_command_without_turn_fresh() {
-        queued_command_without_live_turn(false, false).await;
+        Box::pin(queued_command_without_live_turn(false, false)).await;
     }
 
     #[tokio::test]
     async fn queued_command_without_turn_fresh_replayed_config() {
-        queued_command_without_live_turn(false, true).await;
+        Box::pin(queued_command_without_live_turn(false, true)).await;
     }
 
     #[tokio::test]
     async fn queued_command_without_turn_restart() {
-        queued_command_without_live_turn(true, false).await;
+        Box::pin(queued_command_without_live_turn(true, false)).await;
     }
 
     #[tokio::test]
     async fn queued_command_without_turn_restart_replayed_config() {
-        queued_command_without_live_turn(true, true).await;
+        Box::pin(queued_command_without_live_turn(true, true)).await;
     }
 
     async fn retained_exit_without_resend(already_present: bool) {
