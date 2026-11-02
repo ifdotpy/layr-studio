@@ -27,8 +27,9 @@ Studio uses that executable and does not require a particular Layr version for n
 Use `studio-runtime-server native-layr paths --state /path/to/studio-state` to inspect the store and daemon paths.
 
 The host must use APFS on macOS or btrfs on Linux.
-The new chat selector reads `nativeLayr.ready` and `nativeLayr.reason` from `/api/ui-summary`.
-Linux defaults to WT unless its native capability is ready.
+The new chat selector reads the tagged `nativeLayr` capability, default workspace mode,
+and unavailable message from `/api/ui-summary`. The server defaults to WT unless the
+native capability is ready.
 The probe requires a btrfs store and a listening root daemon at `<Studio state>/layr-native/layr.sock`.
 On macOS, commands run as the Studio user with `LAYR_ROOT` set to the owned store.
 `LAYR_DIRECT=1` selects the macOS backend without another service.
@@ -199,10 +200,7 @@ APFS thin layers are counted conservatively, including their base entries, witho
 The estimate also includes the largest local saved cache tree for each cache path.
 It counts this tree even when the main working cache is empty or absent.
 Same-volume clones add no payload bytes to this estimate.
-Layr 0.2.1 requires a full HEAD allowance and an allowance for copies into existing HEAD files.
-From 0.2.2, matching regular source files can share blocks with HEAD.
-The estimate reads source blob hashes without filters or Git writes to identify files that can share blocks.
-Missing files, modified files, and symlinks require new HEAD bytes.
+The estimate conservatively allows for every HEAD blob and copies into overlapping source files.
 A margin retains at least 64 MiB or ten percent of the estimate, whichever is larger.
 A same-volume clone failure causes refusal, without a byte-copy fallback.
 Cross-volume files require a byte copy and sufficient space before import.
