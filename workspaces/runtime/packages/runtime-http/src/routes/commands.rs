@@ -9,8 +9,10 @@
 use base64::Engine;
 use std::sync::Arc;
 
-use axum::http::StatusCode;
+use axum::extract::ConnectInfo;
+use axum::http::{HeaderMap, StatusCode};
 use axum::{Extension, Json, extract::State};
+use serde_json::Value;
 use studio_runtime_schema::command::{Command, CommandRequest, CommandResponse, CommandRow};
 use studio_runtime_services::agent_lifecycle_runtime::LifecyclePorts;
 use studio_runtime_services::commands::{self, CommandError, Start};
@@ -18,6 +20,7 @@ use studio_runtime_services::principal::Principal;
 
 use super::extractors::{ApiJson, Caller};
 use super::manifest::{OperationStatus, RouteGroup, post};
+use super::questions_write::answer_approval;
 use crate::error::ApiError;
 use crate::router::HttpState;
 
@@ -59,6 +62,11 @@ fn now_ms() -> Result<i64, ApiError> {
 async fn command(
     State(state): State<HttpState>,
     ports: Option<Extension<Arc<dyn LifecyclePorts>>>,
+    ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
+    headers: HeaderMap,
+    monitor: Option<
+        Extension<Arc<studio_runtime_services::monitor_runtime_wiring::MonitorRuntime>>,
+    >,
     Caller(principal): Caller,
     ApiJson(request): ApiJson<CommandRequest>,
 ) -> Result<Json<CommandResponse>, ApiError> {
@@ -67,7 +75,10 @@ async fn command(
     let chat = request.command.target().to_owned();
     let mut extra_rows = Vec::new();
     let reference = match request.command.clone() {
-        Command::Withdraw { .. } | Command::Stop { .. } | Command::Resolve { .. } => {
+        Command::Withdraw { .. }
+        | Command::Stop { .. }
+        | Command::Resolve { .. }
+        | Command::Pause { .. } => {
             let ports = ports.map(|Extension(ports)| ports);
             let (for_transaction, request) = (ports.clone(), request.clone());
             let now = now_ms as f64 / 1000.0;
@@ -95,6 +106,36 @@ async fn command(
                 }
             }
             executed.reference
+        }
+        Command::Answer { target, body } => {
+            // The answer goes through the same dispatch as `POST /api/answer`. The command
+            // reference is recorded after the answer, so a lost response is retried as the
+            // same command, and the approval itself refuses a different answer.
+            let id = target.as_str().to_owned();
+            let mut data = body.0;
+            data.insert("id".into(), Value::String(id.clone()));
+            let data = Value::Object(data);
+            serde_json::from_value::<crate::generated::AnswerBody>(data.clone())
+                .map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "Invalid answer"))?;
+            match begin(&state, &principal, &request, now_ms).await? {
+                Start::Replay(reference) => reference,
+                Start::Fresh(begun) => {
+                    answer_approval(
+                        &state,
+                        peer,
+                        &headers,
+                        monitor.map(|Extension(monitor)| monitor),
+                        &id,
+                        data,
+                    )
+                    .await?;
+                    let reference = commands::approval_reference(&id);
+                    store
+                        .transaction_with_error(move |tx| commands::finish(tx, &begun, &reference))
+                        .await
+                        .map_err(command_error)?
+                }
+            }
         }
         Command::Send { target, body } => {
             match begin(&state, &principal, &request, now_ms).await? {
@@ -799,6 +840,132 @@ mod tests {
         .await;
         assert_eq!(status, 403);
         assert_eq!(status_of(&store, "a").await, "pending");
+    }
+
+    fn pause(id: &str, number: u64) -> Value {
+        json!({"id":id,"client":"web-1","number":number,"kind":"pause","target":"workspace","body":{"descendants":true}})
+    }
+
+    fn answer_command(id: &str, number: u64, approval: &str, body: &Value) -> Value {
+        json!({"id":id,"client":"web-1","number":number,"kind":"answer","target":approval,"body":body})
+    }
+
+    async fn agent_epoch(store: &RuntimeStore) -> i64 {
+        store
+            .transaction(|tx| {
+                Ok(AgentRepository::get(tx, &"workspace".into())?
+                    .expect("agent")
+                    .epoch)
+            })
+            .await
+            .expect("epoch")
+    }
+
+    #[tokio::test]
+    async fn pause_applies_once_and_replays() {
+        let (app, store, _directory) = app_with_queue().await;
+        let before = agent_epoch(&store).await;
+        let id = RequestIdentity::issue_root();
+        let (status, first) = post(&app, None, pause(&id, 1)).await;
+        assert_eq!(status, 200, "{first}");
+        assert_eq!(first["ref_kind"], "agent");
+        assert_eq!(first["ref_id"], "workspace");
+        assert_eq!(
+            agent_epoch(&store).await,
+            before + 1,
+            "the pause bumps the epoch"
+        );
+        assert_ne!(
+            status_of(&store, "a").await,
+            "pending",
+            "the queue is cancelled"
+        );
+        let (status, again) = post(&app, None, pause(&id, 1)).await;
+        assert_eq!(status, 200, "{again}");
+        assert_eq!(first["ref_id"], again["ref_id"]);
+        assert_eq!(first["rev"], again["rev"]);
+        assert_eq!(
+            agent_epoch(&store).await,
+            before + 1,
+            "the replay changes nothing"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_observe_device_cannot_pause() {
+        let (app, store, _directory) = app_with_queue().await;
+        let before = agent_epoch(&store).await;
+        let observe = Principal::Device {
+            id: "phone".into(),
+            grant: Grant::Observe,
+        };
+        let (status, _) = post(
+            &app,
+            Some(observe),
+            pause(&RequestIdentity::issue_root(), 1),
+        )
+        .await;
+        assert_eq!(status, 403);
+        assert_eq!(agent_epoch(&store).await, before);
+    }
+
+    #[tokio::test]
+    async fn an_observe_device_cannot_answer() {
+        let (app, _store, _directory) = app_with_queue().await;
+        let observe = Principal::Device {
+            id: "phone".into(),
+            grant: Grant::Observe,
+        };
+        let (status, _) = post(
+            &app,
+            Some(observe),
+            answer_command(
+                &RequestIdentity::issue_root(),
+                1,
+                "approval-1",
+                &json!({"decision":"accept"}),
+            ),
+        )
+        .await;
+        assert_eq!(status, 403);
+    }
+
+    #[tokio::test]
+    async fn only_the_user_answers_an_approval() {
+        let (app, _store, _directory) = app_with_queue().await;
+        let agent = Principal::Agent {
+            id: "workspace".into(),
+            epoch: 0,
+        };
+        let (status, _) = post(
+            &app,
+            Some(agent),
+            answer_command(
+                &RequestIdentity::issue_root(),
+                1,
+                "approval-1",
+                &json!({"decision":"accept"}),
+            ),
+        )
+        .await;
+        assert_eq!(status, 403);
+    }
+
+    #[tokio::test]
+    async fn an_answer_body_is_checked_like_the_answer_route() {
+        let (app, _store, _directory) = app_with_queue().await;
+        let (status, body) = post(
+            &app,
+            None,
+            answer_command(
+                &RequestIdentity::issue_root(),
+                1,
+                "approval-1",
+                &json!({"decision":"maybe"}),
+            ),
+        )
+        .await;
+        assert_eq!(status, 400, "{body}");
     }
 
     fn stop(id: &str, number: u64) -> Value {

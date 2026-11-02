@@ -8,11 +8,15 @@ import { required } from "../componentTestFixtures";
 const controls = vi.hoisted(() => ({
   cards: [] as Array<{ post(body: Record<string, unknown>): Promise<boolean> }>,
   post: vi.fn(),
+  answer: vi.fn(),
   storage: {},
   write: vi.fn(() => null),
 }));
 vi.mock("../../servers/ServerServicesContext", () => ({
-  useServerApi: () => ({ post: controls.post }),
+  useServerApi: () => ({
+    post: controls.post,
+    command: { answer: controls.answer },
+  }),
   useServerServices: () => ({ owner: { id: "remote", label: "Build server" } }),
   useServerLocalDrafts: () => ({ writeLocalDraft: controls.write }),
   useServerStorage: () => controls.storage,
@@ -171,8 +175,11 @@ it("cancels a prepared intent after an uncertain approval without opening or ret
 it("does not prepare or open a browser for a declined sign-in", async () => {
   const invoke = vi.fn();
   vi.stubGlobal("__TAURI__", { core: { invoke } });
-  controls.post.mockResolvedValue({ status: "answered" });
+  controls.answer.mockResolvedValue({ status: "applied" });
   const { post } = card();
   expect(await post({ decision: "decline" })).toBe(true);
+  expect(controls.answer).toHaveBeenCalledExactlyOnceWith(requestId, {
+    decision: "decline",
+  });
   expect(invoke).not.toHaveBeenCalled();
 });

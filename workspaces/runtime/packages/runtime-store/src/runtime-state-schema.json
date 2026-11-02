@@ -2443,14 +2443,14 @@
       {
         "create_order": 310,
         "name": "enum_check_request_results_ref_kind_ins",
-        "sql": "CREATE TRIGGER \"enum_check_request_results_ref_kind_ins\" BEFORE INSERT ON \"request_results\" WHEN NEW.\"ref_kind\" NOT IN ('agent','annotation','complaint','message','project','room','work','outbox') BEGIN SELECT RAISE(ABORT,'request_results.ref_kind is outside its enum'); END",
+        "sql": "CREATE TRIGGER \"enum_check_request_results_ref_kind_ins\" BEFORE INSERT ON \"request_results\" WHEN NEW.\"ref_kind\" NOT IN ('agent','annotation','complaint','message','project','room','work','outbox','approval') BEGIN SELECT RAISE(ABORT,'request_results.ref_kind is outside its enum'); END",
         "table": "request_results",
         "type": "trigger"
       },
       {
         "create_order": 311,
         "name": "enum_check_request_results_ref_kind_upd",
-        "sql": "CREATE TRIGGER \"enum_check_request_results_ref_kind_upd\" BEFORE UPDATE OF \"ref_kind\" ON \"request_results\" WHEN NEW.\"ref_kind\" NOT IN ('agent','annotation','complaint','message','project','room','work','outbox') BEGIN SELECT RAISE(ABORT,'request_results.ref_kind is outside its enum'); END",
+        "sql": "CREATE TRIGGER \"enum_check_request_results_ref_kind_upd\" BEFORE UPDATE OF \"ref_kind\" ON \"request_results\" WHEN NEW.\"ref_kind\" NOT IN ('agent','annotation','complaint','message','project','room','work','outbox','approval') BEGIN SELECT RAISE(ABORT,'request_results.ref_kind is outside its enum'); END",
         "table": "request_results",
         "type": "trigger"
       }

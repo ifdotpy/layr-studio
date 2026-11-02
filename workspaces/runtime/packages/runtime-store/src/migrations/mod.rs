@@ -81,6 +81,7 @@ mod m2026_11_01_transfer_pointers;
 mod m2026_11_01_transfer_summary;
 mod m2026_11_01_work_detail_policy;
 mod m2026_11_02_legacy_vm_transfers;
+mod m2026_11_02_request_reference_approval;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -1295,6 +1296,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_01_request_reference_outbox::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-02-request-reference-approval",
+            introduced: NOVEMBER_2,
+            target: MigrationTarget::Canvas,
+            supported_source: "Stores whose request result reference kind triggers lack approval",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_02_request_reference_approval::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {

@@ -340,7 +340,7 @@ export function RequestCard({
   request: RequestDto;
   messageId?: string;
 }) {
-  const { post: apiPost } = useServerApi();
+  const { post: apiPost, command: commands } = useServerApi();
   const services = useServerServices();
   const answerStorage = useServerStorage();
 
@@ -415,13 +415,16 @@ export function RequestCard({
     setSending(true);
     setRequestError("");
     try {
-      const approve = () => apiPost("/api/answer", { ...body, id: r.id });
+      // A sign-in approval reads the link to open from the `/api/answer` result, which the
+      // command response does not carry. Other approvals use the command path.
+      const signIn = () => apiPost("/api/answer", { ...body, id: r.id });
+      const approve = () => commands.answer(r.id, body);
       if (browserOpen && body.decision === "accept")
         await approveSignInPage({
           url: browserOpen.url,
           requestId: r.id,
           owner: services?.owner.id,
-          approve,
+          approve: signIn,
           onOpenError: (error) =>
             notify(
               `Studio approved the link, but could not confirm that its page opened: ${errorText(error)}`,

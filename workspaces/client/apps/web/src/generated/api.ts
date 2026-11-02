@@ -10993,6 +10993,10 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /** @description The answer of an approval: the fields of POST /api/answer without id. The answer route owns the field rules. */
+    CommandAnswerBody: {
+      [key: string]: unknown;
+    };
     /** @enum {string} */
     CommandErrorCode: "receipt_expired";
     /** @description Identity of the outbox command that delivers an answer. */
@@ -11005,7 +11009,33 @@ export interface components {
       | components["schemas"]["CommandRequestSend"]
       | components["schemas"]["CommandRequestWithdraw"]
       | components["schemas"]["CommandRequestStop"]
-      | components["schemas"]["CommandRequestResolve"];
+      | components["schemas"]["CommandRequestResolve"]
+      | components["schemas"]["CommandRequestPause"]
+      | components["schemas"]["CommandRequestAnswer"];
+    CommandRequestAnswer: {
+      body: components["schemas"]["CommandAnswerBody"];
+      client: string;
+      id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "answer";
+      number: number;
+      target: string;
+    };
+    CommandRequestPause: {
+      body: components["schemas"]["CommandStopBody"];
+      client: string;
+      id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "pause";
+      number: number;
+      target: string;
+    };
     CommandRequestResolve: {
       body: components["schemas"]["CommandResolveBody"];
       client: string;

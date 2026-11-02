@@ -22177,6 +22177,11 @@
         "title": "CodexLoginReceipt",
         "type": "object"
       },
+      "CommandAnswerBody": {
+        "additionalProperties": true,
+        "description": "The answer of an approval: the fields of POST /api/answer without id. The answer route owns the field rules.",
+        "type": "object"
+      },
       "CommandErrorCode": {
         "enum": [
           "receipt_expired"
@@ -22191,6 +22196,8 @@
         "description": "One write action. The owner is runtime-schema/src/command.rs.",
         "discriminator": {
           "mapping": {
+            "answer": "#/components/schemas/CommandRequestAnswer",
+            "pause": "#/components/schemas/CommandRequestPause",
             "resolve": "#/components/schemas/CommandRequestResolve",
             "send": "#/components/schemas/CommandRequestSend",
             "stop": "#/components/schemas/CommandRequestStop",
@@ -22210,9 +22217,95 @@
           },
           {
             "$ref": "#/components/schemas/CommandRequestResolve"
+          },
+          {
+            "$ref": "#/components/schemas/CommandRequestPause"
+          },
+          {
+            "$ref": "#/components/schemas/CommandRequestAnswer"
           }
         ],
         "title": "CommandRequest"
+      },
+      "CommandRequestAnswer": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "$ref": "#/components/schemas/CommandAnswerBody"
+          },
+          "client": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[a-f0-9-]{36}$",
+            "type": "string"
+          },
+          "kind": {
+            "const": "answer",
+            "type": "string"
+          },
+          "number": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "client",
+          "number",
+          "kind",
+          "target",
+          "body"
+        ],
+        "type": "object"
+      },
+      "CommandRequestPause": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "$ref": "#/components/schemas/CommandStopBody"
+          },
+          "client": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[a-f0-9-]{36}$",
+            "type": "string"
+          },
+          "kind": {
+            "const": "pause",
+            "type": "string"
+          },
+          "number": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "client",
+          "number",
+          "kind",
+          "target",
+          "body"
+        ],
+        "type": "object"
       },
       "CommandRequestResolve": {
         "additionalProperties": false,

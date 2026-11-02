@@ -147,6 +147,17 @@ pub enum Command {
         target: BoundedText<1, COMMAND_TARGET_MAX_CHARS>,
         body: ResolveBody,
     },
+    /// Pause the chat: interrupt its turn, clear its auto-wake and cancel its queue.
+    /// `target` is the chat. `body.descendants` pauses its descendants too.
+    Pause {
+        target: BoundedText<1, COMMAND_TARGET_MAX_CHARS>,
+        body: StopBody,
+    },
+    /// Answer an approval of the user. `target` is the approval id.
+    Answer {
+        target: BoundedText<1, COMMAND_TARGET_MAX_CHARS>,
+        body: AnswerCommandBody,
+    },
 }
 
 impl Command {
@@ -157,6 +168,8 @@ impl Command {
             Self::Withdraw { .. } => "withdraw",
             Self::Stop { .. } => "stop",
             Self::Resolve { .. } => "resolve",
+            Self::Pause { .. } => "pause",
+            Self::Answer { .. } => "answer",
         }
     }
 
@@ -166,7 +179,9 @@ impl Command {
             Self::Send { target, .. }
             | Self::Withdraw { target, .. }
             | Self::Stop { target, .. }
-            | Self::Resolve { target, .. } => target.as_str(),
+            | Self::Resolve { target, .. }
+            | Self::Pause { target, .. }
+            | Self::Answer { target, .. } => target.as_str(),
         }
     }
 }
@@ -214,6 +229,18 @@ pub enum ResolveAction {
 #[serde(deny_unknown_fields)]
 pub struct ResolveBody {
     pub action: ResolveAction,
+}
+
+/// The answer of an approval: the fields of `POST /api/answer` without `id`. The answer
+/// route owns the field rules (`AnswerBody`), so this schema is an open object.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(transparent)]
+pub struct AnswerCommandBody(
+    #[schemars(schema_with = "answer_fields")] pub serde_json::Map<String, serde_json::Value>,
+);
+
+fn answer_fields(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({"type": "object", "additionalProperties": true})
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -304,6 +331,33 @@ mod tests {
         }
         let unknown = r#"{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"resolve","target":"entry","body":{"action":"cancel"}}"#;
         assert!(serde_json::from_str::<CommandRequest>(unknown).is_err());
+    }
+
+    #[test]
+    fn pause_and_answer_are_tagged_commands_and_delete_is_not() {
+        let id = "0192f3a0-0000-7000-8000-000000000001";
+        let pause: CommandRequest = serde_json::from_str(&format!(
+            r#"{{"id":"{id}","client":"c","number":1,"kind":"pause","target":"chat","body":{{}}}}"#
+        ))
+        .expect("pause");
+        assert_eq!(pause.command.name(), "pause");
+        assert_eq!(
+            pause.command,
+            Command::Pause {
+                target: "chat".to_owned().try_into().expect("target"),
+                body: StopBody { descendants: true }
+            }
+        );
+        let answer: CommandRequest = serde_json::from_str(&format!(
+            r#"{{"id":"{id}","client":"c","number":1,"kind":"answer","target":"approval","body":{{"decision":"accept"}}}}"#
+        ))
+        .expect("answer");
+        assert_eq!(answer.command.name(), "answer");
+        assert_eq!(answer.command.target(), "approval");
+        let delete = format!(
+            r#"{{"id":"{id}","client":"c","number":1,"kind":"delete","target":"chat","body":{{}}}}"#
+        );
+        assert!(serde_json::from_str::<CommandRequest>(&delete).is_err());
     }
 
     #[test]
