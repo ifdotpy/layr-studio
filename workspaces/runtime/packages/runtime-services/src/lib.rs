@@ -154,6 +154,7 @@ pub mod peer_updates;
 pub mod portable_history;
 pub mod pricing;
 pub mod principal;
+pub mod project_peer;
 pub mod process_controls;
 pub mod project_deletion;
 pub mod project_locations;

@@ -9,6 +9,7 @@ mod bootstrap;
 mod cached_sql;
 pub mod domain;
 pub mod durable_seq;
+pub mod project_grants;
 pub mod entity_publication;
 pub mod error_incidents;
 pub mod item_seq_backfill;

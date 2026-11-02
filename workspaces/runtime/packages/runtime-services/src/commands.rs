@@ -81,6 +81,7 @@ pub fn principal_key(principal: &Principal) -> String {
         Principal::Peer { server } => format!("peer:{server}"),
         Principal::Agent { id, .. } => format!("agent:{id}"),
         Principal::Federated { peer } => format!("federated:{peer}"),
+        Principal::ProjectPeer { peer, project, .. } => format!("project-peer:{peer}:{project}"),
         Principal::Policy => "policy".into(),
     }
 }
@@ -512,6 +513,7 @@ fn stop_action(principal: &Principal, target: &str, descendants: bool) -> Action
         | Principal::Device { .. }
         | Principal::Peer { .. }
         | Principal::Federated { .. }
+        | Principal::ProjectPeer { .. }
         | Principal::Policy => (None, None),
     };
     Action::Stop {

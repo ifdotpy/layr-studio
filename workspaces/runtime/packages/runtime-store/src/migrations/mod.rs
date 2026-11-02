@@ -83,6 +83,7 @@ mod m2026_11_01_transfer_summary;
 mod m2026_11_01_work_detail_policy;
 mod m2026_11_02_agent_worker_base_ref;
 mod m2026_11_02_legacy_vm_transfers;
+mod m2026_11_02_project_grants;
 mod m2026_11_02_retired_status_columns;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -1446,6 +1447,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_02_retired_status_columns::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-02-project-grants",
+            introduced: NOVEMBER_2,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations without the project grant table",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_02_project_grants::apply(c.transaction),
     },
 ];
 
