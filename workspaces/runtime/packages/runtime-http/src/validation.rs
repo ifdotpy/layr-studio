@@ -1695,7 +1695,10 @@ mod tests {
                 .is_ok(),
             "the same key remains ordinary object data where objects are allowed"
         );
-        assert_eq!(object["answers"]["$serde_json::private::Number"], "1");
+        assert_eq!(
+            object["body"]["answers"]["$serde_json::private::Number"],
+            "1"
+        );
 
         let almost_integer: Value =
             serde_json::from_slice(br#"{"prompt":"x","concurrency":1.00000000000000000001}"#)
