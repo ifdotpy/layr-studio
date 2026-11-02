@@ -610,6 +610,7 @@ async fn accept_project_peer_with(
                     }],
                 )?;
             }
+            crate::sync_policy::publish_peer_teams(tx)?;
             Ok::<_, StoreError>(())
         })
         .await?;
@@ -641,6 +642,7 @@ async fn revoke_project_grant(
                     "This project pairing is already revoked".to_owned(),
                 ));
             }
+            crate::sync_policy::publish_peer_teams(tx)?;
             Ok::<_, FederationError>(project)
         })
         .await?;

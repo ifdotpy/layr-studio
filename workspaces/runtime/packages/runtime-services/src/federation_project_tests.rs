@@ -289,3 +289,74 @@ async fn revoke_is_final_and_refuses_a_later_pairing_request() {
         Some(1)
     );
 }
+
+/// Peer team `team` of the local project `project-b`, as stored in its entity payload.
+async fn peer_team_payload(store: &Arc<RuntimeStore>) -> String {
+    store
+        .read_async("runtime-services/federation/tests", |tx| {
+            tx.query_row(
+                "SELECT payload FROM sync_entities WHERE collection='peerTeam' AND id='team' AND deleted=0",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(StoreError::from)
+        })
+        .await
+        .expect("peer team entity")
+}
+
+#[tokio::test]
+async fn accept_shows_the_peer_lead_in_the_team_and_revoke_removes_it() {
+    let (a, _a_root) = server("project-a").await;
+    let (b, _b_root) = server("project-b").await;
+    let invitation = invite(&a, "project-a").await;
+    let (a_state, _) = identity(&a).await;
+    // The peer lead is shown only for a paired server: a paired access client of `a`.
+    b.transaction_with(move |tx| {
+        tx.execute(
+            "INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2)",
+            (
+                a_state.clone(),
+                json!({"id": a_state, "clientId": "client", "kind": "server", "label": "Server A", "created": 1, "publicKey": "public", "status": "paired"}).to_string(),
+            ),
+        )
+        .map_err(StoreError::from)?;
+        for id in ["a1", "a2"] {
+            tx.execute(
+                "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                (id, json!({"compactions": 0, "id": id, "rootId": id, "epoch": 1, "status": "idle", "name": id, "provider": "codex", "model": "gpt-6", "prompt": "Start", "cwd": "/project-b", "accountKey": "default", "isLead": true, "autoWake": false}).to_string()),
+            )
+            .map_err(StoreError::from)?;
+        }
+        tx.execute(
+            "UPDATE runtime_projects SET record=?1 WHERE id='project-b'",
+            [json!({"recordKind": "live", "id": "project-b", "path": "/project-b", "peerTeams": [{"id": "team", "name": "Team", "members": ["a1", "a2"]}]}).to_string()],
+        )
+        .map_err(StoreError::from)?;
+        Ok::<_, StoreError>(())
+    })
+    .await
+    .expect("paired server and team fixtures");
+    accept(&b, &invitation, "project-b", &a)
+        .await
+        .expect("accept writes the grant");
+    let grant = format!("\"grant\":\"{}\"", invitation.invite_id);
+    assert!(
+        peer_team_payload(&b).await.contains(&grant),
+        "peer lead appears"
+    );
+
+    let grant_id = invitation.invite_id.clone();
+    let view = manage(
+        &b,
+        json!({"action": "revoke_project_grant", "grant_id": grant_id}),
+        None,
+    )
+    .await
+    .expect("revoke");
+    assert_eq!(view["grants"], json!([]));
+    assert!(
+        !peer_team_payload(&b).await.contains(&grant),
+        "peer lead removed"
+    );
+}
