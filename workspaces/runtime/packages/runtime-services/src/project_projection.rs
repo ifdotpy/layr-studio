@@ -322,17 +322,12 @@ mod tests {
             &leads,
         )
         .unwrap();
-        let actual: serde_json::Value = serde_json::to_value(&projection).unwrap();
-        assert_eq!(
-            actual["peerTeams"][0]["peerLeads"][0]["label"],
-            json!("Laptop")
-        );
-        assert_eq!(
-            actual["peerTeams"][0]["peerLeads"]
-                .as_array()
-                .unwrap()
-                .len(),
-            1
+        let encoded = serde_json::to_string(&projection).unwrap();
+        assert!(
+            encoded.contains(
+                r#""peerLeads":[{"grant":"g1","remoteProject":"proj-b","server":"server-b","label":"Laptop"}]"#
+            ),
+            "{encoded}"
         );
     }
 
@@ -348,11 +343,11 @@ mod tests {
             &[],
         )
         .unwrap();
-        let actual: serde_json::Value = serde_json::to_value(&projection).unwrap();
-        assert_eq!(actual["peerTeams"][0]["peerLeads"], json!([]));
-        assert_eq!(
-            actual["peerTeams"][0]["members"],
-            json!(["lead-a", "sub-a"])
+        let encoded = serde_json::to_string(&projection).unwrap();
+        assert!(!encoded.contains("peerLeads"), "{encoded}");
+        assert!(
+            encoded.contains(r#""members":["lead-a","sub-a"]"#),
+            "{encoded}"
         );
     }
 

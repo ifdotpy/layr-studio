@@ -2288,6 +2288,7 @@ struct PeerTeamProjection {
     project_path: String,
     members: Vec<String>,
     revision: Option<u64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     peer_leads: Vec<studio_runtime_schema::project_record::PeerLead>,
 }
 

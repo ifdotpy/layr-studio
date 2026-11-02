@@ -203,12 +203,13 @@ pub(crate) fn peer_team_projection(
     revision: u64,
     peer_leads: &[studio_runtime_schema::project_record::PeerLead],
 ) -> Result<Value, ProjectsError> {
-    Ok(
-        json!({"id":team.get("id").and_then(Value::as_str).ok_or(ProjectsError::Invalid("stored peer team is invalid"))?,
+    let mut value = json!({"id":team.get("id").and_then(Value::as_str).ok_or(ProjectsError::Invalid("stored peer team is invalid"))?,
         "name":team.get("name").and_then(Value::as_str).ok_or(ProjectsError::Invalid("stored peer team is invalid"))?,
-        "projectPath":path,"members":team.get("members").ok_or(ProjectsError::Invalid("stored peer team is invalid"))?,"revision":revision,
-        "peerLeads":peer_leads}),
-    )
+        "projectPath":path,"members":team.get("members").ok_or(ProjectsError::Invalid("stored peer team is invalid"))?,"revision":revision});
+    if !peer_leads.is_empty() {
+        value["peerLeads"] = json!(peer_leads);
+    }
+    Ok(value)
 }
 
 pub(crate) fn refresh_project_rooms(

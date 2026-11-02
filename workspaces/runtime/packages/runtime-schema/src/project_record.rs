@@ -159,7 +159,7 @@ pub struct ProjectPeerTeam {
     pub name: String,
     pub members: Vec<String>,
     /// Derived at projection time from the active project grants. Never stored.
-    #[serde(default, skip_deserializing)]
+    #[serde(default, skip_deserializing, skip_serializing_if = "Vec::is_empty")]
     pub peer_leads: Vec<PeerLead>,
 }
 
