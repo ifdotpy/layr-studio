@@ -375,11 +375,23 @@ async fn worker_status_changes_publish_lead_team_counts() {
         client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
         json!({"working":0,"total":1})
     );
+    write(
+        &store,
+        "UPDATE chats SET status='running' WHERE id=?1",
+        vec!["worker".into()],
+    )
+    .await;
     write(&store, "UPDATE runtime_agents SET record=json_set(record,'$.status','waiting_on_monitor') WHERE id=?1", vec!["worker".into()]).await;
     assert_eq!(
         client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
         json!({"working":1,"total":1})
     );
+    write(
+        &store,
+        "UPDATE chats SET status='queued' WHERE id=?1",
+        vec!["worker".into()],
+    )
+    .await;
     write(
         &store,
         "UPDATE runtime_agents SET record=json_set(record,'$.status','queued') WHERE id=?1",
