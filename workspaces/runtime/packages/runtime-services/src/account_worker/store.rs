@@ -636,7 +636,7 @@ pub(super) async fn recover(
             |error| match error {
                 crate::provider_callbacks::CallbackError::Store(error) => WorkerError::Store(error),
                 crate::provider_callbacks::CallbackError::Expired => WorkerError::Expired,
-                crate::provider_callbacks::CallbackError::Invalid(_) | crate::provider_callbacks::CallbackError::InvalidResultSchema(_) | crate::provider_callbacks::CallbackError::Dependency(_) | crate::provider_callbacks::CallbackError::Stale | crate::provider_callbacks::CallbackError::Conflict | crate::provider_callbacks::CallbackError::Unknown | crate::provider_callbacks::CallbackError::Stored(_) => invalid(&account),
+                crate::provider_callbacks::CallbackError::Invalid(_) | crate::provider_callbacks::CallbackError::InvalidResultSchema(_) | crate::provider_callbacks::CallbackError::Refusal(_) | crate::provider_callbacks::CallbackError::Dependency(_) | crate::provider_callbacks::CallbackError::Stale | crate::provider_callbacks::CallbackError::Conflict | crate::provider_callbacks::CallbackError::Unknown | crate::provider_callbacks::CallbackError::Stored(_) => invalid(&account),
             },
         )?;
         // A provider replacement in this backend is a disconnect. Actual backend

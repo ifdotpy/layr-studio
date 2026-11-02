@@ -746,7 +746,7 @@ pub(crate) async fn spawn_agents(
         let body = json!({"account_key":account_key,"name":name,"model":model,"effort":effort,
             "prompt":prompt,"workspace_explicit":spec.workspace.is_some(),
             "_workspaceInGit":workspace_in_git});
-        let draft = crate::host_worker_create::prepare_work_item(
+        let mut draft = crate::host_worker_create::prepare_work_item(
             &body,
             Path::new(host_cwd),
             AgentId::from(id.as_str()),
@@ -769,6 +769,14 @@ pub(crate) async fn spawn_agents(
             daybreak,
         )
         .map_err(map_create_error)?;
+        draft.extra.insert(
+            "_p02ProjectLookupId".into(),
+            json!(
+                parent_project_id
+                    .and_then(Value::as_str)
+                    .unwrap_or(host_cwd)
+            ),
+        );
         let mut record = crate::host_worker_create::persisted_record(&draft)
             .map_err(map_create_error)?
             .value();
@@ -855,7 +863,24 @@ pub(crate) async fn spawn_agents(
         }
         for draft in &drafts {
             draft.workspace_admission.check(tx, &actor_record)
-                .map_err(|_| crate::managed_host_tools::Error::Stale)?;
+                .map_err(|error| match error {
+                    crate::monitor_policy::MonitorError::Store(error) => crate::managed_host_tools::Error::Store(error),
+                    error @ (crate::monitor_policy::MonitorError::Expired
+                        | crate::monitor_policy::MonitorError::InvalidStored { .. }
+                        | crate::monitor_policy::MonitorError::InvalidResultReceipt(_)
+                        | crate::monitor_policy::MonitorError::InvalidDeliveryIdentity(_)
+                        | crate::monitor_policy::MonitorError::InvalidOutputReceipt(_)
+                        | crate::monitor_policy::MonitorError::TaskFailed
+                        | crate::monitor_policy::MonitorError::Refused(_)
+                        | crate::monitor_policy::MonitorError::InputOutcomeUnknown
+                        | crate::monitor_policy::MonitorError::Unavailable(_)
+                        | crate::monitor_policy::MonitorError::ProviderRequest { .. }
+                        | crate::monitor_policy::MonitorError::ConfigurationRejected { .. }
+                        | crate::monitor_policy::MonitorError::ConfigurationReceipt { .. }
+                        | crate::monitor_policy::MonitorError::Event(_)
+                        | crate::monitor_policy::MonitorError::Rules(_)
+                        | crate::monitor_policy::MonitorError::Io(_)) => crate::managed_host_tools::Error::Refusal(error.to_string()),
+                })?;
             crate::host_worker_create::recheck_worker(tx, &draft.typed, draft.epoch, &draft.account)
                 .map_err(map_recheck_error)?;
         }
@@ -1323,7 +1348,7 @@ fn map_recheck_error(
         crate::agents_create::MutationError::Store(error) => {
             crate::managed_host_tools::Error::Store(error)
         }
-        crate::agents_create::MutationError::Conflict
+        error @ (crate::agents_create::MutationError::Conflict
         | crate::agents_create::MutationError::MissingCreationIntent
         | crate::agents_create::MutationError::Deleted
         | crate::agents_create::MutationError::UnknownAgent
@@ -1338,9 +1363,9 @@ fn map_recheck_error(
         | crate::agents_create::MutationError::Stale
         | crate::agents_create::MutationError::CurrentAccountExcluded
         | crate::agents_create::MutationError::InFlight
-        | crate::agents_create::MutationError::Request(_)
-        | crate::agents_create::MutationError::InvalidStoredObject { .. } => {
-            crate::managed_host_tools::Error::Stale
+        | crate::agents_create::MutationError::InvalidStoredObject { .. }
+        | crate::agents_create::MutationError::Request(_)) => {
+            crate::managed_host_tools::Error::Refusal(error.to_string())
         }
     }
 }
@@ -1493,7 +1518,7 @@ pub(crate) async fn request_review(
             "effort":effort,"prompt":spec.prompt.as_deref().unwrap_or(""),
             "_workspaceInGit":parent_value.get("workspaceInGit").and_then(Value::as_bool).unwrap_or(false),
     });
-    let prepared = crate::host_worker_create::prepare_work_item(
+    let mut prepared = crate::host_worker_create::prepare_work_item(
         &body,
         Path::new(&directory),
         AgentId::from(child_id),
@@ -1516,6 +1541,15 @@ pub(crate) async fn request_review(
         false,
     )
     .map_err(map_create_error)?;
+    prepared.extra.insert(
+        "_p02ProjectLookupId".into(),
+        json!(
+            parent_value
+                .get("projectId")
+                .and_then(Value::as_str)
+                .unwrap_or(parent_cwd)
+        ),
+    );
     let mut record = crate::host_worker_create::persisted_record(&prepared)
         .map_err(map_create_error)?
         .value();
@@ -1631,6 +1665,23 @@ mod vm_review_identity_tests {
         vm_review_guest_ids,
     };
     use serde_json::json;
+
+    #[test]
+    fn worker_recheck_refusal_reports_its_cause() {
+        use crate::agents_create::MutationError;
+        assert_eq!(
+            super::map_recheck_error(MutationError::ModelUnavailable).to_string(),
+            "The selected model is not available for the selected account"
+        );
+        assert_eq!(
+            super::map_recheck_error(MutationError::InvalidCreation("cwd")).to_string(),
+            "Invalid host agent creation field: cwd"
+        );
+        assert_eq!(
+            super::map_recheck_error(MutationError::IdentityChanged).to_string(),
+            "The account or project changed; reload before creating the agent"
+        );
+    }
 
     #[test]
     fn guest_review_ids_are_bounded_by_the_named_limit() {

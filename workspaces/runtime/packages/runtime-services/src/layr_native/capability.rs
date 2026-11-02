@@ -149,7 +149,11 @@ mod tests {
         // The resolver returns the canonical path (/private/var on macOS, not the /var alias).
         assert_eq!(
             resolve_binary_in_path(&path),
-            Ok(std::fs::canonicalize(&binary).expect("canonical fixture"))
+            Ok(
+                studio_runtime_store::path_identity::CanonicalPath::existing(&binary)
+                    .expect("canonical fixture")
+                    .into_path_buf()
+            )
         );
     }
 
