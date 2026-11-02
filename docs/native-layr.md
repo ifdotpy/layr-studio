@@ -242,6 +242,7 @@ A ready project cannot be removed by this recovery.
 Pending and unknown receipts stay held for inspection.
 On btrfs, automatic removal of a partial project is unavailable.
 The error names the private project that needs daemon-owned subvolume removal.
+For a pending import on btrfs, first confirm the daemon has finished using the retained staging folder; do not retry or delete that folder while the outcome is unknown. Inspect the private project and import receipt, then have an operator either complete the remaining preparation and record the verified result, or remove the partial project with daemon-owned subvolume removal before an explicit retry. Preserve the staging folder until that inspection is complete.
 
 Capacity checks run before the pending receipt. A shortage can retry with the same request after capacity increases.
 
