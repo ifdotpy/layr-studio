@@ -38,7 +38,9 @@ async fn delete(
 ) -> Result<Json<generated::DeletedResponse>, ApiError> {
     dispatch::<generated::DeletedResponse>(
         state,
-        Action::Delete { target: body.id },
+        Action::Delete {
+            target: body.id.as_str().to_owned(),
+        },
         ports.map(|Extension(ports)| ports),
     )
     .await

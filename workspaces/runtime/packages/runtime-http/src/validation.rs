@@ -112,6 +112,15 @@ const TYPED_BODIES: &[(&str, &str)] = &[
     ("POST", "/api/work"),
     ("POST", "/api/projects"),
     ("POST", "/api/peer-teams"),
+    ("POST", "/api/web-push/remove"),
+    ("POST", "/api/web-push/subscriptions"),
+    ("POST", "/api/voice/end"),
+    ("POST", "/api/voice/start"),
+    ("POST", "/api/voice/status"),
+    ("POST", "/api/checkpoint/preview"),
+    ("POST", "/api/checkpoint/restore"),
+    ("POST", "/api/connection-recovery"),
+    ("POST", "/api/conversation/delete"),
 ];
 
 // Temporary migration marker; typed extractors own these query contracts.

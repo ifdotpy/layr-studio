@@ -9,6 +9,19 @@ use std::path::PathBuf;
 
 use openapi_to_rust::analysis::{ObjectAdditionalProperties, SchemaType};
 use openapi_to_rust::{CodeGenerator, GeneratorConfig, SchemaAnalyzer};
+
+// Only ingress schemas whose consumers and full constraints have been audited.
+const CONSTRAINED_INGRESS: &[&str] = &[
+    "CheckpointPreviewRequest",
+    "CheckpointRestoreRequest",
+    "IdRequest",
+    "VoiceEndRequest",
+    "VoiceStartRequest",
+    "VoiceStatusRequest",
+    "WebPushRemoveRequest",
+    "WebPushSubscribeRequest",
+];
+
 fn main() -> Result<(), Box<dyn Error>> {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
     // Clippy does not merge parent configs: runtime/clippy.toml owns the shared policy.
@@ -599,6 +612,45 @@ fn main() -> Result<(), Box<dyn Error>> {
     // unevaluatedProperties:false closes the complete schema after its oneOf.
     *additional_properties = ObjectAdditionalProperties::Denied;
     properties.insert("value".to_owned(), value_property);
+    for name in CONSTRAINED_INGRESS {
+        let SchemaType::Object { properties, .. } = &mut analysis
+            .schemas
+            .get_mut(*name)
+            .ok_or("missing constrained ingress schema")?
+            .schema_type
+        else {
+            return Err("constrained ingress must be an object".into());
+        };
+        for property in properties.values_mut() {
+            let constraints = &property.constraints;
+            if constraints.is_empty() {
+                continue;
+            }
+            if constraints.minimum.is_some()
+                || constraints.maximum.is_some()
+                || constraints.exclusive_minimum.is_some()
+                || constraints.exclusive_maximum.is_some()
+                || constraints.multiple_of.is_some()
+                || constraints.pattern.is_some()
+                || constraints.min_items.is_some()
+                || constraints.max_items.is_some()
+                || constraints.unique_items.is_some()
+                || !matches!(&property.schema_type, SchemaType::Primitive { rust_type, serde_with: None } if rust_type == "String")
+            {
+                return Err(format!("unsupported constraint in {name}").into());
+            }
+            let min = constraints.min_length.unwrap_or(0);
+            let max = constraints
+                .max_length
+                .map_or("usize::MAX".to_owned(), |v| v.to_string());
+            property.schema_type = SchemaType::Primitive {
+                rust_type: format!(
+                    "studio_runtime_schema::bounded_text::BoundedText<{min}, {max}>"
+                ),
+                serde_with: None,
+            };
+        }
+    }
     // The generator already emits strict serde for closed untagged branches.
     // Apply that same rule to every explicitly closed object at this boundary.
     for (name, schema) in &analysis.schemas {

@@ -73,10 +73,10 @@ async fn subscribe(
     blocking(move || {
         let row = web_push::Subscriptions::new(&root).add(
             web_push::NewSubscription {
-                endpoint: body.endpoint,
-                p256dh: body.p256dh,
-                auth: body.auth,
-                device: body.device,
+                endpoint: body.endpoint.as_str().to_owned(),
+                p256dh: body.p256dh.as_str().to_owned(),
+                auth: body.auth.as_str().to_owned(),
+                device: body.device.as_str().to_owned(),
             },
             false,
             web_push::now_seconds(),
@@ -93,7 +93,7 @@ async fn remove(
 ) -> Result<Json<generated::WebPushRemoveResponse>, ApiError> {
     let root = std::path::PathBuf::from(&state.state_dir);
     blocking(move || {
-        let removed = web_push::Subscriptions::new(&root).remove(&body.id)?;
+        let removed = web_push::Subscriptions::new(&root).remove(body.id.as_str())?;
         Ok(generated::WebPushRemoveResponse { removed })
     })
     .await
@@ -115,6 +115,138 @@ mod tests {
     };
     use serde_json::{Value, json};
     use tower::ServiceExt;
+
+    #[test]
+    fn opted_in_ingress_matches_schema() {
+        use studio_runtime_schema::http_ingress::Object;
+        let document = crate::schema::openapi_document();
+        for (name, fixture) in [
+            ("IdRequest", json!({"id":"a"})),
+            (
+                "CheckpointPreviewRequest",
+                json!({"agent":"a","checkpoint":"c"}),
+            ),
+            (
+                "CheckpointRestoreRequest",
+                json!({"agent":"a","expectedTree":"t"}),
+            ),
+            ("VoiceEndRequest", json!({"agent":"a","session_id":"s"})),
+            (
+                "VoiceStartRequest",
+                json!({"agent":"a","session_id":"s","sdp":"x"}),
+            ),
+            ("VoiceStatusRequest", json!({"agent":"a"})),
+            (
+                "WebPushSubscribeRequest",
+                json!({"endpoint":"e","p256dh":"p","auth":"a","device":"d"}),
+            ),
+        ] {
+            let schema = json!({"$ref":format!("#/components/schemas/{name}"), "components":document["components"]});
+            let validator = jsonschema::validator_for(&schema).unwrap();
+            let mut cases = vec![fixture.clone()];
+            for key in document["components"]["schemas"][name]["properties"]
+                .as_object()
+                .unwrap()
+                .keys()
+            {
+                let mut missing = fixture.clone();
+                missing.as_object_mut().unwrap().remove(key);
+                cases.push(missing);
+                for value in [
+                    json!(null),
+                    json!(42),
+                    json!(true),
+                    json!(""),
+                    json!("x".repeat(64)),
+                    json!("x".repeat(65)),
+                    json!("x".repeat(80)),
+                    json!("x".repeat(81)),
+                    json!("x".repeat(128)),
+                    json!("x".repeat(129)),
+                    json!("x".repeat(200)),
+                    json!("x".repeat(201)),
+                    json!("x".repeat(2048)),
+                    json!("x".repeat(2049)),
+                ] {
+                    let mut body = fixture.clone();
+                    body[key] = value;
+                    cases.push(body);
+                }
+            }
+            let mut extra = fixture.clone();
+            extra["extra"] = json!(true);
+            cases.push(extra);
+            for body in cases {
+                let decoded = match name {
+                    "IdRequest" => {
+                        serde_json::from_value::<Object<generated::IdRequest>>(body.clone()).is_ok()
+                    }
+                    "CheckpointPreviewRequest" => serde_json::from_value::<
+                        Object<generated::CheckpointPreviewRequest>,
+                    >(body.clone())
+                    .is_ok(),
+                    "CheckpointRestoreRequest" => serde_json::from_value::<
+                        Object<generated::CheckpointRestoreRequest>,
+                    >(body.clone())
+                    .is_ok(),
+                    "VoiceEndRequest" => {
+                        serde_json::from_value::<Object<generated::VoiceEndRequest>>(body.clone())
+                            .is_ok()
+                    }
+                    "VoiceStartRequest" => {
+                        serde_json::from_value::<Object<generated::VoiceStartRequest>>(body.clone())
+                            .is_ok()
+                    }
+                    "VoiceStatusRequest" => serde_json::from_value::<
+                        Object<generated::VoiceStatusRequest>,
+                    >(body.clone())
+                    .is_ok(),
+                    _ => serde_json::from_value::<Object<generated::WebPushSubscribeRequest>>(
+                        body.clone(),
+                    )
+                    .is_ok(),
+                };
+                assert_eq!(decoded, validator.is_valid(&body), "{name}: {body}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn remove_ingress_matches_openapi() {
+        let document = crate::schema::openapi_document();
+        let schema = json!({
+            "$ref":"#/components/schemas/WebPushRemoveRequest",
+            "components":document["components"]
+        });
+        let validator = jsonschema::validator_for(&schema).unwrap();
+        let app = axum::Router::new().route(
+            "/",
+            axum::routing::post(
+                |super::ApiJson(_): super::ApiJson<generated::WebPushRemoveRequest>| async {},
+            ),
+        );
+        for body in [
+            json!({"id":"a"}),
+            json!({"id":"é".repeat(64)}),
+            json!({"id":""}),
+            json!({"id":"é".repeat(65)}),
+            json!({}),
+            json!({"id":null}),
+            json!({"id":42}),
+            json!({"id":"a", "extra":true}),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(request("/", Method::POST, Some(body.clone())))
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status().is_success(),
+                validator.is_valid(&body),
+                "{body}"
+            );
+        }
+    }
 
     /// The P-256 base point: a valid uncompressed point for a fixture subscription.
     const POINT: &str =
