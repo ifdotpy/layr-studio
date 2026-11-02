@@ -5,10 +5,10 @@ use std::time::Duration;
 type Result<T> = std::result::Result<T, NativeLayrError>;
 
 #[derive(serde::Deserialize)]
-struct Identity {
+pub struct Identity {
     format: u64,
-    version: String,
-    build: String,
+    pub version: String,
+    pub build: String,
 }
 #[derive(serde::Deserialize)]
 struct Inspection {
@@ -39,6 +39,11 @@ fn inspect(binary: &Path, root: &Path) -> Result<Inspection> {
         stdout_limit: 16 * 1024, stderr_limit: 4096, timeout: Duration::from_secs(10),
     }).map_err(|e| NativeLayrError::Refused(format!("Cannot inspect Layr at {} for store {root}: {e:?}. Upgrade this binary to the Studio Layr release; see docs/native-layr.md.", binary.display())))?;
     serde_json::from_slice(&result.stdout.bytes).map_err(|e| NativeLayrError::Refused(format!("Layr at {} has no valid store-version response for {root}: {e}. Upgrade this binary; see docs/native-layr.md.", binary.display())))
+}
+
+/// Read the identity reported by the same bounded store inspection used for verification.
+pub fn binary_version(binary: &Path, root: &Path) -> Result<Identity> {
+    Ok(inspect(binary, root)?.binary)
 }
 
 pub(super) fn verify(state: &Path, root: &Path) -> Result<Option<String>> {
