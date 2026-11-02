@@ -119,6 +119,12 @@ pub fn normalize_agent_fixtures(tx: &rusqlite::Transaction<'_>) -> crate::StoreR
     m2026_11_02_agent_worker_base_ref::apply(tx)
 }
 
+/// Apply the creation-field catalog step to historical test rows inserted after startup.
+#[cfg(any(test, feature = "test-support"))]
+pub fn normalize_agent_creation_fixtures(tx: &rusqlite::Transaction<'_>) -> crate::StoreResult<()> {
+    m2026_11_02_agent_worker_base_ref::apply(tx)
+}
+
 use std::path::Path;
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior};

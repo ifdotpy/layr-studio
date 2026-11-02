@@ -27,6 +27,9 @@ async fn try_put_record(
                 &format!("INSERT INTO {table}(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record"),
                 rusqlite::params![id, encoded],
             )?;
+            if table == "runtime_agents" {
+                studio_runtime_store::migrations::normalize_agent_creation_fixtures(tx)?;
+            }
             Ok(())
         })
         .await
@@ -357,6 +360,7 @@ async fn resolved_answering_and_unknown_cards_keep_what_nobody_inferred() {
         if case["actor"] != case["expectedActor"] {
             crate::agent_view_fixtures::materialize_agent_defaults(&mut expected_actor);
         }
+        crate::agent_view_fixtures::normalize_creation_agent(&mut expected_actor);
         crate::normalize_agent_nulls(&mut expected_actor);
         let mut actual_actor = record(&store, "runtime_agents", &context.agent);
         crate::normalize_agent_nulls(&mut actual_actor);
