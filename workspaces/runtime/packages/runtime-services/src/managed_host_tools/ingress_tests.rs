@@ -2676,6 +2676,59 @@ async fn managed_reviewer_defaults_reach_public_spawn_tool() {
 }
 
 #[tokio::test]
+async fn managed_spawn_native_layr_lead_uses_project_binding() {
+    let (directory, store, context) = fixture().await;
+    let line = directory.path().join("line");
+    std::fs::create_dir(&line).unwrap();
+    let project_path = directory.path().to_string_lossy().into_owned();
+    let line_path = line.to_string_lossy().into_owned();
+    let actor_value = store
+        .transaction_with::<_, StoreError>(move |tx| {
+            let mut parent = AgentRepository::get(tx, &AgentId::from(LEAD))?
+                .unwrap()
+                .value();
+            parent["cwd"] = json!(line_path);
+            parent["projectId"] = json!(project_path);
+            parent["hostProjectPath"] = json!(project_path);
+            parent["workspaceMode"] = json!("layr-native");
+            parent["layrReady"] = json!(true);
+            parent["provider"] = json!("claude");
+            parent["accountKey"] = json!("claude-profile-fixture");
+            parent["epoch"] = json!(0);
+            let record = AgentRecord::from_value(parent.clone()).unwrap();
+            AgentRepository::put(tx, &record)?;
+            studio_runtime_store::ProjectsRepository::put_project(
+                tx,
+                &json!({"id":project_path,"path":project_path,"name":"Project"}),
+            )?;
+            Ok(parent)
+        })
+        .await
+        .unwrap();
+    let actor = Actor::from_record(&actor_value, &context.agent, 0).unwrap();
+    for (request, workspace) in [
+        ("native-explicit", Some("layr-native")),
+        ("native-default", None),
+    ] {
+        let mut spec = json!({"name":"Worker","prompt":"Do the task","role":"implementer"});
+        if let Some(workspace) = workspace {
+            spec["workspace"] = json!(workspace);
+        }
+        let spawned = crate::managed_child_create::spawn_agents(
+            &store,
+            &actor,
+            &json!({"agents":[spec]}),
+            request,
+            20.0,
+            &CreationEnvironment,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{request}: {error:?}"));
+        assert!(spawned.result().test_value()["agents"][0]["id"].is_string());
+    }
+}
+
+#[tokio::test]
 async fn managed_spawn_accepts_any_explicit_model_for_each_role() {
     let (_root, store, context) = fixture().await;
     let parent = studio_runtime_store::AgentRepository::get(

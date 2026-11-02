@@ -893,6 +893,7 @@ pub(super) fn execute(
                     crate::managed_host_tools::Error::Expired => CallbackError::Expired,
                     crate::managed_host_tools::Error::Invalid(_)
                     | crate::managed_host_tools::Error::Stale
+                    | crate::managed_host_tools::Error::Refusal(_)
                     | crate::managed_host_tools::Error::InvalidStored { .. }
                     | crate::managed_host_tools::Error::StoredAt(_)
                     | crate::managed_host_tools::Error::Unavailable(_)
@@ -1094,6 +1095,7 @@ pub(super) fn managed_error(error: crate::managed_host_tools::Error) -> Callback
         E::Invalid(message) => CallbackError::Invalid(message),
         E::Expired => CallbackError::Expired,
         E::Stale => CallbackError::Stale,
+        E::Refusal(message) => CallbackError::Stored(message),
         E::InvalidStored {
             table,
             id,
