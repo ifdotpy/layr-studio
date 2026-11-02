@@ -1293,11 +1293,11 @@ impl Snapshot {
     pub fn prepared_member(
         &self,
         agent: &str,
-        target_settings: Value,
+        target_settings: studio_runtime_store::transfer_record::DestinationSettings,
         portable_history: Option<Value>,
     ) -> Result<Decision, TransferError> {
         use studio_runtime_schema::queue_command::Field;
-        if !self.pending() || self.phase(agent)? != Phase::Reading || !target_settings.is_object() {
+        if !self.pending() || self.phase(agent)? != Phase::Reading {
             return Err(TransferError::Refused(
                 "The transfer is not ready for destination settings",
             ));
@@ -1328,10 +1328,7 @@ impl Snapshot {
             .members
             .get_mut(agent)
             .ok_or(TransferError::Refused("Unknown transfer member"))?;
-        member.target_settings = Field::Value(
-            serde::Deserialize::deserialize(target_settings)
-                .map_err(|_| invalid("account transfer", "/members/targetSettings"))?,
-        );
+        member.target_settings = Field::Value(target_settings);
         if let Some(history) = portable_history {
             member.portable_history = serde::Deserialize::deserialize(history)
                 .map_err(|_| invalid("account transfer", "/members/portableHistory"))?;
@@ -1877,7 +1874,7 @@ fn restore_source_field<T: Clone>(
     }
 }
 
-fn known_transfer_value<T: Clone>(
+pub(crate) fn known_transfer_value<T: Clone>(
     field: &studio_runtime_schema::queue_command::Field<
         studio_runtime_store::StoredTransferValue<T>,
     >,
@@ -1890,7 +1887,7 @@ fn known_transfer_value<T: Clone>(
     })
 }
 
-fn known_transfer_object<T: Clone>(
+pub(crate) fn known_transfer_object<T: Clone>(
     field: &studio_runtime_schema::queue_command::Field<
         studio_runtime_store::StoredTransferObject<T>,
     >,
@@ -1903,7 +1900,7 @@ fn known_transfer_object<T: Clone>(
     })
 }
 
-fn worker_defaults(
+pub(crate) fn worker_defaults(
     agent: &studio_runtime_store::AgentRecord,
 ) -> Result<
     studio_runtime_schema::queue_command::Field<
@@ -3322,7 +3319,11 @@ mod provider_receipt_tests {
         );
         let reading = after(
             reading
-                .prepared_member("agent", json!({"model":"model-b"}), None)
+                .prepared_member(
+                    "agent",
+                    serde_json::from_str(r#"{"model":"model-b"}"#).unwrap(),
+                    None,
+                )
                 .expect("test fixture operation succeeds"),
         );
         let submitted = after(
