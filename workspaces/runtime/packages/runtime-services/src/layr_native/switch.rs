@@ -7,9 +7,10 @@ use super::{
 };
 use std::sync::Arc;
 use studio_runtime_store::workspace_ready::workspace_generation;
-use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore, StoreError};
+use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore};
 
 type Result<T> = std::result::Result<T, NativeLayrError>;
+type NativeRelatives = Option<(Box<AgentRecord>, Box<AgentRecord>)>;
 /// Filesystem effects of a switch: old record and native target record in, prepared fields out.
 pub(super) type Effects = fn(&Path, &Value, &Value) -> Result<Value>;
 
@@ -29,13 +30,14 @@ pub(super) async fn switch_chat_with(
             admit(tx, &id)
         })
         .await?;
-    if is_native(&record) {
-        return summary(&record);
+    if is_native(&record.value()) {
+        return summary(&record.value());
     }
     let mut target = record.clone();
     configure(&mut target, relatives.as_ref());
     let state_dir = store.root().to_owned();
-    let source = record.clone();
+    let source = record.value();
+    let target = target.value();
     let prepared = studio_runtime_process::blocking_pool::spawn_blocking(
         "runtime-services/layr-native/switch",
         move || effects(&state_dir, &source, &target),
@@ -46,10 +48,10 @@ pub(super) async fn switch_chat_with(
     store
         .transaction_with_error(move |tx| {
             let (mut current, relatives) = admit(tx, &id)?;
-            if is_native(&current) {
-                return summary(&current);
+            if is_native(&current.value()) {
+                return summary(&current.value());
             }
-            if workspace_generation(&current) != workspace_generation(&record) {
+            if workspace_generation(&current.value()) != workspace_generation(&record.value()) {
                 return Err(NativeLayrError::Refused(
                     "The chat changed during the switch. Try again.".into(),
                 ));
@@ -59,14 +61,20 @@ pub(super) async fn switch_chat_with(
                 .as_object()
                 .ok_or_else(|| NativeLayrError::Refused("Invalid native workspace".into()))?
             {
-                current[key] = value.clone();
+                match key.as_str() {
+                    "cwd" => current.cwd = value.as_str().map(str::to_owned),
+                    "layrProjectId" => current.layr_project_id = value.as_str().map(Into::into),
+                    "layrReadCwd" => current.layr_read_cwd = value.as_str().map(Into::into),
+                    "layrStoreRoot" => current.layr_store_root = value.as_str().map(str::to_owned),
+                    "layrReady" => current.layr_ready = value.as_bool(),
+                    _ => {
+                        current.extra.insert(key.clone(), value.clone());
+                    }
+                }
             }
-            AgentRepository::put(
-                tx,
-                &AgentRecord::from_value(current.clone()).map_err(StoreError::from)?,
-            )?;
-            crate::agents_create::publish_agent(tx, &current)?;
-            summary(&current)
+            AgentRepository::put(tx, &current)?;
+            crate::agents_create::publish_agent(tx, &current.value())?;
+            summary(&current.value())
         })
         .await
 }
@@ -75,7 +83,7 @@ pub(super) async fn switch_chat_with(
 fn admit(
     tx: &studio_runtime_store::Transaction<'_>,
     id: &str,
-) -> Result<(Value, Option<(Value, Value)>)> {
+) -> Result<(Box<AgentRecord>, NativeRelatives)> {
     let get = |id: &str| -> Result<AgentRecord> {
         AgentRepository::get(tx, &AgentId::from(id))?
             .ok_or_else(|| NativeLayrError::Refused(format!("Unknown chat {id}")))
@@ -83,7 +91,7 @@ fn admit(
     let agent = get(id)?;
     let record = agent.value();
     if is_native(&record) {
-        return Ok((record, None));
+        return Ok((Box::new(agent), None));
     }
     if crate::event_write::truthy(record.get("deletedAt")) {
         return Err(NativeLayrError::Refused("The chat was deleted".into()));
@@ -100,24 +108,24 @@ fn admit(
     crate::peer_conversion::idle(tx, std::slice::from_ref(&record), false)
         .map_err(|error| NativeLayrError::Refused(error.to_string()))?;
     if lead {
-        return Ok((record, None));
+        return Ok((Box::new(agent), None));
     }
-    let parent = get(record["parentId"].as_str().unwrap_or_default())?.value();
-    if !is_native(&parent) || parent["layrReady"] != true {
+    let parent = get(record["parentId"].as_str().unwrap_or_default())?;
+    if !is_native(&parent.value()) || parent.layr_ready != Some(true) {
         return Err(NativeLayrError::Refused(
             "Switch the parent chat to Layr first".into(),
         ));
     }
-    let root = get(&agent.root_id.0)?.value();
-    Ok((record, Some((parent, root))))
+    let root = get(&agent.root_id.0)?;
+    Ok((Box::new(agent), Some((Box::new(parent), Box::new(root)))))
 }
 
 /// Native intent: a lead keeps its project folder as the source; a worker inherits its parent.
-fn configure(record: &mut Value, relatives: Option<&(Value, Value)>) {
+fn configure(record: &mut AgentRecord, relatives: Option<&(Box<AgentRecord>, Box<AgentRecord>)>) {
     match relatives {
         Some((parent, root)) => configure_child(record, parent, root),
         None => {
-            let source = record["cwd"].as_str().unwrap_or_default().to_owned();
+            let source = record.cwd.as_deref().unwrap_or_default().to_owned();
             configure_new_chat(record, &source);
         }
     }

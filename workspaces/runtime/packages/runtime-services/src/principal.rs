@@ -3,6 +3,9 @@
 //! A `Scoped` answer names the row check that the caller still owes; the code that holds
 //! the rows (agent tree, link workers, rooms) makes that check.
 
+use std::collections::BTreeSet;
+pub use studio_runtime_store::project_grants::Capability;
+
 /// What a paired device may do. Read from the server's own trust list, never from a request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Grant {
@@ -51,6 +54,13 @@ pub enum Principal {
     Federated {
         peer: String,
     },
+    /// A paired project of another server. Built at the edge from the peer key and an
+    /// active project grant (`crate::project_peer`), never from a request header.
+    ProjectPeer {
+        peer: String,
+        project: String,
+        capabilities: BTreeSet<Capability>,
+    },
     /// Automatic answers.
     Policy,
 }
@@ -81,6 +91,8 @@ pub enum Scope {
     RootLead,
     /// The room is approved for the peer.
     ApprovedRoom,
+    /// The target is the paired lead of the granted project.
+    PairedLead,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,8 +112,15 @@ impl Access {
 pub fn access(principal: &Principal, class: CommandClass) -> Access {
     use Access::{Allow, Deny, Scoped};
     use CommandClass::{ChatControl, Federation, Host, OwnerOnly, Read, Spawn};
-    use Principal::{Agent, Device, Federated, Owner, Peer, Policy};
+    use Principal::{Agent, Device, Federated, Owner, Peer, Policy, ProjectPeer};
     match (principal, class) {
+        (ProjectPeer { capabilities, .. }, ChatControl)
+            if capabilities.contains(&Capability::LeadMessages) =>
+        {
+            Scoped(Scope::PairedLead)
+        }
+        // A project peer has no other row: no read, no spawn, no host, no federation.
+        (ProjectPeer { .. }, _) => Deny,
         (_, Read) => Allow,
         (Owner, Federation) => Deny,
         (Owner, _) => Allow,
@@ -146,6 +165,7 @@ pub fn frontend_locality(
         | Principal::Peer { .. }
         | Principal::Agent { .. }
         | Principal::Federated { .. }
+        | Principal::ProjectPeer { .. }
         | Principal::Policy => FrontendLocality::Local,
     }
 }
@@ -154,6 +174,14 @@ pub fn frontend_locality(
 mod tests {
     use super::*;
     use Access::{Allow, Deny, Scoped};
+
+    fn project_peer(capabilities: &[Capability]) -> Principal {
+        Principal::ProjectPeer {
+            peer: "p".into(),
+            project: "proj".into(),
+            capabilities: capabilities.iter().copied().collect(),
+        }
+    }
 
     fn device(grant: Grant) -> Principal {
         Principal::Device {
@@ -218,6 +246,11 @@ mod tests {
                 [Allow, Deny, Deny, Deny, Deny, Scoped(Scope::ApprovedRoom)],
             ),
             (Principal::Policy, [Allow, Allow, Deny, Deny, Deny, Deny]),
+            (
+                project_peer(&[Capability::LeadMessages]),
+                [Deny, Scoped(Scope::PairedLead), Deny, Deny, Deny, Deny],
+            ),
+            (project_peer(&[]), [Deny, Deny, Deny, Deny, Deny, Deny]),
         ];
         for (principal, expected) in rows {
             let classes = [Read, ChatControl, Spawn, Host, OwnerOnly, Federation];

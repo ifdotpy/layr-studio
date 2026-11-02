@@ -14,6 +14,43 @@ fn nullable<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     Option::<T>::deserialize(deserializer)
 }
 
+/// An explicitly selected effort overrides the inherited setting; null clears it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum EffortSelection {
+    #[default]
+    Inherit,
+    Clear,
+    Set(String),
+}
+
+impl EffortSelection {
+    pub fn is_inherit(&self) -> bool {
+        matches!(self, Self::Inherit)
+    }
+
+    pub fn selected(&self) -> Option<&String> {
+        match self {
+            Self::Set(value) => Some(value),
+            Self::Inherit | Self::Clear => None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for EffortSelection {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(match Option::<String>::deserialize(deserializer)? {
+            Some(value) => Self::Set(value),
+            None => Self::Clear,
+        })
+    }
+}
+
+impl Serialize for EffortSelection {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.selected().serialize(serializer)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentRole {
@@ -65,8 +102,8 @@ pub struct CreationIntent {
     pub cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub daybreak_enabled: Field<bool>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub effort: Field<String>,
+    #[serde(default, skip_serializing_if = "EffortSelection::is_inherit")]
+    pub effort: EffortSelection,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub fast_mode: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -208,7 +245,25 @@ pub struct ReviewDefaults {
 
 #[cfg(test)]
 mod tests {
-    use super::AgentRole;
+    use super::{AgentRole, CreationIntent};
+
+    #[test]
+    fn stored_intents_preserve_missing_and_null_for_replay() {
+        for raw in [
+            r#"{"account_key":"default"}"#,
+            r#"{"account_key":"default","daybreak_enabled":null,"effort":null,"fast_mode":null,"review_defaults":null,"worker_defaults":null}"#,
+            r#"{"account_key":"default","effort":"high"}"#,
+        ] {
+            let stored: CreationIntent = serde_json::from_str(raw).unwrap();
+            let encoded = serde_json::to_string(&stored).unwrap();
+            assert_eq!(encoded, raw);
+            let replay: CreationIntent = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(stored, replay);
+        }
+        let absent: CreationIntent = serde_json::from_str("{}").unwrap();
+        let cleared: CreationIntent = serde_json::from_str(r#"{"effort":null}"#).unwrap();
+        assert_ne!(absent, cleared);
+    }
 
     #[test]
     fn agent_role_matches_openapi_and_its_wire_names() {

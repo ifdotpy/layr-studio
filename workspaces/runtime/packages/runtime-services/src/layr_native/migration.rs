@@ -165,13 +165,23 @@ pub fn migrate_with_options(
     options: Options,
 ) -> Result<Value> {
     let project = CanonicalPath::existing(project).map(CanonicalPath::into_path_buf)?;
-    let mut record = json!({"id":"migration", "isLead":true,"autoWake":true,"cwd":project});
+    let mut agent = studio_runtime_store::AgentRecord::new(
+        "migration".into(),
+        "migration".into(),
+        0,
+        studio_runtime_store::AgentStatus::Idle,
+        "default".into(),
+    );
+    agent.is_lead = Some(true);
+    agent.auto_wake = Some(true);
+    agent.cwd = Some(project.to_string_lossy().into_owned());
     configure_new_chat(
-        &mut record,
+        &mut agent,
         project
             .to_str()
             .ok_or_else(|| NativeLayrError::Refused("Non-UTF-8 project path".into()))?,
     );
+    let mut record = agent.value();
     let root = settings::selected_store(state_dir)?;
     let project_id = super::mapping::resolve(state_dir, &root, &record)?;
     record["layrProjectId"] = json!(project_id);

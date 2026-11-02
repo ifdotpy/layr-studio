@@ -2129,8 +2129,11 @@ fn persist_agent(
     agent_id: &str,
     agent: &Value,
 ) -> Result<Value, NotificationDispatchError> {
-    let mut normalized = agent.clone();
-    crate::agents_create::mode_fields(&mut normalized);
+    // typed-boundary: caller still Value-based
+    let mut typed =
+        studio_runtime_store::AgentRecord::from_value(agent.clone()).map_err(StoreError::from)?;
+    crate::agents_create::mode_fields(&mut typed);
+    let normalized = typed.value();
     let agent = &normalized;
     NotificationDispatchRepository::put_agent_record(transaction, agent_id, agent)?;
     Ok(normalized)

@@ -163,7 +163,7 @@ async fn lead_for_project(
                     continue;
                 };
                 if agent.is_lead == Some(true)
-                    && agent.extra.get("layrProjectId").and_then(Value::as_str) == Some(&project_id)
+                    && agent.layr_project_id.as_deref() == Some(project_id.as_str())
                     && agent.extra.get("layrLine").and_then(Value::as_str) == Some("main")
                     && agent.deleted_at.is_none()
                 {
