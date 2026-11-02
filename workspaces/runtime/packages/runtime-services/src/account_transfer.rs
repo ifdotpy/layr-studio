@@ -118,9 +118,8 @@ fn provider_ticket(
     let Some(ticket) = receipt.ticket() else {
         return Ok(Field::Null);
     };
-    let method = serde_json::from_str(
-        &serde_json::to_string(ticket.method.as_str())
-            .map_err(|_| invalid("provider ticket", "/method"))?,
+    let method = studio_runtime_store::transfer_record::TransferMethod::deserialize(
+        serde::de::value::StrDeserializer::<serde::de::value::Error>::new(ticket.method.as_str()),
     )
     .map_err(|_| invalid("provider ticket", "/method"))?;
     Ok(Field::Value(ProviderTicket {
@@ -371,25 +370,14 @@ pub(crate) fn read_record(
     validate(schema, object, &value)?;
     Ok(value)
 }
-
 impl Snapshot {
     pub fn read(
         raw: &str,
         agents: impl IntoIterator<Item = (String, String)>,
     ) -> Result<Self, TransferError> {
-        Self::read_fallible(raw, agents.into_iter().map(Ok))
-    }
-
-    /// Consume store reads lazily so resource limits stop the next record read.
-    pub(crate) fn read_fallible(
-        raw: &str,
-        agents: impl IntoIterator<Item = Result<(String, String), TransferError>>,
-    ) -> Result<Self, TransferError> {
-        if raw.len() > MAX_RECORD_BYTES {
-            return Err(invalid("account transfer", "/resourceLimit"));
-        }
+        read_record(raw, "PersistedAccountTransferRecord", "account transfer")?;
         let operation = serde_json::from_str(raw).map_err(|_| invalid("account transfer", "/"))?;
-        Self::read_typed(operation, raw, agents)
+        Self::from_parts(operation, raw.len(), agents.into_iter().map(Ok))
     }
 
     /// The store already decoded this operation; keep its ordered members.
@@ -398,7 +386,9 @@ impl Snapshot {
         raw: &str,
         agents: impl IntoIterator<Item = Result<(String, String), TransferError>>,
     ) -> Result<Self, TransferError> {
-        read_record(raw, "PersistedAccountTransferRecord", "account transfer")?;
+        if raw.len() > MAX_RECORD_BYTES {
+            return Err(invalid("account transfer", "/resourceLimit"));
+        }
         Self::from_parts(record, raw.len(), agents)
     }
 
@@ -446,7 +436,7 @@ impl Snapshot {
         public_view_record(&self.operation)
     }
     pub fn lead_id(&self) -> &str {
-        &self.operation.lead_id
+        self.operation.lead_id.as_str()
     }
     pub(crate) fn record(&self) -> &studio_runtime_store::transfer_record::TransferRecord {
         &self.operation
@@ -516,13 +506,13 @@ impl Snapshot {
             .and_then(|requests| requests.get(request));
         let (saved_lead, saved_target, saved_scope) = if let Some(receipt) = receipt {
             (
-                &receipt.lead_id,
+                receipt.lead_id.as_str(),
                 &receipt.target_account_key,
                 &receipt.scope,
             )
-        } else if self.operation.id == request {
+        } else if self.operation.id.as_str() == request {
             (
-                &self.operation.lead_id,
+                self.operation.lead_id.as_str(),
                 &self.operation.target_account_key,
                 &self.operation.scope,
             )
@@ -639,9 +629,9 @@ impl Snapshot {
                         .value()
                         .and_then(|state| state.pending())
                         .cloned();
-                    if let Some(lazy) = lazy
-                        .filter(|lazy| lazy.id.as_str() == op.id && m.lazy.value() == Some(&true))
-                    {
+                    if let Some(lazy) = lazy.filter(|lazy| {
+                        lazy.id.as_str() == op.id.as_str() && m.lazy.value() == Some(&true)
+                    }) {
                         a.account_key = lazy.source_account_key.as_str().to_owned();
                         let mut unreadable = false;
                         let exact = match &lazy.source_state_exact {
@@ -753,7 +743,7 @@ impl Snapshot {
                     {
                         followups.push(Followup {
                             agent: id.clone(),
-                            id: format!("account-transfer-cancel:{}:{id}", op.id),
+                            id: format!("account-transfer-cancel:{}:{id}", op.id.as_str()),
                             text: CANCEL_FOLLOWUP,
                         });
                         a.status = studio_runtime_store::AgentStatus::Queued;
@@ -829,18 +819,12 @@ impl Snapshot {
         let value = agents
             .get_mut(agent)
             .ok_or(TransferError::Refused("Unknown transfer member"))?;
-        let id = self
-            .operation
-            .id
-            .clone()
-            .try_into()
-            .map_err(|_| invalid("account transfer", "/id"))?;
         let enrolled = typed_enroll(
             value,
-            &id,
+            &self.operation.id,
             &self.operation.target_account_key,
             target_provider,
-            agent == self.operation.lead_id,
+            agent == self.operation.lead_id.as_str(),
         )?;
         if enrolled.phase != Phase::Lazy {
             // Completed or blocked members hold no transfer pointer.
@@ -1089,7 +1073,11 @@ impl Snapshot {
             };
         let authorized_unsubscribe = next.method != TransferMethod::Unsubscribe
             || (member.source_account_key == *account
-                && next.operation == format!("transfer:{}:{agent}:unsubscribe", self.operation.id)
+                && next.operation
+                    == format!(
+                        "transfer:{}:{agent}:unsubscribe",
+                        self.operation.id.as_str()
+                    )
                 && valid_source_preflight_params(
                     "thread/unsubscribe",
                     member
@@ -1159,7 +1147,7 @@ impl Snapshot {
             )
             && intent
                 .operation
-                .starts_with(&format!("transfer:{}:{agent}:", self.operation.id));
+                .starts_with(&format!("transfer:{}:{agent}:", self.operation.id.as_str()));
         if !self.pending()
             || member.phase != Phase::Reading
             || intent.operation.is_empty()
@@ -1589,7 +1577,7 @@ impl Snapshot {
         let mut history = studio_runtime_store::transfer_record::TransferAccountHistoryEntry::new(
             member.source_account_key.clone(),
         );
-        history.transfer_id = Field::Value(self.operation.id.clone());
+        history.transfer_id = Field::Value(self.operation.id.as_str().to_owned());
         history.thread_id = member
             .source_thread_id
             .value()
@@ -2338,15 +2326,15 @@ impl Decision {
         let operation = &self.operation;
         let lead = self
             .agents
-            .get_mut(&operation.lead_id)
+            .get_mut(operation.lead_id.as_str())
             .ok_or_else(|| invalid("transfer agent", "/id"))?;
         use studio_runtime_store::transfer_record::AgentTransferState;
         let pointer = lead.account_transfer_id.value().map(|id| id.as_str());
-        if pointer.is_some_and(|value| value != operation.id) {
+        if pointer.is_some_and(|value| value != operation.id.as_str()) {
             return Ok(());
         }
         if let Some(AgentTransferState::Summary(current)) = lead.account_transfer.value()
-            && current.id.as_str() != operation.id
+            && current.id.as_str() != operation.id.as_str()
             && pointer != Some(operation.id.as_str())
             && (!matches!(
                 current.status,
@@ -2362,9 +2350,6 @@ impl Decision {
         Ok(())
     }
     pub fn encoded(&self) -> Result<String, TransferError> {
-        let value = serde::Serialize::serialize(&(&self.operation), serde_json::value::Serializer)
-            .map_err(|_| invalid("account transfer", "/"))?;
-        validate("PersistedAccountTransferRecord", "account transfer", &value)?;
         let encoded =
             serde_json::to_string(&self.operation).map_err(|_| invalid("account transfer", "/"))?;
         if encoded.len() > MAX_RECORD_BYTES {
@@ -2458,8 +2443,8 @@ fn public_view_record(
         );
     }
     SavedTransferResponse {
-        id: op.id.clone(),
-        lead_id: op.lead_id.clone(),
+        id: op.id.as_str().to_owned(),
+        lead_id: op.lead_id.as_str().to_owned(),
         target_account_key: op.target_account_key.clone(),
         status: op.status,
         created: op.created.clone(),
@@ -2540,11 +2525,7 @@ fn summary_record(
         .cloned()
         .map_or(Field::Null, Field::Value);
     Ok(AgentTransferSummary {
-        id: op
-            .id
-            .clone()
-            .try_into()
-            .map_err(|_| invalid("account transfer", "/id"))?,
+        id: op.id.clone(),
         target_account_key: op.target_account_key.clone(),
         status: op.status,
         updated,

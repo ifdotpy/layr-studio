@@ -720,8 +720,8 @@ pub struct TransferRequestIdentity {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TransferRecord {
-    pub id: String,
-    pub lead_id: String,
+    pub id: TransferId,
+    pub lead_id: studio_runtime_schema::bounded_text::BoundedText<1, 200>,
     pub target_account_key: AccountKey,
     pub status: TransferStatus,
     pub created: serde_json::Number,
@@ -749,8 +749,8 @@ pub enum TransferRecordError {
 
 impl TransferRecord {
     pub fn new_team(
-        id: String,
-        lead_id: String,
+        id: TransferId,
+        lead_id: studio_runtime_schema::bounded_text::BoundedText<1, 200>,
         target: AccountKey,
         provider: studio_runtime_schema::ProviderKind,
         created: serde_json::Number,
@@ -762,7 +762,7 @@ impl TransferRecord {
             TransferStatus::Pending
         };
         let request = TransferRequestIdentity {
-            lead_id: lead_id.clone(),
+            lead_id: lead_id.as_str().to_owned(),
             target_account_key: target.clone(),
             scope: Field::Value(TransferScope::Team),
             saved_response: Field::Missing,
@@ -778,7 +778,7 @@ impl TransferRecord {
             updated: Field::Missing,
             scope: Field::Value(TransferScope::Team),
             finish_history: Field::Missing,
-            requests: Field::Value(BTreeMap::from([(id, request)])),
+            requests: Field::Value(BTreeMap::from([(id.as_str().to_owned(), request)])),
             vm: Field::Missing,
         }
     }
@@ -789,7 +789,7 @@ impl TransferRecord {
         lead_id: String,
         target: AccountKey,
     ) -> Result<(), TransferRecordError> {
-        if self.lead_id != lead_id
+        if self.lead_id.as_str() != lead_id
             || self.target_account_key != target
             || matches!(self.scope.value(), Some(TransferScope::Subagents))
         {
@@ -984,6 +984,14 @@ impl TransferId {
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
+    pub fn as_string(&self) -> &String {
+        self.0.as_string()
+    }
+}
+impl PartialEq<String> for TransferId {
+    fn eq(&self, other: &String) -> bool {
+        self.as_str() == other
+    }
 }
 impl TryFrom<String> for TransferId {
     type Error = &'static str;
@@ -1060,6 +1068,98 @@ pub struct LazySourceState {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn transfer_record_rejects_out_of_bounds_identifiers() {
+        for id in [String::new(), "x".repeat(201)] {
+            for field in ["id", "leadId"] {
+                let mut record = serde_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{}});
+                record[field] = id.clone().into();
+                assert!(
+                    serde_json::from_value::<super::TransferRecord>(record).is_err(),
+                    "{field} must be bounded"
+                );
+            }
+        }
+    }
+    fn rejects_at_store(record: &serde_json::Value) -> bool {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute(
+            "CREATE TABLE runtime_account_transfers (id TEXT PRIMARY KEY, record TEXT NOT NULL)",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO runtime_account_transfers VALUES ('move', ?1)",
+            [record.to_string()],
+        )
+        .unwrap();
+        let read_rejected =
+            crate::AccountTransferRepository::get_typed_with_raw(&db, "move").is_err();
+        let tx = db.transaction().unwrap();
+        read_rejected
+            && crate::AccountTransferRepository::put(&tx, "move", &record.to_string()).is_err()
+    }
+    #[test]
+    fn transfer_record_rejects_out_of_bounds_member_text() {
+        for field in ["name", "waiting", "error", "reason", "interruptReason"] {
+            let mut record = serde_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{"lead":{"phase":"waiting","sourceAccountKey":"source"}}});
+            record["members"]["lead"][field] = "x".repeat(65_537).into();
+            assert!(rejects_at_store(&record), "{field} must be bounded");
+        }
+    }
+    #[test]
+    fn transfer_record_rejects_out_of_bounds_member_identifiers() {
+        for field in ["sourceThreadId", "targetConnection"] {
+            for value in [String::new(), "x".repeat(201)] {
+                let mut record = serde_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{"lead":{"phase":"waiting","sourceAccountKey":"source"}}});
+                record["members"]["lead"][field] = value.into();
+                assert!(rejects_at_store(&record), "{field} must be bounded");
+            }
+        }
+    }
+    #[test]
+    fn transfer_record_rejects_invalid_member_keys() {
+        for id in [String::new(), "x".repeat(201)] {
+            let record = serde_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{id:{"phase":"waiting","sourceAccountKey":"source"}}});
+            assert!(rejects_at_store(&record));
+        }
+    }
+    #[test]
+    fn transfer_record_rejects_invalid_request_identifiers() {
+        for id in [String::new(), "x".repeat(201)] {
+            for bad_key in [true, false] {
+                let key = if bad_key { &id } else { "request" };
+                let lead = if bad_key { "lead" } else { &id };
+                let record = serde_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{},"requests":{key:{"leadId":lead,"targetAccountKey":"target"}}});
+                assert!(rejects_at_store(&record));
+            }
+        }
+    }
+    #[test]
+    fn transfer_record_rejects_excess_members_and_requests() {
+        let mut record = serde_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{}});
+        let members = (0..2051)
+            .map(|i| {
+                (
+                    format!("agent-{i}"),
+                    serde_json::json!({"phase":"waiting","sourceAccountKey":"source"}),
+                )
+            })
+            .collect();
+        record["members"] = serde_json::Value::Object(members);
+        assert!(rejects_at_store(&record));
+        record["members"] = serde_json::json!({});
+        let requests = (0..4097)
+            .map(|i| {
+                (
+                    format!("request-{i}"),
+                    serde_json::json!({"leadId":"lead","targetAccountKey":"target"}),
+                )
+            })
+            .collect();
+        record["requests"] = serde_json::Value::Object(requests);
+        assert!(rejects_at_store(&record));
+    }
     #[test]
     fn destination_settings_preserve_pending_and_reject_unknown_fields() {
         let value = serde_json::json!({"model":"model", "pendingSettings":{"model":"queued"}, "pendingSettingsAccountKey":"account"});
@@ -1151,8 +1251,8 @@ mod tests {
         );
         let target: AccountKey = "target".to_owned().try_into().unwrap();
         let mut record = TransferRecord::new_team(
-            "move".into(),
-            "lead".into(),
+            "move".to_owned().try_into().unwrap(),
+            "lead".to_owned().try_into().unwrap(),
             target.clone(),
             studio_runtime_schema::ProviderKind::Codex,
             1.into(),

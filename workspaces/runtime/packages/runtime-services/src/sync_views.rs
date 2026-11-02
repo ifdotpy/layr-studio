@@ -569,6 +569,8 @@ struct AccountChangeAgent {
     thread_id: Option<String>,
     #[serde(default)]
     in_flight: Option<bool>,
+    #[serde(default)]
+    excluded_account_keys: Option<Vec<String>>,
 }
 
 /// Minimal displayable record for an agent whose stored schema failed. Keep
@@ -748,7 +750,7 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
             .cloned()
             .map(|mut destination| {
                 if crate::account_transfer_driver::account_is_excluded(
-                    record.get("excludedAccountKeys"),
+                    source.excluded_account_keys.as_deref(),
                     destination.account_key.as_str(),
                 ) {
                     destination.eligibility =

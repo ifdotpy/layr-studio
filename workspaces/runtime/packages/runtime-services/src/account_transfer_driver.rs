@@ -244,13 +244,6 @@ fn replay_in(
     ))
 }
 
-fn excludes_account(agent: &studio_runtime_store::AgentRecord, target: &str) -> bool {
-    agent
-        .excluded_account_keys
-        .value()
-        .is_some_and(|keys| keys.iter().any(|key| key == target))
-}
-
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
 enum ResumeString<'a> {
@@ -267,10 +260,8 @@ struct ResumeIdentity<'a> {
 }
 
 /// The single compatibility accessor for per-chat account exclusions.
-pub(crate) fn account_is_excluded(exclusions: Option<&Value>, target: &str) -> bool {
-    exclusions
-        .and_then(Value::as_array)
-        .is_some_and(|keys| keys.iter().any(|key| key.as_str() == Some(target)))
+pub(crate) fn account_is_excluded(exclusions: Option<&[String]>, target: &str) -> bool {
+    exclusions.is_some_and(|keys| keys.iter().any(|key| key == target))
 }
 
 /// Return a retained request before consulting mutable account eligibility.
@@ -336,7 +327,10 @@ pub async fn request(
                     "Choose the orchestrator to transfer its team",
                 ));
             }
-            if excludes_account(&actor, &target) {
+            if account_is_excluded(
+                actor.excluded_account_keys.value().map(Vec::as_slice),
+                &target,
+            ) {
                 return Err(TransferError::Refused(
                     "This account is disabled for this chat",
                 ));
@@ -421,8 +415,10 @@ pub async fn request(
                 ));
             }
             let operation = TransferRecord::new_team(
-                operation_id.clone(),
-                lead.clone(),
+                transfer_id,
+                lead.clone()
+                    .try_into()
+                    .map_err(|_| TransferError::Refused("Invalid transfer identity"))?,
                 target_key,
                 provider,
                 serde_json::Number::from_f64(now)
@@ -517,14 +513,15 @@ fn persist_request(
         .map_err(|_| TransferError::Refused("Invalid transfer response"));
     }
     let operation = &decision.operation;
-    let old = decision.agents.get(&operation.lead_id).and_then(|agent| {
-        match agent.account_transfer.value() {
+    let old = decision
+        .agents
+        .get(operation.lead_id.as_str())
+        .and_then(|agent| match agent.account_transfer.value() {
             Some(studio_runtime_store::transfer_record::AgentTransferState::Summary(summary)) => {
                 Some(summary.id.as_str())
             }
             _ => None,
-        }
-    });
+        });
     let previous_created = old
         .map(|id| Repository::get_typed_with_raw(tx, id))
         .transpose()?
@@ -537,7 +534,7 @@ fn persist_request(
     }
     let raw = decision.encoded()?;
     let operation = &decision.operation;
-    Repository::put(tx, &operation.id, &raw)?;
+    Repository::put(tx, operation.id.as_str(), &raw)?;
     let mut agents = std::mem::take(&mut decision.agents);
     for (id, agent) in &mut agents {
         let prior = AgentRepository::get(tx, &AgentId::from(id.as_str()))?;

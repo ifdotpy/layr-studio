@@ -9,6 +9,9 @@ impl<const MIN: usize, const MAX: usize> BoundedText<MIN, MAX> {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+    pub fn as_string(&self) -> &String {
+        &self.0
+    }
 }
 impl<const MIN: usize, const MAX: usize> TryFrom<String> for BoundedText<MIN, MAX> {
     type Error = &'static str;
