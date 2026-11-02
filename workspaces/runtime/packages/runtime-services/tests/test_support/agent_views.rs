@@ -21,6 +21,7 @@ pub(crate) fn normalize_legacy_agent(value: &mut Value) {
     );
 }
 
+#[allow(dead_code)]
 pub(crate) fn normalize_creation_agent(value: &mut Value) {
     normalize_agent(
         value,
