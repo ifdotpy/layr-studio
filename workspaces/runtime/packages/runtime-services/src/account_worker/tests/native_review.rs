@@ -50,6 +50,7 @@ for (key, value) in [
                 ] { match key {
                     "status" => row.status = serde::Deserialize::deserialize(value).unwrap(),
                     "role" => row.role = serde::Deserialize::deserialize(value).unwrap(),
+                    "worktree" => row.worktree = Some(serde::Deserialize::deserialize(value).unwrap()),
                     "nativeEffort" => row.native_effort = serde::Deserialize::deserialize(value).unwrap(),
                     "yoloMode" => row.yolo_mode = serde::Deserialize::deserialize(value).unwrap(),
                     "startAttempt" => row.start_attempt = Some(serde::Deserialize::deserialize(value).unwrap()),

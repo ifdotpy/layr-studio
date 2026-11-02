@@ -369,6 +369,18 @@ pub struct AgentRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_mode: Option<studio_runtime_schema::records::WorkspaceMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_base_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_mode_explicit: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_in_git: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quick_create: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_defaults: Option<studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<studio_runtime_schema::claude_permissions::PermissionMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -1097,6 +1109,12 @@ impl AgentRecord {
             native_status: None,
             is_lead: None,
             workspace_mode: None,
+            worktree: None,
+            worker_base_ref: None,
+            workspace_mode_explicit: None,
+            workspace_in_git: None,
+            quick_create: None,
+            review_defaults: None,
             permission_mode: None,
             model: None,
             cwd: None,
@@ -3639,6 +3657,33 @@ mod tests {
                 assert_eq!(agent(value.clone()).into_value(), value);
             }
         }
+    }
+
+    #[test]
+    fn creation_fields_round_trip_without_extensions() {
+        let record = agent(
+            json!({"id":"agent","rootId":"agent","epoch":2,"status":"idle",
+            "accountKey":"default","compactions":0,"worktree":true,"workerBaseRef":"main",
+            "workspaceModeExplicit":false,"workspaceInGit":true,"quickCreate":true,
+            "reviewDefaults":{"model":null,"effort":"high"}}),
+        );
+        for key in [
+            "worktree",
+            "workerBaseRef",
+            "workspaceModeExplicit",
+            "workspaceInGit",
+            "quickCreate",
+            "reviewDefaults",
+        ] {
+            assert!(!record.extra.contains_key(key), "{key}");
+        }
+        let encoded = record.value();
+        assert_eq!(encoded["workerBaseRef"], "main");
+        assert_eq!(
+            encoded["reviewDefaults"],
+            json!({"model":null,"effort":"high"})
+        );
+        assert_eq!(record, AgentRecord::from_value(encoded).unwrap());
     }
 
     #[test]

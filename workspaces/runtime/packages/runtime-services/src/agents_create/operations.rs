@@ -3821,7 +3821,11 @@ mod tests {
                                 .expect("root")
                                 .value();
                         root["workerDefaults"] = defaults;
-                        root["reviewDefaults"] = review;
+                        if review.as_object().is_some_and(|value| value.is_empty()) {
+                            root.as_object_mut().unwrap().remove("reviewDefaults");
+                        } else {
+                            root["reviewDefaults"] = review;
+                        }
                         root["excludedAccountKeys"] = excluded;
                         studio_runtime_store::AgentRepository::put(
                             tx,

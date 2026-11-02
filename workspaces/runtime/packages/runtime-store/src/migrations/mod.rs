@@ -81,6 +81,7 @@ mod m2026_11_01_transfer_operations;
 mod m2026_11_01_transfer_pointers;
 mod m2026_11_01_transfer_summary;
 mod m2026_11_01_work_detail_policy;
+mod m2026_11_02_agent_worker_base_ref;
 mod m2026_11_02_legacy_vm_transfers;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -420,6 +421,16 @@ mod projection_copy_tests {
 // Explicit dependency order: provider leaves precede strict generated columns;
 // columns precede indexes; volatile data moves before its new triggers exist.
 static CATALOG: &[&dyn Migration] = &[
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-02-agent-worker-base-ref",
+            introduced: NOVEMBER_2,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with null worker base references or review efforts",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_02_agent_worker_base_ref::apply(c.transaction),
+    },
     &SqlMigration {
         definition: MigrationDefinition {
             id: "2026-11-02-legacy-vm-transfers",

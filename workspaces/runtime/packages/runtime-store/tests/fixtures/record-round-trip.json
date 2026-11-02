@@ -61,7 +61,6 @@
     "imageWorkspaceCreatedAt": null,
     "imageWorkspaceError": null,
     "worktreeWarning": null,
-    "workerBaseRef": null,
     "workerBaseCommit": null,
     "workerBaseBehindMain": null,
     "workerBaseMainRef": null,
@@ -73,8 +72,7 @@
       "delegationDepth": 1
     },
     "reviewDefaults": {
-      "model": null,
-      "effort": null
+      "model": null
     },
     "agentMode": "multi",
     "agentModeRevision": 0,

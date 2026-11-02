@@ -890,15 +890,12 @@ mod tests {
             fixture.draft.role.value(),
             Some(&studio_runtime_schema::creation_intent::AgentRole::Reviewer)
         );
-        assert_eq!(
-            fixture.draft.extra.get("worktree").and_then(Value::as_bool),
-            Some(false)
-        );
+        assert_eq!(fixture.draft.worktree, Some(false));
         assert_eq!(
             fixture.draft.workspace_mode,
             Some(studio_runtime_schema::records::WorkspaceMode::Shared)
         );
-        assert_eq!(fixture.draft.extra.get("workerBaseRef"), Some(&Value::Null));
+        assert_eq!(fixture.draft.worker_base_ref, None);
         assert_eq!(fixture.draft.fast_mode, Some(true));
         assert_eq!(fixture.draft.daybreak_enabled, Some(false));
     }
@@ -1134,7 +1131,7 @@ mod tests {
                     .expect("canonical temporary directory")
                     .to_str()
             );
-            assert_eq!(draft.extra.get("workerBaseRef"), Some(&Value::Null));
+            assert_eq!(draft.worker_base_ref, None);
             assert_eq!(
                 draft.model.as_deref(),
                 Some(if id == IDS[0] {

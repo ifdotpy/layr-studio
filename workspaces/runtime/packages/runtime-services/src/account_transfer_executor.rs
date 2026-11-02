@@ -2876,12 +2876,12 @@ mod retained_executor_tests {
 
     #[tokio::test]
     async fn before_start_copies_history_once_and_replays_unknown_fork_after_restart() {
-        assert_history_transfer_without_duplicate_fork(false).await;
+        Box::pin(assert_history_transfer_without_duplicate_fork(false)).await;
     }
 
     #[tokio::test]
     async fn cold_catalog_transfer_prepares_history_without_http_model_read() {
-        assert_history_transfer_without_duplicate_fork(true).await;
+        Box::pin(assert_history_transfer_without_duplicate_fork(true)).await;
     }
 
     async fn assert_history_transfer_without_duplicate_fork(cold_catalog: bool) {
