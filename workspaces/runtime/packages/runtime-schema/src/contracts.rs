@@ -1220,8 +1220,10 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     crate::workspace_modes::update_openapi(&mut openapi);
     openapi["components"]["schemas"]["NativeLayrCapability"] =
         schemars::schema_for!(crate::native_layr::NativeLayrCapability).to_value();
+    openapi["components"]["schemas"]["ChatWorkspaceMode"] =
+        schemars::schema_for!(crate::workspace_modes::ChatWorkspaceMode).to_value();
     openapi["components"]["schemas"]["UiSummaryResponse"]["properties"]["defaultWorkspaceMode"] =
-        serde_json::json!({"type":"string", "enum":crate::workspace_modes::CHAT_WORKSPACE_MODES});
+        serde_json::json!({"$ref":"#/components/schemas/ChatWorkspaceMode"});
     openapi["components"]["schemas"]["UiSummaryResponse"]["properties"]["nativeLayrMessage"] =
         serde_json::json!({"type":"string"});
     // The checked limits ingress schema also owns HTTP, SSE and bridge leaves.

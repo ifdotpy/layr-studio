@@ -23,6 +23,7 @@ Studio refuses an origin or history mismatch.
 Readiness records and operation receipts are separate for each store. The default store retains its original receipt paths.
 
 Install Layr separately and make `layr` available on the server's `PATH`.
+For a systemd service, install it in a directory on the unit's `Environment` PATH or add its installation directory to that PATH, which may omit user-local binary directories.
 Studio uses that executable and does not require a particular Layr version for now.
 Use `studio-runtime-server native-layr paths --state /path/to/studio-state` to inspect the store and daemon paths.
 

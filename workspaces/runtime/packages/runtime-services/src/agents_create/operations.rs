@@ -278,6 +278,7 @@ fn default_workspace_mode(lead: bool, native_ready: bool) -> &'static str {
         "unsupported"
     };
     studio_runtime_schema::workspace_modes::default_chat_workspace_mode(system, native_ready)
+        .as_str()
 }
 
 async fn native_capability(

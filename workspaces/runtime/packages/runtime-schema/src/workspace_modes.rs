@@ -1,14 +1,40 @@
 //! Workspace mode names accepted for new chats and managed workers.
 use serde_json::{Value, json};
 
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub enum ChatWorkspaceMode {
+    #[serde(rename = "layr-native")]
+    LayrNative,
+    #[serde(rename = "layr")]
+    Layr,
+    #[serde(rename = "worktree")]
+    Worktree,
+}
+
+impl ChatWorkspaceMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LayrNative => "layr-native",
+            Self::Layr => "layr",
+            Self::Worktree => "worktree",
+        }
+    }
+}
+
 /// Workspace choices for a new chat, in selector order.
-pub const CHAT_WORKSPACE_MODES: &[&str] = &["layr-native", "layr", "worktree"];
+pub const CHAT_WORKSPACE_MODES: &[&str] = &[
+    ChatWorkspaceMode::LayrNative.as_str(),
+    ChatWorkspaceMode::Layr.as_str(),
+    ChatWorkspaceMode::Worktree.as_str(),
+];
 /// Additional workspace choice for a worker that uses its parent's folder.
 pub const SHARED_WORKSPACE_MODE: &str = "shared";
 /// Preferred workspace mode when the host can run native Layr.
-pub const DEFAULT_CHAT_WORKSPACE_MODE: &str = "layr-native";
+pub const DEFAULT_CHAT_WORKSPACE_MODE: &str = ChatWorkspaceMode::LayrNative.as_str();
 /// Default mode for a top-level task agent and fallback for an unavailable native host.
-pub const DEFAULT_AGENT_WORKSPACE_MODE: &str = "worktree";
+pub const DEFAULT_AGENT_WORKSPACE_MODE: &str = ChatWorkspaceMode::Worktree.as_str();
 /// Server system names that always support the native workspace.
 pub const ALWAYS_NATIVE_SYSTEMS: &[&str] = &["Darwin"];
 /// Server system names that require a ready native capability.
@@ -23,13 +49,13 @@ const PROJECT_POLICY_PROPERTIES: [(&str, &str); 3] = [
     ("ProjectMutationRecord", "workspacePolicy"),
 ];
 
-pub fn default_chat_workspace_mode(system: &str, native_ready: bool) -> &'static str {
+pub fn default_chat_workspace_mode(system: &str, native_ready: bool) -> ChatWorkspaceMode {
     if native_ready
         && (ALWAYS_NATIVE_SYSTEMS.contains(&system) || CAPABILITY_NATIVE_SYSTEMS.contains(&system))
     {
-        DEFAULT_CHAT_WORKSPACE_MODE
+        ChatWorkspaceMode::LayrNative
     } else {
-        DEFAULT_AGENT_WORKSPACE_MODE
+        ChatWorkspaceMode::Worktree
     }
 }
 
@@ -110,10 +136,22 @@ mod tests {
 
     #[test]
     fn platform_defaults_require_the_native_linux_capability() {
-        assert_eq!(default_chat_workspace_mode("Darwin", false), "worktree");
-        assert_eq!(default_chat_workspace_mode("Linux", true), "layr-native");
-        assert_eq!(default_chat_workspace_mode("Linux", false), "worktree");
-        assert_eq!(default_chat_workspace_mode("Windows", true), "worktree");
+        assert_eq!(
+            default_chat_workspace_mode("Darwin", false),
+            ChatWorkspaceMode::Worktree
+        );
+        assert_eq!(
+            default_chat_workspace_mode("Linux", true),
+            ChatWorkspaceMode::LayrNative
+        );
+        assert_eq!(
+            default_chat_workspace_mode("Linux", false),
+            ChatWorkspaceMode::Worktree
+        );
+        assert_eq!(
+            default_chat_workspace_mode("Windows", true),
+            ChatWorkspaceMode::Worktree
+        );
         let mut document = json!({});
         update_openapi(&mut document);
         assert!(

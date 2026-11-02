@@ -519,15 +519,10 @@ async fn ui_summary(
             summary.has_studio_vm = Some(has_studio_vm);
             summary.native_layr_message = native_layr.message().map(str::to_owned);
             summary.default_workspace_mode = Some(
-                if studio_runtime_schema::workspace_modes::default_chat_workspace_mode(
+                studio_runtime_schema::workspace_modes::default_chat_workspace_mode(
                     &summary.system,
                     native_layr.is_ready(),
-                ) == studio_runtime_schema::workspace_modes::DEFAULT_CHAT_WORKSPACE_MODE
-                {
-                    crate::generated::UiSummaryResponseDefaultWorkspaceMode::LayrNative
-                } else {
-                    crate::generated::UiSummaryResponseDefaultWorkspaceMode::Worktree
-                },
+                ),
             );
             summary.native_layr = Some(native_layr);
             Ok::<_, ApiError>(summary)

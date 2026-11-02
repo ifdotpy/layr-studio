@@ -100,6 +100,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         rust_type: "studio_runtime_schema::limit_reset_request::ResetRequest".to_owned(),
         serde_with: None,
     };
+    analysis
+        .schemas
+        .get_mut("ChatWorkspaceMode")
+        .ok_or("missing chat workspace mode")?
+        .schema_type = SchemaType::Primitive {
+        rust_type: "studio_runtime_schema::workspace_modes::ChatWorkspaceMode".to_owned(),
+        serde_with: None,
+    };
     // Draft ingress has a single bounded Rust owner in routes/sync_documents.
     analysis
         .schemas

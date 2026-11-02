@@ -9944,6 +9944,11 @@ export interface components {
       nextBefore?: number | null | undefined;
       room: components["schemas"]["RoomDetailDto"];
     };
+    /**
+     * ChatWorkspaceMode
+     * @enum {string}
+     */
+    ChatWorkspaceMode: "layr-native" | "layr" | "worktree";
     /** CheckpointCaptureRequest */
     CheckpointCaptureRequest: {
       /** Agent */
@@ -25878,8 +25883,9 @@ export interface components {
       busy: boolean;
       /** Chats */
       chats: components["schemas"]["SummaryChat"][];
-      /** @enum {string} */
-      defaultWorkspaceMode?: "layr-native" | "layr" | "worktree" | undefined;
+      defaultWorkspaceMode?:
+        | components["schemas"]["ChatWorkspaceMode"]
+        | undefined;
       /**
        * @description The server has a created Studio Linux VM.
        * @default false
@@ -38839,6 +38845,12 @@ export const ChatOperationalKind = {
   none: "none",
 } as const;
 export type ChatOperationalKind = components["schemas"]["ChatOperationalKind"];
+export const ChatWorkspaceMode = {
+  "layr-native": "layr-native",
+  layr: "layr",
+  worktree: "worktree",
+} as const;
+export type ChatWorkspaceMode = components["schemas"]["ChatWorkspaceMode"];
 export const ClaudeRateStatus = {
   allowed: "allowed",
   allowed_warning: "allowed_warning",
