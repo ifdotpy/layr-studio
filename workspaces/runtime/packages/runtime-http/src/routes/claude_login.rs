@@ -3,7 +3,6 @@ use super::extractors::{ApiJson, TypedQuery};
 use super::manifest::{OperationStatus, RouteGroup, get, post};
 use crate::{error::ApiError, router::HttpState};
 use axum::{Json, extract::State, http::StatusCode};
-use serde::Deserialize;
 use serde_json::Value;
 use std::sync::Arc;
 use studio_runtime_services::claude_login::{LoginError, service::LoginService};
@@ -35,26 +34,6 @@ pub(crate) fn routes() -> RouteGroup {
             cancel,
         ),
     ])
-}
-#[derive(Deserialize)]
-struct Start {
-    login_id: String,
-    account_key: String,
-}
-#[derive(Deserialize)]
-struct Add {
-    login_id: String,
-    email: Option<String>,
-    label: Option<String>,
-}
-#[derive(Deserialize)]
-struct Code {
-    login_id: String,
-    code: String,
-}
-#[derive(Deserialize)]
-struct Cancel {
-    login_id: String,
 }
 fn service(state: &HttpState) -> Result<Arc<LoginService>, ApiError> {
     state
@@ -97,40 +76,53 @@ async fn status(
 }
 async fn start(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Start>,
+    ApiJson(body): ApiJson<crate::generated::ClaudeStartRequest>,
 ) -> Result<Json<Value>, ApiError> {
     service(&state)?
-        .start(body.login_id, Some(body.account_key), None, None)
+        .start(
+            body.login_id.inner().as_str().to_owned(),
+            Some(body.account_key),
+            None,
+            None,
+        )
         .await
         .map(Json)
         .map_err(error)
 }
 async fn add(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Add>,
+    ApiJson(body): ApiJson<crate::generated::ClaudeAddStartRequest>,
 ) -> Result<Json<Value>, ApiError> {
     service(&state)?
-        .start(body.login_id, None, body.email, body.label)
+        .start(
+            body.login_id.inner().as_str().to_owned(),
+            None,
+            body.email.flatten().map(|v| v.inner().as_str().to_owned()),
+            body.label.flatten().map(|v| v.inner().as_str().to_owned()),
+        )
         .await
         .map(Json)
         .map_err(error)
 }
 async fn code(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Code>,
+    ApiJson(body): ApiJson<crate::generated::ClaudeCodeRequest>,
 ) -> Result<Json<Value>, ApiError> {
     service(&state)?
-        .code(&body.login_id, body.code)
+        .code(
+            body.login_id.inner().as_str(),
+            body.code.as_str().to_owned(),
+        )
         .await
         .map(Json)
         .map_err(error)
 }
 async fn cancel(
     State(state): State<HttpState>,
-    ApiJson(body): ApiJson<Cancel>,
+    ApiJson(body): ApiJson<crate::generated::ClaudeCancelRequest>,
 ) -> Result<Json<Value>, ApiError> {
     service(&state)?
-        .cancel(&body.login_id)
+        .cancel(body.login_id.inner().as_str())
         .await
         .map(Json)
         .map_err(error)

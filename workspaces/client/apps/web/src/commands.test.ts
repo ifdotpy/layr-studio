@@ -25,6 +25,7 @@ function memoryStorage(): Storage {
 
 const applied: CommandResponse = {
   status: "applied",
+  kind: "stop",
   ref_kind: "agent",
   ref_id: "chat",
   rev: 1,

@@ -266,9 +266,7 @@ pub(crate) fn commit_steer(
     snapshot.artifact_paths = prepared.snapshot.artifact_paths.clone();
     snapshot.asset_paths = prepared.snapshot.asset_paths.clone();
     let current = turn::compile(&snapshot, &events).map_err(|e| refusal(e.to_string()))?;
-    if serde_json::to_value(current).map_err(|_| invalid("steer compilation"))?
-        != serde_json::to_value(&prepared.compiled).map_err(|_| invalid("steer compilation"))?
-    {
+    if current != prepared.compiled {
         return Err(refusal("steer-preparation/snapshot-changed".into()));
     }
     Ok(())
@@ -1366,12 +1364,17 @@ pub(crate) async fn prepare_monitor_command(
             .filter(|id| !id.is_empty())
             .ok_or_else(|| refusal("monitor-preparation/thread-required".into()))?
             .to_owned();
-        let settings = monitor_command_settings(
+        let mut settings = monitor_command_settings(
             &current,
             &snapshot.actor.cwd,
             snapshot.settings.role,
             snapshot.settings.yolo_mode,
         )?;
+        if let Some(environment) =
+            resources_for_snapshot.monitor_environment(&state_root, &current)?
+        {
+            settings["env"] = Value::Object(environment);
+        }
         Ok(super::PreparedMonitorCommand {
             thread_id,
             settings,
@@ -2061,12 +2064,7 @@ pub(crate) fn commit(
             turn::compile(&current_submission, &current_events)
         })
         .map_err(|e| refusal(e.to_string()))?;
-        if stage("turn_submission.commit.compare", || {
-            Ok::<_, WorkerError>(
-                serde_json::to_value(&recompiled).map_err(|_| invalid("compiler result"))?
-                    != serde_json::to_value(compiled).map_err(|_| invalid("compiler result"))?,
-            )
-        })? {
+        if recompiled != *compiled {
             // Name the changed compiler inputs; a change seen only in the
             // output (its events) names the output fields instead.
             let mut fields = changed_fields(baseline, &current_submission)?;
@@ -2756,9 +2754,12 @@ mod team_progress_delivery_tests {
                     ("busy", "running"),
                     ("waiting", "queued"),
                 ] {
-                    let child = json!({"compactions":0,"id":id,"rootId":"lead","parentId":"lead","epoch":1,
+                    let mut child = json!({"compactions":0,"id":id,"rootId":"lead","parentId":"lead","epoch":1,
                         "status":status,"autoWake":true,"name":id,"cwd":"/work",
                         "provider":provider,"accountKey":"default"});
+                    if id == "busy" {
+                        child["deletedAt"] = json!(0);
+                    }
                     AgentRepository::put(tx, &AgentRecord::from_value(child).expect("child"))?;
                 }
                 for (index, id) in ["done", "failed"].into_iter().enumerate() {
@@ -2794,6 +2795,14 @@ mod team_progress_delivery_tests {
             })
             .await
             .expect("batch snapshot");
+        assert!(
+            !snapshot
+                .workers
+                .iter()
+                .find(|worker| worker.id == "busy")
+                .unwrap()
+                .deleted
+        );
         for provider in studio_runtime_providers::ProviderKind::ALL {
             snapshot.provider = Some(provider);
             let prepared = turn::compile(&snapshot, &events).expect("provider projection");

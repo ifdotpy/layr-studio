@@ -11,6 +11,7 @@ use rusqlite::{OptionalExtension, Transaction};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use studio_runtime_providers::ProviderKind;
+use studio_runtime_schema::queue_command::Field;
 use studio_runtime_store::path_identity::CanonicalPath;
 use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore, StoreError};
 use thiserror::Error;
@@ -371,8 +372,8 @@ pub(crate) async fn resolve_worker_settings(
         requested_model
     };
     let profile_effort = profile.and_then(|profile| profile.effort);
-    let mut effort = if !spec.effort.is_missing() {
-        spec.effort.value().map(String::as_str)
+    let mut effort = if !spec.effort.is_inherit() {
+        spec.effort.selected().map(String::as_str)
     } else if let Some(effort) = profile_effort {
         Some(effort.as_str())
     } else if let Some((_, effort, _)) = &review {
@@ -395,7 +396,7 @@ pub(crate) async fn resolve_worker_settings(
         .unwrap_or(false);
     // An inherited effort unsupported by the selected model uses its native default.
     // A request or profile explicitly choosing an effort remains a validation error.
-    if spec.effort.is_missing()
+    if spec.effort.is_inherit()
         && profile_effort.is_none()
         && effort.is_some()
         && matches!(
@@ -433,7 +434,7 @@ impl From<WorkerSettingsError> for Error {
 
 struct Draft {
     typed: AgentRecord,
-    record: Value,
+    record: AgentRecord,
     id: String,
     prompt: String,
     task_id: Option<String>,
@@ -458,7 +459,7 @@ pub(crate) async fn spawn_agents(
     now: f64,
     environment: &dyn ManagedCreationEnvironment,
 ) -> Result<crate::managed_host_tools::DispatchedOperation, Error> {
-    let actor_record = actor.record().clone();
+    let actor_record = Box::new(actor.record().clone());
     if actor_record.role.value().copied()
         == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer)
     {
@@ -484,7 +485,7 @@ pub(crate) async fn spawn_agents(
         ))?;
     let parent_value = actor_record.value();
     let root_id = actor_record.root_id.0.as_str();
-    let root = stored_root(store, AgentId::from(root_id)).await?;
+    let root = Box::new(stored_root(store, AgentId::from(root_id)).await?);
     event_write::assert_delegation(&root)
         .map_err(|_| crate::managed_host_tools::Error::Invalid("Delegation is disabled"))?;
     let root_value = root.value();
@@ -662,7 +663,7 @@ pub(crate) async fn spawn_agents(
             )
             .into());
         }
-        if !vm_actor && requested_base_ref.is_some() && !in_git {
+        if !vm_actor && workspace != "layr-native" && requested_base_ref.is_some() && !in_git {
             return Err(crate::managed_host_tools::Error::Invalid(
                 "base_ref requires an implementer in a Git repository",
             )
@@ -706,7 +707,6 @@ pub(crate) async fn spawn_agents(
             .or_default() += 1;
         let account_key = &resolved.account_key;
         let account = resolved.account;
-        let provider = account.provider.key();
         let model = &resolved.model;
         let effort = resolved.effort.as_deref();
         let fast_mode = resolved.fast_mode;
@@ -746,7 +746,7 @@ pub(crate) async fn spawn_agents(
         let body = json!({"account_key":account_key,"name":name,"model":model,"effort":effort,
             "prompt":prompt,"workspace_explicit":spec.workspace.is_some(),
             "_workspaceInGit":workspace_in_git});
-        let draft = crate::host_worker_create::prepare_work_item(
+        let mut draft = crate::host_worker_create::prepare_work_item(
             &body,
             Path::new(host_cwd),
             AgentId::from(id.as_str()),
@@ -769,54 +769,75 @@ pub(crate) async fn spawn_agents(
             daybreak,
         )
         .map_err(map_create_error)?;
-        let mut record = crate::host_worker_create::persisted_record(&draft)
-            .map_err(map_create_error)?
-            .value();
+        draft.extra.insert(
+            "_p02ProjectLookupId".into(),
+            json!(
+                parent_project_id
+                    .and_then(Value::as_str)
+                    .unwrap_or(host_cwd)
+            ),
+        );
+        let mut record =
+            crate::host_worker_create::persisted_record(&draft).map_err(map_create_error)?;
         if workspace == "layr-native" {
-            crate::layr_native::configure_child(&mut record, &parent_value, &root_value);
+            crate::layr_native::configure_child(&mut record, &actor_record, &root);
+            if let Some(base_ref) = requested_base_ref {
+                let base_state = crate::layr_native::run(
+                    store.state_dir(),
+                    Path::new(parent_cwd),
+                    &["rev-parse", base_ref],
+                )
+                .map_err(|_| {
+                    crate::managed_host_tools::Error::Invalid(
+                        "Native Layr base revision could not be resolved",
+                    )
+                })?;
+                record.layr_base_state = Some(base_state);
+            }
         } else if vm_workspace {
-            record["workspaceMode"] = json!("layr");
             let (child_cwd, subpath) = vm_directory.as_ref().ok_or(Error::Refused)?;
             crate::agents_create::set_vm_workspace_fields(&mut record, host_cwd);
-            record["cwd"] = json!(child_cwd);
-            record["layrSubpath"] = json!(subpath);
+            record.cwd = Some(child_cwd.clone());
+            record.layr_subpath = Some(subpath.clone());
             if let Some(base_state) = &spec.base_ref {
-                record["layrBaseState"] = json!(base_state);
+                record.layr_base_state = Some(base_state.clone());
             }
         }
         if let Some(note) = workspace_note {
-            record["worktreeWarning"] = json!(note);
+            record.worktree_warning = Some(note.to_owned());
         }
         // An implementer outside Git uses the selected folder.
         if !vm_actor && role == "implementer" && !worktree && workspace != "layr-native" && !in_git
         {
-            record["worktreeWarning"] = json!(no_worktree_warning(
-                record["cwd"].as_str().unwrap_or(child_directory)
+            record.worktree_warning = Some(no_worktree_warning(
+                record.cwd.as_deref().unwrap_or(child_directory),
             ));
         }
-        record["provider"] = json!(provider);
-        record["workerBaseMainRef"] = json!(main_ref.clone());
-        record["workerBaseBehindMain"] = json!(behind_main);
+        record.provider = Field::Value(account.provider);
+        record.worker_base_main_ref = main_ref.clone();
+        record.worker_base_behind_main = behind_main
+            .map(u64::try_from)
+            .transpose()
+            .map_err(|_| Error::Refused)?;
         // Python's AgentFactory persists these keys on every row (including
         // rows without a selected profile): codex_runtime.py:5014-5015.
-        record["profileId"] = json!(spec.profile_id.value());
-        record["profileInstructions"] = json!("");
-        if let Some(profile) = &profile {
-            record["profileInstructions"] = json!(profile.instructions);
-        }
-        record["name"] = json!(name.trim());
-        record["permissionMode"] = root_value
-            .get("permissionMode")
-            .filter(|mode| !mode.is_null())
+        record.profile_id = spec
+            .profile_id
+            .value()
             .cloned()
-            .unwrap_or(json!(
-                studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
-            ));
-        crate::agents_create::set_capacity(
-            &mut record,
-            crate::agents_create::capacity_max(&root_value),
-            false,
-        )?;
+            .map_or(Field::Null, Field::Value);
+        record.profile_instructions = Field::Value(String::new());
+        if let Some(profile) = &profile {
+            record.profile_instructions = Field::Value(profile.instructions.clone());
+        }
+        record.name = Some(name.trim().to_owned());
+        record.permission_mode = Some(root.permission_mode.unwrap_or(
+            studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions,
+        ));
+        record.capacity = studio_runtime_store::AgentCapacity::Automatic {
+            max: studio_runtime_schema::AgentCounter::from_i64(root.capacity.max())
+                .ok_or(Error::Refused)?,
+        };
         drafts.push(Draft {
             typed: draft,
             record,
@@ -840,7 +861,7 @@ pub(crate) async fn spawn_agents(
         let current_root = AgentRepository::get(tx, &actor_record.root_id)?
             .ok_or(crate::managed_host_tools::Error::Stale)?;
         let current_parent = AgentRepository::get(tx, &actor_record.id)?
-            .ok_or(crate::managed_host_tools::Error::Stale)?.value();
+            .ok_or(crate::managed_host_tools::Error::Stale)?;
         event_write::assert_delegation(&current_root)
             .map_err(|_| crate::managed_host_tools::Error::Invalid("Delegation is disabled"))?;
         let max = current_root.capacity.max();
@@ -855,7 +876,24 @@ pub(crate) async fn spawn_agents(
         }
         for draft in &drafts {
             draft.workspace_admission.check(tx, &actor_record)
-                .map_err(|_| crate::managed_host_tools::Error::Stale)?;
+                .map_err(|error| match error {
+                    crate::monitor_policy::MonitorError::Store(error) => crate::managed_host_tools::Error::Store(error),
+                    error @ (crate::monitor_policy::MonitorError::Expired
+                        | crate::monitor_policy::MonitorError::InvalidStored { .. }
+                        | crate::monitor_policy::MonitorError::InvalidResultReceipt(_)
+                        | crate::monitor_policy::MonitorError::InvalidDeliveryIdentity(_)
+                        | crate::monitor_policy::MonitorError::InvalidOutputReceipt(_)
+                        | crate::monitor_policy::MonitorError::TaskFailed
+                        | crate::monitor_policy::MonitorError::Refused(_)
+                        | crate::monitor_policy::MonitorError::InputOutcomeUnknown
+                        | crate::monitor_policy::MonitorError::Unavailable(_)
+                        | crate::monitor_policy::MonitorError::ProviderRequest { .. }
+                        | crate::monitor_policy::MonitorError::ConfigurationRejected { .. }
+                        | crate::monitor_policy::MonitorError::ConfigurationReceipt { .. }
+                        | crate::monitor_policy::MonitorError::Event(_)
+                        | crate::monitor_policy::MonitorError::Rules(_)
+                        | crate::monitor_policy::MonitorError::Io(_)) => crate::managed_host_tools::Error::Refusal(error.to_string()),
+                })?;
             crate::host_worker_create::recheck_worker(tx, &draft.typed, draft.epoch, &draft.account)
                 .map_err(map_recheck_error)?;
         }
@@ -869,10 +907,10 @@ pub(crate) async fn spawn_agents(
                 children.push(project_child(&saved.value(), draft.task_id.as_deref(), draft.worktree));
                 continue;
             }
-            crate::child_permissions::inherit_claude_permissions(&mut draft.record, &current_parent, &current_root.value(), draft.intent.permission_mode).map_err(crate::managed_host_tools::Error::Invalid)?;
+            crate::child_permissions::inherit_claude_permissions(&mut draft.record, &current_parent, &current_root, draft.intent.permission_mode).map_err(crate::managed_host_tools::Error::Invalid)?;
             let mut text = draft.prompt.clone();
             if draft.worktree {
-                text.push_str(&format!("\n\n[Studio worker base] Commit {} from ref {}.", draft.record["workerBaseCommit"].as_str().unwrap_or_default(), draft.record["workerBaseRef"].as_str().unwrap_or("HEAD")));
+                text.push_str(&format!("\n\n[Studio worker base] Commit {} from ref {}.", draft.record.worker_base_commit.as_deref().unwrap_or_default(), draft.record.worker_base_ref.as_deref().unwrap_or("HEAD")));
                 if let Some(behind) = draft.worker_base_behind_main.filter(|behind| *behind != 0) {
                     text.push_str(&format!(" This base is {behind} commits behind {}. Check for newer project instructions before starting.", draft.worker_base_main_ref.as_deref().unwrap_or("main")));
                 }
@@ -884,24 +922,21 @@ pub(crate) async fn spawn_agents(
                 text.push_str(&format!("\n\n[Studio task {task}] {title}\nYou own this task. Submit the result with the work item tools."));
                 text.push_str(&studio_runtime_schema::task_results::assignment_text(&work.value()));
             }
-            let record = AgentRecord::from_value(draft.record.clone())
-                .map_err(|_| crate::managed_host_tools::Error::Invalid("Invalid child agent record"))?;
-            AgentRepository::put(tx, &record)?;
-            record_spawn_effect(tx, &actor_record, &draft.record, &request_id);
-            let mut record_value = draft.record.clone();
-            record_value["workerBaseMainRef"] = json!(draft.worker_base_main_ref);
-            record_value["workerBaseBehindMain"] = json!(draft.worker_base_behind_main);
+            let record = &draft.record;
+            AgentRepository::put(tx, record)?;
+            let record_value = record.value();
+            record_spawn_effect(tx, &actor_record, &record_value, &request_id);
             crate::agents_create::publish_agent(tx, &record_value)?;
             if let Some(task_id) = &draft.task_id {
                 crate::work_assignment_runtime::assign_in_transaction(tx, task_id, &draft.id, &actor_record, now)
                     .map_err(|_| crate::managed_host_tools::Error::Invalid("Work item assignment was rejected"))?;
             }
-            let inserted = event_write::enqueue_event(tx, &record, format!("{}:initial", draft.id), "user", text, now)
+            let inserted = event_write::enqueue_event(tx, record, format!("{}:initial", draft.id), "user", text, now)
                 .map_err(|_| crate::managed_host_tools::Error::Invalid("Initial turn intent was rejected"))?;
             if !inserted {
                 return Err(crate::managed_host_tools::Error::Invalid("This request id has different content"));
             }
-            children.push(project_child(&draft.record, draft.task_id.as_deref(), draft.worktree));
+            children.push(project_child(&record_value, draft.task_id.as_deref(), draft.worktree));
             signals.push(crate::managed_host_tools::WakeSignal::new("worker-driver"));
         }
         Ok(crate::managed_host_tools::OperationResult {
@@ -1323,7 +1358,7 @@ fn map_recheck_error(
         crate::agents_create::MutationError::Store(error) => {
             crate::managed_host_tools::Error::Store(error)
         }
-        crate::agents_create::MutationError::Conflict
+        error @ (crate::agents_create::MutationError::Conflict
         | crate::agents_create::MutationError::MissingCreationIntent
         | crate::agents_create::MutationError::Deleted
         | crate::agents_create::MutationError::UnknownAgent
@@ -1338,9 +1373,9 @@ fn map_recheck_error(
         | crate::agents_create::MutationError::Stale
         | crate::agents_create::MutationError::CurrentAccountExcluded
         | crate::agents_create::MutationError::InFlight
-        | crate::agents_create::MutationError::Request(_)
-        | crate::agents_create::MutationError::InvalidStoredObject { .. } => {
-            crate::managed_host_tools::Error::Stale
+        | crate::agents_create::MutationError::InvalidStoredObject { .. }
+        | crate::agents_create::MutationError::Request(_)) => {
+            crate::managed_host_tools::Error::Refusal(error.to_string())
         }
     }
 }
@@ -1363,7 +1398,7 @@ pub(crate) async fn request_review(
     now: f64,
     environment: &dyn ManagedCreationEnvironment,
 ) -> Result<crate::managed_host_tools::DispatchedOperation, Error> {
-    let actor_record = actor.record().clone();
+    let actor_record = Box::new(actor.record().clone());
     if actor_record.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm) {
         if actor_record.is_lead != Some(true) {
             return Err(crate::managed_host_tools::Error::Invalid(
@@ -1405,7 +1440,7 @@ pub(crate) async fn request_review(
         return Err(crate::managed_host_tools::Error::Invalid("Invalid review identity").into());
     }
     let parent_value = actor_record.value();
-    let root = stored_root(store, actor_record.root_id.clone()).await?;
+    let root = Box::new(stored_root(store, actor_record.root_id.clone()).await?);
     let root_value = root.value();
     let parent_cwd = parent_value.get("cwd").and_then(Value::as_str).ok_or(
         crate::managed_host_tools::Error::Invalid("Select a project directory"),
@@ -1475,7 +1510,7 @@ pub(crate) async fn request_review(
     // Review is read-only in the parent's managed workspace. Its requested
     // repository is validated separately and may differ from the actor's cwd.
     let workspace_admission = environment.prepare_workspace(store, &actor_record, request_id)?;
-    let effort = spec.effort.value().map(String::as_str);
+    let effort = spec.effort.selected().map(String::as_str);
     let fast_mode = spec.fast_mode.value().copied().unwrap_or(false);
     let (base_ref, base_commit, _, _) =
         crate::host_worker_create::resolve_worker_base(Path::new(&directory), None)
@@ -1493,7 +1528,7 @@ pub(crate) async fn request_review(
             "effort":effort,"prompt":spec.prompt.as_deref().unwrap_or(""),
             "_workspaceInGit":parent_value.get("workspaceInGit").and_then(Value::as_bool).unwrap_or(false),
     });
-    let prepared = crate::host_worker_create::prepare_work_item(
+    let mut prepared = crate::host_worker_create::prepare_work_item(
         &body,
         Path::new(&directory),
         AgentId::from(child_id),
@@ -1516,6 +1551,15 @@ pub(crate) async fn request_review(
         false,
     )
     .map_err(map_create_error)?;
+    prepared.extra.insert(
+        "_p02ProjectLookupId".into(),
+        json!(
+            parent_value
+                .get("projectId")
+                .and_then(Value::as_str)
+                .unwrap_or(parent_cwd)
+        ),
+    );
     let mut record = crate::host_worker_create::persisted_record(&prepared)
         .map_err(map_create_error)?
         .value();
@@ -1631,6 +1675,23 @@ mod vm_review_identity_tests {
         vm_review_guest_ids,
     };
     use serde_json::json;
+
+    #[test]
+    fn worker_recheck_refusal_reports_its_cause() {
+        use crate::agents_create::MutationError;
+        assert_eq!(
+            super::map_recheck_error(MutationError::ModelUnavailable).to_string(),
+            "The selected model is not available for the selected account"
+        );
+        assert_eq!(
+            super::map_recheck_error(MutationError::InvalidCreation("cwd")).to_string(),
+            "Invalid host agent creation field: cwd"
+        );
+        assert_eq!(
+            super::map_recheck_error(MutationError::IdentityChanged).to_string(),
+            "The account or project changed; reload before creating the agent"
+        );
+    }
 
     #[test]
     fn guest_review_ids_are_bounded_by_the_named_limit() {

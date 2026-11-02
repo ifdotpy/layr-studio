@@ -79,12 +79,17 @@ async function setup(
           busy: false,
           system,
           hasStudioVm,
-          nativeLayr: {
-            ready: nativeReady,
-            reason: nativeReady
-              ? null
-              : "Native Layr requires a btrfs store and root daemon.",
-          },
+          nativeLayr: nativeReady
+            ? { status: "ready" }
+            : {
+                status: "notReady",
+                reason: "Native Layr requires a btrfs store and root daemon.",
+              },
+          ...(!nativeReady && {
+            nativeLayrMessage:
+              "Native Layr requires a btrfs store and root daemon.",
+          }),
+          defaultWorkspaceMode: nativeReady ? "layr-native" : "worktree",
           agentsRunning: 0,
           alerts: [],
           accounts: [
@@ -563,9 +568,7 @@ test("Linux without native Layr defaults to WT and explains the unavailable opti
       dialog.getByRole("radio", { name: "WT", exact: true }),
     ).toBeChecked();
     await expect(
-      dialog.getByText("Native Layr requires a btrfs store and root daemon.", {
-        exact: true,
-      }),
+      dialog.getByTitle("Native Layr requires a btrfs store and root daemon."),
     ).toBeVisible();
     await dialog
       .getByRole("button", { name: "Start chat", exact: true })

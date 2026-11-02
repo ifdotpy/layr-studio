@@ -2082,6 +2082,9 @@ fn apply_turn_permissions(
     settings: &Value,
     actor: &studio_runtime_store::AgentRecord,
 ) -> Result<(), String> {
+    if let Some(environment) = settings.get("env") {
+        params["env"] = environment.clone();
+    }
     if let Some(policy) = settings
         .get("sandboxPolicy")
         .filter(|value| !value.is_null())
@@ -2124,6 +2127,24 @@ mod tests {
 
     struct NoSession;
     impl AccountSessionPort for NoSession {}
+
+    #[test]
+    fn monitor_launch_applies_prepared_environment() {
+        let actor: studio_runtime_store::AgentRecord =
+            serde_json::from_value(owner(Path::new("/"), true)).unwrap();
+        let mut params = json!({});
+        let settings = json!({"sandboxPolicy":{"type":"dangerFullAccess"},"env":{"LAYR_ROOT":"/store","LAYR_DIRECT":"0","LAYR_SOCKET":"/socket","PATH":"/managed:/usr/bin"}});
+        apply_turn_permissions(&mut params, &settings, &actor).unwrap();
+        assert_eq!(params["env"], settings["env"]);
+        let mut ordinary = json!({});
+        apply_turn_permissions(
+            &mut ordinary,
+            &json!({"sandboxPolicy":{"type":"dangerFullAccess"}}),
+            &actor,
+        )
+        .unwrap();
+        assert!(ordinary.get("env").is_none());
+    }
 
     #[test]
     fn monitor_account_fallback_matches_partial_json() {
@@ -3167,22 +3188,22 @@ mod tests {
 
     #[tokio::test]
     async fn queued_command_without_turn_fresh() {
-        queued_command_without_live_turn(false, false).await;
+        Box::pin(queued_command_without_live_turn(false, false)).await;
     }
 
     #[tokio::test]
     async fn queued_command_without_turn_fresh_replayed_config() {
-        queued_command_without_live_turn(false, true).await;
+        Box::pin(queued_command_without_live_turn(false, true)).await;
     }
 
     #[tokio::test]
     async fn queued_command_without_turn_restart() {
-        queued_command_without_live_turn(true, false).await;
+        Box::pin(queued_command_without_live_turn(true, false)).await;
     }
 
     #[tokio::test]
     async fn queued_command_without_turn_restart_replayed_config() {
-        queued_command_without_live_turn(true, true).await;
+        Box::pin(queued_command_without_live_turn(true, true)).await;
     }
 
     async fn retained_exit_without_resend(already_present: bool) {

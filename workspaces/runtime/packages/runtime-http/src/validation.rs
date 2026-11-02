@@ -110,6 +110,36 @@ const TYPED_BODIES: &[(&str, &str)] = &[
     ("POST", "/api/organization"),
     ("POST", "/api/sync/drafts"),
     ("POST", "/api/work"),
+    ("POST", "/api/projects"),
+    ("POST", "/api/peer-teams"),
+    ("POST", "/api/web-push/remove"),
+    ("POST", "/api/web-push/subscriptions"),
+    ("POST", "/api/voice/end"),
+    ("POST", "/api/voice/start"),
+    ("POST", "/api/voice/status"),
+    ("POST", "/api/checkpoint/preview"),
+    ("POST", "/api/checkpoint/restore"),
+    ("POST", "/api/checkpoint"),
+    ("POST", "/api/voice/records"),
+    ("POST", "/api/project-secrets/list"),
+    ("POST", "/api/project-secrets/set"),
+    ("POST", "/api/project-secrets/remove"),
+    ("POST", "/api/vault/aws-login"),
+    ("POST", "/api/vault/pull"),
+    ("POST", "/api/vault/setup/facts"),
+    ("POST", "/api/vault/setup"),
+    ("POST", "/api/vault/unlock"),
+    ("POST", "/api/mac-sync/config"),
+    ("POST", "/api/mac-sync/resolve"),
+    ("POST", "/api/projects/delete"),
+    ("POST", "/api/accounts/claude/add"),
+    ("POST", "/api/accounts/claude/login"),
+    ("POST", "/api/accounts/claude/login/code"),
+    ("POST", "/api/accounts/claude/login/cancel"),
+    ("POST", "/api/mcp/reconnect"),
+    ("POST", "/api/action"),
+    ("POST", "/api/connection-recovery"),
+    ("POST", "/api/conversation/delete"),
 ];
 
 // Temporary migration marker; typed extractors own these query contracts.
@@ -1609,17 +1639,6 @@ mod tests {
             ["POST /api/agents", "POST /api/projects"],
             "unrequested operations must remain uncompiled"
         );
-        let project = registry
-            .validate_route(
-                "POST",
-                "/api/projects",
-                RawRequest {
-                    body: Some(json!({"path":""})),
-                    ..RawRequest::default()
-                },
-            )
-            .expect_err("minimum string length is enforced");
-        assert_eq!(project.location.first(), Some(&json!("body")));
         registry
             .validate_route(
                 "POST",
@@ -1663,7 +1682,7 @@ mod tests {
     fn parsed_numbers_follow_json_schema_and_object_keys_remain_data() {
         let registry = Registry::compile(&[
             ("POST".to_owned(), "/api/agents".to_owned()),
-            ("POST".to_owned(), "/api/answer".to_owned()),
+            ("POST".to_owned(), "/api/commands".to_owned()),
         ])
         .expect("request schemas compile");
 
@@ -1687,7 +1706,7 @@ mod tests {
         );
 
         let object: Value = crate::json_body::parse_bounded(
-            br#"{"id":"x","answers":{"$serde_json::private::Number":"1"}}"#,
+            br#"{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"answer","target":"x","body":{"answers":{"$serde_json::private::Number":"1"}}}"#,
             1024,
         )
         .expect("magic key object parses");
@@ -1695,7 +1714,7 @@ mod tests {
             registry
                 .validate_route(
                     "POST",
-                    "/api/answer",
+                    "/api/commands",
                     RawRequest {
                         body: Some(object.clone()),
                         ..RawRequest::default()
@@ -1704,7 +1723,10 @@ mod tests {
                 .is_ok(),
             "the same key remains ordinary object data where objects are allowed"
         );
-        assert_eq!(object["answers"]["$serde_json::private::Number"], "1");
+        assert_eq!(
+            object["body"]["answers"]["$serde_json::private::Number"],
+            "1"
+        );
 
         let almost_integer: Value =
             serde_json::from_slice(br#"{"prompt":"x","concurrency":1.00000000000000000001}"#)

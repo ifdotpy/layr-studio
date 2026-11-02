@@ -2205,6 +2205,18 @@
           {
             "properties": {
               "kind": {
+                "const": "pending",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
                 "const": "current",
                 "type": "string"
               }
@@ -4390,6 +4402,9 @@
             ],
             "title": "Layrstateid"
           },
+          "manualConnectionCheck": {
+            "$ref": "#/components/schemas/ManualConnectionCheck"
+          },
           "movedFrom": {
             "anyOf": [
               {
@@ -5599,6 +5614,9 @@
               }
             ],
             "title": "Layrstateid"
+          },
+          "manualConnectionCheck": {
+            "$ref": "#/components/schemas/ManualConnectionCheck"
           },
           "model": {
             "anyOf": [
@@ -9068,6 +9086,9 @@
             "default": null,
             "title": "Layrstateid"
           },
+          "manualConnectionCheck": {
+            "$ref": "#/components/schemas/ManualConnectionCheck"
+          },
           "model": {
             "anyOf": [
               {
@@ -10169,6 +10190,9 @@
               }
             ],
             "title": "Lastreadat"
+          },
+          "manualConnectionCheck": {
+            "$ref": "#/components/schemas/ManualConnectionCheck"
           },
           "model": {
             "anyOf": [
@@ -15421,7 +15445,8 @@
               "project",
               "room",
               "work",
-              "outbox"
+              "outbox",
+              "approval"
             ],
             "type": "string"
           },
@@ -19770,6 +19795,16 @@
         "title": "ChatRead",
         "type": "object"
       },
+      "ChatWorkspaceMode": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "enum": [
+          "layr-native",
+          "layr",
+          "worktree"
+        ],
+        "title": "ChatWorkspaceMode",
+        "type": "string"
+      },
       "CheckpointCaptureRequest": {
         "additionalProperties": false,
         "properties": {
@@ -20813,6 +20848,9 @@
             ],
             "type": "string"
           },
+          "message": {
+            "type": "string"
+          },
           "promptTokens": {
             "maximum": 9007199254740991,
             "minimum": 0,
@@ -20839,6 +20877,9 @@
               "host_managed",
               "model_access"
             ],
+            "type": "string"
+          },
+          "title": {
             "type": "string"
           }
         },
@@ -22177,6 +22218,11 @@
         "title": "CodexLoginReceipt",
         "type": "object"
       },
+      "CommandAnswerBody": {
+        "additionalProperties": true,
+        "description": "The answer of an approval: the answer fields, without the approval id (the command target).",
+        "type": "object"
+      },
       "CommandErrorCode": {
         "enum": [
           "receipt_expired"
@@ -22191,6 +22237,8 @@
         "description": "One write action. The owner is runtime-schema/src/command.rs.",
         "discriminator": {
           "mapping": {
+            "answer": "#/components/schemas/CommandRequestAnswer",
+            "pause": "#/components/schemas/CommandRequestPause",
             "resolve": "#/components/schemas/CommandRequestResolve",
             "send": "#/components/schemas/CommandRequestSend",
             "stop": "#/components/schemas/CommandRequestStop",
@@ -22210,9 +22258,95 @@
           },
           {
             "$ref": "#/components/schemas/CommandRequestResolve"
+          },
+          {
+            "$ref": "#/components/schemas/CommandRequestPause"
+          },
+          {
+            "$ref": "#/components/schemas/CommandRequestAnswer"
           }
         ],
         "title": "CommandRequest"
+      },
+      "CommandRequestAnswer": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "$ref": "#/components/schemas/CommandAnswerBody"
+          },
+          "client": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[a-f0-9-]{36}$",
+            "type": "string"
+          },
+          "kind": {
+            "const": "answer",
+            "type": "string"
+          },
+          "number": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "client",
+          "number",
+          "kind",
+          "target",
+          "body"
+        ],
+        "type": "object"
+      },
+      "CommandRequestPause": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "$ref": "#/components/schemas/CommandStopBody"
+          },
+          "client": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[a-f0-9-]{36}$",
+            "type": "string"
+          },
+          "kind": {
+            "const": "pause",
+            "type": "string"
+          },
+          "number": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "client",
+          "number",
+          "kind",
+          "target",
+          "body"
+        ],
+        "type": "object"
       },
       "CommandRequestResolve": {
         "additionalProperties": false,
@@ -22393,8 +22527,87 @@
         "type": "object"
       },
       "CommandResponse": {
+        "description": "One applied command. The kind names the kind-specific result; only answer has one.",
+        "discriminator": {
+          "mapping": {
+            "answer": "#/components/schemas/CommandResponseAnswer",
+            "pause": "#/components/schemas/CommandResponseApplied",
+            "resolve": "#/components/schemas/CommandResponseApplied",
+            "send": "#/components/schemas/CommandResponseApplied",
+            "stop": "#/components/schemas/CommandResponseApplied",
+            "withdraw": "#/components/schemas/CommandResponseApplied"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/CommandResponseApplied"
+          },
+          {
+            "$ref": "#/components/schemas/CommandResponseAnswer"
+          }
+        ]
+      },
+      "CommandResponseAnswer": {
         "additionalProperties": false,
         "properties": {
+          "kind": {
+            "const": "answer",
+            "type": "string"
+          },
+          "ref_id": {
+            "type": "string"
+          },
+          "ref_kind": {
+            "type": "string"
+          },
+          "result": {
+            "$ref": "#/components/schemas/AnswerResult"
+          },
+          "rev": {
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/CommandRow"
+            },
+            "type": "array"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "applied"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "ref_kind",
+          "ref_id",
+          "rev",
+          "seq",
+          "rows",
+          "kind",
+          "result"
+        ],
+        "type": "object"
+      },
+      "CommandResponseApplied": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "send",
+              "withdraw",
+              "stop",
+              "resolve",
+              "pause"
+            ],
+            "type": "string"
+          },
           "ref_id": {
             "type": "string"
           },
@@ -22426,7 +22639,8 @@
           "ref_id",
           "rev",
           "seq",
-          "rows"
+          "rows",
+          "kind"
         ],
         "type": "object"
       },
@@ -24872,7 +25086,7 @@
             "default": null
           },
           "workspaceMode": {
-            "description": "When omitted, the server selects native Layr on macOS, or on Linux when the native capability is ready; otherwise it selects worktree.",
+            "description": "When omitted, the server selects native Layr when available; otherwise it selects worktree.",
             "enum": [
               "layr-native",
               "layr",
@@ -30696,6 +30910,30 @@
       "ManagedProcessRecord": {
         "$ref": "#/components/schemas/ProcessView"
       },
+      "ManualConnectionCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "receipt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConnectionCheckDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "available",
+          "receipt"
+        ],
+        "title": "ManualConnectionCheck",
+        "type": "object"
+      },
       "McpReconnectRequest": {
         "additionalProperties": false,
         "properties": {
@@ -33458,13 +33696,58 @@
         "type": "object"
       },
       "NativeLayrCapability": {
-        "additionalProperties": false,
-        "description": "Native Layr readiness for this server state directory.",
-        "properties": {
-          "ready": {
-            "type": "boolean"
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "oneOf": [
+          {
+            "properties": {
+              "status": {
+                "const": "ready",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "type": "object"
           },
-          "reason": {
+          {
+            "properties": {
+              "status": {
+                "const": "notInstalled",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "status": {
+                "const": "notReady",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "reason"
+            ],
+            "type": "object"
+          }
+        ],
+        "title": "NativeLayrCapability"
+      },
+      "NativeLayrSettingsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "storeRoot": {
             "anyOf": [
               {
                 "type": "string"
@@ -33473,11 +33756,36 @@
                 "type": "null"
               }
             ]
+          },
+          "version": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "build": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "version",
+                  "build"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
-          "ready"
+          "version",
+          "storeRoot"
         ],
+        "title": "NativeLayrSettingsResponse",
         "type": "object"
       },
       "NativeNameFailureRecordResponse": {
@@ -44565,8 +44873,7 @@
           }
         },
         "required": [
-          "model",
-          "effort"
+          "model"
         ],
         "title": "ReviewDefaultsDto",
         "type": "object"
@@ -59161,6 +59468,9 @@
             "title": "Chats",
             "type": "array"
           },
+          "defaultWorkspaceMode": {
+            "$ref": "#/components/schemas/ChatWorkspaceMode"
+          },
           "hasStudioVm": {
             "default": false,
             "description": "The server has a created Studio Linux VM.",
@@ -59168,6 +59478,9 @@
           },
           "nativeLayr": {
             "$ref": "#/components/schemas/NativeLayrCapability"
+          },
+          "nativeLayrMessage": {
+            "type": "string"
           },
           "projects": {
             "items": {
@@ -69429,127 +69742,6 @@
         "summary": "Annotation"
       }
     },
-    "/api/answer": {
-      "post": {
-        "operationId": "answer_api_answer_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AnswerBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AnswerResult"
-                }
-              }
-            },
-            "description": "Successful Response",
-            "headers": {
-              "Access-Control-Allow-Origin": {
-                "$ref": "#/components/headers/AccessControlAllowOrigin"
-              },
-              "Access-Control-Expose-Headers": {
-                "$ref": "#/components/headers/AccessControlExposeHeaders"
-              },
-              "Cache-Control": {
-                "$ref": "#/components/headers/CacheControl"
-              },
-              "Content-Encoding": {
-                "$ref": "#/components/headers/ContentEncoding"
-              },
-              "Content-Length": {
-                "$ref": "#/components/headers/ContentLength"
-              },
-              "Content-Security-Policy": {
-                "$ref": "#/components/headers/ContentSecurityPolicy"
-              },
-              "Content-Type": {
-                "$ref": "#/components/headers/ContentType"
-              },
-              "Referrer-Policy": {
-                "$ref": "#/components/headers/ReferrerPolicy"
-              },
-              "Server-Timing": {
-                "$ref": "#/components/headers/ServerTiming"
-              },
-              "Vary": {
-                "$ref": "#/components/headers/Vary"
-              },
-              "X-Content-Type-Options": {
-                "$ref": "#/components/headers/XContentTypeOptions"
-              },
-              "X-Studio-API-Schema": {
-                "$ref": "#/components/headers/StudioApiSchema"
-              },
-              "X-Studio-Server": {
-                "$ref": "#/components/headers/StudioServer"
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ApiError400",
-            "description": "Bad Request"
-          },
-          "401": {
-            "$ref": "#/components/responses/ApiError401",
-            "description": "Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ApiError403",
-            "description": "Forbidden"
-          },
-          "408": {
-            "$ref": "#/components/responses/ApiError408",
-            "description": "Request Timeout"
-          },
-          "409": {
-            "$ref": "#/components/responses/ApiError409",
-            "description": "Conflict"
-          },
-          "410": {
-            "$ref": "#/components/responses/ApiError410",
-            "description": "Gone"
-          },
-          "413": {
-            "$ref": "#/components/responses/ApiError413",
-            "description": "Content Too Large"
-          },
-          "415": {
-            "$ref": "#/components/responses/ApiError415",
-            "description": "Unsupported Media Type"
-          },
-          "426": {
-            "$ref": "#/components/responses/ApiError426",
-            "description": "Upgrade Required"
-          },
-          "429": {
-            "$ref": "#/components/responses/ApiError429",
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "$ref": "#/components/responses/ApiError500",
-            "description": "Internal Server Error"
-          },
-          "502": {
-            "$ref": "#/components/responses/ApiError502",
-            "description": "Bad Gateway"
-          },
-          "503": {
-            "$ref": "#/components/responses/ApiError503",
-            "description": "Service Unavailable"
-          }
-        },
-        "summary": "Answer"
-      }
-    },
     "/api/assets": {
       "post": {
         "operationId": "upload_asset_api_assets_post",
@@ -76228,6 +76420,89 @@
           }
         },
         "summary": "Native Command"
+      }
+    },
+    "/api/native-layr/settings": {
+      "get": {
+        "operationId": "native_layr_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeLayrSettingsResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/AccessControlAllowOrigin"
+              },
+              "Access-Control-Expose-Headers": {
+                "$ref": "#/components/headers/AccessControlExposeHeaders"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              },
+              "Content-Encoding": {
+                "$ref": "#/components/headers/ContentEncoding"
+              },
+              "Content-Length": {
+                "$ref": "#/components/headers/ContentLength"
+              },
+              "Content-Security-Policy": {
+                "$ref": "#/components/headers/ContentSecurityPolicy"
+              },
+              "Content-Type": {
+                "$ref": "#/components/headers/ContentType"
+              },
+              "Referrer-Policy": {
+                "$ref": "#/components/headers/ReferrerPolicy"
+              },
+              "Server-Timing": {
+                "$ref": "#/components/headers/ServerTiming"
+              },
+              "Vary": {
+                "$ref": "#/components/headers/Vary"
+              },
+              "X-Content-Type-Options": {
+                "$ref": "#/components/headers/XContentTypeOptions"
+              },
+              "X-Studio-API-Schema": {
+                "$ref": "#/components/headers/StudioApiSchema"
+              },
+              "X-Studio-Server": {
+                "$ref": "#/components/headers/StudioServer"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ApiError400",
+            "description": "Bad Request"
+          },
+          "401": {
+            "$ref": "#/components/responses/ApiError401",
+            "description": "Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/ApiError403",
+            "description": "Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/ApiError429",
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "$ref": "#/components/responses/ApiError500",
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/ApiError503",
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Native Layr Settings"
       }
     },
     "/api/orchestration/settings": {

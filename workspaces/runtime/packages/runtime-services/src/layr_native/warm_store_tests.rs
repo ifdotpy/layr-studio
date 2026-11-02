@@ -58,8 +58,7 @@ fn cargo_build(cwd: &Path) -> (Duration, Vec<Value>) {
 #[test]
 #[ignore = "requires STUDIO_LAYR_NATIVE_TEST_BINARY, the cached memchr crate, and APFS or btrfs"]
 fn real_native_preparation_reuses_an_existing_projects_saved_rust_cache() {
-    let binary =
-        PathBuf::from(std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY").expect("host binary"));
+    let binary = PathBuf::from(crate::layr_native::test_binary().expect("host binary"));
     let fixture = tempfile::tempdir().expect("fixture");
     let fixture_root = CanonicalPath::existing(fixture.path())
         .expect("canonical fixture")
@@ -116,7 +115,6 @@ fn real_native_preparation_reuses_an_existing_projects_saved_rust_cache() {
     ]);
     fs::create_dir_all(binary_path(&state).parent().expect("bin folder")).expect("bin folder");
     fs::copy(binary, binary_path(&state)).expect("private binary");
-    install::ensure_binary(&state).expect("private installation");
     let root = store_path(&state);
     run(
         &state,
@@ -127,8 +125,9 @@ fn real_native_preparation_reuses_an_existing_projects_saved_rust_cache() {
     let main = root.join("projects/studio/lines/main");
     run(&state, &main, &["protect", "main", "--direct"]).expect("main owner");
     settings::configure(&state, Some(&root)).expect("select existing store");
-    let mut lead = json!({"id":"warm-lead","isLead":true,"autoWake":true});
+    let mut lead = fixture_agent("warm-lead", true);
     configure_new_chat(&mut lead, source.to_str().expect("source"));
+    let mut lead = lead.value();
     let cold_ready = runtime::prepare_files(&state, &lead).expect("main without saved caches");
     assert!(
         cold_ready["layrCacheWarning"]
@@ -165,9 +164,13 @@ fn real_native_preparation_reuses_an_existing_projects_saved_rust_cache() {
     for (key, value) in equal_lead.as_object().expect("parent") {
         equal_parent[key] = value.clone();
     }
-    let mut equal_worker =
-        json!({"id":"equal-cache-worker","isLead":false,"role":"implementer","autoWake":true});
+    let equal_parent = fixture_native_parent(&equal_parent);
+    let mut equal_worker = fixture_agent("equal-cache-worker", false);
+    equal_worker.role = studio_runtime_schema::queue_command::Field::Value(
+        studio_runtime_schema::creation_intent::AgentRole::Implementer,
+    );
     configure_child(&mut equal_worker, &equal_parent, &equal_parent);
+    let equal_worker = equal_worker.value();
     let equal_ready =
         runtime::prepare_files(&state, &equal_worker).expect("worker from equal automatic state");
     assert_eq!(equal_ready["layrStateId"], automatic);
@@ -195,9 +198,13 @@ fn real_native_preparation_reuses_an_existing_projects_saved_rust_cache() {
     for (key, value) in ready.as_object().expect("ready") {
         lead[key] = value.clone();
     }
-    let mut worker =
-        json!({"id":"warm-worker","isLead":false,"role":"implementer","autoWake":true});
-    configure_child(&mut worker, &lead, &lead);
+    let parent = fixture_native_parent(&lead);
+    let mut worker = fixture_agent("warm-worker", false);
+    worker.role = studio_runtime_schema::queue_command::Field::Value(
+        studio_runtime_schema::creation_intent::AgentRole::Implementer,
+    );
+    configure_child(&mut worker, &parent, &parent);
+    let mut worker = worker.value();
     let ready = runtime::prepare_files(&state, &worker).expect("real worker preparation");
     for (key, value) in ready.as_object().expect("worker ready") {
         worker[key] = value.clone();
@@ -259,9 +266,7 @@ fn real_native_preparation_reuses_an_existing_projects_saved_rust_cache() {
         .expect_err("incompatible store must refuse")
         .to_string();
     assert!(
-        error.contains("9.9.9")
-            && error.contains(LAYR_VERSION)
-            && error.contains(root.to_str().expect("root")),
+        error.contains("9.9.9") && error.contains(root.to_str().expect("root")),
         "{error}"
     );
 }

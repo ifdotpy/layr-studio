@@ -165,13 +165,23 @@ pub fn migrate_with_options(
     options: Options,
 ) -> Result<Value> {
     let project = CanonicalPath::existing(project).map(CanonicalPath::into_path_buf)?;
-    let mut record = json!({"id":"migration", "isLead":true,"autoWake":true,"cwd":project});
+    let mut agent = studio_runtime_store::AgentRecord::new(
+        "migration".into(),
+        "migration".into(),
+        0,
+        studio_runtime_store::AgentStatus::Idle,
+        "default".into(),
+    );
+    agent.is_lead = Some(true);
+    agent.auto_wake = Some(true);
+    agent.cwd = Some(project.to_string_lossy().into_owned());
     configure_new_chat(
-        &mut record,
+        &mut agent,
         project
             .to_str()
             .ok_or_else(|| NativeLayrError::Refused("Non-UTF-8 project path".into()))?,
     );
+    let mut record = agent.value();
     let root = settings::selected_store(state_dir)?;
     let project_id = super::mapping::resolve(state_dir, &root, &record)?;
     record["layrProjectId"] = json!(project_id);
@@ -420,7 +430,7 @@ pub fn migrate_with_options(
     all_estimate["linesToCreate"] = json!(all_lines_to_create);
     let mut dirty_estimate = json!(size_dirty);
     dirty_estimate["linesToCreate"] = json!(dirty_lines_to_create);
-    let mut report = json!({"dryRun":dry_run,"withoutGit":options.without_git,"worktreeSelection":options.worktrees.as_str(),"selectionEstimates":{"all":all_estimate,"dirty":dirty_estimate},"skipWorktrees":options.skip_worktrees,"gitMetadataDisposition":if options.without_git {"Top-level .git is omitted and is not preserved. Source files and nested repositories follow normal admission. The source folder remains unchanged."} else {"Git metadata follows normal admission and preservation."},"projectId":project_id,"source":project,"layrVersion":super::LAYR_VERSION,"allocationModel":super::import::allocation_model(),"mainSize":clone_main.size,"sourceSize":main_plan.size,"worktreeData":main_plan.worktree_data,"worktreeSummary":super::inventory::worktree_summary(&lines),"linesToCreate":lines_to_create,"sizesComplete":sizes_complete,"excludedWorktreeFolders":main_plan.excluded_worktree_folders,"repositories":repositories,"plainGitMetadata":super::inventory::plain_git_metadata(&project, &main_plan),"refusals":refusals,"admissible":refusals.is_empty()});
+    let mut report = json!({"dryRun":dry_run,"withoutGit":options.without_git,"worktreeSelection":options.worktrees.as_str(),"selectionEstimates":{"all":all_estimate,"dirty":dirty_estimate},"skipWorktrees":options.skip_worktrees,"gitMetadataDisposition":if options.without_git {"Top-level .git is omitted and is not preserved. Source files and nested repositories follow normal admission. The source folder remains unchanged."} else {"Git metadata follows normal admission and preservation."},"projectId":project_id,"source":project,"allocationModel":super::import::allocation_model(),"mainSize":clone_main.size,"sourceSize":main_plan.size,"worktreeData":main_plan.worktree_data,"worktreeSummary":super::inventory::worktree_summary(&lines),"linesToCreate":lines_to_create,"sizesComplete":sizes_complete,"excludedWorktreeFolders":main_plan.excluded_worktree_folders,"repositories":repositories,"plainGitMetadata":super::inventory::plain_git_metadata(&project, &main_plan),"refusals":refusals,"admissible":refusals.is_empty()});
     if let Some(fields) = serde_json::to_value(size)
         .map_err(|error| NativeLayrError::Refused(error.to_string()))?
         .as_object()
@@ -484,7 +494,7 @@ pub fn migrate_with_options(
 }
 
 /// Create line `name` from main and replace its `relative` repository subtree with
-/// the worktree files of `plan`, including ignored data and warm caches.
+/// the selected worktree files of `plan` and warm caches.
 /// Callers run this inside a receipt; the source folder stays unchanged.
 pub(super) fn import_worktree_line(
     state_dir: &Path,
@@ -540,7 +550,7 @@ pub(super) fn import_worktree_line(
             .collect();
         clear_at(&destination, &cache_roots)?;
         // Reuse the pinned subtree even if its pathname was replaced after opening it.
-        plan.stage_open(&destination, &line_directory, relative)
+        plan.stage_open(&destination)
     })?;
     // A top-level line is a private container, distinct from a nested repository root.
     if relative.as_os_str().is_empty() {
@@ -711,7 +721,7 @@ mod tests {
         fs::create_dir_all(project.join("sub/target")).expect("source");
         git(project, &["init", "-q"]).expect("Git init");
         fs::write(project.join("Cargo.toml"), "[package]\n").expect("manifest");
-        fs::write(project.join(".gitignore"), "/target/\n").expect("ignore");
+        fs::write(project.join(".gitignore"), "").expect("ignore");
         fs::write(project.join("sub/target/from-main"), "base-data").expect("versioned data");
         git(project, &["add", "."]).expect("Git add");
         git(
@@ -780,6 +790,22 @@ mod tests {
         let project = fixture.path().join("project");
         cache_policy_fixture(&project);
         let state = fixture.path().join("state");
+        // Every layr call in this test uses this fixture binary, never a layr found on PATH.
+        let binary = binary_path(&state);
+        fs::create_dir_all(binary.parent().expect("fixture operation succeeds"))
+            .expect("fixture operation succeeds");
+        fs::write(
+            &binary,
+            format!(
+                "#!/bin/sh\ncase \"$*\" in\n*store-version*) printf '%s\\n' '{{\"binary\":{{\"format\":1,\"version\":\"fixture\",\"build\":\"fixture\"}},\"store\":{{\"format\":1,\"version\":\"fixture\",\"build\":\"fixture\"}},\"compatible\":true,\"state\":\"current\"}}' ;;\n*) printf '%s\\n' '[{{\"name\":\"main\",\"head\":\"{}\"}}]' ;;\nesac\n",
+                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+            ),
+        )
+        .expect("fixture operation succeeds");
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o700))
+            .expect("fixture operation succeeds");
+        crate::layr_native::capability::TEST_BINARY
+            .with(|value| *value.borrow_mut() = Some(binary.clone()));
         let initial = migrate(&state, &project, true).expect("fixture operation succeeds");
         let id = initial["projectId"]
             .as_str()
@@ -799,19 +825,6 @@ mod tests {
             )
             .expect("fixture operation succeeds");
         }
-        let binary = binary_path(&state);
-        fs::create_dir_all(binary.parent().expect("fixture operation succeeds"))
-            .expect("fixture operation succeeds");
-        fs::write(
-            &binary,
-            format!(
-                "#!/bin/sh\nprintf '%s\\n' '[{{\"name\":\"main\",\"head\":\"{}\"}}]'\n",
-                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-            ),
-        )
-        .expect("fixture operation succeeds");
-        fs::set_permissions(&binary, fs::Permissions::from_mode(0o700))
-            .expect("fixture operation succeeds");
         let partial_report = migrate(&state, &project, true).expect("partial import report");
         assert_eq!(
             partial_report["lines"][0]["lineNewEntries"], initial["lines"][0]["lineNewEntries"],
@@ -875,7 +888,7 @@ mod tests {
         )
         .expect("fixture operation succeeds");
         fs::copy(
-            std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY").expect("fixture operation succeeds"),
+            crate::layr_native::test_binary().expect("fixture operation succeeds"),
             binary_path(&state),
         )
         .expect("fixture operation succeeds");
@@ -988,7 +1001,7 @@ mod tests {
         let state = fixture.path().join("state");
         fs::create_dir_all(binary_path(&state).parent().expect("bin parent")).expect("bin");
         fs::copy(
-            std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY").expect("binary"),
+            crate::layr_native::test_binary().expect("binary"),
             binary_path(&state),
         )
         .expect("binary copy");
@@ -1146,7 +1159,9 @@ mod tests {
         assert!(
             refused["refusals"]
                 .to_string()
-                .contains("outside the project")
+                .contains("outside the project"),
+            "{}",
+            refused["refusals"]
         );
         fs::write(
             project.join("shared/.git/objects/info/alternates"),
@@ -1165,7 +1180,9 @@ mod tests {
         assert!(
             refused["refusals"]
                 .to_string()
-                .contains("outside the project")
+                .contains("outside the project"),
+            "{}",
+            refused["refusals"]
         );
         assert!(!state.exists());
     }
@@ -1180,7 +1197,7 @@ mod tests {
         let state = fixture.path().join("state");
         fs::create_dir_all(binary_path(&state).parent().expect("bin parent")).expect("bin");
         fs::copy(
-            std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY").expect("binary"),
+            crate::layr_native::test_binary().expect("binary"),
             binary_path(&state),
         )
         .expect("binary copy");
@@ -1302,21 +1319,16 @@ mod tests {
             }
         }
         let retained = fixture.path().join("retained-main");
-        fs::create_dir_all(retained.join(".studio-native-import")).expect("owned main");
         git(
             &project,
             &[
                 "clone",
-                "--bare",
                 "--no-local",
                 project.to_str().expect("project path"),
-                retained
-                    .join(".studio-native-import/git")
-                    .to_str()
-                    .expect("store path"),
+                retained.to_str().expect("store path"),
             ],
         )
-        .expect("retained Git fixture");
+        .expect("bridge Git fixture");
         super::super::import::verify_imported_head(&retained, Path::new(""), head.trim())
             .expect("retained base commit");
         let detached = git(&project.join(".worktrees/detached"), &["rev-parse", "HEAD"])

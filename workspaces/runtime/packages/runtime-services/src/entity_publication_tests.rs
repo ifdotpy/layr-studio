@@ -358,6 +358,13 @@ async fn worker_status_changes_publish_lead_team_counts() {
         client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
         json!({"working":1,"total":1})
     );
+    // The status lives on the chat row. The record write after it publishes the change.
+    write(
+        &store,
+        "UPDATE chats SET status='completed' WHERE id=?1",
+        vec!["worker".into()],
+    )
+    .await;
     write(
         &store,
         "UPDATE runtime_agents SET record=json_set(record,'$.status','completed') WHERE id=?1",
@@ -368,11 +375,23 @@ async fn worker_status_changes_publish_lead_team_counts() {
         client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
         json!({"working":0,"total":1})
     );
+    write(
+        &store,
+        "UPDATE chats SET status='running' WHERE id=?1",
+        vec!["worker".into()],
+    )
+    .await;
     write(&store, "UPDATE runtime_agents SET record=json_set(record,'$.status','waiting_on_monitor') WHERE id=?1", vec!["worker".into()]).await;
     assert_eq!(
         client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
         json!({"working":1,"total":1})
     );
+    write(
+        &store,
+        "UPDATE chats SET status='queued' WHERE id=?1",
+        vec!["worker".into()],
+    )
+    .await;
     write(
         &store,
         "UPDATE runtime_agents SET record=json_set(record,'$.status','queued') WHERE id=?1",
@@ -1601,6 +1620,13 @@ async fn a_raw_agent_row_write_reaches_the_client() {
 async fn studio_error_rows_are_published_as_entities_with_their_source_write() {
     let (_dir, store) = store().await;
     seed_chat(&store, chat(json!({}))).await;
+    // The status lives on the chat row. The record write after it publishes the change.
+    write(
+        &store,
+        "UPDATE chats SET status='failed' WHERE id=?1",
+        vec![CHAT.to_owned()],
+    )
+    .await;
     write(
         &store,
         "UPDATE runtime_agents SET record=json_set(record,'$.status','failed','$.error',?2) WHERE id=?1",

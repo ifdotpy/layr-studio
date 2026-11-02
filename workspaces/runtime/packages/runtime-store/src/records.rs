@@ -369,6 +369,58 @@ pub struct AgentRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_mode: Option<studio_runtime_schema::records::WorkspaceMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<studio_runtime_schema::agent_limits::SubagentConcurrency>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mode: Option<studio_runtime_schema::agent_entity_nested::AgentMode>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_safe_counter"
+    )]
+    pub agent_mode_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_concurrency_version: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layr_store_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layr_project_id: Option<Box<str>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layr_read_cwd: Option<Box<str>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layr_subpath: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layr_base_state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_server_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_base_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_mode_explicit: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_in_git: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quick_create: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_defaults: Option<Box<studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_warning: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_base_commit: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_safe_counter"
+    )]
+    pub worker_base_behind_main: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_base_main_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quick_create_request: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<studio_runtime_schema::claude_permissions::PermissionMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -662,7 +714,7 @@ pub struct AgentRecord {
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub fired_events: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_review_thread: Option<NativeReviewThread>,
+    pub native_review_thread: Option<Box<NativeReviewThread>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vm_launch: Option<VmLaunch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1080,14 +1132,20 @@ impl AgentRecord {
         self.deleted_at.is_some_and(|at| at != 0.0)
     }
 
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn test_defaults() -> Self {
+    /// Start an agent record with its required identity and lifecycle state.
+    pub fn new(
+        id: AgentId,
+        root_id: AgentId,
+        epoch: i64,
+        status: AgentStatus,
+        account_key: String,
+    ) -> Self {
         Self {
-            id: AgentId::from(""),
+            id,
             draft: None,
-            root_id: AgentId::from(""),
-            epoch: 0,
-            status: AgentStatus::Unknown,
+            root_id,
+            epoch,
+            status,
             parent_id: None,
             deleted_at: None,
             agent_archive: None,
@@ -1097,6 +1155,28 @@ impl AgentRecord {
             native_status: None,
             is_lead: None,
             workspace_mode: None,
+            concurrency: None,
+            agent_mode: None,
+            agent_mode_revision: None,
+            subagent_concurrency_version: None,
+            layr_store_root: None,
+            layr_project_id: None,
+            layr_read_cwd: None,
+            layr_subpath: None,
+            layr_base_state: None,
+            project_id: None,
+            project_server_id: None,
+            worktree: None,
+            worker_base_ref: None,
+            workspace_mode_explicit: None,
+            workspace_in_git: None,
+            quick_create: None,
+            review_defaults: None,
+            worktree_warning: None,
+            worker_base_commit: None,
+            worker_base_behind_main: None,
+            worker_base_main_ref: None,
+            quick_create_request: None,
             permission_mode: None,
             model: None,
             cwd: None,
@@ -1164,7 +1244,7 @@ impl AgentRecord {
             claude_options: Default::default(),
             execution_mode: None,
             turn_epoch: None,
-            account_key: crate::cost_aggregate::DEFAULT_ACCOUNT.to_owned(),
+            account_key,
             thread_id: None,
             turn_id: Default::default(),
             title_job: None,
@@ -1184,6 +1264,17 @@ impl AgentRecord {
             lazy_account_transfer: studio_runtime_schema::queue_command::Field::Missing,
             extra: BTreeMap::new(),
         }
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn test_defaults() -> Self {
+        Self::new(
+            AgentId::from(""),
+            AgentId::from(""),
+            0,
+            AgentStatus::Unknown,
+            crate::cost_aggregate::DEFAULT_ACCOUNT.to_owned(),
+        )
     }
 
     pub fn active_execution(&self) -> Result<Option<ActiveExecutionView>, serde_json::Error> {
@@ -3103,6 +3194,11 @@ pub(crate) fn decode_json_record<T: DeserializeOwned>(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn agent_record_stays_small_for_async_futures() {
+        // Leave room for surrounding state below clippy's 16 KiB large_futures limit.
+        assert!(std::mem::size_of::<super::AgentRecord>() <= 4608);
+    }
+    #[test]
     fn agent_write_rejects_extra_keys_owned_by_named_fields() {
         for (key, value) in [
             ("error", serde_json::json!(null)),
@@ -3639,6 +3735,66 @@ mod tests {
                 assert_eq!(agent(value.clone()).into_value(), value);
             }
         }
+    }
+
+    #[test]
+    fn creation_fields_round_trip_without_extensions() {
+        let record = agent(
+            json!({"id":"agent","rootId":"agent","epoch":2,"status":"idle",
+            "accountKey":"default","compactions":0,"worktree":true,"workerBaseRef":"main",
+            "workspaceModeExplicit":false,"workspaceInGit":true,"quickCreate":true,
+            "worktreeWarning":"warning","workerBaseCommit":"abc","workerBaseBehindMain":3,
+            "workerBaseMainRef":"main","quickCreateRequest":"signature",
+            "reviewDefaults":{"model":null,"effort":"high"}}),
+        );
+        for key in [
+            "worktree",
+            "workerBaseRef",
+            "workspaceModeExplicit",
+            "workspaceInGit",
+            "quickCreate",
+            "reviewDefaults",
+            "worktreeWarning",
+            "workerBaseCommit",
+            "workerBaseBehindMain",
+            "workerBaseMainRef",
+            "quickCreateRequest",
+        ] {
+            assert!(!record.extra.contains_key(key), "{key}");
+        }
+        let encoded = record.value();
+        assert_eq!(encoded["workerBaseRef"], "main");
+        assert_eq!(encoded["workerBaseBehindMain"], 3);
+        assert_eq!(encoded["quickCreateRequest"], "signature");
+        assert_eq!(
+            encoded["reviewDefaults"],
+            json!({"model":null,"effort":"high"})
+        );
+        assert_eq!(record, AgentRecord::from_value(encoded).unwrap());
+    }
+
+    #[test]
+    fn creation_identity_and_mode_fields_are_typed() {
+        let record = agent(
+            json!({"id":"agent","rootId":"agent","epoch":2,"status":"idle",
+            "accountKey":"default","compactions":0,"concurrency":32,"agentMode":"multi",
+            "agentModeRevision":1,"subagentConcurrencyVersion":2,"layrStoreRoot":"/store",
+            "projectId":"project","projectServerId":"server"}),
+        );
+        for key in [
+            "concurrency",
+            "agentMode",
+            "agentModeRevision",
+            "subagentConcurrencyVersion",
+            "layrStoreRoot",
+            "projectId",
+            "projectServerId",
+        ] {
+            assert!(!record.extra.contains_key(key), "{key}");
+        }
+        assert_eq!(record.concurrency.map(|value| value.get()), Some(32));
+        assert_eq!(record.project_id.as_deref(), Some("project"));
+        assert_eq!(record.value()["agentMode"], "multi");
     }
 
     #[test]

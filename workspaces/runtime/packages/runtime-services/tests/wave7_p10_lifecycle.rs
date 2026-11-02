@@ -1144,6 +1144,7 @@ fn assert_records(store: &RuntimeStore, case: &Value) {
                         "accountChange",
                         "accountTransferProgress",
                         "accountDestinations",
+                        "manualConnectionCheck",
                     ] {
                         agent.remove(field);
                     }

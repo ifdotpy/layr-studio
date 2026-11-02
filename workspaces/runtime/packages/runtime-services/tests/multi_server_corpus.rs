@@ -508,7 +508,7 @@ async fn received_remote_event_replays_cached_receipt_after_restart_without_dupl
     };
     parent.auto_wake = Some(true);
     parent.cwd = Some(std::env::current_dir().unwrap().display().to_string());
-    parent.extra.insert("concurrency".into(), json!(32));
+    parent.concurrency = Some(32.try_into().unwrap());
     parent.extra.insert("moveImportPending".into(), json!(true));
     let link = json!({"id":"test-link","side":"home","server":"peer-server","home":"local-server","parent":"test-parent","parentEpoch":3,"workers":[]});
     store
@@ -755,7 +755,7 @@ async fn moved_worker_send_reaches_a_local_descendant_once() {
     };
     parent.auto_wake = Some(true);
     parent.cwd = Some(std::env::current_dir().unwrap().display().to_string());
-    parent.extra.insert("concurrency".into(), json!(32));
+    parent.concurrency = Some(32.try_into().unwrap());
     let mut worker = AgentRecord {
         in_flight: None,
         account_key: "default".into(),
@@ -2270,7 +2270,7 @@ async fn exec_event_owner_checks_accept_the_receipt_form_like_python() {
             };
             record.auto_wake = Some(true);
             record.cwd = Some(std::env::current_dir().unwrap().display().to_string());
-            record.extra.insert("concurrency".into(), json!(32));
+            record.concurrency = Some(32.try_into().unwrap());
             if let Some(deleted_at) = lead.deleted_at {
                 record.deleted_at = Some(deleted_at);
             }

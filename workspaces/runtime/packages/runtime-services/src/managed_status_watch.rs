@@ -606,11 +606,12 @@ fn capacity_snapshot(
         })
         .collect::<BTreeMap<_, _>>();
     let root_concurrency = root
-        .extra
-        .get("concurrency")
-        .and_then(Value::as_i64)
+        .concurrency
+        .map(|value| value.get())
         .unwrap_or_else(|| {
-            if root.extra.get("agentMode") == Some(&json!("single")) {
+            if root.agent_mode
+                == Some(studio_runtime_schema::agent_entity_nested::AgentMode::Single)
+            {
                 MIN_SUBAGENT_CONCURRENCY
             } else {
                 DEFAULT_SUBAGENT_CONCURRENCY
@@ -659,13 +660,14 @@ fn status_path_inputs(
     connection: &Connection,
     root_id: &str,
 ) -> Result<Vec<StatusPathInput>, StatusError> {
-    let mut statement = connection.prepare(
+    let mut statement = connection.prepare(&format!(
         "SELECT id,cwd, \
          COALESCE((typeof(workspace_operation)='text' AND workspace_operation<>''),0) \
          FROM runtime_agents WHERE (deleted_at IS NULL OR deleted_at IN (0,'')) AND \
          ((typeof(workspace_operation)='text' AND workspace_operation<>'') OR \
-          (root_id=?1 AND status='queued')) ORDER BY id",
-    )?;
+          (root_id=?1 AND {} ='queued')) ORDER BY id",
+        studio_runtime_store::domain::chat_status_sql("runtime_agents.id"),
+    ))?;
     let rows = statement
         .query_map([root_id], |row| {
             Ok((

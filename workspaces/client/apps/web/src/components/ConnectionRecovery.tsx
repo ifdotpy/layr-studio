@@ -1,65 +1,8 @@
-import {
-  AgentSource as GeneratedApiAgentSource,
-  AgentStatus as GeneratedApiAgentStatus,
-  RecoveryStatus as GeneratedApiRecoveryStatus,
-} from "../generated/api.ts";
+import { RecoveryStatus as GeneratedApiRecoveryStatus } from "../generated/api.ts";
 import { useServerApi } from "../servers/ServerServicesContext";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@mantine/core";
 import { errorText } from "../api";
-import type { Agent } from "../types";
-import { nativeThreadError } from "../nativeErrors";
-import {
-  BACKEND_RESTARTED_TURN_ERROR,
-  LEGACY_VM_PROVIDER_DISCONNECTED_TURN_ERROR,
-  PROVIDER_DISCONNECTED_TURN_ERROR,
-  VM_PROVIDER_DISCONNECTED_TURN_ERROR,
-} from "../generated/sharedValues";
-
-// A provider connection ended. The server can check a start that has no turn
-// ID yet in native history, so these errors do not need a turn ID.
-const transportErrors = new Set<string>([
-  PROVIDER_DISCONNECTED_TURN_ERROR,
-  VM_PROVIDER_DISCONNECTED_TURN_ERROR,
-  LEGACY_VM_PROVIDER_DISCONNECTED_TURN_ERROR,
-]);
-const disconnectErrors = new Set<string>([
-  ...transportErrors,
-  BACKEND_RESTARTED_TURN_ERROR,
-]);
-
-export function canCheckConnection(agent: Agent) {
-  return (
-    agent.source === GeneratedApiAgentSource.managed &&
-    agent.status === GeneratedApiAgentStatus.interrupted &&
-    !agent.inFlight &&
-    !agent.autoWake &&
-    !agent.startAttempt &&
-    !agent.accountTransferId &&
-    !agent.workspaceOperation &&
-    !agent.deletedAt &&
-    !nativeThreadError(agent) &&
-    !!agent.threadId &&
-    typeof agent.error === "string" &&
-    disconnectErrors.has(agent.error) &&
-    (!!agent.turnId || transportErrors.has(agent.error))
-  );
-}
-
-export function matchingConnectionCheck(agent: Agent) {
-  const receipt = agent.connectionCheck;
-  return canCheckConnection(agent) &&
-    receipt &&
-    typeof receipt.at === "number" &&
-    receipt.at > 0 &&
-    (receipt.epoch ?? null) === (agent.epoch ?? null) &&
-    (receipt.accountKey || "default") === (agent.accountKey || "default") &&
-    receipt.threadId === agent.threadId &&
-    (receipt.turnId ?? null) === (agent.turnId ?? null) &&
-    receipt.previousError === agent.error
-    ? receipt
-    : null;
-}
 
 export default function ConnectionRecovery({
   agentId,

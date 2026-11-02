@@ -1,8 +1,7 @@
 //! Pin private directories before mutations. Never resolve a destination through a link.
-use rustix::fs::{AtFlags, Mode, OFlags, mkdirat, open, openat, renameat, unlinkat};
+use rustix::fs::{AtFlags, Mode, OFlags, mkdirat, open, openat, renameat};
 use std::{
     ffi::{OsStr, OsString},
-    fs::File,
     os::fd::OwnedFd,
     path::{Component, Path},
 };
@@ -38,7 +37,8 @@ impl Directory {
     }
     pub fn child(&self, relative: &Path, create: bool) -> std::io::Result<Self> {
         let mut fd = rustix::io::dup(&self.0)?;
-        for part in relative.components() {
+        let mut parts = relative.components().peekable();
+        while let Some(part) = parts.next() {
             let Component::Normal(name) = part else {
                 return Err(std::io::Error::other(
                     "Private path contains a parent traversal",
@@ -50,7 +50,15 @@ impl Directory {
                     Err(e) => return Err(e.into()),
                 }
             }
-            fd = openat(&fd, name, flags(), Mode::empty())?;
+            #[cfg(target_os = "linux")]
+            let open_flags = if parts.peek().is_some() {
+                OFlags::PATH | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC
+            } else {
+                flags()
+            };
+            #[cfg(not(target_os = "linux"))]
+            let open_flags = flags();
+            fd = openat(&fd, name, open_flags, Mode::empty())?;
         }
         Ok(Self(fd))
     }
@@ -70,40 +78,11 @@ impl Directory {
             name.to_owned(),
         ))
     }
-    pub fn file(&self, relative: &Path, flags: OFlags, mode: Mode) -> std::io::Result<File> {
-        let (parent, name) = self.parent(relative, false)?;
-        Ok(File::from(openat(
-            &parent.0,
-            name,
-            flags | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            mode,
-        )?))
-    }
     pub fn rename(&self, from: &Path, to: &Self, target: &Path) -> std::io::Result<()> {
         let (source, name) = self.parent(from, false)?;
         let (destination, target) = to.parent(target, false)?;
         renameat(&source.0, name, &destination.0, target)?;
         Ok(())
-    }
-    pub fn replace_file(&self, path: &Path, bytes: &[u8], mode: u32) -> std::io::Result<()> {
-        use std::io::Write;
-        let (parent, name) = self.parent(path, false)?;
-        let temp = OsString::from(format!(".studio-import-{}", uuid::Uuid::new_v4()));
-        let mut file = File::from(openat(
-            &parent.0,
-            &temp,
-            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            Mode::from_raw_mode((mode & 0o7777) as _),
-        )?);
-        let result = (|| {
-            file.write_all(bytes)?;
-            renameat(&parent.0, &temp, &parent.0, &name)?;
-            Ok(())
-        })();
-        if result.is_err() {
-            let _cleanup_result = unlinkat(&parent.0, &temp, AtFlags::empty());
-        }
-        result
     }
     pub fn mode(&self) -> std::io::Result<u32> {
         let mode = rustix::fs::fstat(&self.0)?.st_mode;
@@ -127,6 +106,24 @@ impl Directory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn walks_search_only_intermediate_directory() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("create fixture");
+        let a = root.path().join("a");
+        std::fs::create_dir_all(a.join("b")).expect("create directories");
+        let pinned = Directory::open(root.path()).expect("pin root");
+        std::fs::set_permissions(&a, std::fs::Permissions::from_mode(0o311))
+            .expect("restrict directory");
+        let opened = Directory::open(&a.join("b"));
+        let child = pinned.child(Path::new("a/b"), false);
+        std::fs::set_permissions(&a, std::fs::Permissions::from_mode(0o700))
+            .expect("restore directory permissions");
+        opened.expect("open through search-only directory");
+        child.expect("walk through search-only directory");
+    }
     #[test]
     fn review2_pinned_destination_survives_path_replacement() {
         let root = tempfile::tempdir().expect("fixture operation succeeds");
@@ -146,18 +143,9 @@ mod tests {
         pinned
             .rename(Path::new(".git"), &saved, Path::new("git"))
             .expect("fixture operation succeeds");
-        pinned
-            .replace_file(Path::new("code"), b"private", 0o600)
-            .expect("fixture operation succeeds");
         assert_eq!(
             std::fs::read(source.join(".git")).expect("fixture operation succeeds"),
             b"source"
-        );
-        assert!(!source.join("code").exists());
-        assert_eq!(
-            std::fs::read(root.path().join("old-destination/code"))
-                .expect("fixture operation succeeds"),
-            b"private"
         );
     }
 }

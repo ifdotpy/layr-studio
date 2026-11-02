@@ -467,23 +467,6 @@ export interface paths {
     patch?: never | undefined;
     trace?: never | undefined;
   };
-  "/api/answer": {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    get?: never | undefined;
-    put?: never | undefined;
-    /** Answer */
-    post: operations["answer_api_answer_post"];
-    delete?: never | undefined;
-    options?: never | undefined;
-    head?: never | undefined;
-    patch?: never | undefined;
-    trace?: never | undefined;
-  };
   "/api/assets": {
     parameters: {
       query?: never | undefined;
@@ -1407,6 +1390,23 @@ export interface paths {
     put?: never | undefined;
     /** Native Command */
     post: operations["native_command_api_native_command_post"];
+    delete?: never | undefined;
+    options?: never | undefined;
+    head?: never | undefined;
+    patch?: never | undefined;
+    trace?: never | undefined;
+  };
+  "/api/native-layr/settings": {
+    parameters: {
+      query?: never | undefined;
+      header?: never | undefined;
+      path?: never | undefined;
+      cookie?: never | undefined;
+    };
+    /** Native Layr Settings */
+    get: operations["native_layr_settings_get"];
+    put?: never | undefined;
+    post?: never | undefined;
     delete?: never | undefined;
     options?: never | undefined;
     head?: never | undefined;
@@ -3077,6 +3077,10 @@ export interface components {
     AccountLimitsStatus:
       | {
           /** @constant */
+          kind: "pending";
+        }
+      | {
+          /** @constant */
           kind: "current";
         }
       | {
@@ -3909,6 +3913,9 @@ export interface components {
       layrReady?: boolean | null | undefined;
       /** Layrstateid */
       layrStateId?: null | string | undefined;
+      manualConnectionCheck?:
+        | components["schemas"]["ManualConnectionCheck"]
+        | undefined;
       movedFrom?: components["schemas"]["MovePointerDto"] | null | undefined;
       naming?: components["schemas"]["AgentNaming"] | undefined;
       /** Nativeerror */
@@ -4223,6 +4230,9 @@ export interface components {
       layrReady?: boolean | null | undefined;
       /** Layrstateid */
       layrStateId?: null | string | undefined;
+      manualConnectionCheck?:
+        | components["schemas"]["ManualConnectionCheck"]
+        | undefined;
       /** Model */
       model?: null | string | undefined;
       movedFrom?: components["schemas"]["MovePointerDto"] | null | undefined;
@@ -5958,6 +5968,9 @@ export interface components {
        * @default null
        */
       layrStateId?: null | string | undefined;
+      manualConnectionCheck?:
+        | components["schemas"]["ManualConnectionCheck"]
+        | undefined;
       /**
        * Model
        * @default null
@@ -6373,6 +6386,9 @@ export interface components {
       lastCompletedTurnStatus?: null | string | undefined;
       /** Lastreadat */
       lastReadAt?: null | number | undefined;
+      manualConnectionCheck?:
+        | components["schemas"]["ManualConnectionCheck"]
+        | undefined;
       /** Model */
       model?: null | string | undefined;
       movedTo?: components["schemas"]["MovePointerDto"] | null | undefined;
@@ -8114,7 +8130,8 @@ export interface components {
         | "project"
         | "room"
         | "work"
-        | "outbox";
+        | "outbox"
+        | "approval";
       rev: number;
       rows: components["schemas"]["SyncEntity"][];
       /** @enum {string} */
@@ -9944,6 +9961,11 @@ export interface components {
       nextBefore?: number | null | undefined;
       room: components["schemas"]["RoomDetailDto"];
     };
+    /**
+     * ChatWorkspaceMode
+     * @enum {string}
+     */
+    ChatWorkspaceMode: "layr-native" | "layr" | "worktree";
     /** CheckpointCaptureRequest */
     CheckpointCaptureRequest: {
       /** Agent */
@@ -10411,6 +10433,7 @@ export interface components {
         | "unsupported_by_model"
         | "media_budget"
         | undefined;
+      message?: string | undefined;
       promptTokens?: number | undefined;
       /** @enum {string} */
       provider?:
@@ -10431,6 +10454,7 @@ export interface components {
         | "host_managed"
         | "model_access"
         | undefined;
+      title?: string | undefined;
     };
     ClaudeFileBackupsRequest: {
       id: string;
@@ -10993,6 +11017,10 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /** @description The answer of an approval: the answer fields, without the approval id (the command target). */
+    CommandAnswerBody: {
+      [key: string]: unknown;
+    };
     /** @enum {string} */
     CommandErrorCode: "receipt_expired";
     /** @description Identity of the outbox command that delivers an answer. */
@@ -11005,7 +11033,33 @@ export interface components {
       | components["schemas"]["CommandRequestSend"]
       | components["schemas"]["CommandRequestWithdraw"]
       | components["schemas"]["CommandRequestStop"]
-      | components["schemas"]["CommandRequestResolve"];
+      | components["schemas"]["CommandRequestResolve"]
+      | components["schemas"]["CommandRequestPause"]
+      | components["schemas"]["CommandRequestAnswer"];
+    CommandRequestAnswer: {
+      body: components["schemas"]["CommandAnswerBody"];
+      client: string;
+      id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "answer";
+      number: number;
+      target: string;
+    };
+    CommandRequestPause: {
+      body: components["schemas"]["CommandStopBody"];
+      client: string;
+      id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "pause";
+      number: number;
+      target: string;
+    };
     CommandRequestResolve: {
       body: components["schemas"]["CommandResolveBody"];
       client: string;
@@ -11059,7 +11113,31 @@ export interface components {
       /** @enum {string} */
       action: "retry" | "delivered" | "discard";
     };
-    CommandResponse: {
+    /** @description One applied command. The kind names the kind-specific result; only answer has one. */
+    CommandResponse:
+      | components["schemas"]["CommandResponseApplied"]
+      | components["schemas"]["CommandResponseAnswer"];
+    CommandResponseAnswer: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "answer";
+      ref_id: string;
+      ref_kind: string;
+      result: components["schemas"]["AnswerResult"];
+      rev: number;
+      rows: components["schemas"]["CommandRow"][];
+      seq: number;
+      /** @enum {string} */
+      status: "applied";
+    };
+    CommandResponseApplied: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "pause" | "resolve" | "send" | "stop" | "withdraw";
       ref_id: string;
       ref_kind: string;
       rev: number;
@@ -12268,7 +12346,7 @@ export interface components {
         | undefined;
       /**
        * Workspacemode
-       * @description When omitted, the server selects native Layr on macOS, or on Linux when the native capability is ready; otherwise it selects worktree.
+       * @description When omitted, the server selects native Layr when available; otherwise it selects worktree.
        * @enum {string}
        */
       workspaceMode?: "layr-native" | "layr" | "worktree" | undefined;
@@ -14549,6 +14627,11 @@ export interface components {
       text: string;
     };
     ManagedProcessRecord: components["schemas"]["ProcessView"];
+    /** ManualConnectionCheck */
+    ManualConnectionCheck: {
+      available: boolean;
+      receipt: components["schemas"]["ConnectionCheckDto"] | null;
+    };
     McpReconnectRequest: {
       id: string;
       name: string;
@@ -15734,10 +15817,29 @@ export interface components {
       /** Path */
       path: null | string;
     };
-    /** @description Native Layr readiness for this server state directory. */
-    NativeLayrCapability: {
-      ready: boolean;
-      reason?: string | null | undefined;
+    /** NativeLayrCapability */
+    NativeLayrCapability:
+      | {
+          /** @constant */
+          status: "ready";
+        }
+      | {
+          /** @constant */
+          status: "notInstalled";
+        }
+      | {
+          reason: string;
+          /** @constant */
+          status: "notReady";
+        };
+    /** NativeLayrSettingsResponse */
+    NativeLayrSettingsResponse: {
+      error?: string | undefined;
+      storeRoot: string | null;
+      version: {
+        build: string;
+        version: string;
+      } | null;
     };
     /** NativeNameFailureRecordResponse */
     NativeNameFailureRecordResponse: {
@@ -20119,7 +20221,7 @@ export interface components {
     /** ReviewDefaultsDto */
     ReviewDefaultsDto: {
       /** Effort */
-      effort: null | string;
+      effort?: null | string | undefined;
       fastMode?: boolean | null | undefined;
       /** Model */
       model: null | string;
@@ -25875,12 +25977,16 @@ export interface components {
       busy: boolean;
       /** Chats */
       chats: components["schemas"]["SummaryChat"][];
+      defaultWorkspaceMode?:
+        | components["schemas"]["ChatWorkspaceMode"]
+        | undefined;
       /**
        * @description The server has a created Studio Linux VM.
        * @default false
        */
       hasStudioVm?: boolean | undefined;
       nativeLayr?: components["schemas"]["NativeLayrCapability"] | undefined;
+      nativeLayrMessage?: string | undefined;
       /** Projects */
       projects: components["schemas"]["SummaryProject"][];
       /** Ready */
@@ -30427,69 +30533,6 @@ export interface operations {
       503: components["responses"]["ApiError503"];
     };
   };
-  answer_api_answer_post: {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["AnswerBody"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
-          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
-          "Cache-Control": components["headers"]["CacheControl"];
-          "Content-Encoding": components["headers"]["ContentEncoding"];
-          "Content-Length": components["headers"]["ContentLength"];
-          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
-          "Content-Type": components["headers"]["ContentType"];
-          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
-          "Server-Timing": components["headers"]["ServerTiming"];
-          Vary: components["headers"]["Vary"];
-          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
-          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
-          "X-Studio-Server": components["headers"]["StudioServer"];
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AnswerResult"];
-        };
-      };
-      /** @description Bad Request */
-      400: components["responses"]["ApiError400"];
-      /** @description Unauthorized */
-      401: components["responses"]["ApiError401"];
-      /** @description Forbidden */
-      403: components["responses"]["ApiError403"];
-      /** @description Request Timeout */
-      408: components["responses"]["ApiError408"];
-      /** @description Conflict */
-      409: components["responses"]["ApiError409"];
-      /** @description Gone */
-      410: components["responses"]["ApiError410"];
-      /** @description Content Too Large */
-      413: components["responses"]["ApiError413"];
-      /** @description Unsupported Media Type */
-      415: components["responses"]["ApiError415"];
-      /** @description Upgrade Required */
-      426: components["responses"]["ApiError426"];
-      /** @description Too Many Requests */
-      429: components["responses"]["ApiError429"];
-      /** @description Internal Server Error */
-      500: components["responses"]["ApiError500"];
-      /** @description Bad Gateway */
-      502: components["responses"]["ApiError502"];
-      /** @description Service Unavailable */
-      503: components["responses"]["ApiError503"];
-    };
-  };
   upload_asset_api_assets_post: {
     parameters: {
       query?: never | undefined;
@@ -34279,6 +34322,51 @@ export interface operations {
       500: components["responses"]["ApiError500"];
       /** @description Bad Gateway */
       502: components["responses"]["ApiError502"];
+      /** @description Service Unavailable */
+      503: components["responses"]["ApiError503"];
+    };
+  };
+  native_layr_settings_get: {
+    parameters: {
+      query?: never | undefined;
+      header?: never | undefined;
+      path?: never | undefined;
+      cookie?: never | undefined;
+    };
+    requestBody?: never | undefined;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
+          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
+          "Cache-Control": components["headers"]["CacheControl"];
+          "Content-Encoding": components["headers"]["ContentEncoding"];
+          "Content-Length": components["headers"]["ContentLength"];
+          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
+          "Content-Type": components["headers"]["ContentType"];
+          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
+          "Server-Timing": components["headers"]["ServerTiming"];
+          Vary: components["headers"]["Vary"];
+          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
+          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
+          "X-Studio-Server": components["headers"]["StudioServer"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["NativeLayrSettingsResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: components["responses"]["ApiError400"];
+      /** @description Unauthorized */
+      401: components["responses"]["ApiError401"];
+      /** @description Forbidden */
+      403: components["responses"]["ApiError403"];
+      /** @description Too Many Requests */
+      429: components["responses"]["ApiError429"];
+      /** @description Internal Server Error */
+      500: components["responses"]["ApiError500"];
       /** @description Service Unavailable */
       503: components["responses"]["ApiError503"];
     };
@@ -38833,6 +38921,12 @@ export const ChatOperationalKind = {
   none: "none",
 } as const;
 export type ChatOperationalKind = components["schemas"]["ChatOperationalKind"];
+export const ChatWorkspaceMode = {
+  "layr-native": "layr-native",
+  layr: "layr",
+  worktree: "worktree",
+} as const;
+export type ChatWorkspaceMode = components["schemas"]["ChatWorkspaceMode"];
 export const ClaudeRateStatus = {
   allowed: "allowed",
   allowed_warning: "allowed_warning",

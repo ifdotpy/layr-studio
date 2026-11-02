@@ -3,6 +3,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn native_import_omits_git_ignored_files_and_generated_metadata() {
+        let source = tempfile::tempdir().expect("source");
+        let destination = tempfile::tempdir().expect("destination");
+        let git = |args: &[&str]| super::super::inventory::git(source.path(), args).expect("git");
+        git(&["init", "-q"]);
+        fs::write(source.path().join(".gitignore"), "dist/\n.env\nforced\n").unwrap();
+        fs::write(source.path().join("code"), "source").unwrap();
+        fs::write(source.path().join("forced"), "tracked").unwrap();
+        git(&["add", "."]);
+        git(&["add", "-f", "forced"]);
+        fs::create_dir(source.path().join("dist")).unwrap();
+        fs::write(source.path().join("dist/output"), "build").unwrap();
+        fs::write(source.path().join(".env"), "secret").unwrap();
+        let nested = source.path().join("nested");
+        fs::create_dir(&nested).unwrap();
+        super::super::inventory::git(&nested, &["init", "-q"]).unwrap();
+        fs::write(nested.join(".gitignore"), "secret\n").unwrap();
+        fs::write(nested.join("secret"), "secret").unwrap();
+        let plan = Plan::new(source.path(), false, destination.path()).expect("selection");
+        assert!(!plan.files().any(|path| path == Path::new("nested/secret")));
+        assert!(plan.files().any(|path| path == Path::new("code")));
+        assert!(plan.files().any(|path| path == Path::new("forced")));
+        assert!(!plan.files().any(|path| path.starts_with("dist")));
+        assert!(!plan.files().any(|path| path == Path::new(".env")));
+    }
+
+    #[test]
+    fn native_import_refuses_submodules() {
+        let fixture = tempfile::tempdir().expect("fixture");
+        let module = fixture.path().join("module");
+        let source = fixture.path().join("source");
+        fs::create_dir(&module).unwrap();
+        fs::create_dir(&source).unwrap();
+        let git = |at: &Path, args: &[&str]| super::super::inventory::git(at, args).expect("git");
+        git(&module, &["init", "-q"]);
+        fs::write(module.join("code"), "module").unwrap();
+        git(&module, &["add", "."]);
+        git(&module, &["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "module"]);
+        git(&source, &["init", "-q"]);
+        git(&source, &["-c", "protocol.file.allow=always", "submodule", "add", "-q", module.to_str().unwrap(), "module"]);
+        let plan = Plan::new(&source, false, fixture.path()).expect("selection");
+        assert!(plan.admit().expect_err("submodule refusal").to_string().contains("Submodules are not supported in native Layr import yet"));
+    }
+
+    #[test]
     fn native_import_name_admission_preserves_case_and_unicode_rules() {
         for names in [["Src/one", "src/two"], ["café", "cafe\u{301}"]] {
             let error =
@@ -318,15 +363,13 @@ mod lifecycle_tests {
         }
         let source = fixture.path().join("source");
         fs::create_dir(&source).expect("source");
-        fs::write(source.join(".LAYRIGNORE"), "original").expect("case alias");
         let state = fixture.path().join("absent-state");
-        let mut record = json!({"id":"lead","isLead":true,"autoWake":true});
+        let mut record = studio_runtime_store::AgentRecord::test_defaults();
+        record.id = "lead".into();
+        record.is_lead = Some(true);
+        record.auto_wake = Some(true);
         super::super::configure_new_chat(&mut record, source.to_str().expect("source path"));
-        let error =
-            super::super::runtime::prepare_files(&state, &record).expect_err("case collision");
-        assert!(error.to_string().contains("case or Unicode"));
-        assert!(!state.exists());
-        fs::remove_file(source.join(".LAYRIGNORE")).expect("remove alias");
+        let record = record.value();
         fs::create_dir(source.join(".GIT")).expect("Git case alias");
         super::super::inventory::git(&source, &["init", "-q"]).expect("valid repository");
         let error = super::super::runtime::prepare_files(&state, &record)
@@ -360,25 +403,43 @@ mod lifecycle_tests {
     }
 
     #[test]
-    fn native_import_reports_reserved_paths_and_external_git_metadata_without_writes() {
+    #[ignore = "requires STUDIO_LAYR_NATIVE_TEST_BINARY and a root Layr daemon on btrfs or APFS"]
+    fn native_import_clean_git_head_has_no_extra_commit() {
+        let state = tempfile::tempdir().expect("state");
         let source = tempfile::tempdir().expect("source");
-        fs::create_dir(source.path().join(".studio-native-import")).expect("reserved path");
-        let destination = source.path().join("absent");
-        let plan = Plan::new(source.path(), false, &destination).expect("report");
-        assert!(
-            plan.admit()
-                .expect_err("reserved path")
-                .to_string()
-                .contains("Reserved")
-        );
-        assert!(!destination.exists());
+        let git = |at: &Path, args: &[&str]| super::super::inventory::git(at, args).expect("git");
+        git(source.path(), &["init", "-q"]);
+        fs::write(source.path().join(".gitignore"), "dist/\n.env\n").unwrap();
+        fs::write(source.path().join("code"), "source").unwrap();
+        git(source.path(), &["add", "."]);
+        git(source.path(), &["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "base"]);
+        let head = git(source.path(), &["rev-parse", "HEAD"]);
+        fs::create_dir(source.path().join("dist")).unwrap();
+        fs::write(source.path().join("dist/output"), "build").unwrap();
+        fs::write(source.path().join(".env"), "secret").unwrap();
+        let binary = super::super::binary_path(state.path());
+        fs::create_dir_all(binary.parent().unwrap()).unwrap();
+        fs::copy(crate::layr_native::test_binary().expect("Layr binary"), binary).unwrap();
+        let mut record = studio_runtime_store::AgentRecord::test_defaults();
+        record.id = "lead".into();
+        record.is_lead = Some(true);
+        record.auto_wake = Some(true);
+        super::super::configure_new_chat(&mut record, source.path().to_str().unwrap());
+        let record = record.value();
+        let ready = super::super::runtime::prepare_files(state.path(), &record).expect("import");
+        let main = PathBuf::from(ready["cwd"].as_str().unwrap());
+        assert_eq!(git(&main, &["rev-parse", "HEAD"]), head);
+        assert!(super::super::run(state.path(), &main, &["show", "head:dist/output"]).is_err());
+        assert!(super::super::run(state.path(), &main, &["show", "head:.env"]).is_err());
+        assert!(!main.join(".studio-native-import").exists());
+        assert!(!main.join(".layrignore").exists());
     }
 
     #[test]
     #[ignore = "requires the real vendored Layr binary on APFS or btrfs"]
-    fn native_import_versions_ignored_data_and_keeps_main_and_migration_caches_warm() {
+    fn native_import_excludes_ignored_data_and_keeps_main_and_migration_caches_warm() {
         let binary =
-            PathBuf::from(std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY").expect("Layr binary"));
+            PathBuf::from(crate::layr_native::test_binary().expect("Layr binary"));
         let state = tempfile::tempdir().expect("state");
         let source = tempfile::tempdir().expect("source");
         let git = |args: &[&str]| {
@@ -428,7 +489,10 @@ mod lifecycle_tests {
         let installed = super::super::binary_path(state.path());
         fs::create_dir_all(installed.parent().expect("bin directory")).expect("bin");
         fs::copy(binary, &installed).expect("install fixture binary");
-        let mut record = json!({"id":"lead","isLead":true,"autoWake":true});
+        let mut record = studio_runtime_store::AgentRecord::test_defaults();
+        record.id = "lead".into();
+        record.is_lead = Some(true);
+        record.auto_wake = Some(true);
         let canonical_source = CanonicalPath::existing(source.path())
             .map(CanonicalPath::into_path_buf)
             .expect("canonical source");
@@ -436,14 +500,14 @@ mod lifecycle_tests {
             &mut record,
             canonical_source.to_str().expect("source path"),
         );
+        let record = record.value();
         let ready =
             super::super::runtime::prepare_files(state.path(), &record).expect("native import");
         let main = PathBuf::from(ready["cwd"].as_str().expect("main"));
-        assert_eq!(
-            super::super::run(state.path(), &main, &["show", "head:data/file"])
-                .expect("versioned ignored data"),
-            "ignored data"
-        );
+        let remotes = super::super::run(state.path(), &main, &["git", "remote", "-v"])
+            .expect("Git bridge remotes");
+        assert!(!remotes.lines().any(|line| line.split_whitespace().next() == Some("local")), "staging remote remains: {remotes}");
+        assert!(super::super::run(state.path(), &main, &["show", "head:data/file"]).is_err());
         assert!(
             super::super::run(state.path(), &main, &["show", "head:node_modules/warm"]).is_err()
         );
@@ -451,7 +515,7 @@ mod lifecycle_tests {
             super::super::overlay_folder_state(state.path(), &main, "node_modules").as_deref(),
             Some("cache")
         );
-        assert!(main.join(".studio-native-import/git/objects").is_dir());
+        assert!(!main.join(".studio-native-import").exists());
         assert_eq!(
             super::super::run(state.path(), &main, &["show", "head:evidence/.git/HEAD"])
                 .expect("evidence in history"),
@@ -504,11 +568,7 @@ mod lifecycle_tests {
             fs::read_to_string(line.join("node_modules/warm")).expect("migrated warm cache"),
             "worktree cache"
         );
-        assert_eq!(
-            super::super::run(state.path(), &line, &["show", "head:data/file"])
-                .expect("migrated data history"),
-            "worktree ignored data"
-        );
+        assert!(super::super::run(state.path(), &line, &["show", "head:data/file"]).is_err());
         assert!(!main.join(".worktrees").exists());
     }
 
@@ -532,7 +592,7 @@ mod lifecycle_tests {
         )
         .expect("state");
         fs::copy(
-            std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY").expect("binary"),
+            crate::layr_native::test_binary().expect("binary"),
             super::super::binary_path(&state),
         )
         .expect("binary copy");
@@ -548,7 +608,7 @@ mod lifecycle_tests {
         .expect("plain-folder migration");
         assert_eq!(report["withoutGit"], true);
         let main = PathBuf::from(report["mainPath"].as_str().expect("main path"));
-        assert!(!main.join(GIT_BACKUP).exists());
+        assert!(!main.join(".studio-native-import/git").exists());
         assert_eq!(
             super::super::run(&state, &main, &["show", "head:code"]).expect("history"),
             "plain folder"

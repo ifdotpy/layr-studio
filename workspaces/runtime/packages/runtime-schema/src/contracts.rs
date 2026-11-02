@@ -1116,20 +1116,6 @@ fn workspace_modes_ts() -> String {
         json_string(modes::PROJECT_LAYR_NATIVE_POLICY)
     )
     .expect("write project policy");
-    for (name, values) in [
-        ("ALWAYS_NATIVE_SYSTEMS", modes::ALWAYS_NATIVE_SYSTEMS),
-        (
-            "CAPABILITY_NATIVE_SYSTEMS",
-            modes::CAPABILITY_NATIVE_SYSTEMS,
-        ),
-    ] {
-        writeln!(
-            text,
-            "export const {name} = {} as const;",
-            serde_json::to_string(values).expect("mode names serialize")
-        )
-        .expect("String write");
-    }
     for (name, value) in [
         (
             "DEFAULT_CHAT_WORKSPACE_MODE",
@@ -1142,7 +1128,6 @@ fn workspace_modes_ts() -> String {
     ] {
         writeln!(text, "export const {name} = {};", json_string(value)).expect("String write");
     }
-    text.push_str("export function defaultChatWorkspaceMode(system?: string, nativeReady = false) {\n  return ALWAYS_NATIVE_SYSTEMS.some((value) => value === system) ||\n    (nativeReady && CAPABILITY_NATIVE_SYSTEMS.some((value) => value === system))\n    ? DEFAULT_CHAT_WORKSPACE_MODE\n    : DEFAULT_AGENT_WORKSPACE_MODE;\n}\n");
     text
 }
 
@@ -1233,6 +1218,14 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         .pointer_mut("/components/schemas/AgentCapacity")
         .ok_or("missing AgentCapacity schema")? = agent_limits::capacity_schema();
     crate::workspace_modes::update_openapi(&mut openapi);
+    openapi["components"]["schemas"]["NativeLayrCapability"] =
+        schemars::schema_for!(crate::native_layr::NativeLayrCapability).to_value();
+    openapi["components"]["schemas"]["ChatWorkspaceMode"] =
+        schemars::schema_for!(crate::workspace_modes::ChatWorkspaceMode).to_value();
+    openapi["components"]["schemas"]["UiSummaryResponse"]["properties"]["defaultWorkspaceMode"] =
+        serde_json::json!({"$ref":"#/components/schemas/ChatWorkspaceMode"});
+    openapi["components"]["schemas"]["UiSummaryResponse"]["properties"]["nativeLayrMessage"] =
+        serde_json::json!({"type":"string"});
     // The checked limits ingress schema also owns HTTP, SSE and bridge leaves.
     let mut limits: Value = serde_json::from_str(
         &include_str!("schemas/workspace-usage-limits.schema.json")

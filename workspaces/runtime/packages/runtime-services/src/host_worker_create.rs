@@ -190,7 +190,8 @@ pub fn prepare(
             true,
             created,
             None,
-        );
+        )?
+        .value();
         if value["naming"] != "manual" {
             value["naming"] = json!("automatic");
         }
@@ -281,7 +282,8 @@ pub fn prepare_work_item(
         false,
         created,
         None,
-    );
+    )?
+    .value();
     draft["rootId"] = json!(root_id.0);
     draft["parentId"] = json!(parent_id.0);
     draft["isLead"] = json!(false);
@@ -412,12 +414,12 @@ pub fn recheck_worker(
     let frozen_account = draft.extra.get("_p02ParentAccountKey");
     if parent.cwd.as_deref() != frozen_cwd.and_then(Value::as_str)
         || Some(parent.account_key.as_str()) != frozen_account.and_then(Value::as_str)
-        || parent.extra.get("projectId").and_then(Value::as_str)
+        || parent.project_id.as_deref()
             != draft
                 .extra
                 .get("_p02ParentProjectId")
                 .and_then(Value::as_str)
-        || parent.extra.get("projectServerId").and_then(Value::as_str)
+        || parent.project_server_id.as_deref()
             != draft
                 .extra
                 .get("_p02ParentProjectServerId")
@@ -443,8 +445,14 @@ pub fn recheck_worker(
         .get("_p02ProjectBinding")
         .filter(|value| !value.is_null())
         .cloned();
-    let current_project =
-        ProjectsRepository::get(transaction, project_path)?.map(|(_, value)| value);
+    let lookup_id = draft
+        .extra
+        .get("_p02ProjectLookupId")
+        .and_then(Value::as_str)
+        .unwrap_or(project_path);
+    let current_project = ProjectsRepository::get(transaction, lookup_id)?
+        .or(ProjectsRepository::get(transaction, project_path)?)
+        .map(|(_, value)| value);
     if current_project != frozen_project {
         return Err(CreateError::IdentityChanged);
     }
@@ -492,7 +500,7 @@ fn recheck_parent_epoch(
     if root.is_lead != Some(true)
         || root.deleted_at.is_some()
         || root.auto_wake == Some(false)
-        || root.extra.get("concurrency").and_then(Value::as_i64) == Some(0)
+        || root.concurrency.map(|value| value.get()) == Some(0)
     {
         return Err(CreateError::IdentityChanged);
     }
@@ -820,7 +828,9 @@ mod tests {
             true,
             1.0,
             None,
-        );
+        )
+        .unwrap()
+        .value();
         parent["autoWake"] = json!(true);
         crate::agents_create::set_capacity(&mut parent, DEFAULT_MAX_TEAM_AGENTS, false)
             .expect("valid capacity");
@@ -890,15 +900,12 @@ mod tests {
             fixture.draft.role.value(),
             Some(&studio_runtime_schema::creation_intent::AgentRole::Reviewer)
         );
-        assert_eq!(
-            fixture.draft.extra.get("worktree").and_then(Value::as_bool),
-            Some(false)
-        );
+        assert_eq!(fixture.draft.worktree, Some(false));
         assert_eq!(
             fixture.draft.workspace_mode,
             Some(studio_runtime_schema::records::WorkspaceMode::Shared)
         );
-        assert_eq!(fixture.draft.extra.get("workerBaseRef"), Some(&Value::Null));
+        assert_eq!(fixture.draft.worker_base_ref, None);
         assert_eq!(fixture.draft.fast_mode, Some(true));
         assert_eq!(fixture.draft.daybreak_enabled, Some(false));
     }
@@ -1134,7 +1141,7 @@ mod tests {
                     .expect("canonical temporary directory")
                     .to_str()
             );
-            assert_eq!(draft.extra.get("workerBaseRef"), Some(&Value::Null));
+            assert_eq!(draft.worker_base_ref, None);
             assert_eq!(
                 draft.model.as_deref(),
                 Some(if id == IDS[0] {

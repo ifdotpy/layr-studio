@@ -881,26 +881,28 @@ async fn read_catalog(
 }
 
 fn destination_settings(
-    agent: &Value,
+    agent: &studio_runtime_store::AgentRecord,
     source_provider: ProviderKind,
     target_provider: ProviderKind,
     catalog: &CatalogObservation,
-) -> Result<Value, TransferError> {
+) -> Result<studio_runtime_store::transfer_record::DestinationSettings, TransferError> {
+    use crate::account_transfer::{known_transfer_object, known_transfer_value, worker_defaults};
+    use studio_runtime_schema::queue_command::Field;
+    use studio_runtime_store::transfer_record::{DestinationSettings, TransferSettings};
     let changed = source_provider != target_provider;
-    let target_kind = target_provider;
     let visible = catalog
         .models
         .iter()
         .filter(|model| !model.hidden)
         .collect::<Vec<_>>();
-    let current = agent["model"].as_str().and_then(|name| {
+    let current = agent.model.as_deref().and_then(|name| {
         visible
             .iter()
             .find(|model| model.model == name || model.resolved_model.as_deref() == Some(name))
     });
     let chosen = if changed || current.is_none() {
         visible.iter().find(|model| model.is_default).or_else(|| {
-            let fallback = crate::provider_adapter::default_model(target_kind);
+            let fallback = crate::provider_adapter::default_model(target_provider);
             visible.iter().find(|model| model.model == fallback)
         })
     } else {
@@ -909,45 +911,41 @@ fn destination_settings(
     let model = chosen.ok_or(TransferError::Refused(
         "The destination account has no available default model",
     ))?;
-    let mut selected_model = model.model.clone();
-    if !changed && model.resolved_model.as_deref() == agent["model"].as_str() {
-        selected_model = agent["model"].as_str().unwrap_or_default().into();
-    }
-    let requested_fast = !changed && agent["fastMode"] == true;
+    let selected_model = if !changed && model.resolved_model.as_deref() == agent.model.as_deref() {
+        agent.model.clone().unwrap_or_default()
+    } else {
+        model.model.clone()
+    };
     let settings = ExecutionSettings {
         model: StoredField::Value(selected_model.clone()),
         effort: if changed {
             None
         } else {
-            agent
-                .get("effort")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
+            agent.effort.value().cloned()
         },
         native_effort: StoredField::Missing,
-        fast_mode: Some(requested_fast && model.priority),
-        daybreak_enabled: Some(!changed && agent["daybreakEnabled"] == true),
+        fast_mode: Some(!changed && agent.fast_mode == Some(true) && model.priority),
+        daybreak_enabled: Some(!changed && agent.daybreak_enabled == Some(true)),
     };
     let (effort, native_effort) =
         gates::validate_execution(&settings, catalog, changed || settings.effort.is_none())
             .map_err(|_| TransferError::Requires("account-transfer/destination-settings"))?;
-    let mut worker_defaults = agent
-        .get("workerDefaults")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    worker_defaults.insert("accountKey".into(), json!(catalog.identity.account_key));
+    let account_key = catalog
+        .identity
+        .account_key
+        .clone()
+        .try_into()
+        .map_err(|_| TransferError::Refused("Invalid destination account"))?;
+    let mut defaults = worker_defaults(agent)?.value().cloned().unwrap_or_default();
+    defaults.account_key = Field::Value(catalog.identity.account_key.clone());
     if changed {
-        worker_defaults.insert("model".into(), Value::Null);
-        worker_defaults.insert("effort".into(), json!("medium"));
-        worker_defaults.insert("fastMode".into(), json!(false));
-        worker_defaults.insert("daybreakEnabled".into(), json!(false));
-        worker_defaults.insert("cyberAccessProgram".into(), json!("standard"));
+        defaults.model = Field::Null;
+        defaults.effort = Field::Value("medium".into());
+        defaults.fast_mode = Field::Value(false);
+        defaults.daybreak_enabled = Field::Value(false);
+        defaults.cyber_access_program = Field::Value("standard".into());
     }
-    let mut result = json!({"provider":target_provider,"model":selected_model,"effort":effort,
-        "nativeEffort":native_effort,"fastMode":settings.fast_mode.unwrap_or(false),
-        "daybreakEnabled":settings.daybreak_enabled.unwrap_or(false),"workerDefaults":worker_defaults});
-    let daybreak = !changed && agent["daybreakEnabled"] == true;
+    let daybreak = !changed && agent.daybreak_enabled == Some(true);
     let cyber_program = match target_provider {
         ProviderKind::Claude => {
             if daybreak {
@@ -985,58 +983,56 @@ fn destination_settings(
             }
         }
     };
-    result["cyberAccessProgram"] = json!(cyber_program);
-    if changed {
-        result["pendingSettings"] = Value::Null;
-        result["pendingSettingsAccountKey"] = Value::Null;
-    } else if let Some(pending) = agent
-        .get("pendingSettings")
-        .filter(|value| value.is_object())
+    let mut result = DestinationSettings {
+        settings: TransferSettings {
+            provider: Field::Value(target_provider),
+            model: Field::Value(selected_model),
+            effort: effort.map_or(Field::Null, Field::Value),
+            native_effort: native_effort.map_or(Field::Null, Field::Value),
+            fast_mode: Field::Value(settings.fast_mode.unwrap_or(false)),
+            daybreak_enabled: Field::Value(settings.daybreak_enabled.unwrap_or(false)),
+            cyber_access_program: Field::Value(cyber_program),
+            worker_defaults: Field::Value(defaults),
+            ..TransferSettings::default()
+        },
+        pending_settings: if changed { Field::Null } else { Field::Missing },
+        pending_settings_account_key: if changed { Field::Null } else { Field::Missing },
+    };
+    if !changed
+        && let Some(mut pending) =
+            known_transfer_object(&agent.pending_settings, "pendingSettings")?
+                .value()
+                .cloned()
     {
-        if agent
-            .get("pendingSettingsAccountKey")
-            .and_then(Value::as_str)
-            .is_some_and(|key| key != catalog.identity.account_key)
+        let pending_account = known_transfer_value(
+            &agent.pending_settings_account_key,
+            "pendingSettingsAccountKey",
+        )?;
+        if pending_account
+            .value()
+            .is_some_and(|key| key.as_str() != catalog.identity.account_key)
         {
             return Err(TransferError::Refused(
                 "Queued settings belong to another account. Save them again before transfer",
             ));
         }
-        let pending_model = pending
-            .get("model")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let pending_fast = pending
-            .get("fastMode")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
         let pending_exec = ExecutionSettings {
-            model: StoredField::Value(pending_model.into()),
-            effort: pending
-                .get("effort")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
+            model: StoredField::Value(pending.model.value().cloned().unwrap_or_default()),
+            effort: pending.effort.value().cloned(),
             native_effort: StoredField::Missing,
-            fast_mode: Some(pending_fast),
-            daybreak_enabled: Some(
-                pending
-                    .get("daybreakEnabled")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
-            ),
+            fast_mode: Some(pending.fast_mode.value().copied().unwrap_or(false)),
+            daybreak_enabled: Some(pending.daybreak_enabled.value().copied().unwrap_or(false)),
         };
         let (pending_effort, pending_native) =
             gates::validate_execution(&pending_exec, catalog, false)
                 .map_err(|_| TransferError::Requires("account-transfer/destination-settings"))?;
-        let mut normalized = pending.clone();
-        normalized["effort"] = pending_effort.clone().map_or(Value::Null, Value::String);
-        normalized["nativeEffort"] = pending_native.clone().map_or(Value::Null, Value::String);
-        normalized["cyberAccessProgram"] = pending
-            .get("cyberAccessProgram")
-            .cloned()
-            .unwrap_or(json!("standard"));
-        result["pendingSettings"] = normalized;
-        result["pendingSettingsAccountKey"] = json!(catalog.identity.account_key);
+        pending.effort = pending_effort.map_or(Field::Null, Field::Value);
+        pending.native_effort = pending_native.map_or(Field::Null, Field::Value);
+        if pending.cyber_access_program.is_missing() {
+            pending.cyber_access_program = Field::Value("standard".into());
+        }
+        result.pending_settings = Field::Value(*pending);
+        result.pending_settings_account_key = Field::Value(account_key);
     }
     Ok(result)
 }
@@ -1053,16 +1049,12 @@ impl TransferExecutor for AccountTransferExecutor {
         Box::pin(async move {
             let operation = input.operation();
             let agent = input.agent();
-            let agent_id = agent["id"]
-                .as_str()
-                .ok_or(TransferError::Refused("Invalid transfer agent"))?;
+            let agent_id = agent.id.as_ref();
             let member = operation
                 .members
                 .get(agent_id)
                 .ok_or(TransferError::Refused("Unknown transfer member"))?;
-            let epoch = agent["epoch"]
-                .as_i64()
-                .ok_or(TransferError::Refused("Invalid transfer epoch"))?;
+            let epoch = agent.epoch;
             let transfer_id = operation.id.as_str();
             let source_account = member.source_account_key.as_str();
             let target_account = operation.target_account_key.as_str();
@@ -1285,14 +1277,15 @@ impl TransferExecutor for AccountTransferExecutor {
                     }
                 }
                 if portable_required {
-                    let mut archive_agent = agent.clone();
-                    if let Some(source_state) = agent
+                    let mut archive_agent = agent.value();
+                    if let Some(source_state) = archive_agent
                         .get("lazyAccountTransfer")
                         .and_then(|lazy| lazy.get("sourceState"))
                         .and_then(Value::as_object)
+                        .cloned()
                     {
                         for (key, value) in source_state {
-                            archive_agent[key] = value.clone();
+                            archive_agent[key] = value;
                         }
                     }
                     archive_agent["accountKey"] = json!(source_account);
@@ -1385,20 +1378,17 @@ impl TransferExecutor for AccountTransferExecutor {
             .await
             .map_err(|_| TransferError::Refused("Destination thread preparation failed"))?;
             let mut params = prepared.params;
-            params["model"] = settings["model"].clone();
+            params["model"] = json!(settings.settings.model.value());
             if let Some(config) = params.get_mut("config").and_then(Value::as_object_mut) {
-                if settings.get("nativeEffort").is_some_and(Value::is_string) {
-                    config.insert(
-                        "model_reasoning_effort".into(),
-                        settings["nativeEffort"].clone(),
-                    );
+                if let Some(effort) = settings.settings.native_effort.value() {
+                    config.insert("model_reasoning_effort".into(), json!(effort));
                 }
                 config.insert(
                     "features.fast_mode".into(),
-                    json!(settings["fastMode"] == true),
+                    json!(settings.settings.fast_mode.value() == Some(&true)),
                 );
             }
-            params["serviceTier"] = json!(if settings["fastMode"] == true {
+            params["serviceTier"] = json!(if settings.settings.fast_mode.value() == Some(&true) {
                 "priority"
             } else {
                 "default"
@@ -1594,6 +1584,63 @@ mod destination_settings_tests {
     use super::*;
 
     #[test]
+    fn same_provider_preserves_and_normalizes_queued_settings() {
+        let agent = serde_json::from_str(r#"{"id":"agent","rootId":"agent","epoch":0,"status":"idle","compactions":0,"accountKey":"source","model":"model-a","fastMode":true,"workerDefaults":{"model":"child"},"pendingSettings":{"model":"model-a","fastMode":true},"pendingSettingsAccountKey":"target"}"#).unwrap();
+        let catalog = CatalogObservation {
+            identity: CatalogIdentity {
+                account_key: "target".into(),
+                home: "/target".into(),
+                provider: ProviderKind::Codex,
+                generation: 1,
+            },
+            expires_at: Instant::now() + Duration::from_secs(30),
+            models: vec![ModelCapabilities {
+                model: "model-a".into(),
+                resolved_model: None,
+                is_default: true,
+                hidden: false,
+                access_programs: None,
+                supported_efforts: vec!["medium".into()],
+                default_effort: Some("medium".into()),
+                priority: true,
+            }],
+        };
+        let result =
+            destination_settings(&agent, ProviderKind::Codex, ProviderKind::Codex, &catalog)
+                .unwrap();
+        assert_eq!(
+            result.settings.model.value().map(String::as_str),
+            Some("model-a")
+        );
+        assert_eq!(result.settings.fast_mode.value(), Some(&true));
+        assert_eq!(
+            result
+                .settings
+                .worker_defaults
+                .value()
+                .unwrap()
+                .model
+                .value()
+                .map(String::as_str),
+            Some("child")
+        );
+        let pending = result.pending_settings.value().unwrap();
+        assert_eq!(pending.model.value().map(String::as_str), Some("model-a"));
+        assert_eq!(
+            pending.cyber_access_program.value().map(String::as_str),
+            Some("standard")
+        );
+        assert_eq!(
+            result
+                .pending_settings_account_key
+                .value()
+                .unwrap()
+                .as_str(),
+            "target"
+        );
+    }
+
+    #[test]
     fn provider_change_settings_can_be_prepared() {
         let operation = json!({"id":"transfer","leadId":"agent","targetAccountKey":"target",
             "status":"pending","created":1.0,"scope":"team",
@@ -1637,9 +1684,13 @@ mod destination_settings_tests {
                 priority: false,
             }],
         };
-        let settings =
-            destination_settings(&agent, ProviderKind::Codex, ProviderKind::Claude, &catalog)
-                .unwrap();
+        let settings = destination_settings(
+            reading.agent("agent").unwrap(),
+            ProviderKind::Codex,
+            ProviderKind::Claude,
+            &catalog,
+        )
+        .unwrap();
         reading
             .prepared_member("agent", settings, None)
             .expect("provider change settings are accepted");
@@ -1667,7 +1718,7 @@ mod destination_settings_tests {
             }],
         };
         let result = destination_settings(
-            &json!({"model":"source-model"}),
+            &serde_json::from_str(r#"{"id":"agent","rootId":"agent","epoch":0,"status":"idle","compactions":0,"accountKey":"source","model":"source-model"}"#).unwrap(),
             ProviderKind::Claude,
             ProviderKind::Codex,
             &catalog,
@@ -2825,12 +2876,12 @@ mod retained_executor_tests {
 
     #[tokio::test]
     async fn before_start_copies_history_once_and_replays_unknown_fork_after_restart() {
-        assert_history_transfer_without_duplicate_fork(false).await;
+        Box::pin(assert_history_transfer_without_duplicate_fork(false)).await;
     }
 
     #[tokio::test]
     async fn cold_catalog_transfer_prepares_history_without_http_model_read() {
-        assert_history_transfer_without_duplicate_fork(true).await;
+        Box::pin(assert_history_transfer_without_duplicate_fork(true)).await;
     }
 
     async fn assert_history_transfer_without_duplicate_fork(cold_catalog: bool) {

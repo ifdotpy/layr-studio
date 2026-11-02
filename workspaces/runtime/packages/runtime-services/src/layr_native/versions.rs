@@ -5,10 +5,10 @@ use std::time::Duration;
 type Result<T> = std::result::Result<T, NativeLayrError>;
 
 #[derive(serde::Deserialize)]
-struct Identity {
+pub struct Identity {
     format: u64,
-    version: String,
-    build: String,
+    pub version: String,
+    pub build: String,
 }
 #[derive(serde::Deserialize)]
 struct Inspection {
@@ -41,16 +41,44 @@ fn inspect(binary: &Path, root: &Path) -> Result<Inspection> {
     serde_json::from_slice(&result.stdout.bytes).map_err(|e| NativeLayrError::Refused(format!("Layr at {} has no valid store-version response for {root}: {e}. Upgrade this binary; see docs/native-layr.md.", binary.display())))
 }
 
+/// Read the identity reported by the same bounded store inspection used for verification.
+pub fn binary_version(binary: &Path, root: &Path) -> Result<Identity> {
+    Ok(inspect(binary, root)?.binary)
+}
+
 pub(super) fn verify(state: &Path, root: &Path) -> Result<Option<String>> {
-    let mut bundled = inspect(&super::git_guard::executable_path(state), root)?;
-    if !bundled.compatible
+    let executable = super::capability::resolve_binary().map_err(|capability| {
+        NativeLayrError::Refused(capability.message().unwrap_or("Layr is unavailable").into())
+    })?;
+    #[cfg(target_os = "linux")]
+    let socket = Some(super::selected_socket_path(state)?);
+    #[cfg(not(target_os = "linux"))]
+    let socket: Option<std::path::PathBuf> = None;
+    verify_with_binary(state, root, &executable, socket.as_deref())
+}
+
+fn verify_with_binary(
+    state: &Path,
+    root: &Path,
+    executable: &Path,
+    socket: Option<&Path>,
+) -> Result<Option<String>> {
+    let mut installed = inspect(executable, root)?;
+    #[cfg(target_os = "linux")]
+    if let Some(socket) = socket {
+        let daemon = daemon_identity(socket).map_err(NativeLayrError::Refused)?;
+        check_daemon_identity(&installed.binary, &daemon).map_err(NativeLayrError::Refused)?;
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = socket;
+    if !installed.compatible
         && settings::owns_store(state, root)
-        && let Some(upgrade) = &bundled.upgrade
+        && let Some(upgrade) = &installed.upgrade
         && upgrade.metadata_only
         && upgrade.from_format < upgrade.to_format
-        && upgrade.to_format == bundled.binary.format
-        && (bundled.state == "legacy"
-            || bundled
+        && upgrade.to_format == installed.binary.format
+        && (installed.state == "legacy"
+            || installed
                 .store
                 .as_ref()
                 .is_some_and(|version| version.format == upgrade.from_format))
@@ -61,14 +89,20 @@ pub(super) fn verify(state: &Path, root: &Path) -> Result<Option<String>> {
             &format!("store-upgrade:{}", upgrade.to_format),
             &json!({"kind":"store-upgrade","root":root,"fromFormat":upgrade.from_format,"toFormat":upgrade.to_format}),
             || {
-                super::runtime::run_in_store(state, root, state, &["store-version", "--upgrade"])?;
+                super::runtime::run_with_binary(
+                    state,
+                    root,
+                    state,
+                    &["store-version", "--upgrade"],
+                    executable,
+                )?;
                 Ok(json!({"storeRoot":root,"format":upgrade.to_format}))
             },
         )?;
-        bundled = inspect(&super::git_guard::executable_path(state), root)?;
+        installed = inspect(executable, root)?;
     }
-    if !bundled.compatible {
-        let written = bundled
+    if !installed.compatible {
+        let written = installed
             .store
             .as_ref()
             .map(|store| {
@@ -77,88 +111,167 @@ pub(super) fn verify(state: &Path, root: &Path) -> Result<Option<String>> {
                     store.version, store.format, store.build
                 )
             })
-            .unwrap_or_else(|| bundled.state.clone());
+            .unwrap_or_else(|| installed.state.clone());
         return Err(NativeLayrError::Refused(format!(
             "Store {} was written by {written}. Studio uses {} (format {}, build {}). Use native-layr upgrade-store for a legacy store; see docs/native-layr.md for the switch procedure.",
             root.display(),
-            bundled.binary.version,
-            bundled.binary.format,
-            bundled.binary.build
+            installed.binary.version,
+            installed.binary.format,
+            installed.binary.build
         )));
     }
-    if settings::owns_store(state, root) {
-        return Ok(None);
-    }
-    let developer =
-        PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/bin/layr");
-    verify_developer(&bundled.binary, root, &developer)
+    Ok(None)
 }
 
-fn verify_developer(bundled: &Identity, root: &Path, developer: &Path) -> Result<Option<String>> {
-    // Unguarded releases open the root before rejecting store-version. Probe only scratch.
-    let scratch = tempfile::tempdir()?;
-    let inspected = inspect(developer, scratch.path()).map_err(|error| NativeLayrError::Refused(format!("Store {} requires a guarded developer binary. Studio: {} (format {}, build {}). Developer {}: {error}. Upgrade the developer binary; see docs/native-layr.md.", root.display(), bundled.version, bundled.format, bundled.build, developer.display())))?;
-    compare(bundled, &inspected.binary, root, developer)
-}
-
-fn compare(
-    bundled: &Identity,
-    developer: &Identity,
-    root: &Path,
-    binary: &Path,
-) -> Result<Option<String>> {
-    // The store format is the compatibility contract; any release of the same format may share it.
-    if bundled.format != developer.format {
-        return Err(NativeLayrError::Refused(format!(
-            "Store {} requires the same Layr store format. Studio: {} (format {}, build {}). Developer {}: {} (format {}, build {}). Use a developer binary with the bundled store format; see docs/native-layr.md.",
-            root.display(),
-            bundled.version,
-            bundled.format,
-            bundled.build,
-            binary.display(),
-            developer.version,
-            developer.format,
-            developer.build
-        )));
-    }
-    Ok((bundled.version != developer.version || bundled.build != developer.build).then(|| {
+#[cfg(target_os = "linux")]
+// Layr src/service.rs negotiate. Remove when Layr exposes the daemon identity (ifdotpy/layr#137).
+fn daemon_identity(socket: &Path) -> std::result::Result<Identity, String> {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+    use std::time::Duration;
+    let error = |e: &dyn std::fmt::Display| {
         format!(
-            "Store {} uses Layr format {} with different releases. Studio: {} ({}). Developer {}: {} ({}).",
-            root.display(),
-            bundled.format,
-            bundled.version,
-            bundled.build,
-            binary.display(),
-            developer.version,
-            developer.build
+            "Cannot inspect the Layr daemon at {}: {e}. Restart the daemon after upgrading Layr.",
+            socket.display()
         )
-    }))
+    };
+    let address = socket2::SockAddr::unix(socket).map_err(|e| error(&e))?;
+    let connection = socket2::Socket::new(socket2::Domain::UNIX, socket2::Type::STREAM, None)
+        .map_err(|e| error(&e))?;
+    connection
+        .connect_timeout(&address, Duration::from_secs(10))
+        .map_err(|e| error(&e))?;
+    let mut stream: UnixStream = connection.into();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .map_err(|e| error(&e))?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(10)))
+        .map_err(|e| error(&e))?;
+    let request = br#"{"hello":true}"#;
+    stream
+        .write_all(&(request.len() as u32).to_be_bytes())
+        .and_then(|()| stream.write_all(request))
+        .map_err(|e| error(&e))?;
+    let mut kind = [0; 1];
+    stream.read_exact(&mut kind).map_err(|e| error(&e))?;
+    if kind[0] == b'B' {
+        return Err("The Layr daemon is busy; try again.".into());
+    }
+    let mut header = [0; 4];
+    stream.read_exact(&mut header).map_err(|e| error(&e))?;
+    let size = u32::from_be_bytes(header) as usize;
+    if kind[0] != b'V' || size > 4096 {
+        return Err(error(&"invalid daemon version response"));
+    }
+    let mut bytes = vec![0; size];
+    stream.read_exact(&mut bytes).map_err(|e| error(&e))?;
+    serde_json::from_slice(&bytes).map_err(|e| error(&e))
+}
+
+#[cfg(target_os = "linux")]
+fn check_daemon_identity(client: &Identity, daemon: &Identity) -> std::result::Result<(), String> {
+    if client.format != daemon.format
+        || client.version != daemon.version
+        || client.build != daemon.build
+    {
+        return Err(format!(
+            "Layr daemon {} (format {}, build {}) differs from the installed Layr {} (format {}, build {}). Restart the daemon after upgrading Layr.",
+            daemon.version,
+            daemon.format,
+            daemon.build,
+            client.version,
+            client.format,
+            client.build
+        ));
+    }
+    Ok(())
+}
+
+/// Test daemon: answers one version handshake (Layr `src/service.rs` `negotiate`) with `identity`.
+#[cfg(all(test, target_os = "linux"))]
+pub(super) fn serve_daemon_identity(
+    socket: &Path,
+    identity: &'static [u8],
+) -> std::thread::JoinHandle<()> {
+    use std::io::{Read, Write};
+    let listener = std::os::unix::net::UnixListener::bind(socket).expect("listener");
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let mut length = [0; 4];
+        stream.read_exact(&mut length).expect("length");
+        let mut request = vec![0; u32::from_be_bytes(length) as usize];
+        stream.read_exact(&mut request).expect("request");
+        assert_eq!(request, br#"{"hello":true}"#);
+        stream.write_all(b"V").expect("kind");
+        stream
+            .write_all(&(identity.len() as u32).to_be_bytes())
+            .expect("length");
+        stream.write_all(identity).expect("response");
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[test]
-    fn native_layr_an_unguarded_developer_probe_never_receives_the_selected_root() {
-        use std::{fs, os::unix::fs::PermissionsExt};
-        let fixture = tempfile::tempdir().expect("fixture");
-        let root = fixture.path().join("developer-store");
-        fs::create_dir(&root).expect("store");
-        let binary = fixture.path().join("legacy-layr");
-        fs::write(&binary, "#!/bin/sh\nprintf changed > \"$2/touched\"\nprintf 'unknown command\\n' >&2\nexit 128\n").expect("legacy binary");
-        fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).expect("executable");
-        let bundled = Identity {
+    fn daemon_handshake_reads_identity_without_a_command() {
+        let dir = tempfile::tempdir().expect("socket directory");
+        let path = dir.path().join("socket");
+        let server =
+            serve_daemon_identity(&path, br#"{"format":1,"version":"0.11.0","build":"old"}"#);
+        let daemon = daemon_identity(&path).expect("identity");
+        assert_eq!(daemon.version, "0.11.0");
+        server.join().expect("server");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn busy_daemon_gives_retryable_message() {
+        use std::io::{Read, Write};
+        use std::os::unix::net::UnixListener;
+        let dir = tempfile::tempdir().expect("socket directory");
+        let path = dir.path().join("socket");
+        let listener = UnixListener::bind(&path).expect("listener");
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut request = [0; 18];
+            stream.read_exact(&mut request).expect("request");
+            stream.write_all(b"B").expect("busy response");
+        });
+        assert!(
+            daemon_identity(&path)
+                .err()
+                .expect("busy")
+                .contains("busy; try again")
+        );
+        server.join().expect("server");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn daemon_identity_must_match_client() {
+        let client = Identity {
             format: 1,
-            version: LAYR_VERSION.into(),
-            build: "bundled-build".into(),
+            version: "0.14.2".into(),
+            build: "build".into(),
         };
-        let error = verify_developer(&bundled, &root, &binary)
-            .expect_err("unsupported probe")
-            .to_string();
-        assert!(error.contains("bundled-build") && error.contains(root.to_str().expect("root")));
-        assert!(fs::read_dir(root).expect("store").next().is_none());
+        let matching = Identity {
+            format: 1,
+            version: "0.14.2".into(),
+            build: "build".into(),
+        };
+        let different = Identity {
+            format: 1,
+            version: "0.11.0".into(),
+            build: "old".into(),
+        };
+        assert_eq!(check_daemon_identity(&client, &matching), Ok(()));
+        assert!(
+            matches!(check_daemon_identity(&client, &different), Err(reason) if reason.contains("0.11.0") && reason.contains("0.14.2"))
+        );
     }
 
     #[cfg(unix)]
@@ -184,15 +297,11 @@ case "$*" in
 esac
 "#;
         fs::create_dir_all(binary_path(&state).parent().expect("bin")).expect("bin");
-        for binary in [
-            binary_path(&state),
-            super::super::git_guard::executable_path(&state),
-        ] {
-            fs::write(&binary, script).expect("binary fixture");
-            fs::set_permissions(binary, fs::Permissions::from_mode(0o755)).expect("executable");
-        }
-        verify(&state, &root).expect("metadata adoption");
-        verify(&state, &root).expect("repeat is a no-op");
+        let binary = binary_path(&state);
+        fs::write(&binary, script).expect("binary fixture");
+        fs::set_permissions(binary, fs::Permissions::from_mode(0o755)).expect("executable");
+        verify_with_binary(&state, &root, &binary_path(&state), None).expect("metadata adoption");
+        verify_with_binary(&state, &root, &binary_path(&state), None).expect("repeat is a no-op");
         assert_eq!(
             fs::read_to_string(root.join("calls")).expect("calls"),
             "upgrade\n"
@@ -203,7 +312,7 @@ esac
         );
         let developer = fixture.path().join("developer-store");
         fs::create_dir(&developer).expect("developer store");
-        let error = verify(&state, &developer)
+        let error = verify_with_binary(&state, &developer, &binary_path(&state), None)
             .expect_err("operator store requires explicit upgrade")
             .to_string();
         assert!(error.contains("upgrade-store"));
@@ -213,46 +322,6 @@ esac
                 .expect("developer store")
                 .next()
                 .is_none()
-        );
-    }
-    #[test]
-    fn native_layr_format_mismatch_refuses_but_version_difference_is_visible() {
-        let bundled = Identity {
-            format: 1,
-            version: "0.5.1".into(),
-            build: "upstream".into(),
-        };
-        let mut developer = Identity {
-            format: 2,
-            version: "0.6.0".into(),
-            build: "new".into(),
-        };
-        let compare_now = |developer: &Identity| {
-            compare(
-                &bundled,
-                developer,
-                Path::new("/store"),
-                Path::new("/developer/layr"),
-            )
-        };
-        let error = compare_now(&developer)
-            .expect_err("different store format")
-            .to_string();
-        assert!(
-            error.contains("format 2") && error.contains("format 1") && error.contains("/store")
-        );
-        developer.format = 1;
-        developer.version = "0.5.2".into();
-        let note = compare_now(&developer)
-            .expect("same store format")
-            .expect("visible difference");
-        assert!(note.contains("0.5.2") && note.contains("0.5.1"));
-        developer.version = bundled.version.clone();
-        assert!(
-            compare_now(&developer)
-                .expect("compatible")
-                .expect("warning")
-                .contains("new")
         );
     }
 }

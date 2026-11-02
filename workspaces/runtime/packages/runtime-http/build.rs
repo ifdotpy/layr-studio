@@ -7,8 +7,87 @@ use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 
-use openapi_to_rust::analysis::{ObjectAdditionalProperties, SchemaType};
+use openapi_to_rust::analysis::{ObjectAdditionalProperties, PropertyConstraints, SchemaType};
 use openapi_to_rust::{CodeGenerator, GeneratorConfig, SchemaAnalyzer};
+
+// Only ingress schemas whose consumers and full constraints have been audited.
+const CONSTRAINED_INGRESS: &[&str] = &[
+    "CheckpointPreviewRequest",
+    "CheckpointRestoreRequest",
+    "CheckpointCaptureRequest",
+    "ClaudeAddStartRequest",
+    "ClaudeCancelRequest",
+    "ClaudeCodeRequest",
+    "ClaudeStartRequest",
+    "IdRequest",
+    "MacSyncConfigRequest",
+    "MacSyncResolveRequest",
+    "McpReconnectRequest",
+    "McpSessionBinding",
+    "NativeActionRequest",
+    "ActionContext",
+    "SafetyActionRequest",
+    "ProjectSecretsListRequest",
+    "ProjectDeleteRequest",
+    "ProjectSecretSetRequest",
+    "ProjectSecretRemoveRequest",
+    "VaultLoginRequest",
+    "VaultPullRequest",
+    "VaultSetupFactsRequest",
+    "VaultSetupRequest",
+    "VaultUnlockRequest",
+    "VoiceEndRequest",
+    "VoiceStartRequest",
+    "VoiceStatusRequest",
+    "VoiceRecordsRequest",
+    "WebPushRemoveRequest",
+    "WebPushSubscribeRequest",
+];
+
+const PATTERN_TYPES: &[(&str, &str)] = &[
+    (
+        "^[a-z0-9][a-z0-9_-]{0,31}$",
+        "studio_runtime_schema::project_ingress::AccountGroup",
+    ),
+    ("\\S", "crate::ingress_pattern::NonWhitespace"),
+    (
+        "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+        "crate::ingress_pattern::Uuid",
+    ),
+    (
+        "^[^\\s\\p{C}](?:[^\\s\\p{C}]| +[^\\s\\p{C}])*$",
+        "studio_runtime_schema::multi_server_ingress::ServerLabel",
+    ),
+    (
+        "^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$",
+        "crate::ingress_pattern::ProjectId",
+    ),
+    (
+        "^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$",
+        "crate::ingress_pattern::VaultRequestId",
+    ),
+    (
+        "^[A-Za-z0-9][A-Za-z0-9:_-]{0,99}$",
+        "crate::ingress_pattern::SecretRequestId",
+    ),
+    (
+        "^[A-Za-z0-9][A-Za-z0-9_.@+-]{0,127}$",
+        "crate::ingress_pattern::AwsProfileName",
+    ),
+    (
+        "^[A-Z_][A-Z0-9_]{0,63}$",
+        "crate::ingress_pattern::SecretName",
+    ),
+    (
+        "^[a-z]{2}(-[a-z]+)+-[0-9]$",
+        "crate::ingress_pattern::Region",
+    ),
+    (
+        "^[A-Za-z0-9][A-Za-z0-9_-]{0,43}$",
+        "studio_runtime_schema::resource_ref::VaultPrefix",
+    ),
+];
+
 fn main() -> Result<(), Box<dyn Error>> {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
     // Clippy does not merge parent configs: runtime/clippy.toml owns the shared policy.
@@ -38,7 +117,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=build.rs");
 
     let document: serde_json::Value = serde_json::from_slice(&fs::read(&spec_path)?)?;
-    let mut analyzer = SchemaAnalyzer::new(document)?;
+    let mut analyzer = SchemaAnalyzer::new(document.clone())?;
     let mut analysis = analyzer.analyze()?;
     analysis
         .schemas
@@ -100,7 +179,23 @@ fn main() -> Result<(), Box<dyn Error>> {
         rust_type: "studio_runtime_schema::limit_reset_request::ResetRequest".to_owned(),
         serde_with: None,
     };
+    analysis
+        .schemas
+        .get_mut("ChatWorkspaceMode")
+        .ok_or("missing chat workspace mode")?
+        .schema_type = SchemaType::Primitive {
+        rust_type: "studio_runtime_schema::workspace_modes::ChatWorkspaceMode".to_owned(),
+        serde_with: None,
+    };
     // Draft ingress has a single bounded Rust owner in routes/sync_documents.
+    analysis
+        .schemas
+        .get_mut("NativeLayrCapability")
+        .ok_or("missing native Layr capability")?
+        .schema_type = SchemaType::Primitive {
+        rust_type: "studio_runtime_schema::native_layr::NativeLayrCapability".to_owned(),
+        serde_with: None,
+    };
     for name in ["DraftPushRequest", "DraftPushRow", "DraftDocumentInput"] {
         analysis
             .schemas
@@ -483,6 +578,26 @@ fn main() -> Result<(), Box<dyn Error>> {
         rust_type: "studio_runtime_schema::command::CommandRequest".to_owned(),
         serde_with: None,
     };
+    // The answer result and the forward of a sign-in have one owner too.
+    for (name, rust_type) in [
+        (
+            "AnswerResult",
+            "studio_runtime_schema::command::AnswerResult",
+        ),
+        (
+            "BrowserForward",
+            "studio_runtime_schema::command::BrowserForward",
+        ),
+    ] {
+        analysis
+            .schemas
+            .get_mut(name)
+            .ok_or("missing answer result schema")?
+            .schema_type = SchemaType::Primitive {
+            rust_type: rust_type.to_owned(),
+            serde_with: None,
+        };
+    }
     analysis.schemas.retain(|name, _| {
         !(name.starts_with("CommandRequest") && name != "CommandRequest")
             && !matches!(
@@ -491,6 +606,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     | "CommandWithdrawBody"
                     | "CommandStopBody"
                     | "CommandResponse"
+                    | "CommandResponseApplied"
+                    | "CommandResponseAnswer"
                     | "CommandRow"
             )
     });
@@ -583,6 +700,115 @@ fn main() -> Result<(), Box<dyn Error>> {
     // unevaluatedProperties:false closes the complete schema after its oneOf.
     *additional_properties = ObjectAdditionalProperties::Denied;
     properties.insert("value".to_owned(), value_property);
+    for name in CONSTRAINED_INGRESS {
+        let SchemaType::Object {
+            properties,
+            required,
+            ..
+        } = &mut analysis
+            .schemas
+            .get_mut(*name)
+            .ok_or("missing constrained ingress schema")?
+            .schema_type
+        else {
+            return Err("constrained ingress must be an object".into());
+        };
+        for (field, property) in properties.iter_mut() {
+            if property.nullable
+                && let Some(branches) = document["components"]["schemas"][*name]["properties"]
+                    [field]["anyOf"]
+                    .as_array()
+            {
+                let non_null: Vec<_> = branches
+                    .iter()
+                    .filter(|branch| branch["type"] != "null")
+                    .collect();
+                if branches.len() != 2 || non_null.len() != 1 || !property.constraints.is_empty() {
+                    return Err(format!("unsupported nullable constraint in {name}.{field}").into());
+                }
+                let details: openapi_to_rust::openapi::SchemaDetails =
+                    serde_json::from_value(non_null[0].clone())?;
+                property.constraints = PropertyConstraints::from_schema_details(&details);
+            }
+            let constraints = &property.constraints;
+            if constraints.exclusive_minimum.is_some()
+                || constraints.exclusive_maximum.is_some()
+                || constraints.multiple_of.is_some()
+                || constraints.min_items.is_some()
+                || constraints.max_items.is_some()
+                || constraints.unique_items.is_some()
+            {
+                return Err(format!("unsupported constraint in {name}").into());
+            }
+            if !constraints.is_empty() {
+                let SchemaType::Primitive { rust_type, .. } = &mut property.schema_type else {
+                    return Err(format!("unsupported constraint type in {name}").into());
+                };
+                if let Some(pattern) = &constraints.pattern {
+                    if rust_type != "String"
+                        || constraints.minimum.is_some()
+                        || constraints.maximum.is_some()
+                    {
+                        return Err(format!("unsupported pattern combination in {name}").into());
+                    }
+                    let owner = PATTERN_TYPES
+                        .iter()
+                        .find(|(source, _)| source == pattern)
+                        .ok_or_else(|| format!("unknown pattern in {name}: {pattern}"))?
+                        .1;
+                    *rust_type =
+                        if constraints.min_length.is_some() || constraints.max_length.is_some() {
+                            let min = constraints.min_length.unwrap_or(0);
+                            let max = constraints
+                                .max_length
+                                .map_or("{ usize::MAX }".to_owned(), |v| v.to_string());
+                            format!("crate::ingress_pattern::BoundedPattern<{owner}, {min}, {max}>")
+                        } else {
+                            owner.to_owned()
+                        };
+                } else if rust_type == "String"
+                    && constraints.minimum.is_none()
+                    && constraints.maximum.is_none()
+                {
+                    let min = constraints.min_length.unwrap_or(0);
+                    let max = constraints
+                        .max_length
+                        .map_or("{ usize::MAX }".to_owned(), |v| v.to_string());
+                    *rust_type =
+                        format!("studio_runtime_schema::bounded_text::BoundedText<{min}, {max}>");
+                } else if rust_type == "i64"
+                    && constraints
+                        .minimum
+                        .is_some_and(|v| v >= 0.0 && v.fract() == 0.0)
+                    && constraints.maximum.is_some_and(|v| {
+                        v <= studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as f64
+                            && v.fract() == 0.0
+                    })
+                    && constraints.min_length.is_none()
+                    && constraints.max_length.is_none()
+                {
+                    let (Some(min), Some(max)) = (constraints.minimum, constraints.maximum) else {
+                        return Err(format!("missing integer bound in {name}").into());
+                    };
+                    *rust_type = format!(
+                        "crate::ingress_pattern::BoundedSafeInteger<{}, {}>",
+                        min as u64, max as u64
+                    );
+                } else {
+                    return Err(format!("unsupported constraint type in {name}").into());
+                }
+            }
+            if !required.contains(field) && !property.nullable {
+                let SchemaType::Primitive { serde_with, .. } = &mut property.schema_type else {
+                    return Err(format!("unsupported optional field in {name}").into());
+                };
+                if serde_with.is_some() {
+                    return Err(format!("unsupported optional codec in {name}").into());
+                }
+                *serde_with = Some("crate::routes::extractors::non_null".into());
+            }
+        }
+    }
     // The generator already emits strict serde for closed untagged branches.
     // Apply that same rule to every explicitly closed object at this boundary.
     for (name, schema) in &analysis.schemas {

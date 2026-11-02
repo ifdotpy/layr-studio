@@ -28,12 +28,8 @@ export function jsonObject(
 export function accountLimits(
   value: AccountLimitsSnapshot | null | undefined,
   accountKey: string,
-  accountId?: string | null,
+  _accountId?: string | null,
 ): AccountLimitsSnapshot | null {
   if (!value || value.accountKey !== accountKey) return null;
-  const limits = value;
-  const data = limits.data;
-  if (accountId && data?.accountId != null && data.accountId !== accountId)
-    return null;
-  return limits;
+  return value;
 }

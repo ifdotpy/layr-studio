@@ -115,8 +115,24 @@ fn permission_case(
     override_mode: Option<studio_runtime_schema::claude_permissions::PermissionMode>,
     expected: &str,
 ) {
-    let parent = json!({"provider":provider,"permissionMode":mode.unwrap_or(if yolo { "bypassPermissions" } else { "default" })});
-    let mut child = json!({"provider":"claude","role":"implementer"});
+    let mut parent = studio_runtime_store::AgentRecord::test_defaults();
+    parent.provider = studio_runtime_schema::queue_command::Field::Value(
+        serde_json::from_str(&format!("{provider:?}")).unwrap(),
+    );
+    parent.permission_mode = Some(
+        serde_json::from_str(&format!(
+            "{:?}",
+            mode.unwrap_or(if yolo { "bypassPermissions" } else { "default" })
+        ))
+        .unwrap(),
+    );
+    let mut child = studio_runtime_store::AgentRecord::test_defaults();
+    child.provider = studio_runtime_schema::queue_command::Field::Value(
+        studio_runtime_providers::ProviderKind::Claude,
+    );
+    child.role = studio_runtime_schema::queue_command::Field::Value(
+        studio_runtime_schema::creation_intent::AgentRole::Implementer,
+    );
     crate::child_permissions::inherit_claude_permissions(
         &mut child,
         &parent,
@@ -124,7 +140,7 @@ fn permission_case(
         override_mode,
     )
     .unwrap();
-    assert_eq!(child["permissionMode"], expected);
+    assert_eq!(child.permission_mode.unwrap().as_str(), expected);
 }
 
 #[test]

@@ -10,7 +10,7 @@ use std::{
 use studio_runtime_store::path_identity::CanonicalPath;
 
 const MARKER: &str = "# Studio native Layr Git guard.";
-const LAUNCHER_MARKER: &str = "# Studio native Layr launcher.";
+pub(super) const LAUNCHER_MARKER: &str = "# Studio native Layr launcher.";
 const COMMIT_REFUSAL: &str =
     "Git commit is disabled inside a native Layr line. Use layr save -m \"message\".";
 
@@ -94,6 +94,12 @@ fn hook_script() -> String {
     )
 }
 
+pub(super) fn has_marker(path: &Path, marker: &str) -> std::io::Result<bool> {
+    let mut prefix = Vec::new();
+    fs::File::open(path)?.take(128).read_to_end(&mut prefix)?;
+    Ok(String::from_utf8_lossy(&prefix).contains(marker))
+}
+
 fn find_real_git() -> Result<PathBuf, NativeLayrError> {
     for directory in std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()) {
         let candidate = directory.join("git");
@@ -110,11 +116,7 @@ fn find_real_git() -> Result<PathBuf, NativeLayrError> {
                 continue;
             }
         }
-        let mut prefix = Vec::new();
-        fs::File::open(&candidate)?
-            .take(128)
-            .read_to_end(&mut prefix)?;
-        if String::from_utf8_lossy(&prefix).contains(MARKER) {
+        if has_marker(&candidate, MARKER)? {
             continue;
         }
         return Ok(CanonicalPath::existing(candidate)?.into_path_buf());
@@ -129,26 +131,15 @@ fn real_git_path(state_dir: &Path) -> PathBuf {
 }
 
 /// The managed entry selects real Git for Layr's own child processes only.
-pub(super) fn executable_path(state_dir: &Path) -> PathBuf {
-    binary_path(state_dir).with_file_name("layr-real")
-}
-
-fn install_layr_entry(state_dir: &Path, real_git: &Path) -> Result<(), NativeLayrError> {
+fn install_layr_entry(
+    state_dir: &Path,
+    real_git: &Path,
+    executable: &Path,
+) -> Result<(), NativeLayrError> {
     let entry = binary_path(state_dir);
-    let executable = executable_path(state_dir);
-    if entry.is_file() {
-        let mut prefix = Vec::new();
-        fs::File::open(&entry)?.take(128).read_to_end(&mut prefix)?;
-        if !executable.is_file() && !String::from_utf8_lossy(&prefix).contains(LAUNCHER_MARKER) {
-            // Upgrade an existing installation without removing its entry first.
-            let temporary = executable.with_extension("new");
-            fs::copy(&entry, &temporary)?;
-            fs::rename(temporary, &executable)?;
-        }
-    }
-    if !executable.is_file() {
+    if executable == entry {
         return Err(NativeLayrError::Refused(
-            "The managed Layr executable is unavailable".into(),
+            "The Layr executable is the managed launcher".into(),
         ));
     }
     let git_directory = real_git
@@ -166,7 +157,7 @@ fn install_layr_entry(state_dir: &Path, real_git: &Path) -> Result<(), NativeLay
 }
 
 /// Called under the native binary install lock. Resolve Git once, before publishing its wrapper.
-pub(super) fn ensure(state_dir: &Path) -> Result<(), NativeLayrError> {
+pub(super) fn ensure(state_dir: &Path, executable: &Path) -> Result<(), NativeLayrError> {
     let state_dir = CanonicalPath::existing(state_dir)?.into_path_buf();
     let bin = binary_path(&state_dir)
         .with_file_name("git")
@@ -200,7 +191,7 @@ pub(super) fn ensure(state_dir: &Path) -> Result<(), NativeLayrError> {
     if fs::read(&wrapper).ok().as_deref() != Some(script.as_bytes()) {
         crate::atomic_file::replace(&wrapper, script.as_bytes(), Some(0o755), true)?;
     }
-    install_layr_entry(&state_dir, &real_git)?;
+    install_layr_entry(&state_dir, &real_git, executable)?;
     Ok(())
 }
 
@@ -289,6 +280,14 @@ mod tests {
     use super::*;
     use crate::bounded_child::{self, ChildError, Request};
     use std::{ffi::OsStr, fs, time::Duration};
+
+    #[test]
+    fn launcher_refuses_to_execute_itself() {
+        let state = tempfile::tempdir().expect("state");
+        let entry = binary_path(state.path());
+        assert!(install_layr_entry(state.path(), Path::new("/usr/bin/git"), &entry).is_err());
+        assert!(!entry.exists());
+    }
 
     fn invoke(program: &Path, cwd: &Path, args: &[&str]) -> Result<String, ChildError> {
         invoke_environment(program, cwd, args, &[])
@@ -537,9 +536,10 @@ mod tests {
             serde_json::to_vec(&real.join("git")).expect("path JSON"),
         )
         .expect("saved Git path");
-        crate::atomic_file::replace(&binary_path(&state), b"#!/bin/sh\ncase \"$1:$2\" in save:-m) exec git update-index ;; save:) exec git write-tree ;; git:sync) exec git update-ref ;; git:push) shift; exec git \"$@\" ;; esac\n", Some(0o755), false).expect("old managed Layr binary");
-        ensure(&state).expect("install launcher");
-        ensure(&state).expect("repeat install");
+        let executable = root.path().join("installed-layr");
+        crate::atomic_file::replace(&executable, b"#!/bin/sh\ncase \"$1:$2\" in save:-m) exec git update-index ;; save:) exec git write-tree ;; git:sync) exec git update-ref ;; git:push) shift; exec git \"$@\" ;; esac\n", Some(0o755), false).expect("installed Layr fixture");
+        ensure(&state, &executable).expect("install launcher");
+        ensure(&state, &executable).expect("repeat install");
         let path = format!(
             "{}:{}",
             bin.display(),
@@ -581,8 +581,7 @@ mod tests {
 
     fn real_managed_layr_git_operation(operation: &str) {
         let binary = PathBuf::from(
-            std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY")
-                .expect("Set STUDIO_LAYR_NATIVE_TEST_BINARY"),
+            crate::layr_native::test_binary().expect("Set STUDIO_LAYR_NATIVE_TEST_BINARY"),
         );
         let root = tempfile::tempdir().expect("fixture directory");
         let root_path = CanonicalPath::existing(root.path())
@@ -591,13 +590,7 @@ mod tests {
         let state = root_path.join("state");
         let source = root_path.join("source");
         fs::create_dir_all(&source).expect("source");
-        assert!(super::super::install::version_matches(
-            invoke(&binary, &source, &["--version"])
-                .expect("Layr version")
-                .trim()
-        ));
         fs::create_dir_all(binary_path(&state).parent().expect("binary parent")).expect("bin");
-        fs::copy(binary, binary_path(&state)).expect("copy real Layr");
         fs::write(source.join("file"), "first\n").expect("source file");
         let real_git = find_real_git().expect("host Git");
         for args in [
@@ -628,7 +621,7 @@ mod tests {
             &["remote", "add", "origin", remote.to_str().expect("remote")],
         )
         .expect("origin");
-        ensure(&state).expect("install managed entries");
+        ensure(&state, &binary).expect("install managed entries");
         let path = format!(
             "{}:{}",
             binary_path(&state).parent().expect("bin").display(),
@@ -1112,6 +1105,102 @@ fn main() {
         )
         .expect("wrapper");
         (root, wrapper, line)
+    }
+
+    #[test]
+    fn proxy_allows_writes_targeting_outside_the_line() {
+        let (root, wrapper, line) = review_proxy_fixture();
+        let outside = root.path().join("outside");
+        fs::create_dir(&outside).expect("outside");
+        let outside = outside.to_str().expect("outside path");
+        let config = root.path().join("config");
+        let config = config.to_str().expect("config path");
+        for args in [
+            vec!["init", outside],
+            vec!["-C", outside, "config", "test.key", "value"],
+            vec!["--git-dir", outside, "commit"],
+            vec!["--work-tree", outside, "commit"],
+            vec!["config", "--file", config, "test.key", "value"],
+            vec!["config", &format!("--file={config}"), "test.key", "value"],
+        ] {
+            assert!(invoke(&wrapper, &line, &args).is_ok(), "{args:?}");
+        }
+        assert!(invoke_environment(&wrapper, &line, &["commit"], &[("GIT_DIR", outside)]).is_ok());
+        assert!(
+            invoke_environment(
+                &wrapper,
+                &line,
+                &["config", "--global", "--list"],
+                &[("GIT_CONFIG_GLOBAL", config)]
+            )
+            .is_ok()
+        );
+        for args in [
+            vec!["commit"],
+            vec!["config", "test.key", "value"],
+            vec!["init", "."],
+        ] {
+            assert!(invoke(&wrapper, &line, &args).is_err(), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn proxy_runs_real_git_against_outside_targets() {
+        let (root, wrapper, line) = review_proxy_fixture();
+        let state = root.path().join("state");
+        let real_git = find_real_git().expect("real Git");
+        crate::atomic_file::replace(
+            &wrapper,
+            wrapper_script(&state, &real_git)
+                .expect("wrapper")
+                .as_bytes(),
+            Some(0o755),
+            false,
+        )
+        .expect("wrapper");
+        let outside = root.path().join("repository");
+        let outside = outside.to_str().expect("outside");
+        let config = root.path().join("config");
+        let config = config.to_str().expect("config");
+        invoke(&wrapper, &line, &["init", "-q", outside]).expect("outside init");
+        invoke(
+            &wrapper,
+            &line,
+            &["-C", outside, "config", "test.key", "value"],
+        )
+        .expect("outside repository config");
+        invoke(
+            &wrapper,
+            &line,
+            &["config", "--file", config, "test.key", "value"],
+        )
+        .expect("outside file config");
+        assert_eq!(
+            invoke(
+                &real_git,
+                &line,
+                &["config", "--file", config, "--get", "test.key"]
+            )
+            .expect("read config"),
+            "value\n"
+        );
+        for args in [vec!["commit"], vec!["config", "test.key", "value"]] {
+            assert!(invoke(&wrapper, &line, &args).is_err(), "{args:?}");
+        }
+        assert!(
+            invoke(
+                &wrapper,
+                root.path(),
+                &[
+                    "config",
+                    "--file",
+                    line.join("config").to_str().unwrap(),
+                    "test.key",
+                    "value"
+                ]
+            )
+            .is_err()
+        );
     }
 
     #[test]

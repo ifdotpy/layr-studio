@@ -270,8 +270,11 @@ pub async fn select(
                 )?;
                 return Ok(crate::agents_create::publish_agent(tx, &value)?);
             }
-            let mut view = value;
-            crate::agents_create::mode_fields(&mut view);
+            // typed-boundary: caller still Value-based
+            let mut typed =
+                studio_runtime_store::AgentRecord::from_value(value).map_err(StoreError::from)?;
+            crate::agents_create::mode_fields(&mut typed);
+            let view = typed.value();
             crate::sync_views::agent_entity_view(&view, &context)
                 .ok_or(TransferError::Refused("Invalid selection agent"))
         })

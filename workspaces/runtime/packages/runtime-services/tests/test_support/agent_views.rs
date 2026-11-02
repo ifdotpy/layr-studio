@@ -3,6 +3,20 @@
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+/// Remove server projections that postdate the frozen Python agent oracle.
+pub(crate) fn normalize_frozen_projection(fields: &mut serde_json::Map<String, Value>) {
+    if fields.get("kind").and_then(Value::as_str) == Some("agent") {
+        for key in [
+            "accountChange",
+            "accountTransferProgress",
+            "accountDestinations",
+            "manualConnectionCheck",
+        ] {
+            fields.remove(key);
+        }
+    }
+}
+
 #[allow(dead_code)]
 pub(crate) fn materialize_agent_defaults(value: &mut Value) {
     let fields = value.as_object_mut().expect("agent fixture");
@@ -15,6 +29,24 @@ pub(crate) fn materialize_agent_defaults(value: &mut Value) {
 }
 
 pub(crate) fn normalize_legacy_agent(value: &mut Value) {
+    normalize_agent(
+        value,
+        studio_runtime_store::migrations::normalize_agent_fixtures,
+    );
+}
+
+#[allow(dead_code)]
+pub(crate) fn normalize_creation_agent(value: &mut Value) {
+    normalize_agent(
+        value,
+        studio_runtime_store::migrations::normalize_agent_creation_fixtures,
+    );
+}
+
+fn normalize_agent(
+    value: &mut Value,
+    apply: fn(&rusqlite::Transaction<'_>) -> studio_runtime_store::StoreResult<()>,
+) {
     let mut db = rusqlite::Connection::open_in_memory().expect("fixture database");
     db.execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL)")
         .expect("fixture agents");
@@ -24,8 +56,7 @@ pub(crate) fn normalize_legacy_agent(value: &mut Value) {
     )
     .expect("fixture agent");
     let tx = db.transaction().expect("fixture transaction");
-    studio_runtime_store::migrations::normalize_agent_fixtures(&tx)
-        .expect("normalize legacy agent");
+    apply(&tx).expect("normalize legacy agent");
     let normalized: String = tx
         .query_row("SELECT record FROM runtime_agents", [], |row| row.get(0))
         .expect("normalized agent");

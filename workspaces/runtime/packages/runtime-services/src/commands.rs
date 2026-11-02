@@ -17,7 +17,8 @@ use crate::agent_lifecycle_runtime::LifecyclePorts;
 use crate::agent_management::Action;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use studio_runtime_schema::command::{
-    COMMAND_ROW_MAX_BYTES, Command, CommandRequest, CommandResponse, CommandRow, CommandStatus,
+    COMMAND_ROW_MAX_BYTES, Command, CommandOutcome, CommandRequest, CommandResponse, CommandRow,
+    CommandStatus,
 };
 use studio_runtime_schema::persistence::{
     RequestIdentity, RequestIdentityError, RequestReferenceKind,
@@ -81,6 +82,7 @@ pub fn principal_key(principal: &Principal) -> String {
         Principal::Peer { server } => format!("peer:{server}"),
         Principal::Agent { id, .. } => format!("agent:{id}"),
         Principal::Federated { peer } => format!("federated:{peer}"),
+        Principal::ProjectPeer { peer, project, .. } => format!("project-peer:{peer}:{project}"),
         Principal::Policy => "policy".into(),
     }
 }
@@ -102,6 +104,13 @@ pub fn authorize(
     principal: &Principal,
     command: &Command,
 ) -> Result<(), CommandError> {
+    // Only the user answers an approval, as in the answer route. Agents, peers, federated
+    // rooms and automatic policy answers are refused here.
+    if matches!(command, Command::Answer { .. })
+        && !matches!(principal, Principal::Owner | Principal::Device { .. })
+    {
+        return Err(CommandError::Forbidden);
+    }
     match access(principal, class_of(command)) {
         Access::Allow => Ok(()),
         Access::Deny => Err(CommandError::Forbidden),
@@ -117,7 +126,9 @@ pub fn authorize(
                 }
                 Command::Send { target, .. }
                 | Command::Withdraw { target, .. }
-                | Command::Stop { target, .. } => target.as_str().to_owned(),
+                | Command::Stop { target, .. }
+                | Command::Pause { target, .. } => target.as_str().to_owned(),
+                Command::Answer { .. } => return Err(CommandError::Forbidden),
             };
             let below = crate::managed_host_tools::is_descendant(tx, id, &chat)
                 .map_err(|_| CommandError::Invalid("Invalid stored agent ancestry"))?;
@@ -430,6 +441,7 @@ pub fn response(
     conn: &Connection,
     reference: &RequestReference,
     chat: &str,
+    outcome: CommandOutcome,
 ) -> Result<CommandResponse, CommandError> {
     let mut statement = conn.prepare_cached(
         "SELECT collection,id,seq,payload FROM sync_entities WHERE id IN (?1,?2) AND deleted=0 ORDER BY collection,id",
@@ -472,6 +484,7 @@ pub fn response(
         rev: reference.revision,
         seq,
         rows,
+        outcome,
     })
 }
 
@@ -504,22 +517,35 @@ pub(crate) fn server_draft(
 }
 
 /// The stop of `target` for `principal`. A stop only interrupts the running turn; it does
-/// not pause the chat or clear its queue. An agent principal names itself as the sender.
-fn stop_action(principal: &Principal, target: &str, descendants: bool) -> Action {
+/// not pause the chat or clear its queue. A pause (`pause`) also clears the auto-wake and the
+/// queue. An agent principal names itself as the sender.
+fn stop_action(principal: &Principal, target: &str, descendants: bool, pause: bool) -> Action {
     let (sender, sender_epoch) = match principal {
         Principal::Agent { id, epoch } => (Some(id.clone()), i64::try_from(*epoch).ok()),
         Principal::Owner
         | Principal::Device { .. }
         | Principal::Peer { .. }
         | Principal::Federated { .. }
+        | Principal::ProjectPeer { .. }
         | Principal::Policy => (None, None),
     };
-    Action::Stop {
-        target: target.to_owned(),
-        descendants,
-        reason: None,
-        sender,
-        sender_epoch,
+    let (target, reason) = (target.to_owned(), None);
+    if pause {
+        Action::Pause {
+            target,
+            descendants,
+            reason,
+            sender,
+            sender_epoch,
+        }
+    } else {
+        Action::Stop {
+            target,
+            descendants,
+            reason,
+            sender,
+            sender_epoch,
+        }
     }
 }
 
@@ -554,6 +580,11 @@ pub fn execute_sync(
             "A send command runs through the message path",
         ));
     }
+    if matches!(request.command, Command::Answer { .. }) {
+        return Err(CommandError::Invalid(
+            "An answer command runs through the answer path",
+        ));
+    }
     let begun = match begin(tx, principal, request, now_ms)? {
         Start::Replay(reference) => {
             return Ok(Executed {
@@ -573,7 +604,7 @@ pub fn execute_sync(
             if decision.interrupt {
                 run_stop(
                     tx,
-                    &stop_action(principal, &decision.chat, false),
+                    &stop_action(principal, &decision.chat, false, false),
                     now,
                     ports,
                 )?;
@@ -583,7 +614,16 @@ pub fn execute_sync(
         Command::Stop { target, body } => {
             reply = run_stop(
                 tx,
-                &stop_action(principal, target.as_str(), body.descendants),
+                &stop_action(principal, target.as_str(), body.descendants, false),
+                now,
+                ports,
+            )?;
+            agent_reference(tx, target.as_str())?
+        }
+        Command::Pause { target, body } => {
+            reply = run_stop(
+                tx,
+                &stop_action(principal, target.as_str(), body.descendants, true),
                 now,
                 ports,
             )?;
@@ -594,7 +634,7 @@ pub fn execute_sync(
             crate::outbox_resolve::decide(&entry, body.action)?;
             crate::outbox_resolve::apply(tx, &entry, body.action, now_ms)?
         }
-        Command::Send { .. } => unreachable!("refused above"),
+        Command::Send { .. } | Command::Answer { .. } => unreachable!("refused above"),
     };
     let reference = finish(tx, &begun, &reference)?;
     Ok(Executed {
@@ -640,6 +680,16 @@ pub fn execute_agent_send(
     )?;
     let reference = finish(tx, &begun, &message_reference(tx, request.id.as_str())?)?;
     Ok((reference, result))
+}
+
+/// Reference of an answered approval. An approval row has no revision of its own, so the
+/// revision is 0 and the id alone names it.
+pub fn approval_reference(id: &str) -> RequestReference {
+    RequestReference {
+        kind: RequestReferenceKind::Approval,
+        id: id.into(),
+        revision: 0,
+    }
 }
 
 /// Command identity of a tool call of `agent`: the call id is the command id.

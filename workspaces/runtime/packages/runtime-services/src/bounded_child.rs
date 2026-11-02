@@ -12,6 +12,11 @@ use process_wrap::std::ProcessGroup;
 use process_wrap::std::{ChildWrapper, CommandWrap};
 use studio_runtime_process::child_priority::ChildPriority;
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static TEST_TIMEOUT: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+}
+
 // Each test thread can expire one pipe-drain deadline after leader exit.
 // This seam is absent from production builds and leaves termination unchanged.
 #[cfg(test)]
@@ -131,6 +136,8 @@ fn run_with_environment(request: Request<'_>, remove_git: bool) -> Result<Output
         stderr_limit,
         timeout,
     } = request;
+    #[cfg(test)]
+    TEST_TIMEOUT.set(Some(timeout));
     let deadline = Instant::now() + timeout;
     let mut command = Command::new(program);
     if remove_git {
@@ -361,7 +368,7 @@ mod tests {
             .expect("write inert configuration values");
         let output = super::run_with_isolated_git_config(Request {
             program: OsStr::new("git"),
-            git_directory: None,
+            git_directory: Some(root.path().as_os_str()),
             args: &["config", "--global", "--list"],
             environment: &[("GIT_CONFIG_GLOBAL", config.to_str().expect("fixture path"))],
             input: None,
@@ -389,12 +396,13 @@ mod tests {
         let output = super::run_with_isolated_git_config(Request {
             program: OsStr::new("sh"),
             git_directory: None,
-            args: &["-c", "printf '%s:%s:%s\\n' \"$FIXTURE_SCOPE\" \"$GIT_CONFIG_NOSYSTEM\" \"$GIT_TERMINAL_PROMPT\"; git config --global --list"],
+            args: &["-c", "cd \"$FIXTURE_CWD\" && printf '%s:%s:%s\\n' \"$FIXTURE_SCOPE\" \"$GIT_CONFIG_NOSYSTEM\" \"$GIT_TERMINAL_PROMPT\" && git config --global --list"],
             environment: &[
                 ("GIT_CONFIG_GLOBAL", config.to_str().expect("fixture path")),
                 ("GIT_CONFIG_NOSYSTEM", "0"),
                 ("GIT_TERMINAL_PROMPT", "1"),
                 ("FIXTURE_SCOPE", "kept"),
+                ("FIXTURE_CWD", root.path().to_str().expect("fixture path")),
             ],
             input: None,
             stdout_limit: 4096,

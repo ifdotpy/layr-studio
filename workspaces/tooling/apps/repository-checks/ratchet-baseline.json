@@ -129,10 +129,6 @@
       "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/agents_create.rs",
-      "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:1"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/browser_policy.rs",
       "fingerprint": "f08a93461c190aa29bcdbdceb6268cce933bd0ca584d6c94d0dfe982e39e2ffd:0"
     },
@@ -1280,10 +1276,6 @@
       "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/agents_create/operations.rs",
-      "fingerprint": "14440430ff280b83b9085116dd114c8de928bfe33e36a341b72507cdc8cbb28a:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/analytics_capture.rs",
       "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
     },
@@ -1956,14 +1948,6 @@
       "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_executor.rs",
-      "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_executor.rs",
-      "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:1"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/account_worker/connection_recovery.rs",
       "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
     },
@@ -2569,22 +2553,6 @@
     {
       "file": "workspaces/runtime/packages/runtime-services/src/account_worker/preparation/pipeline.rs",
       "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:1"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_worker/preparation/pipeline.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:2"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_worker/preparation/pipeline.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:3"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_worker/preparation/pipeline.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:4"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_worker/preparation/pipeline.rs",
-      "fingerprint": "ba49cada35f63797e806417ddfb6b96690109671aa7de2fd89c0f92d49290ab1:5"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/account_worker/preparation/snapshot.rs",
@@ -3306,10 +3274,6 @@
     }
   ],
   "ts-json-parse-cast": [
-    {
-      "file": "workspaces/client/apps/desktop/layr-binary.ts",
-      "fingerprint": "30c951a519de8b24758a9f9c2d334f4eb0fcda25e2c2f29d17ea27b8cd71f73a:0"
-    },
     {
       "file": "workspaces/client/apps/desktop/restart-environment.ts",
       "fingerprint": "7b2e2faea7f4dfe66d482b7eb2e06d91a55ed917b960409bbf8a60a762f71532:0"

@@ -1,4 +1,4 @@
-//! Host Layr workspaces. The Studio state directory owns the store and binary.
+//! Host Layr workspaces. The Studio state directory owns the store and guard.
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use studio_runtime_store::path_identity::CanonicalPath;
@@ -8,8 +8,6 @@ pub use studio_runtime_store::NATIVE_LAYR_DIRECTORY;
 pub const STORE_DIRECTORY: &str = "store";
 /// Length of a SHA-256 project ID, in hexadecimal bytes.
 pub(super) const PROJECT_ID_HEX_BYTES: usize = 64;
-/// Host Layr release required by Studio's command contract.
-pub const LAYR_VERSION: &str = "0.11.0";
 
 pub fn store_path(state_dir: &Path) -> PathBuf {
     state_dir.join(NATIVE_LAYR_DIRECTORY).join(STORE_DIRECTORY)
@@ -40,37 +38,71 @@ pub fn is_native(record: &Value) -> bool {
 }
 
 /// Creation records intent only. `workspace_ready_git` owns filesystem effects.
-pub fn configure_new_chat(record: &mut Value, source: &str) {
-    record["workspaceMode"] = json!("layr-native");
-    record["executionMode"] = json!("native");
-    record["hostProjectPath"] = json!(source);
-    record["layrReady"] = json!(false);
-    record["worktree"] = json!(false);
-    record["worktreeReady"] = json!(false);
-    record["workspaceInGit"] = json!(false);
+pub fn configure_new_chat(record: &mut studio_runtime_store::AgentRecord, source: &str) {
+    record.workspace_mode = Some(studio_runtime_schema::records::WorkspaceMode::LayrNative);
+    record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Native);
+    record.host_project_path =
+        studio_runtime_schema::queue_command::Field::Value(source.to_owned());
+    record.layr_ready = Some(false);
+    record.worktree = Some(false);
+    record.worktree_ready = Some(false);
+    record.workspace_in_git = Some(false);
 }
 
-pub fn configure_child(record: &mut Value, parent: &Value, root: &Value) {
-    let source = root["hostProjectPath"]
-        .as_str()
-        .or_else(|| root["cwd"].as_str())
+pub fn configure_child(
+    record: &mut studio_runtime_store::AgentRecord,
+    parent: &studio_runtime_store::AgentRecord,
+    root: &studio_runtime_store::AgentRecord,
+) {
+    let source = root
+        .host_project_path
+        .value()
+        .map(String::as_str)
+        .or(root.cwd.as_deref())
         .unwrap_or_default();
     configure_new_chat(record, source);
-    record["cwd"] = parent["cwd"].clone();
-    for key in ["layrProjectId", "layrStoreRoot"] {
-        if let Some(value) = root.get(key) {
-            record[key] = value.clone();
-        }
+    record.cwd = parent.cwd.clone();
+    if root.layr_project_id.is_some() {
+        record.layr_project_id.clone_from(&root.layr_project_id);
     }
-    if record["layrStoreRoot"].is_null()
-        && root["layrReady"] == true
-        && let Some(cwd) = root["layrReadCwd"]
-            .as_str()
-            .or_else(|| root["cwd"].as_str())
+    if root.layr_store_root.is_some() {
+        record.layr_store_root.clone_from(&root.layr_store_root);
+    }
+    if record.layr_store_root.is_none()
+        && root.layr_ready == Some(true)
+        && let Some(cwd) = root.layr_read_cwd.as_deref().or(root.cwd.as_deref())
         && let Some(store) = settings::root_from_cwd(Path::new(cwd))
     {
-        record["layrStoreRoot"] = json!(store);
+        record.layr_store_root = Some(store.to_string_lossy().into_owned());
     }
+}
+
+#[cfg(test)]
+fn fixture_agent(id: &str, lead: bool) -> studio_runtime_store::AgentRecord {
+    let mut record = studio_runtime_store::AgentRecord::test_defaults();
+    record.id = id.into();
+    record.is_lead = Some(lead);
+    record.auto_wake = Some(true);
+    record
+}
+
+#[cfg(test)]
+fn fixture_native_parent(value: &Value) -> studio_runtime_store::AgentRecord {
+    use studio_runtime_schema::queue_command::Field;
+    let mut record = fixture_agent(
+        value["id"].as_str().unwrap_or_default(),
+        value["isLead"] == true,
+    );
+    record.cwd = value["cwd"].as_str().map(str::to_owned);
+    record.host_project_path = value["hostProjectPath"]
+        .as_str()
+        .map(str::to_owned)
+        .map_or(Field::Missing, Field::Value);
+    record.layr_project_id = value["layrProjectId"].as_str().map(Into::into);
+    record.layr_store_root = value["layrStoreRoot"].as_str().map(str::to_owned);
+    record.layr_read_cwd = value["layrReadCwd"].as_str().map(Into::into);
+    record.layr_ready = value["layrReady"].as_bool();
+    record
 }
 
 #[cfg(test)]
@@ -79,12 +111,23 @@ mod tests {
 
     #[test]
     fn native_creation_preserves_host_execution_and_source_identity() {
-        let mut record = json!({"id":"lead", "cwd":"/code", "isLead":true});
+        let mut record = studio_runtime_store::AgentRecord::test_defaults();
+        record.cwd = Some("/code".into());
+        record.is_lead = Some(true);
         configure_new_chat(&mut record, "/code");
-        assert_eq!(record["workspaceMode"], "layr-native");
-        assert_eq!(record["executionMode"], "native");
-        assert_eq!(record["hostProjectPath"], "/code");
-        assert_eq!(record["layrReady"], false);
+        assert_eq!(
+            record.workspace_mode,
+            Some(studio_runtime_schema::records::WorkspaceMode::LayrNative)
+        );
+        assert_eq!(
+            record.execution_mode,
+            Some(studio_runtime_store::AgentExecutionMode::Native)
+        );
+        assert_eq!(
+            record.host_project_path.value().map(String::as_str),
+            Some("/code")
+        );
+        assert_eq!(record.layr_ready, Some(false));
         assert_eq!(
             store_path(Path::new("/state")),
             Path::new("/state/layr-native/store")
@@ -97,26 +140,46 @@ mod tests {
 
     #[test]
     fn native_child_inherits_project_and_keeps_reviewer_role() {
-        let root =
-            json!({"cwd":"/store/main", "hostProjectPath":"/code", "layrProjectId":"project"});
-        let mut child = json!({"id":"worker", "role":"reviewer"});
+        let mut root = studio_runtime_store::AgentRecord::test_defaults();
+        root.cwd = Some("/store/main".into());
+        root.host_project_path = studio_runtime_schema::queue_command::Field::Value("/code".into());
+        root.layr_project_id = Some("project".into());
+        let mut child = studio_runtime_store::AgentRecord::test_defaults();
+        child.role = studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::creation_intent::AgentRole::Reviewer,
+        );
         configure_child(&mut child, &root, &root);
-        assert_eq!(child["role"], "reviewer");
-        assert_eq!(child["hostProjectPath"], "/code");
-        assert_eq!(child["layrProjectId"], "project");
-        assert_eq!(child["worktree"], false);
+        assert_eq!(
+            child.role.value(),
+            Some(&studio_runtime_schema::creation_intent::AgentRole::Reviewer)
+        );
+        assert_eq!(
+            child.host_project_path.value().map(String::as_str),
+            Some("/code")
+        );
+        assert_eq!(child.layr_project_id.as_deref(), Some("project"));
+        assert_eq!(child.worktree, Some(false));
     }
 }
 
-mod capability;
+pub mod capability;
 mod git_guard;
-pub mod install;
 pub mod mapping;
 pub mod settings;
-mod versions;
+pub mod versions;
 #[cfg(test)]
 mod warm_store_tests;
-pub use capability::{NativeLayrCapability, capability};
+pub use capability::{NativeLayrCapability, capability, resolve_binary};
+#[cfg(test)]
+fn test_binary() -> Option<std::ffi::OsString> {
+    let binary = std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY")?;
+    capability::TEST_BINARY.with(|value| *value.borrow_mut() = Some(PathBuf::from(&binary)));
+    Some(binary)
+}
+#[cfg(test)]
+pub(crate) fn set_test_binary(binary: PathBuf) {
+    capability::TEST_BINARY.with(|value| *value.borrow_mut() = Some(binary));
+}
 mod failed_import;
 mod private_tree;
 mod runtime;
@@ -308,8 +371,7 @@ mod receipt_tests {
     fn real_host_import_worker_merge_archive_and_warm_caches() {
         use std::{fs, path::PathBuf};
         let binary = PathBuf::from(
-            std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY")
-                .expect("Set STUDIO_LAYR_NATIVE_TEST_BINARY"),
+            crate::layr_native::test_binary().expect("Set STUDIO_LAYR_NATIVE_TEST_BINARY"),
         );
         let state = tempfile::tempdir().expect("fixture operation succeeds");
         let source = tempfile::tempdir().expect("fixture operation succeeds");
@@ -359,7 +421,8 @@ mod receipt_tests {
         )
         .expect("fixture operation succeeds");
         fs::copy(binary, binary_path(state.path())).expect("fixture operation succeeds");
-        let mut lead = json!({"id":"lead","isLead":true,"autoWake":true,"cwd":source.path()});
+        let mut lead = fixture_agent("lead", true);
+        lead.cwd = Some(source.path().to_string_lossy().into_owned());
         configure_new_chat(
             &mut lead,
             CanonicalPath::existing(source.path())
@@ -368,6 +431,7 @@ mod receipt_tests {
                 .to_str()
                 .expect("fixture operation succeeds"),
         );
+        let mut lead = lead.value();
         let ready =
             runtime::prepare_files(state.path(), &lead).expect("fixture operation succeeds");
         for (key, value) in ready.as_object().expect("fixture operation succeeds") {
@@ -416,8 +480,13 @@ mod receipt_tests {
                 "native Git commit guard: {result:?}"
             );
         }
-        let mut worker = json!({"id":"worker","role":"implementer","autoWake":true,"isLead":false});
-        configure_child(&mut worker, &lead, &lead);
+        let parent = fixture_native_parent(&lead);
+        let mut worker = fixture_agent("worker", false);
+        worker.role = studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::creation_intent::AgentRole::Implementer,
+        );
+        configure_child(&mut worker, &parent, &parent);
+        let mut worker = worker.value();
         let ready =
             runtime::prepare_files(state.path(), &worker).expect("fixture operation succeeds");
         for (key, value) in ready.as_object().expect("fixture operation succeeds") {
@@ -445,9 +514,12 @@ mod receipt_tests {
             fs::read_to_string(main.join("code.txt")).expect("fixture operation succeeds"),
             "worker result\n"
         );
-        let mut reviewer =
-            json!({"id":"reviewer","role":"reviewer","autoWake":true,"isLead":false});
-        configure_child(&mut reviewer, &lead, &lead);
+        let mut reviewer = fixture_agent("reviewer", false);
+        reviewer.role = studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::creation_intent::AgentRole::Reviewer,
+        );
+        configure_child(&mut reviewer, &parent, &parent);
+        let mut reviewer = reviewer.value();
         let ready =
             runtime::prepare_files(state.path(), &reviewer).expect("fixture operation succeeds");
         for (key, value) in ready.as_object().expect("fixture operation succeeds") {
@@ -740,6 +812,9 @@ esac
 "#).expect("fixture operation succeeds");
         fs::set_permissions(binary_path(state.path()), fs::Permissions::from_mode(0o755))
             .expect("fixture operation succeeds");
+        // Cargo's test runner can execute fixtures concurrently in one process.
+        capability::TEST_BINARY
+            .with(|binary| *binary.borrow_mut() = Some(binary_path(state.path())));
         let project = studio_runtime_store::sha256_hex(b"/fast-source");
         let line = format!("agent-{}", studio_runtime_store::sha256_hex(b"fast-worker"));
         let cwd = main_path(state.path(), &project)
@@ -925,25 +1000,29 @@ esac
         )
         .expect("fixture operation succeeds");
         fs::copy(
-            std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY")
-                .expect("Set STUDIO_LAYR_NATIVE_TEST_BINARY"),
+            crate::layr_native::test_binary().expect("Set STUDIO_LAYR_NATIVE_TEST_BINARY"),
             binary_path(state.path()),
         )
         .expect("fixture operation succeeds");
-        let mut lead =
-            json!({"id":"regression-lead","isLead":true,"autoWake":true,"cwd":source.path()});
+        let mut lead = fixture_agent("regression-lead", true);
+        lead.cwd = Some(source.path().to_string_lossy().into_owned());
         configure_new_chat(
             &mut lead,
             source.path().to_str().expect("fixture operation succeeds"),
         );
+        let mut lead = lead.value();
         let fields =
             runtime::prepare_files(state.path(), &lead).expect("fixture operation succeeds");
         for (key, value) in fields.as_object().expect("fixture operation succeeds") {
             lead[key] = value.clone();
         }
-        let mut worker =
-            json!({"id":"regression-worker","role":"implementer","isLead":false,"autoWake":true});
-        configure_child(&mut worker, &lead, &lead);
+        let parent = fixture_native_parent(&lead);
+        let mut worker = fixture_agent("regression-worker", false);
+        worker.role = studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::creation_intent::AgentRole::Implementer,
+        );
+        configure_child(&mut worker, &parent, &parent);
+        let mut worker = worker.value();
         let fields =
             runtime::prepare_files(state.path(), &worker).expect("fixture operation succeeds");
         for (key, value) in fields.as_object().expect("fixture operation succeeds") {

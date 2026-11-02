@@ -112,6 +112,12 @@
     "effort": {
       "type": "string",
       "enum": ["low", "medium", "high", "max", "xhigh"]
+    },
+    "title": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
     }
   }
 }

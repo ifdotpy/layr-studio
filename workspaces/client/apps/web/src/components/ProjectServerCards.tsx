@@ -10,10 +10,8 @@ import "./project-locations.css";
 import NewChatModelSettings from "./NewChatModelSettings";
 import type { ServerServices } from "../servers/serverServices";
 import {
-  defaultWorkspaceMode,
   projectAllowsWorktree,
   readNewChatResource,
-  workspaceModeForProject,
   type NewChatSettings,
 } from "./newChatSettings";
 
@@ -66,6 +64,10 @@ export default function ProjectServerCards({
     system?: string | undefined;
     hasStudioVm?: boolean | undefined;
     nativeLayr?: ProjectServerChoice["nativeLayr"] | undefined;
+    nativeLayrMessage?: string | undefined;
+    defaultWorkspaceMode?:
+      | ProjectServerChoice["defaultWorkspaceMode"]
+      | undefined;
   } | null>(null);
   const system =
     server?.system ??
@@ -73,9 +75,13 @@ export default function ProjectServerCards({
   const nativeLayr =
     server?.nativeLayr ??
     (fetched?.key === connectionKey ? fetched.nativeLayr : undefined);
-  const nativeAvailable = nativeLayr?.ready ?? system === "Darwin";
+  const nativeAvailable = nativeLayr?.status === "ready";
   const nativeReason =
-    nativeLayr?.reason || "Native Layr is not ready on this server.";
+    server?.nativeLayrMessage ??
+    (fetched?.key === connectionKey ? fetched.nativeLayrMessage : undefined);
+  const defaultMode =
+    server?.defaultWorkspaceMode ??
+    (fetched?.key === connectionKey ? fetched.defaultWorkspaceMode : undefined);
   const fetchedKey = useRef("");
   fetchedKey.current = fetched?.key || "";
   const [modeChoice, setModeChoice] = useState<{
@@ -84,12 +90,11 @@ export default function ProjectServerCards({
   } | null>(null);
   const chosenMode =
     modeChoice?.server === selected ? modeChoice.mode : undefined;
-  const mode = workspaceModeForProject(
-    project,
-    chosenMode && (chosenMode !== "layr-native" || nativeAvailable)
+  const mode =
+    defaultMode &&
+    (chosenMode && (chosenMode !== "layr-native" || nativeAvailable)
       ? chosenMode
-      : defaultWorkspaceMode(system, nativeLayr),
-  );
+      : defaultMode);
   const worktreeAllowed = projectAllowsWorktree(project);
   const [models, setModels] = useState<Omit<
     NewChatSettings,
@@ -99,7 +104,8 @@ export default function ProjectServerCards({
   const knownSystem =
     !!server?.system &&
     server.hasStudioVm !== undefined &&
-    (server.system !== "Linux" || server.nativeLayr !== undefined);
+    server.nativeLayr !== undefined &&
+    server.defaultWorkspaceMode !== undefined;
   const disabled = !!server?.disabled;
   const available = !!server;
   useEffect(() => {
@@ -122,6 +128,8 @@ export default function ProjectServerCards({
             system: value.system,
             hasStudioVm: value.hasStudioVm,
             nativeLayr: value.nativeLayr,
+            nativeLayrMessage: value.nativeLayrMessage,
+            defaultWorkspaceMode: value.defaultWorkspaceMode,
           });
       })
       .catch((error) => {
@@ -175,7 +183,7 @@ export default function ProjectServerCards({
           );
         })}
       </div>
-      {(system === "Darwin" || system === "Linux") && (
+      {system && (
         <div className="new-chat-run-mode">
           <Text component="label" id="new-chat-run-mode-label" size="sm">
             Workspace
@@ -183,7 +191,7 @@ export default function ProjectServerCards({
           <SegmentedControl
             fullWidth
             aria-labelledby="new-chat-run-mode-label"
-            value={mode}
+            {...(mode ? { value: mode } : {})}
             onChange={(value) =>
               setModeChoice({
                 server: selected,
@@ -198,7 +206,18 @@ export default function ProjectServerCards({
             data={[
               {
                 value: "layr-native",
-                label: "Layr",
+                label: (
+                  <span
+                    className={
+                      !nativeAvailable && nativeReason
+                        ? "native-layr-error"
+                        : undefined
+                    }
+                    title={nativeReason}
+                  >
+                    Layr
+                  </span>
+                ),
                 disabled: !nativeAvailable,
               },
               ...((server?.hasStudioVm ??
@@ -208,11 +227,6 @@ export default function ProjectServerCards({
               { value: "worktree", label: "WT", disabled: !worktreeAllowed },
             ]}
           />
-          {!nativeAvailable && (
-            <Text size="xs" c="dimmed" role="status">
-              {nativeReason}
-            </Text>
-          )}
           {!worktreeAllowed && (
             <Text size="xs" c="dimmed" role="status">
               This project allows only Layr workspaces.
@@ -244,21 +258,20 @@ export default function ProjectServerCards({
             !models ||
             !system ||
             (mode === "layr-native" && !nativeAvailable) ||
-            (system === "Linux" &&
-              !nativeLayr &&
-              fetched?.key !== connectionKey) ||
+            (mode === "worktree" && !worktreeAllowed) ||
+            !defaultMode ||
             !!platformError ||
             !!servers.find((row) => row.id === selected)?.disabled
           }
           onClick={() =>
             location &&
+            mode &&
             models &&
             onChoose(
               { ...location, serverId: selected },
               {
                 ...models,
-                workspaceMode:
-                  system === "Darwin" || system === "Linux" ? mode : "worktree",
+                workspaceMode: mode,
               },
             )
           }

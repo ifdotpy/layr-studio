@@ -147,6 +147,44 @@ impl RecoverySnapshot {
         eligibility(&self.agent, &self.typed)
     }
 
+    /// Manual connection-check control and the receipt for this exact turn.
+    pub fn manual_connection_check(
+        &self,
+    ) -> studio_runtime_schema::agent_entity_native::ManualConnectionCheck {
+        use studio_runtime_schema::agent_entity_native::{
+            ConnectionCheckDto, ManualConnectionCheck,
+        };
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Fields {
+            error: Option<String>,
+            connection_check: Option<ConnectionCheckDto>,
+        }
+        fn account(value: Option<&String>) -> &str {
+            value
+                .filter(|value| !value.is_empty())
+                .map_or("default", String::as_str)
+        }
+        let available = self.eligibility().connection
+            && self.typed.status == "interrupted"
+            && !self.typed.in_flight.unwrap_or(false)
+            && !self.typed.auto_wake.unwrap_or(false)
+            && self.typed.start_attempt.is_none();
+        let fields = <Fields as serde::Deserialize>::deserialize(self.agent.as_ref()).ok();
+        let receipt = fields.and_then(|fields| {
+            let receipt = fields.connection_check?;
+            (available
+                && receipt.at.as_f64().is_some_and(|at| at > 0.0)
+                && receipt.epoch.value().map(|epoch| epoch.get()) == Some(self.typed.epoch.get())
+                && account(receipt.account_key.value()) == account(self.typed.account_key.as_ref())
+                && receipt.thread_id.value() == self.typed.thread_id.as_ref()
+                && receipt.turn_id.value() == self.typed.turn_id.as_ref()
+                && receipt.previous_error.value() == fields.error.as_ref())
+            .then_some(receipt)
+        });
+        ManualConnectionCheck { available, receipt }
+    }
+
     pub(crate) fn automatic_turn(&self) -> Option<AutomaticTurnRecovery<'_>> {
         let eligible = self.eligibility();
         let kind = if eligible.restart_turn {
@@ -823,6 +861,130 @@ mod disconnect_text_tests {
         RecoverySnapshot::from_record(record.clone())
             .expect("recovery record")
             .eligibility()
+    }
+
+    #[test]
+    fn published_manual_connection_check_matches_recovery_cases() {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Published {
+            manual_connection_check:
+                studio_runtime_schema::agent_entity_native::ManualConnectionCheck,
+        }
+        let cases = [
+            (
+                "vm with turn",
+                VM_PROVIDER_DISCONNECTED_TURN_ERROR,
+                Some("turn-1"),
+                true,
+            ),
+            (
+                "provider with turn",
+                PROVIDER_DISCONNECTED_TURN_ERROR,
+                Some("turn-1"),
+                true,
+            ),
+            (
+                "legacy vm with turn",
+                super::LEGACY_VM_PROVIDER_DISCONNECTED_TURN_ERROR,
+                Some("turn-1"),
+                true,
+            ),
+            (
+                "legacy vm without turn",
+                super::LEGACY_VM_PROVIDER_DISCONNECTED_TURN_ERROR,
+                None,
+                false,
+            ),
+            (
+                "vm without turn",
+                VM_PROVIDER_DISCONNECTED_TURN_ERROR,
+                None,
+                false,
+            ),
+            (
+                "provider without turn",
+                PROVIDER_DISCONNECTED_TURN_ERROR,
+                None,
+                false,
+            ),
+            (
+                "restart without turn",
+                super::BACKEND_RESTARTED_TURN_ERROR,
+                None,
+                false,
+            ),
+            ("other error", "Another failure", Some("turn-1"), false),
+        ];
+        let mut mismatches = Vec::new();
+        for (name, error, turn, expected) in cases {
+            let raw = format!(
+                r#"{{"compactions":0,"id":"agent-1","rootId":"agent-1","source":"managed","epoch":4,"accountKey":"default","status":"interrupted","inFlight":false,"autoWake":false,"threadId":"thread-1","turnId":{},"error":{}}}"#,
+                serde_json::to_string(&turn).unwrap(),
+                serde_json::to_string(error).unwrap()
+            );
+            let record = serde_json::from_str(&raw).unwrap();
+            let view = crate::sync_views::agent_entity_view(&record, &Default::default()).unwrap();
+            let published = <Published as serde::Deserialize>::deserialize(view).unwrap();
+            let actual = published.manual_connection_check.available;
+            if actual != expected {
+                mismatches.push((name, expected, actual));
+            }
+        }
+        assert!(
+            mismatches.is_empty(),
+            "client/server differences: {mismatches:?}"
+        );
+
+        let base = format!(
+            r#"{{"compactions":0,"id":"agent-1","rootId":"agent-1","epoch":4,"accountKey":"default","status":"interrupted","inFlight":false,"autoWake":false,"threadId":"thread-1","turnId":"turn-1","error":{}}}"#,
+            serde_json::to_string(PROVIDER_DISCONNECTED_TURN_ERROR).unwrap()
+        );
+        for (name, raw) in [
+            ("queued", base.replace("\"interrupted\"", "\"queued\"")),
+            (
+                "in flight",
+                base.replace("\"inFlight\":false", "\"inFlight\":true"),
+            ),
+            (
+                "automatic wake",
+                base.replace("\"autoWake\":false", "\"autoWake\":true"),
+            ),
+            (
+                "start attempt",
+                base.replace("\"threadId\":", "\"startAttempt\":{},\"threadId\":"),
+            ),
+        ] {
+            let record = serde_json::from_str(&raw).unwrap();
+            let view = crate::sync_views::agent_entity_view(&record, &Default::default()).unwrap();
+            let published = <Published as serde::Deserialize>::deserialize(view).unwrap();
+            assert!(!published.manual_connection_check.available, "{name}");
+        }
+        let receipt = format!(
+            r#""connectionCheck":{{"at":10,"epoch":4,"accountKey":"default","threadId":"thread-1","turnId":"turn-1","previousError":{},"nativeState":"idle"}},"#,
+            serde_json::to_string(PROVIDER_DISCONNECTED_TURN_ERROR).unwrap()
+        );
+        for (name, value, expected) in [
+            ("matching", receipt.clone(), true),
+            (
+                "old epoch",
+                receipt.replace("\"epoch\":4", "\"epoch\":3"),
+                false,
+            ),
+            ("old thread", receipt.replace("thread-1", "thread-2"), false),
+            ("old turn", receipt.replace("turn-1", "turn-2"), false),
+            ("old account", receipt.replace("default", "other"), false),
+        ] {
+            let raw = base.replacen('{', &format!("{{{value}"), 1);
+            let record = serde_json::from_str(&raw).unwrap();
+            let view = crate::sync_views::agent_entity_view(&record, &Default::default()).unwrap();
+            let published = <Published as serde::Deserialize>::deserialize(view).unwrap();
+            assert_eq!(
+                published.manual_connection_check.receipt.is_some(),
+                expected,
+                "{name}"
+            );
+        }
     }
 
     #[test]

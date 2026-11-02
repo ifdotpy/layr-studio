@@ -11,6 +11,8 @@ async fn change_agent(state: &State, key: &'static str, value: Value) {
                     let mut row = AgentRepository::get(tx, &AgentId::from(id.as_str()))?.unwrap();
                     if key == "nativeRelease" {
                         row.native_release = Some(serde::Deserialize::deserialize(value).unwrap());
+                    } else if key == "agentModeRevision" {
+                        row.agent_mode_revision = value.as_u64();
                     } else {
                         row.extra.insert(key.into(), value);
                     }
@@ -107,7 +109,9 @@ async fn compiler_dependencies_and_late_holds_are_checked_before_commit() {
                             "contextRepair" => (mutation_name,json!({"phase":"unknown"})),
                             _ => (mutation_name,json!("transfer")),
                         };
-                        if key == "accountTransferId" {
+                        if key == "agentModeRevision" {
+                            row.agent_mode_revision = value.as_u64();
+                        } else if key == "accountTransferId" {
                             row.account_transfer_id = serde::Deserialize::deserialize(value).expect("typed transfer id");
                         } else {
                             row.extra.insert(key.into(),value);

@@ -340,10 +340,10 @@ async fn delete_project(
     let result = project_deletion::execute(
         store,
         project_deletion::Request {
-            id: body.id,
-            request_id: body.request_id,
-            expected_workspace_id: body.expected_workspace_id,
-            expected_project_seq: body.expected_project_seq,
+            id: body.id.as_str().to_owned(),
+            request_id: body.request_id.as_str().to_owned(),
+            expected_workspace_id: body.expected_workspace_id.as_str().to_owned(),
+            expected_project_seq: body.expected_project_seq.get(),
         },
         now,
         ports,
@@ -1521,6 +1521,212 @@ mod local_registration_tests {
             let valid = validator.is_valid(&body);
             let decoded = serde_json::from_value::<super::PeerTeamRequest>(body.clone()).is_ok();
             assert_eq!(decoded, valid, "{body}");
+        }
+    }
+
+    #[test]
+    fn typed_body_constraints_match_openapi() {
+        let document = crate::schema::openapi_document();
+        let fixtures = [
+            ("project", "ProjectWriteRequest", json!({"path":"p"})),
+            (
+                "project",
+                "ProjectLocationRequest",
+                json!({"action":"add_location","path":"p","project":"p","server":"s","request_id":"r"}),
+            ),
+            (
+                "project",
+                "SidebarReorderRequest",
+                json!({"action":"reorder","request_id":"r","expected_revision":0,"groups":{}}),
+            ),
+            (
+                "peer",
+                "PeerTeamSaveRequest",
+                json!({"action":"save","path":"p","request_id":"r","expected_revision":0,"name":"n","members":["a"]}),
+            ),
+            (
+                "peer",
+                "PeerTeamDeleteRequest",
+                json!({"action":"delete","path":"p","request_id":"r","expected_revision":0,"team_id":"t"}),
+            ),
+            (
+                "peer",
+                "PeerTeamMoveRequest",
+                json!({"action":"move","path":"p","request_id":"r","expected_revision":0,"member":"a"}),
+            ),
+            (
+                "peer",
+                "PeerTeamConvertRequest",
+                json!({"action":"convert","path":"p","request_id":"r","expected_revision":0,"member":"a","target":"b"}),
+            ),
+            (
+                "peer",
+                "PeerTeamRadioCreateRequest",
+                json!({"action":"radio","radio_action":"create","path":"p","request_id":"r","name":"n","participants":[{"account_key":"a","model":"m"},{"account_key":"b","model":"m"}]}),
+            ),
+            (
+                "peer",
+                "PeerTeamRadioOpenRequest",
+                json!({"action":"radio","radio_action":"open","path":"p","request_id":"r","team_id":"t"}),
+            ),
+            (
+                "peer",
+                "PeerTeamRadioSendRequest",
+                json!({"action":"radio","radio_action":"send","path":"p","request_id":"r","team_id":"t","expected_revision":0,"text":"t"}),
+            ),
+            (
+                "peer",
+                "PeerTeamRadioPassRequest",
+                json!({"action":"radio","radio_action":"pass","path":"p","request_id":"r","team_id":"t","expected_revision":0,"target":"a"}),
+            ),
+            (
+                "peer",
+                "PeerTeamRadioStopRequest",
+                json!({"action":"radio","radio_action":"stop","path":"p","request_id":"r","team_id":"t","expected_revision":0}),
+            ),
+        ];
+        let values = [
+            json!(null),
+            json!(true),
+            json!(42),
+            json!(-1),
+            json!(0),
+            json!(1),
+            json!(2),
+            json!(3),
+            json!(1.5),
+            json!(9007199254740991_u64),
+            json!(9007199254740992_u64),
+            json!(""),
+            json!("invalid"),
+            json!([]),
+            json!({}),
+            json!(["a"]),
+            json!(vec!["a"; 17]),
+            json!("x".repeat(80)),
+            json!("x".repeat(81)),
+            json!("x".repeat(128)),
+            json!("x".repeat(129)),
+            json!("x".repeat(255)),
+            json!("x".repeat(256)),
+            json!("x".repeat(4096)),
+            json!("x".repeat(4097)),
+        ];
+        for (route, name, fixture) in fixtures {
+            let path = if route == "project" {
+                "~1api~1projects"
+            } else {
+                "~1api~1peer-teams"
+            };
+            let schema = json!({"$ref":format!("#/paths/{path}/post/requestBody/content/application~1json/schema"), "paths":document["paths"], "components":document["components"]});
+            let validator = jsonschema::validator_for(&schema).unwrap();
+            let mut cases = vec![fixture.clone()];
+            for key in document["components"]["schemas"][name]["properties"]
+                .as_object()
+                .unwrap()
+                .keys()
+            {
+                let mut missing = fixture.clone();
+                missing.as_object_mut().unwrap().remove(key);
+                cases.push(missing);
+                for value in &values {
+                    let mut body = fixture.clone();
+                    body[key] = value.clone();
+                    cases.push(body);
+                }
+            }
+            let mut extra = fixture.clone();
+            extra["extra"] = json!(true);
+            cases.push(extra);
+            if name == "PeerTeamRadioCreateRequest" {
+                for key in ["account_key", "model", "effort"] {
+                    let mut missing = fixture.clone();
+                    missing["participants"][0]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove(key);
+                    cases.push(missing);
+                    for value in &values {
+                        let mut body = fixture.clone();
+                        body["participants"][0][key] = value.clone();
+                        cases.push(body);
+                    }
+                }
+                let mut body = fixture.clone();
+                body["participants"][0]["extra"] = json!(true);
+                cases.push(body);
+            }
+            if name == "SidebarReorderRequest" {
+                let mut body = fixture.clone();
+                body["groups"] = json!({"folder": [42]});
+                cases.push(body);
+            }
+            for body in cases {
+                let decoded = if route == "project" {
+                    serde_json::from_value::<super::ProjectRequest>(body.clone()).is_ok()
+                } else {
+                    serde_json::from_value::<super::PeerTeamRequest>(body.clone()).is_ok()
+                };
+                assert_eq!(decoded, validator.is_valid(&body), "{name}: {body}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn typed_extractors_reject_invalid_project_and_peer_team_bodies() {
+        use super::super::extractors::ApiJson;
+        use axum::{
+            Router,
+            body::Body,
+            http::{Request, StatusCode},
+            routing::post,
+        };
+        use tower::ServiceExt;
+        let app = Router::new()
+            .route(
+                "/project",
+                post(|ApiJson(_): ApiJson<super::ProjectRequest>| async {}),
+            )
+            .route(
+                "/peer",
+                post(|ApiJson(_): ApiJson<super::PeerTeamRequest>| async {}),
+            );
+        for (path, body) in [
+            ("/project", json!({"path":""})),
+            ("/project", json!({"path":"p", "extra":true})),
+            ("/project", json!({"path":42})),
+            (
+                "/project",
+                json!({"action":"add_location", "path":"p", "server":"s", "request_id":"r"}),
+            ),
+            (
+                "/project",
+                json!({"action":"add_location", "path":"p", "project":"p", "server":"s", "request_id":"r", "extra":true}),
+            ),
+            (
+                "/peer",
+                json!({"action":"delete", "path":"p", "request_id":"r", "expected_revision":0, "team_id":"t", "extra":true}),
+            ),
+            (
+                "/peer",
+                json!({"action":"delete", "path":42, "request_id":"r", "expected_revision":0, "team_id":"t"}),
+            ),
+            (
+                "/peer",
+                json!({"action":"delete", "path":"p", "request_id":"r", "expected_revision":0}),
+            ),
+        ] {
+            let request = Request::builder()
+                .method("POST")
+                .uri(path)
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap();
+            assert_eq!(
+                app.clone().oneshot(request).await.unwrap().status(),
+                StatusCode::BAD_REQUEST,
+                "{body}"
+            );
         }
     }
 

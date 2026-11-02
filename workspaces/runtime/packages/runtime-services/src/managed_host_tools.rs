@@ -168,6 +168,8 @@ pub(crate) enum Error {
     Invalid(&'static str),
     #[error("The caller identity changed")]
     Stale,
+    #[error("{0}")]
+    Refusal(String),
     #[error("invalid stored object {table}/{id} at {location}")]
     InvalidStored {
         table: &'static str,
@@ -1047,7 +1049,9 @@ fn permits(
         Access::Scoped(Scope::RootLead) => {
             Ok(actor.is_lead && actor.parent_id.is_none() && actor.root_id == actor.id)
         }
-        Access::Scoped(Scope::LinkWorker | Scope::OwnLink | Scope::ApprovedRoom) => Ok(false),
+        Access::Scoped(
+            Scope::LinkWorker | Scope::OwnLink | Scope::ApprovedRoom | Scope::PairedLead,
+        ) => Ok(false),
     }
 }
 

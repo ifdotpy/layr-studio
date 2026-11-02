@@ -1452,7 +1452,7 @@ pub async fn prepare_vm_accept(
                     event_write::refuse_remote(&recipient)?;
                 }
             }
-            if lead.extra.get("layrProjectId") != owner.extra.get("layrProjectId") {
+            if lead.layr_project_id != owner.layr_project_id {
                 return Err(
                     Error::InvalidRequest("The result belongs to another layr project").into(),
                 );

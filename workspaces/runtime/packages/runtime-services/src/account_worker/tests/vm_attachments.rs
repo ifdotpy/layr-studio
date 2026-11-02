@@ -155,9 +155,9 @@ async fn start_and_next_turn(provider: &'static str) {
                     record.workspace_mode =
                         Some(studio_runtime_schema::records::WorkspaceMode::Layr);
                     record.cwd = Some("/guest/line".into());
+                    record.layr_project_id = Some("project".into());
                     for (key, value) in [
                         ("layrHome", json!(home_record)),
-                        ("layrProjectId", json!("project")),
                         ("layrLine", json!("main")),
                     ] {
                         record.extra.insert(key.into(), value);

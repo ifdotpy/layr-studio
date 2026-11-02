@@ -119,9 +119,11 @@ const SETTLED_WORK_STATUSES: &str = "'accepted','cancelled'";
 /// work item. A waiting worker will likely get another turn soon, so it keeps
 /// the ordinary idle timer.
 fn finished_worker_sql(connection: &Connection) -> StoreResult<String> {
-    let mut predicate = "COALESCE(json_extract(record,'$.isLead'),0)=0 \
-         AND COALESCE(status,'')!='waiting'"
-        .to_owned();
+    let mut predicate = format!(
+        "COALESCE(json_extract(record,'$.isLead'),0)=0 \
+         AND COALESCE({},'')!='waiting'",
+        crate::domain::chat_status_sql("runtime_agents.id")
+    );
     if table_exists(connection, "runtime_work")? {
         predicate.push_str(&format!(
             " AND NOT EXISTS(SELECT 1 FROM runtime_work w \

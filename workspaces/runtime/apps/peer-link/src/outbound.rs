@@ -12,6 +12,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use iroh::endpoint::{Connection, ConnectionError, VarInt};
 use serde::Deserialize;
 use serde_json::json;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
@@ -19,6 +20,7 @@ use tokio::net::{UnixListener, UnixStream};
 
 use crate::Links;
 use crate::frame::{self, RequestHead, ResponseHead};
+use crate::identity;
 
 const MAX_TIMEOUT_SECONDS: f64 = 3600.0;
 const CHUNK: usize = 256 * 1024;
@@ -111,9 +113,10 @@ where
         body_length: head.body_length,
     };
     request.validate().map_err(|_| "invalid")?;
-    let key = crate::tls::spki(&head.public_key).map_err(|_| "invalid")?;
+    let id = identity::endpoint_id(&identity::spki(&head.public_key).map_err(|_| "invalid")?)
+        .map_err(|_| "invalid")?;
     let connection = links
-        .connect(head.address, key)
+        .connect(head.address, id)
         .await
         .map_err(|_| "unreachable")?;
     let (mut send, mut recv) = connection.open_bi().await.map_err(|_| "unreachable")?;
@@ -125,7 +128,7 @@ where
         .map_err(|_| "invalid")?;
     if copied != request.body_length {
         // The paired server never forwards an incomplete body.
-        send.reset(quinn::VarInt::from_u32(1)).ok();
+        send.reset(VarInt::from_u32(1)).ok();
         return Err("invalid");
     }
     progress.sent = true;
@@ -165,13 +168,13 @@ where
     writer.flush().await.map_err(|_| "lost")
 }
 
-fn refused(connection: &quinn::Connection) -> bool {
-    match connection.close_reason() {
-        Some(quinn::ConnectionError::ConnectionClosed(close)) => {
-            (0x100..0x200).contains(&u64::from(close.error_code))
-        }
-        _ => false,
-    }
+/// The peer closed the connection with the refusal code: its endpoint hooks refused our key.
+fn refused(connection: &Connection) -> bool {
+    matches!(
+        connection.close_reason(),
+        Some(ConnectionError::ApplicationClosed(close))
+            if close.error_code.into_inner() == u64::from(identity::REFUSED)
+    )
 }
 
 pub fn bind(path: &Path) -> std::io::Result<UnixListener> {

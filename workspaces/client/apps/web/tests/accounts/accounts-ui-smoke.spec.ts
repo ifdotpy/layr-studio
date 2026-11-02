@@ -476,6 +476,7 @@ async function runAccountsUi(
       }
       return json({
         status: "applied",
+        kind: "send",
         ref_kind: "message",
         ref_id: command.id,
         rev: 1,

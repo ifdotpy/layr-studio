@@ -85,7 +85,7 @@ async fn configure(
         move || {
             mac_sync::configure(
                 &root,
-                &body.project_id,
+                body.project_id.as_str(),
                 body.enabled.flatten(),
                 body.allow_deletes.unwrap_or(false),
             )
@@ -105,9 +105,9 @@ async fn resolve(
     let notifications = state.sync_changes.clone();
     let root = state.vm_state_dir.clone();
     let guest = UnixGuestRpc::new(state.vm_state_dir.clone());
-    let project_id = body.project_id;
+    let project_id = body.project_id.as_str().to_owned();
     let resolve_project_id = project_id.clone();
-    let path = body.path;
+    let path = body.path.as_str().to_owned();
     let choice = body.choice.as_str().to_owned();
     let result = studio_runtime_process::blocking_pool::spawn_blocking(
         "runtime-http/routes/mac_sync",
@@ -163,7 +163,7 @@ async fn lead_for_project(
                     continue;
                 };
                 if agent.is_lead == Some(true)
-                    && agent.extra.get("layrProjectId").and_then(Value::as_str) == Some(&project_id)
+                    && agent.layr_project_id.as_deref() == Some(project_id.as_str())
                     && agent.extra.get("layrLine").and_then(Value::as_str) == Some("main")
                     && agent.deleted_at.is_none()
                 {
