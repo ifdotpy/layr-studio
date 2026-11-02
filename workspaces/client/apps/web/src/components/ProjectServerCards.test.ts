@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
 import { theme } from "../theme";
 import ProjectServerCards from "./ProjectServerCards";
+import { ChatWorkspaceMode } from "../generated/api";
 
 describe("new chat actions", () => {
   it("offers Cancel and a primary Start chat action", () => {
@@ -76,7 +77,7 @@ it("disables unavailable native Layr on Linux and explains the fallback", () => 
               reason: "A btrfs store is required.",
             },
             nativeLayrMessage: "A btrfs store is required.",
-            defaultWorkspaceMode: "worktree",
+            defaultWorkspaceMode: ChatWorkspaceMode.worktree,
           },
         ],
         onChoose: () => {},
@@ -112,7 +113,7 @@ it("shows the server's install message on the disabled Layr option", () => {
             hasStudioVm: false,
             nativeLayr: { status: "notInstalled" },
             nativeLayrMessage: "Install layr",
-            defaultWorkspaceMode: "worktree",
+            defaultWorkspaceMode: ChatWorkspaceMode.worktree,
           },
         ],
         onChoose: () => {},
@@ -141,7 +142,7 @@ it("selects the server's default when Layr is ready", () => {
             system: "Linux",
             hasStudioVm: false,
             nativeLayr: { status: "ready" },
-            defaultWorkspaceMode: "layr-native",
+            defaultWorkspaceMode: ChatWorkspaceMode["layr-native"],
           },
         ],
         onChoose: () => {},
