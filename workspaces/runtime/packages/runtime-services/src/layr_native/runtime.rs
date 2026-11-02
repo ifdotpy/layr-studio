@@ -1155,7 +1155,7 @@ esac
             state.path(),
             state.path(),
             &["init", "project", "--from", "/source"],
-            Path::new("/bin/true"),
+            Path::new("/usr/bin/true"),
         )
         .unwrap();
         let import = bounded_child::TEST_TIMEOUT.get().unwrap();
@@ -1164,7 +1164,7 @@ esac
             state.path(),
             state.path(),
             &["status"],
-            Path::new("/bin/true"),
+            Path::new("/usr/bin/true"),
         )
         .unwrap();
         let regular = bounded_child::TEST_TIMEOUT.get().unwrap();

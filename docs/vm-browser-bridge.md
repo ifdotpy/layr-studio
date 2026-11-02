@@ -373,7 +373,7 @@ Server to guest (the existing JSON-RPC on vsock 4050):
 | `browser.callback` | `id`, `target` (path and query), `headers`     | `status`, `contentType`, `body` (base64), `done`                                                                                                            | No. A new request ID for each browser request. |
 | `browser.close`    | `id`, `reason`                                 | `state`                                                                                                                                                     | Yes                                            |
 
-Server to window: the request record above. `/api/answer` returns `openUrl` for an accepted
+Server to window: the request record above. the answer command (`POST /api/commands`, `kind` `answer`) returns `result.openUrl` for an accepted
 `browser/open` card, from a local window only.
 
 ### Tests
@@ -607,7 +607,7 @@ Request record (`runtime_requests`, method `browser/open`). New `params` fields:
 link). The server reads it from `params.url` when it checks a pasted address; it is not stored
 twice.
 
-`POST /api/answer` (`AnswerBody` gains `paste` and `result`):
+the answer command (`POST /api/commands`, `kind` `answer`; the body gains `paste` and `result`):
 
 | Body                                         | When                                   | Effect                                                                                                                                                                                       |
 | -------------------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

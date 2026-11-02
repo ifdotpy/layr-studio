@@ -373,6 +373,8 @@ pub async fn creation_account_key(
             previous_lead(read, previous_id.as_deref(), &|schema, value| {
                 validate(schema, value)
             })
+            // typed-boundary: removed by the creation PR
+            .map(|record| record.map(|record| record.value()))
         })
         .await?;
     let cwd = if let Some(cwd) = requested_cwd {
@@ -770,7 +772,8 @@ async fn create(
         .read_async::<_, OperationError>("runtime-services/agents_create/read", move |read| {
             let previous = previous_lead(read, previous_id.as_deref(), &|schema, value| {
                 read_validate(schema, value)
-            })?;
+            })?
+            .map(|record| record.value()); // typed-boundary: removed by the creation PR
             let profile = profile_id
                 .map(|id| {
                     load_profile(read, &id)?
@@ -863,7 +866,9 @@ async fn create(
                 request.intent.project_server_id.value().cloned(),
                 request.intent.project_folder.value().cloned(),
             )
-            .await?,
+            .await?
+            .serialize(serde_json::value::Serializer)
+            .map_err(StoreError::from)?, // typed-boundary: removed by the creation PR
         )
     } else {
         None
@@ -999,7 +1004,9 @@ async fn create(
                     &settings.model,
                     &[],
                 )
-                .await?,
+                .await?
+                .serialize(serde_json::value::Serializer)
+                .map_err(StoreError::from)?, // typed-boundary: removed by the creation PR
             ),
             Some(
                 resolve_review_defaults(
@@ -1015,7 +1022,9 @@ async fn create(
                         .map(String::as_str),
                     &[],
                 )
-                .await?,
+                .await?
+                .serialize(serde_json::value::Serializer)
+                .map_err(StoreError::from)?, // typed-boundary: removed by the creation PR
             ),
         )
     } else {
@@ -1119,7 +1128,9 @@ async fn create(
         {
             return Err(CreateError::IdentityChanged.into());
         }
-        if let Some(prior) = previous_lead(tx, request.previous.as_deref(), &validate)?
+        // typed-boundary: removed by the creation PR
+        if let Some(prior) =
+            previous_lead(tx, request.previous.as_deref(), &validate)?.map(|record| record.value())
             && request.reuse_empty.unwrap_or(true)
             && draft
             && !reuse_execution_fields
@@ -1209,7 +1220,9 @@ async fn create(
                     .as_str()
                     .ok_or(OperationError::Internal)?,
                 binding["projectFolder"].as_str(),
-            )?;
+            )?
+            .serialize(serde_json::value::Serializer)
+            .map_err(StoreError::from)?; // typed-boundary: removed by the creation PR
             if current != *binding {
                 return Err(CreateError::IdentityChanged.into());
             }
@@ -1817,7 +1830,7 @@ pub async fn conversation(
                 &identity,
                 root_model,
                 &excluded_account_keys,
-            ).await?,
+            ).await?.serialize(serde_json::value::Serializer).map_err(StoreError::from)?, // typed-boundary: removed by the creation PR
             None => initial
                 .get("workerDefaults")
                 .cloned()
@@ -1850,6 +1863,8 @@ pub async fn conversation(
                     &excluded_account_keys,
                 )
                 .await?
+                .serialize(serde_json::value::Serializer)
+                .map_err(StoreError::from)? // typed-boundary: removed by the creation PR
             }
             None => initial
                 .get("reviewDefaults")
@@ -2469,18 +2484,25 @@ fn previous_lead(
     connection: &Connection,
     id: Option<&str>,
     validate: &impl Fn(&str, &Value) -> bool,
-) -> Result<Option<Value>, OperationError> {
+) -> Result<Option<AgentRecord>, OperationError> {
     id.filter(|id| !id.is_empty())
         .map(|id| {
-            let record =
-                load_agent_value(connection, id, validate)?.ok_or(MutationError::UnknownAgent)?;
-            if !truthy(record.get("isLead")) {
+            let record = AgentRepository::get(connection, &AgentId::from(id))?
+                .ok_or(MutationError::UnknownAgent)?;
+            if !validate("PersistedAgentRecord", &record.value()) {
+                return Err(MutationError::InvalidStoredObject {
+                    table: "runtime_agents",
+                    id: id.to_owned(),
+                }
+                .into());
+            }
+            if record.is_lead != Some(true) {
                 return Err(OperationError::Invalid("Select a lead conversation"));
             }
-            if truthy(record.get("agentArchive")) {
+            if record.agent_archive.is_some() {
                 return Ok(None);
             }
-            if truthy(record.get("deletedAt")) {
+            if record.is_deleted() {
                 return Err(MutationError::Deleted.into());
             }
             Ok(Some(record))
@@ -2714,13 +2736,24 @@ fn can_attempt_native_proof_projection(row: &Value) -> bool {
     row.get("canAttemptNativeProof").and_then(Value::as_bool) == Some(true)
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectBinding {
+    cwd: String,
+    project_id: String,
+    project_server_id: String,
+    local_server_id: String,
+    project_folder: Option<String>,
+    project_version: Option<(i64, bool)>,
+}
+
 async fn resolve_project_binding(
     context: &Context<'_>,
     cwd: String,
     project_id: Option<String>,
     home_server: Option<String>,
     folder: Option<String>,
-) -> Result<Value, OperationError> {
+) -> Result<ProjectBinding, OperationError> {
     let local = context
         .store
         .local_server_id()?
@@ -2752,10 +2785,17 @@ async fn resolve_worker_defaults(
     account: &AccountIdentity,
     root_model: &str,
     excluded_account_keys: &[String],
-) -> Result<Value, OperationError> {
+) -> Result<studio_runtime_store::transfer_record::TransferWorkerDefaults, OperationError> {
     let Some(value) = value else {
         return Ok(
-            json!({"model":"gpt-6-luna","effort":"high","fastMode":false,"daybreakEnabled":false,"delegationDepth":1}),
+            studio_runtime_store::transfer_record::TransferWorkerDefaults {
+                model: Field::Value("gpt-6-luna".into()),
+                effort: Field::Value("high".into()),
+                fast_mode: Field::Value(false),
+                daybreak_enabled: Field::Value(false),
+                delegation_depth: Field::Value(1.try_into().expect("valid depth")),
+                ..Default::default()
+            },
         );
     };
     let requested_account_key = value.account_key.value().map(String::as_str);
@@ -2829,13 +2869,21 @@ async fn resolve_worker_defaults(
         fast_mode,
         daybreak,
     )?;
-    let mut defaults = json!({"model":value.model,
-        "effort":settings.effort,"fastMode":settings.fast_mode,"daybreakEnabled":settings.daybreak_enabled,
-        "cyberAccessProgram":settings.cyber_access_program,"delegationDepth":depth});
-    if requested_account_key.is_some() {
-        defaults["accountKey"] = json!(worker_account_key);
-    }
-    Ok(defaults)
+    Ok(
+        studio_runtime_store::transfer_record::TransferWorkerDefaults {
+            model: value.model.clone().map_or(Field::Null, Field::Value),
+            effort: settings.effort.map_or(Field::Null, Field::Value),
+            fast_mode: Field::Value(settings.fast_mode),
+            daybreak_enabled: Field::Value(settings.daybreak_enabled),
+            cyber_access_program: Field::Value(settings.cyber_access_program),
+            delegation_depth: Field::Value(depth.try_into().map_err(|_| OperationError::Internal)?),
+            account_key: if requested_account_key.is_some() {
+                Field::Value(worker_account_key)
+            } else {
+                Field::Missing
+            },
+        },
+    )
 }
 
 async fn resolve_review_defaults(
@@ -2845,14 +2893,21 @@ async fn resolve_review_defaults(
     account: &AccountIdentity,
     worker_account_key: Option<&str>,
     excluded_account_keys: &[String],
-) -> Result<Value, OperationError> {
+) -> Result<studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto, OperationError> {
     let Some(value) = value else {
-        return Ok(json!({"model":null,"effort":null}));
+        return Ok(
+            studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
+                model: None,
+                effort: None,
+                fast_mode: None,
+            },
+        );
     };
-    let mut defaults = json!({"model":null,"effort":null});
-    if let Some(fast_mode) = value.fast_mode {
-        defaults["fastMode"] = json!(fast_mode);
-    }
+    let mut defaults = studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
+        model: None,
+        effort: None,
+        fast_mode: value.fast_mode,
+    };
     let Some(model) = value.model.value().map(String::as_str) else {
         if value.effort.value().is_some() {
             return Err(OperationError::Invalid(
@@ -2914,8 +2969,8 @@ async fn resolve_review_defaults(
         value.fast_mode.unwrap_or(false),
         false,
     )?;
-    defaults["model"] = json!(settings.model);
-    defaults["effort"] = json!(settings.effort);
+    defaults.model = Some(settings.model);
+    defaults.effort = settings.effort;
     Ok(defaults)
 }
 
@@ -2926,7 +2981,7 @@ fn resolve_project_binding_from(
     home_server: Option<&str>,
     local: &str,
     folder: Option<&str>,
-) -> Result<Value, OperationError> {
+) -> Result<ProjectBinding, OperationError> {
     let project_id = project_id
         .filter(|value| !value.is_empty())
         .ok_or(OperationError::Invalid("A project ID is required"))?;
@@ -2970,7 +3025,7 @@ fn resolve_project_binding_from(
                 });
         if direct || alias {
             let folder_id = match folder {
-                None => Value::Null,
+                None => None,
                 Some(id) => {
                     if !project
                         .get("folders")
@@ -2985,7 +3040,7 @@ fn resolve_project_binding_from(
                             "This folder is not in the selected project",
                         ));
                     }
-                    json!(id)
+                    Some(id.to_owned())
                 }
             };
             let version = crate::project_deletion::admission_version(
@@ -2995,9 +3050,14 @@ fn resolve_project_binding_from(
                     .and_then(Value::as_str)
                     .ok_or(OperationError::Internal)?,
             )?;
-            return Ok(
-                json!({"cwd":cwd,"projectId":project_id,"projectServerId":home_server,"localServerId":local,"projectFolder":folder_id,"projectVersion":version}),
-            );
+            return Ok(ProjectBinding {
+                cwd: cwd.to_owned(),
+                project_id: project_id.to_owned(),
+                project_server_id: home_server.to_owned(),
+                local_server_id: local.to_owned(),
+                project_folder: folder_id,
+                project_version: version,
+            });
         }
     }
     Err(OperationError::Invalid(
@@ -4029,9 +4089,12 @@ mod tests {
         )
         .await
         .expect("automatic Luna resolves through the eligible Codex account");
-        assert_eq!(resolved["model"], "gpt-6-luna");
         assert_eq!(
-            resolved.get("accountKey"),
+            resolved.model.value().map(String::as_str),
+            Some("gpt-6-luna")
+        );
+        assert_eq!(
+            resolved.account_key.value(),
             None,
             "automatic choice stays unpinned"
         );
@@ -4064,13 +4127,16 @@ mod tests {
         )
         .await
         .expect("null model inherits the current lead model");
-        assert_eq!(cleared["model"], Value::Null);
+        assert!(matches!(cleared.model, Field::Null));
         assert_eq!(
-            cleared.get("accountKey"),
+            cleared.account_key.value(),
             None,
             "null clears an old account pin"
         );
-        assert_eq!(cleared["cyberAccessProgram"], "standard");
+        assert_eq!(
+            cleared.cyber_access_program.value().map(String::as_str),
+            Some("standard")
+        );
     }
 
     #[tokio::test]
@@ -4109,7 +4175,7 @@ mod tests {
                 )
                 .await
                 .expect("Fast review defaults validate");
-                assert_eq!(resolved["fastMode"], fast);
+                assert_eq!(resolved.fast_mode, Some(fast));
             }
         }
         let legacy = ReviewDefaults {
@@ -4121,7 +4187,7 @@ mod tests {
             resolve_review_defaults(&context, Some(&legacy), "default", &account, None, &[])
                 .await
                 .expect("legacy defaults validate");
-        assert!(resolved.get("fastMode").is_none());
+        assert!(resolved.fast_mode.is_none());
     }
 
     #[tokio::test]
@@ -4170,8 +4236,14 @@ mod tests {
         )
         .await
         .expect("Codex worker model validates");
-        assert_eq!(workers["accountKey"], "default");
-        assert_eq!(workers["model"], "gpt-6-luna");
+        assert_eq!(
+            workers.account_key.value().map(String::as_str),
+            Some("default")
+        );
+        assert_eq!(
+            workers.model.value().map(String::as_str),
+            Some("gpt-6-luna")
+        );
         let review = resolve_review_defaults(
             &context,
             Some(&review_defaults),
@@ -4184,7 +4256,8 @@ mod tests {
         )
         .await
         .expect("review model validates against the worker's Codex catalog");
-        assert_eq!(review, json!({"model":"gpt-6.1-sol","effort":"high"}));
+        assert_eq!(review.model.as_deref(), Some("gpt-6.1-sol"));
+        assert_eq!(review.effort.as_deref(), Some("high"));
         assert_eq!(payload["account_key"], "claude-local");
         assert_eq!(payload["model"], "default");
     }
@@ -4284,7 +4357,7 @@ mod tests {
             Some("folder-a"),
         )
         .expect("accept folder in selected project");
-        assert_eq!(valid["projectFolder"], "folder-a");
+        assert_eq!(valid.project_folder.as_deref(), Some("folder-a"));
         let remote = resolve_project_binding_from(
             &connection,
             "/work/alias",
@@ -4294,7 +4367,7 @@ mod tests {
             Some("remote-folder"),
         )
         .expect("accept registered remote project alias");
-        assert_eq!(remote["projectServerId"], "home-server");
+        assert_eq!(remote.project_server_id, "home-server");
         assert!(matches!(
             resolve_project_binding_from(
                 &connection,

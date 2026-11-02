@@ -123,6 +123,7 @@ test("queue-mutation-deadline-browser @performance", async ({
         return route.fulfill({
           json: {
             status: "applied",
+            kind: "withdraw",
             ref_kind: "message",
             ref_id: command.body.message,
             rev: 1,

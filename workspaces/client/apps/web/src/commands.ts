@@ -167,6 +167,15 @@ export function createCommandClient(
       run(make("stop", chat, { descendants }), options),
     withdraw: (chat: string, message: string, options?: CommandOptions) =>
       run(make("withdraw", chat, { message }), options),
+    /** Pause the chat. `descendants` pauses its workers too. */
+    pause: (chat: string, descendants: boolean, options?: CommandOptions) =>
+      run(make("pause", chat, { descendants }), options),
+    /** The approval id is the command target. The body is the answer without its `id`. */
+    answer: (
+      approval: string,
+      body: Variant<"answer">["body"],
+      options?: CommandOptions,
+    ) => run(make("answer", approval, body), options),
     /** The message id is the command id, so a retry of the same message is the same command. */
     send: (message: SendMessageBody, options?: CommandOptions) =>
       run(
