@@ -472,7 +472,10 @@ fn create_worker_line(
                     NativeLayrError::Refused(detail) => NativeLayrError::Refused(format!(
                         "Native Layr base revision could not be resolved: {detail}"
                     )),
-                    other => other,
+                    other @ (NativeLayrError::Unknown(_)
+                    | NativeLayrError::Io(_)
+                    | NativeLayrError::Store(_)
+                    | NativeLayrError::Worker) => other,
                 })?;
             }
             Ok(())
