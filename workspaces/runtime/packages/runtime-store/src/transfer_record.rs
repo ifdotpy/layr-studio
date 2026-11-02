@@ -767,8 +767,9 @@ impl TransferRecord {
             scope: Field::Value(TransferScope::Team),
             saved_response: Field::Missing,
         };
+        let requests = Field::Value(BTreeMap::from([(id.as_str().to_owned(), request)]));
         Self {
-            id: id.clone(),
+            id,
             lead_id,
             target_account_key: target,
             status,
@@ -778,7 +779,7 @@ impl TransferRecord {
             updated: Field::Missing,
             scope: Field::Value(TransferScope::Team),
             finish_history: Field::Missing,
-            requests: Field::Value(BTreeMap::from([(id.as_str().to_owned(), request)])),
+            requests,
             vm: Field::Missing,
         }
     }
@@ -1075,7 +1076,7 @@ mod tests {
                 let mut record = serde_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{}});
                 record[field] = id.clone().into();
                 assert!(
-                    serde_json::from_value::<super::TransferRecord>(record).is_err(),
+                    serde_json::from_str::<super::TransferRecord>(&record.to_string()).is_err(),
                     "{field} must be bounded"
                 );
             }
