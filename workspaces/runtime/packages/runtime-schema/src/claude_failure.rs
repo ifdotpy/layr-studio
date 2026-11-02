@@ -98,7 +98,8 @@ impl ClaudeFailure {
         self.title = Some(title.into());
         let counts = match (self.prompt_tokens, self.max_context_tokens) {
             (Some(prompt), Some(limit))
-                if prompt <= 9_007_199_254_740_991 && limit <= 9_007_199_254_740_991 =>
+                if prompt <= crate::shared_values::MAX_SAFE_INTEGER as u64
+                    && limit <= crate::shared_values::MAX_SAFE_INTEGER as u64 =>
             {
                 format!(" Context: {prompt} tokens. Limit: {limit} tokens.")
             }
