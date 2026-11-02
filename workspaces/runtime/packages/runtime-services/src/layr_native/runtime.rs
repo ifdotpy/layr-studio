@@ -569,7 +569,11 @@ pub(super) fn prepare_files_with_git_policy(
                         NativeLayrError::Refused(message) => {
                             NativeLayrError::Refused(format!("{message}{retained}"))
                         }
-                        other => NativeLayrError::Refused(format!("{other}{retained}")),
+                        other @ (NativeLayrError::Io(_)
+                        | NativeLayrError::Store(_)
+                        | NativeLayrError::Worker) => {
+                            NativeLayrError::Refused(format!("{other}{retained}"))
+                        }
                     }
                 })?;
                 run(state_dir, &main, &["git", "remote", "remove", "local"])?;
@@ -1050,7 +1054,7 @@ esac
         super::super::capability::TEST_BINARY.with(|value| *value.borrow_mut() = Some(binary));
         let mut record = json!({"id":"lead","isLead":true,"autoWake":true});
         super::super::configure_new_chat(&mut record, source.to_str().unwrap());
-        let _ = prepare_files(&state, &record);
+        prepare_files(&state, &record).expect("fixture import succeeds");
         assert!(
             fixture.path().join("removed").exists(),
             "staging remote was not removed"
