@@ -7,6 +7,7 @@ use crate::notification_dispatch::NotificationStreamMetrics;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::{Value, json};
 use std::sync::Arc;
+use studio_runtime_schema::json_compat::python_json_compact_serialized;
 use studio_runtime_schema::provider_kind::ProviderKind;
 use studio_runtime_schema::usage::ledger::{
     UsageCorrection, UsageIdentity, UsageLedgerRow, correction,
@@ -18,7 +19,7 @@ use studio_runtime_schema::usage::{
 use studio_runtime_store::CachedSql;
 use studio_runtime_store::analytics::Notification;
 use studio_runtime_store::analytics_capture::{AnalyticsCaptureRepository as Repo, CaptureTable};
-use studio_runtime_store::{RuntimeStore, StoreError, python_json_compact, sha256_hex};
+use studio_runtime_store::{RuntimeStore, StoreError, sha256_hex};
 use thiserror::Error;
 
 pub const MAX_CAPTURE_BYTES: usize = 64 * 1024 * 1024;
@@ -455,11 +456,11 @@ impl CaptureSnapshot {
             let id = usage_key(&meta, observation);
             rows.usage = Repo::read(db, CaptureTable::Usage, &id)?;
             if rows.usage.is_none() && prepared.legacy_counter_era() {
-                let old_id = hash(&json!([
-                    meta["agentId"],
-                    meta["threadId"],
-                    fingerprint(observation)
-                ]));
+                let old_id = hash(&(
+                    &meta["agentId"],
+                    &meta["threadId"],
+                    fingerprint(observation),
+                ));
                 rows.usage = Repo::read(db, CaptureTable::Usage, &old_id)?;
             }
             if let UsageObservation::Response { response_id, .. }
@@ -468,7 +469,7 @@ impl CaptureSnapshot {
                 let response = Repo::read(
                     db,
                     CaptureTable::Usage,
-                    &hash(&json!([meta["agentId"], response_id])),
+                    &hash(&(&meta["agentId"], response_id)),
                 )?;
                 rows.exact_response = match response {
                     Some(row) => Some(row),
@@ -784,7 +785,8 @@ fn apply_stream_metrics(
         .hours
         .iter()
         .map(|hour| Notification {
-            id: python_json_compact(&json!([meta["agentId"], prepared.method, hour.hour])),
+            id: python_json_compact_serialized(&(&meta["agentId"], &prepared.method, hour.hour))
+                .expect("notification identity serializes"),
             agent: meta["agentId"].as_str().map(str::to_owned),
             root: meta["rootId"].as_str().map(str::to_owned),
             method: Some(prepared.method.clone()),
@@ -922,7 +924,8 @@ pub fn decide(
     if q.source == CaptureSource::Live && !q.model {
         let hour = (at / 3600.).floor() as i64 * 3600;
         result.notifications.push(Notification {
-            id: python_json_compact(&json!([q.agent["id"], method, hour])),
+            id: python_json_compact_serialized(&(&q.agent["id"], method, hour))
+                .expect("notification identity serializes"),
             agent: q.agent["id"].as_str().map(str::to_owned),
             root: meta["rootId"].as_str().map(str::to_owned),
             method: Some(method.to_owned()),
@@ -1369,8 +1372,12 @@ fn timestamp_source(q: &PreparedCapture) -> Value {
             "record"
         }))
 }
-fn hash(v: &Value) -> String {
-    sha256_hex(python_json_compact(v).as_bytes())
+fn hash(v: &impl serde::Serialize) -> String {
+    sha256_hex(
+        python_json_compact_serialized(v)
+            .expect("identity serializes")
+            .as_bytes(),
+    )
 }
 
 fn domain(observation: &UsageObservation) -> &'static str {
@@ -1388,7 +1395,7 @@ fn domain(observation: &UsageObservation) -> &'static str {
     }
 }
 fn fingerprint(observation: &UsageObservation) -> String {
-    hash(&json!(observation))
+    hash(observation)
 }
 fn usage_key(meta: &Value, observation: &UsageObservation) -> String {
     match UsageIdentity::new(
@@ -1398,9 +1405,9 @@ fn usage_key(meta: &Value, observation: &UsageObservation) -> String {
     ) {
         UsageIdentity::Response { agent, response_id } => {
             if matches!(observation, UsageObservation::Gap { .. }) {
-                hash(&json!([agent, "gap", response_id]))
+                hash(&(agent, "gap", response_id))
             } else {
-                hash(&json!([agent, response_id]))
+                hash(&(agent, response_id))
             }
         }
         UsageIdentity::Cumulative { .. } => UsageLedgerRow::capture(
@@ -1429,7 +1436,7 @@ fn legacy_usage_key(meta: &Value, legacy: &LegacyUsageTotals, params: &Value) ->
 }
 fn old_legacy_usage_key(meta: &Value, legacy: &LegacyUsageTotals, params: &Value) -> String {
     if let Some(response) = &legacy.response_id {
-        return hash(&json!([meta["agentId"], response]));
+        return hash(&(&meta["agentId"], response));
     }
     let identity = studio_runtime_schema::usage::legacy_notice_identity(
         text(&meta["agentId"]),
@@ -1711,6 +1718,19 @@ pub async fn capture_limit(
 #[cfg(test)]
 mod usage_contract_tests {
     use super::*;
+
+    #[test]
+    fn typed_usage_identity_keeps_legacy_hash() {
+        let raw = r#"{"kind":"response","responseId":"résponse","model":"model","evidence":"live","tokens":{"uncachedInput":10,"cacheReadInput":3,"cacheWriteInput":2,"output":7}}"#;
+        let observation: UsageObservation = serde_json::from_str(raw).expect("usage observation");
+        let value: Value =
+            serde_json::from_str(&serde_json::to_string(&observation).expect("JSON"))
+                .expect("legacy JSON value");
+        assert_eq!(fingerprint(&observation), hash(&value));
+        let tuple = ("agent", "résponse");
+        let old: Value = serde_json::from_str(r#"["agent","résponse"]"#).expect("identity JSON");
+        assert_eq!(hash(&tuple), hash(&old));
+    }
 
     #[test]
     fn provider_identity_invalid_capture_is_refused() {
