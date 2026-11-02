@@ -437,6 +437,7 @@ async function runSnapshotOrderUi(
   assert.equal(serverAnswer.status(), 200);
   assert.equal(answerResponse.kind, "answer");
   assert.equal(answerResponse.result.status, "answered");
+  const pullsBeforeAnswer = entityPulls.length;
   await pendingAnswer!.fulfill({
     response: serverAnswer,
     json: answerResponse,
@@ -457,6 +458,19 @@ async function runSnapshotOrderUi(
       { message: "The answer tombstone arrives through the entity stream" },
     )
     .toBe(true);
+  // Same window as the legacy check: the answer tombstone is delivered exactly once.
+  const tombstones = entityPulls
+    .slice(pullsBeforeAnswer)
+    .flatMap((pull) => pull.documents)
+    .filter(
+      (document) =>
+        document.id === `entity:request:${requestId}` && document._deleted,
+    ).length;
+  assert.equal(
+    tombstones,
+    1,
+    "The answer tombstone arrives exactly once through the entity stream",
+  );
 
   for (const oldFailure of [false, true]) {
     oldRequest = null;
