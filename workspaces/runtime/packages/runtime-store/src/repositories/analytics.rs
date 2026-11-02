@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::{
     Connection, OpenFlags, OptionalExtension, params_from_iter, types::Value as SqlValue,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 use thiserror::Error;
 
 use super::cost_aggregate::CostMember;
@@ -325,7 +325,7 @@ pub fn rollup<'a>(
     let tracking: f64 = metadata(db, "trackingSince")?.unwrap_or(0.0);
     let capture: CaptureErrors = metadata(db, "captureErrors")?.unwrap_or_default();
     let selected = ScopeFilter::new(db).members("agent", selected_ids.iter().cloned());
-    let selected_json = json!(selected_ids).to_string();
+    let selected_json = serde_json::to_string(&selected_ids)?;
     let history_filter = ScopeFilter::new(db).and("(COALESCE(NULLIF(json_extract(record,'$.agent'),''),NULLIF(json_extract(record,'$.agentId'),'')) IS NULL OR json_extract(record,'$.agent') IN (SELECT value FROM json_each(?1)) OR json_extract(record,'$.agentId') IN (SELECT value FROM json_each(?1)))",[SqlValue::Text(selected_json)]);
     let history = history_filter.optional_page("analytics_history", "rowid")?;
     let monitors = ScopeFilter::new(db)
@@ -1076,14 +1076,14 @@ fn query<T, P: rusqlite::Params>(
         .collect::<Result<_, _>>()?)
 }
 #[derive(serde::Serialize)]
-struct Notification {
-    id: String,
-    agent: Option<String>,
-    root: Option<String>,
-    method: Option<String>,
-    hour: Option<i64>,
-    count: i64,
-    bytes: i64,
+pub struct Notification {
+    pub id: String,
+    pub agent: Option<String>,
+    pub root: Option<String>,
+    pub method: Option<String>,
+    pub hour: Option<i64>,
+    pub count: i64,
+    pub bytes: Option<i64>,
 }
 fn project(row: &Value, fields: &[&str]) -> Value {
     let mut row = row.clone();
@@ -1157,7 +1157,9 @@ impl<'a> ScopeFilter<'a> {
         let values: Vec<_> = values.into_iter().collect();
         self.and(
             &format!("{column} IN (SELECT value FROM json_each(?))"),
-            [SqlValue::Text(json!(values).to_string())],
+            [SqlValue::Text(
+                serde_json::to_string(&values).expect("strings serialize"),
+            )],
         )
     }
     fn range(mut self, column: &str, from: Option<f64>, to: Option<f64>) -> Self {
@@ -1676,6 +1678,7 @@ pub fn turn_errors(db: &Connection, keys: Vec<String>) -> Result<Value, Analytic
 #[cfg(test)]
 mod turn_errors_tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn projects_only_requested_turn_error_fields() {

@@ -114,4 +114,13 @@ mod tests {
         assert_eq!(measured["format"], "json");
         assert_eq!(payload_size(&json!("hello"))["bytes"], 5);
     }
+
+    #[test]
+    fn measurements_do_not_count_provider_json_whitespace() {
+        let raw = r#"{ "content" : [ "hello" ] }"#;
+        let payload = serde_json::from_str(raw).expect("provider JSON");
+        let measured = payload_size(&payload);
+        assert_eq!(measured["bytes"], r#"{"content":["hello"]}"#.len());
+        assert_ne!(measured["bytes"].as_u64(), Some(raw.len() as u64));
+    }
 }
