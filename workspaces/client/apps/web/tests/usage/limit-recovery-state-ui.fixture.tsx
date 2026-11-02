@@ -1,3 +1,5 @@
+import type { components } from "../../src/generated/api.ts";
+import { projectedLimits } from "../../src/usage/accountLimits.fixture.ts";
 import type { Agent, Message } from "../../src/types.ts";
 import { fixtureRoot } from "./usage-fixture.ts";
 
@@ -36,7 +38,7 @@ const item: Message = {
 };
 export type LimitSnapshot = {
   label: string;
-  limits: Parameters<typeof Usage>[0]["limits"];
+  limits: components["schemas"]["RateLimitView"];
   agentId?: string;
   accountKey?: string;
   threadId?: string;
@@ -65,12 +67,15 @@ function Fixture() {
     () =>
       parseSnapshot(sessionStorage.getItem("fixture-initial") || "null") || {
         label: "initial",
-        limits: null,
+        limits: initialLimits(),
       },
   );
   window.applyLimitSnapshot = setSnapshot;
+  const recovery =
+    snapshot.limits.projection.agents[snapshot.agentId || agent.id]?.recovery;
   const currentAgent = {
     ...agent,
+    error: recovery ? agent.error : undefined,
     id: snapshot.agentId || agent.id,
     accountKey: snapshot.accountKey || agent.accountKey,
     threadId: snapshot.threadId || agent.threadId,
@@ -81,7 +86,17 @@ function Fixture() {
   // Base one-off Usage fixture omits stateDir; preserve that partial prop surface.
   const usageProps = partialUsageProps({
     agent: currentAgent,
-    limits: snapshot.limits,
+    limits: snapshot.limits.observation,
+    accounts: [
+      {
+        key: currentAgent.accountKey,
+        label: "Work",
+        limits: snapshot.limits.observation,
+        loading: false,
+        reload: action,
+        ...snapshot.limits.projection,
+      },
+    ],
     reload: action,
     opened: true,
     onChange: action,
@@ -91,12 +106,14 @@ function Fixture() {
     <MantineProvider>
       <main data-case={snapshot.label}>
         <section id="current">
-          <NativeError
-            key={snapshot.mountKey}
-            agent={currentAgent}
-            limits={snapshot.limits}
-            openLimits={action}
-          />
+          {currentAgent.error && (
+            <NativeError
+              key={snapshot.mountKey}
+              agent={currentAgent}
+              recovery={recovery}
+              openLimits={action}
+            />
+          )}
         </section>
         <section id="history">
           <NativeNotice item={item} />
@@ -114,4 +131,27 @@ createRoot(fixtureRoot()).render(<Fixture />);
 // The one-off base fixture omits Usage.stateDir.
 function partialUsageProps(value: unknown): React.ComponentProps<typeof Usage> {
   return value as React.ComponentProps<typeof Usage>;
+}
+
+function initialLimits(): components["schemas"]["RateLimitView"] {
+  const view = projectedLimits("work", now);
+  view.projection.agents.lumina = {
+    eligibility: {
+      agentId: "lumina",
+      accountKey: "work",
+      provider: "codex",
+      model: "gpt-6-astra",
+      state: "blocked",
+      validUntil: null,
+      buckets: [],
+      overage: "unavailable",
+    },
+    recovery: {
+      title: "Limit reached",
+      message: "Limit reached",
+      timing: { kind: "unknown" },
+      action: { kind: "none" },
+    },
+  };
+  return view;
 }

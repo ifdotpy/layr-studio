@@ -42,7 +42,10 @@ pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
 };
 
 pub struct LimitsRead {
-    pub snapshots: Vec<(String, Value)>,
+    pub snapshots: Vec<(
+        String,
+        studio_runtime_schema::usage_limits::UsageLimitsResponse,
+    )>,
     pub diagnostics: Vec<LimitsReadDiagnostic>,
 }
 
@@ -56,26 +59,123 @@ pub struct LimitsReadDiagnostic {
 /// Freshness fields stored privately between content changes. Unit: Unix seconds.
 pub const LIMITS_OBSERVATION_TIME_FIELDS: &[&str] = &["at", "readAt", "checkedAt", "processedAt"];
 
-/// Move observation times onto a decoded account snapshot without cloning provider data.
-pub fn apply_limits_observation(snapshot: &mut Value, observation: &mut Value) {
-    let (Some(snapshot), Some(observation)) =
-        (snapshot.as_object_mut(), observation.as_object_mut())
-    else {
-        return;
-    };
-    if !LIMITS_OBSERVATION_TIME_FIELDS
-        .iter()
-        .any(|field| observation.contains_key(*field))
-    {
-        return;
+/// Durable provider cursor and observation times; absent and null times are equivalent.
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitsStamp {
+    pub scope: Option<studio_runtime_schema::provider_call_contract::ConnectionScope>,
+    #[serde(default)]
+    pub cursor: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read_at: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checked_at: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub processed_at: Option<f64>,
+}
+
+impl LimitsStamp {
+    pub fn read(raw: Option<String>) -> StoreResult<Self> {
+        Ok(raw
+            .map(|raw| serde_json::from_str::<Option<Self>>(&raw))
+            .transpose()?
+            .flatten()
+            .unwrap_or_default())
     }
-    for field in LIMITS_OBSERVATION_TIME_FIELDS {
-        if let Some((key, value)) = observation.remove_entry(*field) {
-            snapshot.insert(key, value);
-        } else {
-            snapshot.remove(*field);
+
+    pub fn set_times(
+        &mut self,
+        response: &studio_runtime_schema::usage_limits::UsageLimitsResponse,
+    ) {
+        self.at = response.at;
+        self.read_at = response.read_at;
+        self.checked_at = response.checked_at;
+        self.processed_at = response.processed_at;
+    }
+
+    pub fn apply(&self, response: &mut studio_runtime_schema::usage_limits::UsageLimitsResponse) {
+        if self.at.is_some()
+            || self.read_at.is_some()
+            || self.checked_at.is_some()
+            || self.processed_at.is_some()
+        {
+            response.at = self.at;
+            response.read_at = self.read_at;
+            response.checked_at = self.checked_at;
+            response.processed_at = self.processed_at;
         }
     }
+}
+
+/// Decode one account's stored limits, isolating unreadable and foreign observations.
+pub fn normalized_limits_view(
+    account: &str,
+    bytes: &[u8],
+    now: f64,
+) -> (studio_runtime_schema::usage_limits::RateLimitView, bool) {
+    use studio_runtime_schema::usage_limits::{RateLimitView, UsageLimitsResponse};
+    let parsed = (|| {
+        if bytes.len() > MAX_PERSISTED_DOCUMENT_BYTES || !persisted_document_within_bounds(bytes) {
+            return None;
+        }
+        #[derive(serde::Deserialize)]
+        struct Entity<'a> {
+            #[serde(borrow)]
+            value: &'a serde_json::value::RawValue,
+        }
+        #[derive(serde::Deserialize)]
+        struct Projected<'a> {
+            #[serde(borrow)]
+            observation: &'a serde_json::value::RawValue,
+        }
+        #[derive(serde::Deserialize)]
+        struct Legacy {
+            #[serde(default, rename = "eligibility")]
+            _eligibility: Option<serde::de::IgnoredAny>,
+            #[serde(flatten)]
+            response: UsageLimitsResponse,
+        }
+        let entity: Entity<'_> = serde_json::from_slice(bytes).ok()?;
+        if let Ok(view) = serde_json::from_str::<RateLimitView>(entity.value.get())
+            && view.observation.account_key == account
+        {
+            return Some(view);
+        }
+        let observation = serde_json::from_str::<Projected<'_>>(entity.value.get())
+            .map(|view| view.observation)
+            .unwrap_or(entity.value);
+        let value: Legacy = serde_json::from_str(observation.get()).ok()?;
+        (value.response.account_key == account)
+            .then(|| RateLimitView::from_observation(value.response, now))
+    })();
+    if let Some(view) = parsed {
+        return (view, false);
+    }
+    eprintln!("limits: isolated unreadable account {account}");
+    let empty = UsageLimitsResponse {
+        account_key: account.to_owned(),
+        ..Default::default()
+    };
+    (RateLimitView::from_observation(empty, now), true)
+}
+
+pub fn typed_limits_snapshot(
+    connection: &Connection,
+    account: &str,
+    stamp: &LimitsStamp,
+) -> StoreResult<Option<studio_runtime_schema::usage_limits::UsageLimitsResponse>> {
+    let raw: Option<String> = connection.query_row(
+        "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0",
+        [account], |row| row.get(0),
+    ).optional()?;
+    Ok(raw.map(|raw| {
+        let (view, _) = normalized_limits_view(account, raw.as_bytes(), 0.0);
+        let mut response = view.observation;
+        stamp.apply(&mut response);
+        response
+    }))
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -300,12 +400,12 @@ pub fn limits_observation(connection: &Connection, account: &str) -> StoreResult
 pub fn put_limits_observation(
     tx: &Transaction<'_>,
     account: &str,
-    observation: &str,
+    observation: &LimitsStamp,
 ) -> StoreResult<()> {
     ensure_account(tx, account)?;
     tx.execute(
         "UPDATE runtime_account_state SET limits_observation=?2 WHERE account=?1",
-        (account, observation),
+        (account, serde_json::to_string(observation)?),
     )?;
     Ok(())
 }
@@ -314,37 +414,9 @@ pub fn put_limits_observation(
 pub fn latest_limits_snapshot(
     connection: &Connection,
     account: &str,
-) -> StoreResult<Option<Value>> {
-    let mut observation = limits_observation(connection, account)?
-        .map(|raw| serde_json::from_str::<Value>(&raw))
-        .transpose()?
-        .unwrap_or(Value::Null);
-    limits_snapshot_with_observation(connection, account, &mut observation)
-}
-
-/// Join one already-decoded observation with its account entity; each document parses once.
-pub fn limits_snapshot_with_observation(
-    connection: &Connection,
-    account: &str,
-    observation: &mut Value,
-) -> StoreResult<Option<Value>> {
-    let raw: Option<String> = connection.query_row(
-        "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0",
-        [account], |row| row.get(0),
-    ).optional()?;
-    let mut snapshot = raw
-        .map(|raw| serde_json::from_str::<Value>(&raw))
-        .transpose()?
-        .and_then(|mut envelope| {
-            envelope
-                .get_mut("value")?
-                .get_mut("observation")
-                .map(Value::take)
-        });
-    if let Some(snapshot) = &mut snapshot {
-        apply_limits_observation(snapshot, observation);
-    }
-    Ok(snapshot)
+) -> StoreResult<Option<studio_runtime_schema::usage_limits::UsageLimitsResponse>> {
+    let stamp = LimitsStamp::read(limits_observation(connection, account)?)?;
+    typed_limits_snapshot(connection, account, &stamp)
 }
 
 /// Move persisted v3 workspace snapshots once, without changing their account identity.
@@ -365,35 +437,58 @@ pub fn limits_snapshots(connection: &Connection) -> StoreResult<LimitsRead> {
         let receipt: Option<Vec<u8>> = row.get(3)?;
         let receipt_length: Option<i64> = row.get(4)?;
         let decoded = (|| {
-            let mut receipt = receipt
-                .map(|receipt| decode_limits_document(&receipt, receipt_length))
-                .transpose()?
-                .unwrap_or(Value::Null);
+            #[derive(serde::Deserialize)]
+            struct Envelope {
+                value: Projected,
+            }
+            #[derive(serde::Deserialize)]
+            struct Projected {
+                observation: studio_runtime_schema::usage_limits::UsageLimitsResponse,
+            }
+            fn decode<T: serde::de::DeserializeOwned>(
+                bytes: &[u8],
+                length: Option<i64>,
+                prefix: &str,
+            ) -> Result<T, (String, String)> {
+                if length.unwrap_or_default() > MAX_PERSISTED_DOCUMENT_BYTES as i64
+                    || !persisted_document_within_bounds(bytes)
+                {
+                    return Err(("/".into(), "resourceLimit".into()));
+                }
+                let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+                serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
+                    let path = error.path().to_string();
+                    let path = path
+                        .strip_prefix(prefix)
+                        .unwrap_or(&path)
+                        .trim_start_matches('.');
+                    let first = path.split('.').next().unwrap_or("");
+                    let pointer = if first.is_empty() {
+                        "/value".into()
+                    } else {
+                        format!("/{first}")
+                    };
+                    (pointer, "type".into())
+                })
+            }
+            let stamp = match receipt {
+                Some(bytes) => {
+                    decode::<Option<LimitsStamp>>(&bytes, receipt_length, "")?.unwrap_or_default()
+                }
+                None => LimitsStamp::default(),
+            };
             let bytes = bytes.ok_or_else(|| ("/value".to_owned(), "type".to_owned()))?;
-            let mut envelope = decode_limits_document(&bytes, length)?;
-            let mut snapshot = envelope
-                .get_mut("value")
-                .and_then(|value| value.get_mut("observation"))
-                .map(Value::take)
-                .ok_or_else(|| ("/value".to_owned(), "type".to_owned()))?;
-            apply_limits_observation(&mut snapshot, &mut receipt);
-            Ok(snapshot)
+            let mut response = decode::<Envelope>(&bytes, length, "value.observation")?
+                .value
+                .observation;
+            if response.account_key != key {
+                return Err(("/accountKey".into(), "identity".into()));
+            }
+            stamp.apply(&mut response);
+            Ok(response)
         })();
         let (snapshot, invalid) = match decoded {
-            Ok(snapshot) => {
-                let invalid = if snapshot
-                    .get("accountKey")
-                    .is_some_and(|account| account != &key)
-                {
-                    Some(("/accountKey".to_owned(), "identity".to_owned()))
-                } else {
-                    match validate_account_limits(&snapshot) {
-                        Ok(error) => error,
-                        Err(()) => Some(("/".to_owned(), "schemaCompile".to_owned())),
-                    }
-                };
-                (Some(snapshot), invalid)
-            }
+            Ok(snapshot) => (Some(snapshot), None),
             Err(error) => (None, Some(error)),
         };
         if let Some((pointer, keyword)) = invalid {
@@ -408,20 +503,6 @@ pub fn limits_snapshots(connection: &Connection) -> StoreResult<LimitsRead> {
         }
     }
     Ok(result)
-}
-
-fn decode_limits_document(bytes: &[u8], length: Option<i64>) -> Result<Value, (String, String)> {
-    if length.unwrap_or_default() > MAX_PERSISTED_DOCUMENT_BYTES as i64
-        || !persisted_document_within_bounds(bytes)
-    {
-        return Err(("/".to_owned(), "resourceLimit".to_owned()));
-    }
-    serde_json::from_slice(bytes).map_err(|_| ("/".to_owned(), "parse".to_owned()))
-}
-
-fn validate_account_limits(value: &Value) -> Result<Option<(String, String)>, ()> {
-    studio_runtime_schema::first_error("workspace-usage-limits/UsageLimitsResponse", value)
-        .map_err(|_| ())
 }
 
 pub fn persisted_document_within_bounds(bytes: &[u8]) -> bool {
@@ -602,11 +683,21 @@ mod tests {
         .expect("observation");
         let restored = limits_snapshots(&db).expect("read current account owner only");
         assert!(restored.diagnostics.is_empty());
-        assert_eq!(restored.snapshots[0].1["at"], 2.0);
-        assert_eq!(restored.snapshots[0].1["data"]["accountId"], "A");
+        assert_eq!(restored.snapshots[0].1.at, Some(2.0));
         assert_eq!(
-            super::latest_limits_snapshot(&db, "alpha").expect("latest"),
-            Some(restored.snapshots[0].1.clone())
+            restored.snapshots[0]
+                .1
+                .data
+                .as_ref()
+                .unwrap()
+                .0
+                .account_id
+                .as_deref(),
+            Some("A")
+        );
+        assert!(
+            super::latest_limits_snapshot(&db, "alpha").expect("latest")
+                == Some(restored.snapshots[0].1.clone())
         );
     }
 
@@ -653,6 +744,17 @@ mod tests {
     }
 
     #[test]
+    fn restored_limits_are_typed_observations() {
+        let db = database(
+            &json!({"value":{"rateLimitsByAccount":{"alpha":{"accountKey":"alpha","at":1.0,"data":{"status":"ready"}}}}}),
+        );
+        let restored = limits_snapshots(&db).unwrap();
+        let observation: &studio_runtime_schema::usage_limits::UsageLimitsResponse =
+            &restored.snapshots[0].1;
+        assert_eq!(observation.account_key, "alpha");
+    }
+
+    #[test]
     fn reads_valid_account_map() {
         let alpha = json!({"accountKey":"alpha","at":1.0,"data":{"status":"ready",
             "rateLimits":{"primary":{"usedPercent":12,"providerWindow":{"x":1}}}}
@@ -662,7 +764,14 @@ mod tests {
         );
         let restored = limits_snapshots(&db).expect("read");
         assert!(restored.diagnostics.is_empty());
-        assert!(restored.snapshots.contains(&("alpha".to_owned(), alpha)));
+        let expected: studio_runtime_schema::usage_limits::UsageLimitsResponse =
+            serde::Deserialize::deserialize(alpha).unwrap();
+        assert!(
+            restored
+                .snapshots
+                .iter()
+                .any(|(key, value)| key == "alpha" && *value == expected)
+        );
         assert!(!restored.snapshots.iter().any(|(key, _)| key == "default"));
         assert!(!restored.snapshots.iter().any(|(key, _)| key == "missing"));
     }
@@ -741,9 +850,19 @@ mod tests {
         .expect("account observation");
         let restored = limits_snapshots(&db).expect("restore");
         assert!(restored.diagnostics.is_empty());
-        assert_eq!(restored.snapshots[0].1["at"], 2.0);
-        assert!(restored.snapshots[0].1.get("readAt").is_none());
-        assert_eq!(restored.snapshots[0].1["data"]["accountId"], "A");
+        assert_eq!(restored.snapshots[0].1.at, Some(2.0));
+        assert!(restored.snapshots[0].1.read_at.is_none());
+        assert_eq!(
+            restored.snapshots[0]
+                .1
+                .data
+                .as_ref()
+                .unwrap()
+                .0
+                .account_id
+                .as_deref(),
+            Some("A")
+        );
         db.execute(
             "UPDATE runtime_account_state SET limits_observation=?1",
             [json!({"at":"private-corrupt-timestamp"}).to_string()],

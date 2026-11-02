@@ -17,9 +17,10 @@ fetch chains, focus probes, periodic refresh, and automatic mark-read are
 forbidden.
 
 Local storage and IndexedDB may contain device keys, credentials and pairing
-secrets, the monitor input journal, outbox request identities, the unsent input
-buffer, and the remote frontend's subscription cache. Secret answer fields remain
-in memory only. The cache is never used to decide whether to send or retry a command.
+secrets, the monitor input journal, outbox request identities, unsent user input (drafts,
+reply and answer text, form and queue edits, pending uploads, and unsent
+recordings) until the server confirms it, and the remote frontend's subscription
+cache. Secret answer fields remain in memory only. The cache is never used to decide whether to send or retry a command.
 
 A remote frontend stores one IndexedDB record per cacheable subscription, with
 its data and cursor together. It writes at most once per five seconds and when

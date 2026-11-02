@@ -28,7 +28,22 @@ def free_port():
         return server.getsockname()[1]
 
 
-class RecoveryTest(unittest.TestCase):
+class Launchd:
+    def launchd(self, running):
+        """Replace launchctl for this test: `print` reports a pid only when `running`."""
+        calls = []
+
+        def fake(*args):
+            calls.append(args)
+            out = "pid = 4242\n" if running and args[0] == "print" else "state = not running\n"
+            return subprocess.CompletedProcess(args, 0, out, "")
+        patcher = patch.object(recovery, "launchctl", side_effect=fake)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return calls
+
+
+class RecoveryTest(Launchd, unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="studio-supervisor-test-")
         self.addCleanup(self.temp.cleanup)
@@ -123,8 +138,10 @@ class RecoveryTest(unittest.TestCase):
                 recovery.tick(self.config, self.state)
             spawn.assert_not_called()
 
+
     def test_supervisor_probe_failure_never_starts_a_replacement(self):
         config = {**self.config, "supervisorEnabled": True}
+        self.launchd(running=True)
         with patch.object(recovery, "supervisor_request", side_effect=TimeoutError("probe")), \
                 patch.object(recovery.subprocess, "Popen") as spawn:
             self.assertEqual(recovery.supervisor_tick(config, self.state), (None, "supervisor starting"))
@@ -207,7 +224,7 @@ class InterpreterCheckTest(unittest.TestCase):
         self.assertIn("desktop_updates", result.stderr)
 
 
-class RustSelectionTest(unittest.TestCase):
+class RustSelectionTest(Launchd, unittest.TestCase):
     """The explicit Rust selection uses fake executables in a private state directory."""
 
     def setUp(self):
@@ -224,6 +241,7 @@ class RustSelectionTest(unittest.TestCase):
                        "codex": "/usr/bin/true", "resources": str(self.state),
                        "backend": "rust", "runtimeServer": str(self.server),
                        "processSupervisor": str(self.supervisor), "environment": {}}
+        self.launchd(running=True)  # no test reaches the real launchd
 
     def fake_executable(self, name, content, mode=0o755):
         path = self.state / "bin" / name
@@ -422,6 +440,76 @@ class RustSelectionTest(unittest.TestCase):
         self.assertEqual(recovery.supervisor_tick(config, self.state), (None, "supervisor starting"))
         with self.assertRaisesRegex(RuntimeError, "Rust process supervisor is missing"):
             recovery.supervisor_tick({**config, "processSupervisor": str(self.state / "bin/missing")}, self.state)
+
+    def age_journal(self, seconds):
+        journal = self.state / "supervisor.sqlite3"
+        journal.write_text("journal")
+        old = time.time() - seconds
+        os.utime(journal, (old, old))
+
+    def mismatched_supervisor(self):
+        return patch.object(recovery, "supervisor_request",
+                            side_effect=recovery.SupervisorMismatch("The running process supervisor uses an incompatible protocol."))
+
+    def test_an_idle_supervisor_with_another_protocol_is_replaced_through_launchd(self):
+        config = {**self.config, "supervisorEnabled": True}
+        calls = self.launchd(running=True)
+        self.age_journal(recovery.SUPERVISOR_QUIET_SECONDS + 1)
+        with self.mismatched_supervisor(), patch.object(recovery, "identity", return_value=None):
+            self.assertEqual(recovery.supervisor_tick(config, self.state), (None, "supervisor replaced"))
+        domain = f"gui/{os.getuid()}"
+        label = recovery.supervisor_label(self.state)
+        plist = Path.home() / "Library/LaunchAgents" / f"{label}.plist"
+        self.assertEqual(calls, [("bootout", f"{domain}/{label}"), ("bootstrap", domain, str(plist))])
+
+    def test_the_backend_of_a_replaced_supervisor_is_restarted_to_reconnect(self):
+        config = {**self.config, "supervisorEnabled": True}
+        self.launchd(running=True)
+        self.age_journal(recovery.SUPERVISOR_QUIET_SECONDS + 1)
+        backend = {"pid": 77, "supervisorMode": True}
+        with self.mismatched_supervisor(), patch.object(recovery, "identity", return_value=backend), \
+                patch.object(recovery, "verify_backend_process") as verify, patch.object(recovery.os, "kill") as kill:
+            recovery.supervisor_tick(config, self.state)
+        verify.assert_called_once_with(backend, config)
+        kill.assert_called_once_with(77, signal.SIGTERM)
+
+    def test_a_supervisor_with_recent_work_is_kept_and_the_backend_waits(self):
+        config = {**self.config, "supervisorEnabled": True}
+        calls = self.launchd(running=True)
+        self.age_journal(recovery.SUPERVISOR_QUIET_SECONDS - 60)
+        with self.mismatched_supervisor(), self.assertRaisesRegex(RuntimeError, "live work"):
+            recovery.supervisor_tick(config, self.state)
+        self.assertEqual(calls, [])
+
+    def test_an_unreadable_journal_is_treated_as_live_work(self):
+        config = {**self.config, "supervisorEnabled": True}
+        calls = self.launchd(running=True)
+        with self.mismatched_supervisor(), self.assertRaisesRegex(RuntimeError, "live work"):
+            recovery.supervisor_tick(config, self.state)
+        self.assertEqual(calls, [])
+
+    def test_the_replacement_happens_without_a_person_when_the_work_ends(self):
+        config = {**self.config, "supervisorEnabled": True}
+        calls = self.launchd(running=True)
+        self.age_journal(10)
+        with self.mismatched_supervisor(), patch.object(recovery, "identity", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "live work"):
+                recovery.supervisor_tick(config, self.state)
+            self.age_journal(recovery.SUPERVISOR_QUIET_SECONDS + 1)
+            self.assertEqual(recovery.supervisor_tick(config, self.state), (None, "supervisor replaced"))
+        self.assertEqual([call[0] for call in calls], ["bootout", "bootstrap"])
+
+    def test_a_job_that_launchd_did_not_start_is_bootstrapped_again(self):
+        config = {**self.config, "supervisorEnabled": True}
+        calls = self.launchd(running=False)
+        self.assertEqual(recovery.supervisor_tick(config, self.state), (None, "supervisor starting"))
+        self.assertEqual([call[0] for call in calls], ["print", "bootout", "bootstrap"])
+
+    def test_a_running_job_without_a_socket_yet_is_left_alone(self):
+        config = {**self.config, "supervisorEnabled": True}
+        calls = self.launchd(running=True)
+        self.assertEqual(recovery.supervisor_tick(config, self.state), (None, "supervisor starting"))
+        self.assertEqual([call[0] for call in calls], ["print"])
 
     def test_supervisor_protocol_matches_its_rust_owner(self):
         owner = (REPOSITORY_ROOT / "workspaces/runtime/packages/runtime-providers/src/supervisor_protocol.rs").read_text()

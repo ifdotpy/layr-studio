@@ -31,6 +31,7 @@ test(
         "pnpm-lock.yaml",
         ".oxfmtrc.json",
         "workspaces/runtime/packages/runtime-schema",
+        "workspaces/runtime/packages/request-signing",
         "workspaces/client/packages/client-domain",
         "workspaces/providers/apps/claude-bridge/codex-generated",
         "workspaces/providers/apps/claude-bridge/package.json",
@@ -50,7 +51,7 @@ test(
         "utf8",
       ).replace(
         /members = \[[\s\S]*?\]/,
-        'members = ["workspaces/runtime/packages/runtime-schema", "workspaces/client/packages/client-domain"]',
+        'members = ["workspaces/runtime/packages/runtime-schema", "workspaces/runtime/packages/request-signing", "workspaces/client/packages/client-domain"]',
       );
       writeFileSync(path.join(copy, "Cargo.toml"), manifest);
       const env = {

@@ -526,8 +526,7 @@ fn convert(id: &str, legacy: Legacy) -> StoreResult<Approval> {
     })
 }
 
-/// Convert one legacy record. Tests seed their fixtures with it.
-#[cfg(any(test, feature = "test-support"))]
+/// Convert one legacy record. The legacy question-history migration and test fixtures use it.
 pub(crate) fn approval_from_record(id: &str, record: &str) -> StoreResult<Approval> {
     convert(id, legacy_of(id, record)?)
 }

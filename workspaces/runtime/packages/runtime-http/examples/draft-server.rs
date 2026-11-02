@@ -30,6 +30,7 @@ async fn write_entity(
         if body.get("appendWorkResult").and_then(serde_json::Value::as_bool) == Some(true) {
             let result = serde_json::json!({"id":"appended","agent":"lead","text":"New evidence only","checks":"fixture","revision":"fixture","files":[],"created":2});
             tx.execute("UPDATE runtime_work SET record=json_set(json_insert(record,'$.results[#]',json(?1)),'$.version',3,'$.updated',3) WHERE id='transfer-assignment'", [result.to_string()])?;
+            reconcile_transfer_work(tx)?;
         }
         if let Some(status) = body.get("workStatus").and_then(serde_json::Value::as_str) {
             tx.execute("UPDATE runtime_work SET record=json_set(record,'$.status',?1,'$.updated',2,'$.version',2) WHERE id='transfer-assignment'", [status])?;
@@ -106,6 +107,7 @@ async fn main() {
             let results = (0..515).map(|index| serde_json::json!({"id":format!("result-{index}"),"agent":"lead","text":if index == 0 { "界".repeat(studio_runtime_schema::shared_values::SYNC_STREAM_EVENT_MAX_BYTES / 2) } else {format!("Evidence-{index}")},"checks":"fixture","revision":"fixture","files":[],"created":1})).collect::<Vec<_>>();
             let work = serde_json::json!({"id":"transfer-assignment","rootId":"lead","title":"Large existing review","description":"Preserve all review history","status":"running","owner":null,"dependencies":[],"created":1,"updated":1,"version":1,"gate":null,"results":results,"decisions":[],"releases":[]});
             tx.execute("INSERT INTO runtime_work(id,record) VALUES(?1,?2)",rusqlite::params!["transfer-assignment",work.to_string()])?;
+            studio_runtime_store::work_history::reconcile(tx, "transfer-assignment", &work)?;
             Ok::<_, StoreError>(())
         }).await.expect("large existing work source");
     }
@@ -185,4 +187,19 @@ async fn main() {
     })
     .await
     .expect("fixture server");
+}
+
+/// Raw SQL writes skip the record writers, so the fixture repairs its history rows.
+fn reconcile_transfer_work(tx: &rusqlite::Transaction<'_>) -> Result<(), StoreError> {
+    let raw: String = tx.query_row(
+        "SELECT record FROM runtime_work WHERE id='transfer-assignment'",
+        [],
+        |row| row.get(0),
+    )?;
+    studio_runtime_store::work_history::reconcile(
+        tx,
+        "transfer-assignment",
+        &serde_json::from_str(&raw)?,
+    )?;
+    Ok(())
 }

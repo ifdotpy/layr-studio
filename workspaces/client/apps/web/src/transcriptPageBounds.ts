@@ -1,4 +1,5 @@
 import type { Message } from "./types";
+import { messageRenderKey } from "./components/message-delivery/messageDelivery";
 import { isMessagePending } from "./messageSendStatus.ts";
 
 export const MAX_TRANSCRIPT_PAGE_ITEMS = 240;
@@ -93,12 +94,15 @@ export function boundTranscriptPage(
     nextAfter: string | null;
   },
   anchorId?: string,
+  visibleEndId?: string,
 ) {
   const bounded = boundTranscriptItems(
     items,
     sizeOf,
     direction === "older" ? "oldest" : "newest",
-    direction === "newer" ? undefined : anchorId,
+    anchorId,
+    direction === "around",
+    visibleEndId,
   );
   let before = direction === "newer" ? cursors.before : cursors.nextBefore;
   let after = cursors.nextAfter;
@@ -109,7 +113,8 @@ export function boundTranscriptPage(
         ? bounded.items.at(-1)?.id || null
         : null;
   else if (direction === "newer") {
-    if (cursors.nextAfter) after = bounded.items.at(-1)?.id || null;
+    if (bounded.droppedNewest || cursors.nextAfter)
+      after = bounded.items.at(-1)?.id || null;
     before =
       bounded.droppedOldest || cursors.before
         ? bounded.items[0]?.id || null
@@ -124,42 +129,62 @@ export function boundTranscriptItems(
   sizeOf: (item: Message) => number,
   keep: "oldest" | "newest" = "newest",
   anchorId?: string,
+  centered = false,
+  visibleEndId?: string,
 ) {
   const result: Message[] = [];
   let bytes = 0;
   const anchorIndex = anchorId
     ? items.findIndex(
-        (item) => item.id === anchorId || item.sourceId === anchorId,
+        (item) =>
+          messageRenderKey(item) === anchorId ||
+          item.id === anchorId ||
+          item.sourceId === anchorId,
       )
     : -1;
-  const start =
-    anchorIndex >= 0
-      ? Math.max(
-          0,
-          Math.min(anchorIndex - 120, items.length - MAX_TRANSCRIPT_PAGE_ITEMS),
-        )
-      : keep === "oldest"
-        ? 0
-        : Math.max(0, items.length - MAX_TRANSCRIPT_PAGE_ITEMS);
-  const source =
-    anchorIndex >= 0
-      ? items.slice(start)
-      : keep === "oldest"
-        ? items
-        : [...items].reverse();
-  for (const item of source) {
-    const size = sizeOf(item);
-    if (
-      result.length >= MAX_TRANSCRIPT_PAGE_ITEMS ||
-      bytes + size > MAX_TRANSCRIPT_PAGE_BYTES
-    )
-      break;
-    result.push(item);
-    bytes += size;
-  }
   if (anchorIndex >= 0) {
-    // The anchor-centered window keeps the visible row while pruning both sides.
-  } else if (keep === "newest") result.reverse();
+    let first = anchorIndex;
+    let last = anchorIndex;
+    result.push(items[anchorIndex]!);
+    bytes = sizeOf(items[anchorIndex]!);
+    const extend = (step: -1 | 1, limit = MAX_TRANSCRIPT_PAGE_ITEMS) => {
+      while (result.length < limit) {
+        const index = step < 0 ? first - 1 : last + 1;
+        const item = items[index];
+        if (!item || bytes + sizeOf(item) > MAX_TRANSCRIPT_PAGE_BYTES) break;
+        if (step < 0) {
+          result.unshift(item);
+          first = index;
+        } else {
+          result.push(item);
+          last = index;
+        }
+        bytes += sizeOf(item);
+      }
+    };
+    if (visibleEndId && keep === "oldest") {
+      const end = items.findIndex(
+        (item) => item.id === visibleEndId || item.sourceId === visibleEndId,
+      );
+      extend(1, Math.max(1, end - anchorIndex + 1));
+    }
+    if (centered) extend(-1, 121);
+    extend(keep === "oldest" ? -1 : 1);
+    extend(keep === "oldest" ? 1 : -1);
+  } else {
+    const source = keep === "oldest" ? items : [...items].reverse();
+    for (const item of source) {
+      const size = sizeOf(item);
+      if (
+        result.length >= MAX_TRANSCRIPT_PAGE_ITEMS ||
+        bytes + size > MAX_TRANSCRIPT_PAGE_BYTES
+      )
+        break;
+      result.push(item);
+      bytes += size;
+    }
+    if (keep === "newest") result.reverse();
+  }
   const retained = new Set(result);
   const firstRetained = items.findIndex((item) => retained.has(item));
   return {

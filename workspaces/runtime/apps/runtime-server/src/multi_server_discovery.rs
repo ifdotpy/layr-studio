@@ -186,7 +186,10 @@ impl ServerDiscoveryPort for TailscaleServerDiscovery {
         store: Arc<RuntimeStore>,
         identity: &'a Value,
         public_origin: &'a str,
-    ) -> BoxFuture<'a, Result<Value, AccessError>> {
+    ) -> BoxFuture<
+        'a,
+        Result<studio_runtime_schema::multi_server_access::AccessSnapshot, AccessError>,
+    > {
         Box::pin(async move {
             let _guard = DiscoveryPassGuard::acquire(Arc::clone(&self.discovery_lock))?;
             let executable = self.executable.clone();

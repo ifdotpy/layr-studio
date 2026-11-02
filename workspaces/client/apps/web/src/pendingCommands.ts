@@ -7,7 +7,7 @@
 // stream delivers rows in `seq` order, so the sequence checkpoint of the client is that
 // proof. The response carries the changed rows, so the client does not wait for a frame.
 
-export type PendingKind = "send" | "stop" | "withdraw" | "answer";
+export type PendingKind = "send" | "stop" | "withdraw" | "answer" | "resolve";
 
 export type PendingEntry = {
   /** The command id. */

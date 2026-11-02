@@ -289,7 +289,8 @@ async fn branch(
                                     != Some(operation_id.as_str()))
                                 || snapshot.agents.iter().any(|entry| {
                                     entry.id != agent_id
-                                        && entry.record.get("cwd") == source.get("cwd")
+                                        && entry.record.get("cwd").and_then(Value::as_str)
+                                            == snapshot.agent.cwd.as_deref()
                                         && entry
                                             .record
                                             .get("workspaceOperation")
@@ -330,7 +331,8 @@ async fn branch(
                         != Some(operation_id.as_str()))
                     || snapshot.agents.iter().any(|entry| {
                         entry.id != agent_id
-                            && entry.record.get("cwd") == source.get("cwd")
+                            && entry.record.get("cwd").and_then(Value::as_str)
+                                == snapshot.agent.cwd.as_deref()
                             && entry
                                 .record
                                 .get("workspaceOperation")

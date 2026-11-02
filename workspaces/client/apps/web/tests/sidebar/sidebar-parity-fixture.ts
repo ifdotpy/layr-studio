@@ -672,6 +672,14 @@ export async function sidebarParityFixture(
               )?.members ||
               [],
             radio: {
+              controls: {
+                busy: false,
+                inputBlocked: false,
+                canPass: false,
+                stopping: false,
+                speaking: false,
+                busyNotice: null,
+              },
               active: null,
               error: null,
               next: [],

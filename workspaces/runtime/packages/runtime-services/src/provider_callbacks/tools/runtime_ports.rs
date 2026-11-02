@@ -607,7 +607,10 @@ impl super::runtime_dispatch::InterruptPort for ManagedInterruptAdapter {
                     }
                     CommandError::NotFound
                     | CommandError::TooOld
-                    | CommandError::Coordination(_) => Error::Invalid("Agent stop was refused"),
+                    | CommandError::Coordination(_)
+                    | CommandError::Outbox(_)
+                    | CommandError::Missing(_)
+                    | CommandError::Entity(_) => Error::Invalid("Agent stop was refused"),
                 })?;
             if !executed.replayed {
                 // A failed wake cannot roll back the committed stop. The effect owner

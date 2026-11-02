@@ -1,3 +1,4 @@
+import { AccessClientStatus } from "../generated/api";
 import assert from "node:assert/strict";
 import { describe, expect, it } from "vitest";
 import { relativeSeen, serverRows } from "./serverRows";
@@ -11,7 +12,7 @@ const peer = (
   origin: `https://${id}.tailnet.ts.net`,
   status,
   lastSeen: null,
-  paired: status === "paired",
+  paired: status === AccessClientStatus.paired,
   publicKey: "key",
   generation: "1",
 });
@@ -32,10 +33,10 @@ describe("Settings server rows", () => {
         },
       ],
       [
-        peer("revoked", "revoked"),
-        peer("offline", "unreachable"),
-        peer("new", "discovered"),
-        peer("remote", "paired"),
+        peer("revoked", AccessClientStatus.revoked),
+        peer("offline", AccessClientStatus.unreachable),
+        peer("new", AccessClientStatus.discovered),
+        peer("remote", AccessClientStatus.paired),
       ],
       { remote: "live", revoked: "live" },
     );
@@ -82,7 +83,7 @@ describe("Settings server rows", () => {
           origin: "https://remote.tailnet.ts.net",
         },
       ],
-      [peer("remote", "paired")],
+      [peer("remote", AccessClientStatus.paired)],
       { local: "paused", remote: "paused" },
     );
     expect(rows.map((row) => row.status)).toEqual(["Online", "Paired"]);

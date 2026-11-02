@@ -66,6 +66,12 @@ pub const DURABLE_TABLES: &[DurableTable] = &[
     DurableTable::new("runtime_work", "record"),
     // The owner of conversation items; transcript pages are built from it at read time.
     DurableTable::online("runtime_items", "record"),
+    // Work history entries, one row per entry (see work_history.rs).
+    DurableTable::new("runtime_work_results", "record"),
+    DurableTable::new("runtime_work_decisions", "record"),
+    DurableTable::new("runtime_work_releases", "record"),
+    // Execution runs: a failure refusal of a work document depends on the owner's run.
+    DurableTable::new("runtime_execution_runs", "record"),
 ];
 
 /// The next number of the shared counter. Owner of the allocation rule. The same text
@@ -166,6 +172,10 @@ pub(crate) fn install(tx: &Transaction<'_>) -> StoreResult<()> {
     tx.execute_batch(&view_log_sql())?;
     for table in DURABLE_TABLES {
         let name = table.name;
+        // A table created later by its own migration is numbered when it exists.
+        if !crate::schema::table_exists(tx, name)? {
+            continue;
+        }
         if !table.online_backfill {
             let base: i64 = tx.query_row(&format!("SELECT {NEXT}-1"), [], |r| r.get(0))?;
             tx.execute_batch(&format!(
@@ -233,6 +243,16 @@ pub enum DurableChanges {
         tombstones: Vec<DurableTombstone>,
         seq: i64,
     },
+}
+
+/// The highest change number of any sync table, and the durable tombstone floor.
+pub fn high_and_floor(connection: &Connection) -> StoreResult<(i64, i64)> {
+    let high: i64 = connection.query_row(&format!("SELECT {NEXT}-1"), [], |row| row.get(0))?;
+    let floor: i64 =
+        connection.query_row("SELECT floor FROM durable_floor WHERE id=1", [], |row| {
+            row.get(0)
+        })?;
+    Ok((high, floor))
 }
 
 /// Rows of `table` with `seq` above `cursor`, or a snapshot when the cursor is absent,
@@ -684,8 +704,7 @@ mod tests {
     #[test]
     fn retiring_the_copies_needs_every_item_in_the_owner_and_never_deletes_rows() {
         let mut db = canvas();
-        // A fresh state has no copies, so the migration retired them.
-        assert!(transcript_copies_retired(&db).expect("flag"));
+        assert!(!transcript_copies_retired(&db).expect("flag"));
         db.execute_batch(
             "DELETE FROM sync_entity_meta WHERE key='transcript_copies';
              INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES

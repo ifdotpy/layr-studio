@@ -20,6 +20,12 @@ export interface components {
        */
       quietThresholdMs: number;
     };
+    BucketCreditBalance: string | number | boolean;
+    BucketCredits: {
+      balance?: components["schemas"]["BucketCreditBalance"] | null | undefined;
+      hasCredits?: boolean | null | undefined;
+      unlimited?: boolean | null | undefined;
+    };
     CacheReport: {
       /** @default true */
       compactionEnabled: boolean;
@@ -144,6 +150,39 @@ export interface components {
         | "model_access"
         | undefined;
     };
+    ClaudeRateInfo: {
+      isUsingOverage?: boolean | null | undefined;
+      overageInUse?: boolean | null | undefined;
+      /** Format: double */
+      overageResetsAt?: number | null | undefined;
+      overageStatus?:
+        | components["schemas"]["ClaudeRateStatus"]
+        | null
+        | undefined;
+      rateLimitType?:
+        | components["schemas"]["ClaudeRateType"]
+        | null
+        | undefined;
+      /** Format: double */
+      resetsAt?: number | null | undefined;
+      status: components["schemas"]["ClaudeRateStatus"];
+      /** Format: double */
+      utilization?: number | null | undefined;
+    };
+    /** @description Unknown provider evidence is retained only as an unsupported decision. */
+    ClaudeRateLimit:
+      | components["schemas"]["ClaudeRateInfo"]
+      | components["schemas"]["UnsupportedRateInfo"];
+    /** @enum {string} */
+    ClaudeRateStatus: "allowed" | "allowed_warning" | "rejected";
+    /** @enum {string} */
+    ClaudeRateType:
+      | "five_hour"
+      | "seven_day"
+      | "seven_day_opus"
+      | "seven_day_sonnet"
+      | "seven_day_overage_included"
+      | "overage";
     /** ClaudeSessionSettings */
     ClaudeSessionSettings: {
       /**
@@ -353,46 +392,36 @@ export interface components {
     } & {
       [key: string]: unknown;
     };
-    /**
-     * RateLimitBucket
-     * @description Known rate-limit fields plus provider-owned fields passed through unchanged.
-     */
     RateLimitBucket: {
+      claudeRateLimit?:
+        | components["schemas"]["ClaudeRateLimit"]
+        | null
+        | undefined;
+      credits?: components["schemas"]["BucketCredits"] | null | undefined;
       individualLimit?:
         | components["schemas"]["RateLimitIndividualLimit"]
         | null
         | undefined;
-      /** Limitid */
       limitId?: string | null | undefined;
-      /** Limitname */
       limitName?: string | null | undefined;
-      /** Plantype */
       planType?: string | null | undefined;
       primary?: components["schemas"]["RateLimitWindow"] | null | undefined;
-      /** Ratelimitreachedtype */
       rateLimitReachedType?: string | null | undefined;
       secondary?: components["schemas"]["RateLimitWindow"] | null | undefined;
-      /** Spendcontrolreached */
       spendControlReached?: boolean | null | undefined;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
     RateLimitBucketDto: components["schemas"]["RateLimitBucket"];
-    /** RateLimitIndividualLimit */
     RateLimitIndividualLimit: {
-      /** Remainingpercent */
+      /** Format: double */
       remainingPercent?: number | null | undefined;
     };
-    /** RateLimitWindow */
     RateLimitWindow: {
-      /** Resetsat */
+      /** Format: double */
       resetsAt?: number | null | undefined;
-      /** Usedpercent */
+      /** Format: double */
       usedPercent?: number | null | undefined;
-      /** Windowdurationmins */
+      /** Format: double */
       windowDurationMins?: number | null | undefined;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
     RateLimitWindowDto: components["schemas"]["RateLimitWindow"];
     TerminalTurn: {
@@ -425,6 +454,11 @@ export interface components {
       /** @constant */
       type: "unsupported";
     };
+    UnsupportedRateInfo: {
+      type: components["schemas"]["UnsupportedRateKind"];
+    };
+    /** @enum {string} */
+    UnsupportedRateKind: "unsupported";
   };
   responses: never;
   parameters: never;
@@ -442,6 +476,21 @@ export type JsonValue =
   | string
   | JsonValue[]
   | { [key: string]: JsonValue };
+export const ClaudeRateStatus = {
+  allowed: "allowed",
+  allowed_warning: "allowed_warning",
+  rejected: "rejected",
+} as const;
+export type ClaudeRateStatus = components["schemas"]["ClaudeRateStatus"];
+export const ClaudeRateType = {
+  five_hour: "five_hour",
+  seven_day: "seven_day",
+  seven_day_opus: "seven_day_opus",
+  seven_day_sonnet: "seven_day_sonnet",
+  seven_day_overage_included: "seven_day_overage_included",
+  overage: "overage",
+} as const;
+export type ClaudeRateType = components["schemas"]["ClaudeRateType"];
 export const FreshAgentPhase = {
   commentary: "commentary",
   final_answer: "final_answer",
@@ -475,8 +524,12 @@ export const TerminalTurnStatus = {
   failed: "failed",
 } as const;
 export type TerminalTurnStatus = components["schemas"]["TerminalTurnStatus"];
+export const UnsupportedRateKind = { unsupported: "unsupported" } as const;
+export type UnsupportedRateKind = components["schemas"]["UnsupportedRateKind"];
 export type BackgroundShellPolicySettings =
   components["schemas"]["BackgroundShellPolicySettings"];
+export type BucketCreditBalance = components["schemas"]["BucketCreditBalance"];
+export type BucketCredits = components["schemas"]["BucketCredits"];
 export type CacheReport = components["schemas"]["CacheReport"];
 export type ClaudeBridgeSessionWire =
   components["schemas"]["ClaudeBridgeSessionWire"];
@@ -484,6 +537,8 @@ export type ClaudeBridgeTurnWire =
   components["schemas"]["ClaudeBridgeTurnWire"];
 export type ClaudeCustomModel = components["schemas"]["ClaudeCustomModel"];
 export type ClaudeFailure = components["schemas"]["ClaudeFailure"];
+export type ClaudeRateInfo = components["schemas"]["ClaudeRateInfo"];
+export type ClaudeRateLimit = components["schemas"]["ClaudeRateLimit"];
 export type ClaudeSessionSettings =
   components["schemas"]["ClaudeSessionSettings"];
 export type FreshFileChange = components["schemas"]["FreshFileChange"];
@@ -506,3 +561,4 @@ export type ThreadIdentity = components["schemas"]["ThreadIdentity"];
 export type ToolDefinition = components["schemas"]["ToolDefinition"];
 export type UnsupportedClaudeRateLimit =
   components["schemas"]["UnsupportedClaudeRateLimit"];
+export type UnsupportedRateInfo = components["schemas"]["UnsupportedRateInfo"];

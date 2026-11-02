@@ -1263,7 +1263,10 @@ pub(super) async fn submitted(
                             == Some(i.attempt_id.as_str())
                         && agent.start_attempt.as_ref().and_then(|a| a.submitted) == Some(false)
                         && agent.auto_wake == Some(true)
-                        && agent.extra.get("nativeFailureHold").unwrap_or(&Value::Null) != true
+                        && !matches!(
+                            agent.native_failure_hold.value(),
+                            Some(studio_runtime_store::NativeFailureHold::Boolean(true))
+                        )
                 }
             })
         })?;
@@ -2133,16 +2136,11 @@ pub(super) async fn journal_batch(
                 Some(
                     store
                         .read_async("runtime-services/account_worker_journal_snapshot", move |tx| {
-                            let limits = studio_runtime_store::account_state::limits_snapshots(tx)?
-                                .snapshots
-                                .into_iter()
-                                .find(|(key, _)| key == &account_for_read)
-                                .map(|(_, limits)| limits)
-                                .unwrap_or_else(|| {
-                                    json!({"accountKey":account_for_read,"at":null,"error":null,"data":null,"stale":true})
-                                });
-                            crate::usage_resume::LimitsObservation::from_record(limits, None)
-                                .map_err(|error| WorkerError::PreparationRefused(error.to_string()))
+                            let response = studio_runtime_store::account_state::limits_snapshots(tx)?
+                                .snapshots.into_iter().find(|(key, _)| key == &account_for_read)
+                                .map(|(_, response)| response)
+                                .unwrap_or_else(|| studio_runtime_schema::usage_limits::UsageLimitsResponse { account_key: account_for_read, ..Default::default() });
+                            Ok::<_, WorkerError>(crate::usage_resume::LimitsObservation::from_response(response))
                         })
                         .await?,
                 )
@@ -2541,6 +2539,12 @@ fn journal_one(
                 )
                 .map_err(|_| invalid(&operation))?;
                 effect = Some(Effect::LimitsUpdated(update));
+            }
+        } else if let Some(("account/updated", _)) = notice {
+            if publication.native_source.as_ref().is_some_and(|source| {
+                source.account == account && source.generation == Some(entry.generation.0)
+            }) {
+                effect = Some(Effect::AccountUpdated);
             }
         } else if let Some((method, params)) = notice
             && record_manual_release_closure(
@@ -3090,6 +3094,48 @@ mod effect_obligation_tests {
     }
 
     #[test]
+    fn journal_resumes_after_the_supervisor_ack_of_a_new_generation() {
+        let mut db = rusqlite::Connection::open_in_memory().expect("database");
+        studio_runtime_store::receipt_schema::create(&db).expect("schema");
+        db.execute("INSERT INTO runtime_account_state VALUES('account',8,7,'connection',0,0,'null',NULL,NULL)", []).expect("account");
+        let tx = db.transaction().expect("transaction");
+        for (generation, cursor, ready) in [(6, 90, true), (7, 91, true), (7, 93, true)] {
+            let row = OutboxRow {
+                id: journal_operation("account", generation, cursor),
+                kind: OutboxKind::JournalEntry,
+                owner_kind: OwnerKind::Account,
+                owner_id: "account".into(),
+                request_id: None,
+                signature: cursor.to_string(),
+                status: OutboxStatus::Committed,
+                account: Some("account".into()),
+                stream_id: Some("account".into()),
+                generation: Some(generation as i64),
+                ordinal: Some(cursor as i64),
+                next_at: None,
+                payload: JournalSettlement {
+                    cursor,
+                    digest: cursor.to_string(),
+                    ready,
+                    committed: ready,
+                    notification: None,
+                },
+                created: 1,
+            };
+            Outbox::put(&tx, &row).expect("journal");
+        }
+        compact(&tx, "account", 7).expect("compact");
+        assert_eq!(checkpoint(&tx, "account", 7).expect("ack"), 0);
+        seed_ack(&tx, "account", 7, 89).expect("supervisor ack");
+        compact(&tx, "account", 7).expect("compact");
+        assert_eq!(
+            checkpoint(&tx, "account", 7).expect("ack"),
+            91,
+            "the stream resumes after the supervisor ACK; a gap still holds"
+        );
+    }
+
+    #[test]
     fn mixed_generation_journal_compacts_only_the_contiguous_ready_prefix() {
         let mut db = rusqlite::Connection::open_in_memory().expect("database");
         studio_runtime_store::receipt_schema::create(&db).expect("schema");
@@ -3234,6 +3280,22 @@ fn current_stream_generation(
         return Err(invalid(scope));
     }
     Ok(generation)
+}
+
+/// A new generation's ACK starts at 0, but the supervisor stream keeps its cursors
+/// and resumes after what it acknowledged. Raise the ACK to that cursor so
+/// compaction can reach the entries after it.
+pub(super) fn seed_ack(
+    tx: &studio_runtime_store::Transaction<'_>,
+    journal_scope: &str,
+    generation: u64,
+    acknowledged: u64,
+) -> Result<(), WorkerError> {
+    if acknowledged > checkpoint(tx, journal_scope, generation)? {
+        set_checkpoint(tx, journal_scope, generation, acknowledged)?;
+        super::retained::storage::checkpoint_covered(tx, journal_scope, generation, acknowledged)?;
+    }
+    Ok(())
 }
 
 fn set_checkpoint(
@@ -3873,9 +3935,14 @@ async fn publish_pending(
                     .pointer("/turn/id")
                     .and_then(Value::as_str)
             {
-                crate::layr_native::save_turn(store, agent, turn)
-                    .await
-                    .map_err(|error| WorkerError::PreparationPending(error.to_string().into()))?;
+                // A save error belongs to this chat. Its save stays `pending` in
+                // `layrTurnSaves`, and the next turn preparation of this chat retries
+                // the save and reports the error. Other chats on the account go on.
+                if let Err(error) = crate::layr_native::save_turn(store, agent, turn).await {
+                    crate::diagnostics::log_stderr(format_args!(
+                        "native Layr turn save of agent {agent} stays pending: {error}"
+                    ));
+                }
             }
             sink.publish(&effect).await?;
         }
@@ -4506,7 +4573,7 @@ fn hold_before_claim(
 ) -> Result<(), WorkerError> {
     let mut agent = AgentRepository::get(tx, &AgentId::from(id))?.ok_or_else(|| invalid(id))?;
     agent.status = studio_runtime_store::AgentStatus::Waiting;
-    agent.extra.insert("nativeFailureHold".into(), json!(true));
+    agent.set_native_failure_hold(true);
     agent.auto_wake = Some(false);
     agent.in_flight = Some(false);
     agent.error = studio_runtime_schema::queue_command::Field::Value(

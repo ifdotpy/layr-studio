@@ -1,5 +1,3 @@
-import { AccountStatus } from "./generated/api";
-import { ProviderKind } from "./generated/providerKind.ts";
 import type { Account } from "./components/Accounts";
 
 export function accountDisplayName(
@@ -15,13 +13,5 @@ export function accountTooltip(account: Pick<Account, "email">): string {
 }
 
 export function accountCanStart(account: Account | undefined): boolean {
-  return (
-    !!account &&
-    !account.deleted &&
-    !account.disconnected &&
-    (account.status === AccountStatus.ready ||
-      (account.provider === ProviderKind.Claude &&
-        account.status === AccountStatus.error &&
-        account.canAttemptNativeProof === true))
-  );
+  return account?.eligibility?.kind === "available";
 }

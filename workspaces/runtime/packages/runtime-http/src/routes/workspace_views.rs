@@ -504,7 +504,7 @@ async fn task_output(
 async fn workspace_tasks(
     TypedQuery(query): TypedQuery<WorkspaceTasksQuery>,
     State(state): State<HttpState>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<Json<studio_runtime_services::workspace_views::TaskFeedResponse>, ApiError> {
     let agent = query.agent.filter(|value| !value.is_empty());
     let limit = query.limit.map_or(100, |value| value.get()).clamp(1, 100) as usize;
     let cursor = parse_task_cursor(
@@ -521,30 +521,19 @@ async fn workspace_tasks(
     let result = store
         .read_async(
             "runtime-http/routes/workspace_views",
-            move |connection| -> Result<Value, ApiError> {
-                // Each served row is decoded below; rows outside the page are not read.
-                let agents = record_values(
-                    WorkspaceViewsRepository::agents(connection).map_err(map_store_error)?,
-                )?;
-                let root =
-                    studio_runtime_services::workspace_views::agent_root(&agents, agent.as_deref())
-                        .map_err(|error| {
-                            match error {
-                        studio_runtime_services::workspace_views::AgentScopeError::MissingAgent => {
-                            invalid_request()
-                        }
-                        studio_runtime_services::workspace_views::AgentScopeError::MissingRoot => {
-                            invalid_stored("runtime_agents", agent.as_deref().unwrap_or("unknown"))
-                        }
-                        }
-                        })?;
-                let ids = studio_runtime_services::workspace_views::agents_in_root(
-                    &agents,
-                    root.as_deref(),
-                )
-                .into_iter()
-                .filter_map(|record| record["id"].as_str().map(str::to_owned))
-                .collect::<Vec<_>>();
+            move |connection| -> Result<_, ApiError> {
+                let root = agent
+                    .as_deref()
+                    .map(|id| {
+                        let agent = WorkspaceViewsRepository::agent(connection, id)
+                            .map_err(map_store_error)?
+                            .filter(|agent| !agent.is_deleted())
+                            .ok_or_else(invalid_request)?;
+                        Ok::<_, ApiError>(agent.root_id.0)
+                    })
+                    .transpose()?;
+                let ids = WorkspaceViewsRepository::task_agent_ids(connection, root.as_deref())
+                    .map_err(map_store_error)?;
                 let page = WorkspaceViewsRepository::task_page(
                     connection,
                     &ids,
@@ -561,13 +550,10 @@ async fn workspace_tasks(
                     .into_iter()
                     .take(limit)
                     .map(|row| {
-                        let record = row.decode(connection).map_err(map_store_error)?;
-                        let mut summary = record;
-                        if let Some(record) = summary.as_object_mut() {
-                            record.remove("tail");
-                            record.remove("arguments");
-                            record.remove("error");
-                        }
+                        let mut summary = row.decode(connection).map_err(map_store_error)?;
+                        summary.tail = None;
+                        summary.arguments = None;
+                        summary.error = None;
                         Ok(summary)
                     })
                     .collect::<Result<Vec<_>, ApiError>>()?;
@@ -790,6 +776,7 @@ mod tests {
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
         store.transaction_with(|tx| {
             studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"agent","rootId":"agent","epoch":0,"status":"idle"}))?)?;
+            tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", ("deleted", json!({"id":"deleted","rootId":"deleted","provider":"codex","deletedAt":1}).to_string()))?;
             for (id, created) in [("a", 1), ("b", 2), ("c", 3)] {
                 tx.execute("INSERT INTO runtime_tasks VALUES(?1,?2)", (id, json!({"id":if id == "a" { "wrong" } else { id },"agent":"agent","created":created,"kind":"command","type":"commandExecution","name":"commandExecution","itemId":"item","turnId":"turn","status":"completed","tail":"large tail","arguments":"{}","error":"detail"}).to_string()))?;
             }

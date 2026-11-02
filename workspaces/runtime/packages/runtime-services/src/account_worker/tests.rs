@@ -2822,7 +2822,9 @@ async fn provider_worker(
                 );
                 row.native_effort =
                     studio_runtime_schema::queue_command::Field::Value("medium".into());
-                row.extra.insert("claudeOptions".into(), json!({}));
+                row.claude_options = studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_store::StoredTransferObject::Known(Default::default()),
+                );
                 AgentRepository::put(tx, &row)?;
                 Ok(())
             })
@@ -4254,16 +4256,32 @@ async fn scenario_new_thread_freezes_settings_and_accepts_context() {
     state
         .bridge
         .run(move |store| async move {
-            store.transaction(move |tx| {
-                let mut record = AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
-                record.thread_id = None;
-                record.extra.remove("nativeToolCatalog");
-                record.extra.insert(
-                    "pendingSettings".into(),
-                    json!({"model":"pending-model","effort":"high","nativeEffort":"high","fastMode":true}),
-                );
-                AgentRepository::put(tx, &record)
-            }).await?;
+            store
+                .transaction(move |tx| {
+                    let mut record =
+                        AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
+                    record.thread_id = None;
+                    record.extra.remove("nativeToolCatalog");
+                    record.pending_settings = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_store::StoredTransferObject::Known(Box::new(
+                            studio_runtime_store::transfer_record::TransferSettings {
+                                model: studio_runtime_schema::queue_command::Field::Value(
+                                    "pending-model".into(),
+                                ),
+                                effort: studio_runtime_schema::queue_command::Field::Value(
+                                    "high".into(),
+                                ),
+                                native_effort: studio_runtime_schema::queue_command::Field::Value(
+                                    "high".into(),
+                                ),
+                                fast_mode: studio_runtime_schema::queue_command::Field::Value(true),
+                                ..Default::default()
+                            },
+                        )),
+                    );
+                    AgentRepository::put(tx, &record)
+                })
+                .await?;
             Ok(())
         })
         .await
@@ -5341,7 +5359,9 @@ async fn vm_claude_refresh_copies_rotation_to_active_guest_without_restart() {
                     record.cwd = Some("/home/studio/project".into());
                     record.workspace_mode =
                         Some(studio_runtime_schema::records::WorkspaceMode::Layr);
-                    record.extra.insert("claudeOptions".into(), json!({}));
+                    record.claude_options = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_store::StoredTransferObject::Known(Default::default()),
+                    );
                     record.thread_id = None;
                     AgentRepository::put(tx, &record)
                 })
@@ -6541,7 +6561,7 @@ async fn preparation_commit_rechecks_workspace_settings_and_input() {
                     if mutation == "workspace" {
                         row.workspace_mode = Some(studio_runtime_schema::records::WorkspaceMode::Image);
                     } else {
-                        row.extra.insert("pendingSettings".into(), json!({"model":"changed-model"}));
+                        row.pending_settings = studio_runtime_schema::queue_command::Field::Value(studio_runtime_store::StoredTransferObject::Known(Box::new(studio_runtime_store::transfer_record::TransferSettings { model: studio_runtime_schema::queue_command::Field::Value("changed-model".into()), ..Default::default() })));
                     }
                     AgentRepository::put(tx, &row)?;
                 }

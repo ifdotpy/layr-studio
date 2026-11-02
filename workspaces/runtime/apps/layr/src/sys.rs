@@ -213,6 +213,27 @@ pub fn subvol_set_received(fd: BorrowedFd, uuid: [u8; 16], transid: u64) -> io::
     ioctl_ptr(fd, 0xc0c8_9425, &mut args)
 }
 
+#[cfg(all(target_os = "linux", not(feature = "overlayfs")))]
+const INO_LOOKUP: libc::c_ulong = 0xd000_9412;
+
+#[cfg(all(target_os = "linux", not(feature = "overlayfs")))]
+#[repr(C)]
+struct InoLookupArgs {
+    treeid: u64,
+    objectid: u64,
+    name: [u8; 4080],
+}
+
+/// The id of the subvolume that holds `fd`, for a folder of any depth (`btrfs inspect-internal
+/// rootid`). The top-level subvolume has id 5.
+#[cfg(all(target_os = "linux", not(feature = "overlayfs")))]
+pub fn subvol_id(fd: BorrowedFd) -> io::Result<u64> {
+    // Object 256 is the first free inode: the root folder of the subvolume.
+    let mut a = Box::new(InoLookupArgs { treeid: 0, objectid: 256, name: [0; 4080] });
+    ioctl_ptr(fd, INO_LOOKUP, &mut *a)?;
+    Ok(a.treeid)
+}
+
 pub struct RawSubvolInfo {
     pub tree_id: u64,
     pub generation: u64,
@@ -268,6 +289,99 @@ pub fn send_no_data(src: BorrowedFd, out: BorrowedFd, parent_root: u64) -> io::R
 pub fn clone_range(src: &impl AsFd, src_off: u64, len: u64, dst: &impl AsFd, dst_off: u64) -> io::Result<()> {
     let mut a = CloneRange { src_fd: src.as_fd().as_raw_fd() as i64, src_offset: src_off, src_length: len, dest_offset: dst_off };
     ioctl_ptr(dst.as_fd(), FICLONERANGE, &mut a)
+}
+
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+const FIDEDUPERANGE: libc::c_ulong = 0xc018_9436;
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+const FS_IOC_FIEMAP: libc::c_ulong = 0xc020_660b;
+/// Extent flags that give no stable device offset: unknown, delayed allocation, inline data.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+const FIEMAP_UNSTABLE: u32 = 0x2 | 0x4 | 0x200;
+
+/// `struct file_dedupe_range` with one `struct file_dedupe_range_info`.
+#[repr(C)]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+struct DedupeArgs {
+    src_offset: u64,
+    src_length: u64,
+    dest_count: u16,
+    reserved1: u16,
+    reserved2: u32,
+    dest_fd: i64,
+    dest_offset: u64,
+    bytes_deduped: u64,
+    status: i32,
+    reserved3: u32,
+}
+
+#[repr(C)]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+struct FiemapExtent {
+    logical: u64,
+    physical: u64,
+    length: u64,
+    reserved64: [u64; 2],
+    flags: u32,
+    reserved: [u32; 3],
+}
+
+#[repr(C)]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+struct Fiemap {
+    start: u64,
+    length: u64,
+    flags: u32,
+    mapped_extents: u32,
+    extent_count: u32,
+    reserved: u32,
+    extent: FiemapExtent,
+}
+
+/// Share a byte range of `src` with `dst` when the kernel finds the bytes equal (FIDEDUPERANGE).
+/// The kernel compares inside, so a write to either file during the call cannot lose data.
+/// Returns the bytes shared: 0 when the ranges differ. `dst` is open for writing.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub fn dedupe_range(src: &impl AsFd, src_off: u64, len: u64, dst: &impl AsFd, dst_off: u64) -> io::Result<u64> {
+    let mut a = DedupeArgs {
+        src_offset: src_off,
+        src_length: len,
+        dest_count: 1,
+        reserved1: 0,
+        reserved2: 0,
+        dest_fd: dst.as_fd().as_raw_fd() as i64,
+        dest_offset: dst_off,
+        bytes_deduped: 0,
+        status: 0,
+        reserved3: 0,
+    };
+    ioctl_ptr(src.as_fd(), FIDEDUPERANGE, &mut a)?;
+    match a.status {
+        0 => Ok(a.bytes_deduped),
+        e if e < 0 => Err(io::Error::from_raw_os_error(-e)),
+        _ => Ok(0),
+    }
+}
+
+/// The device offset of the byte at `off`, or `None` when the file system gives none (a hole,
+/// delayed allocation, inline data, or no FIEMAP). Equal offsets in two files mean one extent.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub fn physical_at(f: &impl AsFd, off: u64) -> Option<u64> {
+    let mut m = Fiemap {
+        start: off,
+        length: 1,
+        flags: 0,
+        mapped_extents: 0,
+        extent_count: 1,
+        reserved: 0,
+        extent: FiemapExtent { logical: 0, physical: 0, length: 0, reserved64: [0; 2], flags: 0, reserved: [0; 3] },
+    };
+    ioctl_ptr(f.as_fd(), FS_IOC_FIEMAP, &mut m).ok()?;
+    let e = &m.extent;
+    if m.mapped_extents == 0 || e.flags & FIEMAP_UNSTABLE != 0 || off < e.logical {
+        return None;
+    }
+    Some(e.physical + (off - e.logical))
 }
 
 // ----- processes -----
@@ -648,6 +762,20 @@ pub fn apfs_data_identity(path: &std::path::Path) -> io::Result<ApfsDataIdentity
     })
 }
 
+/// Write the dirty data of a file to the device with `fsync`. On macOS `File::sync_data` is
+/// `F_FULLFSYNC`, which also flushes the drive cache of the whole device: about 0.5 ms on an
+/// idle Mac and much more while other programs write. Physical addresses need only the data
+/// on the device.
+#[cfg(target_os = "macos")]
+pub fn fsync_data(f: &std::fs::File) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    // SAFETY: the descriptor belongs to `f`, which is open for the call.
+    if unsafe { libc::fsync(f.as_raw_fd()) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 /// The physical extents of a file: (file offset, length, device offset). `None` when APFS does
 /// not report a mapping for some range (a hole, or data not yet allocated).
 #[cfg(target_os = "macos")]
@@ -951,36 +1079,62 @@ pub fn apfs_unseal_fd(fd: std::os::fd::BorrowedFd<'_>) -> io::Result<()> {
 
 #[cfg(target_os = "macos")]
 pub fn apfs_xattrs(path: &std::path::Path) -> io::Result<Vec<(Vec<u8>, Vec<u8>)>> {
+    apfs_xattrs_where(path, |_| true)
+}
+
+/// The attributes of `path` as `apfs_xattrs` reads them; the value of an attribute that
+/// `read_value` refuses stays empty. Reading a value costs a system call of its own.
+#[cfg(target_os = "macos")]
+pub fn apfs_xattrs_where(path: &std::path::Path, read_value: impl Fn(&[u8]) -> bool) -> io::Result<Vec<(Vec<u8>, Vec<u8>)>> {
     let cp = cpath(path)?;
-    // SAFETY: the path and the allocated buffers remain valid during each call.
-    unsafe {
-        let n = libc::listxattr(cp.as_ptr(), std::ptr::null_mut(), 0, libc::XATTR_NOFOLLOW);
-        if n < 0 {
+    // Most entries have none or a few small attributes: one call each with a buffer that fits
+    // them, and a second call with the exact size only when the buffer was too small.
+    let mut names = vec![0u8; 512];
+    // SAFETY: the path and the buffers remain valid during each call.
+    let n = loop {
+        let n = unsafe { libc::listxattr(cp.as_ptr(), names.as_mut_ptr().cast(), names.len(), libc::XATTR_NOFOLLOW) };
+        if n >= 0 {
+            break n as usize;
+        }
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ERANGE) {
+            return Err(error);
+        }
+        let size = unsafe { libc::listxattr(cp.as_ptr(), std::ptr::null_mut(), 0, libc::XATTR_NOFOLLOW) };
+        if size < 0 {
             return Err(io::Error::last_os_error());
         }
-        let mut names = vec![0u8; n as usize];
-        let n = libc::listxattr(cp.as_ptr(), names.as_mut_ptr().cast(), names.len(), libc::XATTR_NOFOLLOW);
-        if n < 0 {
-            return Err(io::Error::last_os_error());
+        names = vec![0u8; size as usize + 64];
+    };
+    names.truncate(n);
+    let mut result = Vec::new();
+    for name in names.split(|b| *b == 0).filter(|s| !s.is_empty()) {
+        if !read_value(name) {
+            result.push((name.to_vec(), Vec::new()));
+            continue;
         }
-        names.truncate(n as usize);
-        let mut result = Vec::new();
-        for name in names.split(|b| *b == 0).filter(|s| !s.is_empty()) {
-            let cn = std::ffi::CString::new(name)?;
-            let n = libc::getxattr(cp.as_ptr(), cn.as_ptr(), std::ptr::null_mut(), 0, 0, libc::XATTR_NOFOLLOW);
-            if n < 0 {
+        let cn = std::ffi::CString::new(name)?;
+        let mut value = vec![0u8; 256];
+        let n = loop {
+            // SAFETY: as above.
+            let n = unsafe { libc::getxattr(cp.as_ptr(), cn.as_ptr(), value.as_mut_ptr().cast(), value.len(), 0, libc::XATTR_NOFOLLOW) };
+            if n >= 0 {
+                break n as usize;
+            }
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() != Some(libc::ERANGE) {
+                return Err(error);
+            }
+            let size = unsafe { libc::getxattr(cp.as_ptr(), cn.as_ptr(), std::ptr::null_mut(), 0, 0, libc::XATTR_NOFOLLOW) };
+            if size < 0 {
                 return Err(io::Error::last_os_error());
             }
-            let mut value = vec![0u8; n as usize];
-            let n = libc::getxattr(cp.as_ptr(), cn.as_ptr(), value.as_mut_ptr().cast(), value.len(), 0, libc::XATTR_NOFOLLOW);
-            if n < 0 {
-                return Err(io::Error::last_os_error());
-            }
-            value.truncate(n as usize);
-            result.push((name.to_vec(), value));
-        }
-        Ok(result)
+            value = vec![0u8; size as usize + 64];
+        };
+        value.truncate(n);
+        result.push((name.to_vec(), value));
     }
+    Ok(result)
 }
 
 #[cfg(target_os = "macos")]
@@ -1073,6 +1227,39 @@ pub fn apfs_has_acl(path: &std::path::Path) -> io::Result<bool> {
     }
     Ok(result as u32 & libc::COPYFILE_ACL != 0)
 }
+/// The ACL of `path` (the link itself) as text; `None` without an ACL.
+#[cfg(target_os = "macos")]
+pub fn apfs_acl_text(path: &std::path::Path) -> io::Result<Option<Vec<u8>>> {
+    unsafe extern "C" {
+        fn acl_get_link_np(path: *const libc::c_char, kind: libc::c_int) -> *mut libc::c_void;
+        fn acl_to_text(acl: *mut libc::c_void, len: *mut libc::ssize_t) -> *mut libc::c_char;
+        fn acl_free(ptr: *mut libc::c_void) -> libc::c_int;
+    }
+    let path = cpath(path)?;
+    // SAFETY: the ACL and the text are owned by libc, copied, and freed once.
+    unsafe {
+        let acl = acl_get_link_np(path.as_ptr(), 0x100);
+        if acl.is_null() {
+            let error = io::Error::last_os_error();
+            return match error.raw_os_error() {
+                Some(libc::ENOENT) | Some(libc::EOPNOTSUPP) => Ok(None),
+                _ => Err(error),
+            };
+        }
+        let mut len: libc::ssize_t = 0;
+        let text = acl_to_text(acl, &mut len);
+        if text.is_null() {
+            let error = io::Error::last_os_error();
+            acl_free(acl);
+            return Err(error);
+        }
+        let out = std::ffi::CStr::from_ptr(text).to_bytes().to_vec();
+        acl_free(text.cast());
+        acl_free(acl);
+        Ok(Some(out))
+    }
+}
+
 #[cfg(target_os = "macos")]
 pub fn apfs_clear_acl(path: &std::path::Path) -> io::Result<()> {
     unsafe extern "C" {
@@ -1227,4 +1414,145 @@ pub fn drop_to_user(uid: u32, gid: u32) -> Result<()> {
         anyhow::bail!("cannot drop registry privileges");
     }
     Ok(())
+}
+
+/// One entry of a folder with its sizes for `layr du`: allocated bytes and the bytes that no
+/// clone shares (APFS private size).
+#[cfg(target_os = "macos")]
+pub struct SpaceEntry {
+    pub name: std::ffi::OsString,
+    pub dir: bool,
+    pub ino: u64,
+    pub links: u32,
+    pub alloc: u64,
+    pub private: u64,
+    /// The data identity that clones of this file share (0: none).
+    pub clone: u64,
+}
+
+/// Read the sizes of all entries of an open folder with `getattrlistbulk`.
+#[cfg(target_os = "macos")]
+pub fn apfs_space_read(dir: BorrowedFd<'_>, buf: &mut Vec<u8>) -> io::Result<Vec<SpaceEntry>> {
+    use std::os::unix::ffi::OsStrExt;
+    let mut attrs = libc::attrlist {
+        bitmapcount: libc::ATTR_BIT_MAP_COUNT,
+        reserved: 0,
+        commonattr: libc::ATTR_CMN_RETURNED_ATTRS | libc::ATTR_CMN_NAME | libc::ATTR_CMN_OBJTYPE | libc::ATTR_CMN_FILEID,
+        volattr: 0,
+        dirattr: 0,
+        fileattr: libc::ATTR_FILE_LINKCOUNT | libc::ATTR_FILE_ALLOCSIZE,
+        forkattr: libc::ATTR_CMNEXT_PRIVATESIZE | libc::ATTR_CMNEXT_CLONEID,
+    };
+    let flags = libc::FSOPT_NOFOLLOW | libc::FSOPT_PACK_INVAL_ATTRS | libc::FSOPT_ATTR_CMN_EXTENDED;
+    if buf.len() < 256 * 1024 {
+        buf.resize(256 * 1024, 0);
+    }
+    let mut out = Vec::new();
+    loop {
+        // SAFETY: the folder descriptor is live; attrs and buf are valid for their sizes.
+        let n = unsafe {
+            libc::getattrlistbulk(
+                dir.as_raw_fd(),
+                (&mut attrs as *mut libc::attrlist).cast(),
+                buf.as_mut_ptr().cast(),
+                buf.len(),
+                flags as u64,
+            )
+        };
+        if n < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if n == 0 {
+            return Ok(out);
+        }
+        let mut pos = 0usize;
+        for _ in 0..n {
+            let rd = |off: usize, len: usize| -> io::Result<&[u8]> {
+                buf.get(off..off + len).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "short getattrlistbulk entry"))
+            };
+            let u32_at = |off: usize| -> io::Result<u32> { Ok(u32::from_ne_bytes(rd(off, 4)?.try_into().unwrap())) };
+            let i32_at = |off: usize| -> io::Result<i32> { Ok(i32::from_ne_bytes(rd(off, 4)?.try_into().unwrap())) };
+            let u64_at = |off: usize| -> io::Result<u64> { Ok(u64::from_ne_bytes(rd(off, 8)?.try_into().unwrap())) };
+            let len = u32_at(pos)? as usize;
+            if len == 0 {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "empty getattrlistbulk entry"));
+            }
+            // Layout: length, returned attributes (5 words), then the attributes in bit order:
+            // name, type, file id; for a file the link count and the allocated size; then the
+            // private size and the clone id. A folder has no file group.
+            let mut q = pos + 4 + 20;
+            let name_ref = q;
+            q += 8;
+            let dir = u32_at(q)? == 2; // VDIR
+            q += 4;
+            let ino = u64_at(q)?;
+            q += 8;
+            let (links, alloc) = if dir {
+                (1, 0)
+            } else {
+                let links = u32_at(q)?;
+                let alloc = u64_at(q + 4)?;
+                q += 12;
+                (links, alloc)
+            };
+            let (private, clone) = if dir { (0, 0) } else { (u64_at(q)?, u64_at(q + 8)?) };
+            let name_off = name_ref as i64 + i32_at(name_ref)? as i64;
+            let name_len = u32_at(name_ref + 4)? as usize;
+            let raw = rd(name_off as usize, name_len)?;
+            let name = std::ffi::OsStr::from_bytes(raw.strip_suffix(&[0]).unwrap_or(raw)).to_os_string();
+            out.push(SpaceEntry { name, dir, ino, links, alloc, private, clone });
+            pos += len;
+        }
+    }
+}
+
+/// The extents of an open file (`FIEMAP`): physical address, length, and whether another file
+/// or snapshot shares it (`FIEMAP_EXTENT_SHARED`). btrfs, XFS and ext4.
+#[cfg(target_os = "linux")]
+pub fn fiemap_extents(file: &std::fs::File) -> io::Result<Vec<(u64, u64, bool)>> {
+    const FS_IOC_FIEMAP: libc::c_ulong = 0xC020_660B;
+    const EXTENT_LAST: u32 = 0x1;
+    const EXTENT_SHARED: u32 = 0x2000;
+    const COUNT: usize = 256;
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct Extent {
+        logical: u64,
+        physical: u64,
+        length: u64,
+        reserved64: [u64; 2],
+        flags: u32,
+        reserved: [u32; 3],
+    }
+    #[repr(C)]
+    struct Map {
+        start: u64,
+        length: u64,
+        flags: u32,
+        mapped: u32,
+        count: u32,
+        reserved: u32,
+        extents: [Extent; COUNT],
+    }
+    let mut out = Vec::new();
+    let mut start = 0u64;
+    loop {
+        let mut map = Map { start, length: u64::MAX - start, flags: 0, mapped: 0, count: COUNT as u32, reserved: 0, extents: [Extent::default(); COUNT] };
+        // SAFETY: the descriptor is live and `map` is a valid fiemap buffer with room for COUNT extents.
+        if unsafe { libc::ioctl(file.as_raw_fd(), FS_IOC_FIEMAP as _, &mut map as *mut Map) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mapped = (map.mapped as usize).min(COUNT);
+        if mapped == 0 {
+            return Ok(out);
+        }
+        for e in &map.extents[..mapped] {
+            out.push((e.physical, e.length, e.flags & EXTENT_SHARED != 0));
+            if e.flags & EXTENT_LAST != 0 {
+                return Ok(out);
+            }
+        }
+        let last = map.extents[mapped - 1];
+        start = last.logical + last.length;
+    }
 }

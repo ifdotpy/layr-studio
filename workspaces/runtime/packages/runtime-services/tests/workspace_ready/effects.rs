@@ -106,7 +106,10 @@ impl Fixture {
                     record["accountKey"] = json!("default");
                     record["compactions"] = json!(0);
                     record["status"] = json!("queued");
-                    studio_runtime_store::AgentRecord::from_value(record).expect("fixture agent")
+                    Box::new(
+                        studio_runtime_store::AgentRecord::from_value(record)
+                            .expect("fixture agent"),
+                    )
                 },
                 parent_checkpoint: None,
                 agents: Vec::new(),

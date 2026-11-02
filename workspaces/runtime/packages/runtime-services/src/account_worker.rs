@@ -951,6 +951,7 @@ enum Effect {
         Option<i64>,
     ),
     LimitsUpdated(crate::account_session_runtime::LimitsUpdate),
+    AccountUpdated,
     /// A committed terminal limit failure owes one account refresh before its wake.
     LimitFailure {
         agent: String,
@@ -1507,6 +1508,15 @@ impl Worker {
                 })?;
                 session
                     .ingest_limits(update)
+                    .await
+                    .map_err(|error| WorkerError::PreparationRefused(error.to_string()))?;
+            }
+            Effect::AccountUpdated => {
+                let session = self.resources.account_session.as_ref().ok_or_else(|| {
+                    WorkerError::PreparationRefused("account-registry/refresh".into())
+                })?;
+                session
+                    .refresh_account(&self.account)
                     .await
                     .map_err(|error| WorkerError::PreparationRefused(error.to_string()))?;
             }
@@ -2950,7 +2960,10 @@ impl Worker {
                         return Err(WorkerError::StaleVmActor);
                     };
                     let fields = &row.extra;
-                    let wait = fields.get("usageResume").unwrap_or(&Value::Null);
+                    let wait = row
+                        .usage_resume_value()
+                        .map_err(|_| WorkerError::StaleVmActor)?
+                        .unwrap_or(Value::Null);
                     let auth_attempt = row.auth_resume_attempt.unwrap_or(0);
                     if auth_attempt == 0 || wait["cause"] != "auth" || wait["status"] != "started" {
                         return Ok(None);
@@ -2970,7 +2983,10 @@ impl Worker {
                         Some("claude"),
                     )? || row.status != studio_runtime_store::AgentStatus::Starting
                         || row.auto_wake != Some(true)
-                        || fields.get("nativeFailureHold") == Some(&json!(true))
+                        || matches!(
+                            row.native_failure_hold.value(),
+                            Some(studio_runtime_store::NativeFailureHold::Boolean(true))
+                        )
                         || row.lazy_account_transfer.value().is_some()
                         || row.account_transfer_id.value().is_some()
                         || ["executionMove"]
@@ -3010,7 +3026,7 @@ impl Worker {
                         .transpose()
                         .map_err(|_| WorkerError::StaleVmActor)?
                         .as_ref()
-                        != Some(wait)
+                        != Some(&wait)
                     {
                         return Err(WorkerError::StaleVmActor);
                     }
@@ -3886,8 +3902,35 @@ impl Worker {
                 .key()
                 .to_owned(),
         });
+        let acknowledged = self
+            .session
+            .status
+            .borrow()
+            .attachment
+            .info
+            .as_ref()
+            .map_or(0, |info| info.acknowledged.0);
+        let generation = self.generation.0;
+        let seed_scope = journal_scope.clone();
         let (previous, committed) = self
             .db("journal", move |store| async move {
+                if acknowledged > 0 && expected_vm_actor.is_none() {
+                    let read_scope = seed_scope.clone();
+                    let behind = store
+                        .read_async("runtime-services/journal_seed_ack", move |tx| {
+                            Ok::<_, WorkerError>(
+                                store::checkpoint(tx, &read_scope, generation)? < acknowledged,
+                            )
+                        })
+                        .await?;
+                    if behind {
+                        store
+                            .transaction_with(move |tx| {
+                                store::seed_ack(tx, &seed_scope, generation, acknowledged)
+                            })
+                            .await?;
+                    }
+                }
                 let result = store::journal_batch(
                     store,
                     &account,
@@ -4988,6 +5031,7 @@ impl Worker {
                     }
                 }
                 effect @ Effect::LimitsUpdated(_)
+                | effect @ Effect::AccountUpdated
                 | effect @ Effect::LimitFailure { .. }
                 | effect @ Effect::Submit(_)
                 | effect @ Effect::Interrupt { .. }

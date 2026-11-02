@@ -2,7 +2,6 @@ import { fixtureOrigin } from "../misc-fixture.ts";
 import { usageFixtureServer } from "./fixture-server.ts";
 // Hidden browser fixture for the production limits and organization components.
 // Screenshots stay outside the checkout.
-import type { GetResult } from "../../src/apiTypes.ts";
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -31,48 +30,8 @@ test("Rust model decisions and safe Claude organizations at 320 and 1200 pixels"
       await page.emulateMedia({ colorScheme: "light" });
       const now = 1_800_000_000;
       await page.clock.install({ time: now * 1000 });
-      let mode: NonNullable<
-        GetResult<"/api/limits">["eligibility"]
-      >["overage"] = "rejected";
-      const requests: { agent: string | null; account: string | null }[] = [];
       await page.route("**/api/**", async (route) => {
-        if (route.request().url().includes("/api/limits")) {
-          const query = new URL(route.request().url()).searchParams;
-          requests.push({
-            agent: query.get("agent"),
-            account: query.get("account_key"),
-          });
-          await route.fulfill({
-            json: {
-              accountKey: "claude",
-              at: now,
-              data: {
-                rateLimits: {
-                  limitId: "claude",
-                  primary: { usedPercent: 100, resetsAt: now + 3600 },
-                },
-              },
-              eligibility: {
-                agentId: "worker",
-                accountKey: "claude",
-                model: "sonnet",
-                provider: "claude",
-                allowed: mode !== "rejected",
-                canRun: mode !== "rejected",
-                fresh: true,
-                checkedAt: now,
-                validUntil: now + 60,
-                resetAt: mode === "rejected" ? now + 3600 : null,
-                buckets: [
-                  { id: "claude", overageAllowed: mode !== "rejected" },
-                  { id: "claude-sonnet", overageAllowed: mode !== "rejected" },
-                ],
-                overage: mode,
-              },
-            } satisfies GetResult<"/api/limits">,
-          });
-        } else
-          await route.fulfill({ json: { items: [], accounts: [], cost: 0 } });
+        await route.fulfill({ json: { items: [], accounts: [], cost: 0 } });
       });
       await page.goto(fixtureOrigin(server));
       // The chat notice stays one line. Model eligibility details are not shown.
@@ -144,12 +103,6 @@ test("Rust model decisions and safe Claude organizations at 320 and 1200 pixels"
       await expect(
         page.locator(".account-limit-windows").first(),
       ).toBeVisible();
-      assert.ok(requests.length >= 2);
-      assert.ok(
-        requests.every(
-          ({ agent, account }) => agent === "worker" && account === "claude",
-        ),
-      );
       await expect(page.locator(".account-limits-popover")).toHaveCSS(
         "opacity",
         "1",
@@ -168,9 +121,8 @@ test("Rust model decisions and safe Claude organizations at 320 and 1200 pixels"
         animations: "disabled",
       });
       for (const value of ["allowed", "in_use"] as const) {
-        mode = value;
         await page.clock.fastForward(1000);
-        await page.evaluate(() => window.refreshFixture());
+        await page.evaluate((mode) => window.refreshFixture(mode), value);
         await expect(page.locator("[data-notice] .native-error")).toHaveCount(
           0,
         );

@@ -24,7 +24,7 @@ where
     )
 }
 
-#[derive(Clone, PartialEq, Eq, Serialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(transparent)]
 pub struct JsonObject<T>(pub T);
 

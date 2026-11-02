@@ -148,13 +148,11 @@ layr git clone git@github.com:ifdotpy/codex-studio.git studio
 
 Start a line with a warm build:
 
-1. In a built line, run `layr save --caches`.
-2. Find the new automatic state: `layr log --auto -n 1`.
-3. Start the line from that state ID: `layr line new <name> <state-id>`.
-4. Enter it: `cd ../<name>`.
+1. In the main line folder, run `layr git fetch origin`.
+2. Run `layr line new <name> origin/main`.
+3. Enter it: `cd ../<name>`.
 
-Use the state ID, not the line name. On an unprotected line, `save --caches`
-puts the caches on an automatic state.
+After a build in main, run `layr save --caches` once. New lines then start warm.
 `target/` (about 11 GB) is regenerable. Starting the line copies it as an APFS
 clone in 5 to 15 seconds. Cargo rebuilds only what changed.
 
@@ -166,6 +164,34 @@ Two traps in a line started from an automatic state:
   `env!("CARGO_BIN_EXE_<name>")`, which still name the line that built the
   cache. Run `cargo clean -p <crate>` for a crate whose tests start its own
   binary, before you trust its results.
+
+### Build and test speed rules
+
+Every agent and developer follows these rules:
+
+1. Start each task in a new line from `origin/main`: `layr line new <name> origin/main`.
+   Never use a git clone or a copied folder. The line gets `target/` and `node_modules`
+   from the cache overlays, so a build after a small change compiles only the changed crates.
+2. Do not set `CARGO_TARGET_DIR`, do not use `sccache`, and do not run `cargo clean`.
+   Each one throws the warm cache away or bypasses it. The exception is
+   `cargo clean -p <crate>` in the trap list above.
+3. Run the full gates through the gate wrapper when one exists. On the owner's machine,
+   that is `~/Projects/studio-ops/layr-test-fast.sh` or `layr-test-comprehensive.sh`. The
+   wrapper takes the machine gate lock, sets the build jobs, and saves the results to the
+   shared results line. Never start a gate directly while another gate runs.
+4. After a failed gate, fix the cause and run the gate again. A passing step runs again
+   only when its inputs changed. On an unchanged tree, only the failed steps run again.
+5. Build scripts print `cargo:rerun-if-changed` paths relative to their package. Include
+   generated files through `env!("OUT_DIR")`. An absolute path makes every new line rebuild.
+   The test "build scripts print relative rerun-if-changed paths" in
+   `rust-lint-policy.test.ts` rejects absolute paths in build script output and in
+   `include!`, `include_str!`, `include_bytes!`, and `#[path]`. `layr retest doctor`
+   reports the same check. `tauri-build` is the known exception (see "Build script paths").
+6. `layr retest run` runs only the Rust tests whose executed code changed. It is opt-in
+   with `STUDIO_RETEST=1` (see "Retest" below). It is not the default. It builds a second
+   copy of the tests with coverage, and the measured runs below were slower than the
+   default path.
+7. The sweep config lives in the root `Cargo.toml` under `[workspace.metadata.layr-retest]`, and its `sweep` list must name the same command as the gate (checked by `layr-sweep-parity.test.ts`).
 
 ### Run the gates
 

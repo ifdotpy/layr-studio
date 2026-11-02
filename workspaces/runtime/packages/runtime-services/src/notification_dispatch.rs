@@ -1338,6 +1338,9 @@ fn validate_agent(
     Ok(())
 }
 
+/// The event counter is optional in the agent schema and in `AgentRecord`;
+/// each notification starts or raises it. A stored value that is present must
+/// still be a counter.
 fn validate_agent_write_fields(
     agent: &Value,
     agent_id: &str,
@@ -1352,6 +1355,9 @@ fn validate_agent_write_fields(
             .and_then(Value::as_str)
             .is_none_or(str::is_empty)
         || agent.get("status").and_then(Value::as_str).is_none()
+        || agent
+            .get("events")
+            .is_some_and(|events| !events.is_null() && events.as_u64().is_none())
     {
         return Err(stored("runtime_agents", agent_id));
     }
@@ -1568,7 +1574,10 @@ fn stream_turn_active(
     key: &StreamKey,
 ) -> Result<bool, NotificationDispatchError> {
     Ok(transaction.query_row_cached(
-        "SELECT EXISTS(SELECT 1 FROM runtime_agents WHERE id=?4 AND account_key=?1 AND id IN (SELECT chat FROM sessions WHERE thread_id=?2 AND state<>'ended') AND (?3 IS NULL OR turn_id=?3) AND deleted_at IS NULL AND (in_flight=1 OR status IN ('running','starting','approval')))",
+        &format!(
+            "SELECT EXISTS(SELECT 1 FROM runtime_agents WHERE id=?4 AND account_key=?1 AND id IN (SELECT chat FROM sessions WHERE thread_id=?2 AND state<>'ended') AND (?3 IS NULL OR turn_id=?3) AND deleted_at IS NULL AND ({} OR status IN ('running','starting','approval')))",
+            studio_runtime_store::domain::chat_busy_sql("runtime_agents.id")
+        ),
         rusqlite::params![key.account, key.thread, key.turn, key.agent_id],
         |row| row.get(0),
     ).map_err(StoreError::from)?)
@@ -2602,7 +2611,7 @@ mod tests {
                  CREATE TABLE sync_entities(collection TEXT NOT NULL,id TEXT NOT NULL,seq INTEGER NOT NULL,hash TEXT NOT NULL,payload TEXT,deleted INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(collection,id));
                  CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
                  CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
-                 CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+                 CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
                  CREATE TABLE sync_entity_meta(key TEXT PRIMARY KEY,value TEXT);
                  CREATE VIRTUAL TABLE runtime_search_next USING fts5(body,content='',contentless_delete=1,tokenize='unicode61');
                  CREATE TABLE runtime_search_next_meta(id TEXT PRIMARY KEY,agent TEXT NOT NULL,kind TEXT NOT NULL,search_rowid INTEGER NOT NULL UNIQUE);
@@ -3243,6 +3252,86 @@ mod tests {
             .await
             .expect("submitted attempt is durable");
         (directory, store)
+    }
+
+    /// Live bug 2026-11-01: an agent record without the event counter is valid
+    /// (the schema and `AgentRecord` make it optional, and each notification
+    /// writes it), but the write check refused it and held the agent.
+    #[tokio::test]
+    async fn an_agent_without_an_event_counter_still_accepts_its_user_message_receipt() {
+        let (_directory, store) = submitted_chat_runtime().await;
+        store
+            .transaction(|tx| {
+                let mut agent = AgentRepository::get(tx, &"agent".into())?.expect("agent");
+                agent.events = None;
+                AgentRepository::put(tx, &agent)?;
+                assert_eq!(
+                    AgentRepository::get(tx, &"agent".into())?
+                        .expect("agent")
+                        .events,
+                    None
+                );
+                Ok(())
+            })
+            .await
+            .expect("counter removed");
+        let notification = frame(&json!({
+            "method":"item/started",
+            "params":{
+                "threadId":"thread",
+                "turnId":"turn-1",
+                "item":{"id":"input-1","type":"userMessage","clientId":"chat:message-1:agent"}
+            }
+        }));
+        let identity = identity(1);
+        let outcome = store
+            .transaction(move |tx| {
+                super::dispatch_notification_with_effects(
+                    tx,
+                    "agent",
+                    &PublicationContext::default(),
+                    &NotificationStreamBuffer::default(),
+                    &identity,
+                    &notification,
+                    2.0,
+                    &crate::notification_runtime_effects::RuntimeNotificationEffects,
+                )
+                .map(|result| result.outcome)
+                .map_err(|error| {
+                    studio_runtime_store::StoreError::SchemaMismatch(error.to_string())
+                })
+            })
+            .await
+            .expect("a missing counter is not invalid stored data");
+        assert_eq!(outcome, DispatchOutcome::Written);
+        store
+            .transaction(|tx| {
+                let agent = AgentRepository::get(tx, &"agent".into())?.expect("agent");
+                assert_eq!(agent.events, Some(1));
+                Ok(())
+            })
+            .await
+            .expect("the receipt starts the counter");
+    }
+
+    #[test]
+    fn the_event_counter_is_optional_but_never_malformed() {
+        let base = |events: Value| {
+            let mut agent = json!({"id":"a","rootId":"a","epoch":1,"status":"idle"});
+            if !events.is_null() {
+                agent["events"] = events;
+            }
+            agent
+        };
+        for ok in [Value::Null, json!(0), json!(7)] {
+            assert!(super::validate_agent_write_fields(&base(ok), "a").is_ok());
+        }
+        let mut explicit_null = base(Value::Null);
+        explicit_null["events"] = Value::Null;
+        assert!(super::validate_agent_write_fields(&explicit_null, "a").is_ok());
+        for bad in [json!(-1), json!("7"), json!(1.5), json!([])] {
+            assert!(super::validate_agent_write_fields(&base(bad), "a").is_err());
+        }
     }
 
     #[tokio::test]
@@ -4593,3 +4682,48 @@ mod tests {
 #[cfg(test)]
 #[path = "notification_dispatch/review_tests.rs"]
 mod review_tests;
+
+#[cfg(test)]
+mod busy_stream_tests {
+    use super::*;
+
+    #[test]
+    fn stream_of_a_busy_chat_is_active_without_the_agent_flag() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(studio_runtime_store::agent_columns::agent_table_sql())
+            .unwrap();
+        db.execute_batch(&studio_runtime_store::domain::tables_sql())
+            .unwrap();
+        for id in ["busy", "idle"] {
+            let record = json!({"id":id,"provider":"codex","accountKey":"acct","status":"idle",
+                "turnId":"turn","inFlight":true});
+            db.execute(
+                "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                rusqlite::params![id, record.to_string()],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO sessions(id,chat,thread_id,account_key,state) VALUES(?1,?2,'thread','acct','ready')",
+                rusqlite::params![format!("{id}:thread"), id],
+            )
+            .unwrap();
+        }
+        db.execute(
+            "INSERT INTO turns(id,chat,state) VALUES('t1','busy','starting')",
+            [],
+        )
+        .unwrap();
+        let key = |agent: &str| StreamKey {
+            agent_id: agent.to_owned(),
+            account: "acct".to_owned(),
+            generation: 1,
+            thread: "thread".to_owned(),
+            turn: Some("turn".to_owned()),
+            item: "item".to_owned(),
+            method: "method".to_owned(),
+        };
+        let tx = db.transaction().unwrap();
+        assert!(stream_turn_active(&tx, &key("busy")).unwrap());
+        assert!(!stream_turn_active(&tx, &key("idle")).unwrap());
+    }
+}

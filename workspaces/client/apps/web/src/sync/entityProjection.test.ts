@@ -1782,6 +1782,8 @@ it("projects independent account limits and preserves them across workspace upda
     low: false,
   };
   const combinedProjection = {
+    agents: {},
+    status: { kind: "current" as const },
     runway: projection,
     reset,
     buckets: { current: bucketState, next: bucketState, validUntil: null },

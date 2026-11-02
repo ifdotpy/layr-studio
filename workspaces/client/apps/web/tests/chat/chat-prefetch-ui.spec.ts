@@ -1104,7 +1104,12 @@ test("chat prefetch ui @performance", async ({ browser }) => {
     // Both appended and focused history must survive a return before any HTTP reply.
     await page.locator(`[data-chat="${a.id}"]`).click();
     await marker("A-current").waitFor();
-    await page.locator("#earlier-messages").click();
+    await page.locator("#messages").evaluate((root) => {
+      root.scrollTop = 0;
+      root.dispatchEvent(
+        new WheelEvent("wheel", { deltaY: -1000, bubbles: true }),
+      );
+    });
     await marker("A-older").waitFor();
     const checkPageReturn = async (tag: string, offset: number) => {
       await page.locator("#messages").evaluate((element, top) => {

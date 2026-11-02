@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use rusqlite::{OptionalExtension, Transaction, params};
-use serde_json::{Value, json};
+use serde_json::Value;
 use studio_runtime_store::{
     AccessNonceOutcome, RemoteTransportRepository, RuntimeStore, StoreError,
 };
@@ -24,6 +24,13 @@ const MAX_PAIRING_ATTEMPTS: usize = 128;
 /// idle timeout of the QUIC link (apps/peer-link `transport`); a closed connection sends nothing.
 const CONNECTION_CHECK_IDLE: std::time::Duration = std::time::Duration::from_secs(60);
 const MAX_CONNECTION_CHECKS: usize = 256;
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(untagged)]
+pub enum AccessReply {
+    Identity(studio_runtime_schema::multi_server_access::AccessIdentity),
+    Pair(studio_runtime_schema::multi_server_access::DevicePairReply),
+}
 
 /// Host adapter must bind observations to the requested address, use a five
 /// second deadline and cap each command/probe response at one MiB. No process
@@ -143,7 +150,7 @@ impl MultiServerBoundary {
         address: &str,
         logins: &[String],
         now: f64,
-    ) -> Result<Value, AccessError> {
+    ) -> Result<AccessReply, AccessError> {
         let prepared = self
             .prepare_incoming(Arc::clone(&store), request, address, logins, now)
             .await?;
@@ -208,7 +215,7 @@ impl MultiServerBoundary {
         &self,
         store: &RuntimeStore,
         prepared: &PreparedAccessRequest,
-    ) -> Result<Value, AccessError> {
+    ) -> Result<AccessReply, AccessError> {
         self.handle_at(
             store,
             &prepared.request,
@@ -518,7 +525,7 @@ impl MultiServerBoundary {
         store: Arc<RuntimeStore>,
         address: &str,
         logins: &[String],
-    ) -> Result<Value, AccessError> {
+    ) -> Result<studio_runtime_schema::multi_server_access::DiscoveryResponse, AccessError> {
         let (owner, _) = self.lookup(address, logins, None).await?;
         if address.parse::<std::net::IpAddr>().ok() != Some(owner.address()) {
             return Err(refused(
@@ -527,8 +534,16 @@ impl MultiServerBoundary {
                 "The identity observation belongs to another address",
             ));
         }
-        let mut identity = (self.identity)(&store).await?;
+        let identity = (self.identity)(&store).await?;
         auth::schema("ServerIdentityResponse", &identity)?;
+        let mut identity: studio_runtime_schema::multi_server_access::AccessIdentity =
+            <studio_runtime_schema::multi_server_access::AccessIdentity as serde::Deserialize>::deserialize(&identity).map_err(|_| {
+                refused(
+                    503,
+                    "identity_unavailable",
+                    "The server identity is unavailable",
+                )
+            })?;
         let enabled = store
             .read_async("runtime-services/multi_server_pairing", move |tx| {
                 Ok::<_, StoreError>(tx.query_row(
@@ -538,10 +553,15 @@ impl MultiServerBoundary {
                 )?)
             })
             .await?;
-        identity["protocol"] = json!(ACCESS_PROTOCOL_VERSION);
-        identity["autoPair"] = json!(enabled);
-        identity["tailscaleUser"] = json!(owner.login());
-        Ok(identity)
+        identity.tailscale_user = Some(owner.login().to_owned());
+        Ok(
+            studio_runtime_schema::multi_server_access::DiscoveryResponse {
+                identity,
+                protocol: ACCESS_PROTOCOL_VERSION,
+                auto_pair: enabled,
+                proof: None,
+            },
+        )
     }
     pub async fn handle(
         &self,
@@ -550,7 +570,7 @@ impl MultiServerBoundary {
         owner: &OwnerObservation,
         probe: Option<&Value>,
         now: i64,
-    ) -> Result<Value, AccessError> {
+    ) -> Result<AccessReply, AccessError> {
         self.handle_at(store, request, owner, probe, now as f64)
             .await
     }
@@ -561,7 +581,7 @@ impl MultiServerBoundary {
         owner: &OwnerObservation,
         probe: Option<&Value>,
         now: f64,
-    ) -> Result<Value, AccessError> {
+    ) -> Result<AccessReply, AccessError> {
         if !request.is_status() && !request.is_pairing() && !request.is_auto_pairing() {
             return Err(refused(
                 501,
@@ -591,6 +611,8 @@ impl MultiServerBoundary {
         }
         let identity = (self.identity)(store).await?;
         auth::schema("ServerIdentityResponse", &identity)?;
+        let identity = <studio_runtime_schema::multi_server_access::AccessIdentity as serde::Deserialize>::deserialize(&identity)
+            .map_err(|_| refused(503, "identity_unavailable", "The server identity is unavailable"))?;
         let request = request.clone();
         let owner = owner.clone();
         let probe = probe.cloned();
@@ -619,7 +641,7 @@ impl MultiServerBoundary {
                 let decision = auth::authorize_at(
                     &snapshot,
                     &request,
-                    text(&identity, "serverId"),
+                    &identity.server_id,
                     &owner,
                     probe.as_ref(),
                     now,
@@ -663,9 +685,10 @@ impl MultiServerBoundary {
                             request.client_id()
                         ],
                     )?;
-                    return Ok(identity.clone());
+                    return Ok(AccessReply::Identity(identity.clone()));
                 }
                 apply_pair(tx, &snapshot, &request, &decision.principal, &identity, now)
+                    .map(AccessReply::Pair)
             })
             .await
     }
@@ -676,9 +699,9 @@ fn apply_pair(
     snapshot: &AccessSnapshot,
     request: &SignedRequest,
     principal: &VerifiedPrincipal,
-    identity: &Value,
+    identity: &studio_runtime_schema::multi_server_access::AccessIdentity,
     now: f64,
-) -> Result<Value, AccessError> {
+) -> Result<studio_runtime_schema::multi_server_access::DevicePairReply, AccessError> {
     let fingerprint = request.fingerprint();
     use crate::event_write::{CallerAdmission, RequestKey, begin_request};
     use studio_runtime_store::multi_server_delivery::{
@@ -725,23 +748,22 @@ fn apply_pair(
         CallerAdmission::Fresh(admitted) => admitted,
         CallerAdmission::Replay(saved) => return pairing_reply(&saved, request.client_id()),
     };
-    let mut result = identity.clone();
-    let fields = result.as_object_mut().ok_or_else(|| {
-        refused(
-            503,
-            "identity_unavailable",
-            "The server identity is unavailable",
-        )
-    })?;
-    fields.extend(serde_json::Map::from_iter([
-        ("protocol".to_owned(), json!(ACCESS_PROTOCOL_VERSION)),
-        ("clientId".to_owned(), json!(request.client_id())),
-        (
-            "tailscaleUser".to_owned(),
-            json!(principal.tailscale_user()),
-        ),
-        ("paired".to_owned(), json!(true)),
-    ]));
+    let result = studio_runtime_schema::multi_server_access::DevicePairReply {
+        protocol: ACCESS_PROTOCOL_VERSION,
+        server_id: identity.server_id.clone(),
+        client_id: request.client_id().to_owned(),
+        label: identity.label.clone(),
+        origin: identity.origin.clone().ok_or_else(|| {
+            refused(
+                503,
+                "identity_unavailable",
+                "The server identity is unavailable",
+            )
+        })?,
+        public_key: identity.public_key.clone(),
+        tailscale_user: principal.tailscale_user().to_owned(),
+        paired: true,
+    };
     let mut client = if request.is_pairing() {
         auth::check_invite(
             snapshot.invite(),
@@ -803,9 +825,6 @@ fn apply_pair(
         client.pairing_hash = studio_runtime_schema::queue_command::Field::Value(fingerprint);
     }
     tx.execute("INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![request.client_id(),serde_json::to_string(&client).map_err(StoreError::from)?])?;
-    let _: studio_runtime_schema::multi_server_access::DevicePairReply =
-        <studio_runtime_schema::multi_server_access::DevicePairReply as serde::Deserialize>::deserialize(&result)
-            .map_err(|_| refused(503, "receipt_invalid", "The pairing receipt is invalid"))?;
     save_receipt(tx, &admitted, &result, now)?;
     if snapshot.client().is_none() {
         tx.execute(
@@ -827,7 +846,7 @@ fn apply_pair(
 fn pairing_reply(
     reply: &studio_runtime_store::multi_server_delivery::HttpAccessReply,
     client: &str,
-) -> Result<Value, AccessError> {
+) -> Result<studio_runtime_schema::multi_server_access::DevicePairReply, AccessError> {
     let invalid = || {
         refused(
             503,
@@ -847,16 +866,16 @@ fn pairing_reply(
     {
         return Err(invalid());
     }
-    serde_json::from_slice(&bytes).map_err(|_| invalid())
+    Ok(result)
 }
 
 fn save_receipt(
     tx: &Transaction<'_>,
     admitted: &studio_runtime_store::request_results::AdmittedRequest,
-    result: &Value,
+    result: &studio_runtime_schema::multi_server_access::DevicePairReply,
     now: f64,
 ) -> Result<(), AccessError> {
-    let encoded = crate::remote_transport::canonical_json(result)
+    let encoded = studio_runtime_schema::json_compat::python_json_compact_serialized(result)
         .map_err(|_| refused(503, "receipt_invalid", "The pairing receipt is invalid"))?;
     let reply = studio_runtime_store::multi_server_delivery::HttpAccessReply {
         status: 200,

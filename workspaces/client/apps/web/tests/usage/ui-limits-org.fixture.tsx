@@ -1,6 +1,7 @@
 import type { Agent } from "../../src/types.ts";
 import type { Account } from "../../src/components/Accounts.tsx";
-import type { AccountLimitsSnapshot } from "../../src/usage/accountUsage.ts";
+import type { components } from "../../src/generated/api.ts";
+import { projectedLimits } from "../../src/usage/accountLimits.fixture.ts";
 import { fixtureRoot } from "./usage-fixture.ts";
 
 import React, { useState } from "react";
@@ -18,7 +19,7 @@ import "../../src/appearance.css";
 import { theme } from "../../src/theme.ts";
 declare global {
   interface Window {
-    refreshFixture: () => void;
+    refreshFixture: (mode?: "rejected" | "allowed" | "in_use") => void;
     signedInAccount: string | undefined;
   }
 }
@@ -64,43 +65,66 @@ const agent: Agent = {
 };
 function Fixture() {
   const [screen, setScreen] = useState("limits");
-  const [at, setAt] = useState(now);
+  const [mode, setMode] = useState<"rejected" | "allowed" | "in_use">(
+    "rejected",
+  );
   const [limitsOpen, setLimitsOpen] = useState(false);
-  window.refreshFixture = () => setAt(Date.now() / 1000);
-  const limits: AccountLimitsSnapshot = {
-    accountKey: "claude",
-    at,
-    eligibility: {
-      agentId: "another-worker",
-      accountKey: "claude",
-      provider: "claude",
-      model: "opus",
-      allowed: true,
-      canRun: true,
-      fresh: true,
-      checkedAt: now,
-      validUntil: now + 3600,
-      resetAt: null,
-      buckets: [],
-      overage: "unavailable",
-    },
-    data: {
-      rateLimits: {
-        limitId: "claude",
-        primary: { usedPercent: 100, resetsAt: now + 3600 },
-      },
-      rateLimitsByLimitId: {
-        "claude-opus": {
-          limitName: "Opus",
-          secondary: { usedPercent: 100, resetsAt: now + 7200 },
-        },
-        "claude-sonnet": {
-          limitName: "Sonnet",
-          secondary: { usedPercent: 20, resetsAt: now + 3600 },
-        },
-      },
+  window.refreshFixture = (next = mode) => setMode(next);
+  const view: components["schemas"]["RateLimitView"] = projectedLimits(
+    "claude",
+    now,
+  );
+  view.observation.data = {
+    rateLimits: {
+      limitId: "claude",
+      primary: { usedPercent: 100, resetsAt: now + 3600 },
     },
   };
+  view.projection.agents.worker = {
+    eligibility: {
+      agentId: "worker",
+      accountKey: "claude",
+      provider: "claude",
+      model: "sonnet",
+      state: mode === "rejected" ? "blocked" : "allowed",
+      validUntil: now + 60,
+      buckets: [
+        { id: "claude", overageAllowed: mode !== "rejected" },
+        { id: "claude-sonnet", overageAllowed: mode !== "rejected" },
+      ],
+      overage: mode,
+    },
+    recovery:
+      mode === "rejected"
+        ? {
+            title: "Limit reached",
+            message: "Limit reached",
+            timing: { kind: "waiting", resetAt: now + 3600 },
+            action: { kind: "none" },
+          }
+        : null,
+  };
+  view.projection.buckets.current.buckets = [
+    {
+      id: "claude",
+      name: "Claude",
+      shortName: "Claude",
+      planType: null,
+      creditsLabel: null,
+      windows: [
+        {
+          label: "Session",
+          color: "paused",
+          expired: false,
+          remaining: 0,
+          reset: now + 3600,
+          warning: true,
+        },
+      ],
+    },
+  ];
+  const limits = view.observation;
+  const recovery = view.projection.agents.worker.recovery;
   return (
     <MantineProvider theme={theme} defaultColorScheme="auto">
       <main style={{ padding: 12, maxWidth: 900, margin: "auto", minWidth: 0 }}>
@@ -112,11 +136,13 @@ function Fixture() {
         {screen === "limits" ? (
           <>
             <div data-notice>
-              <NativeError
-                agent={agent}
-                limits={limits}
-                refreshLimits={() => window.refreshFixture()}
-              />
+              {recovery && (
+                <NativeError
+                  agent={agent}
+                  recovery={recovery}
+                  refreshLimits={() => window.refreshFixture()}
+                />
+              )}
             </div>
             <div
               style={{ position: "fixed", bottom: 12, right: 12 }}
@@ -132,6 +158,7 @@ function Fixture() {
                     provider: "claude",
                     label: "Research",
                     limits,
+                    ...view.projection,
                     reload: async () => window.refreshFixture(),
                   }),
                 ]}

@@ -228,7 +228,6 @@ export function AccountLimitsAcrossServers({
         view={accountLimitView(
           account,
           shown?.limits ?? null,
-          now,
           true,
           shown?.projection ?? null,
         )}

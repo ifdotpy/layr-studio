@@ -536,6 +536,38 @@ mod tests {
                 "{path}"
             );
         }
+        for (path, body) in [
+            ("create", json!({"id":"request", "agent":"agent", "cols":1})),
+            (
+                "input",
+                json!({"id":"terminal", "text":"x", "request_id":""}),
+            ),
+            ("resize", json!({"id":"terminal", "cols":null})),
+            ("rename", json!({"id":"terminal", "title":""})),
+            ("close", json!({"id":"terminal", "extra":true})),
+        ] {
+            let request = Request::builder()
+                .method("POST")
+                .uri(format!("/api/terminals/{path}"))
+                .header("host", "127.0.0.1:12345")
+                .header("content-type", "application/json")
+                .header("x-canvas-token", "token")
+                .header(
+                    crate::schema::API_SCHEMA_HASH_HEADER,
+                    crate::schema::api_schema_hash(),
+                )
+                .extension(ConnectInfo(std::net::SocketAddr::from((
+                    [127, 0, 0, 1],
+                    54321,
+                ))))
+                .body(Body::from(body.to_string()))
+                .unwrap();
+            assert_eq!(
+                app.clone().oneshot(request).await.unwrap().status(),
+                StatusCode::BAD_REQUEST,
+                "{path}"
+            );
+        }
         let after = TerminalsRepository::list(&store.test_reader().expect("read after request"))
             .expect("read terminal rows after request");
         assert_eq!(after.len(), before.len());

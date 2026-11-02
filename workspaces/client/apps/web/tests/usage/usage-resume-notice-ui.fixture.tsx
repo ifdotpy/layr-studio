@@ -1,3 +1,5 @@
+import type { components } from "../../src/generated/api.ts";
+import { projectedLimits } from "../../src/usage/accountLimits.fixture.ts";
 import type { Agent } from "../../src/types.ts";
 import { fixtureRoot } from "./usage-fixture.ts";
 
@@ -47,18 +49,34 @@ const authAgent: Agent = {
   error: { codexErrorInfo: "unauthorized", message: "Sign in again" },
   usageResume: authResume,
 };
+const view: components["schemas"]["RateLimitView"] = projectedLimits(
+  "work",
+  dueAt - 30,
+);
+view.projection.agents[agent.id] = {
+  eligibility: {
+    agentId: agent.id,
+    accountKey: "work",
+    provider: "codex",
+    model: "gpt-6-astra",
+    state: "blocked",
+    validUntil: null,
+    buckets: [],
+    overage: "unavailable",
+  },
+  recovery: {
+    title: "Limit reached",
+    message: "Usage limit reached",
+    timing: { kind: "waiting", resetAt: dueAt },
+    action: { kind: "none" },
+  },
+};
 createRoot(fixtureRoot()).render(
   <MantineProvider>
     <>
       <NativeError
         agent={agent}
-        limits={{
-          accountKey: "work",
-          at: dueAt - 30,
-          data: {
-            rateLimits: { primary: { usedPercent: 100, resetsAt: dueAt } },
-          },
-        }}
+        recovery={view.projection.agents[agent.id]?.recovery}
       />
       <NativeError agent={authAgent} />
     </>

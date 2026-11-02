@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc, time::Duration};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::persistence::{IdleEpisodeOutcome, RequestIdentity};
+use studio_runtime_schema::usage_limits::UsageLimitsResponse;
 use studio_runtime_schema::{
     idle_compaction::{Mode, Settings},
     shared_values::*,
@@ -22,7 +23,7 @@ const FAILURE_RETRY_SECONDS: u64 = 30;
 
 pub use studio_runtime_schema::idle_compaction::CacheReport;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Episode {
     pub id: String,
@@ -41,8 +42,11 @@ pub struct Episode {
     pub fired_at: Option<f64>,
     #[serde(default)]
     pub before: Option<Value>,
-    #[serde(default)]
-    pub limits: Option<Value>,
+    #[serde(
+        default,
+        deserialize_with = "studio_runtime_schema::json_object::optional_field"
+    )]
+    pub limits: Option<UsageLimitsResponse>,
     /// Actual account-worker unload deadline, in Unix seconds.
     #[serde(default)]
     pub unload_at: Option<f64>,
@@ -299,7 +303,7 @@ fn record(
 pub struct IdleAdmission {
     pub inner: Arc<dyn Admission>,
     pub episode: Episode,
-    pub limits: Value,
+    pub limits: UsageLimitsResponse,
 }
 impl Admission for IdleAdmission {
     fn idle_episode_id(&self) -> Option<&str> {
@@ -323,7 +327,7 @@ impl Admission for IdleAdmission {
         }
         self.inner.check(tx, agent, action)?;
         record(tx, &self.episode, IdleEpisodeOutcome::Started, now)?;
-        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.idleCompactionEpisode.limits',json(?2),'$.idleCompactionEpisode.before',json(?3)) WHERE id=?1", params![agent["id"].as_str(),self.limits.to_string(),json!({"status":agent["status"],"startAttempt":agent["startAttempt"],"turnEpoch":agent["turnEpoch"]}).to_string()])?;
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.idleCompactionEpisode.limits',json(?2),'$.idleCompactionEpisode.before',json(?3)) WHERE id=?1", params![agent["id"].as_str(),serde_json::to_string(&self.limits)?,json!({"status":agent["status"],"startAttempt":agent["startAttempt"],"turnEpoch":agent["turnEpoch"]}).to_string()])?;
         Ok(())
     }
 }
@@ -381,23 +385,21 @@ pub fn handoff_refusal(
     }
     let episode: Episode = Episode::deserialize(&agent["idleCompactionEpisode"])
         .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
-    let receipt = &agent["idleCompactionEpisode"];
     let account = episode.identity["accountKey"].as_str().unwrap_or("default");
-    let current: Option<String> = tx.query_row("SELECT payload FROM sync_entities WHERE collection='workspace' AND id='current' AND deleted=0", [], |row| row.get(0)).optional()?;
-    let current: Value = current
-        .map(|raw| serde_json::from_str(&raw))
-        .transpose()
-        .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?
-        .unwrap_or(Value::Null);
-    let limits = current
-        .pointer("/value/rateLimitsByAccount")
-        .and_then(|all| all.get(account))
-        .unwrap_or(&receipt["limits"]);
+    let stamp = studio_runtime_store::account_state::LimitsStamp::read(
+        studio_runtime_store::account_state::limits_observation(tx, account)?,
+    )?;
+    let limits = studio_runtime_store::account_state::typed_limits_snapshot(tx, account, &stamp)?
+        .or_else(|| episode.limits.clone())
+        .unwrap_or_else(|| UsageLimitsResponse {
+            account_key: account.to_owned(),
+            ..Default::default()
+        });
     let mut idle = agent.clone();
     idle["startAttempt"]["id"] = episode.attempt.clone();
     idle["inFlight"] = json!(false);
     idle["status"] = json!("idle");
-    let reason = check(tx, &episode, &idle, limits, wall_now())?;
+    let reason = check(tx, &episode, &idle, &limits, wall_now())?;
     if reason.is_some() {
         return Ok(reason);
     }
@@ -405,22 +407,19 @@ pub fn handoff_refusal(
     Ok((settings.mode == Mode::Log).then_some(IdleEpisodeOutcome::WouldCompact))
 }
 
-pub fn limits_allowed(limits: &Value, agent: &Value, now: f64) -> bool {
-    // B2-6 owns freshness and model-specific window eligibility. A native
-    // warning is stricter than ordinary admission: only `allowed` may compact.
-    let Ok(info) =
-        studio_runtime_schema::provider_rate_limits::checked_claude_rate_info(&limits["data"])
-    else {
-        return false;
-    };
-    info.is_none_or(|info| info["status"] == "allowed")
-        && crate::usage_resume::eligibility(limits, agent, now)["canRun"] == true
+pub fn limits_allowed(
+    limits: &UsageLimitsResponse,
+    agent: &studio_runtime_store::AgentRecord,
+    now: f64,
+) -> bool {
+    crate::usage_resume::LimitsObservation::from_response(limits.clone())
+        .permits_idle_compaction(agent, now)
 }
 fn check(
     connection: &Connection,
     episode: &Episode,
     agent: &Value,
-    limits: &Value,
+    limits: &UsageLimitsResponse,
     now: f64,
 ) -> Result<Option<IdleEpisodeOutcome>, StoreError> {
     let settings =
@@ -430,14 +429,20 @@ fn check(
         episode,
         agent,
         now,
-        limits_allowed(limits, agent, now),
+        studio_runtime_store::AgentRecord::from_value(agent.clone())
+            .is_ok_and(|agent| limits_allowed(limits, &agent, now)),
         queued(connection, agent["id"].as_str().unwrap_or_default())?,
     ))
 }
 
 pub type HostFuture<'a> = Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
 pub trait Host: Send + Sync + 'static {
-    fn compact<'a>(&'a self, agent: &'a str, episode: Episode, limits: Value) -> HostFuture<'a>;
+    fn compact<'a>(
+        &'a self,
+        agent: &'a str,
+        episode: Episode,
+        limits: UsageLimitsResponse,
+    ) -> HostFuture<'a>;
 }
 
 const NEXT_EPISODE_SQL: &str = "SELECT a.id,a.record FROM runtime_agents a WHERE a.idle_episode_type='object' AND a.idle_episode_id NOT IN (SELECT value FROM json_each(?1)) AND COALESCE(json_extract(a.record,'$.idleCompactionEpisode.fired'),0)=0 ORDER BY a.idle_episode_fire_at,a.id LIMIT 1";
@@ -477,7 +482,7 @@ pub async fn fire(
     store: Arc<RuntimeStore>,
     agent_id: String,
     episode: Episode,
-    limits: Value,
+    limits: UsageLimitsResponse,
     now: f64,
     host: &dyn Host,
 ) -> Result<(), StoreError> {
@@ -595,7 +600,10 @@ pub async fn run(
                 let limits = port
                     .read_limits_for_resume(account, wall_now())
                     .await
-                    .unwrap_or(Value::Null);
+                    .unwrap_or_else(|_| UsageLimitsResponse {
+                        account_key: account.to_owned(),
+                        ..Default::default()
+                    });
                 let result = fire(store, agent, episode, limits, wall_now(), host.as_ref()).await;
                 (id, result)
             });
@@ -609,6 +617,15 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn idle_limit_admission_uses_typed_observation_and_agent() {
+        let _: fn(
+            &studio_runtime_schema::usage_limits::UsageLimitsResponse,
+            &studio_runtime_store::AgentRecord,
+            f64,
+        ) -> bool = limits_allowed;
+    }
 
     #[test]
     fn unload_deadline_scan_skips_json_for_non_claude_agents() {
@@ -821,22 +838,19 @@ mod tests {
 
     #[test]
     fn unsupported_rate_evidence_never_proves_resume_or_compaction() {
-        let agent =
-            json!({"id":"agent", "accountKey":"default", "provider":"claude", "model":"sonnet"});
+        let agent = json!({"id":"agent", "rootId":"agent", "epoch":1, "status":"idle", "compactions":0, "accountKey":"default", "provider":"claude", "model":"sonnet"});
         let known = json!({"status":"allowed", "rateLimitType":"five_hour", "utilization":0.2, "resetsAt":2000});
         let base = json!({"accountKey":"default", "at":1000, "data":{"rateLimits":{"limitId":"claude", "primary":{"usedPercent":20, "resetsAt":2000}}, "claudeRateLimit":known}});
-        assert_eq!(
-            crate::usage_resume::eligibility(&base, &agent, 1000.0)["canRun"],
-            true
-        );
-        assert!(limits_allowed(&base, &agent, 1000.0));
+        let typed_agent = studio_runtime_store::AgentRecord::from_value(agent.clone()).unwrap();
+        let typed_base: UsageLimitsResponse =
+            serde::Deserialize::deserialize(base.clone()).unwrap();
+        assert!(limits_allowed(&typed_base, &typed_agent, 1000.0));
         for raw in [
             json!({"type":"unsupported", "raw":{"status":"future"}}),
             json!({"status":"future", "rateLimitType":"five_hour"}),
             json!({"status":"allowed", "rateLimitType":"future_scope"}),
             json!({"status":"allowed", "rateLimitType":"five_hour", "overageStatus":"future"}),
             json!({"status":"allowed", "rateLimitType":"five_hour", "resetsAt":"soon"}),
-            Value::Null,
         ] {
             for bucket in [false, true] {
                 let mut observation = base.clone();
@@ -846,14 +860,29 @@ mod tests {
                     observation["data"]["claudeRateLimit"] = raw.clone();
                 }
                 let before = observation.clone();
-                let decision = crate::usage_resume::eligibility(&observation, &agent, 1000.0);
-                assert_eq!(decision["fresh"], false, "{raw}; bucket={bucket}");
-                assert_eq!(decision["canRun"], false);
-                assert_eq!(decision["allowed"], false);
-                assert!(!limits_allowed(&observation, &agent, 1000.0));
+                let typed =
+                    crate::usage_resume::LimitsObservation::from_record(observation.clone(), None)
+                        .unwrap();
+                let typed_agent =
+                    studio_runtime_store::AgentRecord::from_value(agent.clone()).unwrap();
+                let decision = crate::usage_resume::eligibility(&typed, &typed_agent, 1000.0);
+                assert_eq!(
+                    decision.state,
+                    studio_runtime_schema::usage_limits::EligibilityState::Stale,
+                    "{raw}; bucket={bucket}"
+                );
+                let response: UsageLimitsResponse =
+                    serde::Deserialize::deserialize(observation.clone()).unwrap();
+                assert!(!limits_allowed(&response, &typed_agent, 1000.0));
                 assert_eq!(observation, before);
             }
         }
+    }
+    #[test]
+    fn null_optional_claude_evidence_is_absent_for_idle_admission() {
+        let agent = studio_runtime_store::AgentRecord::from_value(json!({"id":"agent","rootId":"agent","epoch":1,"status":"idle","compactions":0,"accountKey":"default","provider":"claude","model":"sonnet"})).unwrap();
+        let limits: UsageLimitsResponse = serde::Deserialize::deserialize(json!({"accountKey":"default","at":1000.0,"data":{"ordinaryUsageAllowed":null,"claudeRateLimit":null,"rateLimits":{"limitId":"claude","primary":{"usedPercent":20,"resetsAt":2000}}}})).unwrap();
+        assert!(limits_allowed(&limits, &agent, 1000.0));
     }
     struct Clock(f64);
     impl Clock {

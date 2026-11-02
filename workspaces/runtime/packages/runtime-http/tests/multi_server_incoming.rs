@@ -260,6 +260,45 @@ async fn paired_receiver() -> PairedReceiver {
 }
 
 #[tokio::test]
+async fn access_snapshot_projects_legacy_missing_fields_as_null() {
+    let receiver = paired_receiver().await;
+    receiver.receiver_store.transaction(|tx| {
+        tx.execute("INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2)",
+            rusqlite::params!["legacy", serde_json::json!({"id":"legacy","clientId":"legacy","kind":"ui","status":"paired","label":"Legacy","created":1,"publicKey":"key"}).to_string()])?;
+        Ok(())
+    }).await.unwrap();
+    let mut request = Request::builder()
+        .uri("/api/multi-server")
+        .header("host", "127.0.0.1:4000")
+        .body(Body::empty())
+        .unwrap();
+    request.extensions_mut().insert(ConnectInfo(
+        "127.0.0.1:4321".parse::<std::net::SocketAddr>().unwrap(),
+    ));
+    let response = receiver.app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), 65536).await.unwrap();
+    let _: studio_runtime_http::generated::AccessSnapshot = serde_json::from_slice(&bytes).unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    let client = body["clients"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["id"] == "legacy")
+        .unwrap();
+    for key in [
+        "serverId",
+        "origin",
+        "tailscaleUser",
+        "lastAccess",
+        "revoked",
+    ] {
+        assert_eq!(client.get(key), Some(&Value::Null), "{key}");
+    }
+    assert!(client.get("lastSeen").is_none());
+}
+
+#[tokio::test]
 async fn paired_fake_servers_create_and_recover_the_same_invitation() {
     let PairedReceiver {
         _caller_root,
@@ -337,6 +376,16 @@ async fn paired_fake_servers_create_and_recover_the_same_invitation() {
     serde_json::from_slice::<studio_runtime_http::generated::InvitationResponse>(&first_body)
         .expect("signed invitation response matches the generated contract");
     let first: Value = serde_json::from_slice(&first_body).expect("first invitation JSON");
+    let mut fractional = first.clone();
+    fractional["expires"] = serde_json::json!(1234.5);
+    fractional["invitation"]["expires"] = serde_json::json!(1234.5);
+    serde_json::from_value::<studio_runtime_http::generated::InvitationResponse>(fractional)
+        .expect("fractional Unix-second expiry matches the generated HTTP contract");
+    let snapshot =
+        studio_runtime_services::multi_server::snapshot(&receiver_store, &receiver_identity)
+            .await
+            .expect("new invite is visible in snapshot");
+    let _: studio_runtime_http::generated::AccessSnapshot = snapshot;
     assert_eq!(
         first["invitation"]["serverId"],
         receiver_identity["serverId"]
@@ -838,7 +887,7 @@ async fn signed_remote_event_crosses_http_boundary_and_persists_once() {
         in_flight: None,
         account_key: "default".into(),
         thread_id: None,
-        turn_id: None,
+        turn_id: Default::default(),
         auto_wake: None,
         usage_resume_enabled: None,
         execution_mode: None,

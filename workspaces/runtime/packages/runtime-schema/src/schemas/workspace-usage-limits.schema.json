@@ -1,6 +1,27 @@
 {
   "$defs": {
+    "EligibilityBucket": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "overageAllowed": {
+          "type": "boolean"
+        }
+      },
+      "required": ["id", "overageAllowed"],
+      "type": "object"
+    },
+    "EligibilityState": {
+      "enum": ["stale", "allowed", "blocked"],
+      "type": "string"
+    },
     "JsonValue": {},
+    "Overage": {
+      "enum": ["allowed", "in_use", "rejected", "unavailable"],
+      "type": "string"
+    },
     "RateLimitBucket": {
       "additionalProperties": {
         "$ref": "#/$defs/JsonValue"
@@ -40,7 +61,14 @@
           "title": "Limitname"
         },
         "planType": {
-          "anyOf": [{ "type": "string" }, { "type": "null" }],
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "title": "Plantype"
         },
         "primary": {
@@ -194,7 +222,9 @@
       "type": "object"
     },
     "RateLimitWindow": {
-      "additionalProperties": { "$ref": "#/$defs/JsonValue" },
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
       "properties": {
         "resetsAt": {
           "anyOf": [
@@ -269,6 +299,50 @@
       },
       "required": ["id", "seq", "payload", "_deleted"],
       "title": "SyncEntity",
+      "type": "object"
+    },
+    "UsageEligibility": {
+      "additionalProperties": false,
+      "properties": {
+        "accountKey": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "buckets": {
+          "items": {
+            "$ref": "#/$defs/EligibilityBucket"
+          },
+          "type": "array"
+        },
+        "model": {
+          "type": "string"
+        },
+        "overage": {
+          "$ref": "#/$defs/Overage"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/EligibilityState"
+        },
+        "validUntil": {
+          "format": "double",
+          "type": ["number", "null"]
+        }
+      },
+      "required": [
+        "accountKey",
+        "agentId",
+        "buckets",
+        "model",
+        "overage",
+        "provider",
+        "state",
+        "validUntil"
+      ],
       "type": "object"
     },
     "UsageLimitsData": {
@@ -435,6 +509,9 @@
             }
           ]
         },
+        "eligibility": {
+          "$ref": "#/$defs/UsageEligibility"
+        },
         "error": {
           "anyOf": [
             {
@@ -467,83 +544,10 @@
             }
           ],
           "title": "Readat"
-        },
-        "eligibility": {
-          "$ref": "#/$defs/UsageEligibility"
         }
       },
       "required": ["accountKey"],
       "title": "UsageLimitsResponse",
-      "type": "object"
-    },
-    "UsageEligibility": {
-      "additionalProperties": false,
-      "properties": {
-        "accountKey": {
-          "type": "string"
-        },
-        "agentId": {
-          "type": "string"
-        },
-        "allowed": {
-          "type": "boolean"
-        },
-        "buckets": {
-          "items": {
-            "additionalProperties": false,
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "overageAllowed": {
-                "type": "boolean"
-              }
-            },
-            "required": ["id", "overageAllowed"],
-            "type": "object"
-          },
-          "type": "array"
-        },
-        "canRun": {
-          "type": "boolean"
-        },
-        "checkedAt": {
-          "type": "number"
-        },
-        "fresh": {
-          "type": "boolean"
-        },
-        "model": {
-          "type": "string"
-        },
-        "overage": {
-          "enum": ["allowed", "in_use", "rejected", "unavailable"],
-          "type": "string"
-        },
-        "provider": {
-          "type": "string"
-        },
-        "resetAt": {
-          "type": ["number", "null"]
-        },
-        "validUntil": {
-          "type": ["number", "null"]
-        }
-      },
-      "required": [
-        "agentId",
-        "accountKey",
-        "model",
-        "provider",
-        "allowed",
-        "canRun",
-        "fresh",
-        "checkedAt",
-        "validUntil",
-        "resetAt",
-        "overage",
-        "buckets"
-      ],
       "type": "object"
     }
   },

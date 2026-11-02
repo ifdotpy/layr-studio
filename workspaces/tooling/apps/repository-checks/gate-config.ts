@@ -37,3 +37,15 @@ if (process.argv[1] === fileURLToPath(import.meta.url))
   process.stdout.write(`${CARGO_BUILD_JOBS}\n`);
 // Native WebView tests run separately on the prepared native CI builder.
 export const NATIVE_PACKAGE = "studio-native-client";
+// Rust workspace build of the gate, as cargo arguments. Owner of the command: the `sweep` list
+// in the root Cargo.toml must equal it (tests/layr-sweep-parity.test.ts).
+export const RUST_WORKSPACE_BUILD_ARGS = [
+  "build",
+  "--workspace",
+  "--exclude",
+  NATIVE_PACKAGE,
+  "--tests",
+  "--bins",
+  "--examples",
+  "--locked",
+] as const;

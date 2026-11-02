@@ -6,6 +6,7 @@ pub mod bisect;
 pub mod branch;
 pub mod change;
 pub mod checks;
+pub mod du;
 pub mod history;
 pub mod layerpush;
 pub mod mergecmd;
@@ -191,10 +192,11 @@ Work in a line:
 Read history:
    log, show, blame, grep, ls-files, rev-parse, merge-base
 Lines and states:
-   line new <name> [<rev>] [--count N], line list, line delete, line rename
+   line new <name> [<rev>] [--count N], line list, line delete, line rename, line move <line> [<path>]
    save -m <message> [-a] [--amend]
    save [--note <text>] [--all-lines] [--running] [--force] [--caches [--cache <path>]]
    park [list/show/pop/apply/drop/clear]
+   retest run [--full] [--save] [-- <nextest args>], retest init [--yes], retest doctor
    tag, merge, pick, invert, replay, undo, op, try, bisect run, adopt
    ref set/list/log/delete, release attach/files/get, attest, attestations, change list/show/log/diff
    view [<rev or line>] [--json], view save [<line>], view show <id>
@@ -209,7 +211,8 @@ Git bridge:
 Overlays (files with their own readers and history, shown in lines):
    overlay create, set, list, readers, use, move, remote, log, show, diff, grep, ls-files
 Projects and machines:
-   init, projects, config, cache, export, gc, fsck, reindex, daemon
+   init [--allow-root-snapshots], projects, config, cache, export, gc, du [<line>...] [--json], fsck, reindex,
+   daemon [--allow-root-snapshots]
 
 Lines are folders: <root>/projects/<project>/lines/<line>. Run commands inside a line folder.
 ";
@@ -221,10 +224,10 @@ const OVERLAY_READS: &[&str] =
 /// Public command names, including removed commands with a replacement diagnostic.
 pub const COMMANDS: &[&str] = &[
     "help", "--help", "-h", "version", "--version", "status", "diff", "show", "log", "rev-parse", "merge-base", "blame",
-    "index", "grep", "ls-files", "add", "rm", "mv", "apply", "restore", "reset", "park", "clean", "line", "tag", "adopt",
+    "index", "grep", "ls-files", "add", "rm", "mv", "apply", "restore", "reset", "retest", "park", "clean", "line", "tag", "adopt",
     "merge", "pick", "invert", "replay", "save", "undo", "op", "try", "bisect", "access", "protect", "approve", "approvals",
     "checks", "ref", "release", "queue", "request", "requests", "view", "attest", "attestations", "change", "comment", "probe",
-    "gc", "fsck", "reindex", "init", "projects", "machines", "debug", "config", "cache", "layer", "remote", "fetch", "pull",
+    "gc", "du", "fsck", "reindex", "init", "projects", "machines", "debug", "config", "cache", "layer", "remote", "fetch", "pull",
     "push", "git-sync", "git", "clone", "overlay", "export", "sync", "serve-peer", "worktree", "branch", "commit", "stash",
     "cherry-pick", "rebase", "revert", "checkout", "switch", "person", "mount", "daemon",
 ];
@@ -317,6 +320,7 @@ pub fn run(ctx: &Ctx, argv: &[String]) -> Result<i32> {
         "comment" => change::comment(ctx, &rest),
         "probe" => probe::probe(ctx, &rest),
         "gc" => admin::gc(ctx, &rest),
+        "du" => du::du(ctx, &rest),
         "fsck" => admin::fsck(ctx, &rest),
         "reindex" => admin::reindex(ctx, &rest),
         "init" => admin::init(ctx, &rest),

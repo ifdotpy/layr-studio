@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   access: vi.fn(),
   snapshots: [] as unknown[],
   setLocalServerDetails: vi.fn(),
+  adopt: vi.fn(async (_snapshot: unknown) => {}),
   stateCalls: 0,
   snapshotOverride: undefined as unknown,
   fields: {} as Record<string, unknown>,
@@ -43,6 +44,9 @@ vi.mock("./registry", () => ({
   SERVER_REGISTRY_EVENT: "registry-changed",
   serveOrigin: (origin: string) => origin,
 }));
+vi.mock("./trustedServers", () => ({
+  adoptTrustedServers: (snapshot: unknown) => mocks.adopt(snapshot),
+}));
 vi.mock("./serverNames", () => ({
   watchRegisteredServerNames: () => () => {},
 }));
@@ -63,6 +67,7 @@ afterEach(() => {
   mocks.snapshots.length = 0;
   mocks.access.mockReset();
   mocks.setLocalServerDetails.mockReset();
+  mocks.adopt.mockClear();
   mocks.stateCalls = 0;
   mocks.snapshotOverride = undefined;
   mocks.fields = {};
@@ -101,6 +106,9 @@ it("uses stream snapshots without a fallback HTTP read", async () => {
     discoverySnapshot: snapshot,
   } as ResourceVersion);
   expect(mocks.access).not.toHaveBeenCalled();
+  expect(mocks.adopt).toHaveBeenCalledWith(
+    expect.objectContaining({ localServerId: "owner" }),
+  );
   expect(mocks.snapshots).toContainEqual(
     expect.objectContaining({ localServerId: "owner" }),
   );

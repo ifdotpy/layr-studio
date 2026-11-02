@@ -52,7 +52,8 @@ impl Admission for MessageNativeAdmission {
                     .is_some_and(is_misalignment_policy_violation))
             || (thread_id.is_some()
                 && value.get("nativeTurnError").is_some_and(|previous| {
-                    previous.get("turnId") == value.get("turnId")
+                    previous.get("turnId").filter(|v| !v.is_null())
+                        == value.get("turnId").filter(|v| !v.is_null())
                         && previous
                             .get("error")
                             .is_some_and(is_misalignment_policy_violation)

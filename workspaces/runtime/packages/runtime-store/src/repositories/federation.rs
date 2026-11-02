@@ -420,7 +420,11 @@ impl FederationRepository {
             }
             let mut p = json!({"id":agent_id,"role":if is_lead{"lead"}else{"agent"}});
             if is_lead || share_names {
-                p["name"] = agent.get("name").cloned().unwrap_or_else(|| json!("Agent"));
+                p["name"] = agent
+                    .get("name")
+                    .filter(|v| !v.is_null())
+                    .cloned()
+                    .unwrap_or_else(|| json!("Agent"));
             }
             if share_status {
                 p["status"] = agent

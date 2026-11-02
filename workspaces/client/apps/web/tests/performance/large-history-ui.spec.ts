@@ -234,8 +234,7 @@ test("Large history @performance", async ({ context }) => {
       0,
       "No commentary is hidden inside tools",
     );
-    const loadEarlier = page.locator("#earlier-messages");
-    while (await loadEarlier.count()) {
+    while (!(await page.locator('[data-message="text-0-0"]').count())) {
       const response = page
         .waitForResponse((r) => r.url().includes("/api/transcript/page?"))
         .then(
@@ -244,13 +243,14 @@ test("Large history @performance", async ({ context }) => {
         );
       await page.locator("#messages").evaluate((root) => {
         root.scrollTop = 0;
-        root.dispatchEvent(new Event("scroll"));
+        root.dispatchEvent(
+          new WheelEvent("wheel", { deltaY: -1000, bubbles: true }),
+        );
       });
-      await loadEarlier.click({ timeout: 5000 });
       const result = await response;
       if ("error" in result) {
         throw Error(
-          `Earlier page request missing: count=${pageRequests}, button=${await loadEarlier.isVisible()}, disabled=${await loadEarlier.isDisabled()}, errors=${JSON.stringify(errors)}, urls=${JSON.stringify(pageRequestUrls)}. ${result.error}`,
+          `Earlier page request missing: count=${pageRequests}, errors=${JSON.stringify(errors)}, urls=${JSON.stringify(pageRequestUrls)}. ${result.error}`,
         );
       }
     }

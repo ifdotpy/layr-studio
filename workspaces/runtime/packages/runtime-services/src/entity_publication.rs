@@ -51,6 +51,9 @@ impl EntityPublisher for DefaultPublisher {
 pub async fn install(store: &RuntimeStore) -> StoreResult<()> {
     store.install_entity_publisher(Arc::new(DefaultPublisher));
     store
+        .transaction(crate::account_session_runtime::limits::seed_agents)
+        .await?;
+    store
         .transaction(crate::sync_policy::seed_work_details)
         .await?;
     // Upgrades may have source errors but no studioError entities yet.

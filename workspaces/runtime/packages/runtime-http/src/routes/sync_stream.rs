@@ -1257,17 +1257,19 @@ async fn read_entity_changes_typed(
     store
         .ok_or_else(ApiError::internal)?
         .read_async("runtime-http/routes/sync_stream", move |connection| {
+            let (high, durable_floor) =
+                studio_runtime_store::durable_seq::high_and_floor(connection)
+                    .map_err(|_| ApiError::internal())?;
             let floor = SyncDocumentsRepository::entity_tombstone_floor(connection)
-                .map_err(|_| ApiError::internal())?;
-            let sequence = SyncDocumentsRepository::entity_sequence(connection)
                 .map_err(|_| ApiError::internal())?
-                .max(floor);
+                .max(durable_floor);
+            let sequence = high.max(floor);
             if !(0..=MAX_SAFE_REVISION).contains(&sequence) {
                 return Err(ApiError::internal());
             }
             let batch = match after {
                 Some(after) if after >= floor && after < sequence => {
-                    SyncDocumentsRepository::resume_entity_scope(
+                    studio_runtime_services::work_scope::resume(
                         connection,
                         Some(after),
                         Some(
@@ -1599,7 +1601,6 @@ async fn attach_transient_snapshots(
                 entry.discovery_snapshot = super::multi_server::read_snapshot(state)
                     .await
                     .ok()
-                    .and_then(|snapshot| serde_json::from_value(snapshot).ok())
                     .map(Some);
             }
             ResourceRef::VoiceResource(resource) => {
@@ -5159,6 +5160,7 @@ mod tests {
         let root = tempfile::tempdir().expect("isolated state");
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
         store.transaction(|tx| {
+            tx.execute("INSERT OR REPLACE INTO sync_entity_meta(key,value) VALUES('transcript_copies','retired')", [])?;
             studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"open","rootId":"open","epoch":0,"status":"idle"}))?)?;
             tx.execute("INSERT INTO runtime_items(id,agent,record,created) VALUES('answer','open',?1,1)",
                 [json!({"id":"answer","role":"assistant","text":"before"}).to_string()])?;

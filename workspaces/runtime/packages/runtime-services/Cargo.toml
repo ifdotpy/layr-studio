@@ -43,6 +43,7 @@ toml = { version = "=1.1.8", default-features = false, features = ["parse", "ser
 studio-operations = { path = "../operations", features = ["serde"] }
 studio-runtime-process = { path = "../runtime-process" }
 studio-runtime-providers = { path = "../runtime-providers" }
+studio-request-signing = { path = "../request-signing" }
 studio-runtime-schema = { path = "../runtime-schema" }
 studio-runtime-store = { path = "../runtime-store" }
 sysinfo = { workspace = true }

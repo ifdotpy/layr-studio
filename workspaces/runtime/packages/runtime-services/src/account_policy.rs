@@ -427,7 +427,7 @@ impl fmt::Debug for AccountsSnapshot {
 #[derive(Clone)]
 pub struct AccountPolicyState {
     accounts: AccountsSnapshot,
-    limits: BTreeMap<String, Value>,
+    limits: BTreeMap<String, studio_runtime_schema::usage_limits::UsageLimitsResponse>,
     limits_diagnostics: Vec<LimitsDiagnostic>,
 }
 
@@ -473,7 +473,9 @@ impl AccountPolicyState {
             if candidate.get("data").is_none_or(Value::is_null) {
                 continue;
             }
-            limits.insert(key, candidate);
+            if let Ok(candidate) = serde::Deserialize::deserialize(candidate) {
+                limits.insert(key, candidate);
+            }
         }
         Ok(Self {
             accounts,
@@ -486,7 +488,12 @@ impl AccountPolicyState {
         registry_bytes: Option<&[u8]>,
         read: studio_runtime_store::account_state::LimitsRead,
     ) -> Result<Self, AccountPolicyError> {
-        let mut state = Self::from_startup(registry_bytes, read.snapshots)?;
+        let mut state = Self::from_startup(registry_bytes, [])?;
+        state.limits.extend(
+            read.snapshots
+                .into_iter()
+                .filter(|(_, value)| value.data.is_some()),
+        );
         state
             .limits_diagnostics
             .extend(read.diagnostics.into_iter().map(|item| LimitsDiagnostic {
@@ -506,10 +513,28 @@ impl AccountPolicyState {
         self.accounts.known_account_keys.contains(account_key)
     }
 
+    pub fn typed_limits(
+        &self,
+        account_key: &str,
+    ) -> studio_runtime_schema::usage_limits::UsageLimitsResponse {
+        self.limits.get(account_key).cloned().unwrap_or_else(|| {
+            studio_runtime_schema::usage_limits::UsageLimitsResponse {
+                account_key: account_key.to_owned(),
+                ..Default::default()
+            }
+        })
+    }
+
     pub fn limits(&self, account_key: &str) -> Value {
-        self.limits.get(account_key).cloned().unwrap_or_else(
-            || serde_json::json!({"accountKey":account_key,"data":null,"at":null,"error":null}),
-        )
+        self.limits
+            .get(account_key)
+            .map(|value| {
+                serde::Serialize::serialize(&(value), serde_json::value::Serializer)
+                    .expect("typed limits serialize")
+            })
+            .unwrap_or_else(
+                || serde_json::json!({"accountKey":account_key,"data":null,"at":null,"error":null}),
+            )
     }
 
     pub fn limits_diagnostics(&self) -> &[LimitsDiagnostic] {
@@ -831,12 +856,14 @@ mod tests {
     }
 
     #[test]
-    fn startup_preserves_vendor_window_and_reset_credit_extensions() {
+    fn startup_drops_unread_vendor_window_and_reset_credit_extensions() {
         let input = json!({"accountKey":"default","at":1.0,"data":{"rateLimits":{"primary":{"usedPercent":12,"providerWindow":{"x":1}}},"rateLimitResetCredits":{"providerOwned":true}}});
-        let state =
-            AccountPolicyState::from_startup(Some(REGISTRY), [("default".into(), input.clone())])
-                .expect("provider extensions survive startup");
-        assert_eq!(state.limits("default"), input);
+        let state = AccountPolicyState::from_startup(Some(REGISTRY), [("default".into(), input)])
+            .expect("provider extensions survive startup");
+        assert_eq!(
+            state.limits("default"),
+            json!({"accountKey":"default","at":1.0,"data":{"rateLimits":{"primary":{"usedPercent":12.0}},"rateLimitResetCredits":{"credits":[]}}})
+        );
         assert!(state.limits_diagnostics().is_empty());
     }
 

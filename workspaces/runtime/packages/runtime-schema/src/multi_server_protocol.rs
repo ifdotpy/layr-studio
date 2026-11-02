@@ -3,10 +3,10 @@
 
 /// Version of the signed multi-server access protocol.
 pub const ACCESS_PROTOCOL_VERSION: u64 = 1;
-/// Domain separator prefixed to every signed multi-server message.
-pub const MULTI_SERVER_SIGNING_DOMAIN: &str = "studio-multi-server-v1";
-/// Size of the random nonce that a client sends to prove a route's identity, in bytes.
-pub const IDENTITY_PROOF_NONCE_BYTES: usize = 24;
+// Owned by `studio-request-signing`; re-exported so callers keep one path.
+pub use studio_request_signing::{
+    IDENTITY_PROOF_NONCE_BYTES, MULTI_SERVER_SIGNING_DOMAIN, identity_proof_message,
+};
 /// File name of the remote access record in the state directory.
 pub const REMOTE_ACCESS_FILE: &str = "remote-access.json";
 /// Environment variable that overrides the public origin of this server.
@@ -16,16 +16,6 @@ pub const INVITE_ID_MAX_CHARS: usize = 128;
 pub const INVITE_OWNER_MAX_CHARS: usize = 254;
 /// Length of the lower-case SHA-256 token digest, in ASCII bytes.
 pub const INVITE_TOKEN_HASH_BYTES: usize = 64;
-
-/// The message a server signs to prove its identity for `nonce`. The nonce is
-/// unpadded base64url of `IDENTITY_PROOF_NONCE_BYTES` bytes; any other value gives `None`.
-pub fn identity_proof_message(server_id: &str, nonce: &str) -> Option<String> {
-    let valid = nonce.len() == (IDENTITY_PROOF_NONCE_BYTES * 4).div_ceil(3)
-        && nonce
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_');
-    valid.then(|| format!("{MULTI_SERVER_SIGNING_DOMAIN}\nidentity\n{server_id}\n{nonce}"))
-}
 
 /// A complete discovery response, checked while decoding.
 #[derive(serde::Deserialize)]
@@ -70,11 +60,12 @@ fn optional_proof<'de, D: serde::Deserializer<'de>>(
 }
 
 /// A stored invitation. Legacy rows that do not decode are discarded.
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PersistedAccessInvite {
     pub invite_id: crate::bounded_text::BoundedText<1, INVITE_ID_MAX_CHARS>,
     pub status: InviteStatus,
+    /// Expiry as Unix seconds; fractional seconds are permitted.
     pub expires: NonNegativeNumber,
     pub token_hash: InviteTokenHash,
     pub tailscale_user: crate::bounded_text::BoundedText<1, INVITE_OWNER_MAX_CHARS>,
@@ -82,40 +73,50 @@ pub struct PersistedAccessInvite {
         default,
         skip_serializing_if = "crate::queue_command::Field::is_missing"
     )]
+    #[schemars(with = "Option<u64>")]
     pub protocol: crate::queue_command::Field<u64>,
     #[serde(
         default,
         skip_serializing_if = "crate::queue_command::Field::is_missing"
     )]
+    #[schemars(with = "Option<String>")]
     pub server_id: crate::queue_command::Field<String>,
     #[serde(
         default,
         skip_serializing_if = "crate::queue_command::Field::is_missing"
     )]
+    #[schemars(with = "Option<String>")]
     pub label: crate::queue_command::Field<String>,
     #[serde(
         default,
         skip_serializing_if = "crate::queue_command::Field::is_missing"
     )]
+    #[schemars(with = "Option<String>")]
     pub origin: crate::queue_command::Field<String>,
     #[serde(
         default,
         skip_serializing_if = "crate::queue_command::Field::is_missing"
     )]
+    #[schemars(with = "Option<String>")]
     pub public_key: crate::queue_command::Field<String>,
     #[serde(
         default,
         skip_serializing_if = "crate::queue_command::Field::is_missing"
     )]
-    pub created: crate::queue_command::Field<serde_json::Number>,
+    #[schemars(with = "Option<NonNegativeNumber>")]
+    /// Creation time as Unix seconds; fractional seconds are permitted.
+    pub created: crate::queue_command::Field<NonNegativeNumber>,
     #[serde(
         default,
         skip_serializing_if = "crate::queue_command::Field::is_missing"
     )]
+    #[schemars(with = "Option<String>")]
     pub grant: crate::queue_command::Field<String>,
 }
 
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum InviteStatus {
     Open,
@@ -130,15 +131,23 @@ impl InviteStatus {
     }
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
 #[serde(transparent)]
 pub struct NonNegativeNumber(serde_json::Number);
+impl schemars::JsonSchema for NonNegativeNumber {
+    fn inline_schema() -> bool {
+        true
+    }
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "NonNegativeNumber".into()
+    }
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({"type":"number", "minimum":0})
+    }
+}
 impl NonNegativeNumber {
     pub fn as_f64(&self) -> Option<f64> {
         self.0.as_f64()
-    }
-    pub fn as_i64(&self) -> Option<i64> {
-        self.0.as_i64()
     }
 }
 impl TryFrom<serde_json::Number> for NonNegativeNumber {
@@ -147,7 +156,7 @@ impl TryFrom<serde_json::Number> for NonNegativeNumber {
         if value.as_f64().is_some_and(|number| number >= 0.0) {
             Ok(Self(value))
         } else {
-            Err("negative invitation expiry")
+            Err("negative access timestamp")
         }
     }
 }
@@ -162,6 +171,21 @@ impl<'de> serde::Deserialize<'de> for NonNegativeNumber {
 #[derive(Clone, serde::Serialize)]
 #[serde(transparent)]
 pub struct InviteTokenHash(String);
+impl schemars::JsonSchema for InviteTokenHash {
+    fn inline_schema() -> bool {
+        true
+    }
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "InviteTokenHash".into()
+    }
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({"type":"string", "pattern":format!("^[0-9a-f]{{{INVITE_TOKEN_HASH_BYTES}}}$")})
+    }
+}
+
+pub(crate) fn invite_schema() -> serde_json::Value {
+    schemars::schema_for!(PersistedAccessInvite).to_value()
+}
 impl TryFrom<String> for InviteTokenHash {
     type Error = &'static str;
     fn try_from(value: String) -> Result<Self, Self::Error> {
@@ -367,41 +391,6 @@ mod tests {
 
     #[test]
     fn invite_record_tracks_schema_and_rejects_unknown_fields() {
-        let schema: Value =
-            serde_json::from_str(include_str!("schemas/persisted-access-invite.schema.json"))
-                .unwrap();
-        let mut properties = schema["properties"].clone();
-        for field in properties.as_object_mut().unwrap().values_mut() {
-            field.as_object_mut().unwrap().remove("title");
-        }
-        assert_eq!(
-            properties,
-            json!({
-                "inviteId":{"type":"string","minLength":1,"maxLength":128},
-                "status":{"type":"string","enum":["open","used"]},
-                "expires":{"type":"number","minimum":0},
-                "tokenHash":{"type":"string","pattern":"^[0-9a-f]{64}$"},
-                "tailscaleUser":{"type":"string","minLength":1,"maxLength":254},
-                "protocol":{"type":["integer","null"],"minimum":0},
-                "serverId":{"type":["string","null"]},
-                "label":{"type":["string","null"]},
-                "origin":{"type":["string","null"]},
-                "publicKey":{"type":["string","null"]},
-                "created":{"type":["number","null"]},
-                "grant":{"type":["string","null"]}
-            })
-        );
-        assert_eq!(
-            schema["required"],
-            json!([
-                "inviteId",
-                "status",
-                "expires",
-                "tokenHash",
-                "tailscaleUser"
-            ])
-        );
-        assert_eq!(schema["additionalProperties"], false);
         let valid = json!({"inviteId":"i", "status":"open", "expires":9007199254740993_u64, "tokenHash":"a".repeat(64), "tailscaleUser":"owner", "grant":"observe"});
         assert!(crate::validate("PersistedAccessInvite", &valid).unwrap());
         let mut invite: super::PersistedAccessInvite =
@@ -414,6 +403,7 @@ mod tests {
         for (field, invalid) in [
             ("status", json!("unknown")),
             ("expires", json!(-1)),
+            ("created", json!(-1)),
             ("inviteId", json!("")),
             ("tokenHash", json!("bad")),
             ("tailscaleUser", json!("")),

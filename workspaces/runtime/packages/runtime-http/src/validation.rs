@@ -67,6 +67,11 @@ pub(crate) struct MatchedOperation {
 
 // Temporary migration marker; remove when every body uses a typed extractor.
 const TYPED_BODIES: &[(&str, &str)] = &[
+    ("POST", "/api/terminals/create"),
+    ("POST", "/api/terminals/input"),
+    ("POST", "/api/terminals/resize"),
+    ("POST", "/api/terminals/rename"),
+    ("POST", "/api/terminals/close"),
     ("POST", "/api/room/delete"),
     ("POST", "/api/sync/notify"),
     ("POST", "/api/studio-errors/dismiss"),
@@ -1440,6 +1445,25 @@ mod tests {
     };
     use axum::http::{HeaderMap, HeaderValue};
     use serde_json::{Map, Value, json};
+
+    #[test]
+    fn terminal_bodies_use_only_typed_ingress() {
+        let routes: Vec<_> = ["create", "input", "resize", "rename", "close"]
+            .into_iter()
+            .map(|action| ("POST".to_owned(), format!("/api/terminals/{action}")))
+            .collect();
+        let registry = Registry::compile(&routes).expect("terminal routes compile");
+        for (method, path) in routes {
+            let operation = registry
+                .match_route(&method, &path)
+                .expect("terminal route");
+            assert!(operation.typed_body, "{path} must use typed ingress");
+            assert!(
+                registry.operations[&operation.key].body.is_none(),
+                "{path} must not compile a body validator"
+            );
+        }
+    }
 
     #[test]
     fn named_schema_draft_push_matches_shared_compatibility_fixtures() {

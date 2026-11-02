@@ -213,11 +213,11 @@ async fn transcript_blob(
             }
             other => ApiError::stored(other),
         })?;
-    Ok(Json(super::generated_json::<
-        crate::generated::TextBlobResponse,
-    >(
-        serde_json::json!({"hash": hash, "size": text.len(), "text": text}),
-    )?))
+    Ok(Json(crate::generated::TextBlobResponse {
+        hash,
+        size: i64::try_from(text.len()).map_err(|_| ApiError::internal())?,
+        text,
+    }))
 }
 
 async fn transcript_search(
@@ -329,6 +329,58 @@ inventory::submit! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn blob_http_returns_text_and_utf8_byte_length() {
+        use axum::{body::Body, extract::ConnectInfo, http::Request};
+        use tower::ServiceExt;
+        let root = tempfile::tempdir().expect("state");
+        let store = std::sync::Arc::new(
+            studio_runtime_store::RuntimeStore::open(Some(root.path()))
+                .await
+                .expect("store"),
+        );
+        let text = "hello 世界";
+        let (blob, bytes) = studio_runtime_store::text_blobs::encode_blob(text);
+        let path = studio_runtime_store::text_blobs::layout(&root.path().join("blobs"), &blob.hash);
+        tokio::fs::create_dir_all(path.parent().expect("parent"))
+            .await
+            .expect("blob directory");
+        tokio::fs::write(path, bytes).await.expect("blob");
+        let state = HttpState::new(
+            "token".into(),
+            "workspace".into(),
+            root.path().to_string_lossy().into_owned(),
+            4620,
+            None,
+            Some(store),
+            None,
+        );
+        let request = Request::builder()
+            .uri(format!("/api/transcript/blob?hash={}", blob.hash))
+            .header("host", "127.0.0.1:4620")
+            .header("x-canvas-token", "token")
+            .header(crate::API_SCHEMA_HASH_HEADER, crate::api_schema_hash())
+            .extension(ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                12345,
+            ))))
+            .body(Body::empty())
+            .expect("request");
+        let response = crate::router(state)
+            .expect("router")
+            .oneshot(request)
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("body");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON");
+        assert_eq!(
+            value,
+            serde_json::json!({"hash":blob.hash,"size":text.len(),"text":text})
+        );
+    }
     #[test]
     fn transcript_queries_reject_unknown_and_out_of_range_inputs() {
         fn decode<T: serde::de::DeserializeOwned>(query: &str) -> bool {

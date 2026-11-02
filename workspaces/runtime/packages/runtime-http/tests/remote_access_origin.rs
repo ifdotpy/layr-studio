@@ -79,6 +79,7 @@ async fn the_state_file_origin_admits_serve_requests_until_it_is_disabled() {
 
     let (status, body) = send(&app, "/api/session").await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["token"], "token");
     let (_, body) = send(&app, "/api/multi-server/v1/identity").await;
     assert_ne!(body["error"], signed_refusal);
 

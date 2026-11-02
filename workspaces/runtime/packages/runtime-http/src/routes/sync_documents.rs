@@ -782,15 +782,19 @@ fn pull_entities(
             },
         )?;
     }
-    let mut page = SyncDocumentsRepository::pull_global_entities(
-        transaction,
-        after,
-        limit,
-        fresh,
-        initial_high,
-        reset_support,
-        priority_id,
-    )?;
+    let mut page = if fresh {
+        SyncDocumentsRepository::pull_global_entities(
+            transaction,
+            after,
+            limit,
+            fresh,
+            initial_high,
+            reset_support,
+            priority_id,
+        )?
+    } else {
+        studio_runtime_services::work_scope::pull_global(transaction, after, limit, reset_support)?
+    };
     let workspace_id = SyncDocumentsRepository::workspace_id(transaction)?;
     if page.reset {
         studio_runtime_services::diagnostics::record_sync_recovery(
@@ -855,15 +859,24 @@ fn pull_entities(
             break;
         }
         scan_after = next_after;
-        page = SyncDocumentsRepository::pull_global_entities(
-            transaction,
-            next_after,
-            limit,
-            fresh,
-            initial_high,
-            reset_support,
-            None,
-        )?;
+        page = if fresh {
+            SyncDocumentsRepository::pull_global_entities(
+                transaction,
+                next_after,
+                limit,
+                fresh,
+                initial_high,
+                reset_support,
+                None,
+            )?
+        } else {
+            studio_runtime_services::work_scope::pull_global(
+                transaction,
+                next_after,
+                limit,
+                reset_support,
+            )?
+        };
         if page.rows.is_empty() {
             checkpoint = page.checkpoint;
             break;

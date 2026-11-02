@@ -396,7 +396,7 @@ impl ServerTools {
         self.read(|tx| {
             Ok(crate::multi_server::paired_servers(tx)?
                 .into_iter()
-                .filter_map(|server| server["id"].as_str().map(str::to_owned))
+                .map(|server| server.id.as_str().to_owned())
                 .collect())
         })
         .await
@@ -538,11 +538,13 @@ impl ServerTools {
             .await?;
         let servers = servers
             .into_iter()
-            .map(|mut server| {
-                if pending.iter().any(|id| server["id"].as_str() == Some(id)) {
-                    server["status"] = json!("offline");
+            .map(|server| {
+                let offline = pending.iter().any(|id| server.id.as_str() == id);
+                let mut result = json!(server);
+                if offline {
+                    result["status"] = json!("offline");
                 }
-                server
+                result
             })
             .collect::<Vec<_>>();
         Ok(json!({"localServer": local, "servers": servers}))

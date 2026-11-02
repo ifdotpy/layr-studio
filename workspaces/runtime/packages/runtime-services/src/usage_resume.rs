@@ -1,17 +1,21 @@
 //! Durable usage/authentication continuation decisions; observations never invoke a provider.
 use crate::continuation::{
     ContinuationError, ContinuationUpdate as U, Decision, Effect, POLL_SECONDS, ProposedRecord,
-    Result, Snapshot, UsageDraft, WaitStatus, account, flag, now_checked, number, present, text,
+    Result, Snapshot, UsageDraft, WaitStatus, now_checked, text,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use studio_runtime_providers::ProviderKind;
+use studio_runtime_schema::json_object::JsonObject;
 use studio_runtime_schema::provider_errors::{
     KnownCodexErrorKind, known_error_kind, raw_error_kind,
 };
-use studio_runtime_schema::provider_rate_limits::{
-    checked_claude_rate_info, rate_evidence_supported,
+use studio_runtime_schema::usage_limits::{
+    AgentLimitProjection, ClaudeRateInfo, ClaudeRateLimit, ClaudeRateStatus, ClaudeRateType,
+    EligibilityBucket, EligibilityState, LimitRecovery, Overage, RateLimitBucket, RecoveryAction,
+    RecoveryTiming, UsageEligibility, UsageLimitsData,
 };
+use studio_runtime_store::AgentRecord;
 
 const RESET_GRACE: f64 = 5.0;
 const RESUME_MIN: f64 = 60.0;
@@ -33,92 +37,217 @@ pub enum Cause {
 }
 #[derive(Clone)]
 pub struct LimitsObservation {
-    raw: Value,
-    account_key: String,
+    response: studio_runtime_schema::usage_limits::UsageLimitsResponse,
+    stale: bool,
     marker: Option<String>,
 }
 impl LimitsObservation {
-    pub fn from_record(raw: Value, marker: Option<String>) -> Result<Self> {
-        if let Some((path, _)) =
-            studio_runtime_schema::first_error("continuation/ContinuationLimitsObservation", &raw)
-                .map_err(|_| ContinuationError::Invalid("/limits/schema".into()))?
-        {
-            return Err(ContinuationError::Invalid(format!("/limits{path}")));
+    pub fn from_response(
+        response: studio_runtime_schema::usage_limits::UsageLimitsResponse,
+    ) -> Self {
+        Self {
+            response,
+            stale: false,
+            marker: None,
         }
-        let account_key = raw["accountKey"]
-            .as_str()
-            .ok_or_else(|| ContinuationError::Invalid("/limits/accountKey".into()))?
-            .to_owned();
+    }
+    pub fn from_record(raw: impl Serialize, marker: Option<String>) -> Result<Self> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Input {
+            #[serde(default)]
+            stale: Option<bool>,
+            #[serde(flatten)]
+            response: studio_runtime_schema::usage_limits::UsageLimitsResponse,
+        }
+        let encoded =
+            serde_json::to_vec(&raw).map_err(|_| ContinuationError::Invalid("/limits".into()))?;
+        let JsonObject(Input { response, stale }) = serde_json::from_slice(&encoded)
+            .map_err(|_| ContinuationError::Invalid("/limits".into()))?;
         Ok(Self {
-            raw,
-            account_key,
+            response,
+            stale: stale.unwrap_or(false),
             marker,
         })
     }
     pub fn account_key(&self) -> &str {
-        &self.account_key
+        &self.response.account_key
+    }
+    fn data(&self) -> Option<&UsageLimitsData> {
+        self.response.data.as_ref().map(|data| &data.0)
     }
     fn fresh_for(&self, key: &str, after: f64, strict: bool) -> bool {
-        !present(&self.raw, "error")
-            && !flag(&self.raw, "stale")
-            && rate_evidence_supported(&self.raw["data"])
-            && self.account_key == key
-            && number(&self.raw, "at")
+        self.response.error.as_deref().is_none_or(str::is_empty)
+            && !self.stale
+            && self.data().is_none_or(supported)
+            && self.account_key() == key
+            && self
+                .response
+                .at
                 .is_some_and(|at| if strict { at > after } else { at >= after })
     }
-    /// A resume may reuse only recent telemetry newer than the wait's last observation.
     pub fn fresh_after(&self, after: f64, now: f64) -> bool {
-        self.fresh_for(&self.account_key, after, true)
-            && self.fresh_for(&self.account_key, now - FRESH_SECONDS, false)
+        self.fresh_for(self.account_key(), after, true)
+            && self.fresh_for(self.account_key(), now - FRESH_SECONDS, false)
     }
-    pub fn reset_at(&self, agent: &Value) -> Option<f64> {
-        reset_at(&self.raw["data"], agent)
+    pub fn reset_at(&self, agent: &AgentRecord) -> Option<f64> {
+        self.data().and_then(|data| reset_at(data, agent))
     }
-    pub fn allowed(&self, agent: &Value, now: f64) -> bool {
-        allowed(&self.raw["data"], agent, now)
+    pub fn allowed(&self, agent: &AgentRecord, now: f64) -> bool {
+        self.data().is_some_and(|data| allowed(data, agent, now))
+    }
+    pub fn permits_idle_compaction(&self, agent: &AgentRecord, now: f64) -> bool {
+        let Some(data) = self.data() else {
+            return false;
+        };
+        let permitted = match data.claude_rate_limit.as_ref() {
+            None => true,
+            Some(ClaudeRateLimit::Known(info)) => info.status == ClaudeRateStatus::Allowed,
+            Some(ClaudeRateLimit::Unsupported(_)) => false,
+        };
+        permitted && eligibility(self, agent, now).state == EligibilityState::Allowed
     }
 }
 /// Read projection of the same model gate used by automatic continuation.
-/// Times are Unix seconds. `validUntil` bounds the freshness of this decision.
-pub fn eligibility(observation: &Value, agent: &Value, now: f64) -> Value {
-    let data = &observation["data"];
-    let key = account(agent);
-    let fresh = LimitsObservation::from_record(observation.clone(), None)
-        .is_ok_and(|limits| limits.fresh_for(key, now - FRESH_SECONDS, false));
-    let applicable: Vec<Value> = buckets(data, agent)
-        .filter(|(_, bucket)| bucket.is_object())
-        .map(|(id, _)| json!({"id": id, "overageAllowed": overage_allowed(data, agent, id)}))
-        .collect();
-    let info = rate_evidence_supported(data)
-        .then(|| checked_claude_rate_info(data).ok().flatten())
-        .flatten();
-    let overage = if info.is_some_and(|info| text(info, "overageStatus") == "rejected") {
-        "rejected"
-    } else if info.is_some_and(|info| flag(info, "isUsingOverage") || flag(info, "overageInUse")) {
-        "in_use"
-    } else if applicable.iter().any(|b| flag(b, "overageAllowed")) {
-        "allowed"
+pub fn eligibility(
+    observation: &LimitsObservation,
+    agent: &AgentRecord,
+    now: f64,
+) -> UsageEligibility {
+    let key = if agent.account_key.is_empty() {
+        "default"
     } else {
-        "unavailable"
+        &agent.account_key
     };
-    let valid_until = number(observation, "at").map(|at| {
-        buckets(data, agent)
-            .filter(|(id, _)| !overage_allowed(data, agent, id))
-            .flat_map(|(_, bucket)| {
-                ["primary", "secondary"]
-                    .into_iter()
-                    .filter_map(move |window| number(&bucket[window], "resetsAt"))
+    let fresh = observation.fresh_for(key, now - FRESH_SECONDS, false);
+    let data = observation.data();
+    let applicable: Vec<JsonObject<EligibilityBucket>> = data
+        .into_iter()
+        .flat_map(|data| {
+            buckets(data, agent).map(|(id, _)| {
+                JsonObject(EligibilityBucket {
+                    id: id.to_owned(),
+                    overage_allowed: overage_allowed(data, agent, id),
+                })
+            })
+        })
+        .collect();
+    let info = data
+        .filter(|data| supported(data))
+        .and_then(|data| rate_info(data.claude_rate_limit.as_ref()));
+    let overage =
+        if info.is_some_and(|info| info.overage_status == Some(ClaudeRateStatus::Rejected)) {
+            Overage::Rejected
+        } else if info.is_some_and(|info| {
+            info.is_using_overage == Some(true) || info.overage_in_use == Some(true)
+        }) {
+            Overage::InUse
+        } else if applicable.iter().any(|bucket| bucket.0.overage_allowed) {
+            Overage::Allowed
+        } else {
+            Overage::Unavailable
+        };
+    let valid_until = observation.response.at.map(|at| {
+        data.into_iter()
+            .flat_map(|data| {
+                buckets(data, agent)
+                    .filter(|(id, _)| !overage_allowed(data, agent, id))
+                    .flat_map(|(_, bucket)| {
+                        [bucket.primary.as_ref(), bucket.secondary.as_ref()]
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|window| window.0.resets_at)
+                    })
             })
             .fold(at + FRESH_SECONDS, f64::min)
     });
-    json!({
-        "agentId": text(agent, "id"), "accountKey": key,
-        "model": text(agent, "model"), "provider": text(agent, "provider"),
-        "allowed": allowed(data, agent, now),
-        "canRun": fresh && allowed(data, agent, now), "fresh": fresh,
-        "checkedAt": now, "validUntil": valid_until,
-        "resetAt": reset_at(data, agent), "buckets": applicable, "overage": overage
-    })
+    let allowed = observation.allowed(agent, now);
+    UsageEligibility {
+        agent_id: agent.id.0.clone(),
+        account_key: key.to_owned(),
+        model: agent.model.clone().unwrap_or_default(),
+        provider: agent.provider.as_ref().map_or("", |p| p.key()).to_owned(),
+        state: if !fresh {
+            EligibilityState::Stale
+        } else if allowed {
+            EligibilityState::Allowed
+        } else {
+            EligibilityState::Blocked
+        },
+        valid_until,
+        buckets: applicable,
+        overage,
+    }
+}
+
+/// Agent-specific presentation, derived from the same typed gate as continuation.
+pub fn agent_limit_projection(
+    limits: &LimitsObservation,
+    agent: &AgentRecord,
+    now: f64,
+) -> AgentLimitProjection {
+    let eligibility = eligibility(limits, agent, now);
+    if eligibility.account_key != limits.account_key() {
+        return AgentLimitProjection {
+            eligibility,
+            recovery: None,
+        };
+    }
+    let kind = agent.error.as_ref().and_then(|error| error.known_kind());
+    let recovery = kind
+        .filter(|kind| matches!(kind, KnownCodexErrorKind::UsageLimitExceeded | KnownCodexErrorKind::RateLimitExceeded))
+        .map(|kind| {
+            let previous_reset = agent.usage_continuation()
+                .filter(|resume| {
+                    use studio_runtime_schema::continuation_snapshot::UsageContinuationCause;
+                    matches!(resume.cause, Some(UsageContinuationCause::UsageLimit | UsageContinuationCause::RateLimit))
+                        && resume.account_key.as_str() == limits.account_key()
+                        && resume.epoch.as_u64() == u64::try_from(agent.epoch).ok()
+                        && agent.thread_id.as_deref() == Some(resume.thread_id.as_str())
+                        && agent.last_completed_turn.as_ref().map(String::as_str) == Some(resume.turn_id.as_str())
+                })
+                .and_then(|resume| resume.reset_at.value().map(|time| time.get()).filter(|reset| *reset > resume.failed_at.get()));
+            let reset_at = limits.reset_at(agent).or(previous_reset);
+            let confirmed = previous_reset.filter(|previous| limits.response.read_at.is_some_and(|read| read > *previous)
+                && limits.response.error.as_deref().is_none_or(str::is_empty)
+                && limits.allowed(agent, now));
+            let timing = match (confirmed, reset_at) {
+                (Some(reset_at), _) => RecoveryTiming::Confirmed { reset_at },
+                (None, Some(reset_at)) if reset_at > now => RecoveryTiming::Waiting { reset_at },
+                (None, Some(reset_at)) => RecoveryTiming::Unconfirmed { reset_at },
+                (None, None) => RecoveryTiming::Unknown,
+            };
+            let bucket = limits.data().and_then(|data| data.rate_limits.as_ref()).map(|bucket| &bucket.0);
+            let reached = bucket.and_then(|bucket| bucket.rate_limit_reached_type.as_deref());
+            let reached = match (kind, reached) {
+                (KnownCodexErrorKind::UsageLimitExceeded, Some("workspace_owner_credits_depleted")) => Some("workspace_owner_usage_limit_reached"),
+                (KnownCodexErrorKind::UsageLimitExceeded, Some("workspace_member_credits_depleted")) => Some("workspace_member_usage_limit_reached"),
+                (_, reached) => reached,
+            };
+            let fallback = ("Usage limit reached", "View account limits for reset times and available credits.", RecoveryAction::None);
+            let (title, message, action) = if agent.provider.as_ref() != Some(&ProviderKind::Codex)
+                || eligibility.state == EligibilityState::Stale || bucket.is_none() {
+                fallback
+            } else {
+                match reached {
+                    Some("workspace_owner_credits_depleted") => ("Workspace credits depleted", "Your workspace is out of credits. Add credits to continue using Codex.", RecoveryAction::Link { label: "Add workspace credits".into(), href: "https://chatgpt.com/admin/billing?codex_credit_action=add_credits".into() }),
+                    Some("workspace_member_credits_depleted") => ("Workspace credits depleted", "Your workspace is out of credits. Ask your workspace owner to add credits.", RecoveryAction::AskOwner { request: "Codex says our workspace is out of credits. Can you add credits?".into() }),
+                    Some("workspace_owner_usage_limit_reached") => ("Workspace usage limit reached", "Increase your workspace usage limit to continue using Codex.", RecoveryAction::Link { label: "Open workspace usage limits".into(), href: "https://chatgpt.com/admin/usage-limits/workspace".into() }),
+                    Some("workspace_member_usage_limit_reached") => ("Workspace usage limit reached", "Ask your workspace owner to increase your usage limit.", RecoveryAction::AskOwner { request: "Codex says I reached my workspace usage limit. Can you increase my limit?".into() }),
+                    Some(_) => fallback,
+                    None => match bucket.and_then(|bucket| bucket.plan_type.as_deref()) {
+                        Some("pro" | "plus" | "pro_lite") => ("Usage limit reached", "Wait for the limit to reset, or add credits in ChatGPT.", RecoveryAction::Link { label: "View credits in ChatGPT".into(), href: "https://chatgpt.com/codex/settings/usage?credits_modal=true".into() }),
+                        Some("free" | "go") => ("Usage limit reached", "Wait for the limit to reset, or review your plan in ChatGPT.", RecoveryAction::Link { label: "View ChatGPT usage".into(), href: "https://chatgpt.com/codex/settings/usage".into() }),
+                        _ => fallback,
+                    },
+                }
+            };
+            LimitRecovery { title: title.into(), message: message.into(), action, timing }
+        });
+    AgentLimitProjection {
+        eligibility,
+        recovery,
+    }
 }
 
 pub fn next_check(reset: Option<f64>, now: f64) -> f64 {
@@ -133,7 +262,7 @@ fn auth_backoff(attempt: u64) -> f64 {
 #[serde(rename_all = "camelCase")]
 struct ClaudeUsagePolicy {
     model_buckets: std::collections::BTreeMap<String, String>,
-    allowed_overage_statuses: Vec<String>,
+    allowed_overage_statuses: Vec<ClaudeRateStatus>,
 }
 fn claude_policy() -> &'static ClaudeUsagePolicy {
     static POLICY: std::sync::OnceLock<ClaudeUsagePolicy> = std::sync::OnceLock::new();
@@ -148,11 +277,11 @@ fn claude_policy() -> &'static ClaudeUsagePolicy {
         serde_json::from_str(json).expect("shared Claude usage policy")
     })
 }
-fn model_family(agent: &Value) -> Option<&'static str> {
-    if text(agent, "provider") != ProviderKind::Claude.key() {
+fn model_family(agent: &AgentRecord) -> Option<&'static str> {
+    if agent.provider.as_ref() != Some(&ProviderKind::Claude) {
         return None;
     }
-    let model = text(agent, "model");
+    let model = agent.model.as_deref().unwrap_or_default();
     claude_policy()
         .model_buckets
         .keys()
@@ -163,104 +292,127 @@ fn model_family(agent: &Value) -> Option<&'static str> {
         })
         .map(String::as_str)
 }
-fn relevant_bucket(id: &str, agent: &Value) -> bool {
-    let Some(family) = model_family(agent) else {
-        return true;
-    };
-    // Only a known different model family can exclude a bucket. Unknown scopes
-    // still participate in the gate and the latest reset.
-    claude_policy()
-        .model_buckets
-        .iter()
-        .all(|(name, bucket)| bucket != id || name == family)
+fn relevant_bucket(id: &str, agent: &AgentRecord) -> bool {
+    model_family(agent).is_none_or(|family| {
+        claude_policy()
+            .model_buckets
+            .iter()
+            .all(|(name, bucket)| bucket != id || name == family)
+    })
 }
-fn buckets<'a>(data: &'a Value, agent: &'a Value) -> impl Iterator<Item = (&'a str, &'a Value)> {
-    std::iter::once((text(&data["rateLimits"], "limitId"), &data["rateLimits"]))
+fn buckets<'a>(
+    data: &'a UsageLimitsData,
+    agent: &'a AgentRecord,
+) -> impl Iterator<Item = (&'a str, &'a RateLimitBucket)> {
+    data.rate_limits
+        .iter()
+        .map(|bucket| (bucket.0.limit_id.as_deref().unwrap_or_default(), &bucket.0))
         .chain(
-            data.get("rateLimitsByLimitId")
-                .and_then(Value::as_object)
-                .into_iter()
-                .flat_map(|m| m.iter().map(|(id, value)| (id.as_str(), value))),
+            data.rate_limits_by_limit_id
+                .iter()
+                .flat_map(|buckets| buckets.iter().map(|(id, bucket)| (id.as_str(), &bucket.0))),
         )
         .filter(|(id, _)| relevant_bucket(id, agent))
 }
-fn overage_allowed(data: &Value, agent: &Value, id: &str) -> bool {
-    if text(agent, "provider") != ProviderKind::Claude.key() || !rate_evidence_supported(data) {
+fn rate_info(rate: Option<&ClaudeRateLimit>) -> Option<&ClaudeRateInfo> {
+    match rate {
+        Some(ClaudeRateLimit::Known(info)) => Some(info),
+        _ => None,
+    }
+}
+fn supported(data: &UsageLimitsData) -> bool {
+    let valid =
+        |rate: Option<&ClaudeRateLimit>| !matches!(rate, Some(ClaudeRateLimit::Unsupported(_)));
+    valid(data.claude_rate_limit.as_ref())
+        && data
+            .rate_limits
+            .as_ref()
+            .is_none_or(|b| valid(b.0.claude_rate_limit.as_ref()))
+        && data.rate_limits_by_limit_id.as_ref().is_none_or(|buckets| {
+            buckets
+                .values()
+                .all(|b| valid(b.0.claude_rate_limit.as_ref()))
+        })
+}
+fn overage_allowed(data: &UsageLimitsData, agent: &AgentRecord, id: &str) -> bool {
+    if agent.provider.as_ref() != Some(&ProviderKind::Claude) || !supported(data) {
         return false;
     }
-    let Ok(Some(info)) = checked_claude_rate_info(data) else {
+    let Some(info) = rate_info(data.claude_rate_limit.as_ref()) else {
         return false;
     };
-    if text(info, "overageStatus") == "rejected" {
+    if info.overage_status == Some(ClaudeRateStatus::Rejected) {
         return false;
     }
     let family = model_family(agent);
-    let known_bucket = (id == "claude" || id == "claude-overage")
+    let known_bucket = id == "claude"
+        || id == "claude-overage"
         || family.is_some_and(|family| claude_policy().model_buckets[family] == id);
     let known_scope = matches!(
-        text(info, "rateLimitType"),
-        "five_hour" | "seven_day" | "overage"
-    ) || family
-        .is_some_and(|family| text(info, "rateLimitType") == format!("seven_day_{family}"));
+        info.rate_limit_type,
+        Some(ClaudeRateType::FiveHour | ClaudeRateType::SevenDay | ClaudeRateType::Overage)
+    ) || matches!(
+        (info.rate_limit_type, family),
+        (Some(ClaudeRateType::SevenDayOpus), Some("opus"))
+            | (Some(ClaudeRateType::SevenDaySonnet), Some("sonnet"))
+    );
     known_bucket
         && known_scope
-        && (claude_policy()
-            .allowed_overage_statuses
-            .iter()
-            .any(|status| status == text(info, "overageStatus"))
-            || flag(info, "isUsingOverage")
-            || flag(info, "overageInUse"))
+        && (info
+            .overage_status
+            .is_some_and(|status| claude_policy().allowed_overage_statuses.contains(&status))
+            || info.is_using_overage == Some(true)
+            || info.overage_in_use == Some(true))
 }
-fn reset_at(data: &Value, agent: &Value) -> Option<f64> {
-    if !rate_evidence_supported(data) {
+fn reset_at(data: &UsageLimitsData, agent: &AgentRecord) -> Option<f64> {
+    if !supported(data) {
         return None;
     }
     buckets(data, agent)
         .filter(|(id, _)| !overage_allowed(data, agent, id))
-        .flat_map(|(_, b)| {
-            let windows: Vec<&Value> = ["primary", "secondary"]
-                .iter()
-                .filter_map(|n| b.get(*n))
-                .filter(|v| v.is_object())
+        .flat_map(|(_, bucket)| {
+            let windows: Vec<_> = [bucket.primary.as_ref(), bucket.secondary.as_ref()]
+                .into_iter()
+                .flatten()
+                .map(|window| &window.0)
                 .collect();
             let full = windows
                 .iter()
-                .any(|w| number(w, "usedPercent").is_some_and(|p| p >= 100.0));
-            let event = &b["claudeRateLimit"];
-            let blocked = text(event, "status") == "rejected";
+                .any(|window| window.used_percent.is_some_and(|used| used >= 100.0));
+            let event = rate_info(bucket.claude_rate_limit.as_ref());
+            let blocked = event.is_some_and(|event| event.status == ClaudeRateStatus::Rejected);
             windows
                 .into_iter()
-                .filter(move |w| {
+                .filter(move |window| {
                     if full {
-                        number(w, "usedPercent").is_some_and(|p| p >= 100.0)
+                        window.used_percent.is_some_and(|used| used >= 100.0)
                     } else {
-                        blocked || b.get("rateLimitReachedType").is_some_and(|v| !v.is_null())
+                        blocked || bucket.rate_limit_reached_type.is_some()
                     }
                 })
-                .filter_map(|w| number(w, "resetsAt"))
-                .chain(blocked.then(|| number(event, "resetsAt")).flatten())
+                .filter_map(|window| window.resets_at)
+                .chain(event.filter(|_| blocked).and_then(|event| event.resets_at))
                 .chain(
-                    (text(event, "overageStatus") == "rejected")
-                        .then(|| number(event, "overageResetsAt"))
-                        .flatten(),
+                    event
+                        .filter(|event| event.overage_status == Some(ClaudeRateStatus::Rejected))
+                        .and_then(|event| event.overage_resets_at),
                 )
         })
         .reduce(f64::max)
 }
-fn allowed(data: &Value, agent: &Value, now: f64) -> bool {
-    if !rate_evidence_supported(data)
-        || !present(data, "rateLimits")
-        || data
-            .get("ordinaryUsageAllowed")
-            .is_some_and(|v| v != &Value::Bool(true))
+fn allowed(data: &UsageLimitsData, agent: &AgentRecord, now: f64) -> bool {
+    if !supported(data) || data.rate_limits.is_none() || data.ordinary_usage_allowed == Some(false)
     {
         return false;
     }
     let mut measured = false;
     for (id, bucket) in buckets(data, agent) {
-        if !bucket.is_object()
-            || present(bucket, "spendControlReached")
-            || number(&bucket["individualLimit"], "remainingPercent").is_some_and(|p| p <= 0.0)
+        if bucket.spend_control_reached == Some(true)
+            || bucket
+                .individual_limit
+                .as_ref()
+                .and_then(|limit| limit.0.remaining_percent)
+                .is_some_and(|remaining| remaining <= 0.0)
         {
             return false;
         }
@@ -268,23 +420,21 @@ fn allowed(data: &Value, agent: &Value, now: f64) -> bool {
             measured = true;
             continue;
         }
-        if bucket
-            .get("rateLimitReachedType")
-            .is_some_and(|v| !v.is_null())
-            || text(&bucket["claudeRateLimit"], "status") == "rejected"
+        if bucket.rate_limit_reached_type.is_some()
+            || rate_info(bucket.claude_rate_limit.as_ref())
+                .is_some_and(|info| info.status == ClaudeRateStatus::Rejected)
         {
             return false;
         }
-        for key in ["primary", "secondary"] {
-            if !present(bucket, key) {
-                continue;
-            }
-            let window = &bucket[key];
-            let Some(used) = number(window, "usedPercent") else {
+        for window in [bucket.primary.as_ref(), bucket.secondary.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            let Some(used) = window.0.used_percent else {
                 return false;
             };
             measured = true;
-            if used >= 100.0 || number(window, "resetsAt").is_some_and(|t| t <= now) {
+            if used >= 100.0 || window.0.resets_at.is_some_and(|at| at <= now) {
                 return false;
             }
         }
@@ -369,14 +519,14 @@ pub fn tick(s: &Snapshot, limits: &LimitsObservation, now: f64) -> Result<Decisi
             .and_then(|r| r.proof_at.as_ref())
             .is_some_and(|t| t.get() > failed)
             || limits.fresh_for(key, failed, true)
-            || (account(&limits.raw) == key
+            || (limits.account_key() == key
                 && limits.marker.as_ref().is_some_and(|marker| {
                     s.usage_record()
                         .and_then(|r| r.auth_refresh_marker.as_ref())
                         .is_some_and(|old| old.as_str() != marker)
                 }))
     } else if fresh {
-        limits.allowed(&s.agent, now)
+        limits.allowed(s.agent_record(), now)
     } else {
         reset_passed(s, now)
     };
@@ -384,7 +534,7 @@ pub fn tick(s: &Snapshot, limits: &LimitsObservation, now: f64) -> Result<Decisi
     if !recovered {
         // Only a current read replaces the reset that the wait holds.
         let reset = fresh
-            .then(|| limits.reset_at(&s.agent))
+            .then(|| limits.reset_at(s.agent_record()))
             .flatten()
             .or_else(|| s.record_reset_at());
         let due = if auth {
@@ -401,7 +551,7 @@ pub fn tick(s: &Snapshot, limits: &LimitsObservation, now: f64) -> Result<Decisi
         r.update(U::PlannedAt(reset.filter(|t| *t > now)));
         r.update(U::ResetAt(reset));
         r.update(U::LastCheckedAt(
-            limits.raw.get("at").and_then(Value::as_number).cloned(),
+            limits.response.at.and_then(serde_json::Number::from_f64),
         ));
         r.update(U::WaitingForAuth(auth));
         r.update(U::Reason(
@@ -502,8 +652,12 @@ pub fn limits_changed(s: &Snapshot, limits: &LimitsObservation, now: f64) -> Res
     };
     if s.status() != Some(WaitStatus::Scheduled)
         || s.record_is_auth()
-        || present(&limits.raw, "error")
-        || !present(&limits.raw, "data")
+        || limits
+            .response
+            .error
+            .as_deref()
+            .is_some_and(|error| !error.is_empty())
+        || limits.response.data.is_none()
     {
         return Ok(Decision::default());
     }
@@ -514,11 +668,13 @@ pub fn limits_changed(s: &Snapshot, limits: &LimitsObservation, now: f64) -> Res
         ));
     }
     // Telemetry without a blocked window keeps the reset that the wait holds.
-    let reset = limits.reset_at(&s.agent).or_else(|| s.record_reset_at());
+    let reset = limits
+        .reset_at(s.agent_record())
+        .or_else(|| s.record_reset_at());
     let mut r = ProposedRecord::existing(s).expect("validated record");
     r.update(U::ResetAt(reset));
     r.update(U::PlannedAt(reset.filter(|t| *t > now)));
-    if limits.allowed(&s.agent, now) {
+    if limits.allowed(s.agent_record(), now) {
         r.update(U::DueAt(Some(
             now.max(s.record_failed_at().unwrap_or(now) + RESUME_MIN),
         )));
@@ -619,7 +775,7 @@ pub fn record_failure(s: &Snapshot, failure: FailureObservation<'_>, now: f64) -
     } else {
         failure
             .limits
-            .reset_at(&s.agent)
+            .reset_at(s.agent_record())
             .into_iter()
             .chain(failure.error_reset)
             .reduce(f64::max)

@@ -637,7 +637,7 @@ async fn cancel_restores_source_fields_with_null_and_absent_values_exactly() {
                     "Transfer history is unavailable".into(),
                 ),
             );
-            row.extra.insert("nativeFailureHold".into(), json!(true));
+            row.set_native_failure_hold(true);
             AgentRepository::put(tx, &row)
         })
         .await

@@ -136,22 +136,25 @@ pub(crate) fn settle_supervisor_written(
     Ok(Some((row.owner_id, row.id, fingerprint)))
 }
 
-pub(crate) fn hold_unclean_responses(tx: &Transaction<'_>) -> Result<(), CallbackError> {
-    let mut query = tx.prepare("SELECT id FROM runtime_outbox WHERE kind=?1 AND status=?2")?;
-    let ids = query
-        .query_map(
-            params![OutboxKind::ProviderCallback, OutboxStatus::Pending],
-            |row| row.get::<_, String>(0),
-        )?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(query);
-    for id in ids {
-        let mut row: Response = Outbox::get(tx, &id)?.ok_or(CallbackError::Unknown)?;
-        row.status = OutboxStatus::Submitted;
-        row.next_at = None;
-        put_response(tx, &row)?;
-        delivery_in(tx, &row.payload.identity, DeliveryOutcome::Unknown)?;
-    }
+/// Entity hook of the unclean-stop pass for one held callback. It keeps `Submitted`, not
+/// `Unknown`: the connection-loss settlement in `recovery.rs` reads only `Submitted` rows.
+pub(crate) fn hold_response(tx: &Transaction<'_>, id: &str) -> Result<(), CallbackError> {
+    let mut row: Response = Outbox::get(tx, id)?.ok_or(CallbackError::Unknown)?;
+    row.status = OutboxStatus::Submitted;
+    row.next_at = None;
+    put_response(tx, &row)?;
+    delivery_in(tx, &row.payload.identity, DeliveryOutcome::Unknown)?;
+    Ok(())
+}
+
+/// Settle the delivery of an unknown callback response with `outcome`.
+pub(crate) fn resolve_response(
+    tx: &Transaction<'_>,
+    id: &str,
+    outcome: DeliveryOutcome,
+) -> Result<(), CallbackError> {
+    let row: Response = Outbox::get(tx, id)?.ok_or(CallbackError::Unknown)?;
+    delivery_in(tx, &row.payload.identity, outcome)?;
     Ok(())
 }
 
@@ -383,9 +386,10 @@ pub(super) fn saved_reply_signed(
         OutboxStatus::Committed => Err(CallbackError::Stored(
             "completed callback still has a response obligation".into(),
         )),
-        OutboxStatus::Submitted | OutboxStatus::Unknown | OutboxStatus::Unrecognized => {
-            Err(CallbackError::Unknown)
-        }
+        OutboxStatus::Submitted
+        | OutboxStatus::Unknown
+        | OutboxStatus::Cancelled
+        | OutboxStatus::Unrecognized => Err(CallbackError::Unknown),
     }
 }
 
@@ -404,7 +408,10 @@ pub async fn submission_ready(store: &RuntimeStore, reply: &Reply) -> Result<boo
             match saved.status {
                 OutboxStatus::Committed => return Ok(false),
                 OutboxStatus::Pending => {}
-                OutboxStatus::Submitted | OutboxStatus::Unknown | OutboxStatus::Unrecognized => {
+                OutboxStatus::Submitted
+                | OutboxStatus::Unknown
+                | OutboxStatus::Cancelled
+                | OutboxStatus::Unrecognized => {
                     return Err(CallbackError::Unknown);
                 }
             }
@@ -1040,7 +1047,7 @@ mod tests {
         )
         .expect("reply");
         save_reply(&tx, &input, &reply).expect("save");
-        hold_unclean_responses(&tx).expect("unclean hold");
+        crate::unclean_recovery::hold_entities(&tx).expect("unclean hold");
         assert_eq!(
             held_supervisor_operations(&tx, "account", 4).expect("operations"),
             vec![reply.identity.operation_id()]

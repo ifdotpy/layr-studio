@@ -196,3 +196,98 @@ it("deletes and logs a record with an invalid key", async () => {
   expect(rows.has("not-json")).toBe(false);
   expect(console.error).toHaveBeenCalled();
 });
+
+const textFeatures = ["form", "answer", "queue-edit", "reply"] as const;
+
+it("writes each text input kind at once and removes it only on its confirmation", async () => {
+  for (const feature of textFeatures) {
+    const buffer = unsentStore("server", feature);
+    const rowKey = unsentKey("server", feature, "item");
+    await buffer.put("item", `${feature} text`);
+    expect(rows.has(rowKey)).toBe(true);
+    await buffer.deleteIfEqual("item", "older text");
+    expect(await buffer.get("item")).toBe(`${feature} text`);
+    await buffer.deleteIfEqual("item", `${feature} text`);
+    expect(rows.has(rowKey)).toBe(false);
+  }
+});
+
+it("restores each text input kind after a simulated reload", async () => {
+  for (const feature of textFeatures)
+    await unsentStore("server", feature).put("item", `${feature} text`);
+  vi.resetModules();
+  const reloaded = await import("./store.ts");
+  for (const feature of textFeatures)
+    expect(await reloaded.unsentStore("server", feature).get("item")).toBe(
+      `${feature} text`,
+    );
+});
+
+it("keeps a draft, upload, recording, and send until its confirmation and restores it after reload", async () => {
+  const draft = { id: "draft", payload: "text", seq: 1, _deleted: false };
+  const upload = {
+    id: "file",
+    workspace: "workspace",
+    stateDir: "state",
+    agent: "chat",
+    name: "file.txt",
+    size: 3,
+    mime: "text/plain",
+    created: 1,
+    bytes: new Blob(["abc"]),
+  };
+  const recording = {
+    id: "r",
+    chatId: "chat",
+    created: 1,
+    sampleRate: 16000,
+    samples: 0,
+    state: "recording" as const,
+  };
+  const sent = {
+    request: {
+      id: "one",
+      client: "client",
+      number: 1,
+      kind: "send" as const,
+      target: "chat",
+      body: { text: "hello" },
+    },
+    localState: { kind: "stored" as const },
+    workspaceId: "workspace",
+    created: 1,
+    attachments: [],
+  };
+  const sendId = JSON.stringify(["chat", "one"]);
+  const stores = await import("./store.ts");
+  await stores.draftStore("server").put(draft.id, draft);
+  await stores.uploadStore("server").put(upload.id, upload);
+  await stores.recordingStore("server").put("record:r", {
+    kind: "record",
+    value: recording,
+  });
+  await stores.sendStore("server").put(sendId, sent);
+  const before = rows.size;
+  expect(before).toBe(4);
+
+  vi.resetModules();
+  const reloaded = await import("./store.ts");
+  expect(
+    (await reloaded.draftStore("server").loadAll()).map(([id]) => id),
+  ).toEqual([draft.id]);
+  expect(
+    (await reloaded.uploadStore("server").loadAll()).map(([id]) => id),
+  ).toEqual([upload.id]);
+  expect(
+    (await reloaded.recordingStore("server").loadAll()).map(([key]) => key),
+  ).toEqual(["record:r"]);
+  expect(
+    (await reloaded.sendStore("server").loadAll()).map(([id]) => id),
+  ).toEqual([sendId]);
+
+  await reloaded.draftStore("server").delete(draft.id);
+  await reloaded.uploadStore("server").delete(upload.id);
+  await reloaded.recordingStore("server").delete("record:r");
+  await reloaded.sendStore("server").delete(sendId);
+  expect(rows.size).toBe(0);
+});

@@ -1,3 +1,6 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import HistoryWindow from "./components/conversation/transcript/HistoryWindow";
 import assert from "node:assert/strict";
 import { it } from "vitest";
 import {
@@ -313,4 +316,100 @@ it("advances the held window through several forward pages", () => {
   }
   assert.equal(page.items.at(-1)?.id, "m700");
   assert.equal(page.after, null);
+});
+
+it.each(["older", "newer"] as const)(
+  "keeps the visible anchor while advancing a byte-bounded %s page",
+  (direction) => {
+    const all = Array.from({ length: 40 }, (_, index) => item(index));
+    const anchor = direction === "older" ? "m20" : "m19";
+    const page = boundTranscriptPage(
+      all,
+      () => 200_000,
+      direction,
+      {
+        before: "m0",
+        after: "m39",
+        nextBefore: null,
+        nextAfter: null,
+      },
+      anchor,
+    );
+    assert.ok(page.items.some((row) => row.id === anchor));
+    assert.ok(
+      page.items.some((row) =>
+        direction === "older" ? Number(row.at) < 20 : Number(row.at) > 19,
+      ),
+    );
+    if (direction === "newer") assert.equal(page.after, page.items.at(-1)?.id);
+    else assert.equal(page.before, page.items[0]?.id);
+  },
+);
+
+it.each(["older", "newer"] as const)(
+  "renders the retained anchor after %s byte eviction",
+  (direction) => {
+    const rows = Array.from({ length: 40 }, (_, index) => item(index));
+    const anchor = direction === "older" ? "m20" : "m19";
+    const page = boundTranscriptPage(
+      rows,
+      () => 200_000,
+      direction,
+      { before: "m0", after: "m39", nextBefore: null, nextAfter: null },
+      anchor,
+    );
+    const html = renderToStaticMarkup(
+      createElement(HistoryWindow, {
+        rows: page.items.map((message) => ({
+          id: message.id,
+          items: [message] as [Message],
+        })),
+        storageKey: "paging-test",
+        render: (row) =>
+          createElement("div", { "data-message": row.id }, row.items[0].text),
+      }),
+    );
+    assert.match(html, new RegExp(`data-message="${anchor}"`));
+  },
+);
+
+it("keeps enough visible rows below the anchor to avoid clamping an older-page restore", () => {
+  const rows = Array.from({ length: 40 }, (_, index) => item(index));
+  const page = boundTranscriptPage(
+    rows,
+    () => 200_000,
+    "older",
+    {
+      before: "m0",
+      after: "m39",
+      nextBefore: null,
+      nextAfter: null,
+    },
+    "m20",
+    "m24",
+  );
+  const anchorIndex = page.items.findIndex((row) => row.id === "m20");
+  const rowHeight = 100;
+  const viewportHeight = 500;
+  const desiredTop = anchorIndex * rowHeight;
+  const maximumTop = page.items.length * rowHeight - viewportHeight;
+  assert.equal(Math.min(desiredTop, maximumTop), desiredTop);
+});
+
+it("keeps a visible user message addressed by its render key", () => {
+  const rows = Array.from({ length: 40 }, (_, index) =>
+    index === 20
+      ? { ...item(index), role: "user" as const, clientMessageId: "draft" }
+      : item(index),
+  );
+  const page = boundTranscriptPage(
+    rows,
+    () => 200_000,
+    "older",
+    { before: "m0", after: "m39", nextBefore: null, nextAfter: null },
+    "client:draft",
+    "m24",
+  );
+  assert.ok(page.items.some((row) => row.id === "m20"));
+  assert.ok(page.items.some((row) => row.id === "m24"));
 });

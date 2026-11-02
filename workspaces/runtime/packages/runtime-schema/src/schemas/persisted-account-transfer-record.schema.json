@@ -437,6 +437,10 @@
         }
       ],
       "title": "Updated"
+    },
+    "vm": {
+      "title": "Vm",
+      "type": "boolean"
     }
   },
   "required": [

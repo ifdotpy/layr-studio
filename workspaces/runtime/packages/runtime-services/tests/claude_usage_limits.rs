@@ -35,6 +35,77 @@ fn observation(data: Value) -> LimitsObservation {
 }
 
 #[test]
+fn recovery_projection_includes_the_provider_reset_time() {
+    let mut records = snapshot_records("sonnet");
+    records["agent"]["error"] = json!({"codexErrorInfo":"rateLimitExceeded"});
+    let agent = studio_runtime_store::AgentRecord::from_value(records["agent"].clone()).unwrap();
+    let limits = observation(data(100.0));
+    let projection = usage_resume::agent_limit_projection(&limits, &agent, 1000.0);
+    assert_eq!(
+        projection.recovery.unwrap().timing,
+        studio_runtime_schema::usage_limits::RecoveryTiming::Waiting { reset_at: 1300.0 }
+    );
+}
+
+#[test]
+fn recovery_never_uses_another_accounts_limits() {
+    let mut records = snapshot_records("sonnet");
+    records["agent"]["error"] = json!({"codexErrorInfo":"rateLimitExceeded"});
+    records["agent"]["accountKey"] = json!("different");
+    let agent = studio_runtime_store::AgentRecord::from_value(records["agent"].clone()).unwrap();
+    assert!(
+        usage_resume::agent_limit_projection(&observation(data(100.0)), &agent, 1000.0)
+            .recovery
+            .is_none()
+    );
+}
+
+#[test]
+fn reset_confirmation_requires_a_current_provider_read_for_the_same_wait() {
+    use studio_runtime_schema::usage_limits::RecoveryTiming;
+    let mut records = snapshot_records("sonnet");
+    records["agent"]["error"] = json!({"codexErrorInfo":"rateLimitExceeded"});
+    records["agent"]["usageResume"]["resetAt"] = json!(1300.0);
+    let agent = studio_runtime_store::AgentRecord::from_value(records["agent"].clone()).unwrap();
+    let old = LimitsObservation::from_record(
+        json!({"accountKey":"default","at":1000.0,"readAt":1000.0,"data":data(100.0)}),
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        usage_resume::agent_limit_projection(&old, &agent, 1305.0)
+            .recovery
+            .unwrap()
+            .timing,
+        RecoveryTiming::Unconfirmed { reset_at: 1300.0 }
+    );
+    let mut refreshed = data(20.0);
+    refreshed["rateLimits"]["primary"]["resetsAt"] = json!(2300.0);
+    let current = LimitsObservation::from_record(
+        json!({"accountKey":"default","at":1305.0,"readAt":1305.0,"data":refreshed}),
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        usage_resume::agent_limit_projection(&current, &agent, 1305.0)
+            .recovery
+            .unwrap()
+            .timing,
+        RecoveryTiming::Confirmed { reset_at: 1300.0 }
+    );
+    records["agent"]["usageResume"]["accountKey"] = json!("different");
+    let different =
+        studio_runtime_store::AgentRecord::from_value(records["agent"].clone()).unwrap();
+    assert_ne!(
+        usage_resume::agent_limit_projection(&current, &different, 1305.0)
+            .recovery
+            .unwrap()
+            .timing,
+        RecoveryTiming::Confirmed { reset_at: 1300.0 }
+    );
+}
+
+#[test]
 fn sonnet_wait_uses_main_reset_and_ignores_full_opus_bucket() {
     let s = snapshot("claude-sonnet-4-6");
     let full = observation(data(100.0));
@@ -253,7 +324,7 @@ async fn account_limits_change_updates_each_wait_by_its_model() {
             tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", [model, &agent.to_string()]).map_err(studio_runtime_store::StoreError::from)?;
             tx.execute("INSERT INTO runtime_usage_resumes(id,agent,record) VALUES(?1,?1,?2)", [model, &record.to_string()]).map_err(studio_runtime_store::StoreError::from)?;
         }
-        let raw = json!({"accountKey":"default","at":1000.0,"data":data(100.0)});
+        let raw: studio_runtime_schema::usage_limits::UsageLimitsResponse = serde::Deserialize::deserialize(json!({"accountKey":"default","at":1000.0,"data":data(100.0)})).unwrap();
         assert!(stage_limits_changed_for_account(tx, "default", &raw, 1000.0)?);
         Ok::<_, studio_runtime_services::continuation::ContinuationError>(())
     }).await.expect("account telemetry");
@@ -294,11 +365,16 @@ fn ui_eligibility_matches_resume_decisions_on_shared_fixtures() {
         let raw = &case["observation"];
         let limits =
             LimitsObservation::from_record(raw.clone(), None).expect("limits observation is valid");
-        let view = usage_resume::eligibility(raw, agent, 1000.0);
+        let typed_agent = studio_runtime_store::AgentRecord::from_value(agent.clone()).unwrap();
+        let view = serde::Serialize::serialize(
+            &(usage_resume::eligibility(&limits, &typed_agent, 1000.0)),
+            serde_json::value::Serializer,
+        )
+        .unwrap();
         let decision =
             usage_resume::tick(&state, &limits, 1000.0).expect("resume decision succeeds");
         assert_eq!(
-            view["canRun"],
+            view["state"] == "allowed",
             decision
                 .record
                 .expect("resume decision retains its record")
@@ -307,9 +383,12 @@ fn ui_eligibility_matches_resume_decisions_on_shared_fixtures() {
             "{}",
             case["name"]
         );
-        assert_eq!(view["allowed"], limits.allowed(agent, 1000.0));
-        assert_eq!(view["resetAt"], json!(limits.reset_at(agent)));
-        assert_eq!(view["canRun"], case["canRun"], "{}", case["name"]);
+        assert_eq!(
+            view["state"] == "allowed",
+            case["canRun"].as_bool().unwrap(),
+            "{}",
+            case["name"]
+        );
         assert_eq!(view["overage"], case["overage"], "{}", case["name"]);
         assert_eq!(
             view["buckets"]
@@ -334,12 +413,18 @@ fn ui_decision_expires_at_the_first_applicable_window_reset() {
     let agent = &records["agent"];
     let mut raw = json!({"accountKey":"default","at":1000.0,"data":data(20.0)});
     raw["data"]["rateLimits"]["primary"]["resetsAt"] = json!(1002.0);
-    let view = usage_resume::eligibility(&raw, agent, 1000.0);
-    assert_eq!(view["canRun"], true);
+    let typed_agent = studio_runtime_store::AgentRecord::from_value(agent.clone()).unwrap();
+    let limits = LimitsObservation::from_record(raw.clone(), None).unwrap();
+    let view = serde::Serialize::serialize(
+        &(usage_resume::eligibility(&limits, &typed_agent, 1000.0)),
+        serde_json::value::Serializer,
+    )
+    .unwrap();
+    assert_eq!(view["state"], "allowed");
     assert_eq!(view["validUntil"], 1002.0);
     assert_eq!(
-        usage_resume::eligibility(&raw, agent, 1002.0)["canRun"],
-        false
+        usage_resume::eligibility(&limits, &typed_agent, 1002.0).state,
+        studio_runtime_schema::usage_limits::EligibilityState::Blocked
     );
 }
 

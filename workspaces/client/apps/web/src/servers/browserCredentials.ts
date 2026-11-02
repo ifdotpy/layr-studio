@@ -19,7 +19,7 @@ import {
   type PairReceipt,
 } from "./pairing";
 import { deviceKey, replaceDeviceKey } from "./deviceKey";
-import type { StudioServer } from "./registry";
+import { serveOrigin, type StudioServer } from "./registry";
 import { retarget, routesFor, sendRouted } from "./routes";
 import { ACCESS_PROTOCOL_VERSION } from "../generated/multiServerProtocol";
 type Credential = {
@@ -83,6 +83,37 @@ async function signingKey(credential: Credential): Promise<CryptoKey> {
   if (device.id !== credential.clientId)
     throw new Error("The server key is unavailable. Pair this UI again.");
   return device.privateKey;
+}
+/**
+ * A server that trusts this device through the shared list. The device key signs for
+ * it, so no pairing request is sent. The route check later uses the server key that
+ * the trusted list shares.
+ */
+export async function trustedServer(peer: {
+  id: string;
+  label: string;
+  origin: string;
+  publicKey: string;
+}): Promise<StudioServer> {
+  const device = await deviceKey();
+  const origin = serveOrigin(peer.origin);
+  const credentialId = `${peer.id}:${device.id}`;
+  await record("readwrite", (store) =>
+    store.put({
+      id: credentialId,
+      origin,
+      serverId: peer.id,
+      clientId: device.id,
+      publicKey: device.publicKey,
+      targetPublicKey: peer.publicKey,
+    }),
+  );
+  return {
+    id: peer.id,
+    label: peer.label.slice(0, 128) || new URL(origin).hostname,
+    origin,
+    credentialId,
+  };
 }
 export class BrowserServerCredentials implements ServerCredentialAdapter {
   async frameSigningCredential(server: StudioServer) {

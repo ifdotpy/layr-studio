@@ -9,6 +9,20 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(transparent)]
 pub struct SafeInteger(StoredJsonInteger);
+
+impl schemars::JsonSchema for SafeInteger {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "SafeInteger".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({"type":"integer", "minimum":0, "maximum":MAX_SAFE_INTEGER})
+    }
+}
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(transparent)]
 pub struct NonnegativeInteger(f64);

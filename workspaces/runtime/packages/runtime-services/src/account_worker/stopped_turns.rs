@@ -561,14 +561,21 @@ fn ended_turn(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
     stopped_turn(agent, generation).or_else(|| unsettled_stop(agent, generation))
 }
 
+/// Candidate agents of an ended turn. A recovery-enabled chat with no unfinished
+/// turn is an ended turn; the turn rows decide busy, not the agent `in_flight` column.
+fn stopped_turn_candidates_sql() -> String {
+    format!(
+        "SELECT id FROM runtime_agents WHERE account_key=?1 AND ((EXISTS(SELECT 1 FROM chats ch WHERE ch.id=runtime_agents.id AND ch.auto_wake=0) AND has_disconnect_recovery=1 AND NOT {busy}) OR json_extract(record,'$.startAttempt.interrupt.outcome') IN ('unknown','unsent'))",
+        busy = studio_runtime_store::domain::chat_busy_sql("runtime_agents.id"),
+    )
+}
+
 fn stopped_turns(
     tx: &rusqlite::Transaction<'_>,
     account: &str,
     generation: u64,
 ) -> Result<Vec<StoppedTurn>, studio_runtime_store::StoreError> {
-    let mut statement = tx.prepare_cached(
-        "SELECT id FROM runtime_agents WHERE account_key=?1 AND ((EXISTS(SELECT 1 FROM chats ch WHERE ch.id=runtime_agents.id AND ch.auto_wake=0) AND has_disconnect_recovery=1 AND COALESCE(in_flight,0)=0) OR json_extract(record,'$.startAttempt.interrupt.outcome') IN ('unknown','unsent'))",
-    )?;
+    let mut statement = tx.prepare_cached(&stopped_turn_candidates_sql())?;
     let ids = statement
         .query_map([account], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
@@ -767,5 +774,45 @@ mod stop_epoch_tests {
             let turn = unsettled_stop(&staged(agent_epoch, attempt_epoch), 3);
             assert_eq!(turn.map(|turn| turn.epoch), found.then_some(attempt_epoch));
         }
+    }
+}
+
+#[cfg(test)]
+mod busy_candidate_tests {
+    use super::*;
+
+    #[test]
+    fn recovery_candidates_exclude_busy_chats() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(studio_runtime_store::agent_columns::agent_table_sql())
+            .unwrap();
+        db.execute_batch(&studio_runtime_store::domain::tables_sql())
+            .unwrap();
+        for id in ["busy", "idle"] {
+            let record = json!({"id":id,"provider":"codex","accountKey":"acct","status":"idle",
+                "inFlight":true,"disconnectRecovery":{}});
+            db.execute(
+                "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                rusqlite::params![id, record.to_string()],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO chats(id,state,status,auto_wake) VALUES(?1,'idle','idle',0)",
+                [id],
+            )
+            .unwrap();
+        }
+        db.execute(
+            "INSERT INTO turns(id,chat,state) VALUES('t1','busy','starting')",
+            [],
+        )
+        .unwrap();
+        let mut statement = db.prepare(&stopped_turn_candidates_sql()).unwrap();
+        let ids = statement
+            .query_map(["acct"], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(ids, ["idle"]);
     }
 }

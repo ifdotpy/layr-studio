@@ -195,6 +195,25 @@ impl Outbox {
             .collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Unclean-stop hold: every pending row of `kind` becomes unknown and loses its
+    /// due time. Returns the held ids so the caller runs the kind's entity hook.
+    pub fn hold_pending(tx: &Transaction<'_>, kind: OutboxKind) -> rusqlite::Result<Vec<String>> {
+        let ids = {
+            let mut query =
+                tx.prepare("SELECT id FROM runtime_outbox WHERE kind=?1 AND status=?2")?;
+            query
+                .query_map(params![kind, OutboxStatus::Pending], |row| row.get(0))?
+                .collect::<rusqlite::Result<Vec<String>>>()?
+        };
+        for id in &ids {
+            tx.execute(
+                "UPDATE runtime_outbox SET status=?2,next_at=NULL WHERE id=?1",
+                params![id, OutboxStatus::Unknown],
+            )?;
+        }
+        Ok(ids)
+    }
+
     /// Call only in the transaction committing delivery/settlement evidence to the owner.
     pub fn delete_settled(tx: &Transaction<'_>, id: &str, signature: &str) -> Result<bool> {
         Ok(tx.execute(

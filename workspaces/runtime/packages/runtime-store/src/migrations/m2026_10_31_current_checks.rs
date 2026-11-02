@@ -11,7 +11,7 @@ const SERVER_OUTBOX_DDL: &str = r#"CREATE TABLE runtime_server_outbox (
                     state TEXT NOT NULL, result TEXT, attempts INTEGER NOT NULL DEFAULT 0,
                     next_at REAL NOT NULL DEFAULT 0, error TEXT, created_at REAL NOT NULL DEFAULT 0, completed_at REAL NOT NULL DEFAULT 0, fingerprint TEXT, admission TEXT, receipt_state TEXT GENERATED ALWAYS AS (state) VIRTUAL NOT NULL CHECK("receipt_state" IN ('queued','running','waiting','complete')), receipt_kind TEXT GENERATED ALWAYS AS (json_extract(body,'$.action')) VIRTUAL NOT NULL CHECK("receipt_kind" IN ('event','input','message','move_send','move_status','location_info','location_matches','stop','exec_event','projects','projects.changed','folders','git','export','chunk','exec_read','exec_input','exec_cancel','release','update.offer','update.export','update.chunk','update.release','backup.put','task','complaint','context','directory','chat_read','move_manage','move_interrupt','move_spawn','exec','exec_receipt','browser_callback','add_location','remove_location','move_validate','move_begin','device_trust')))"#;
 
-fn rebuild(
+pub(super) fn rebuild(
     tx: &Transaction<'_>,
     table: &str,
     ddl: &str,

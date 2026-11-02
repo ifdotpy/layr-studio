@@ -415,6 +415,27 @@ impl StartGate {
         }
     }
 
+    /// Busy agents of an account (an unfinished turn of the chat), by account.
+    fn busy_agents_sql() -> String {
+        format!(
+            "SELECT id FROM runtime_agents \
+         WHERE account_key=?1 \
+           AND {} \
+           AND deleted_at IS NULL",
+            studio_runtime_store::domain::chat_busy_sql("runtime_agents.id")
+        )
+    }
+
+    /// Whether one agent is still busy (an unfinished turn of the chat).
+    fn busy_agent_sql() -> String {
+        format!(
+            "SELECT 1 FROM runtime_agents WHERE id=?1 \
+           AND {} \
+           AND deleted_at IS NULL",
+            studio_runtime_store::domain::chat_busy_sql("runtime_agents.id")
+        )
+    }
+
     /// Count the in-flight turns of this account once, when the gate is new.
     async fn seed(&self, sources: &StartSources) -> Result<(), ContinuationError> {
         if self.lock().seeded {
@@ -424,12 +445,7 @@ impl StartGate {
         let in_flight = sources
             .store
             .read_async("runtime-services/account_start_gate", move |db| {
-                let mut statement = db.prepare_cached(
-                    "SELECT id FROM runtime_agents \
-                     WHERE account_key=?1 \
-                       AND in_flight=1 \
-                       AND deleted_at IS NULL",
-                )?;
+                let mut statement = db.prepare_cached(&Self::busy_agents_sql())?;
                 let rows = statement
                     .query_map([account], |row| row.get::<_, String>(0))?
                     .collect::<Result<Vec<_>, _>>()?;
@@ -461,11 +477,7 @@ impl StartGate {
         }
         let settled = store
             .read_async("runtime-services/account_start_gate", move |db| {
-                let mut statement = db.prepare_cached(
-                    "SELECT 1 FROM runtime_agents WHERE id=?1 \
-                       AND in_flight=1 \
-                       AND deleted_at IS NULL",
-                )?;
+                let mut statement = db.prepare_cached(&Self::busy_agent_sql())?;
                 let mut settled = Vec::new();
                 for agent in claimed {
                     if !statement.exists([&agent])? {
@@ -1041,5 +1053,42 @@ mod tests {
                 Some(claude)
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod busy_agent_sql_tests {
+    use super::*;
+
+    #[test]
+    fn busy_agent_queries_read_the_unfinished_turn() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(studio_runtime_store::agent_columns::agent_table_sql())
+            .unwrap();
+        db.execute_batch(&studio_runtime_store::domain::tables_sql())
+            .unwrap();
+        for id in ["busy", "idle"] {
+            let record = json!({"id":id,"provider":"codex","accountKey":"acct","status":"idle","inFlight":true});
+            db.execute(
+                "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                rusqlite::params![id, record.to_string()],
+            )
+            .unwrap();
+        }
+        db.execute(
+            "INSERT INTO turns(id,chat,state) VALUES('t1','busy','starting')",
+            [],
+        )
+        .unwrap();
+        let mut seeded = db.prepare(&StartGate::busy_agents_sql()).unwrap();
+        let ids = seeded
+            .query_map(["acct"], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(ids, ["busy"]);
+        let mut settled = db.prepare(&StartGate::busy_agent_sql()).unwrap();
+        assert!(settled.exists(["busy"]).unwrap());
+        assert!(!settled.exists(["idle"]).unwrap());
     }
 }

@@ -20,12 +20,14 @@ pub(crate) fn inherit_claude_permissions(
     let inherited = if parent["provider"] == ProviderKind::Claude.key() {
         parent
             .get("permissionMode")
+            .filter(|value| !value.is_null())
             .map(PermissionMode::deserialize)
             .transpose()
             .map_err(|_| "Invalid parent Claude permission mode")?
             .unwrap_or(PermissionMode::Default)
     } else {
         root.get("permissionMode")
+            .filter(|value| !value.is_null())
             .map(PermissionMode::deserialize)
             .transpose()
             .map_err(|_| "Invalid root permission mode")?
@@ -47,6 +49,28 @@ pub(crate) fn inherit_claude_permissions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn null_permission_inherits_same_default_as_absence() {
+        for provider in ["claude", "codex"] {
+            for mode in [None, Some(Value::Null)] {
+                let mut parent = json!({"provider":provider});
+                if let Some(mode) = mode {
+                    parent["permissionMode"] = mode;
+                }
+                let mut child = json!({"provider":"claude", "role":"implementer"});
+                inherit_claude_permissions(&mut child, &parent, &parent, None).unwrap();
+                assert_eq!(
+                    child["permissionMode"],
+                    if provider == "claude" {
+                        "default"
+                    } else {
+                        "bypassPermissions"
+                    }
+                );
+            }
+        }
+    }
 
     #[test]
     fn child_inherits_canonical_permission_mode() {

@@ -1,3 +1,4 @@
+import { AccessClientStatus } from "../generated/api";
 import type { ConnectionHealth } from "../sync/connectionState";
 import type { StudioServer } from "./registry";
 import type { DiscoveredServer } from "./discoveryModel";
@@ -24,7 +25,7 @@ export function serverRows(
     const registered = servers.find((row) => row.id === server.id);
     const connection = statuses[server.id];
     const status: ServerStatus =
-      peer?.status === "revoked"
+      peer?.status === AccessClientStatus.revoked
         ? "Revoked"
         : connection === "live"
           ? "Active"
@@ -34,9 +35,9 @@ export function serverRows(
               ? "Update required"
               : server.id === "local"
                 ? "Online"
-                : peer?.status === "discovered"
+                : peer?.status === AccessClientStatus.discovered
                   ? "Discovered"
-                  : peer?.status === "unreachable"
+                  : peer?.status === AccessClientStatus.unreachable
                     ? "Unreachable"
                     : "Paired";
     return { server, peer, registered, status };

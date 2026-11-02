@@ -343,3 +343,133 @@ fn review2_stages_linked_repository_root_mode() {
         0o750
     );
 }
+
+/// Extended attribute name for fixtures, or None when the temporary folder does not support them.
+fn fixture_xattr(root: &Path) -> Option<&'static str> {
+    use rustix::fs::{XattrFlags, lsetxattr};
+    let attr = if cfg!(target_os = "macos") {
+        "com.studio.fixture"
+    } else {
+        "user.studio.fixture"
+    };
+    let probe = root.join("probe");
+    fs::write(&probe, "").expect("fixture operation succeeds");
+    match lsetxattr(&probe, attr, b"attribute", XattrFlags::empty()) {
+        Ok(()) => Some(attr),
+        Err(error) if std::io::Error::from(error).kind() == std::io::ErrorKind::Unsupported => None,
+        Err(error) => panic!("fixture xattr probe failed: {error}"),
+    }
+}
+
+#[test]
+fn import_stage_copies_xattrs_of_read_only_files_and_folders() {
+    use rustix::fs::{XattrFlags, lgetxattr, lsetxattr};
+    let root = tempfile::tempdir().expect("fixture operation succeeds");
+    let Some(attr) = fixture_xattr(root.path()) else {
+        eprintln!("skipped: temporary folder does not support extended attributes");
+        return;
+    };
+    let source = root.path().join("source");
+    let destination = root.path().join("destination");
+    fs::create_dir_all(source.join("locked")).expect("fixture operation succeeds");
+    fs::create_dir(&destination).expect("fixture operation succeeds");
+    fs::write(source.join("locked/readonly"), "data").expect("fixture operation succeeds");
+    lsetxattr(
+        source.join("locked/readonly"),
+        attr,
+        b"attribute",
+        XattrFlags::empty(),
+    )
+    .expect("fixture operation succeeds");
+    fs::set_permissions(
+        source.join("locked/readonly"),
+        fs::Permissions::from_mode(0o444),
+    )
+    .expect("fixture operation succeeds");
+    lsetxattr(
+        source.join("locked"),
+        attr,
+        b"attribute",
+        XattrFlags::empty(),
+    )
+    .expect("fixture operation succeeds");
+    fs::set_permissions(source.join("locked"), fs::Permissions::from_mode(0o555))
+        .expect("fixture operation succeeds");
+    let mut plan = Plan::new(&source, false, &destination).expect("fixture operation succeeds");
+    for entry in &mut plan.entries {
+        entry.cloneable = false;
+    }
+    plan.stage(&destination)
+        .expect("import copies read-only files and folders with extended attributes");
+    let mut value = [0u8; 64];
+    let len = lgetxattr(destination.join("locked/readonly"), attr, &mut value)
+        .expect("fixture operation succeeds");
+    assert_eq!(&value[..len], b"attribute");
+    assert_eq!(
+        fs::read(destination.join("locked/readonly")).expect("fixture operation succeeds"),
+        b"data"
+    );
+    assert_eq!(
+        fs::metadata(destination.join("locked/readonly"))
+            .expect("fixture operation succeeds")
+            .mode()
+            & 0o7777,
+        0o444
+    );
+    let len = lgetxattr(destination.join("locked"), attr, &mut value)
+        .expect("fixture operation succeeds");
+    assert_eq!(&value[..len], b"attribute");
+    // Restore write access so the temporary folder can be removed.
+    fs::set_permissions(
+        destination.join("locked"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .expect("fixture operation succeeds");
+    fs::set_permissions(source.join("locked"), fs::Permissions::from_mode(0o755))
+        .expect("fixture operation succeeds");
+}
+
+#[test]
+fn import_restore_writes_xattrs_of_read_only_folders() {
+    use rustix::fs::{XattrFlags, lgetxattr, lsetxattr};
+    let root = tempfile::tempdir().expect("fixture operation succeeds");
+    let Some(attr) = fixture_xattr(root.path()) else {
+        eprintln!("skipped: temporary folder does not support extended attributes");
+        return;
+    };
+    let source = root.path().join("source");
+    let destination = root.path().join("destination");
+    fs::create_dir_all(source.join("locked")).expect("fixture operation succeeds");
+    fs::create_dir(&destination).expect("fixture operation succeeds");
+    lsetxattr(
+        source.join("locked"),
+        attr,
+        b"attribute",
+        XattrFlags::empty(),
+    )
+    .expect("fixture operation succeeds");
+    fs::set_permissions(source.join("locked"), fs::Permissions::from_mode(0o555))
+        .expect("fixture operation succeeds");
+    // The folder import creates the read-only folder without its attributes.
+    let locked = destination.join("locked");
+    fs::create_dir(&locked).expect("fixture operation succeeds");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o555))
+        .expect("fixture operation succeeds");
+    let plan = Plan::new(&source, false, &destination).expect("fixture operation succeeds");
+    plan.restore_directory_attributes(&destination)
+        .expect("restore writes attributes of read-only folders");
+    let mut value = [0u8; 64];
+    let len = lgetxattr(&locked, attr, &mut value).expect("fixture operation succeeds");
+    assert_eq!(&value[..len], b"attribute");
+    assert_eq!(
+        fs::metadata(&locked)
+            .expect("fixture operation succeeds")
+            .mode()
+            & 0o7777,
+        0o555
+    );
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755))
+        .expect("fixture operation succeeds");
+    fs::set_permissions(source.join("locked"), fs::Permissions::from_mode(0o755))
+        .expect("fixture operation succeeds");
+}

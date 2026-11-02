@@ -2604,7 +2604,7 @@ export interface components {
        * @enum {string}
        */
       action: "accept_invite";
-      invitation: components["schemas"]["AccessInvitation"];
+      invitation: components["schemas"]["AccessInvitationRequest"];
       /** Requestid */
       requestId: string;
     };
@@ -2643,135 +2643,74 @@ export interface components {
       /** Sequence */
       sequence: number;
     };
-    /** AccessClient */
+    /** @description Public projection of a stored client. Missing required fields become null. */
     AccessClient: {
-      /**
-       * Alias
-       * @default null
-       */
-      alias?: null | string | undefined;
-      /**
-       * Autopair
-       * @default null
-       */
+      alias?: string | null | undefined;
       autoPair?: boolean | null | undefined;
-      /** Clientid */
       clientId: string;
-      /** Created */
       created: number;
-      /** Id */
       id: string;
-      /**
-       * Kind
-       * @enum {string}
-       */
-      kind: "ui" | "server";
-      /** Label */
+      kind: components["schemas"]["AccessClientKind"];
       label: string;
-      /** Lastaccess */
-      lastAccess: null | number;
-      /**
-       * Lastseen
-       * @default null
-       */
-      lastSeen?: null | number | undefined;
-      /** Origin */
-      origin: null | string;
-      /** Publickey */
+      lastAccess: number | null;
+      lastSeen?: number | null | undefined;
+      origin: string | null;
       publicKey: string;
-      /**
-       * Reachability
-       * @default null
-       */
-      reachability?:
-        | ("reachable" | "unreachable" | "unknown")
-        | null
-        | undefined;
-      /**
-       * Replacedby
-       * @description The server identity that succeeds this lost identity.
-       * @default null
-       */
-      replacedBy?: null | string | undefined;
-      /** Revoked */
-      revoked: null | number;
-      /** Serverid */
-      serverId: null | string;
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: "paired" | "revoked" | "discovered" | "unreachable";
-      /**
-       * Tailscaleuser
-       * @description The Tailscale owner; null for the previous identity of this server after a historical identity replacement.
-       */
-      tailscaleUser: null | string;
+      reachability?: components["schemas"]["Reachability"] | null | undefined;
+      replacedBy?: string | null | undefined;
+      revoked: number | null;
+      serverId: string | null;
+      status: components["schemas"]["AccessClientStatus"];
+      tailscaleUser: string | null;
     };
-    /** AccessInvitation */
+    /** @enum {string} */
+    AccessClientKind: "ui" | "server";
+    /** @enum {string} */
+    AccessClientStatus: "paired" | "revoked" | "discovered" | "unreachable";
     AccessInvitation: {
-      /** Expires */
+      /** @description Expiry in Unix seconds, including fractional seconds. */
       expires: number;
-      /** Inviteid */
       inviteId: string;
-      /** Label */
       label: string;
-      /** Origin */
       origin: string;
-      /**
-       * Protocol
-       * @constant
-       */
+      /** @constant */
       protocol: 1;
-      /** Publickey */
       publicKey: string;
-      /** Serverid */
       serverId: string;
-      /** Tailscaleuser */
       tailscaleUser: string;
-      /** Token */
       token: string;
     };
-    /** AccessSettings */
+    AccessInvitationRequest: {
+      expires: number;
+      inviteId: string;
+      label: string;
+      origin: components["schemas"]["Origin"];
+      protocol: number;
+      publicKey: string;
+      serverId: string;
+      tailscaleUser: string;
+      token: string;
+    };
     AccessSettings: {
-      /**
-       * Aliases
-       * @default {}
-       */
+      /** @default {} */
       aliases?:
         | {
             [key: string]: string;
           }
         | undefined;
-      /** Autopair */
       autoPair: boolean;
-      /**
-       * Autoupdate
-       * @description Install a newer build that a paired server runs (docs/peer-updates.md).
-       * @default true
-       */
+      /** @default true */
       autoUpdate?: boolean | undefined;
     };
-    /** AccessSnapshot */
     AccessSnapshot: {
-      /** Clients */
       clients: components["schemas"]["AccessClient"][];
       identity: components["schemas"]["ServerIdentity"];
-      /**
-       * Identityalerts
-       * @description Warnings about references to previous server identities.
-       * @default []
-       */
+      /** @default [] */
       identityAlerts?: components["schemas"]["IdentityAlert"][] | undefined;
-      /** Invites */
       invites: components["schemas"]["InviteSummary"][];
-      /**
-       * Protocol
-       * @constant
-       */
+      /** @constant */
       protocol: 1;
-      /** Servers */
-      servers: components["schemas"]["DiscoveredServer"][];
+      servers: components["schemas"]["AccessClient"][];
       settings: components["schemas"]["AccessSettings"];
     };
     /**
@@ -3126,10 +3065,26 @@ export interface components {
     };
     /** @description Server-owned account presentation; each field is derived from the same observation. */
     AccountLimitsProjection: {
+      /** @default {} */
+      agents: {
+        [key: string]: components["schemas"]["AgentLimitProjection"];
+      };
       buckets: components["schemas"]["BucketProjection"];
       reset: components["schemas"]["ResetProjection"];
       runway: components["schemas"]["WeeklyRunway"];
+      status: components["schemas"]["AccountLimitsStatus"];
     };
+    AccountLimitsStatus:
+      | {
+          /** @constant */
+          kind: "current";
+        }
+      | {
+          /** @constant */
+          kind: "checking";
+          /** Format: double */
+          resetAt: number;
+        };
     /** AccountLoginResponse */
     AccountLoginResponse: {
       /** Accountkey */
@@ -4558,6 +4513,10 @@ export interface components {
       text: string;
       /** Title */
       title: string;
+    };
+    AgentLimitProjection: {
+      eligibility: components["schemas"]["UsageEligibility"];
+      recovery: components["schemas"]["LimitRecovery"] | null;
     };
     /**
      * AgentMode
@@ -8154,7 +8113,8 @@ export interface components {
         | "message"
         | "project"
         | "room"
-        | "work";
+        | "work"
+        | "outbox";
       rev: number;
       rows: components["schemas"]["SyncEntity"][];
       /** @enum {string} */
@@ -9539,6 +9499,12 @@ export interface components {
        */
       skillRoot?: null | string | undefined;
     };
+    BucketCreditBalance: string | number | boolean;
+    BucketCredits: {
+      balance?: components["schemas"]["BucketCreditBalance"] | null | undefined;
+      hasCredits?: boolean | null | undefined;
+      unlimited?: boolean | null | undefined;
+    };
     BucketProjection: {
       current: components["schemas"]["BucketState"];
       next: components["schemas"]["BucketState"];
@@ -9922,23 +9888,19 @@ export interface components {
        */
       turnId?: null | string | undefined;
     };
-    /** ChatEntityDto */
     ChatEntityDto: {
-      /** Id */
       id: string;
-      /** Kind */
-      kind?: "chat" | null | undefined;
-      /** Lastmessageat */
-      lastMessageAt?: null | number | undefined;
-      /** Members */
+      kind?: components["schemas"]["ChatKind"] | null | undefined;
+      /** Format: double */
+      lastMessageAt?: number | null | undefined;
       members?: string[] | null | undefined;
-      /** Messagecount */
+      /** Format: uint64 */
       messageCount?: number | null | undefined;
-      /** Name */
-      name?: null | string | undefined;
-      /** Tail */
-      tail?: null | string | undefined;
+      name?: string | null | undefined;
+      tail?: string | null | undefined;
     };
+    /** @enum {string} */
+    ChatKind: "chat";
     /** ChatMessage */
     ChatMessage: {
       /** Created */
@@ -9959,6 +9921,12 @@ export interface components {
       seq: number;
       /** Text */
       text: string;
+    };
+    /** @enum {string} */
+    ChatOperationalKind: "answer" | "error" | "working" | "paused" | "none";
+    ChatOperationalStatus: {
+      kind: components["schemas"]["ChatOperationalKind"];
+      label: string;
     };
     /** ChatRead */
     ChatRead: {
@@ -10648,6 +10616,39 @@ export interface components {
       /** @default null */
       options?: components["schemas"]["ClaudeOptions"] | null | undefined;
     };
+    ClaudeRateInfo: {
+      isUsingOverage?: boolean | null | undefined;
+      overageInUse?: boolean | null | undefined;
+      /** Format: double */
+      overageResetsAt?: number | null | undefined;
+      overageStatus?:
+        | components["schemas"]["ClaudeRateStatus"]
+        | null
+        | undefined;
+      rateLimitType?:
+        | components["schemas"]["ClaudeRateType"]
+        | null
+        | undefined;
+      /** Format: double */
+      resetsAt?: number | null | undefined;
+      status: components["schemas"]["ClaudeRateStatus"];
+      /** Format: double */
+      utilization?: number | null | undefined;
+    };
+    /** @description Unknown provider evidence is retained only as an unsupported decision. */
+    ClaudeRateLimit:
+      | components["schemas"]["ClaudeRateInfo"]
+      | components["schemas"]["UnsupportedRateInfo"];
+    /** @enum {string} */
+    ClaudeRateStatus: "allowed" | "allowed_warning" | "rejected";
+    /** @enum {string} */
+    ClaudeRateType:
+      | "five_hour"
+      | "seven_day"
+      | "seven_day_opus"
+      | "seven_day_sonnet"
+      | "seven_day_overage_included"
+      | "overage";
     ClaudeRepairReport: {
       invalidSequence: boolean;
       nativeHistoryConfirmed: boolean | null;
@@ -11003,7 +11004,21 @@ export interface components {
     CommandRequest:
       | components["schemas"]["CommandRequestSend"]
       | components["schemas"]["CommandRequestWithdraw"]
-      | components["schemas"]["CommandRequestStop"];
+      | components["schemas"]["CommandRequestStop"]
+      | components["schemas"]["CommandRequestResolve"];
+    CommandRequestResolve: {
+      body: components["schemas"]["CommandResolveBody"];
+      client: string;
+      id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "resolve";
+      number: number;
+      /** @description Outbox entry id */
+      target: string;
+    };
     CommandRequestSend: {
       body: components["schemas"]["CommandSendBody"];
       client: string;
@@ -11039,6 +11054,10 @@ export interface components {
       kind: "withdraw";
       number: number;
       target: string;
+    };
+    CommandResolveBody: {
+      /** @enum {string} */
+      action: "retry" | "delivered" | "discard";
     };
     CommandResponse: {
       ref_id: string;
@@ -12659,76 +12678,7 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
-    /**
-     * DiscoveredServer
-     * @description Stored discovery record; ``ServerDiscovery.servers`` passes it through.
-     */
-    DiscoveredServer: {
-      /**
-       * Alias
-       * @default null
-       */
-      alias?: null | string | undefined;
-      /**
-       * Autopair
-       * @default null
-       */
-      autoPair?: boolean | null | undefined;
-      /** Clientid */
-      clientId: string;
-      /** Created */
-      created: number;
-      /** Id */
-      id: string;
-      /**
-       * Kind
-       * @enum {string}
-       */
-      kind: "ui" | "server";
-      /** Label */
-      label: string;
-      /** Lastaccess */
-      lastAccess: null | number;
-      /**
-       * Lastseen
-       * @default null
-       */
-      lastSeen?: null | number | undefined;
-      /** Origin */
-      origin: null | string;
-      /** Publickey */
-      publicKey: string;
-      /**
-       * Reachability
-       * @default null
-       */
-      reachability?:
-        | ("reachable" | "unreachable" | "unknown")
-        | null
-        | undefined;
-      /**
-       * Replacedby
-       * @description The server identity that succeeds this lost identity.
-       * @default null
-       */
-      replacedBy?: null | string | undefined;
-      /** Revoked */
-      revoked: null | number;
-      /** Serverid */
-      serverId: null | string;
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: "paired" | "revoked" | "discovered" | "unreachable";
-      /**
-       * Tailscaleuser
-       * @description The Tailscale owner; null for the previous identity of this server after a historical identity replacement.
-       */
-      tailscaleUser: null | string;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
-    };
+    DiscoveredServer: components["schemas"]["AccessClient"];
     /** DiscoverServers */
     DiscoverServers: {
       /**
@@ -12826,19 +12776,25 @@ export interface components {
        */
       kind: "drafts";
     };
-    /** EdgeEntityDto */
     EdgeEntityDto: {
-      /** Id */
       id: string;
-      /** Kind */
-      kind?: ("chat" | "spawn") | null | undefined;
-      /** Source */
-      source?: null | string | undefined;
-      /** Target */
-      target?: null | string | undefined;
+      /** @default null */
+      kind?: components["schemas"]["EdgeKind"] | null | undefined;
+      /** @default null */
+      source?: string | null | undefined;
+      /** @default null */
+      target?: string | null | undefined;
     };
     /** @enum {string} */
+    EdgeKind: "chat" | "spawn";
+    /** @enum {string} */
     ElicitationAction: "accept" | "decline" | "cancel";
+    EligibilityBucket: {
+      id: string;
+      overageAllowed: boolean;
+    };
+    /** @enum {string} */
+    EligibilityState: "stale" | "allowed" | "blocked";
     /** EmptyTransferRecoveryRecordResponse */
     EmptyTransferRecoveryRecordResponse: {
       /**
@@ -14023,25 +13979,15 @@ export interface components {
         [key: string]: number;
       };
     };
-    /**
-     * IdentityAlert
-     * @description A server identity change that leaves live references to the lost identity.
-     */
     IdentityAlert: {
-      /**
-       * Code
-       * @enum {string}
-       */
-      code: "peer_identity_changed" | "local_identity_changed";
-      /** Detail */
+      code: components["schemas"]["IdentityAlertCode"];
       detail: string;
-      /** Newserverid */
       newServerId: string;
-      /** Oldserverid */
       oldServerId: string;
-      /** Origin */
-      origin: null | string;
+      origin?: string | null | undefined;
     };
+    /** @enum {string} */
+    IdentityAlertCode: "peer_identity_changed" | "local_identity_changed";
     IdleCompactionSettings: {
       /** @default 150000 */
       minTokens: number;
@@ -14099,30 +14045,20 @@ export interface components {
       /** Threadid */
       threadId: string;
     };
-    /** InvitationResponse */
     InvitationResponse: {
-      /** Expires */
+      /** @description Expiry in Unix seconds, including fractional seconds. */
       expires: number;
       invitation: components["schemas"]["AccessInvitation"];
     };
-    /**
-     * InviteStatus
-     * @enum {string}
-     */
+    /** @enum {string} */
     InviteStatus: "open" | "used";
-    /** InviteSummary */
     InviteSummary: {
-      /** Created */
+      /** @description Creation time in Unix seconds, including fractional seconds. */
       created: number;
-      /** Expires */
+      /** @description Unix seconds, including fractional seconds. */
       expires: number;
-      /** Inviteid */
       inviteId: string;
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: "open" | "used";
+      status: components["schemas"]["InviteStatus"];
     };
     JsonObjectResponse: {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
@@ -14221,6 +14157,12 @@ export interface components {
      * @enum {string}
      */
     LimitColor: "paused" | "unread" | "answer" | "error";
+    LimitRecovery: {
+      action: components["schemas"]["RecoveryAction"];
+      message: string;
+      timing: components["schemas"]["RecoveryTiming"];
+      title: string;
+    };
     /** LimitResetResponse */
     LimitResetResponse: {
       /** Account Id */
@@ -16537,6 +16479,9 @@ export interface components {
       /** @default null */
       read_state?: components["schemas"]["ReadStateBody"] | null | undefined;
     };
+    Origin: string;
+    /** @enum {string} */
+    Overage: "allowed" | "in_use" | "rejected" | "unavailable";
     /** PairRequest */
     PairRequest: {
       /** Inviteid */
@@ -18680,6 +18625,8 @@ export interface components {
       /** Version */
       version: string;
     };
+    /** @description Public projection of a stored client, with missing required fields normalized to null. */
+    PublicAccessClient: components["schemas"]["AccessClient"];
     /** PullRequest */
     PullRequest: {
       /**
@@ -18918,88 +18865,78 @@ export interface components {
       /** Revision */
       revision: string;
     };
+    RadioControls: {
+      busy: boolean;
+      busyNotice: string | null;
+      canPass: boolean;
+      inputBlocked: boolean;
+      speaking: boolean;
+      stopping: boolean;
+    };
     /**
      * RadioStatus
      * @enum {string}
      */
     RadioStatus: "idle" | "waiting" | "speaking" | "stopping" | "blocked";
-    /**
-     * RateLimitBucket
-     * @description Known rate-limit fields plus provider-owned fields passed through unchanged.
-     */
     RateLimitBucket: {
+      claudeRateLimit?:
+        | components["schemas"]["ClaudeRateLimit"]
+        | null
+        | undefined;
+      credits?: components["schemas"]["BucketCredits"] | null | undefined;
       individualLimit?:
         | components["schemas"]["RateLimitIndividualLimit"]
         | null
         | undefined;
-      /** Limitid */
       limitId?: string | null | undefined;
-      /** Limitname */
       limitName?: string | null | undefined;
-      /** Plantype */
       planType?: string | null | undefined;
       primary?: components["schemas"]["RateLimitWindow"] | null | undefined;
-      /** Ratelimitreachedtype */
       rateLimitReachedType?: string | null | undefined;
       secondary?: components["schemas"]["RateLimitWindow"] | null | undefined;
-      /** Spendcontrolreached */
       spendControlReached?: boolean | null | undefined;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
     RateLimitBucketDto: components["schemas"]["RateLimitBucket"];
-    /** RateLimitIndividualLimit */
     RateLimitIndividualLimit: {
-      /** Remainingpercent */
+      /** Format: double */
       remainingPercent?: number | null | undefined;
     };
-    /**
-     * RateLimitResetCredit
-     * @description A provider reset-credit record; native service fields remain extensible.
-     */
     RateLimitResetCredit: {
-      /** Expiresat */
+      description?: string | null | undefined;
+      /** Format: double */
       expiresAt?: number | null | undefined;
-      /** Grantedat */
+      /** Format: double */
       grantedAt?: number | null | undefined;
-      /** Id */
       id: string;
-      /** Resettype */
       resetType: string;
-      /** Status */
       status: string;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
+      title?: string | null | undefined;
     };
-    /**
-     * RateLimitResetCredits
-     * @description Provider-owned reset-credit summary with the known count and credit fields.
-     */
     RateLimitResetCredits: {
-      /** Availablecount */
-      availableCount?: number | null | undefined;
-      /** Credits */
-      credits?: components["schemas"]["RateLimitResetCredit"][] | undefined;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
+      availableCount?:
+        | components["schemas"]["StoredJsonInteger"]
+        | null
+        | undefined;
+      /** @default [] */
+      credits: components["schemas"]["RateLimitResetCredit"][];
     };
     RateLimitsDataDto: components["schemas"]["UsageLimitsData"];
+    /** @description The retained observation and its server-owned presentation travel together. */
     RateLimitView: {
-      observation: components["schemas"]["AccountRateLimitsDto"];
+      observation: components["schemas"]["UsageLimitsResponse"];
       projection: components["schemas"]["AccountLimitsProjection"];
     };
-    /** RateLimitWindow */
     RateLimitWindow: {
-      /** Resetsat */
+      /** Format: double */
       resetsAt?: number | null | undefined;
-      /** Usedpercent */
+      /** Format: double */
       usedPercent?: number | null | undefined;
-      /** Windowdurationmins */
+      /** Format: double */
       windowDurationMins?: number | null | undefined;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
     RateLimitWindowDto: components["schemas"]["RateLimitWindow"];
+    /** @enum {string} */
+    Reachability: "reachable" | "unreachable" | "unknown";
     /** ReadStateBody */
     ReadStateBody: {
       /** Expected Revision */
@@ -19050,6 +18987,22 @@ export interface components {
       error?: string | null | undefined;
       status: components["schemas"]["DeliveryStatus"];
     };
+    RecoveryAction:
+      | {
+          /** @constant */
+          kind: "none";
+        }
+      | {
+          href: string;
+          /** @constant */
+          kind: "link";
+          label: string;
+        }
+      | {
+          /** @constant */
+          kind: "ask_owner";
+          request: string;
+        };
     /**
      * RecoveryConnectionGeneration
      * @description A recovery receipt `supervisor` that earlier releases wrote when the start attempt had no supervisor identity. It holds only the start attempt's `connectionGeneration` and identifies no supervisor; current releases write null instead.
@@ -19124,6 +19077,35 @@ export interface components {
       | "tool_response_delivered"
       | "superseded"
       | "unconfirmed";
+    RecoveryTiming:
+      | {
+          /** @constant */
+          kind: "unknown";
+        }
+      | {
+          /** @constant */
+          kind: "waiting";
+          /** Format: double */
+          resetAt: number;
+        }
+      | {
+          /** @constant */
+          kind: "checking";
+          /** Format: double */
+          resetAt: number;
+        }
+      | {
+          /** @constant */
+          kind: "confirmed";
+          /** Format: double */
+          resetAt: number;
+        }
+      | {
+          /** @constant */
+          kind: "unconfirmed";
+          /** Format: double */
+          resetAt: number;
+        };
     /** RegisterAccountRequest */
     RegisterAccountRequest: {
       /** Home */
@@ -20138,7 +20120,7 @@ export interface components {
     ReviewDefaultsDto: {
       /** Effort */
       effort: null | string;
-      fastMode?: boolean | undefined;
+      fastMode?: boolean | null | undefined;
       /** Model */
       model: null | string;
     };
@@ -20197,6 +20179,7 @@ export interface components {
       id: string;
       kind?: components["schemas"]["RoomKind"] | null | undefined;
       lastMessage?: components["schemas"]["RoomLastMessage"] | null | undefined;
+      leadIds?: string[] | undefined;
       /** Localmembers */
       localMembers?: string[] | null | undefined;
       /** Localparticipants */
@@ -20250,6 +20233,7 @@ export interface components {
       id: string;
       kind?: components["schemas"]["RoomKind"] | null | undefined;
       lastMessage?: components["schemas"]["RoomLastMessage"] | null | undefined;
+      leadIds?: string[] | undefined;
       /** Localmembers */
       localMembers?: string[] | null | undefined;
       /** Members */
@@ -20302,6 +20286,7 @@ export interface components {
     /** RoomRadio */
     RoomRadio: {
       active: components["schemas"]["RoomRadioActive"] | null;
+      controls: components["schemas"]["RadioControls"];
       /** Direct */
       direct?: boolean | null | undefined;
       /** Error */
@@ -21421,18 +21406,12 @@ export interface components {
         | null
         | undefined;
     };
-    /** ServerIdentity */
     ServerIdentity: {
-      /** Label */
       label: string;
-      /** Origin */
-      origin: null | string;
-      /** Publickey */
+      origin: string | null;
       publicKey: string;
-      /** Serverid */
       serverId: string;
-      /** Tailscaleuser */
-      tailscaleUser: null | string;
+      tailscaleUser: string | null;
     };
     /** ServerIdentityResponse */
     ServerIdentityResponse: {
@@ -22458,6 +22437,8 @@ export interface components {
       /** Stopped */
       stopped: string[];
     };
+    /** @description A JSON Schema integer, preserving integral decimal spellings and large values. */
+    StoredJsonInteger: number;
     /**
      * AgentRole
      * @enum {string}
@@ -23169,14 +23150,12 @@ export interface components {
       id: string;
       value: components["schemas"]["AnnotationEntityDto"];
     };
-    /** SyncChatEntityPayload */
     SyncChatEntityPayload: {
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
       collection: "chat";
-      /** Id */
       id: string;
       value: components["schemas"]["ChatEntityDto"];
     };
@@ -23217,14 +23196,12 @@ export interface components {
       /** Seq */
       seq: number;
     };
-    /** SyncEdgeEntityPayload */
     SyncEdgeEntityPayload: {
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
       collection: "edge";
-      /** Id */
       id: string;
       value: components["schemas"]["EdgeEntityDto"];
     };
@@ -23924,14 +23901,12 @@ export interface components {
       id: string;
       value: components["schemas"]["WorkEntityDto"];
     };
-    /** SyncWorkReleaseEntityPayload */
     SyncWorkReleaseEntityPayload: {
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
       collection: "workRelease";
-      /** Id */
       id: string;
       value: components["schemas"]["WorkReleaseEntityDto"];
     };
@@ -25930,22 +25905,20 @@ export interface components {
       /** Requestid */
       requestId: string;
     };
+    UnsupportedRateInfo: {
+      type: components["schemas"]["UnsupportedRateKind"];
+    };
+    /** @enum {string} */
+    UnsupportedRateKind: "unsupported";
     UsageEligibility: {
       accountKey: string;
       agentId: string;
-      allowed: boolean;
-      buckets: {
-        id: string;
-        overageAllowed: boolean;
-      }[];
-      canRun: boolean;
-      checkedAt: number;
-      fresh: boolean;
+      buckets: components["schemas"]["EligibilityBucket"][];
       model: string;
-      /** @enum {string} */
-      overage: "allowed" | "in_use" | "rejected" | "unavailable";
+      overage: components["schemas"]["Overage"];
       provider: string;
-      resetAt: number | null;
+      state: components["schemas"]["EligibilityState"];
+      /** Format: double */
       validUntil: number | null;
     };
     /**
@@ -25995,68 +25968,58 @@ export interface components {
       /** @description Immutable logical usage identity; dimensionless. */
       usageIdentity: components["schemas"]["UsageIdentity"];
     };
-    /**
-     * UsageLimitsData
-     * @description Known usage projection plus account-service fields passed through unchanged.
-     */
     UsageLimitsData: {
-      /** Accountid */
       accountId?: string | null | undefined;
-      /** Ordinaryusageallowed */
+      claudeRateLimit?:
+        | components["schemas"]["ClaudeRateLimit"]
+        | null
+        | undefined;
       ordinaryUsageAllowed?: boolean | null | undefined;
       rateLimitResetCredits?:
         | components["schemas"]["RateLimitResetCredits"]
         | null
         | undefined;
       rateLimits?: components["schemas"]["RateLimitBucket"] | null | undefined;
-      /** Ratelimitsbylimitid */
       rateLimitsByLimitId?:
         | {
             [key: string]: components["schemas"]["RateLimitBucket"];
           }
         | null
         | undefined;
-      /** Signedin */
       signedIn?: boolean | null | undefined;
-      /** Source */
       source?: string | null | undefined;
-      /** Status */
       status?: string | null | undefined;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
-    /** UsageLimitsResponse */
     UsageLimitsResponse: {
-      /** Accountkey */
+      _syncEntities?:
+        | components["schemas"]["UsageLimitsSyncEntity"][]
+        | null
+        | undefined;
+      _syncEntitiesAfter?:
+        | components["schemas"]["StoredJsonInteger"]
+        | null
+        | undefined;
       accountKey: string;
-      /**
-       * At
-       * @default null
-       */
-      at?: null | number | undefined;
-      /**
-       * Checkedat
-       * @default null
-       */
-      checkedAt?: null | number | undefined;
-      /** @default null */
+      /** Format: double */
+      at?: number | null | undefined;
+      /** Format: double */
+      checkedAt?: number | null | undefined;
       data?: components["schemas"]["UsageLimitsData"] | null | undefined;
-      eligibility?: components["schemas"]["UsageEligibility"] | undefined;
-      /**
-       * Error
-       * @default null
-       */
-      error?: null | string | undefined;
-      /**
-       * Processedat
-       * @default null
-       */
-      processedAt?: null | number | undefined;
-      /**
-       * Readat
-       * @default null
-       */
-      readAt?: null | number | undefined;
+      eligibility?:
+        | components["schemas"]["UsageEligibility"]
+        | null
+        | undefined;
+      error?: string | null | undefined;
+      /** Format: double */
+      processedAt?: number | null | undefined;
+      /** Format: double */
+      readAt?: number | null | undefined;
+    };
+    UsageLimitsSyncEntity: {
+      _deleted: boolean;
+      id: string;
+      payload: string;
+      seq: components["schemas"]["StoredJsonInteger"];
     };
     /** @description Accounting evidence, preserving response identity and cumulative counter scope. */
     UsageObservation:
@@ -27554,12 +27517,12 @@ export interface components {
        * Daybreakenabled
        * @default false
        */
-      daybreakEnabled?: boolean | undefined;
+      daybreakEnabled?: boolean | null | undefined;
       /**
        * Delegationdepth
        * @default 1
        */
-      delegationDepth?: number | undefined;
+      delegationDepth?: number | null | undefined;
       /** Effort */
       effort: null | string;
       /** Fastmode */
@@ -27714,9 +27677,9 @@ export interface components {
       /** Tasks */
       tasks: components["schemas"]["WorkItem"][];
     };
-    /** WorkReleaseEntityDto */
     WorkReleaseEntityDto: {
       id: string;
+      /** Format: uint64 */
       index: number;
       rootId: string;
       taskId: string;
@@ -38648,6 +38611,15 @@ export type WorkReleaseEntityDto =
 export type WorkResultEntityDto = components["schemas"]["WorkResultEntityDto"];
 export type WorkspaceEntityDto = components["schemas"]["WorkspaceEntityDto"];
 export type SyncEntityPayload = components["schemas"]["SyncEntityPayload"];
+export const AccessClientKind = { ui: "ui", server: "server" } as const;
+export type AccessClientKind = components["schemas"]["AccessClientKind"];
+export const AccessClientStatus = {
+  paired: "paired",
+  revoked: "revoked",
+  discovered: "discovered",
+  unreachable: "unreachable",
+} as const;
+export type AccessClientStatus = components["schemas"]["AccessClientStatus"];
 export const AccountStatus = {
   ready: "ready",
   signedOut: "signedOut",
@@ -38844,6 +38816,31 @@ export const CapacityRetryStatus = {
   failed: "failed",
 } as const;
 export type CapacityRetryStatus = components["schemas"]["CapacityRetryStatus"];
+export const ChatKind = { chat: "chat" } as const;
+export type ChatKind = components["schemas"]["ChatKind"];
+export const ChatOperationalKind = {
+  answer: "answer",
+  error: "error",
+  working: "working",
+  paused: "paused",
+  none: "none",
+} as const;
+export type ChatOperationalKind = components["schemas"]["ChatOperationalKind"];
+export const ClaudeRateStatus = {
+  allowed: "allowed",
+  allowed_warning: "allowed_warning",
+  rejected: "rejected",
+} as const;
+export type ClaudeRateStatus = components["schemas"]["ClaudeRateStatus"];
+export const ClaudeRateType = {
+  five_hour: "five_hour",
+  seven_day: "seven_day",
+  seven_day_opus: "seven_day_opus",
+  seven_day_sonnet: "seven_day_sonnet",
+  seven_day_overage_included: "seven_day_overage_included",
+  overage: "overage",
+} as const;
+export type ClaudeRateType = components["schemas"]["ClaudeRateType"];
 export const CommandErrorCode = { receipt_expired: "receipt_expired" } as const;
 export type CommandErrorCode = components["schemas"]["CommandErrorCode"];
 export const ComplaintResponseStatus = {
@@ -38895,12 +38892,20 @@ export const DeliveryStatus = {
   uncertain: "uncertain",
 } as const;
 export type DeliveryStatus = components["schemas"]["DeliveryStatus"];
+export const EdgeKind = { chat: "chat", spawn: "spawn" } as const;
+export type EdgeKind = components["schemas"]["EdgeKind"];
 export const ElicitationAction = {
   accept: "accept",
   decline: "decline",
   cancel: "cancel",
 } as const;
 export type ElicitationAction = components["schemas"]["ElicitationAction"];
+export const EligibilityState = {
+  stale: "stale",
+  allowed: "allowed",
+  blocked: "blocked",
+} as const;
+export type EligibilityState = components["schemas"]["EligibilityState"];
 export const ExecutionAction = {
   review: "review",
   compact: "compact",
@@ -38960,6 +38965,11 @@ export const HttpErrorKind = {
   unclassified: "unclassified",
 } as const;
 export type HttpErrorKind = components["schemas"]["HttpErrorKind"];
+export const IdentityAlertCode = {
+  peer_identity_changed: "peer_identity_changed",
+  local_identity_changed: "local_identity_changed",
+} as const;
+export type IdentityAlertCode = components["schemas"]["IdentityAlertCode"];
 export const InviteStatus = { open: "open", used: "used" } as const;
 export type InviteStatus = components["schemas"]["InviteStatus"];
 export const LimitColor = {
@@ -39140,6 +39150,13 @@ export const NonSteerableTurnKind = {
 } as const;
 export type NonSteerableTurnKind =
   components["schemas"]["NonSteerableTurnKind"];
+export const Overage = {
+  allowed: "allowed",
+  in_use: "in_use",
+  rejected: "rejected",
+  unavailable: "unavailable",
+} as const;
+export type Overage = components["schemas"]["Overage"];
 export const ParticipantRole = { lead: "lead", agent: "agent" } as const;
 export type ParticipantRole = components["schemas"]["ParticipantRole"];
 export const PayloadMigrationName = {
@@ -39234,6 +39251,12 @@ export const RadioStatus = {
   blocked: "blocked",
 } as const;
 export type RadioStatus = components["schemas"]["RadioStatus"];
+export const Reachability = {
+  reachable: "reachable",
+  unreachable: "unreachable",
+  unknown: "unknown",
+} as const;
+export type Reachability = components["schemas"]["Reachability"];
 export const RecoveryOutcome = {
   completed: "completed",
   failed: "failed",
@@ -39526,6 +39549,8 @@ export const TransferStatus = {
   cancelled: "cancelled",
 } as const;
 export type TransferStatus = components["schemas"]["TransferStatus"];
+export const UnsupportedRateKind = { unsupported: "unsupported" } as const;
+export type UnsupportedRateKind = components["schemas"]["UnsupportedRateKind"];
 export const UsageEvidence = {
   live: "live",
   recovered: "recovered",

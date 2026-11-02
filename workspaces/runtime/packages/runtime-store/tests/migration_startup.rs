@@ -453,3 +453,41 @@ async fn migration_terminal_empty_source_is_complete_before_new_turns_arrive() {
         assert_eq!(current, checkpoint);
     }
 }
+
+#[tokio::test]
+async fn compactions_unknown_survives_full_catalog_replay() {
+    let state = tempfile::tempdir().unwrap();
+    let store = RuntimeStore::open(Some(state.path())).await.unwrap();
+    store.transaction(|tx| {
+        let record = studio_runtime_store::AgentRecord::from_value(json!({"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","provider":"codex","compactions":0})).unwrap();
+        studio_runtime_store::AgentRepository::put(tx, &record)?;
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.compactions',NULL) WHERE id='agent'", [])?;
+        tx.execute("DELETE FROM sync_entity_meta WHERE key='migration_catalog'", [])?;
+        Ok(())
+    }).await.unwrap();
+    drop(store);
+    for _ in 0..2 {
+        let store = RuntimeStore::open(Some(state.path())).await.unwrap();
+        let db = store.test_reader().unwrap();
+        let kind: String = db
+            .query_row(
+                "SELECT json_type(record,'$.compactions') FROM runtime_agents WHERE id='agent'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(kind, "null");
+        drop(db);
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "DELETE FROM sync_entity_meta WHERE key='migration_catalog'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        drop(store);
+    }
+}

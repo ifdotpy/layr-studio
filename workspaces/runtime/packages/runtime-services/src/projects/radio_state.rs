@@ -200,6 +200,7 @@ fn agent_projection(
         _ => return Err(invalid()),
     };
     Ok(AgentAuthorityRow {
+        created: value.get("created").and_then(Value::as_f64),
         id: string("id")?,
         root_id: string("rootId")?,
         parent_id: string("parentId")?,

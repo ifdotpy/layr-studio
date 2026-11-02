@@ -148,8 +148,8 @@ fn agent_fences(agents: &[(String, Value)]) -> Vec<AgentFence> {
         .map(|(id, row)| AgentFence {
             id: id.clone(),
             path: row.get("path").cloned(),
-            cwd: row.get("cwd").cloned(),
-            deleted_at: row.get("deletedAt").cloned(),
+            cwd: row.get("cwd").filter(|v| !v.is_null()).cloned(),
+            deleted_at: row.get("deletedAt").filter(|v| !v.is_null()).cloned(),
             archived_at: row.get("archivedAt").cloned(),
             archived: row.get("archived").cloned(),
             archived_status: row.get("status").and_then(Value::as_str) == Some("archived"),

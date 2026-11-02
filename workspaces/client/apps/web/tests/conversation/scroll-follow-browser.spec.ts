@@ -187,10 +187,18 @@ async function scrollFollow(page: Page, full: boolean) {
   let transcriptSeq = 1;
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (message) => {
+    if (
+      message.type() === "error" &&
+      message.text().includes("Sync stream frame could not be applied")
+    )
+      errors.push(message.text());
+  });
   // The transcript map owns both pulled baselines and sparse stream deltas.
   const syncStreams = new Map<ServerResponse, ResourceRef[]>();
   const sessions = new Map<string, ServerResponse>();
   let subscriptionUpdates = 0;
+  const subscriptionAcks: unknown[] = [];
   let streamRevision = 0;
   let transcriptPulls = 0;
   const streamFrame = (
@@ -257,7 +265,12 @@ async function scrollFollow(page: Page, full: boolean) {
           next.push(added);
       }
       resources.splice(0, resources.length, ...next);
-      stream.write(protocol3SseEvent("subscriptions", { gen: update.gen }));
+      const ack = {
+        gen: update.gen,
+        cachePolicies: [],
+      } satisfies components["schemas"]["SyncSubscriptionAck"];
+      subscriptionAcks.push(ack);
+      stream.write(protocol3SseEvent("subscriptions", ack));
       if (update.add.length)
         stream.write(
           protocol3SseEvent(
@@ -269,7 +282,7 @@ async function scrollFollow(page: Page, full: boolean) {
         "Content-Type": "application/json",
         "Access-Control-Allow-Origin": "*",
       });
-      response.end(JSON.stringify({ gen: update.gen }));
+      response.end(JSON.stringify(ack));
       return;
     }
     const resources = fixtureResourceRefs(
@@ -478,6 +491,13 @@ async function scrollFollow(page: Page, full: boolean) {
     await expect(chatRow).toBeVisible();
     await chatRow.click();
     await root.locator('[data-message="prompt-live"]').waitFor();
+    await expect.poll(() => subscriptionAcks.length).toBeGreaterThan(0);
+    assert.ok(
+      subscriptionAcks.every((ack) =>
+        Array.isArray((ack as { cachePolicies?: unknown }).cachePolicies),
+      ),
+      "subscription acknowledgements include cache policies",
+    );
     await page.waitForTimeout(500);
     assert.ok(
       await page.evaluate(
@@ -518,7 +538,6 @@ async function scrollFollow(page: Page, full: boolean) {
       );
       assert.equal(witness.writes, 0, "scrolling must not write storage");
     }
-    await expect(page.locator("#earlier-messages")).toBeVisible();
     {
       holdPage = true;
       const response = page.waitForResponse(
@@ -553,6 +572,7 @@ async function scrollFollow(page: Page, full: boolean) {
       releasePage!();
       releasePage = undefined;
       await response;
+      await expect(page.getByText("Loading messages…")).toHaveCount(0);
       await expect
         .poll(async () =>
           root.evaluate((element, anchor) => {
@@ -570,22 +590,25 @@ async function scrollFollow(page: Page, full: boolean) {
         )
         .toBeLessThan(2);
     }
-    while (await page.locator("#earlier-messages").count()) {
+    for (
+      let attempt = 0;
+      attempt < 20 &&
+      !(await page.locator('[data-message="prompt-0"]').count());
+      attempt++
+    ) {
       const response = page.waitForResponse(
         (response) =>
           new URL(response.url()).pathname === "/api/transcript/page",
       );
-      await page.locator("#earlier-messages").click();
-      await response;
-      await expect
-        .poll(async () => {
-          const earlier = page.locator("#earlier-messages");
-          return (
-            !(await earlier.count()) ||
-            (await earlier.getAttribute("data-loading")) !== "true"
-          );
-        })
-        .toBe(true);
+      await root.evaluate((element) => {
+        element.scrollTop = 0;
+        element.dispatchEvent(
+          new WheelEvent("wheel", { deltaY: -1000, bubbles: true }),
+        );
+      });
+      const result = await (await response).json();
+      await expect(page.getByText("Loading messages…")).toHaveCount(0);
+      if (!result.nextCursor) break;
     }
     await latest.click();
     assert.ok(
@@ -757,11 +780,12 @@ async function scrollFollow(page: Page, full: boolean) {
       deltaY: number,
       label: string,
       growAbove = 0,
+      key?: string,
     ) => {
       await settle(true);
       const sentence = `Streamed ${width} sentence ${streamed} `;
       const step = await root.evaluate(
-        (element, { deltaY, growAbove, sentence }) =>
+        (element, { deltaY, growAbove, sentence, key }) =>
           new Promise<{
             attempts: number;
             before: number;
@@ -788,7 +812,15 @@ async function scrollFollow(page: Page, full: boolean) {
                 if (event.target === element) event.stopImmediatePropagation();
               };
               window.addEventListener("scroll", hold, true);
-              element.dispatchEvent(new WheelEvent("wheel", { deltaY }));
+              if (key)
+                element.dispatchEvent(
+                  new KeyboardEvent("keydown", {
+                    key: key === "Shift+Space" ? " " : key,
+                    shiftKey: key === "Shift+Space",
+                    bubbles: true,
+                  }),
+                );
+              else element.dispatchEvent(new WheelEvent("wheel", { deltaY }));
               element.scrollTop = before + deltaY;
               const inside = (node: Element) =>
                 node.getBoundingClientRect().height > 0 &&
@@ -867,7 +899,7 @@ async function scrollFollow(page: Page, full: boolean) {
             };
             attempt();
           }),
-        { deltaY, growAbove, sentence },
+        { deltaY, growAbove, sentence, key },
       );
       assert.ok(
         step.before - step.moved.top > Math.abs(deltaY) * 0.75 &&
@@ -892,6 +924,34 @@ async function scrollFollow(page: Page, full: boolean) {
         (await geometry()).gap < 2,
         `${width}px: the reader at the bottom follows the stream (${JSON.stringify(await geometry())})`,
       );
+
+      // Recent downward input at the tail must not prevent following growth.
+      await page.locator("#messages").evaluate((root) => {
+        root.dispatchEvent(
+          new WheelEvent("wheel", { deltaY: 120, bubbles: true }),
+        );
+      });
+      await nextRender();
+      await expect.poll(async () => (await geometry()).gap).toBeLessThan(2);
+
+      // Activity below history belongs to the same scrollable content.
+      await page.locator(".message-content").evaluate((content) => {
+        const activity = document.createElement("div");
+        activity.dataset.testActivity = "true";
+        activity.style.height = "300px";
+        content.append(activity);
+      });
+      await expect.poll(async () => (await geometry()).gap).toBeLessThan(2);
+      await page
+        .locator('[data-test-activity="true"]')
+        .evaluate((node) => node.remove());
+      await settle(true);
+
+      for (const key of ["ArrowUp", "PageUp", "Home", "Shift+Space"]) {
+        await wheelStepInGap(-300, `${key} keeps the reader's place`, 0, key);
+        await latest.click();
+        await settle(true);
+      }
 
       // A wheel step away from the bottom is kept by a render in the gap.
       await wheelStepInGap(

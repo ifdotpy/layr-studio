@@ -205,3 +205,60 @@ async fn an_unanswered_command_commits_only_its_loss_and_replays_without_changes
     );
     assert_eq!(commits.load(Ordering::SeqCst), 1);
 }
+
+/// A rule check whose rule already moved to a later check can never finish that
+/// rule. Its unanswered command must still end as lost and wake the owner.
+#[tokio::test]
+async fn an_unanswered_check_of_a_rule_that_moved_on_still_settles() {
+    use studio_runtime_services::monitor_runtime;
+    use studio_runtime_store::{MonitorsRepository, RuleRecord, RulesRepository};
+    let root = fixtures::tempdir();
+    let store = fixtures::store(root.path(), "moved-rule").await;
+    let case = fixtures::corpus(root.path()).remove(0);
+    fixtures::seed(&store, &case, fixtures::monitor(root.path())).await;
+    let id = case["before"]["id"].as_str().expect("id");
+    let operation: Operation =
+        serde_json::from_str(&case["before"]["operation"].to_string()).expect("operation");
+    let mut seed: Value =
+        serde_json::from_str(include_str!("rules_engine/seed.json")).expect("rule seed");
+    seed["rule"]["agent"] = case["actor"]["id"].clone();
+    seed["rule"]["epoch"] = case["actor"]["epoch"].clone();
+    seed["rule"]["checks"] = json!(9);
+    seed["rule"]["inFlight"] = json!(true);
+    let rule: RuleRecord = serde_json::from_str(&seed["rule"].to_string()).expect("rule");
+    let selected = id.to_owned();
+    store
+        .transaction(move |tx| {
+            tx.execute(
+                "UPDATE runtime_monitors SET record=json_set(record,'$.ruleId','rule') WHERE id=?1",
+                [&selected],
+            )?;
+            RulesRepository::put(tx, &rule)
+        })
+        .await
+        .expect("bind rule");
+    monitor_runtime::settle_unanswered(
+        &store,
+        id,
+        &operation,
+        monitor_policy::DEADLINE_PASSED,
+        3000.0,
+    )
+    .await
+    .expect("a moved-on rule must not keep its old check running");
+    let record = MonitorsRepository::get(&store.test_reader().expect("reader"), id)
+        .expect("read")
+        .expect("monitor");
+    assert_eq!(
+        record.status,
+        studio_runtime_schema::studio_errors::MonitorStatus::Lost
+    );
+    let rule = RulesRepository::get(&store.test_reader().expect("reader"), "rule")
+        .expect("rule read")
+        .expect("rule");
+    assert_eq!(
+        rule.checks.get(),
+        9,
+        "the old check does not finish the new one"
+    );
+}

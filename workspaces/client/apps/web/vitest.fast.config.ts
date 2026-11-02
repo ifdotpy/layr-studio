@@ -7,6 +7,8 @@ export default {
     ...base.test,
     name: "fast",
     include: [
+      "src/accountName.test.ts",
+      "src/components/RadioChat.test.ts",
       "src/layout/deriveWorkspaceLayout.test.ts",
       "src/hooks/mobileViewport.test.ts",
       "src/layout/terminalGeometry.test.ts",
@@ -67,6 +69,7 @@ export default {
       "src/components/ConversationWarnings.test.ts",
       "src/components/Conversation.connection.test.ts",
       "src/components/Conversation.limits.test.ts",
+      "src/components/Conversation.paging.test.ts",
       // web unit safety witnesses
       "src/uuid.test.ts",
       "src/sha256.test.ts",
@@ -175,8 +178,6 @@ export default {
       "src/servers/mergedSidebar.test.ts",
       "src/sync/uiPreferenceBridge.test.ts",
       // Reserved preference keys survive profile import.
-      // An authoritative delete readback must settle even when another refresh owns the current render generation.
-      "src/hooks/snapshotDeleteReadback.test.ts",
       "src/chatDeleteScope.test.ts",
       "src/projectDelete.test.ts",
       "src/useProjectDelete.test.ts",

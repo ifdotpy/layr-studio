@@ -432,6 +432,8 @@ export default function TurnHistory({
   agent,
   scrollContainer,
   rememberScroll,
+  getFollow,
+  followTail = true,
   hasRecentScrollInput,
   questionCards = questionCard,
   requestCards,
@@ -448,6 +450,8 @@ export default function TurnHistory({
   onJump: (id: string) => void;
   scrollContainer?: RefObject<HTMLDivElement | null>;
   rememberScroll?: () => void;
+  getFollow?: () => boolean;
+  followTail?: boolean;
   hasRecentScrollInput?: () => boolean;
 }) {
   reportPromptComposerRender("turn-history", agentId);
@@ -522,6 +526,8 @@ export default function TurnHistory({
       requiredRows={requiredRows}
       storageKey={storageKey}
       rememberScroll={rememberScroll}
+      getFollow={getFollow}
+      followTail={followTail}
       hasRecentScrollInput={hasRecentScrollInput}
       scrollContainer={scrollContainer}
       render={(group, revealedMessage) => {

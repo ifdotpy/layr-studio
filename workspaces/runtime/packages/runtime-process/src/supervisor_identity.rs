@@ -717,9 +717,14 @@ mod tests {
     #[test]
     #[cfg(target_os = "linux")]
     fn captured_group_kills_member_created_after_term() {
-        use std::io::{BufRead, BufReader, Read};
+        use std::io::{BufRead, BufReader};
         use std::os::unix::process::CommandExt;
         use std::process::Stdio;
+        use std::sync::mpsc::{self, RecvTimeoutError};
+        use std::time::Duration;
+
+        // Bounds each wait so a broken fixture fails instead of hanging CI.
+        const DEADLINE: Duration = Duration::from_secs(10);
 
         // Keep the unreaped leader as the cleanup anchor on every failure.
         struct Fixture(std::process::Child);
@@ -736,11 +741,14 @@ mod tests {
         // handling and is in the group. A TERM sent before the leader forks
         // that member would be deferred until the member exits, and nothing
         // would run the trap. The test sends TERM only after `member` is read.
+        // The trap starts a background `sleep`, which ignores TERM and stays
+        // alive until KILL. A background `cat <&0` would not: dash gives async
+        // jobs /dev/null as stdin, so cat exits at once and races the check.
         let mut child = Fixture(
             Command::new("/bin/sh")
                 .args([
                     "-c",
-                    "trap 'trap \"\" TERM; /bin/cat <&0 & echo $!; wait $!' TERM; echo ready; /bin/sh -c 'echo member; exec /bin/cat >/dev/null'",
+                    "trap 'trap \"\" TERM; /bin/sleep 1000 & echo $!; wait $!' TERM; echo ready; /bin/sh -c 'echo member; exec /bin/cat >/dev/null'",
                 ])
                 .process_group(0)
                 .stdin(Stdio::piped())
@@ -748,21 +756,27 @@ mod tests {
                 .spawn()
                 .expect("owned group starts"),
         );
-        let mut output = BufReader::new(child.0.stdout.take().expect("fixture output"));
-        let mut line = String::new();
-        output.read_line(&mut line).expect("fixture ready");
-        assert_eq!(line.trim(), "ready");
-        line.clear();
-        output.read_line(&mut line).expect("fixture member started");
-        assert_eq!(line.trim(), "member");
+        // A reader thread turns stdout into lines. Its channel disconnects
+        // only at EOF, when every writer has stopped.
+        let stdout = BufReader::new(child.0.stdout.take().expect("fixture output"));
+        let (lines_tx, lines) = mpsc::channel::<String>();
+        std::thread::spawn(move || {
+            for line in stdout.lines() {
+                let Ok(line) = line else { break };
+                if lines_tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        let next_line = || lines.recv_timeout(DEADLINE).expect("fixture line in time");
+        assert_eq!(next_line().trim(), "ready");
+        assert_eq!(next_line().trim(), "member");
         let group = capture_groups(GroupScope::Group(child.0.id()))
             .expect("capture original members")
             .pop()
             .expect("owned group");
         assert!(group.signal(Signal::TERM).expect("send TERM"));
-        line.clear();
-        output.read_line(&mut line).expect("replacement created");
-        let replacement: u32 = line.trim().parse().expect("replacement pid");
+        let replacement: u32 = next_line().trim().parse().expect("replacement pid");
         assert!(!group.members.iter().any(|member| member.pid == replacement));
         assert!(
             start_time(replacement, false)
@@ -771,10 +785,10 @@ mod tests {
         );
         assert!(group.has_live_anchor().expect("original member remains"));
         assert!(group.signal(Signal::KILL).expect("send KILL"));
-        let mut tail = String::new();
-        output
-            .read_to_string(&mut tail)
-            .expect("all writers stopped");
+        assert!(matches!(
+            lines.recv_timeout(DEADLINE),
+            Err(RecvTimeoutError::Disconnected)
+        ));
     }
 
     #[test]

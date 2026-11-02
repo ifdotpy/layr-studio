@@ -385,7 +385,7 @@ fn post_managed_message(
     // A manual send wakes a stopped agent in the same transaction as the event.
     agent.auto_wake = Some(true);
     agent.error = studio_runtime_schema::queue_command::Field::Null;
-    agent.extra.remove("nativeFailureHold");
+    agent.clear_native_failure_hold();
     capacity_reset(transaction, &mut agent)?;
     studio_runtime_store::AgentRepository::put(transaction, &agent)?;
     let projection = studio_runtime_store::projection_value(&agent);
@@ -617,7 +617,7 @@ fn send_followup_inner(
     if sender_identity.is_some() {
         recipient.auto_wake = Some(true);
         recipient.error = studio_runtime_schema::queue_command::Field::Null;
-        recipient.extra.remove("nativeFailureHold");
+        recipient.clear_native_failure_hold();
         capacity_reset(transaction, &mut recipient)?;
         studio_runtime_store::AgentRepository::put(transaction, &recipient)?;
         let projection = studio_runtime_store::projection_value(&recipient);
@@ -1154,7 +1154,7 @@ mod tests {
              CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT,kind TEXT,text TEXT,status TEXT,created REAL,epoch INTEGER,turn_id TEXT,error TEXT);
              CREATE TABLE runtime_event_meta(id TEXT PRIMARY KEY,record TEXT NOT NULL);
              CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-             CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+             CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
              CREATE TABLE sync_entities(collection TEXT NOT NULL,id TEXT NOT NULL,seq INTEGER NOT NULL,hash TEXT NOT NULL,payload TEXT,deleted INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(collection,id));
              CREATE TABLE sync_documents(seq INTEGER PRIMARY KEY AUTOINCREMENT,scope TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,deleted INTEGER NOT NULL DEFAULT 0);
              CREATE TABLE durable_rows(seq INTEGER); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);")

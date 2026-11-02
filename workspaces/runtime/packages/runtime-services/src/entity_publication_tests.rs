@@ -11,6 +11,218 @@ use studio_runtime_store::{AgentRecord, AgentRepository, StoreError};
 const CHAT: &str = "published-chat";
 
 #[tokio::test]
+async fn unreadable_limits_do_not_block_publication_or_startup() {
+    let (_dir, store) = store().await;
+    store
+        .transaction(|tx| {
+            studio_runtime_store::SyncDocumentsRepository::put_entity(
+                tx,
+                "rateLimit",
+                "broken",
+                json!({"unexpected": true}),
+                false,
+            )?;
+            crate::account_session_runtime::limits::seed_agents(tx)?;
+            crate::account_session_runtime::limits::publish_agent_change(tx, CHAT, true)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn null_limits_payload_does_not_block_publication_or_startup() {
+    let (_dir, store) = store().await;
+    store.transaction(|tx| {
+        studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "rateLimit", "broken", json!({"unexpected": true}), false)?;
+        tx.execute("UPDATE sync_entities SET payload=NULL WHERE collection='rateLimit' AND id='broken'", [])?;
+        crate::account_session_runtime::limits::publish_agent_change(tx, CHAT, true)?;
+        tx.execute("UPDATE sync_entities SET payload=NULL WHERE collection='rateLimit' AND id='broken'", [])?;
+        crate::account_session_runtime::limits::seed_agents(tx)?;
+        Ok(())
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn agent_limit_failure_republishes_account_recovery() {
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64();
+    store.transaction(move |tx| {
+        let observation = json!({"accountKey":"default","at":now,"data":{"rateLimits":{"primary":{"usedPercent":100,"resetsAt":now+3600.0}}}});
+        let raw = serde_json::value::RawValue::from_string(observation.to_string())?;
+        let mut view = studio_runtime_schema::usage_limits::RateLimitView::read(&raw, "default", now)?;
+        crate::account_session_runtime::limits::populate_agents(tx, &mut view, now)?;
+        studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "rateLimit", "default", view, false)?;
+        Ok(())
+    }).await.unwrap();
+    let before: i64 = store
+        .test_read_transaction(|tx| {
+            tx.query_row(
+                "SELECT seq FROM sync_entities WHERE collection='rateLimit' AND id='default'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+        })
+        .unwrap();
+    store
+        .transaction(|tx| {
+            tx.execute(
+                "UPDATE runtime_agents SET record=json_set(record,'$.error',json(?1)) WHERE id=?2",
+                [r#"{"codexErrorInfo":"rateLimitExceeded"}"#, CHAT],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let after: i64 = store
+        .test_read_transaction(|tx| {
+            tx.query_row(
+                "SELECT seq FROM sync_entities WHERE collection='rateLimit' AND id='default'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+        })
+        .unwrap();
+    let (_, view) = client_entity(&store, "rateLimit", "default").unwrap();
+    assert!(after > before);
+    assert_eq!(
+        view["projection"]["agents"][CHAT]["recovery"]["timing"]["kind"],
+        "waiting"
+    );
+    assert_eq!(
+        view["projection"]["agents"][CHAT]["recovery"]["timing"]["resetAt"],
+        now + 3600.0
+    );
+}
+
+#[tokio::test]
+async fn room_roots_follow_live_agent_root_change() {
+    let (_dir, store) = store().await;
+    seed_chat(
+        &store,
+        chat(json!({"id":"child","rootId":"old","isLead":false})),
+    )
+    .await;
+    store.transaction(|tx| {
+        tx.execute("INSERT INTO runtime_rooms(id,record) VALUES('room',?1)", [json!({"id":"room","kind":"private","members":["child"]}).to_string()])?;
+        studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "room", "room", json!({"id":"room","kind":"private","members":["child"],"name":"Child","leadIds":["old"]}), false)?;
+        Ok(())
+    }).await.unwrap();
+    store.transaction(|tx| {
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','new') WHERE id='child'", [])?;
+        Ok(())
+    }).await.unwrap();
+    assert_eq!(
+        client_entity(&store, "room", "room").unwrap().1["leadIds"],
+        json!(["new"])
+    );
+}
+
+#[tokio::test]
+async fn startup_reprojects_legacy_room_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = studio_runtime_store::RuntimeStore::open(Some(dir.path()))
+        .await
+        .unwrap();
+    super::install(&store).await.unwrap();
+    seed_chat(
+        &store,
+        chat(json!({"id":"lead","rootId":"lead","isLead":true,"created":2})),
+    )
+    .await;
+    seed_chat(
+        &store,
+        chat(json!({"id":"z","rootId":"z","isLead":true,"created":1})),
+    )
+    .await;
+    seed_chat(
+        &store,
+        chat(json!({"id":"y","rootId":"y","isLead":true,"created":2})),
+    )
+    .await;
+    store
+        .transaction(|tx| {
+            tx.execute(
+                "INSERT INTO runtime_rooms(id,record) VALUES('room',?1)",
+                [json!({"id":"room","kind":"private","members":["lead","z","y"]}).to_string()],
+            )?;
+            studio_runtime_store::SyncDocumentsRepository::put_entity(
+                tx,
+                "room",
+                "room",
+                json!({"id":"room","kind":"private","members":["lead","z","y"],"name":"Lead","radio":{"teamId":"team","revision":1,"status":"blocked","speaker":null,"next":[],"active":{"agentId":"lead"},"error":null}}),
+                false,
+            )?;
+            tx.execute(
+                "DELETE FROM sync_entity_meta WHERE key='migration_catalog'",
+                [],
+            )?;
+            tx.execute("DELETE FROM runtime_payload_migrations WHERE name IN ('2026-11-01-room-lead-projection','2026-11-01-radio-controls-projection')", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(
+        client_entity(&store, "room", "room")
+            .unwrap()
+            .1
+            .get("leadIds")
+            .is_none()
+    );
+    drop(store);
+    let store = studio_runtime_store::RuntimeStore::open(Some(dir.path()))
+        .await
+        .unwrap();
+    assert_eq!(
+        client_entity(&store, "room", "room").unwrap().1["leadIds"],
+        json!(["z", "lead", "y"])
+    );
+    assert_eq!(
+        client_entity(&store, "room", "room").unwrap().1["radio"]["controls"]["inputBlocked"],
+        true
+    );
+    let seq = store
+        .test_read_transaction(|tx| {
+            tx.query_row(
+                "SELECT seq FROM sync_entities WHERE collection='room' AND id='room'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(StoreError::from)
+        })
+        .unwrap();
+    store.transaction(|tx| {
+        studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "room", "late", json!({"id":"late","kind":"private","members":["lead"],"radio":{"status":"idle","active":null}}), false)?;
+        tx.execute_batch("CREATE TRIGGER room_migration_schema_change AFTER INSERT ON runtime_rooms BEGIN SELECT 1; END;")?;
+        Ok(())
+    }).await.unwrap();
+    drop(store);
+    let store = studio_runtime_store::RuntimeStore::open(Some(dir.path()))
+        .await
+        .unwrap();
+    let after = store
+        .test_read_transaction(|tx| {
+            tx.query_row(
+                "SELECT seq FROM sync_entities WHERE collection='room' AND id='room'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(StoreError::from)
+        })
+        .unwrap();
+    assert_eq!(after, seq);
+    let late = client_entity(&store, "room", "late").unwrap().1;
+    assert!(late.get("leadIds").is_none());
+    assert!(late["radio"].get("controls").is_none());
+}
+
+#[tokio::test]
 async fn unreadable_summary_keeps_agent_and_exposes_reason() {
     let (_dir, store) = store().await;
     seed_chat(
@@ -585,6 +797,7 @@ async fn work_details_upgrade_seeds_before_first_stream_without_a_pull() {
     store.transaction(move |tx| {
         AgentRepository::put(tx,&AgentRecord::from_value(chat(json!({"taskDefaultGate":{"command":"upgrade-check","timeout_ms":1234}})))?)?;
         tx.execute("INSERT INTO runtime_work(id,record) VALUES(?1,?2)", rusqlite::params![id,json!({"id":id,"rootId":CHAT,"title":"Old assignment","status":"review","created":1,"updated":1,"version":1,"results":[{"id":"old-result","agent":CHAT,"text":"Old evidence","checks":"Checked","revision":"abc","files":[],"created":1}]}).to_string()])?;
+        reconcile_work_history(tx, id)?;
         tx.execute("DELETE FROM sync_entity_meta WHERE key=?1", [studio_runtime_store::WORK_DETAILS_SEED_MARKER])?;
         Ok(())
     }).await.expect("pre-upgrade sources without a publisher");
@@ -619,6 +832,29 @@ async fn work_details_upgrade_seeds_before_first_stream_without_a_pull() {
         0,
         "the durable marker skips later seed reads"
     );
+}
+
+/// Accepted work keeps a private archive intent in the writer's shape
+/// (`intentId`, no `id`). The client detail must omit it like the work view.
+#[tokio::test]
+async fn work_detail_omits_private_effect_records() {
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    let id = "accepted-private";
+    let work = json!({"id":id,"rootId":CHAT,"title":"Accepted","status":"accepted","owner":CHAT,"dependencies":[],"created":1,"updated":1,"version":1,"results":[],"decisions":[],
+        "archiveIntent":{"status":"terminal","taskId":id,"intentId":"accepted-private:result","actor":CHAT,"actorEpoch":0,"target":CHAT,"attempts":3,"created":1.0,"nextAttemptAt":2.0}});
+    write(
+        &store,
+        "INSERT INTO runtime_work(id,record) VALUES(?1,?2)",
+        vec![id.into(), work.to_string()],
+    )
+    .await;
+    let detail = client_entity(&store, "workDetail", id)
+        .expect("accepted work publishes its detail")
+        .1;
+    for private in ["archiveIntent", "vmSubmit", "vmAccept", "resultFailures"] {
+        assert!(detail.get(private).is_none(), "{private} is private");
+    }
 }
 
 #[tokio::test]
@@ -1297,11 +1533,35 @@ fn chat(extra: Value) -> Value {
     record
 }
 
+/// Raw SQL writes skip the record writers, so a test repeats their history rows here.
+pub(crate) fn reconcile_work_history(
+    tx: &rusqlite::Transaction<'_>,
+    id: &str,
+) -> Result<(), StoreError> {
+    use rusqlite::OptionalExtension;
+    // A statement that deleted the row has no entries left to repair.
+    let raw: Option<String> = tx
+        .query_row("SELECT record FROM runtime_work WHERE id=?1", [id], |row| {
+            row.get(0)
+        })
+        .optional()?;
+    match raw {
+        Some(raw) => {
+            studio_runtime_store::work_history::reconcile(tx, id, &serde_json::from_str(&raw)?)
+        }
+        None => Ok(()),
+    }
+}
+
 async fn write(store: &studio_runtime_store::RuntimeStore, sql: &'static str, params: Vec<String>) {
     store
         .transaction_with(move |tx| {
+            let id = params.first().cloned();
             tx.execute(sql, rusqlite::params_from_iter(params))
                 .map_err(StoreError::from)?;
+            if let Some(id) = id.filter(|_| sql.contains("runtime_work")) {
+                reconcile_work_history(tx, &id)?;
+            }
             Ok::<_, StoreError>(())
         })
         .await

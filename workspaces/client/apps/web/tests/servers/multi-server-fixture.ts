@@ -713,12 +713,16 @@ export async function fixture(
           ? "text/javascript"
           : filename.endsWith(".css")
             ? "text/css"
-            : "text/html",
+            : filename.endsWith(".wasm")
+              ? "application/wasm"
+              : filename.endsWith(".png")
+                ? "image/png"
+                : "text/html",
       );
       if (url.pathname === "/")
         response.setHeader(
           "Content-Security-Policy",
-          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* https://api.openai.com https://*.ts.net:*; img-src 'self' data: blob: https: http:; media-src 'self' blob: data:; frame-src 'self' blob: http://*.localhost:*; frame-ancestors " +
+          "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* https://api.openai.com https://*.ts.net:*; img-src 'self' data: blob: https: http:; media-src 'self' blob: data:; frame-src 'self' blob: http://*.localhost:*; frame-ancestors " +
             (url.searchParams.has("studio-server")
               ? "'self' http://127.0.0.1:* http://localhost:*"
               : "'none'") +

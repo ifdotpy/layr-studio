@@ -460,17 +460,10 @@ fn account_error(error: AccountDriverError) -> ApiError {
 async fn discover(
     State(state): State<HttpState>,
 ) -> Result<Json<crate::generated::AccountsResponse>, ApiError> {
-    if let Some(port) = state.account_session.clone() {
-        let response = port.discover().await.map_err(session_error)?;
-        state.event_wake.notify_one();
-        return serde_json::from_value(response)
-            .map(Json)
-            .map_err(|_| ApiError::internal());
-    }
     let Some(driver) = state.account_driver.clone() else {
         return Err(runtime_availability("account-driver/runtime"));
     };
-    let snapshot = run_account_operation(&state, driver, |driver| {
+    run_account_operation(&state, driver, |driver| {
         let user_home = std::env::var_os("HOME")
             .map(std::path::PathBuf::from)
             .unwrap_or_default();
@@ -483,11 +476,10 @@ async fn discover(
                 studio_runtime_services::account_driver::AccountMutationError::Refused(_) => {
                     AccountDriverError::InvalidRegistry
                 }
-            })?;
-        driver.snapshot()
+            })
     })
     .await?;
-    accounts_response(snapshot)
+    super::catalog::accounts(State(state)).await
 }
 
 #[derive(serde::Serialize)]
@@ -590,9 +582,9 @@ async fn claude_profile(
         .account_session
         .clone()
         .ok_or_else(|| unavailable(CLAUDE_PROFILE[0]))?;
-    let result = port.profile(body).await.map_err(session_error)?;
+    port.profile(body).await.map_err(session_error)?;
     state.event_wake.notify_one();
-    super::generated_json::<crate::generated::AccountsResponse>(result).map(Json)
+    super::catalog::accounts(State(state)).await
 }
 
 pub(super) fn session_error(error: AccountSessionError) -> ApiError {

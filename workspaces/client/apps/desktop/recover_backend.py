@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import socket
 import subprocess
@@ -872,6 +873,56 @@ def launch_environment(config, state, supervisor_fallback=False):
     return env
 
 
+# Seconds without a journal write after which a supervisor of another protocol holds no live work.
+# The supervisor saves every output frame and receipt, so a running turn keeps writing. Limit: a
+# turn that stays silent for this long (a tool run without output) is not seen as live work.
+SUPERVISOR_QUIET_SECONDS = 600
+# Seconds allowed for one launchctl command.
+LAUNCHCTL_SECONDS = 60
+
+
+class SupervisorMismatch(RuntimeError):
+    """The running supervisor does not speak this build's protocol."""
+
+
+def launchctl(*args):
+    return subprocess.run(["/bin/launchctl", *args], capture_output=True, text=True,
+                          timeout=LAUNCHCTL_SECONDS, check=False)
+
+
+def supervisor_label(state):
+    """Owner: recoveryPaths in recovery.ts (supervisorLabel)."""
+    return "local.codex.agents.supervisor." + hashlib.sha256(str(state).encode()).hexdigest()[:16]
+
+
+def supervisor_job_running(state):
+    result = launchctl("print", f"gui/{os.getuid()}/{supervisor_label(state)}")
+    return result.returncode == 0 and re.search(r"^\s*pid = \d+$", result.stdout, re.M) is not None
+
+
+def restart_supervisor_job(state):
+    """Stop and load the supervisor job again so launchd starts it from the installed app. A job
+    that failed to spawn while the app was swapped stays failed until it is loaded again."""
+    label = supervisor_label(state)
+    domain = f"gui/{os.getuid()}"
+    plist = Path.home() / "Library/LaunchAgents" / f"{label}.plist"
+    launchctl("bootout", f"{domain}/{label}")
+    result = launchctl("bootstrap", domain, str(plist))
+    if result.returncode != 0:
+        raise RuntimeError("launchd could not load the supervisor job: " + (result.stderr or "").strip()[-200:])
+
+
+def supervisor_idle(state, now=time.time):
+    """True when the supervisor journal has had no write for SUPERVISOR_QUIET_SECONDS. This reads
+    files only, so it works for a supervisor of any protocol. An unreadable journal is not idle."""
+    try:
+        written = max((state / name).stat().st_mtime
+                      for name in ("supervisor.sqlite3", "supervisor.sqlite3-wal") if (state / name).exists())
+    except (OSError, ValueError):
+        return False
+    return now() - written >= SUPERVISOR_QUIET_SECONDS
+
+
 def supervisor_tick(config, state, child=None):
     """Probe the separately supervised owner without taking over its lifecycle."""
     if config.get("supervisorEnabled") is not True:
@@ -881,8 +932,22 @@ def supervisor_tick(config, state, child=None):
         raise RuntimeError("Supervisor mode is enabled but the Rust process supervisor is missing.")
     try:
         health = supervisor_request(state, SupervisorAction.HEALTH)
+    except SupervisorMismatch as error:
+        # An old supervisor (kept across an app update) is replaced once it holds no live work.
+        if not supervisor_idle(state):
+            raise RuntimeError(f"{error} It holds live work; waiting for it to end.") from error
+        restart_supervisor_job(state)
+        # A backend that ran against the old supervisor reconnects only by restarting.
+        existing = identity(config["port"], state)
+        if existing:
+            verify_backend_process(existing, config)
+            os.kill(existing["pid"], signal.SIGTERM)
+        return child, "supervisor replaced"
     except OSError:
-        # Failed probes never authorize replacing the separately supervised owner.
+        # Failed probes never authorize replacing the separately supervised owner. A job that
+        # launchd does not run (it failed to spawn during the app swap) is loaded again.
+        if not supervisor_job_running(state):
+            restart_supervisor_job(state)
         return child, "supervisor starting"
     recovery = health.get("recovery") or {}
     if recovery.get("blocked"):
@@ -933,7 +998,7 @@ def supervisor_request(state: Path, action: SupervisorAction) -> dict[str, objec
             hello = SupervisorHello(**exchange({"protocol": SUPERVISOR_PROTOCOL_VERSION,
                               "stateDir": str(state), role: True}))
             if hello.ok is not True or hello.protocol != SUPERVISOR_PROTOCOL_VERSION:
-                raise RuntimeError("The running process supervisor uses an incompatible protocol.")
+                raise SupervisorMismatch("The running process supervisor uses an incompatible protocol.")
             reply = SupervisorReply(**exchange({"requestId": 1, "action": action}))
             if reply.requestId != 1 or reply.error is not None or reply.result is None:
                 raise RuntimeError(reply.error or "The supervisor reply does not match the request.")

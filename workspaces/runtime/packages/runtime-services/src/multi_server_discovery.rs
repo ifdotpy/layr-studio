@@ -129,7 +129,10 @@ pub trait ServerDiscoveryPort: Send + Sync {
         store: Arc<RuntimeStore>,
         identity: &'a Value,
         public_origin: &'a str,
-    ) -> BoxFuture<'a, Result<Value, AccessError>>;
+    ) -> BoxFuture<
+        'a,
+        Result<studio_runtime_schema::multi_server_access::AccessSnapshot, AccessError>,
+    >;
 }
 
 #[derive(Clone)]

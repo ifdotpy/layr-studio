@@ -39,6 +39,9 @@ pub(crate) fn command_error(error: CommandError) -> ApiError {
         CommandError::Invalid(message) => ApiError::new(StatusCode::BAD_REQUEST, message),
         CommandError::Conflict(message) => ApiError::new(StatusCode::CONFLICT, message),
         CommandError::NotFound => ApiError::new(StatusCode::NOT_FOUND, error.to_string()),
+        CommandError::Missing(message) => ApiError::new(StatusCode::NOT_FOUND, message),
+        CommandError::Entity(message) => ApiError::new(StatusCode::CONFLICT, message),
+        CommandError::Outbox(error) => studio_runtime_store::StoreError::from(error).into(),
         CommandError::RequestResult(error) => error.into(),
         CommandError::Store(error) => error.into(),
         CommandError::Lifecycle(error) => super::agent_management::management_error(error),
@@ -64,7 +67,7 @@ async fn command(
     let chat = request.command.target().to_owned();
     let mut extra_rows = Vec::new();
     let reference = match request.command.clone() {
-        Command::Withdraw { .. } | Command::Stop { .. } => {
+        Command::Withdraw { .. } | Command::Stop { .. } | Command::Resolve { .. } => {
             let ports = ports.map(|Extension(ports)| ports);
             let (for_transaction, request) = (ports.clone(), request.clone());
             let now = now_ms as f64 / 1000.0;
@@ -234,6 +237,8 @@ mod tests {
     use serde_json::{Value, json};
     use std::sync::Arc;
     use studio_runtime_schema::persistence::{REQUEST_RESULT_TTL_MS, RequestIdentity};
+    use studio_runtime_services::agent_lifecycle_runtime::LifecyclePorts;
+    use studio_runtime_services::commands::CommandError;
     use studio_runtime_services::principal::{Grant, Principal};
     use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore};
     use tower::ServiceExt;
@@ -817,6 +822,271 @@ mod tests {
             })
             .await
             .expect("count")
+    }
+
+    /// Seed an outbox entry of `kind` for the agent `workspace` with `status`.
+    async fn seed_entry(store: &RuntimeStore, kind: &'static str, status: &'static str) {
+        store
+            .transaction(move |tx| {
+                tx.execute(
+                    "INSERT INTO runtime_outbox(id,kind,owner_kind,owner_id,request_id,signature,status,account,stream_id,generation,ordinal,next_at,payload,created,target) VALUES('entry',?1,'agent','workspace',NULL,'sig',?2,NULL,NULL,NULL,NULL,NULL,'{}',1,NULL)",
+                    [kind, status],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("seed outbox entry");
+    }
+
+    async fn entry_row(store: &RuntimeStore) -> (String, Option<i64>, String) {
+        store
+            .transaction(|tx| {
+                Ok(tx.query_row(
+                    "SELECT status,next_at,payload FROM runtime_outbox WHERE id='entry'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )?)
+            })
+            .await
+            .expect("entry row")
+    }
+
+    fn resolve(id: &str, number: u64, action: &str) -> Value {
+        json!({"id":id,"client":"web-1","number":number,"kind":"resolve","target":"entry","body":{"action":action}})
+    }
+
+    #[tokio::test]
+    async fn resolve_retry_queues_the_same_entry_with_its_body() {
+        let (app, store, _directory) = app_with_queue().await;
+        seed_entry(&store, "provider_call", "unknown").await;
+        let (status, body) = post(
+            &app,
+            None,
+            resolve(&RequestIdentity::issue_root(), 1, "retry"),
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(body["ref_kind"], "outbox");
+        assert_eq!(body["ref_id"], "entry");
+        let (status, next_at, payload) = entry_row(&store).await;
+        assert_eq!(status, "pending");
+        assert!(next_at.is_some(), "a retry is due");
+        assert_eq!(payload, "{}", "the body is unchanged");
+    }
+
+    #[tokio::test]
+    async fn resolve_delivered_commits_the_entry() {
+        let (app, store, _directory) = app_with_queue().await;
+        seed_entry(&store, "provider_call", "unknown").await;
+        let (status, body) = post(
+            &app,
+            None,
+            resolve(&RequestIdentity::issue_root(), 1, "delivered"),
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        let (status, next_at, _) = entry_row(&store).await;
+        assert_eq!(status, "committed");
+        assert_eq!(next_at, None);
+    }
+
+    #[tokio::test]
+    async fn resolve_discard_cancels_the_entry_and_keeps_its_payload() {
+        let (app, store, _directory) = app_with_queue().await;
+        seed_entry(&store, "provider_call", "unknown").await;
+        let (status, body) = post(
+            &app,
+            None,
+            resolve(&RequestIdentity::issue_root(), 1, "discard"),
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        let (status, next_at, payload) = entry_row(&store).await;
+        assert_eq!(status, "cancelled");
+        assert_eq!(next_at, None);
+        assert_eq!(payload, "{}", "the row keeps its payload");
+    }
+
+    #[tokio::test]
+    async fn resolve_refuses_an_entry_that_is_not_unknown() {
+        let (app, store, _directory) = app_with_queue().await;
+        seed_entry(&store, "provider_call", "pending").await;
+        let (status, _) = post(
+            &app,
+            None,
+            resolve(&RequestIdentity::issue_root(), 1, "delivered"),
+        )
+        .await;
+        assert_eq!(status, 409);
+        assert_eq!(entry_row(&store).await.0, "pending");
+    }
+
+    #[tokio::test]
+    async fn resolve_refuses_a_steer_retry_and_leaves_it_unknown() {
+        let (app, store, _directory) = app_with_queue().await;
+        seed_entry(&store, "steer", "unknown").await;
+        let (status, _) = post(
+            &app,
+            None,
+            resolve(&RequestIdentity::issue_root(), 1, "retry"),
+        )
+        .await;
+        assert_eq!(status, 400);
+        assert_eq!(entry_row(&store).await.0, "unknown");
+    }
+
+    #[tokio::test]
+    async fn resolve_replay_returns_the_first_reference_and_changes_nothing_again() {
+        let (app, store, _directory) = app_with_queue().await;
+        seed_entry(&store, "provider_call", "unknown").await;
+        let id = RequestIdentity::issue_root();
+        let (status, first) = post(&app, None, resolve(&id, 1, "delivered")).await;
+        assert_eq!(status, 200, "{first}");
+        let (status, again) = post(&app, None, resolve(&id, 1, "delivered")).await;
+        assert_eq!(status, 200, "{again}");
+        assert_eq!(first["ref_id"], again["ref_id"]);
+        assert_eq!(entry_row(&store).await.0, "committed");
+    }
+
+    #[tokio::test]
+    async fn an_observe_device_cannot_resolve() {
+        let (app, store, _directory) = app_with_queue().await;
+        seed_entry(&store, "provider_call", "unknown").await;
+        let observe = Principal::Device {
+            id: "phone".into(),
+            grant: Grant::Observe,
+        };
+        let (status, _) = post(
+            &app,
+            Some(observe),
+            resolve(&RequestIdentity::issue_root(), 1, "delivered"),
+        )
+        .await;
+        assert_eq!(status, 403);
+        assert_eq!(entry_row(&store).await.0, "unknown");
+    }
+
+    /// Records the lifecycle effects that a command stages in its transaction.
+    struct StagingPorts(
+        Arc<
+            std::sync::Mutex<
+                Vec<studio_runtime_services::agent_lifecycle_runtime::LifecycleEffectKind>,
+            >,
+        >,
+    );
+
+    impl LifecyclePorts for StagingPorts {
+        fn stage(
+            &self,
+            _: &rusqlite::Transaction<'_>,
+            effect: &studio_runtime_services::agent_lifecycle_runtime::LifecycleEffect,
+        ) -> Result<(), studio_runtime_services::agent_management::ManagementError> {
+            self.0.lock().expect("staged effects").push(effect.kind());
+            Ok(())
+        }
+
+        fn committed(
+            &self,
+        ) -> studio_runtime_services::agent_lifecycle_runtime::LifecycleCommitFuture<'_> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    /// The owner withdraws message `a`, which a running turn of `workspace` holds.
+    async fn hold_a_and_withdraw_it(
+        store: &RuntimeStore,
+        staged: Arc<
+            std::sync::Mutex<
+                Vec<studio_runtime_services::agent_lifecycle_runtime::LifecycleEffectKind>,
+            >,
+        >,
+        forced_rollback: bool,
+    ) -> Result<studio_runtime_services::commands::Executed, CommandError> {
+        use studio_runtime_services::commands::execute_sync;
+        store
+            .transaction(|tx| {
+                tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.status','running','$.inFlight',json('true'),'$.turnId','turn-1') WHERE id='workspace'", [])?;
+                tx.execute("UPDATE runtime_events SET status='reserved' WHERE id='a'", [])?;
+                Ok(())
+            })
+            .await
+            .expect("hold a");
+        // The owner's command id must be a UUIDv7, as the HTTP edge requires.
+        let id = RequestIdentity::issue_root();
+        let request: studio_runtime_schema::command::CommandRequest =
+            serde_json::from_value(withdraw(&id, 1, "a")).expect("request");
+        let now = now_ms();
+        store
+            .transaction_with_error(move |tx| {
+                let ports = StagingPorts(staged);
+                let dynamic: &dyn LifecyclePorts = &ports;
+                let executed = execute_sync(
+                    tx,
+                    &Principal::Owner,
+                    &request,
+                    now,
+                    now as f64 / 1000.0,
+                    Some(dynamic),
+                )?;
+                if forced_rollback {
+                    return Err(CommandError::Invalid("forced rollback"));
+                }
+                Ok(executed)
+            })
+            .await
+    }
+
+    #[tokio::test]
+    async fn withdrawing_a_held_message_writes_the_draft_and_stages_the_stop_in_one_commit() {
+        use studio_runtime_services::agent_lifecycle_runtime::LifecycleEffectKind;
+        let (_app, store, _directory) = app_with_queue().await;
+        let staged = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let executed = hold_a_and_withdraw_it(&store, staged.clone(), false)
+            .await
+            .expect("withdraw held");
+        assert!(!executed.replayed);
+        assert_eq!(executed.reference.id, "a");
+        assert_eq!(
+            *staged.lock().expect("staged effects"),
+            vec![LifecycleEffectKind::Interrupt]
+        );
+        assert_eq!(status_of(&store, "a").await, "cancelled");
+        let draft: String = store
+            .transaction(|tx| {
+                Ok(tx.query_row(
+                    "SELECT payload FROM sync_documents WHERE scope='drafts' AND id='server:withdraw:workspace'",
+                    [],
+                    |row| row.get(0),
+                )?)
+            })
+            .await
+            .expect("server draft");
+        let draft: Value = serde_json::from_str(&draft).expect("draft JSON");
+        assert_eq!(draft["text"], "A");
+    }
+
+    #[tokio::test]
+    async fn a_held_withdraw_that_rolls_back_leaves_the_message_the_draft_and_the_turn_as_they_were()
+     {
+        let (_app, store, _directory) = app_with_queue().await;
+        let staged = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let outcome = hold_a_and_withdraw_it(&store, staged, true).await;
+        assert!(matches!(
+            outcome,
+            Err(CommandError::Invalid("forced rollback"))
+        ));
+        assert_eq!(status_of(&store, "a").await, "reserved");
+        let drafts: i64 = store
+            .transaction(|tx| {
+                Ok(tx.query_row(
+                    "SELECT count(*) FROM sync_documents WHERE scope='drafts' AND id='server:withdraw:workspace'",
+                    [],
+                    |row| row.get(0),
+                )?)
+            })
+            .await
+            .expect("draft count");
+        assert_eq!(drafts, 0);
     }
 
     #[tokio::test]

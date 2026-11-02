@@ -16,7 +16,7 @@ use studio_runtime_store::StoreError;
 use subtle::ConstantTimeEq;
 use thiserror::Error;
 
-use crate::remote_transport::{self, MultiServerSigningInput};
+use crate::remote_transport;
 
 pub const PAIR_PATH: &str = "/api/multi-server/v1/pair";
 pub const AUTO_PAIR_PATH: &str = "/api/multi-server/v1/auto-pair";
@@ -1047,9 +1047,11 @@ fn verify_request_signature(
     } else {
         client.map(|v| v.public_key.as_str()).unwrap_or_default()
     };
-    remote_transport::verify_signature(
-        key,
-        &remote_transport::multi_server_signing_bytes(MultiServerSigningInput {
+    let invalid = || refused(401, "invalid_signature", "The request signature is invalid");
+    let public_key = remote_transport::ed25519_public_key(key).map_err(|_| invalid())?;
+    studio_request_signing::verify(
+        &public_key,
+        studio_request_signing::SigningInput {
             method: &request.method,
             target: &request.target,
             server_id: &request.server,
@@ -1058,10 +1060,10 @@ fn verify_request_signature(
             nonce: &request.nonce,
             request_id: &request.request,
             body: &request.raw,
-        }),
+        },
         &request.signature,
     )
-    .map_err(|_| refused(401, "invalid_signature", "The request signature is invalid"))?;
+    .map_err(|_| invalid())?;
     Ok(())
 }
 pub(crate) fn check_invite(

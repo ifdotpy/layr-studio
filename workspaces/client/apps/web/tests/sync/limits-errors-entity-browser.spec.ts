@@ -157,12 +157,14 @@ test("limits and Studio errors update from entities with no idle HTTP refresh", 
         req.on("end", () => {
           const update: unknown = JSON.parse(body);
           assert.ok(update && typeof update === "object" && "gen" in update);
-          assert.equal(typeof update.gen, "number");
+          assert.ok(typeof update.gen === "number");
+          const ack = {
+            gen: update.gen,
+            cachePolicies: [],
+          } satisfies import("../../src/generated/api.ts").components["schemas"]["SyncSubscriptionAck"];
           for (const stream of streams)
-            stream.write(
-              protocol3SseEvent("subscriptions", { gen: update.gen }),
-            );
-          json({ gen: update.gen });
+            stream.write(protocol3SseEvent("subscriptions", ack));
+          json(ack);
         });
         return;
       }

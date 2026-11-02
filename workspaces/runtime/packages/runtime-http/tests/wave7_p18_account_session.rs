@@ -284,3 +284,49 @@ async fn login_refuses_preexisting_symlink_that_escapes_accounts_root() {
             .is_symlink()
     );
 }
+
+/// Discovery answers with the same typed account listing as `GET /api/accounts`.
+#[tokio::test]
+#[allow(clippy::disallowed_methods)] // Test fixture writes the registry file.
+async fn discover_returns_the_typed_account_listing() {
+    let root = tempfile::tempdir().expect("fixture state");
+    let store = Arc::new(
+        studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .expect("store"),
+    );
+    let path = root.path().join("registry.json");
+    let registry = json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":{"provider":studio_runtime_schema::ProviderKind::Codex,"id":"default","home":root.path(),"label":"Default","source":"Fixture","status":"signedOut"}},"logins":{}}).to_string();
+    std::fs::write(&path, &registry).expect("registry");
+    let driver = Arc::new(AccountDriver::open(&path).expect("driver"));
+    let policy = studio_runtime_services::account_policy::AccountPolicyState::from_startup(
+        Some(registry.as_bytes()),
+        [],
+    )
+    .expect("policy");
+    let session = AccountSessionRuntime::new(
+        driver.clone(),
+        None,
+        tokio::runtime::Handle::current(),
+        root.path().into(),
+        root.path().join("base"),
+        PathBuf::from(std::env::var_os("HOME").expect("isolated home")),
+    );
+    let mut state = HttpState::new(
+        "fixture-token".into(),
+        "fixture".into(),
+        root.path().to_string_lossy().into(),
+        49171,
+        None,
+        Some(store),
+        Some(Arc::new(policy)),
+    )
+    .with_account_driver(driver);
+    state.account_session = Some(Arc::new(session));
+    let app = router(state).expect("router");
+    let (status, body) = post(&app, "/api/accounts/discover", json!({})).await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body["defaultAccountGroups"].is_array(), "{body}");
+    assert_eq!(body["accounts"][0]["id"], "default");
+    assert!(body["accounts"][0]["eligibility"].is_object(), "{body}");
+}

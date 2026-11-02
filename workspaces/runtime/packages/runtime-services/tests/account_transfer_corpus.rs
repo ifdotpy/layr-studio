@@ -347,7 +347,9 @@ fn retry_only_resets_blocked_members() {
             "interruptTurnId":"turn","interruptSubmittedAt":4,"interruptOutcome":"unknown"});
         let mut blocked_agent = agent.clone();
         blocked_agent["id"] = json!("b");
-        blocked_agent["lazyAccountTransfer"] = json!(lazy);
+        if lazy {
+            blocked_agent["lazyAccountTransfer"] = json!({"id":"op","sourceAccountKey":"source"});
+        }
         let result = Snapshot::read(
             &op.to_string(),
             [

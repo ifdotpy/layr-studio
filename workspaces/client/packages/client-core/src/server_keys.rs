@@ -13,6 +13,7 @@ use ring::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use studio_request_signing::SigningInput;
 
 pub trait Vault: Send + Sync {
     fn read(&self) -> Result<VaultState, String>;
@@ -300,26 +301,19 @@ pub fn signature(
     request_id: &str,
     bytes: &[u8],
 ) -> Result<String, String> {
-    let digest = Sha256::digest(bytes)
-        .iter()
-        .map(|v| format!("{v:02x}"))
-        .collect::<String>();
-    let text = [
-        "studio-multi-server-v1",
+    let input = SigningInput {
         method,
         target,
-        credential.field("serverId")?,
-        credential.field("clientId")?,
+        server_id: credential.field("serverId")?,
+        client_id: credential.field("clientId")?,
         timestamp,
         nonce,
         request_id,
-        &digest,
-    ]
-    .join("\n");
-    Ok(STANDARD.encode(
-        signing_key(vault, credential)?
-            .sign(text.as_bytes())
-            .as_ref(),
+        body: bytes,
+    };
+    Ok(studio_request_signing::sign(
+        &signing_key(vault, credential)?,
+        input,
     ))
 }
 
@@ -540,6 +534,62 @@ mod tests {
         vault.write(&VaultState::from_value(newer.clone())).unwrap();
         import(&vault, &source).unwrap();
         assert_eq!(vault.read().unwrap().into_value(), newer);
+    }
+
+    #[test]
+    fn signature_is_the_shared_golden_vector_and_the_shared_verifier_accepts_it() {
+        let seed: [u8; 32] = [
+            0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec,
+            0x2c, 0xc4, 0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03,
+            0x1c, 0xae, 0x7f, 0x60,
+        ];
+        let public: [u8; 32] = [
+            0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7, 0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64,
+            0x07, 0x3a, 0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25, 0xaf, 0x02, 0x1a, 0x68,
+            0xf7, 0x07, 0x51, 0x1a,
+        ];
+        let mut der = vec![
+            0x30, 0x53, 0x02, 0x01, 0x01, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22,
+            0x04, 0x20,
+        ];
+        der.extend_from_slice(&seed);
+        der.extend_from_slice(&[0xa1, 0x23, 0x03, 0x21, 0x00]);
+        der.extend_from_slice(&public);
+        let pem = format!(
+            "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n",
+            STANDARD.encode(der)
+        );
+        let vault = Memory(Mutex::new(json!({"drafts":{},"servers":{},
+            "device":{"id":"test-identity","publicKey":"x","privateKey":pem}})));
+        let credential = Credential::from_value(json!({"origin":"https://fixture.tailnet.ts.net",
+            "serverId":"server","clientId":"test-identity","inviteId":"i"}));
+        let nonce = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let signed = signature(
+            &vault,
+            &credential,
+            "POST",
+            "/api/x?q=1",
+            "1700000000",
+            nonce,
+            "request-1",
+            b"{\"a\":1}",
+        )
+        .unwrap();
+        assert_eq!(
+            signed,
+            "PfjrkGA/IwuIryihDJjgbfNY/NicDM3N3JicKu0yQMHvEE58pUjBK502a+n1/jr/ovXn4d9nwTi1Q6p1nfX2Dg=="
+        );
+        let input = SigningInput {
+            method: "POST",
+            target: "/api/x?q=1",
+            server_id: "server",
+            client_id: "test-identity",
+            timestamp: "1700000000",
+            nonce,
+            request_id: "request-1",
+            body: b"{\"a\":1}",
+        };
+        assert!(studio_request_signing::verify(&public, input, &signed).is_ok());
     }
 
     fn public_bytes(pem: &str) -> Vec<u8> {

@@ -135,7 +135,9 @@ pub(super) async fn agents(state: &State, kind: ProviderKind, others: usize) -> 
                     );
                     template.native_effort =
                         studio_runtime_schema::queue_command::Field::Value("medium".into());
-                    template.extra.insert("claudeOptions".into(), json!({}));
+                    template.claude_options = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_store::StoredTransferObject::Known(Default::default()),
+                    );
                 }
                 AgentRepository::put(tx, &template)?;
                 for (offset, id) in rows.iter().enumerate() {

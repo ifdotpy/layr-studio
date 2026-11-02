@@ -1,6 +1,7 @@
 import { required } from "./components/componentTestFixtures.ts";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { serverActivityActive } from "./servers/activity";
 import {
   ApiError,
   errorText,
@@ -17,6 +18,37 @@ import {
 } from "./api";
 
 describe("OpenAPI transport facade", () => {
+  it("releases renderer activity when a pending chat delete is aborted", async () => {
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (request: Request) =>
+          new Promise((_resolve, reject) => {
+            started();
+            request.signal.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true },
+            );
+          }),
+      ),
+    );
+    const controller = new AbortController();
+    const result = post(
+      "/api/conversation/delete",
+      { id: "lead" },
+      { signal: controller.signal },
+    );
+    await running;
+    expect(serverActivityActive()).toBe(true);
+    controller.abort();
+    await expect(result).rejects.toMatchObject({ name: "AbortError" });
+    expect(serverActivityActive()).toBe(false);
+  });
   it("requires bodies for all successful GET and POST operations in the OpenAPI owner", () => {
     const spec: unknown = JSON.parse(
       readFileSync(

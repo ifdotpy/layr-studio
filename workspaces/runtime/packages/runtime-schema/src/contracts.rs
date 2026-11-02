@@ -1261,17 +1261,10 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         .for_serialize()
         .with(|settings| settings.definitions_path = "/components/schemas".into())
         .into_generator();
-    runway_generator.subschema_for::<crate::usage_limits::AccountLimitsProjection>();
+    runway_generator.subschema_for::<crate::usage_limits::RateLimitView>();
     for (name, schema) in runway_generator.take_definitions(true) {
         openapi["components"]["schemas"][name] = schema;
     }
-    openapi["components"]["schemas"]["RateLimitView"] = serde_json::json!({
-        "type":"object", "additionalProperties":false,
-        "properties":{
-            "observation":{"$ref":"#/components/schemas/AccountRateLimitsDto"},
-            "projection":{"$ref":"#/components/schemas/AccountLimitsProjection"}
-        }, "required":["observation","projection"]
-    });
     openapi["components"]["schemas"]["SyncRateLimitEntityPayload"]["properties"]["value"] =
         serde_json::json!({"$ref":"#/components/schemas/RateLimitView"});
     if let Some(variants) = openapi["components"]["schemas"]["SyncEntity"]["oneOf"].as_array_mut() {
@@ -1284,7 +1277,11 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             }
         }
     }
+    for (name, schema) in crate::sync_entity_payload::schemas()? {
+        openapi["components"]["schemas"][name] = schema;
+    }
     crate::records::refresh_openapi(&mut openapi)?;
+    crate::multi_server_access::refresh_openapi(&mut openapi);
     crate::multi_server_protocol::refresh_openapi(&mut openapi);
     openapi["components"]["schemas"]["BackgroundShellPolicySettings"]["properties"]["quietThresholdMs"]
         ["not"] = serde_json::json!({"minimum":1,"maximum":crate::shell_policy::QUIET_MIN_MS - 1});
@@ -1370,6 +1367,10 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     openapi["components"]["schemas"]["AgentEntityDto"]["properties"]["accountTransfer"] = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/AccountTransferSummaryDto"},{"type":"null"}]});
     openapi["components"]["schemas"]["Account"]["properties"]["eligibility"] =
         serde_json::json!({"$ref":"#/components/schemas/AccountEligibility"});
+    for name in ["RoomEntityDto", "RoomDetailDto"] {
+        openapi["components"]["schemas"][name]["properties"]["leadIds"] =
+            serde_json::json!({"type":"array","items":{"type":"string"}});
+    }
     for (name, schema) in crate::studio_errors::schemas()? {
         openapi["components"]["schemas"][name] = schema;
     }
@@ -1380,6 +1381,11 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     openapi["components"]["schemas"]["TeamCounts"] = serde_json::json!({});
     for (name, schema) in crate::agent_progress::schemas()
         .into_iter()
+        .chain(crate::agent_entity_nested::schemas()?)
+        .chain(crate::agent_entity_nested_extra::schemas()?)
+        .chain(crate::agent_entity_transfer::schemas()?)
+        .chain(crate::agent_entity_remote::schemas()?)
+        .chain(crate::agent_entity_native::schemas()?)
         .chain(crate::desktop::schemas())
         .chain(crate::queue_command::schemas())
         .chain(crate::claude_controls::schemas())
@@ -1387,6 +1393,18 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         *openapi
             .pointer_mut(&format!("/components/schemas/{name}"))
             .ok_or_else(|| format!("OpenAPI is missing Rust-owned {name}"))? = schema;
+    }
+    for (name, schema) in crate::chat_operational_status::schemas() {
+        openapi["components"]["schemas"][name] = schema;
+    }
+    openapi["components"]["schemas"]["RadioControls"] = crate::radio_controls::schema();
+    openapi["components"]["schemas"]["RoomRadio"]["properties"]["controls"] =
+        serde_json::json!({"$ref":"#/components/schemas/RadioControls"});
+    let required = openapi["components"]["schemas"]["RoomRadio"]["required"]
+        .as_array_mut()
+        .ok_or("RoomRadio required fields missing")?;
+    if !required.iter().any(|value| value == "controls") {
+        required.push(serde_json::json!("controls"));
     }
     for (name, schema) in crate::process_controls::schemas() {
         openapi["components"]["schemas"][name] = schema;
@@ -1526,6 +1544,10 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-annotation-record.schema.json".into(),
             text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-annotation-record.schema.json", &serde_json::to_string_pretty(&crate::annotation_record::schema()).map_err(|error| error.to_string())?)?,
+        },
+        Rendered {
+            path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-access-invite.schema.json".into(),
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-access-invite.schema.json", &serde_json::to_string_pretty(&crate::multi_server_protocol::invite_schema()).map_err(|error| error.to_string())?)?,
         },
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-terminal-record.schema.json".into(),
@@ -1679,6 +1701,23 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             text: linux_vm_swift(),
         },
     ];
+    // The workspace envelope remains a legacy input; its eligibility leaf is
+    // generated from the same Rust owner as the HTTP and SSE contracts.
+    let usage_limits_path =
+        "workspaces/runtime/packages/runtime-schema/src/schemas/workspace-usage-limits.schema.json";
+    let mut usage_limits_schema = read_json(root, usage_limits_path)?;
+    let mut eligibility_generator = schemars::generate::SchemaSettings::draft2020_12()
+        .for_serialize()
+        .with(|settings| settings.definitions_path = "/$defs".into())
+        .into_generator();
+    eligibility_generator.subschema_for::<crate::usage_limits::UsageEligibility>();
+    for (name, schema) in eligibility_generator.take_definitions(true) {
+        usage_limits_schema["$defs"][name] = schema;
+    }
+    rendered.push(Rendered {
+        path: usage_limits_path.into(),
+        text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/workspace-usage-limits.schema.json", &serde_json::to_string_pretty(&usage_limits_schema).map_err(|error| error.to_string())?)?,
+    });
     for (file, field, variants) in [
         (
             "persisted-tool-request-record",
@@ -1866,6 +1905,14 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             "RateLimitBucket",
             "RateLimitWindow",
             "RateLimitIndividualLimit",
+            "BucketCredits",
+            "BucketCreditBalance",
+            "ClaudeRateLimit",
+            "ClaudeRateInfo",
+            "ClaudeRateStatus",
+            "ClaudeRateType",
+            "UnsupportedRateInfo",
+            "UnsupportedRateKind",
             "JsonValue",
             "ClaudeSessionSettings",
             "ClaudeCustomModel",

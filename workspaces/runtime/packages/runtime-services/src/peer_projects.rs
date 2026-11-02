@@ -296,10 +296,17 @@ impl PeerProjects {
             .read_async("runtime-services/peer_projects", |tx| {
                 let mut paired = BTreeMap::new();
                 for server in crate::multi_server::paired_servers(tx)? {
-                    if let Some(id) = server["id"].as_str() {
-                        let label = server["label"].as_str().filter(|label| !label.is_empty());
-                        paired.insert(id.to_owned(), label.unwrap_or(LABEL_FALLBACK).to_owned());
-                    }
+                    let id = server.id.as_str();
+                    let label = server.label.as_str();
+                    paired.insert(
+                        id.to_owned(),
+                        if label.is_empty() {
+                            LABEL_FALLBACK
+                        } else {
+                            label
+                        }
+                        .to_owned(),
+                    );
                 }
                 Ok::<_, StoreError>(paired)
             })

@@ -336,10 +336,10 @@ impl Puller {
         self.remove_all(RemoteEffect::UpdateOffer).await?;
         let mut found = Vec::new();
         for server in servers {
-            let Some(id) = server["id"].as_str() else {
-                continue;
-            };
-            if server["reachability"].as_str() == Some("unreachable") {
+            let id = server.id.as_str();
+            if server.reachability.value()
+                == Some(&studio_runtime_schema::multi_server_access::Reachability::Unreachable)
+            {
                 continue;
             }
             let entry = self

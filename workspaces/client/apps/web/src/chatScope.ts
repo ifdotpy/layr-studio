@@ -1,36 +1,7 @@
 import { needsAnswer } from "./approvals";
-import { RoomKind } from "./generated/api";
-import type { Agent, Room, Snapshot } from "./types";
+import type { Room, Snapshot } from "./types";
 
-// Private rooms predate rootId metadata. Their participants define the scope.
-// Historical cross-team rooms remain visible to the user in the participant chats.
-// Agent position by ID, built once per agents array: a snapshot asks this for
-// every room, so a per-room scan of all agents would scale with rooms x agents.
-const agentPositions = new WeakMap<Agent[], Map<string, number>>();
-
-export function roomLeadIds(room: Room, agents: Agent[]): string[] {
-  if (room.kind === RoomKind.broadcast)
-    return room.rootId && room.rootId !== "all" ? [room.rootId] : [];
-  let positions = agentPositions.get(agents);
-  if (!positions) {
-    positions = new Map();
-    agents.forEach((agent, index) => positions!.set(agent.id, index));
-    agentPositions.set(agents, positions);
-  }
-  // Agent order decides which lead is the room's default.
-  const participants = [...new Set(room.members)]
-    .map((id) => positions.get(id))
-    .filter((index): index is number => index !== undefined)
-    .sort((a, b) => a - b);
-  return [
-    ...new Set(
-      participants
-        .map((index) => agents[index]!)
-        .map((agent) => (agent.isLead ? agent.id : agent.rootId))
-        .filter((id): id is string => !!id),
-    ),
-  ];
-}
+export const roomLeadIds = (room: Room): string[] => room.leadIds ?? [];
 
 // A conversation belongs to one lead tree, even when two chats use the same folder.
 // A missing selection must never expand into all sessions.
@@ -53,7 +24,7 @@ export function chatSnapshot(
       ...runtime,
       agents: runtime.agents.filter((agent) => owns(agent.id)),
       rooms: runtime.rooms.filter(
-        (room) => !!rootId && roomLeadIds(room, data.threads).includes(rootId),
+        (room) => !!rootId && roomLeadIds(room).includes(rootId),
       ),
       requests: runtime.requests.filter((request) => owns(request.agent)),
       complaints: runtime.complaints.filter(

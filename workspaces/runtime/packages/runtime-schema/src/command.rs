@@ -142,6 +142,11 @@ pub enum Command {
         target: BoundedText<1, COMMAND_TARGET_MAX_CHARS>,
         body: StopBody,
     },
+    /// Resolve an outbox entry whose outcome is unknown. `target` is the entry id.
+    Resolve {
+        target: BoundedText<1, COMMAND_TARGET_MAX_CHARS>,
+        body: ResolveBody,
+    },
 }
 
 impl Command {
@@ -151,15 +156,17 @@ impl Command {
             Self::Send { .. } => "send",
             Self::Withdraw { .. } => "withdraw",
             Self::Stop { .. } => "stop",
+            Self::Resolve { .. } => "resolve",
         }
     }
 
-    /// The chat that the command acts on.
+    /// The chat that the command acts on, or the outbox entry id of a `resolve`.
     pub fn target(&self) -> &str {
         match self {
             Self::Send { target, .. }
             | Self::Withdraw { target, .. }
-            | Self::Stop { target, .. } => target.as_str(),
+            | Self::Stop { target, .. }
+            | Self::Resolve { target, .. } => target.as_str(),
         }
     }
 }
@@ -189,6 +196,24 @@ pub struct SendBody {
 #[serde(deny_unknown_fields)]
 pub struct WithdrawBody {
     pub message: MessageId,
+}
+
+/// What the user does with an outbox entry whose outcome is unknown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ResolveAction {
+    /// Queue the entry again with the same id and body.
+    Retry,
+    /// The effect happened: the entry is committed.
+    Delivered,
+    /// Cancel the entry. The entry keeps its payload, and a user message returns to the composer.
+    Discard,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResolveBody {
+    pub action: ResolveAction,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -265,6 +290,20 @@ mod tests {
         assert!(serde_json::from_value::<CommandRequest>(extra).is_err());
         let extra = serde_json::json!({"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"stop","target":"t","body":{},"extra":true});
         assert!(serde_json::from_value::<CommandRequest>(extra).is_err());
+    }
+
+    #[test]
+    fn resolve_takes_one_of_three_actions() {
+        for action in ["retry", "delivered", "discard"] {
+            let wire = format!(
+                r#"{{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"resolve","target":"entry","body":{{"action":"{action}"}}}}"#
+            );
+            let request: CommandRequest = serde_json::from_str(&wire).expect("parse");
+            assert_eq!(request.command.name(), "resolve");
+            assert_eq!(request.command.target(), "entry");
+        }
+        let unknown = r#"{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"resolve","target":"entry","body":{"action":"cancel"}}"#;
+        assert!(serde_json::from_str::<CommandRequest>(unknown).is_err());
     }
 
     #[test]

@@ -759,8 +759,22 @@ pub fn publish_entity_changes(
         .map(|row| (row.id.as_str(), &row.value))
         .collect::<Vec<_>>();
     let mut liveness_changed = BTreeSet::new();
+    let mut room_agents = BTreeSet::new();
     let mut changed_roots = BTreeSet::new();
     for &(id, record) in &agents {
+        let previous: Option<(Option<String>, Option<bool>)> = transaction.query_row(
+            "SELECT json_extract(payload,'$.value.rootId'),json_extract(payload,'$.value.isLead') FROM sync_entities WHERE collection='agent' AND id=?1 AND deleted=0",
+            [id], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?;
+        if let Some((old_root, old_lead)) = previous {
+            let new_root = record.get("rootId").and_then(Value::as_str);
+            let new_lead = record.get("isLead").and_then(Value::as_bool);
+            if old_root.as_deref() != new_root || old_lead != new_lead {
+                room_agents.insert(id.to_owned());
+                changed_roots.extend(old_root);
+                changed_roots.extend(new_root.map(str::to_owned));
+            }
+        }
         let projected_live: bool = transaction.query_row(
             "SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection='agent' AND id=?1 AND deleted=0)",
             [id],
@@ -768,6 +782,7 @@ pub fn publish_entity_changes(
         )?;
         if projected_live == truthy(record.get("deletedAt")) {
             liveness_changed.insert(id.to_owned());
+            room_agents.insert(id.to_owned());
             if let Some(root) = record.get("rootId").and_then(Value::as_str) {
                 changed_roots.insert(root.to_owned());
             }
@@ -818,8 +833,8 @@ pub fn publish_entity_changes(
             }
         }
     }
-    if !liveness_changed.is_empty() {
-        publish_rooms_of(transaction, &liveness_changed, &changed_roots, validate)?;
+    if !room_agents.is_empty() {
+        publish_rooms_of(transaction, &room_agents, &changed_roots, validate)?;
     }
     // Approval rows publish through the same code as their writers.
     for id in &changes.requests {
@@ -1149,6 +1164,7 @@ pub(crate) fn publish_agent_projection(
     deleted: bool,
     validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
+    crate::account_session_runtime::limits::publish_agent_change(transaction, id, deleted)?;
     for collection in ["agentSummary", "agentDetail"] {
         let projected = if deleted {
             json!({})
@@ -1335,8 +1351,11 @@ fn publish_work_history(
         };
         for index in indices {
             let entry_id = format!("{id}:{index}");
-            match crate::sync_views::work_history_view(id, record, kind, index) {
-                Some(entry) => {
+            let stored = studio_runtime_store::work_history::entry(transaction, id, kind, index)?;
+            match stored {
+                Some(value) => {
+                    let entry =
+                        crate::sync_views::work_history_entry(id, &record["rootId"], index, &value);
                     #[cfg(test)]
                     work_publication_probe::history(id, serde_json::to_vec(&entry)?.len());
                     put_projection(
@@ -4732,6 +4751,11 @@ mod work_parity_tests {
                 transaction.execute(
                     "INSERT INTO runtime_work(id,record) VALUES('w',?1)",
                     [&source],
+                )?;
+                studio_runtime_store::work_history::reconcile(
+                    transaction,
+                    "w",
+                    &serde_json::from_str::<serde_json::Value>(&source)?,
                 )?;
                 publish_entity_changes(
                     transaction,

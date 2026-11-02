@@ -7,28 +7,16 @@ vi.mock("../servers/ServerServicesContext", () => ({
 }));
 import LimitRecoveryNotice from "./LimitRecoveryNotice";
 vi.mock("../local-time", () => ({ localDateTime: () => "Fixture reset time" }));
-import type { LimitRecovery } from "../usage/limitRecovery";
+import type { components } from "../generated/api";
+type LimitRecovery = components["schemas"]["LimitRecovery"];
 
 const NOW = 1_800_000_000;
 const RESET = NOW + 3600;
 const recovery: LimitRecovery = {
   title: "Usage limit reached",
   message: "View account limits for reset times and available credits.",
-  resetAt: RESET,
-  eligibility: {
-    agentId: "a",
-    accountKey: "default",
-    model: "sonnet",
-    provider: "claude",
-    allowed: false,
-    canRun: false,
-    fresh: false,
-    checkedAt: NOW - 600,
-    validUntil: NOW - 300,
-    resetAt: RESET,
-    buckets: [{ id: "claude-sonnet", overageAllowed: false }],
-    overage: "rejected",
-  },
+  action: { kind: "none" },
+  timing: { kind: "waiting", resetAt: RESET },
 };
 const scheduled = {
   id: "resume-1",
@@ -77,35 +65,43 @@ test("a limit shows one line with the local reset time and a Refresh button", ()
   hidesDetails(html);
 });
 
-test("a chat that resumes by itself says so and needs no Refresh", () => {
+test("automatic resume can be controlled while waiting", () => {
   const html = render({ agentId: "a", usageResume: scheduled });
+  expect(html).toContain("Resets at Fixture reset time");
+  expect(html).toContain("Automatic resume planned for");
   expect(html).toContain(
-    "Limit reached. Studio resumes this chat after the reset.",
+    `<time dateTime="${new Date((RESET + 60) * 1000).toISOString()}">`,
   );
   expect(html).not.toContain(">Refresh<");
-  hidesDetails(html);
-});
-
-test("after the reset time a waiting chat says that Studio checks the account", () => {
-  vi.setSystemTime((RESET + 1) * 1000);
-  const waiting = render({ agentId: "a", usageResume: scheduled });
-  expect(waiting).toContain(
-    "The reset time passed. Studio is checking the account.",
-  );
-  hidesDetails(waiting);
-  // A chat without automatic resume asks for a refresh instead.
-  const manual = render({});
-  expect(manual).toContain(
-    "The reset time passed. Refresh to check the account.",
-  );
-  expect(manual).toContain("Refresh");
 });
 
 test("a limit without a known reset time stays one line", () => {
   const html = render({
-    recovery: { ...recovery, resetAt: undefined, eligibility: undefined },
+    recovery: { ...recovery, timing: { kind: "unknown" } },
   });
   expect(html).toContain("Limit reached.");
   expect(html).not.toContain("Resets at");
-  hidesDetails(html);
+});
+
+test("reset state follows the server projection instead of the client clock", () => {
+  vi.setSystemTime((RESET + 1) * 1000);
+  const waiting = {
+    title: "Usage limit reached",
+    message: "Wait",
+    action: { kind: "none" },
+    timing: { kind: "waiting", resetAt: RESET },
+  };
+  expect(render({ recovery: waiting })).toContain(
+    "Resets at Fixture reset time",
+  );
+  expect(
+    render({
+      recovery: { ...waiting, timing: { kind: "checking", resetAt: RESET } },
+    }),
+  ).toContain("Studio is checking the account");
+  expect(
+    render({
+      recovery: { ...waiting, timing: { kind: "confirmed", resetAt: RESET } },
+    }),
+  ).toContain("The limit has reset");
 });
