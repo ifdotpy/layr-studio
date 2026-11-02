@@ -124,6 +124,18 @@ mod tests {
         let mut expected = super::OPTIONAL_FIELDS
             .iter()
             .chain(super::super::m2026_11_02_agent_worker_base_ref::OPTIONAL_FIELDS.iter())
+            .chain(
+                [
+                    "concurrency",
+                    "layrStoreRoot",
+                    "projectId",
+                    "projectServerId",
+                    "agentMode",
+                    "agentModeRevision",
+                    "subagentConcurrencyVersion",
+                ]
+                .iter(),
+            )
             .map(|field| field.to_string())
             .collect::<Vec<_>>();
         fields.sort();

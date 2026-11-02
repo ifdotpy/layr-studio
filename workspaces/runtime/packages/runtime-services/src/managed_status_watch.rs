@@ -606,11 +606,12 @@ fn capacity_snapshot(
         })
         .collect::<BTreeMap<_, _>>();
     let root_concurrency = root
-        .extra
-        .get("concurrency")
-        .and_then(Value::as_i64)
+        .concurrency
+        .map(|value| value.get())
         .unwrap_or_else(|| {
-            if root.extra.get("agentMode") == Some(&json!("single")) {
+            if root.agent_mode
+                == Some(studio_runtime_schema::agent_entity_nested::AgentMode::Single)
+            {
                 MIN_SUBAGENT_CONCURRENCY
             } else {
                 DEFAULT_SUBAGENT_CONCURRENCY
