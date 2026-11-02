@@ -47,7 +47,6 @@ export type UsageAccount = Pick<Account, "label"> & {
 } & {
   provider?: Account["provider"] | undefined;
   key: string;
-  signedOut?: boolean;
   runway?:
     | import("../generated/api").components["schemas"]["WeeklyRunway"]
     | undefined;
@@ -145,9 +144,6 @@ export default function Usage({
     usageAccounts.find((item) => item.key === activeAccountKey) ||
     usageAccounts[0];
   const selectedAccountKey = activeAccount?.key || fallbackKey;
-  const activeAccountReload = useRef(activeAccount?.reload);
-  activeAccountReload.current = activeAccount?.reload;
-  const autoReloadedAccounts = useRef(new Set<string>());
   const limits = accountLimits(
     activeAccount?.limits,
     selectedAccountKey,
@@ -363,16 +359,6 @@ export default function Usage({
   const percent = known
     ? Math.round((contextTokens / contextWindow) * 100)
     : null;
-  useEffect(() => {
-    autoReloadedAccounts.current.clear();
-  }, [agent.id]);
-  useEffect(() => {
-    if (!limitsOpened || !activeAccount || selectedAccountKey === fallbackKey)
-      return;
-    if (autoReloadedAccounts.current.has(selectedAccountKey)) return;
-    autoReloadedAccounts.current.add(selectedAccountKey);
-    void activeAccountReload.current?.(false);
-  }, [limitsOpened, selectedAccountKey, fallbackKey]);
   const lowAccount = usageAccounts.find((item) => item.buckets?.current.low);
   return (
     <div
@@ -489,18 +475,13 @@ export default function Usage({
           aria-label="Account weekly allowance"
         >
           {usageAccounts.map((item) => {
-            const projection = item.signedOut ? null : item.runway?.current;
+            const projection = item.runway?.current;
             const current = item.key === fallbackKey;
             const provider = providerLabel(accountProvider(item));
             const label = humanAccountLabel(item);
             const details = [
               `${label} (${provider})${current ? ", current chat account" : ""}`,
-              ...(item.signedOut
-                ? ["Signed out. Weekly allowance unavailable."]
-                : []),
-              ...(!item.signedOut &&
-              typeof item.limits?.error === "string" &&
-              !item.limits?.data
+              ...(typeof item.limits?.error === "string" && !item.limits?.data
                 ? [`Limits unavailable: ${item.limits.error}`]
                 : []),
               ...(projection?.windows ?? []).map(
@@ -747,7 +728,8 @@ export default function Usage({
                             <small>{activeAccount?.key || fallbackKey}</small>
                           )}
                       </div>
-                      {activeAccount.status?.kind === "checking" && (
+                      {(activeAccount.status?.kind === "checking" ||
+                        activeAccount.status?.kind === "pending") && (
                         <p role="status">Checking account limits…</p>
                       )}
                       {recovery && (

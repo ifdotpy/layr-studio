@@ -1369,7 +1369,7 @@ impl MultiServerToolPort for ServerTools {
         key: &'a str,
         _now: f64,
     ) -> BoxFuture<'a, Result<DispatchedOperation, Error>> {
-        Box::pin(async move { settle(Box::pin(self.run(actor, args, key)).await) })
+        Box::pin(async move { settle(self.run(actor, args, key).await) })
     }
 
     fn worker_call<'a>(

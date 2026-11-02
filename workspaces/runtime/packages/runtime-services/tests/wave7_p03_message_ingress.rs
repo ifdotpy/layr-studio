@@ -502,15 +502,7 @@ fn assert_json(actual: &Value, expected: &Value, path: &str) {
         (Value::Object(a), Value::Object(b)) => {
             let mut a = a.clone();
             let mut b = b.clone();
-            if a.get("kind").and_then(Value::as_str) == Some("agent") {
-                for key in [
-                    "accountChange",
-                    "accountTransferProgress",
-                    "accountDestinations",
-                ] {
-                    a.remove(key);
-                }
-            }
+            crate::agent_view_fixtures::normalize_frozen_projection(&mut a);
             if !a.contains_key("sync_versions") {
                 b.remove("sync_versions");
             }

@@ -3094,6 +3094,10 @@ export interface components {
     AccountLimitsStatus:
       | {
           /** @constant */
+          kind: "pending";
+        }
+      | {
+          /** @constant */
           kind: "current";
         }
       | {
@@ -3926,6 +3930,9 @@ export interface components {
       layrReady?: boolean | null | undefined;
       /** Layrstateid */
       layrStateId?: null | string | undefined;
+      manualConnectionCheck?:
+        | components["schemas"]["ManualConnectionCheck"]
+        | undefined;
       movedFrom?: components["schemas"]["MovePointerDto"] | null | undefined;
       naming?: components["schemas"]["AgentNaming"] | undefined;
       /** Nativeerror */
@@ -4240,6 +4247,9 @@ export interface components {
       layrReady?: boolean | null | undefined;
       /** Layrstateid */
       layrStateId?: null | string | undefined;
+      manualConnectionCheck?:
+        | components["schemas"]["ManualConnectionCheck"]
+        | undefined;
       /** Model */
       model?: null | string | undefined;
       movedFrom?: components["schemas"]["MovePointerDto"] | null | undefined;
@@ -5975,6 +5985,9 @@ export interface components {
        * @default null
        */
       layrStateId?: null | string | undefined;
+      manualConnectionCheck?:
+        | components["schemas"]["ManualConnectionCheck"]
+        | undefined;
       /**
        * Model
        * @default null
@@ -6390,6 +6403,9 @@ export interface components {
       lastCompletedTurnStatus?: null | string | undefined;
       /** Lastreadat */
       lastReadAt?: null | number | undefined;
+      manualConnectionCheck?:
+        | components["schemas"]["ManualConnectionCheck"]
+        | undefined;
       /** Model */
       model?: null | string | undefined;
       movedTo?: components["schemas"]["MovePointerDto"] | null | undefined;
@@ -14573,6 +14589,11 @@ export interface components {
       text: string;
     };
     ManagedProcessRecord: components["schemas"]["ProcessView"];
+    /** ManualConnectionCheck */
+    ManualConnectionCheck: {
+      available: boolean;
+      receipt: components["schemas"]["ConnectionCheckDto"] | null;
+    };
     McpReconnectRequest: {
       id: string;
       name: string;

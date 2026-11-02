@@ -1,4 +1,3 @@
-import { AccountStatus } from "../generated/api";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { errorText } from "../api";
 import AccountStartThrottle from "../components/AccountStartThrottle";
@@ -187,10 +186,7 @@ export function AccountLimitsAcrossServers({
     const timer = setInterval(() => setNow(Date.now() / 1000), AGE_REFRESH_MS);
     return () => clearInterval(timer);
   }, []);
-  const ready = sources.filter(
-    (source) => source.account.status === AccountStatus.ready,
-  );
-  const readings: Reading[] = ready.map((source) => ({
+  const readings: Reading[] = sources.map((source) => ({
     ...source,
     limits: limits[source.serverId]?.limits ?? null,
     projection: limits[source.serverId]?.projection ?? null,
@@ -207,7 +203,7 @@ export function AccountLimitsAcrossServers({
       : undefined;
   return (
     <>
-      {ready.map((source) => (
+      {sources.map((source) => (
         <ServerScope key={source.serverId} services={source.services}>
           <SourceReading
             source={source}
