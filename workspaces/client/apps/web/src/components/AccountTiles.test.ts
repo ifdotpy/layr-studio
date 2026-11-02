@@ -34,15 +34,19 @@ test("an account picker tile states the remaining limit next to the name", () =>
   ).not.toContain("left");
 });
 
-test("the remaining limit is known only for a signed-in account with data", () => {
+test("the remaining limit comes from the server projection", () => {
   expect(
     accountLimitView(account(), reading(), true, projectedLimits("work", 100))
       .remaining,
   ).toBe(33);
   expect(
-    accountLimitView(account(GeneratedApiAccountStatus.signedOut), reading())
-      .remaining,
-  ).toBe(null);
+    accountLimitView(
+      account(GeneratedApiAccountStatus.signedOut),
+      reading(),
+      true,
+      projectedLimits("work", 100),
+    ).remaining,
+  ).toBe(33);
   const failed = accountLimitView(
     account(),
     reading({ data: null, error: "Offline" }),

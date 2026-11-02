@@ -1,8 +1,7 @@
 //! Pin private directories before mutations. Never resolve a destination through a link.
-use rustix::fs::{AtFlags, Mode, OFlags, mkdirat, open, openat, renameat, unlinkat};
+use rustix::fs::{AtFlags, Mode, OFlags, mkdirat, open, openat, renameat};
 use std::{
     ffi::{OsStr, OsString},
-    fs::File,
     os::fd::OwnedFd,
     path::{Component, Path},
 };
@@ -70,40 +69,11 @@ impl Directory {
             name.to_owned(),
         ))
     }
-    pub fn file(&self, relative: &Path, flags: OFlags, mode: Mode) -> std::io::Result<File> {
-        let (parent, name) = self.parent(relative, false)?;
-        Ok(File::from(openat(
-            &parent.0,
-            name,
-            flags | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            mode,
-        )?))
-    }
     pub fn rename(&self, from: &Path, to: &Self, target: &Path) -> std::io::Result<()> {
         let (source, name) = self.parent(from, false)?;
         let (destination, target) = to.parent(target, false)?;
         renameat(&source.0, name, &destination.0, target)?;
         Ok(())
-    }
-    pub fn replace_file(&self, path: &Path, bytes: &[u8], mode: u32) -> std::io::Result<()> {
-        use std::io::Write;
-        let (parent, name) = self.parent(path, false)?;
-        let temp = OsString::from(format!(".studio-import-{}", uuid::Uuid::new_v4()));
-        let mut file = File::from(openat(
-            &parent.0,
-            &temp,
-            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            Mode::from_raw_mode((mode & 0o7777) as _),
-        )?);
-        let result = (|| {
-            file.write_all(bytes)?;
-            renameat(&parent.0, &temp, &parent.0, &name)?;
-            Ok(())
-        })();
-        if result.is_err() {
-            let _cleanup_result = unlinkat(&parent.0, &temp, AtFlags::empty());
-        }
-        result
     }
     pub fn mode(&self) -> std::io::Result<u32> {
         let mode = rustix::fs::fstat(&self.0)?.st_mode;
@@ -146,18 +116,9 @@ mod tests {
         pinned
             .rename(Path::new(".git"), &saved, Path::new("git"))
             .expect("fixture operation succeeds");
-        pinned
-            .replace_file(Path::new("code"), b"private", 0o600)
-            .expect("fixture operation succeeds");
         assert_eq!(
             std::fs::read(source.join(".git")).expect("fixture operation succeeds"),
             b"source"
-        );
-        assert!(!source.join("code").exists());
-        assert_eq!(
-            std::fs::read(root.path().join("old-destination/code"))
-                .expect("fixture operation succeeds"),
-            b"private"
         );
     }
 }

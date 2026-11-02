@@ -563,7 +563,7 @@ impl ReviewPreparation {
                 preparation::review_thread_submitted(&mut current, &submitted)
                     .map_err(|_| NativeError::Invalid("native-review/thread-start"))?;
                 let mut stored = AgentRecord::from_value(current)?;
-                stored.native_review_thread = Some(saved_receipt);
+                stored.native_review_thread = Some(Box::new(saved_receipt));
                 AgentRepository::put(tx, &stored)?;
                 Ok(())
             })

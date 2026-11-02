@@ -4,6 +4,11 @@ use crate::json_object::JsonObject;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 
+/// An observation belongs to a previous sign-in only when both identities are known.
+pub fn account_identity_mismatch(current: Option<&str>, observed: Option<&str>) -> bool {
+    matches!((current, observed), (Some(current), Some(observed)) if current != observed)
+}
+
 #[derive(Clone, Default, Deserialize, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UsageLimitsResponse {
@@ -431,7 +436,11 @@ impl RateLimitView {
     pub fn from_observation(value: UsageLimitsResponse, now: f64) -> Self {
         Self {
             projection: AccountLimitsProjection {
-                status: AccountLimitsStatus::Current,
+                status: if value.data.is_none() && value.error.is_none() {
+                    AccountLimitsStatus::Pending
+                } else {
+                    AccountLimitsStatus::Current
+                },
                 runway: weekly_runway(&value, now),
                 reset: reset_projection(&value, now),
                 buckets: bucket_projection(&value, now),
@@ -461,6 +470,7 @@ pub struct AccountLimitsProjection {
     rename_all_fields = "camelCase"
 )]
 pub enum AccountLimitsStatus {
+    Pending,
     #[default]
     Current,
     Checking {

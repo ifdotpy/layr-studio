@@ -114,7 +114,6 @@ impl Size {
 
 pub(super) struct Plan {
     source: PathBuf,
-    project_root: PathBuf,
     entries: Vec<Entry>,
     pub caches: Vec<PathBuf>,
     pub repositories: Vec<Repository>,
@@ -122,8 +121,6 @@ pub(super) struct Plan {
     pub excluded_worktree_folders: Vec<PathBuf>,
     pub plain_git_metadata: Vec<metadata::PlainMetadata>,
     pub worktree_data: Vec<PathBuf>,
-    git_backed: bool,
-    ignore_directories: BTreeSet<PathBuf>,
     pub size: Size,
     destination_volume: u64,
 }
@@ -174,9 +171,20 @@ impl Plan {
         let project_root =
             CanonicalPath::existing(project.map_or(source.as_path(), |(root, _)| root))
                 .map(CanonicalPath::into_path_buf)?;
+        let marker = source.join(".git");
+        let ignored = if marker.exists()
+            && (!without_git
+                || metadata::plain_reason(&source, &marker).is_ok_and(|reason| reason.is_none()))
+            && metadata::validate_repository(&project_root, &source).is_ok()
+        {
+            ignored_paths(&source)?
+        } else {
+            BTreeSet::new()
+        };
         let mut tree = Selection {
             project_root: project_root.clone(),
             without_git,
+            ignored,
             ..Selection::default()
         };
         collect_tree(&source, Path::new(""), false, false, worktree, &mut tree)?;
@@ -205,42 +213,16 @@ impl Plan {
             }
         }
         let mut entries = tree.entries;
-        if fs::symlink_metadata(source.join(".studio-native-import")).is_ok() {
-            tree.refusals.push(format!(
-                "Reserved native import path already exists: {}",
-                source.join(".studio-native-import").display()
-            ));
+        if tree
+            .repositories
+            .iter()
+            .any(|repo| repo.kind == "submodule")
+        {
+            tree.refusals
+                .push("Submodules are not supported in native Layr import yet".into());
         }
-        for directory in &tree.ignore_directories {
-            let path = source.join(directory).join(".layrignore");
-            if fs::symlink_metadata(&path).is_ok_and(|m| !m.is_file() || m.file_type().is_symlink())
-            {
-                tree.refusals.push(format!(
-                    "Cannot override ignore rules through a link: {}",
-                    path.display()
-                ));
-            }
-        }
-        tree.ignore_directories.insert(PathBuf::new());
-        for cache in &tree.caches {
-            tree.ignore_directories
-                .insert(cache.parent().unwrap_or(Path::new("")).to_owned());
-        }
-        let mut generated_names = Vec::new();
         // Layr creates this bridge even when the source is a plain folder.
-        generated_names.push(PathBuf::from(".git"));
-        generated_names.extend(
-            tree.ignore_directories
-                .iter()
-                .map(|directory| directory.join(".layrignore")),
-        );
-        generated_names.extend(entries.iter().filter_map(|entry| {
-            entry
-                .relative
-                .strip_prefix(".git")
-                .ok()
-                .map(|suffix| Path::new(GIT_BACKUP).join(suffix))
-        }));
+        let generated_names = [PathBuf::from(".git")];
         let destination_case_sensitive = case_sensitive(destination)?;
         validate_names(
             entries
@@ -288,11 +270,7 @@ impl Plan {
                 entry.cloneable = volume == destination_volume;
             }
             if meta.is_file() && !entry.cloneable {
-                let copies =
-                    stage_destinations(&entry.relative, entry.cache, git_backed).len() as u64;
-                size.cross_volume_bytes = size
-                    .cross_volume_bytes
-                    .saturating_add(meta.len().saturating_mul(copies));
+                size.cross_volume_bytes = size.cross_volume_bytes.saturating_add(meta.len());
             }
             if meta.is_file()
                 && (entry.relative.starts_with(".git")
@@ -314,7 +292,6 @@ impl Plan {
         size.refresh_estimate();
         Ok(Self {
             source,
-            project_root,
             entries,
             size,
             destination_volume,
@@ -324,8 +301,6 @@ impl Plan {
             excluded_worktree_folders: tree.excluded_worktree_folders,
             plain_git_metadata: tree.plain_git_metadata,
             worktree_data: tree.worktree_data,
-            git_backed,
-            ignore_directories: tree.ignore_directories,
         })
     }
 
@@ -367,7 +342,6 @@ impl Plan {
         }
         size.refresh_estimate();
         Ok(Self {
-            project_root: source.clone(),
             source,
             entries,
             caches: Vec::new(),
@@ -376,8 +350,6 @@ impl Plan {
             excluded_worktree_folders: Vec::new(),
             plain_git_metadata: Vec::new(),
             worktree_data: Vec::new(),
-            git_backed: false,
-            ignore_directories: BTreeSet::new(),
             size,
             destination_volume: volume_id(existing_ancestor(destination)?)?,
         })
@@ -513,18 +485,11 @@ impl Plan {
 
     pub fn stage_at(&self, project: &Directory, relative: &Path) -> Result<()> {
         let destination = project.child(relative, true)?;
-        self.stage_open(&destination, project, relative)
+        self.stage_open(&destination)
     }
 
-    pub fn stage_open(
-        &self,
-        destination: &Directory,
-        project: &Directory,
-        relative: &Path,
-    ) -> Result<()> {
+    pub fn stage_open(&self, destination: &Directory) -> Result<()> {
         self.stage_entries(destination, false)?;
-        self.write_ignores(destination)?;
-        self.rewrite_submodules(destination, project, relative, false)?;
         self.directory_modes(destination, false)
     }
 
@@ -541,55 +506,54 @@ impl Plan {
             if entry.cache != caches || entry.relative.as_os_str().is_empty() {
                 continue;
             }
-            for relative in stage_destinations(&entry.relative, caches, self.git_backed) {
-                let meta = &entry.metadata;
-                if meta.is_dir() {
-                    destination.child(&relative, true)?;
-                    continue;
+            let relative = &entry.relative;
+            let meta = &entry.metadata;
+            if meta.is_dir() {
+                destination.child(relative, true)?;
+                continue;
+            }
+            let (parent, name) = destination.parent(relative, true)?;
+            if meta.file_type().is_symlink() {
+                symlinkat(
+                    fs::read_link(self.source.join(&entry.relative))?,
+                    &parent.0,
+                    &name,
+                )
+                .map_err(std::io::Error::from)?;
+            } else {
+                let source = open_source(&self.source, &entry.relative)?;
+                if vm_archive_identity(&source.metadata()?) != vm_archive_identity(meta) {
+                    return Err(source_changed());
                 }
-                let (parent, name) = destination.parent(&relative, true)?;
-                if meta.file_type().is_symlink() {
-                    symlinkat(
-                        fs::read_link(self.source.join(&entry.relative))?,
-                        &parent.0,
-                        &name,
-                    )
-                    .map_err(std::io::Error::from)?;
+                if entry.cloneable {
+                    clone_file(&source,&parent.0,&name).map_err(|error|NativeLayrError::Refused(format!("Cannot clone {}: {error}. Native import does not fall back to an unbudgeted byte copy.",self.source.join(&entry.relative).display())))?;
                 } else {
-                    let source = open_source(&self.source, &entry.relative)?;
-                    if vm_archive_identity(&source.metadata()?) != vm_archive_identity(meta) {
-                        return Err(source_changed());
-                    }
-                    if entry.cloneable {
-                        clone_file(&source,&parent.0,&name).map_err(|error|NativeLayrError::Refused(format!("Cannot clone {}: {error}. Native import does not fall back to an unbudgeted byte copy.",self.source.join(&entry.relative).display())))?;
-                    } else {
-                        let mut copy = File::from(
-                            openat(
-                                &parent.0,
-                                &name,
-                                OFlags::CREATE
-                                    | OFlags::EXCL
-                                    | OFlags::WRONLY
-                                    | OFlags::NOFOLLOW
-                                    | OFlags::CLOEXEC,
-                                Mode::from_raw_mode(0o600),
-                            )
-                            .map_err(std::io::Error::from)?,
-                        );
-                        std::io::copy(&mut &source, &mut copy)?;
-                    }
-                    let file = File::from(
+                    let mut copy = File::from(
                         openat(
                             &parent.0,
                             &name,
-                            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-                            Mode::empty(),
+                            OFlags::CREATE
+                                | OFlags::EXCL
+                                | OFlags::WRONLY
+                                | OFlags::NOFOLLOW
+                                | OFlags::CLOEXEC,
+                            Mode::from_raw_mode(0o600),
                         )
                         .map_err(std::io::Error::from)?,
                     );
-                    file.set_permissions(fs::Permissions::from_mode(meta.mode() & 0o7777))?;
-                    file.set_times(fs::FileTimes::new().set_modified(meta.modified()?))?;
+                    std::io::copy(&mut &source, &mut copy)?;
                 }
+                let file = File::from(
+                    openat(
+                        &parent.0,
+                        &name,
+                        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                        Mode::empty(),
+                    )
+                    .map_err(std::io::Error::from)?,
+                );
+                file.set_permissions(fs::Permissions::from_mode(meta.mode() & 0o7777))?;
+                file.set_times(fs::FileTimes::new().set_modified(meta.modified()?))?;
             }
         }
         for entry in self
@@ -597,15 +561,13 @@ impl Plan {
             .iter()
             .filter(|entry| entry.cache == caches && !entry.relative.as_os_str().is_empty())
         {
-            for relative in stage_destinations(&entry.relative, caches, self.git_backed) {
-                attributes::copy(
-                    &self.source,
-                    &entry.relative,
-                    destination,
-                    &relative,
-                    entry.metadata.file_type().is_symlink(),
-                )?;
-            }
+            attributes::copy(
+                &self.source,
+                &entry.relative,
+                destination,
+                &entry.relative,
+                entry.metadata.file_type().is_symlink(),
+            )?;
         }
         self.verify_source()
     }
@@ -617,11 +579,9 @@ impl Plan {
             .rev()
             .filter(|entry| entry.cache == caches && entry.metadata.is_dir())
         {
-            for relative in stage_destinations(&entry.relative, caches, self.git_backed) {
-                destination
-                    .child(&relative, false)?
-                    .set_mode(entry.metadata.mode() & 0o7777)?;
-            }
+            destination
+                .child(&entry.relative, false)?
+                .set_mode(entry.metadata.mode() & 0o7777)?;
         }
         Ok(())
     }
@@ -633,10 +593,13 @@ impl Plan {
         for entry in self.entries.iter().filter(|entry| {
             entry.metadata.is_dir() && !entry.cache && !entry.relative.as_os_str().is_empty()
         }) {
-            for target in stage_destinations(&entry.relative, false, false) {
-                changed |=
-                    attributes::copy(&self.source, &entry.relative, &destination, &target, false)?;
-            }
+            changed |= attributes::copy(
+                &self.source,
+                &entry.relative,
+                &destination,
+                &entry.relative,
+                false,
+            )?;
         }
         self.verify_source()?;
         Ok(changed)
@@ -650,19 +613,6 @@ impl Plan {
             }
         }
         Ok(())
-    }
-}
-
-fn stage_destinations(relative: &Path, caches: bool, git_backed: bool) -> Vec<PathBuf> {
-    if !caches && let Ok(suffix) = relative.strip_prefix(".git") {
-        let backup = Path::new(GIT_BACKUP).join(suffix);
-        if git_backed {
-            vec![relative.to_owned(), backup]
-        } else {
-            vec![backup]
-        }
-    } else {
-        vec![relative.to_owned()]
     }
 }
 
@@ -814,7 +764,6 @@ fn validate_names<'a>(
     Ok(())
 }
 
-/// Native selection includes ignored data. VM archive admission stays unchanged.
 struct Entry {
     relative: PathBuf,
     metadata: fs::Metadata,
@@ -826,12 +775,12 @@ pub(super) struct Repository {
     pub kind: &'static str,
     pub included: bool,
     pub cache: bool,
-    pub git_directory: Option<PathBuf>,
 }
 #[derive(Default)]
 struct Selection {
     project_root: PathBuf,
     without_git: bool,
+    ignored: BTreeSet<PathBuf>,
     entries: Vec<Entry>,
     caches: Vec<PathBuf>,
     repositories: Vec<Repository>,
@@ -839,10 +788,7 @@ struct Selection {
     worktree_data: Vec<PathBuf>,
     refusals: Vec<String>,
     excluded_worktree_folders: Vec<PathBuf>,
-    ignore_directories: BTreeSet<PathBuf>,
 }
-/// Reserved history directory for the source repository's complete Git metadata.
-const GIT_BACKUP: &str = ".studio-native-import/git";
 
 /// A repeat migration can skip only commits retained by the earlier import.
 pub(super) fn verify_imported_head(main: &Path, repository: &Path, head: &str) -> Result<()> {
@@ -851,31 +797,55 @@ pub(super) fn verify_imported_head(main: &Path, repository: &Path, head: &str) -
     }
     let main = CanonicalPath::existing(main).map(CanonicalPath::into_path_buf)?;
     let folder = main.join(repository);
-    let marker = if repository.as_os_str().is_empty() {
-        main.join(GIT_BACKUP)
+    if repository.as_os_str().is_empty() {
+        super::inventory::git(&main, &["cat-file", "-e", &format!("{head}^{{commit}}")])?;
     } else {
-        folder.join(".git")
-    };
-    let git = if marker.is_dir() {
-        marker
-    } else {
-        crate::vm_preparation::read_gitdir_pointer(&folder, &marker)?.into_path_buf()
-    };
-    metadata::validate_stored_git(&main, &git)?;
-    let git = git
-        .to_str()
-        .ok_or_else(|| NativeLayrError::Refused("Non-UTF-8 imported Git path".into()))?;
-    super::inventory::git(
-        &main,
+        let marker = folder.join(".git");
+        let git = if marker.is_dir() {
+            marker
+        } else {
+            crate::vm_preparation::read_gitdir_pointer(&folder, &marker)?.into_path_buf()
+        };
+        metadata::validate_stored_git(&main, &git)?;
+        let git = git
+            .to_str()
+            .ok_or_else(|| NativeLayrError::Refused("Non-UTF-8 imported Git path".into()))?;
+        super::inventory::git(
+            &main,
+            &[
+                "--git-dir",
+                git,
+                "cat-file",
+                "-e",
+                &format!("{head}^{{commit}}"),
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+fn ignored_paths(repository: &Path) -> Result<BTreeSet<PathBuf>> {
+    use std::os::unix::ffi::OsStrExt;
+    let paths = super::inventory::git(
+        repository,
         &[
-            "--git-dir",
-            git,
-            "cat-file",
-            "-e",
-            &format!("{head}^{{commit}}"),
+            "ls-files",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--directory",
+            "-z",
         ],
     )?;
-    Ok(())
+    Ok(paths
+        .split(|byte| *byte == 0)
+        .filter(|item| !item.is_empty())
+        .map(|item| {
+            PathBuf::from(std::ffi::OsStr::from_bytes(
+                item.strip_suffix(b"/").unwrap_or(item),
+            ))
+        })
+        .collect())
 }
 
 fn collect_tree(
@@ -890,15 +860,13 @@ fn collect_tree(
         tree.project_root = root.to_owned();
     }
     let path = root.join(relative);
+    if !cache && tree.ignored.contains(relative) && !crate::vm_preparation::regenerable_path(&path)
+    {
+        return Ok(());
+    }
     let metadata = fs::symlink_metadata(&path)?;
     let directory = metadata.is_dir();
     if !inside_git && directory {
-        if relative == Path::new(".studio-native-import") {
-            tree.refusals.push(format!(
-                "Reserved native import path already exists: {}",
-                path.display()
-            ));
-        }
         if !relative.as_os_str().is_empty()
             && !cache
             && crate::vm_preparation::regenerable_path(&path)
@@ -926,7 +894,6 @@ fn collect_tree(
                 Ok(None) => {
                     let mut kind = "plain";
                     let mut included = true;
-                    let mut git_directory = None;
                     if marker_metadata.file_type().is_symlink() {
                         included = false;
                         tree.refusals
@@ -945,13 +912,11 @@ fn collect_tree(
                                         kind,
                                         included: false,
                                         cache,
-                                        git_directory: Some(target.into_path_buf()),
                                     });
                                     return Ok(());
                                 }
                                 Ok(target) if target.starts_with(&tree.project_root) => {
                                     kind = "submodule";
-                                    git_directory = Some(target.into_path_buf());
                                 }
                                 Ok(target) => {
                                     included = false;
@@ -978,12 +943,19 @@ fn collect_tree(
                         tree.refusals
                             .push(format!("Git metadata at {}: {error}", marker.display()));
                     }
+                    if included && !cache && !relative.as_os_str().is_empty() && kind != "submodule"
+                    {
+                        tree.ignored.extend(
+                            ignored_paths(&path)?
+                                .into_iter()
+                                .map(|ignored| relative.join(ignored)),
+                        );
+                    }
                     tree.repositories.push(Repository {
                         relative: relative.to_owned(),
                         kind,
                         included,
                         cache,
-                        git_directory,
                     });
                 }
             }
@@ -1019,10 +991,6 @@ fn collect_tree(
                 continue;
             }
             let child_relative = relative.join(&name);
-            if !inside_git && !cache && matches!(name.to_str(), Some(".gitignore" | ".layrignore"))
-            {
-                tree.ignore_directories.insert(relative.to_owned());
-            }
             collect_tree(
                 root,
                 &child_relative,
@@ -1034,18 +1002,6 @@ fn collect_tree(
         }
     }
     Ok(())
-}
-
-fn escape_pattern(name: &str) -> String {
-    name.chars()
-        .flat_map(|c| {
-            if matches!(c, '\\' | '*' | '?' | '[' | ']' | '!' | '#' | ' ') {
-                vec!['\\', c]
-            } else {
-                vec![c]
-            }
-        })
-        .collect()
 }
 
 /// Adds cache paths to the project `regenerable` setting, which every line reads, and keeps the
@@ -1075,141 +1031,6 @@ fn add_regenerable(state: &Path, cwd: &Path, paths: &[String]) -> Result<()> {
 }
 
 impl Plan {
-    fn write_ignores(&self, destination: &Directory) -> Result<()> {
-        use rustix::fs::{Mode, OFlags};
-        use std::io::Write;
-        for directory in &self.ignore_directories {
-            let parent = destination.child(directory, false)?;
-            if parent.exists(std::ffi::OsStr::new(".layrignore"))? {
-                parent
-                    .file(Path::new(".layrignore"), OFlags::RDONLY, Mode::empty())?
-                    .set_permissions(fs::Permissions::from_mode(0o600))?;
-            }
-            let file = parent.file(
-                Path::new(".layrignore"),
-                OFlags::CREATE | OFlags::APPEND | OFlags::WRONLY,
-                Mode::from_raw_mode(0o600),
-            )?;
-            let mut output = file;
-            writeln!(
-                output,
-                "\n# Studio native import: version data; retain build caches.\n!*"
-            )?;
-            for cache in &self.caches {
-                if cache.parent().unwrap_or(Path::new("")) == directory {
-                    let name = cache
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .ok_or_else(|| NativeLayrError::Refused("Non-UTF-8 cache path".into()))?;
-                    writeln!(output, "/{}/", escape_pattern(name))?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn rewrite_submodules(
-        &self,
-        destination: &Directory,
-        project: &Directory,
-        repository: &Path,
-        caches: bool,
-    ) -> Result<()> {
-        use rustix::fs::{Mode, OFlags, openat};
-        use std::io::Read;
-        for repo in &self.repositories {
-            if repo.kind != "submodule" || repo.cache != caches {
-                continue;
-            }
-            let Some(git_dir) = &repo.git_directory else {
-                continue;
-            };
-            let (relative, base, module) = if let Ok(relative) = git_dir.strip_prefix(&self.source)
-            {
-                (relative, destination, repo.relative.clone())
-            } else {
-                (
-                    git_dir
-                        .strip_prefix(&self.project_root)
-                        .map_err(|e| NativeLayrError::Refused(e.to_string()))?,
-                    project,
-                    repository.join(&repo.relative),
-                )
-            };
-            let mapped = relative.strip_prefix(".git").map_or_else(
-                |_| relative.to_owned(),
-                |tail| Path::new(GIT_BACKUP).join(tail),
-            );
-            let pointer = relative_path(&module, &mapped);
-            base.replace_file(
-                &module.join(".git"),
-                format!("gitdir: {}\n", pointer.display()).as_bytes(),
-                0o600,
-            )?;
-            let config = mapped.join("config");
-            let (parent, name) = base.parent(&config, false)?;
-            // Only this read may follow the copied config link. Its bytes enter a new private file.
-            let mut input = File::from(
-                openat(
-                    &parent.0,
-                    &name,
-                    OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC,
-                    Mode::empty(),
-                )
-                .map_err(std::io::Error::from)?,
-            );
-            if !input.metadata()?.is_file() {
-                return Err(NativeLayrError::Refused(
-                    "Copied Git config is not a regular file".into(),
-                ));
-            }
-            let mut contents = Vec::new();
-            input.read_to_end(&mut contents)?;
-            let temp = tempfile::tempdir()?;
-            let config_temp = temp.path().join("config");
-            let private = Directory::open(temp.path())?;
-            private.replace_file(Path::new("config"), &contents, 0o600)?;
-            #[cfg(test)]
-            REVIEW_CONFIG_SWAP.with(|hook| {
-                if let Some(swap) = hook.borrow_mut().take() {
-                    swap();
-                }
-            });
-            let worktree = relative_path(&mapped, &module);
-            let args = [
-                "config",
-                "--file",
-                config_temp.to_str().ok_or_else(|| {
-                    NativeLayrError::Refused("Non-UTF-8 temporary config path".into())
-                })?,
-                "core.worktree",
-                worktree
-                    .to_str()
-                    .ok_or_else(|| NativeLayrError::Refused("Non-UTF-8 submodule path".into()))?,
-            ];
-            crate::bounded_child::run_without_git_environment(crate::bounded_child::Request {
-                program: std::ffi::OsStr::new("git"),
-                git_directory: Some(temp.path().as_os_str()),
-                args: &args,
-                environment: &[("GIT_OPTIONAL_LOCKS", "0"), ("GIT_NO_LAZY_FETCH", "1")],
-                input: None,
-                stdout_limit: 64 * 1024,
-                stderr_limit: 64 * 1024,
-                timeout: std::time::Duration::from_secs(60),
-            })
-            .map_err(|error| {
-                NativeLayrError::Refused(format!("Cannot set cloned submodule worktree: {error:?}"))
-            })?;
-            let mut output = Vec::new();
-            private
-                .file(Path::new("config"), OFlags::RDONLY, Mode::empty())?
-                .read_to_end(&mut output)?;
-            // The validated parent remains pinned even if its pathname or config leaf is replaced.
-            parent.replace_file(Path::new(&name), &output, 0o600)?;
-        }
-        Ok(())
-    }
-
     pub fn warm_caches(&self, state: &Path, cwd: &Path, relative: &Path) -> Result<()> {
         let project = Directory::open(cwd)?;
         let paths: Vec<String> = self
@@ -1220,27 +1041,12 @@ impl Plan {
         add_regenerable(state, cwd, &paths)?;
         let destination = project.child(relative, false)?;
         self.stage_entries(&destination, true)?;
-        self.rewrite_submodules(&destination, &project, relative, true)?;
         self.directory_modes(&destination, true)?;
         if !self.caches.is_empty() {
             super::run(state, cwd, &["save", "--caches"])?;
         }
         Ok(())
     }
-}
-
-fn relative_path(from: &Path, to: &Path) -> PathBuf {
-    let from: Vec<_> = from.components().collect();
-    let to: Vec<_> = to.components().collect();
-    let common = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
-    let mut path = PathBuf::new();
-    for _ in common..from.len() {
-        path.push("..");
-    }
-    for part in &to[common..] {
-        path.push(part.as_os_str());
-    }
-    path
 }
 
 fn volume_id(path: &Path) -> std::io::Result<u64> {
@@ -1295,9 +1101,6 @@ fn child_relative_path(root: &Path, path: &Path) -> Result<PathBuf> {
 
 #[cfg(test)]
 mod review_tests;
-
-#[cfg(test)]
-thread_local! { static REVIEW_CONFIG_SWAP: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) }; }
 
 /// Validate the actual copied Git input before Layr can run a Git child with a cleared environment.
 pub(super) fn validate_private_git(staging: &Path) -> Result<()> {

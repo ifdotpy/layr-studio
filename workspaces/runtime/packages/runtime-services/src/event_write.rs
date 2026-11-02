@@ -672,20 +672,16 @@ pub fn unix_time() -> Result<f64, EventWriteError> {
 }
 
 pub fn assert_delegation(agent: &AgentRecord) -> Result<(), EventWriteError> {
-    let mode = agent.extra.get("agentMode").and_then(Value::as_str);
-    let schema_version = agent
-        .extra
-        .get("subagentConcurrencyVersion")
-        .and_then(Value::as_i64)
-        .unwrap_or_default();
-    let limit = if schema_version < 2 && mode == Some("single") {
+    let single =
+        agent.agent_mode == Some(studio_runtime_schema::agent_entity_nested::AgentMode::Single);
+    let schema_version = agent.subagent_concurrency_version.unwrap_or_default();
+    let limit = if schema_version < 2 && single {
         0
     } else {
         agent
-            .extra
-            .get("concurrency")
-            .and_then(Value::as_i64)
-            .unwrap_or(if mode == Some("single") { 0 } else { 32 })
+            .concurrency
+            .map(|value| value.get())
+            .unwrap_or(if single { 0 } else { 32 })
     };
     if limit == 0 {
         return Err(EventWriteError::InvalidRequest(

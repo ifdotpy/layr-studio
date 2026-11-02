@@ -199,6 +199,9 @@ test("Claude causes use plain words and preserve the raw code", () => {
     message: "API failed",
     codexErrorInfo: "badRequest",
     claudeFailure: {
+      title: "Tool history does not match",
+      message:
+        "The conversation's tool calls and results do not match. Rewind the conversation or start a new chat.",
       apiError: "tool_history_mismatch",
       apiErrorCode: "new_server_gate",
       apiErrorStatus: 400,
@@ -213,6 +216,9 @@ test("Claude causes use plain words and preserve the raw code", () => {
 test("Claude token counts and unknown server codes remain useful", () => {
   const view = nativeErrorView({
     claudeFailure: {
+      title: "Claude request failed",
+      message:
+        "Claude could not complete the request. Check the cause details before continuing. Context: 210001 tokens. Limit: 200000 tokens.",
       apiErrorCode: "future_server_gate",
       promptTokens: 210001,
       maxContextTokens: 200000,
@@ -227,7 +233,12 @@ test("Claude cause metadata preserves the native limit reset text", () => {
   const view = nativeErrorView({
     message: "Usage limit reached. Try again at 20:00 UTC",
     codexErrorInfo: "rateLimitExceeded",
-    claudeFailure: { error: "rate_limit", apiError: "usage_limit_reached" },
+    claudeFailure: {
+      error: "rate_limit",
+      apiError: "usage_limit_reached",
+      title: "Claude usage limit reached",
+      message: "Check this account's limit and reset time.",
+    },
   });
   assert.match(view.message, /Try again at 20:00 UTC/);
   assert.equal(view.kind, "rateLimitExceeded");

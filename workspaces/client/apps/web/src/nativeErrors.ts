@@ -1,4 +1,3 @@
-import { claudeFailureView } from "./claudeFailure.ts";
 import { errorDetails } from "./errorPresentation.ts";
 import {
   DISK_FULL_ERROR_PATTERN,
@@ -119,11 +118,13 @@ export function nativeErrorView(value: unknown, planType?: string) {
     };
   if (!isDiskFullError(value)) {
     const record = objectRecord(value);
-    const claude = claudeFailureView(record?.claudeFailure);
-    if (!claude) return view;
+    const claude = objectRecord(record?.claudeFailure);
+    if (typeof claude?.title !== "string" || typeof claude.message !== "string")
+      return view;
     return {
       ...view,
-      ...claude,
+      title: claude.title,
+      hint: claude.message,
       message: ["usageLimitExceeded", "rateLimitExceeded"].includes(view.kind)
         ? view.message
         : claude.message,
