@@ -8,9 +8,8 @@ pub(super) fn run(args: &[String]) -> Result<ExitCode> {
     let command = args
         .next()
         .map(String::as_str)
-        .ok_or("Use native-layr <install|configure|map|upgrade-store|migrate|paths>")?;
+        .ok_or("Use native-layr <configure|map|upgrade-store|migrate|paths>")?;
     let mut state = None;
-    let mut source = None;
     let mut store_root = None;
     let mut mapped_project = None;
     let mut default_store = false;
@@ -39,11 +38,6 @@ pub(super) fn run(args: &[String]) -> Result<ExitCode> {
             "--state" => {
                 state = Some(PathBuf::from(
                     args.next().ok_or("--state requires a directory")?,
-                ))
-            }
-            "--source" => {
-                source = Some(PathBuf::from(
-                    args.next().ok_or("--source requires a directory")?,
                 ))
             }
             "--dry-run" => dry_run = true,
@@ -135,7 +129,6 @@ pub(super) fn run(args: &[String]) -> Result<ExitCode> {
             );
         }
         "upgrade-store" => {
-            studio_runtime_services::layr_native::install::ensure_binary(&state)?;
             println!(
                 "{}",
                 studio_runtime_services::layr_native::run(
@@ -145,22 +138,11 @@ pub(super) fn run(args: &[String]) -> Result<ExitCode> {
                 )?
             );
         }
-        "install" => {
-            if let Some(source) = source {
-                studio_runtime_services::layr_native::install::install(&state, &source)?;
-            } else {
-                studio_runtime_services::layr_native::install::ensure_binary(&state)?;
-            }
-            println!(
-                "{}",
-                studio_runtime_services::layr_native::binary_path(&state).display()
-            );
-        }
         "paths" => println!(
             "{}",
             serde_json::json!({
                 "store":studio_runtime_services::layr_native::settings::selected_store(&state)?,
-                "binary":studio_runtime_services::layr_native::binary_path(&state),
+                "binary":studio_runtime_services::layr_native::resolve_binary().ok(),
                 "socket":studio_runtime_services::layr_native::selected_socket_path(&state)?,
             })
         ),
@@ -190,9 +172,7 @@ pub(super) fn run(args: &[String]) -> Result<ExitCode> {
             }
         }
         _ => {
-            return Err(
-                "Use native-layr <install|configure|map|upgrade-store|migrate|paths>".into(),
-            );
+            return Err("Use native-layr <configure|map|upgrade-store|migrate|paths>".into());
         }
     }
     Ok(ExitCode::SUCCESS)

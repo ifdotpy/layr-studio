@@ -9944,6 +9944,11 @@ export interface components {
       nextBefore?: number | null | undefined;
       room: components["schemas"]["RoomDetailDto"];
     };
+    /**
+     * ChatWorkspaceMode
+     * @enum {string}
+     */
+    ChatWorkspaceMode: "layr-native" | "layr" | "worktree";
     /** CheckpointCaptureRequest */
     CheckpointCaptureRequest: {
       /** Agent */
@@ -12268,7 +12273,7 @@ export interface components {
         | undefined;
       /**
        * Workspacemode
-       * @description When omitted, the server selects native Layr on macOS, or on Linux when the native capability is ready; otherwise it selects worktree.
+       * @description When omitted, the server selects native Layr when available; otherwise it selects worktree.
        * @enum {string}
        */
       workspaceMode?: "layr-native" | "layr" | "worktree" | undefined;
@@ -15734,11 +15739,21 @@ export interface components {
       /** Path */
       path: null | string;
     };
-    /** @description Native Layr readiness for this server state directory. */
-    NativeLayrCapability: {
-      ready: boolean;
-      reason?: string | null | undefined;
-    };
+    /** NativeLayrCapability */
+    NativeLayrCapability:
+      | {
+          /** @constant */
+          status: "ready";
+        }
+      | {
+          /** @constant */
+          status: "notInstalled";
+        }
+      | {
+          reason: string;
+          /** @constant */
+          status: "notReady";
+        };
     /** NativeNameFailureRecordResponse */
     NativeNameFailureRecordResponse: {
       /**
@@ -25868,12 +25883,16 @@ export interface components {
       busy: boolean;
       /** Chats */
       chats: components["schemas"]["SummaryChat"][];
+      defaultWorkspaceMode?:
+        | components["schemas"]["ChatWorkspaceMode"]
+        | undefined;
       /**
        * @description The server has a created Studio Linux VM.
        * @default false
        */
       hasStudioVm?: boolean | undefined;
       nativeLayr?: components["schemas"]["NativeLayrCapability"] | undefined;
+      nativeLayrMessage?: string | undefined;
       /** Projects */
       projects: components["schemas"]["SummaryProject"][];
       /** Ready */
@@ -38826,6 +38845,12 @@ export const ChatOperationalKind = {
   none: "none",
 } as const;
 export type ChatOperationalKind = components["schemas"]["ChatOperationalKind"];
+export const ChatWorkspaceMode = {
+  "layr-native": "layr-native",
+  layr: "layr",
+  worktree: "worktree",
+} as const;
+export type ChatWorkspaceMode = components["schemas"]["ChatWorkspaceMode"];
 export const ClaudeRateStatus = {
   allowed: "allowed",
   allowed_warning: "allowed_warning",

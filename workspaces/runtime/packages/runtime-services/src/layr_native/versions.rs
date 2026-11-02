@@ -42,15 +42,22 @@ fn inspect(binary: &Path, root: &Path) -> Result<Inspection> {
 }
 
 pub(super) fn verify(state: &Path, root: &Path) -> Result<Option<String>> {
-    let mut bundled = inspect(&super::git_guard::executable_path(state), root)?;
-    if !bundled.compatible
+    let executable = super::capability::resolve_binary().map_err(|capability| {
+        NativeLayrError::Refused(capability.message().unwrap_or("Layr is unavailable").into())
+    })?;
+    verify_with_binary(state, root, &executable)
+}
+
+fn verify_with_binary(state: &Path, root: &Path, executable: &Path) -> Result<Option<String>> {
+    let mut installed = inspect(executable, root)?;
+    if !installed.compatible
         && settings::owns_store(state, root)
-        && let Some(upgrade) = &bundled.upgrade
+        && let Some(upgrade) = &installed.upgrade
         && upgrade.metadata_only
         && upgrade.from_format < upgrade.to_format
-        && upgrade.to_format == bundled.binary.format
-        && (bundled.state == "legacy"
-            || bundled
+        && upgrade.to_format == installed.binary.format
+        && (installed.state == "legacy"
+            || installed
                 .store
                 .as_ref()
                 .is_some_and(|version| version.format == upgrade.from_format))
@@ -61,14 +68,20 @@ pub(super) fn verify(state: &Path, root: &Path) -> Result<Option<String>> {
             &format!("store-upgrade:{}", upgrade.to_format),
             &json!({"kind":"store-upgrade","root":root,"fromFormat":upgrade.from_format,"toFormat":upgrade.to_format}),
             || {
-                super::runtime::run_in_store(state, root, state, &["store-version", "--upgrade"])?;
+                super::runtime::run_with_binary(
+                    state,
+                    root,
+                    state,
+                    &["store-version", "--upgrade"],
+                    executable,
+                )?;
                 Ok(json!({"storeRoot":root,"format":upgrade.to_format}))
             },
         )?;
-        bundled = inspect(&super::git_guard::executable_path(state), root)?;
+        installed = inspect(executable, root)?;
     }
-    if !bundled.compatible {
-        let written = bundled
+    if !installed.compatible {
+        let written = installed
             .store
             .as_ref()
             .map(|store| {
@@ -77,89 +90,21 @@ pub(super) fn verify(state: &Path, root: &Path) -> Result<Option<String>> {
                     store.version, store.format, store.build
                 )
             })
-            .unwrap_or_else(|| bundled.state.clone());
+            .unwrap_or_else(|| installed.state.clone());
         return Err(NativeLayrError::Refused(format!(
             "Store {} was written by {written}. Studio uses {} (format {}, build {}). Use native-layr upgrade-store for a legacy store; see docs/native-layr.md for the switch procedure.",
             root.display(),
-            bundled.binary.version,
-            bundled.binary.format,
-            bundled.binary.build
+            installed.binary.version,
+            installed.binary.format,
+            installed.binary.build
         )));
     }
-    if settings::owns_store(state, root) {
-        return Ok(None);
-    }
-    let developer =
-        PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/bin/layr");
-    verify_developer(&bundled.binary, root, &developer)
-}
-
-fn verify_developer(bundled: &Identity, root: &Path, developer: &Path) -> Result<Option<String>> {
-    // Unguarded releases open the root before rejecting store-version. Probe only scratch.
-    let scratch = tempfile::tempdir()?;
-    let inspected = inspect(developer, scratch.path()).map_err(|error| NativeLayrError::Refused(format!("Store {} requires a guarded developer binary. Studio: {} (format {}, build {}). Developer {}: {error}. Upgrade the developer binary; see docs/native-layr.md.", root.display(), bundled.version, bundled.format, bundled.build, developer.display())))?;
-    compare(bundled, &inspected.binary, root, developer)
-}
-
-fn compare(
-    bundled: &Identity,
-    developer: &Identity,
-    root: &Path,
-    binary: &Path,
-) -> Result<Option<String>> {
-    // The store format is the compatibility contract; any release of the same format may share it.
-    if bundled.format != developer.format {
-        return Err(NativeLayrError::Refused(format!(
-            "Store {} requires the same Layr store format. Studio: {} (format {}, build {}). Developer {}: {} (format {}, build {}). Use a developer binary with the bundled store format; see docs/native-layr.md.",
-            root.display(),
-            bundled.version,
-            bundled.format,
-            bundled.build,
-            binary.display(),
-            developer.version,
-            developer.format,
-            developer.build
-        )));
-    }
-    Ok((bundled.version != developer.version || bundled.build != developer.build).then(|| {
-        format!(
-            "Store {} uses Layr format {} with different releases. Studio: {} ({}). Developer {}: {} ({}).",
-            root.display(),
-            bundled.format,
-            bundled.version,
-            bundled.build,
-            binary.display(),
-            developer.version,
-            developer.build
-        )
-    }))
+    Ok(None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[cfg(unix)]
-    #[test]
-    fn native_layr_an_unguarded_developer_probe_never_receives_the_selected_root() {
-        use std::{fs, os::unix::fs::PermissionsExt};
-        let fixture = tempfile::tempdir().expect("fixture");
-        let root = fixture.path().join("developer-store");
-        fs::create_dir(&root).expect("store");
-        let binary = fixture.path().join("legacy-layr");
-        fs::write(&binary, "#!/bin/sh\nprintf changed > \"$2/touched\"\nprintf 'unknown command\\n' >&2\nexit 128\n").expect("legacy binary");
-        fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).expect("executable");
-        let bundled = Identity {
-            format: 1,
-            version: LAYR_VERSION.into(),
-            build: "bundled-build".into(),
-        };
-        let error = verify_developer(&bundled, &root, &binary)
-            .expect_err("unsupported probe")
-            .to_string();
-        assert!(error.contains("bundled-build") && error.contains(root.to_str().expect("root")));
-        assert!(fs::read_dir(root).expect("store").next().is_none());
-    }
 
     #[cfg(unix)]
     #[test]
@@ -184,15 +129,11 @@ case "$*" in
 esac
 "#;
         fs::create_dir_all(binary_path(&state).parent().expect("bin")).expect("bin");
-        for binary in [
-            binary_path(&state),
-            super::super::git_guard::executable_path(&state),
-        ] {
-            fs::write(&binary, script).expect("binary fixture");
-            fs::set_permissions(binary, fs::Permissions::from_mode(0o755)).expect("executable");
-        }
-        verify(&state, &root).expect("metadata adoption");
-        verify(&state, &root).expect("repeat is a no-op");
+        let binary = binary_path(&state);
+        fs::write(&binary, script).expect("binary fixture");
+        fs::set_permissions(binary, fs::Permissions::from_mode(0o755)).expect("executable");
+        verify_with_binary(&state, &root, &binary_path(&state)).expect("metadata adoption");
+        verify_with_binary(&state, &root, &binary_path(&state)).expect("repeat is a no-op");
         assert_eq!(
             fs::read_to_string(root.join("calls")).expect("calls"),
             "upgrade\n"
@@ -203,7 +144,7 @@ esac
         );
         let developer = fixture.path().join("developer-store");
         fs::create_dir(&developer).expect("developer store");
-        let error = verify(&state, &developer)
+        let error = verify_with_binary(&state, &developer, &binary_path(&state))
             .expect_err("operator store requires explicit upgrade")
             .to_string();
         assert!(error.contains("upgrade-store"));
@@ -213,46 +154,6 @@ esac
                 .expect("developer store")
                 .next()
                 .is_none()
-        );
-    }
-    #[test]
-    fn native_layr_format_mismatch_refuses_but_version_difference_is_visible() {
-        let bundled = Identity {
-            format: 1,
-            version: "0.5.1".into(),
-            build: "upstream".into(),
-        };
-        let mut developer = Identity {
-            format: 2,
-            version: "0.6.0".into(),
-            build: "new".into(),
-        };
-        let compare_now = |developer: &Identity| {
-            compare(
-                &bundled,
-                developer,
-                Path::new("/store"),
-                Path::new("/developer/layr"),
-            )
-        };
-        let error = compare_now(&developer)
-            .expect_err("different store format")
-            .to_string();
-        assert!(
-            error.contains("format 2") && error.contains("format 1") && error.contains("/store")
-        );
-        developer.format = 1;
-        developer.version = "0.5.2".into();
-        let note = compare_now(&developer)
-            .expect("same store format")
-            .expect("visible difference");
-        assert!(note.contains("0.5.2") && note.contains("0.5.1"));
-        developer.version = bundled.version.clone();
-        assert!(
-            compare_now(&developer)
-                .expect("compatible")
-                .expect("warning")
-                .contains("new")
         );
     }
 }

@@ -304,13 +304,7 @@ impl Plan {
             }
         }
         if git_backed {
-            match git_allocation(
-                &source,
-                &entries,
-                &tree.ignore_directories,
-                super::LAYR_VERSION,
-                destination_case_sensitive,
-            ) {
+            match git_allocation(&source, &entries, destination_case_sensitive) {
                 Ok(bytes) => size.git_head_bytes = bytes,
                 Err(error) => tree.refusals.push(error.to_string()),
             }

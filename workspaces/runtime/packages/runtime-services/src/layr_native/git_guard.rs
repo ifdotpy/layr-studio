@@ -129,28 +129,12 @@ fn real_git_path(state_dir: &Path) -> PathBuf {
 }
 
 /// The managed entry selects real Git for Layr's own child processes only.
-pub(super) fn executable_path(state_dir: &Path) -> PathBuf {
-    binary_path(state_dir).with_file_name("layr-real")
-}
-
-fn install_layr_entry(state_dir: &Path, real_git: &Path) -> Result<(), NativeLayrError> {
+fn install_layr_entry(
+    state_dir: &Path,
+    real_git: &Path,
+    executable: &Path,
+) -> Result<(), NativeLayrError> {
     let entry = binary_path(state_dir);
-    let executable = executable_path(state_dir);
-    if entry.is_file() {
-        let mut prefix = Vec::new();
-        fs::File::open(&entry)?.take(128).read_to_end(&mut prefix)?;
-        if !executable.is_file() && !String::from_utf8_lossy(&prefix).contains(LAUNCHER_MARKER) {
-            // Upgrade an existing installation without removing its entry first.
-            let temporary = executable.with_extension("new");
-            fs::copy(&entry, &temporary)?;
-            fs::rename(temporary, &executable)?;
-        }
-    }
-    if !executable.is_file() {
-        return Err(NativeLayrError::Refused(
-            "The managed Layr executable is unavailable".into(),
-        ));
-    }
     let git_directory = real_git
         .parent()
         .ok_or_else(|| NativeLayrError::Refused("Missing real Git directory".into()))?;
@@ -166,7 +150,7 @@ fn install_layr_entry(state_dir: &Path, real_git: &Path) -> Result<(), NativeLay
 }
 
 /// Called under the native binary install lock. Resolve Git once, before publishing its wrapper.
-pub(super) fn ensure(state_dir: &Path) -> Result<(), NativeLayrError> {
+pub(super) fn ensure(state_dir: &Path, executable: &Path) -> Result<(), NativeLayrError> {
     let state_dir = CanonicalPath::existing(state_dir)?.into_path_buf();
     let bin = binary_path(&state_dir)
         .with_file_name("git")
@@ -200,7 +184,7 @@ pub(super) fn ensure(state_dir: &Path) -> Result<(), NativeLayrError> {
     if fs::read(&wrapper).ok().as_deref() != Some(script.as_bytes()) {
         crate::atomic_file::replace(&wrapper, script.as_bytes(), Some(0o755), true)?;
     }
-    install_layr_entry(&state_dir, &real_git)?;
+    install_layr_entry(&state_dir, &real_git, executable)?;
     Ok(())
 }
 
@@ -537,9 +521,10 @@ mod tests {
             serde_json::to_vec(&real.join("git")).expect("path JSON"),
         )
         .expect("saved Git path");
-        crate::atomic_file::replace(&binary_path(&state), b"#!/bin/sh\ncase \"$1:$2\" in save:-m) exec git update-index ;; save:) exec git write-tree ;; git:sync) exec git update-ref ;; git:push) shift; exec git \"$@\" ;; esac\n", Some(0o755), false).expect("old managed Layr binary");
-        ensure(&state).expect("install launcher");
-        ensure(&state).expect("repeat install");
+        let executable = root.path().join("installed-layr");
+        crate::atomic_file::replace(&executable, b"#!/bin/sh\ncase \"$1:$2\" in save:-m) exec git update-index ;; save:) exec git write-tree ;; git:sync) exec git update-ref ;; git:push) shift; exec git \"$@\" ;; esac\n", Some(0o755), false).expect("installed Layr fixture");
+        ensure(&state, &executable).expect("install launcher");
+        ensure(&state, &executable).expect("repeat install");
         let path = format!(
             "{}:{}",
             bin.display(),
@@ -581,8 +566,7 @@ mod tests {
 
     fn real_managed_layr_git_operation(operation: &str) {
         let binary = PathBuf::from(
-            std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY")
-                .expect("Set STUDIO_LAYR_NATIVE_TEST_BINARY"),
+            crate::layr_native::test_binary().expect("Set STUDIO_LAYR_NATIVE_TEST_BINARY"),
         );
         let root = tempfile::tempdir().expect("fixture directory");
         let root_path = CanonicalPath::existing(root.path())
@@ -591,13 +575,7 @@ mod tests {
         let state = root_path.join("state");
         let source = root_path.join("source");
         fs::create_dir_all(&source).expect("source");
-        assert!(super::super::install::version_matches(
-            invoke(&binary, &source, &["--version"])
-                .expect("Layr version")
-                .trim()
-        ));
         fs::create_dir_all(binary_path(&state).parent().expect("binary parent")).expect("bin");
-        fs::copy(binary, binary_path(&state)).expect("copy real Layr");
         fs::write(source.join("file"), "first\n").expect("source file");
         let real_git = find_real_git().expect("host Git");
         for args in [
@@ -628,7 +606,7 @@ mod tests {
             &["remote", "add", "origin", remote.to_str().expect("remote")],
         )
         .expect("origin");
-        ensure(&state).expect("install managed entries");
+        ensure(&state, &binary).expect("install managed entries");
         let path = format!(
             "{}:{}",
             binary_path(&state).parent().expect("bin").display(),
