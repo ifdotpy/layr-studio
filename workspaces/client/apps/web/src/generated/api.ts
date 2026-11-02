@@ -25278,6 +25278,15 @@ export interface components {
       phase?: null | string | undefined;
       /** @default null */
       previousError?: components["schemas"]["JsonValue"] | null | undefined;
+      /** @description Set on a stored provider item whose kind Studio does not know; carries the raw provider item. */
+      providerUnknown?:
+        | {
+            kind: string;
+            raw: {
+              [key: string]: unknown;
+            };
+          }
+        | undefined;
       /**
        * Reasoningms
        * @default null

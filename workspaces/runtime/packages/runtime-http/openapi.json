@@ -57786,6 +57786,23 @@
             ],
             "default": null
           },
+          "providerUnknown": {
+            "description": "Set on a stored provider item whose kind Studio does not know; carries the raw provider item.",
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "raw": {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind",
+              "raw"
+            ],
+            "type": "object"
+          },
           "reasoningMs": {
             "anyOf": [
               {
