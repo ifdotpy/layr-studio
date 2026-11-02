@@ -2,6 +2,7 @@ export const API_SCHEMA_HASH =
 <<<<<<< head
 <<<<<<< head
 <<<<<<< head
+<<<<<<< head
   "d1bde6a2e9fa339d9ed7a8755f966249cb8be749637af8ea82c90bf43d9fc528";
 ||||||| base
   "d3ad819e884fd735c0f079f0087c75417af0ec10981626ccd94bcb8ef21494a2";
@@ -12,6 +13,9 @@ export const API_SCHEMA_HASH =
 ||||||| base
 =======
 >>>>>>> 2ef63e1
+||||||| base
+=======
+>>>>>>> 27bb67e
 <<<<<<< head
   "d3ad819e884fd735c0f079f0087c75417af0ec10981626ccd94bcb8ef21494a2";
 ||||||| base
@@ -55,7 +59,16 @@ export const API_SCHEMA_HASH =
 =======
   "e6c3bd124e1b10b9d0259491b3a391c854f8d5fe16c4ba7606b694801c69b91e";
 >>>>>>> 44aa5ae
+<<<<<<< head
 >>>>>>> 2ef63e1
+||||||| base
+=======
+||||||| base
+  "e6c3bd124e1b10b9d0259491b3a391c854f8d5fe16c4ba7606b694801c69b91e";
+=======
+  "875d2daceb60648bcd748b395d1341d205dc4e809a117b59c76d740a8f1d708b";
+>>>>>>> a396c09
+>>>>>>> 27bb67e
 export const API_SCHEMA_HASH_HEADER = "X-Studio-API-Schema";
 export const API_SCHEMA_HASH_PARAM = "apiSchema";
 export const API_SCHEMA_MISMATCH_HEADER = "X-Studio-API-Schema-Mismatch";

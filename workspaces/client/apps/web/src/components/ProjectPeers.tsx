@@ -1,18 +1,24 @@
 import { useServerApi } from "../servers/ServerServicesContext";
 import { Button, Checkbox, NativeSelect, Textarea } from "@mantine/core";
 import { useEffect, useState } from "react";
-import { errorText } from "../api";
+import { errorText, type PostResult } from "../api";
+import type { components } from "../generated/api.ts";
 import {
   capabilityLabel,
   fingerprintOf,
   formatFingerprint,
   parseProjectInvitation,
   type PeerInvitation,
-  type ProjectGrant,
 } from "./peerHelpers";
 
-type GrantsResponse = { grants: ProjectGrant[] };
-type InviteResponse = { invitation: PeerInvitation; warning: string };
+type ProjectGrant = components["schemas"]["ProjectGrant"];
+
+/** The grants of a list or change reply. */
+function grantsOf(result: PostResult<"/api/federation">): ProjectGrant[] {
+  if (!("grants" in result))
+    throw new Error("The server sent no project grants.");
+  return result.grants;
+}
 
 export function ProjectPeers({
   projectId,
@@ -33,11 +39,11 @@ export function ProjectPeers({
   const [busy, setBusy] = useState(false);
 
   const load = async () => {
-    const result = (await post("/api/federation", {
+    const result = await post("/api/federation", {
       action: "list_project_grants",
       project_id: projectId,
-    } as never)) as unknown as GrantsResponse;
-    setGrants(result.grants);
+    });
+    setGrants(grantsOf(result));
   };
 
   useEffect(() => {
@@ -69,10 +75,11 @@ export function ProjectPeers({
 
   const create = () =>
     run(async () => {
-      const result = (await post("/api/federation", {
+      const result = await post("/api/federation", {
         action: "create_project_invite",
         project_id: projectId,
-      } as never)) as unknown as InviteResponse;
+      });
+      if (!("invitation" in result)) throw new Error("No invitation returned.");
       setInviteText(JSON.stringify(result.invitation, null, 2));
     });
 
@@ -88,23 +95,23 @@ export function ProjectPeers({
   const accept = () =>
     run(async () => {
       if (!invitation) return;
-      const result = (await post("/api/federation", {
+      const result = await post("/api/federation", {
         action: "accept_project_peer",
         invitation,
         project_id: localProject,
-      } as never)) as unknown as GrantsResponse;
-      setGrants(result.grants);
+      });
+      setGrants(grantsOf(result));
       setInvitation(null);
       setPasted("");
     });
 
   const revoke = (grantId: string) =>
     run(async () => {
-      const result = (await post("/api/federation", {
+      const result = await post("/api/federation", {
         action: "revoke_project_grant",
         grant_id: grantId,
-      } as never)) as unknown as GrantsResponse;
-      setGrants(result.grants);
+      });
+      setGrants(grantsOf(result));
     });
 
   return (
