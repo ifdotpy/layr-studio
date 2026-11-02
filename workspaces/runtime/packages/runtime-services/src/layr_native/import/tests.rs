@@ -364,8 +364,12 @@ mod lifecycle_tests {
         let source = fixture.path().join("source");
         fs::create_dir(&source).expect("source");
         let state = fixture.path().join("absent-state");
-        let mut record = json!({"id":"lead","isLead":true,"autoWake":true});
+        let mut record = studio_runtime_store::AgentRecord::test_defaults();
+        record.id = "lead".into();
+        record.is_lead = Some(true);
+        record.auto_wake = Some(true);
         super::super::configure_new_chat(&mut record, source.to_str().expect("source path"));
+        let record = record.value();
         fs::create_dir(source.join(".GIT")).expect("Git case alias");
         super::super::inventory::git(&source, &["init", "-q"]).expect("valid repository");
         let error = super::super::runtime::prepare_files(&state, &record)
@@ -481,7 +485,10 @@ mod lifecycle_tests {
         let installed = super::super::binary_path(state.path());
         fs::create_dir_all(installed.parent().expect("bin directory")).expect("bin");
         fs::copy(binary, &installed).expect("install fixture binary");
-        let mut record = json!({"id":"lead","isLead":true,"autoWake":true});
+        let mut record = studio_runtime_store::AgentRecord::test_defaults();
+        record.id = "lead".into();
+        record.is_lead = Some(true);
+        record.auto_wake = Some(true);
         let canonical_source = CanonicalPath::existing(source.path())
             .map(CanonicalPath::into_path_buf)
             .expect("canonical source");
@@ -489,6 +496,7 @@ mod lifecycle_tests {
             &mut record,
             canonical_source.to_str().expect("source path"),
         );
+        let record = record.value();
         let ready =
             super::super::runtime::prepare_files(state.path(), &record).expect("native import");
         let main = PathBuf::from(ready["cwd"].as_str().expect("main"));

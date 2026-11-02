@@ -13,7 +13,7 @@ use studio_runtime_schema::agent_limits::{
 };
 use studio_runtime_schema::{
     agent_entity_nested::AgentMode,
-    creation_intent::{CreationIntent, ReviewDefaults, WorkerDefaults},
+    creation_intent::{CreationIntent, EffortSelection, ReviewDefaults, WorkerDefaults},
     queue_command::Field,
 };
 use studio_runtime_store::RuntimeStore;
@@ -373,18 +373,15 @@ pub async fn creation_account_key(
             previous_lead(read, previous_id.as_deref(), &|schema, value| {
                 validate(schema, value)
             })
-            // typed-boundary: removed by the creation PR
-            .map(|record| record.map(|record| record.value()))
         })
         .await?;
     let cwd = if let Some(cwd) = requested_cwd {
         cwd
     } else if let Some(prior) = previous.as_ref() {
         let raw = prior
-            .get("hostProjectPath")
-            .filter(|value| !value.is_null())
-            .or_else(|| prior.get("cwd"))
-            .and_then(Value::as_str)
+            .host_project_path
+            .value()
+            .or(prior.cwd.as_ref())
             .ok_or(OperationError::Internal)?
             .to_owned();
         project_directory_async(Some(raw))
@@ -429,12 +426,16 @@ pub async fn conversation_account_key(
     let expected = expected_account.map(str::to_owned);
     let old_account = store
         .read_async::<_, OperationError>("runtime-services/agents_create/read", move |read| {
-            let initial = load_agent_value(read, &id, &|schema, value| validate(schema, value))?
+            let initial = AgentRepository::get(read, &AgentId::from(id.as_str()))?
                 .ok_or(MutationError::UnknownAgent)?;
-            let account = initial
-                .get("accountKey")
-                .and_then(Value::as_str)
-                .unwrap_or("default");
+            if !validate("PersistedAgentRecord", &initial.value()) {
+                return Err(MutationError::InvalidStoredObject {
+                    table: "runtime_agents",
+                    id,
+                }
+                .into());
+            }
+            let account = initial.account_key.as_str();
             if expected
                 .as_deref()
                 .is_some_and(|expected| expected != account)
@@ -470,22 +471,35 @@ pub async fn conversation_worker_account_key(
     let expected = expected_account.map(str::to_owned);
     store
         .read_async::<_, OperationError>("runtime-services/agents_create/read", move |read| {
-            let record = load_agent_value(read, &id, &|schema, value| validate(schema, value))?
+            let record = AgentRepository::get(read, &AgentId::from(id.as_str()))?
                 .ok_or(MutationError::UnknownAgent)?;
-            let account = record
-                .get("accountKey")
-                .and_then(Value::as_str)
-                .unwrap_or("default");
+            if !validate("PersistedAgentRecord", &record.value()) {
+                return Err(MutationError::InvalidStoredObject {
+                    table: "runtime_agents",
+                    id,
+                }
+                .into());
+            }
+            let account = record.account_key.as_str();
             if expected
                 .as_deref()
                 .is_some_and(|expected| expected != account)
             {
                 return Err(MutationError::Stale.into());
             }
-            Ok(record
-                .pointer("/workerDefaults/accountKey")
-                .and_then(Value::as_str)
-                .map(str::to_owned))
+            match record.worker_defaults.value() {
+                Some(studio_runtime_store::StoredWorkerDefaults::Known(defaults)) => {
+                    Ok(defaults.account_key.value().cloned())
+                }
+                Some(studio_runtime_store::StoredWorkerDefaults::Unreadable(_)) => {
+                    Err(MutationError::InvalidStoredObject {
+                        table: "runtime_agents",
+                        id,
+                    }
+                    .into())
+                }
+                None => Ok(None),
+            }
         })
         .await
 }
@@ -573,7 +587,7 @@ async fn prepare_new_agent_admission(
         .or(profile_model)
         .map(str::to_owned);
     let profile_supplies_model = explicit.model.is_missing() && profile.is_some();
-    let profile_supplies_effort = explicit.effort.is_missing()
+    let profile_supplies_effort = explicit.effort.is_inherit()
         && profile
             .as_ref()
             .is_some_and(|profile| profile.effort.is_some());
@@ -609,7 +623,7 @@ fn agent_needs_catalog(
 ) -> bool {
     is_child
         || !explicit.model.is_missing()
-        || !explicit.effort.is_missing()
+        || !explicit.effort.is_inherit()
         || !explicit.fast_mode.is_missing()
         || !explicit.daybreak_enabled.is_missing()
         || !explicit.worker_defaults.is_missing()
@@ -623,12 +637,12 @@ fn merge_profile_catalog_fields(
     profile: &studio_runtime_store::ProfileRecord,
 ) -> bool {
     let model = original.model.is_missing();
-    let effort = original.effort.is_missing() && profile.effort.is_some();
+    let effort = original.effort.is_inherit() && profile.effort.is_some();
     if model {
         intent.model = Field::Value(profile.model.clone());
     }
     if let (true, Some(value)) = (effort, profile.effort) {
-        intent.effort = Field::Value(value.as_str().to_owned());
+        intent.effort = EffortSelection::Set(value.as_str().to_owned());
     }
     model || effort
 }
@@ -695,7 +709,10 @@ mod agent_catalog_requirement_tests {
             effective.model.value().map(String::as_str),
             Some("gpt-6-luna")
         );
-        assert_eq!(effective.effort.value().map(String::as_str), Some("high"));
+        assert_eq!(
+            effective.effort.selected().map(String::as_str),
+            Some("high")
+        );
     }
 }
 
@@ -773,7 +790,7 @@ async fn create(
             let previous = previous_lead(read, previous_id.as_deref(), &|schema, value| {
                 read_validate(schema, value)
             })?
-            .map(|record| record.value()); // typed-boundary: removed by the creation PR
+            .map(Box::new);
             let profile = profile_id
                 .map(|id| {
                     load_profile(read, &id)?
@@ -833,10 +850,9 @@ async fn create(
         cwd
     } else if let Some(prior) = &previous {
         let path = prior
-            .get("hostProjectPath")
-            .filter(|value| !value.is_null())
-            .or_else(|| prior.get("cwd"))
-            .and_then(Value::as_str)
+            .host_project_path
+            .value()
+            .or(prior.cwd.as_ref())
             .ok_or(OperationError::Internal)?
             .to_owned();
         project_directory_async(Some(path))
@@ -866,9 +882,7 @@ async fn create(
                 request.intent.project_server_id.value().cloned(),
                 request.intent.project_folder.value().cloned(),
             )
-            .await?
-            .serialize(serde_json::value::Serializer)
-            .map_err(StoreError::from)?, // typed-boundary: removed by the creation PR
+            .await?,
         )
     } else {
         None
@@ -897,13 +911,13 @@ async fn create(
         let effort = request
             .intent
             .effort
-            .value()
+            .selected()
             .map(String::as_str)
             .map(str::trim)
             .filter(|effort| !effort.is_empty());
         let effort = effort.or_else(|| {
             (request.intent.model.value().is_some())
-                .then(|| previous.as_ref()?.get("effort")?.as_str())
+                .then(|| previous.as_ref()?.effort.value().map(String::as_str))
                 .flatten()
         });
         let fast_mode = request
@@ -913,7 +927,7 @@ async fn create(
             .copied()
             .or_else(|| {
                 request.intent.model.value()?;
-                previous.as_ref()?.get("fastMode")?.as_bool()
+                previous.as_ref()?.fast_mode
             })
             .unwrap_or(false);
         let daybreak_enabled = request
@@ -923,7 +937,7 @@ async fn create(
             .copied()
             .or_else(|| {
                 request.intent.model.value()?;
-                previous.as_ref()?.get("daybreakEnabled")?.as_bool()
+                previous.as_ref()?.daybreak_enabled
             })
             .unwrap_or(false);
         let catalog = context
@@ -965,11 +979,9 @@ async fn create(
     let yolo = request.yolo.unwrap_or_else(|| {
         previous
             .as_ref()
-            .and_then(|record| record.get("permissionMode"))
-            .and_then(Value::as_str)
+            .and_then(|record| record.permission_mode)
             .map(|mode| {
                 mode == studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
-                    .as_str()
             })
             .unwrap_or(true)
     });
@@ -1004,9 +1016,7 @@ async fn create(
                     &settings.model,
                     &[],
                 )
-                .await?
-                .serialize(serde_json::value::Serializer)
-                .map_err(StoreError::from)?, // typed-boundary: removed by the creation PR
+                .await?,
             ),
             Some(
                 resolve_review_defaults(
@@ -1022,15 +1032,13 @@ async fn create(
                         .map(String::as_str),
                     &[],
                 )
-                .await?
-                .serialize(serde_json::value::Serializer)
-                .map_err(StoreError::from)?, // typed-boundary: removed by the creation PR
+                .await?,
             ),
         )
     } else {
         (None, None)
     };
-    let mut record = build_agent_record(
+    let mut record = Box::new(build_agent_record(
         &id,
         if draft {
             "New chat"
@@ -1051,19 +1059,24 @@ async fn create(
         draft,
         created,
         draft.then_some(signature.clone()),
-    );
+    )?);
     if let Some(mode) = request.intent.permission_mode {
-        record["permissionMode"] = json!(mode);
+        record.permission_mode = Some(mode);
     }
     if !draft && role == "orchestrator" {
-        super::set_capacity(&mut record, max_agents, request.max_agents.is_some())?;
+        let max = studio_runtime_schema::AgentCounter::from_i64(max_agents)
+            .ok_or(OperationError::Internal)?;
+        record.capacity = if request.max_agents.is_some() {
+            studio_runtime_store::AgentCapacity::Explicit { max }
+        } else {
+            studio_runtime_store::AgentCapacity::Automatic { max }
+        };
     }
-    if role == "orchestrator" {
-        record["workerDefaults"] = worker_defaults.unwrap_or_else(|| {
-            json!({"model":"gpt-6-luna","effort":"high","fastMode":false,"daybreakEnabled":false,"delegationDepth":1})
-        });
-        record["reviewDefaults"] = review_defaults.unwrap_or(json!({"model":null,"effort":null}));
+    if let Some(defaults) = worker_defaults {
+        record.worker_defaults =
+            Field::Value(studio_runtime_store::StoredWorkerDefaults::Known(defaults));
     }
+    record.review_defaults = review_defaults.map(Box::new);
     mode_fields(&mut record);
     if workspace == "layr-native" {
         let state = context.store.state_dir().to_path_buf();
@@ -1079,26 +1092,31 @@ async fn create(
             )
         })?;
         crate::layr_native::configure_new_chat(&mut record, &cwd);
-        record["layrStoreRoot"] = json!(root);
+        record.layr_store_root = Some(root.to_str().ok_or(OperationError::Internal)?.to_owned());
     }
     if workspace == "layr" {
         set_vm_workspace_fields(&mut record, &cwd);
     }
-    record["model"] = json!(settings.model);
-    record["effort"] = json!(settings.effort);
-    record["fastMode"] = json!(settings.fast_mode);
-    record["daybreakEnabled"] = json!(settings.daybreak_enabled);
-    record["cyberAccessProgram"] = json!(settings.cyber_access_program);
-    record["profileId"] = json!(request.profile);
+    record.model = Some(settings.model.clone());
+    record.effort = settings.effort.clone().map_or(Field::Null, Field::Value);
+    record.fast_mode = Some(settings.fast_mode);
+    record.daybreak_enabled = Some(settings.daybreak_enabled);
+    record.cyber_access_program = Field::Value(studio_runtime_store::StoredTransferValue::Known(
+        settings.cyber_access_program.clone(),
+    ));
+    record.profile_id = request.profile.clone().map_or(Field::Null, Field::Value);
     if let Some(profile) = profile {
-        record["profileInstructions"] = json!(profile.instructions);
+        record.profile_instructions = Field::Value(profile.instructions);
     }
     if let Some(binding) = &binding {
-        record["projectId"] = binding["projectId"].clone();
-        record["projectServerId"] = binding["projectServerId"].clone();
-        record["projectFolder"] = binding["projectFolder"].clone();
+        record.project_id = Some(binding.project_id.clone());
+        record.project_server_id = Some(binding.project_server_id.clone());
+        record.project_folder = binding
+            .project_folder
+            .clone()
+            .map_or(Field::Null, Field::Value);
     }
-    let reuse_execution_fields = !request.intent.effort.is_missing()
+    let reuse_execution_fields = !request.intent.effort.is_inherit()
         || !request.intent.fast_mode.is_missing()
         || !request.intent.daybreak_enabled.is_missing()
         || !request.intent.worker_defaults.is_missing()
@@ -1128,101 +1146,102 @@ async fn create(
         {
             return Err(CreateError::IdentityChanged.into());
         }
-        // typed-boundary: removed by the creation PR
-        if let Some(prior) =
-            previous_lead(tx, request.previous.as_deref(), &validate)?.map(|record| record.value())
+        if let Some(prior) = previous_lead(tx, request.previous.as_deref(), &validate)?
             && request.reuse_empty.unwrap_or(true)
             && draft
             && !reuse_execution_fields
             && !request.worker_catalog
             && reusable_previous_workspace(&prior, &workspace_for_write, &cwd)
-            && !truthy(prior.get("layrReady"))
+            && prior.layr_ready != Some(true)
             && prior
-                .get("workspaceMode")
-                .and_then(Value::as_str)
+                .workspace_mode
+                .map(|mode| mode.as_str())
                 .unwrap_or("worktree")
                 == workspace_for_write.as_str()
-            && studio_runtime_providers::ProviderKind::key_of(&prior) == Some(provider.as_str())
-            && crate::sync_entity_context::agent_view_context(tx, &prior, None)?.empty_lead
+            && prior.provider.value().map(|kind| kind.key()) == Some(provider.as_str())
+            && crate::sync_entity_context::agent_view_context(tx, &prior.value(), None)?.empty_lead
         {
             let mut reused = prior;
-            let previous_account = reused
-                .get("accountKey")
-                .and_then(Value::as_str)
-                .unwrap_or("default")
-                .to_owned();
-            if reused.get("provider").and_then(Value::as_str) != Some(provider.as_str()) {
+            let previous_account = reused.account_key.clone();
+            if reused.provider.value().map(|kind| kind.key()) != Some(provider.as_str()) {
                 return Err(OperationError::Create(CreateError::IdentityChanged));
             }
-            reused["cwd"] = json!(cwd);
-            reused["hostProjectPath"] = json!(cwd);
-            reused["accountKey"] = json!(account);
-            reused["executionSettingsAccountKey"] = json!(account);
+            reused.cwd = Some(cwd.clone());
+            reused.host_project_path = Field::Value(cwd.clone());
+            reused.account_key = account.clone();
+            reused.execution_settings_account_key = Field::Value(account.clone());
             if let Some(mode) = request.intent.permission_mode.or_else(|| {
                 request.yolo.map(
                     studio_runtime_schema::claude_permissions::PermissionMode::from_full_access,
                 )
             }) {
-                reused["permissionMode"] = json!(mode);
+                reused.permission_mode = Some(mode);
             }
             if request.intent.model.value().is_some() {
-                reused["model"] = json!(settings.model);
-                reused["effort"] = json!(settings.effort);
-                reused["fastMode"] = json!(settings.fast_mode);
-                reused["daybreakEnabled"] = json!(settings.daybreak_enabled);
-                reused["cyberAccessProgram"] = json!(settings.cyber_access_program);
+                reused.model = Some(settings.model.clone());
+                reused.effort = settings.effort.clone().map_or(Field::Null, Field::Value);
+                reused.fast_mode = Some(settings.fast_mode);
+                reused.daybreak_enabled = Some(settings.daybreak_enabled);
+                reused.cyber_access_program =
+                    Field::Value(studio_runtime_store::StoredTransferValue::Known(
+                        settings.cyber_access_program.clone(),
+                    ));
             }
             if let Some(binding) = &binding {
-                reused["projectId"] = binding["projectId"].clone();
-                reused["projectServerId"] = binding["projectServerId"].clone();
-                reused["projectFolder"] = binding["projectFolder"].clone();
-            } else if let Some(fields) = reused.as_object_mut() {
-                fields.remove("projectId");
-                fields.remove("projectServerId");
-                fields.remove("projectFolder");
+                reused.project_id = Some(binding.project_id.clone());
+                reused.project_server_id = Some(binding.project_server_id.clone());
+                reused.project_folder = binding
+                    .project_folder
+                    .clone()
+                    .map_or(Field::Null, Field::Value);
+            } else {
+                reused.project_id = None;
+                reused.project_server_id = None;
+                reused.project_folder = Field::Missing;
             }
             if previous_account != account {
-                reused["daybreakEnabled"] = json!(false);
-                reused["cyberAccessProgram"] = json!("standard");
-                reused
-                    .as_object_mut()
-                    .ok_or(OperationError::Internal)?
-                    .remove("pendingSettings");
-                reused
-                    .as_object_mut()
-                    .ok_or(OperationError::Internal)?
-                    .remove("pendingSettingsAccountKey");
+                reused.daybreak_enabled = Some(false);
+                reused.cyber_access_program = Field::Value(
+                    studio_runtime_store::StoredTransferValue::Known("standard".into()),
+                );
+                reused.pending_settings = Field::Missing;
+                reused.pending_settings_account_key = Field::Missing;
             }
             if workspace_for_write == "layr" {
                 set_vm_workspace_fields(&mut reused, &cwd);
             } else if workspace_for_write == "layr-native" {
                 crate::layr_native::configure_new_chat(&mut reused, &cwd);
-                if reused["layrStoreRoot"].is_null() {
-                    reused["layrStoreRoot"] = record["layrStoreRoot"].clone();
+                if reused.layr_store_root.is_none() {
+                    reused.layr_store_root = record.layr_store_root.clone();
                 }
             }
-            ensure_project(tx, &reused)?;
-            save_agent(tx, &reused, &validate)?;
+            let value = reused.value();
+            ensure_project(tx, &value)?;
+            if !validate("PersistedAgentRecord", &value) {
+                return Err(MutationError::InvalidStoredObject {
+                    table: "runtime_agents",
+                    id: reused.id.0.clone(),
+                }
+                .into());
+            }
+            AgentRepository::put(tx, &reused)?;
+            publish_agent(tx, &value)?;
             tx.execute(
                 "INSERT INTO runtime_lead_requests(id,agent,signature) VALUES(?1,?2,?3)",
-                rusqlite::params![id_for_write, reused["id"].as_str(), signature],
+                rusqlite::params![id_for_write, reused.id.0, signature],
             )
             .map_err(StoreError::from)?;
-            return Ok(sync_projection(tx, &reused)?);
+            return Ok(sync_projection(tx, &value)?);
         }
         if let Some(binding) = &binding {
             let current = resolve_project_binding_from(
                 tx,
-                binding["cwd"].as_str().ok_or(OperationError::Internal)?,
-                binding["projectId"].as_str(),
-                binding["projectServerId"].as_str(),
-                binding["localServerId"]
-                    .as_str()
-                    .ok_or(OperationError::Internal)?,
-                binding["projectFolder"].as_str(),
-            )?
-            .serialize(serde_json::value::Serializer)
-            .map_err(StoreError::from)?; // typed-boundary: removed by the creation PR
+                &binding.cwd,
+                Some(&binding.project_id),
+                Some(&binding.project_server_id),
+                &binding.local_server_id,
+                binding.project_folder.as_deref(),
+            )?;
             if current != *binding {
                 return Err(CreateError::IdentityChanged.into());
             }
@@ -1231,7 +1250,7 @@ async fn create(
             tx,
             &id_for_write,
             &prompt,
-            record,
+            *record,
             created,
             (!draft).then_some(intent),
             validate,
@@ -1252,12 +1271,21 @@ async fn create_child(
     let parent_id = request.parent.as_deref().ok_or(OperationError::Internal)?;
     let parent_id_for_read = parent_id.to_owned();
     let validate_fn = std::sync::Arc::clone(&validate);
-    let (parent, root, project_binding) = context
+    let (parent_record, root_record, project_binding) = context
         .store
         .read_async::<_, OperationError>("runtime-services/agents_create/read", move |db| {
             let validate = |schema: &str, value: &Value| validate_fn(schema, value);
-            let parent = load_agent_value(db, &parent_id_for_read, &validate)?
-                .ok_or(MutationError::UnknownAgent)?;
+            let parent_record =
+                AgentRepository::get(db, &AgentId::from(parent_id_for_read.as_str()))?
+                    .ok_or(MutationError::UnknownAgent)?;
+            let parent = parent_record.value();
+            if !validate("PersistedAgentRecord", &parent) {
+                return Err(MutationError::InvalidStoredObject {
+                    table: "runtime_agents",
+                    id: parent_id_for_read,
+                }
+                .into());
+            }
             if truthy(parent.get("deletedAt")) {
                 return Err(MutationError::Deleted.into());
             }
@@ -1265,12 +1293,22 @@ async fn create_child(
                 .get("rootId")
                 .and_then(Value::as_str)
                 .ok_or(OperationError::Internal)?;
-            let root =
-                load_agent_value(db, root_id, &validate)?.ok_or(MutationError::UnknownAgent)?;
+            let root_record = AgentRepository::get(db, &AgentId::from(root_id))?
+                .ok_or(MutationError::UnknownAgent)?;
+            let root = root_record.value();
+            if !validate("PersistedAgentRecord", &root) {
+                return Err(MutationError::InvalidStoredObject {
+                    table: "runtime_agents",
+                    id: root_id.to_owned(),
+                }
+                .into());
+            }
             let project = parent_project_binding(db, &parent, &root)?;
-            Ok((parent, root, project))
+            Ok((Box::new(parent_record), Box::new(root_record), project))
         })
         .await?;
+    let parent = parent_record.value();
+    let root = root_record.value();
     if !truthy(root.get("isLead"))
         || root.get("id").and_then(Value::as_str) != root.get("rootId").and_then(Value::as_str)
     {
@@ -1360,7 +1398,6 @@ async fn create_child(
     })?;
     let account = &resolved.account_key;
     let identity = resolved.account;
-    let provider = identity.provider.key().to_owned();
     let model = &resolved.model;
     let effort = resolved.effort.as_deref();
     let fast_mode = resolved.fast_mode;
@@ -1396,10 +1433,10 @@ async fn create_child(
     let root_permission = root
         .get("permissionMode")
         .filter(|mode| !mode.is_null())
-        .cloned()
-        .unwrap_or(json!(
-            studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
-        ));
+        .map(studio_runtime_schema::claude_permissions::PermissionMode::deserialize)
+        .transpose()
+        .map_err(StoreError::from)?
+        .unwrap_or(studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions);
     let root_max_agents = super::capacity_max(&root);
     let prepare_cwd = cwd.to_owned();
     let prepare_host_cwd = host_cwd.to_owned();
@@ -1442,31 +1479,35 @@ async fn create_child(
                 daybreak,
             )?;
             let checked = crate::host_worker_create::persisted_record(&draft)?;
-            Ok::<_, CreateError>((draft, checked.value()))
+            Ok::<_, CreateError>((draft, Box::new(checked)))
         },
     )
     .await
     .map_err(|_| OperationError::Internal)??;
     if workspace == "layr" {
-        record["cwd"] = json!(cwd);
+        record.cwd = Some(cwd.to_owned());
         set_vm_workspace_fields(&mut record, host_cwd);
         if role == "reviewer" {
-            record["worktree"] = json!(false);
+            record.worktree = Some(false);
         }
     }
     if workspace == "layr-native" {
-        crate::layr_native::configure_child(&mut record, &parent, &root);
+        crate::layr_native::configure_child(&mut record, &parent_record, &root_record);
     }
-    record["profileId"] = json!(request.profile);
+    record.profile_id = request.profile.clone().map_or(Field::Null, Field::Value);
     if let Some(profile) = profile {
-        record["profileInstructions"] = json!(profile.instructions);
+        record.profile_instructions = Field::Value(profile.instructions.clone());
     }
-    record["provider"] = json!(provider);
-    record["permissionMode"] = root_permission;
-    super::set_capacity(&mut record, root_max_agents, false)?;
+    record.provider = Field::Value(identity.provider);
+    record.permission_mode = Some(root_permission);
+    record.capacity = studio_runtime_store::AgentCapacity::Automatic {
+        max: studio_runtime_schema::AgentCounter::from_i64(root_max_agents)
+            .ok_or(OperationError::Internal)?,
+    };
     let created = record
-        .get("created")
-        .and_then(Value::as_f64)
+        .created
+        .value()
+        .and_then(|value| value.number().as_f64())
         .ok_or(OperationError::Internal)?;
     let prompt = request.prompt.trim().to_owned();
     let task_id = creation_intent.task_id.clone();
@@ -1479,10 +1520,10 @@ async fn create_child(
     let result = mutate(context, move |tx| {
         let validate = |schema: &str, value: &Value| validate(schema, value);
         crate::host_worker_create::recheck_worker(tx, &draft, epoch, &identity)?;
-        let current_parent =
-            load_agent_value(tx, &parent_id, &validate)?.ok_or(MutationError::UnknownAgent)?;
-        let current_root = load_agent_value(tx, &draft.root_id.0, &validate)?
+        let current_parent = AgentRepository::get(tx, &AgentId::from(parent_id.as_str()))?
             .ok_or(MutationError::UnknownAgent)?;
+        let current_root =
+            AgentRepository::get(tx, &draft.root_id)?.ok_or(MutationError::UnknownAgent)?;
         crate::child_permissions::inherit_claude_permissions(
             &mut record,
             &current_parent,
@@ -1502,7 +1543,7 @@ async fn create_child(
             tx,
             &id_for_write,
             &prompt,
-            record,
+            *record,
             created,
             Some(creation_intent),
             validate,
@@ -1620,13 +1661,15 @@ fn parent_project_binding(
 /// before its first turn. Python's `codex_runtime.py:5018-5026` stores these
 /// fields at creation; `codex_vm_agents.py:196-230` fills the guest association
 /// during preparation.
-pub(crate) fn set_vm_workspace_fields(record: &mut Value, host_root: &str) {
-    record["workspaceMode"] = json!("layr");
-    record["executionMode"] = json!("vm");
-    record["hostProjectPath"] = json!(host_root);
-    record["environment"] = json!("linux");
-    record["worktree"] = json!(false);
-    record["layrReady"] = json!(false);
+pub(crate) fn set_vm_workspace_fields(record: &mut AgentRecord, host_root: &str) {
+    record.workspace_mode = Some(studio_runtime_schema::records::WorkspaceMode::Layr);
+    record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Vm);
+    record.host_project_path = Field::Value(host_root.to_owned());
+    record.environment = Field::Value(studio_runtime_store::StoredTransferValue::Known(
+        studio_runtime_schema::project_ingress::WorkerEnvironment::Linux,
+    ));
+    record.worktree = Some(false);
+    record.layr_ready = Some(false);
 }
 
 pub async fn configure(
@@ -1681,11 +1724,16 @@ pub async fn configure(
         let validate = std::sync::Arc::clone(&validate);
         return mutate(context, move |tx| {
             let validate = |schema: &str, value: &Value| validate(schema, value);
-            let mut root =
-                load_agent_value(tx, &request.id, &validate)?.ok_or(MutationError::UnknownAgent)?;
-            if root.get("isLead").and_then(Value::as_bool) != Some(true)
-                || root.get("rootId").and_then(Value::as_str) != Some(request.id.as_str())
-            {
+            let mut root = AgentRepository::get(tx, &AgentId::from(request.id.as_str()))?
+                .ok_or(MutationError::UnknownAgent)?;
+            if !validate("PersistedAgentRecord", &root.value()) {
+                return Err(MutationError::InvalidStoredObject {
+                    table: "runtime_agents",
+                    id: request.id.clone(),
+                }
+                .into());
+            }
+            if root.is_lead != Some(true) || root.root_id.0 != request.id {
                 return Err(MutationError::LeadRequired.into());
             }
             let admitted = match admit_agent_mutation::<ConcurrencyReply>(
@@ -1705,29 +1753,40 @@ pub async fn configure(
             };
             let before = SyncDocumentsRepository::entity_sequence(tx)?;
             mode_fields(&mut root);
-            let current = root.get("concurrency").and_then(Value::as_i64).unwrap_or(0);
-            let current_revision = root
-                .get("agentModeRevision")
-                .and_then(Value::as_i64)
-                .unwrap_or(0);
+            let current = root.concurrency.map(|value| value.get()).unwrap_or(0);
+            let current_revision = root.agent_mode_revision.unwrap_or(0) as i64;
             if current_revision != revision {
                 return Err(MutationError::Stale.into());
             }
-            let prior_max = super::capacity_max(&root);
+            let prior_max = root.capacity.max();
             if current != limit {
-                root["concurrency"] = json!(limit);
-                root["agentModeRevision"] = json!(revision + 1);
+                root.concurrency = Some(limit.try_into().map_err(|_| OperationError::Internal)?);
+                root.agent_mode_revision = Some((revision + 1) as u64);
             }
             if matches!(
-                super::agent_capacity(&root),
+                root.capacity,
                 studio_runtime_store::AgentCapacity::Automatic { .. }
             ) {
-                super::set_capacity(&mut root, prior_max.max(limit + TEAM_AGENT_HEADROOM), false)?;
+                root.capacity = studio_runtime_store::AgentCapacity::Automatic {
+                    max: studio_runtime_schema::AgentCounter::from_i64(
+                        prior_max.max(limit + TEAM_AGENT_HEADROOM),
+                    )
+                    .ok_or(OperationError::Internal)?,
+                };
             }
             mode_fields(&mut root);
-            let changed = current != limit || super::capacity_max(&root) != prior_max;
+            let changed = current != limit || root.capacity.max() != prior_max;
             if changed {
-                save_agent(tx, &root, &validate)?;
+                let value = root.value();
+                if !validate("PersistedAgentRecord", &value) {
+                    return Err(MutationError::InvalidStoredObject {
+                        table: "runtime_agents",
+                        id: request.id.clone(),
+                    }
+                    .into());
+                }
+                AgentRepository::put(tx, &root)?;
+                publish_agent(tx, &value)?;
             }
             let result = ConcurrencyReply {
                 id: request.id.clone(),
@@ -1742,7 +1801,7 @@ pub async fn configure(
                 } else {
                     revision + 1
                 },
-                max_agents: super::capacity_max(&root),
+                max_agents: root.capacity.max(),
                 sync: MutationSync::read(tx, before)?,
             };
             crate::event_write::settle_request(tx, &admitted, Some(&request.id), &result)
@@ -1788,17 +1847,22 @@ pub async fn conversation(
         let initial = context
             .store
             .read_async::<_, OperationError>("runtime-services/agents_create/read", move |db| {
-                load_agent_value(db, &id, &|schema, value| read_validate(schema, value))?
-                    .ok_or(MutationError::UnknownAgent.into())
+                let record = AgentRepository::get(db, &AgentId::from(id.as_str()))?
+                    .ok_or(MutationError::UnknownAgent)?;
+                if !read_validate("PersistedAgentRecord", &record.value()) {
+                    return Err(MutationError::InvalidStoredObject {
+                        table: "runtime_agents",
+                        id,
+                    }
+                    .into());
+                }
+                Ok(record)
             })
             .await?;
-        if initial.get("isLead").and_then(Value::as_bool) != Some(true) {
+        if initial.is_lead != Some(true) {
             return Err(MutationError::LeadRequired.into());
         }
-        let account_key = initial
-            .get("accountKey")
-            .and_then(Value::as_str)
-            .unwrap_or("default");
+        let account_key = initial.account_key.as_str();
         if request
             .expected_account
             .as_deref()
@@ -1808,33 +1872,46 @@ pub async fn conversation(
         }
         let identity = account_identity(context, account_key).await?;
         let excluded_account_keys = initial
-            .get("excludedAccountKeys")
-            .and_then(Value::as_array)
-            .map(|values| {
-                values
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_owned)
-                    .collect::<Vec<_>>()
-            })
+            .excluded_account_keys
+            .value()
+            .cloned()
             .unwrap_or_default();
-        let root_model = initial
-            .get("model")
-            .and_then(Value::as_str)
-            .unwrap_or(DEFAULT_LEAD_MODEL);
+        let root_model = initial.model.as_deref().unwrap_or(DEFAULT_LEAD_MODEL);
         let worker_defaults = match request.worker_defaults.as_ref() {
-            Some(value) => resolve_worker_defaults(
-                context,
-                Some(value),
-                account_key,
-                &identity,
-                root_model,
-                &excluded_account_keys,
-            ).await?.serialize(serde_json::value::Serializer).map_err(StoreError::from)?, // typed-boundary: removed by the creation PR
-            None => initial
-                .get("workerDefaults")
-                .cloned()
-                .unwrap_or_else(|| json!({"model":"gpt-6-luna","effort":"high","fastMode":false,"daybreakEnabled":false,"delegationDepth":1})),
+            Some(value) => Field::Value(
+                resolve_worker_defaults(
+                    context,
+                    Some(value),
+                    account_key,
+                    &identity,
+                    root_model,
+                    &excluded_account_keys,
+                )
+                .await?
+                .into(),
+            ),
+            None => match &initial.worker_defaults {
+                Field::Missing => Field::Value(
+                    resolve_worker_defaults(
+                        context,
+                        None,
+                        account_key,
+                        &identity,
+                        root_model,
+                        &excluded_account_keys,
+                    )
+                    .await?
+                    .into(),
+                ),
+                Field::Value(studio_runtime_store::StoredWorkerDefaults::Unreadable(_)) => {
+                    return Err(MutationError::InvalidStoredObject {
+                        table: "runtime_agents",
+                        id: request.id.clone(),
+                    }
+                    .into());
+                }
+                defaults @ (Field::Null | Field::Value(_)) => defaults.clone(),
+            },
         };
         let review_defaults = match request.review_defaults.as_ref() {
             Some(value) => {
@@ -1847,10 +1924,11 @@ pub async fn conversation(
                         request
                             .worker_defaults
                             .is_none()
-                            .then(|| {
-                                initial
-                                    .pointer("/workerDefaults/accountKey")
-                                    .and_then(Value::as_str)
+                            .then(|| match initial.worker_defaults.value() {
+                                Some(studio_runtime_store::StoredWorkerDefaults::Known(
+                                    defaults,
+                                )) => defaults.account_key.value().map(String::as_str),
+                                _ => None,
                             })
                             .flatten()
                     });
@@ -1863,26 +1941,47 @@ pub async fn conversation(
                     &excluded_account_keys,
                 )
                 .await?
-                .serialize(serde_json::value::Serializer)
-                .map_err(StoreError::from)? // typed-boundary: removed by the creation PR
             }
-            None => initial
-                .get("reviewDefaults")
-                .cloned()
-                .unwrap_or(json!({"model":null,"effort":null})),
+            None => initial.review_defaults.as_deref().cloned().unwrap_or(
+                resolve_review_defaults(
+                    context,
+                    None,
+                    account_key,
+                    &identity,
+                    None,
+                    &excluded_account_keys,
+                )
+                .await?,
+            ),
         };
         let account_key = account_key.to_owned();
         let validate = std::sync::Arc::clone(&validate);
         return mutate(context, move |tx| {
             let validate = |schema: &str, value: &Value| validate(schema, value);
-            let mut target =
-                load_agent_value(tx, &request.id, &validate)?.ok_or(MutationError::UnknownAgent)?;
-            if target.get("accountKey").and_then(Value::as_str) != Some(account_key.as_str()) {
+            let mut target = AgentRepository::get(tx, &AgentId::from(request.id.as_str()))?
+                .ok_or(MutationError::UnknownAgent)?;
+            if !validate("PersistedAgentRecord", &target.value()) {
+                return Err(MutationError::InvalidStoredObject {
+                    table: "runtime_agents",
+                    id: request.id.clone(),
+                }
+                .into());
+            }
+            if target.account_key != account_key {
                 return Err(MutationError::IdentityChanged.into());
             }
-            target["workerDefaults"] = worker_defaults;
-            target["reviewDefaults"] = review_defaults;
-            Ok(save_agent(tx, &target, &validate)?)
+            target.worker_defaults = worker_defaults;
+            target.review_defaults = Some(Box::new(review_defaults));
+            let value = target.value();
+            if !validate("PersistedAgentRecord", &value) {
+                return Err(MutationError::InvalidStoredObject {
+                    table: "runtime_agents",
+                    id: request.id.clone(),
+                }
+                .into());
+            }
+            AgentRepository::put(tx, &target)?;
+            Ok(publish_agent(tx, &value)?)
         })
         .await;
     }
@@ -1898,19 +1997,20 @@ pub async fn conversation(
                 .read_async::<_, OperationError>(
                     "runtime-services/agents_create/read",
                     move |connection| {
-                        load_agent_value(connection, &id, &|schema, value| {
-                            read_validate(schema, value)
-                        })?
-                        .ok_or(MutationError::UnknownAgent.into())
+                        let record = AgentRepository::get(connection, &AgentId::from(id.as_str()))?
+                            .ok_or(MutationError::UnknownAgent)?;
+                        if !read_validate("PersistedAgentRecord", &record.value()) {
+                            return Err(MutationError::InvalidStoredObject {
+                                table: "runtime_agents",
+                                id,
+                            }
+                            .into());
+                        }
+                        Ok(record)
                     },
                 )
                 .await?;
-            if record
-                .get("accountKey")
-                .and_then(Value::as_str)
-                .unwrap_or("default")
-                != expected_account
-            {
+            if record.account_key != expected_account {
                 return Err(MutationError::Stale.into());
             }
         }
@@ -1934,10 +2034,17 @@ pub async fn conversation(
             .read_async::<_, OperationError>(
                 "runtime-services/agents_create/read",
                 move |connection| {
-                    load_agent_value(connection, &id, &|schema, value| {
-                        read_validate(schema, value)
-                    })?
-                    .ok_or(MutationError::UnknownAgent.into())
+                    let record = AgentRepository::get(connection, &AgentId::from(id.as_str()))?
+                        .ok_or(MutationError::UnknownAgent)?;
+                    let value = record.value();
+                    if !read_validate("PersistedAgentRecord", &value) {
+                        return Err(MutationError::InvalidStoredObject {
+                            table: "runtime_agents",
+                            id,
+                        }
+                        .into());
+                    }
+                    Ok(value)
                 },
             )
             .await?;
@@ -1976,15 +2083,19 @@ pub async fn conversation(
     let initial = context
         .store
         .read_async::<_, OperationError>("runtime-services/agents_create/read", move |db| {
-            load_agent_value(db, &id, &|schema, value| read_validate(schema, value))?
-                .ok_or(MutationError::UnknownAgent.into())
+            let record = AgentRepository::get(db, &AgentId::from(id.as_str()))?
+                .ok_or(MutationError::UnknownAgent)?;
+            if !read_validate("PersistedAgentRecord", &record.value()) {
+                return Err(MutationError::InvalidStoredObject {
+                    table: "runtime_agents",
+                    id,
+                }
+                .into());
+            }
+            Ok(record)
         })
         .await?;
-    let old_account = initial
-        .get("accountKey")
-        .and_then(Value::as_str)
-        .unwrap_or("default")
-        .to_owned();
+    let old_account = initial.account_key.clone();
     if request
         .expected_account
         .as_deref()
@@ -2001,7 +2112,7 @@ pub async fn conversation(
                 next_turn_signature(&request, request_id),
             )
         } else {
-            if initial.get("isLead").and_then(Value::as_bool) != Some(true) {
+            if initial.is_lead != Some(true) {
                 return Err(MutationError::LeadRequired.into());
             }
             (AgentMutation::Permissions, permissions_signature(&request))
@@ -2013,8 +2124,15 @@ pub async fn conversation(
             .read_async::<_, OperationError>(
                 "runtime-services/agents_create/settings-replay",
                 move |db| {
-                    load_agent_value(db, &id, &|schema, value| read_validate(schema, value))?
+                    let record = AgentRepository::get(db, &AgentId::from(id.as_str()))?
                         .ok_or(MutationError::UnknownAgent)?;
+                    if !read_validate("PersistedAgentRecord", &record.value()) {
+                        return Err(MutationError::InvalidStoredObject {
+                            table: "runtime_agents",
+                            id,
+                        }
+                        .into());
+                    }
                     Ok(crate::event_write::saved_request::<SettingsReply>(
                         db,
                         crate::event_write::RequestKey::new(
@@ -2039,12 +2157,7 @@ pub async fn conversation(
         .as_deref()
         .map(project_directory)
         .transpose()?
-        .or_else(|| {
-            initial
-                .get("cwd")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        })
+        .or_else(|| initial.cwd.clone())
         .ok_or(OperationError::Internal)?;
     let account = if request.cwd.is_some() {
         account_key(context, None, cwd.clone()).await?
@@ -2054,7 +2167,7 @@ pub async fn conversation(
     let identity = account_identity(context, &account).await?;
     let provider = identity.provider.key().to_owned();
     let provider_changed =
-        initial.get("provider").and_then(Value::as_str) != Some(provider.as_str());
+        initial.provider.value().map(|value| value.key()) != Some(provider.as_str());
     let execution_requested = request.model.is_some()
         || request.effort.is_present()
         || request.fast_mode.is_some()
@@ -2063,28 +2176,45 @@ pub async fn conversation(
         || request.effort.value().is_some()
         || request.fast_mode.is_some()
         || request.daybreak_enabled.value().is_some();
-    let base_pending = initial
-        .get("pendingSettings")
-        .filter(|_| {
-            initial
-                .get("pendingSettingsAccountKey")
-                .and_then(Value::as_str)
-                .unwrap_or(&account)
-                == account
-        })
-        .cloned()
-        .unwrap_or_else(|| json!({}));
+    let pending_account = match initial.pending_settings_account_key.value() {
+        Some(studio_runtime_store::StoredTransferValue::Known(key)) => Some(key.as_str()),
+        Some(studio_runtime_store::StoredTransferValue::Unreadable(_)) => {
+            return Err(MutationError::InvalidStoredObject {
+                table: "runtime_agents",
+                id: request.id.clone(),
+            }
+            .into());
+        }
+        None => None,
+    };
+    let (pending_model, pending_effort, pending_fast_mode, pending_daybreak) =
+        if pending_account.unwrap_or(&account) == account {
+            match initial.pending_settings.value() {
+                Some(studio_runtime_store::StoredTransferObject::Known(settings)) => (
+                    settings.model.value().map(String::as_str),
+                    settings.effort.value().map(String::as_str),
+                    settings.fast_mode.value().copied(),
+                    settings.daybreak_enabled.value().copied(),
+                ),
+                Some(studio_runtime_store::StoredTransferObject::Unreadable(_)) => {
+                    return Err(MutationError::InvalidStoredObject {
+                        table: "runtime_agents",
+                        id: request.id.clone(),
+                    }
+                    .into());
+                }
+                None => (None, None, None, None),
+            }
+        } else {
+            (None, None, None, None)
+        };
     let model = request
         .model
         .as_deref()
+        .or_else(|| (!provider_changed).then_some(pending_model).flatten())
         .or_else(|| {
             (!provider_changed)
-                .then(|| base_pending.get("model").and_then(Value::as_str))
-                .flatten()
-        })
-        .or_else(|| {
-            (!provider_changed)
-                .then(|| initial.get("model").and_then(Value::as_str))
+                .then_some(initial.model.as_deref())
                 .flatten()
         })
         .unwrap_or(crate::provider_adapter::default_model(identity.provider));
@@ -2092,39 +2222,27 @@ pub async fn conversation(
         request.effort.value().map(String::as_str)
     } else {
         (!provider_changed)
-            .then(|| base_pending.get("effort").and_then(Value::as_str))
+            .then_some(pending_effort)
             .flatten()
             .or_else(|| {
                 (!provider_changed)
-                    .then(|| initial.get("effort").and_then(Value::as_str))
+                    .then(|| initial.effort.value().map(String::as_str))
                     .flatten()
             })
     };
     let fast_mode = request
         .fast_mode
-        .or_else(|| {
-            (!provider_changed)
-                .then(|| base_pending.get("fastMode").and_then(Value::as_bool))
-                .flatten()
-        })
-        .or_else(|| {
-            (!provider_changed)
-                .then(|| initial.get("fastMode").and_then(Value::as_bool))
-                .flatten()
-        })
+        .or_else(|| (!provider_changed).then_some(pending_fast_mode).flatten())
+        .or_else(|| (!provider_changed).then_some(initial.fast_mode).flatten())
         .unwrap_or(false);
     let daybreak = request
         .daybreak_enabled
         .value()
         .copied()
+        .or_else(|| (!provider_changed).then_some(pending_daybreak).flatten())
         .or_else(|| {
             (!provider_changed)
-                .then(|| base_pending.get("daybreakEnabled").and_then(Value::as_bool))
-                .flatten()
-        })
-        .or_else(|| {
-            (!provider_changed)
-                .then(|| initial.get("daybreakEnabled").and_then(Value::as_bool))
+                .then_some(initial.daybreak_enabled)
                 .flatten()
         })
         .unwrap_or(false);
@@ -2143,17 +2261,28 @@ pub async fn conversation(
             model: model.to_owned(),
             effort: None,
             native_effort: initial
-                .get("nativeEffort")
-                .and_then(Value::as_str)
+                .native_effort
+                .value()
+                .map(String::as_str)
                 .unwrap_or("medium")
                 .to_owned(),
             fast_mode,
             daybreak_enabled: daybreak,
-            cyber_access_program: initial
-                .get("cyberAccessProgram")
-                .and_then(Value::as_str)
-                .unwrap_or("standard")
-                .to_owned(),
+            cyber_access_program: match initial.cyber_access_program.value() {
+                Some(studio_runtime_store::StoredTransferValue::Known(value)) => {
+                    Some(value.as_str())
+                }
+                Some(studio_runtime_store::StoredTransferValue::Unreadable(_)) => {
+                    return Err(MutationError::InvalidStoredObject {
+                        table: "runtime_agents",
+                        id: request.id.clone(),
+                    }
+                    .into());
+                }
+                None => None,
+            }
+            .unwrap_or("standard")
+            .to_owned(),
         })
     } else {
         None
@@ -2180,56 +2309,91 @@ pub async fn conversation(
         let validate = std::sync::Arc::clone(&validate);
         return mutate(context, move |tx| {
             let validate = |schema: &str, value: &Value| validate(schema, value);
-            let mut target =
-                load_agent_value(tx, &request.id, &validate)?.ok_or(MutationError::UnknownAgent)?;
-            if target
-                .get("accountKey")
-                .and_then(Value::as_str)
-                .unwrap_or("default")
-                != old_account
-            {
+            let mut target = AgentRepository::get(tx, &AgentId::from(request.id.as_str()))?
+                .ok_or(MutationError::UnknownAgent)?;
+            if !validate("PersistedAgentRecord", &target.value()) {
+                return Err(MutationError::InvalidStoredObject {
+                    table: "runtime_agents",
+                    id: request.id.clone(),
+                }
+                .into());
+            }
+            if target.account_key != old_account {
                 return Err(MutationError::IdentityChanged.into());
             }
-            let admitted = match admit_agent_mutation::<SettingsReply>(tx, &request.id, &request_id, AgentMutation::NextTurn, &signature)? {
+            let admitted = match admit_agent_mutation::<SettingsReply>(
+                tx,
+                &request.id,
+                &request_id,
+                AgentMutation::NextTurn,
+                &signature,
+            )? {
                 MutationAdmission::Replay(reply) => return Ok(reply.agent),
                 MutationAdmission::Fresh(admitted) => admitted,
             };
             let resolved = settings.as_ref().ok_or(OperationError::Internal)?;
-            target["pendingSettings"] = json!({"model":resolved.model,"effort":resolved.effort,
-                "nativeEffort":resolved.native_effort,"fastMode":resolved.fast_mode,
-                "daybreakEnabled":resolved.daybreak_enabled,"cyberAccessProgram":resolved.cyber_access_program});
-            target["pendingSettingsAccountKey"] = json!(account);
-            save_agent(tx, &target, &validate)?;
-            crate::event_write::settle_request(tx, &admitted, Some(&request.id), &SettingsReply {agent:target.clone()}).map_err(MutationError::from)?;
-            Ok(target)
-        }).await;
+            target.pending_settings =
+                Field::Value(studio_runtime_store::StoredTransferObject::Known(Box::new(
+                    studio_runtime_store::transfer_record::TransferSettings {
+                        model: Field::Value(resolved.model.clone()),
+                        effort: resolved.effort.clone().map_or(Field::Null, Field::Value),
+                        native_effort: Field::Value(resolved.native_effort.clone()),
+                        fast_mode: Field::Value(resolved.fast_mode),
+                        daybreak_enabled: Field::Value(resolved.daybreak_enabled),
+                        cyber_access_program: Field::Value(resolved.cyber_access_program.clone()),
+                        ..Default::default()
+                    },
+                )));
+            target.pending_settings_account_key =
+                Field::Value(studio_runtime_store::StoredTransferValue::Known(
+                    account.try_into().map_err(|_| OperationError::Internal)?,
+                ));
+            let value = target.value();
+            if !validate("PersistedAgentRecord", &value) {
+                return Err(MutationError::InvalidStoredObject {
+                    table: "runtime_agents",
+                    id: request.id.clone(),
+                }
+                .into());
+            }
+            AgentRepository::put(tx, &target)?;
+            publish_agent(tx, &value)?;
+            crate::event_write::settle_request(
+                tx,
+                &admitted,
+                Some(&request.id),
+                &SettingsReply {
+                    agent: value.clone(),
+                },
+            )
+            .map_err(MutationError::from)?;
+            Ok(value)
+        })
+        .await;
     }
     let validate = std::sync::Arc::clone(&validate);
     mutate(context, move |tx| {
         let validate = |schema: &str, value: &Value| validate(schema, value);
-        let mut target =
-            load_agent_value(tx, &request.id, &validate)?.ok_or(MutationError::UnknownAgent)?;
-        if target
-            .get("deletedAt")
-            .is_some_and(|value| truthy(Some(value)))
-        {
+        let mut target = AgentRepository::get(tx, &AgentId::from(request.id.as_str()))?
+            .ok_or(MutationError::UnknownAgent)?;
+        if !validate("PersistedAgentRecord", &target.value()) {
+            return Err(MutationError::InvalidStoredObject {
+                table: "runtime_agents",
+                id: request.id.clone(),
+            }
+            .into());
+        }
+        if target.deleted_at.is_some_and(|at| at != 0.0) {
             return Err(MutationError::Deleted.into());
         }
-        if target
-            .get("accountKey")
-            .and_then(Value::as_str)
-            .unwrap_or("default")
-            != old_account
-        {
+        if target.account_key != old_account {
             return Err(MutationError::IdentityChanged.into());
         }
-        if request.expected_account.as_deref().is_some_and(|expected| {
-            target
-                .get("accountKey")
-                .and_then(Value::as_str)
-                .unwrap_or("default")
-                != expected
-        }) {
+        if request
+            .expected_account
+            .as_deref()
+            .is_some_and(|expected| target.account_key != expected)
+        {
             return Err(MutationError::Stale.into());
         }
         let permission_receipt = request
@@ -2250,10 +2414,12 @@ pub async fn conversation(
             None => None,
         };
         if (execution_requested || request.cwd.is_some())
-            && (truthy(target.get("inFlight"))
+            && (target.in_flight == Some(true)
                 || matches!(
-                    target.get("status").and_then(Value::as_str),
-                    Some("running" | "starting" | "approval")
+                    target.status,
+                    studio_runtime_store::AgentStatus::Running
+                        | studio_runtime_store::AgentStatus::Starting
+                        | studio_runtime_store::AgentStatus::Approval
                 ))
         {
             return Err(MutationError::InFlight.into());
@@ -2263,70 +2429,69 @@ pub async fn conversation(
             && request.yolo_mode.is_none()
             && request.excluded.is_none()
         {
-            return Ok(sync_projection(tx, &target)?);
+            return Ok(sync_projection(tx, &target.value())?);
         }
         if let Some(excluded) = request.excluded.as_ref() {
-            if target.get("isLead").and_then(Value::as_bool) != Some(true) {
+            if target.is_lead != Some(true) {
                 return Err(MutationError::LeadRequired.into());
             }
             if excluded.iter().any(|value| value == &account) {
                 return Err(MutationError::CurrentAccountExcluded.into());
             }
-            target["excludedAccountKeys"] = json!(excluded);
+            target.excluded_account_keys = Field::Value(excluded.clone());
         }
         if let Some(yolo) = request.yolo_mode {
-            if target.get("isLead").and_then(Value::as_bool) != Some(true) {
+            if target.is_lead != Some(true) {
                 return Err(MutationError::LeadRequired.into());
             }
-            target["permissionMode"] = json!(
-                studio_runtime_schema::claude_permissions::PermissionMode::from_full_access(yolo)
+            target.permission_mode = Some(
+                studio_runtime_schema::claude_permissions::PermissionMode::from_full_access(yolo),
             );
         }
         if request.cwd.is_some() {
-            if target
-                .get("threadId")
-                .is_some_and(|thread| !thread.is_null())
-            {
+            if target.thread_id.is_some() {
                 return Err(OperationError::Invalid(
                     "Choose the project before the first message, or create a new chat",
                 ));
             }
-            target["cwd"] = json!(cwd);
-            target["hostProjectPath"] = json!(cwd);
-            target["accountKey"] = json!(account);
-            target["provider"] = json!(provider);
-            ensure_project(tx, &target)?;
+            target.cwd = Some(cwd.clone());
+            target.host_project_path = Field::Value(cwd);
+            target.account_key = account.clone();
+            target.provider = Field::Value(provider.parse().map_err(|_| OperationError::Internal)?);
+            ensure_project(tx, &target.value())?;
             if account != old_account {
-                target["daybreakEnabled"] = json!(false);
-                target["cyberAccessProgram"] = json!("standard");
-                target
-                    .as_object_mut()
-                    .ok_or(OperationError::Internal)?
-                    .remove("pendingSettings");
-                target
-                    .as_object_mut()
-                    .ok_or(OperationError::Internal)?
-                    .remove("pendingSettingsAccountKey");
+                target.daybreak_enabled = Some(false);
+                target.cyber_access_program = Field::Value(
+                    studio_runtime_store::StoredTransferValue::Known("standard".into()),
+                );
+                target.pending_settings = Field::Missing;
+                target.pending_settings_account_key = Field::Missing;
             }
         }
         if let Some(settings) = settings.as_ref() {
-            target["model"] = json!(settings.model);
-            target["effort"] = json!(settings.effort);
-            target["nativeEffort"] = json!(settings.native_effort);
-            target["fastMode"] = json!(settings.fast_mode);
-            target["daybreakEnabled"] = json!(settings.daybreak_enabled);
-            target["cyberAccessProgram"] = json!(settings.cyber_access_program);
-            target["executionSettingsAccountKey"] = json!(account);
-            target
-                .as_object_mut()
-                .ok_or(OperationError::Internal)?
-                .remove("pendingSettings");
-            target
-                .as_object_mut()
-                .ok_or(OperationError::Internal)?
-                .remove("pendingSettingsAccountKey");
+            target.model = Some(settings.model.clone());
+            target.effort = settings.effort.clone().map_or(Field::Null, Field::Value);
+            target.native_effort = Field::Value(settings.native_effort.clone());
+            target.fast_mode = Some(settings.fast_mode);
+            target.daybreak_enabled = Some(settings.daybreak_enabled);
+            target.cyber_access_program =
+                Field::Value(studio_runtime_store::StoredTransferValue::Known(
+                    settings.cyber_access_program.clone(),
+                ));
+            target.execution_settings_account_key = Field::Value(account);
+            target.pending_settings = Field::Missing;
+            target.pending_settings_account_key = Field::Missing;
         }
-        let projection = save_agent(tx, &target, &validate)?;
+        let value = target.value();
+        if !validate("PersistedAgentRecord", &value) {
+            return Err(MutationError::InvalidStoredObject {
+                table: "runtime_agents",
+                id: request.id.clone(),
+            }
+            .into());
+        }
+        AgentRepository::put(tx, &target)?;
+        let projection = publish_agent(tx, &value)?;
         if let Some(yolo) = request.yolo_mode {
             update_team_yolo(tx, &request.id, yolo, &validate)?;
         }
@@ -2353,46 +2518,55 @@ fn update_team_yolo(
     validate: &impl Fn(&str, &Value) -> bool,
 ) -> Result<(), OperationError> {
     let mut statement = tx
-        .prepare("SELECT id,record FROM runtime_agents")
+        .prepare("SELECT id FROM runtime_agents")
         .map_err(StoreError::from)?;
     let rows = statement
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
+        .query_map([], |row| row.get::<_, String>(0))
         .map_err(StoreError::from)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(StoreError::from)?;
     drop(statement);
     let mut team = Vec::new();
-    for (id, raw) in rows {
-        let record = decode_record(
-            tx,
-            "runtime_agents",
-            "PersistedAgentRecord",
-            &id,
-            &raw,
-            validate,
-        )?;
-        if record.get("rootId").and_then(Value::as_str) == Some(root_id) {
-            team.push((id, record));
+    for id in rows {
+        let record = AgentRepository::get(tx, &AgentId::from(id.as_str()))?
+            .ok_or(MutationError::UnknownAgent)?;
+        if !validate("PersistedAgentRecord", &record.value()) {
+            return Err(MutationError::InvalidStoredObject {
+                table: "runtime_agents",
+                id,
+            }
+            .into());
+        }
+        if record.root_id.0 == root_id {
+            team.push(record);
         }
     }
     // Permission changes are live; running turns, tools and monitors do not
     // lock this policy. Workspace transitions retain their existing exclusion.
-    if team
-        .iter()
-        .any(|(_, record)| truthy(record.get("workspaceOperation")))
-    {
+    if team.iter().any(|record| {
+        record
+            .workspace_operation
+            .value()
+            .is_some_and(|value| !value.is_empty())
+    }) {
         return Err(MutationError::InFlight.into());
     }
-    for (id, mut record) in team {
-        if id == root_id {
+    for mut record in team {
+        if record.id.0 == root_id {
             continue;
         }
-        record["permissionMode"] = json!(
-            studio_runtime_schema::claude_permissions::PermissionMode::from_full_access(yolo)
-        );
-        save_agent(tx, &record, validate)?;
+        record.permission_mode =
+            Some(studio_runtime_schema::claude_permissions::PermissionMode::from_full_access(yolo));
+        let value = record.value();
+        if !validate("PersistedAgentRecord", &value) {
+            return Err(MutationError::InvalidStoredObject {
+                table: "runtime_agents",
+                id: record.id.0,
+            }
+            .into());
+        }
+        AgentRepository::put(tx, &record)?;
+        publish_agent(tx, &value)?;
     }
     Ok(())
 }
@@ -3123,8 +3297,9 @@ fn lead_signature(
     serde_json::to_string(&settings).map_err(|_| OperationError::Internal)
 }
 
-fn reusable_previous_workspace(prior: &Value, _workspace: &str, _cwd: &str) -> bool {
-    !crate::legacy_image_workspace::is_legacy(prior)
+fn reusable_previous_workspace(prior: &AgentRecord, _workspace: &str, _cwd: &str) -> bool {
+    prior.workspace_mode != Some(studio_runtime_schema::records::WorkspaceMode::Image)
+        && prior.image_workspace.value() != Some(&true)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3145,49 +3320,114 @@ pub(crate) fn build_agent_record(
     draft: bool,
     created: f64,
     quick_create_signature: Option<String>,
-) -> Value {
-    let mut record = merge_records([
-        json!({
-          "id":id,"threadId":null,"accountKey":account,"executionSettingsAccountKey":account,
-          "provider":provider.key(),"permissionMode":studio_runtime_schema::claude_permissions::PermissionMode::from_full_access(yolo),"name":name,"prompt":prompt,"cwd":cwd,
-          "role":role,"isLead":is_lead,"naming":if draft { "pending_title" } else { "automatic" },"parentId":null,"rootId":id,
-          "model":crate::provider_adapter::default_model(provider),"effort":"medium",
-          "fastMode":false,"daybreakEnabled":false,"cyberAccessProgram":"standard",
-          "capacity":{"kind":"automatic","max":max_agents},"status":status,"autoWake":true,
-          "epoch":0,"turnId":null,"inFlight":false,"turnEpoch":0,"usageResumeEnabled":true,
-          "compactions":0,"contextUsage":null,
-          "events":0,"created":created,"error":null,"profileId":null,"profileInstructions":""
-        }),
-        json!({
-          "tail":"","worktree":false,"workspaceMode":workspace_mode,"executionMode":"native",
-          "hostProjectPath":cwd,"layrReady":false,"workspaceInGit":false,"worktreeReady":false,
-          "environment":"host","workspaceModeExplicit":false,
-          "worktreeWarning":null,"workerBaseRef":null,"workerBaseCommit":null,
-          "workerBaseBehindMain":null,"workerBaseMainRef":null
-        }),
-    ]);
-    if let Some(concurrency) = concurrency {
-        record["concurrency"] = json!(concurrency);
-    }
+) -> Result<AgentRecord, CreateError> {
+    use studio_runtime_schema::{
+        agent_entity_nested::AgentNaming, creation_intent::AgentRole,
+        project_ingress::WorkerEnvironment, records::WorkspaceMode,
+    };
+    use studio_runtime_store::{
+        AgentCapacity, AgentExecutionMode, StoredTransferValue, StoredWorkerDefaults,
+    };
+    let status = match status {
+        "idle" => AgentStatus::Idle,
+        "queued" => AgentStatus::Queued,
+        _ => return Err(CreateError::InvalidCreation("status")),
+    };
+    let role = match role {
+        "orchestrator" => AgentRole::Orchestrator,
+        "implementer" => AgentRole::Implementer,
+        "reviewer" => AgentRole::Reviewer,
+        _ => return Err(CreateError::InvalidCreation("role")),
+    };
+    let workspace = match workspace_mode {
+        "layr-native" => WorkspaceMode::LayrNative,
+        "layr" => WorkspaceMode::Layr,
+        "image" => WorkspaceMode::Image,
+        "worktree" => WorkspaceMode::Worktree,
+        "shared" => WorkspaceMode::Shared,
+        _ => return Err(CreateError::InvalidCreation("workspace")),
+    };
+    let mut record = AgentRecord::new(
+        AgentId::from(id),
+        AgentId::from(id),
+        0,
+        status,
+        account.to_owned(),
+    );
+    record.execution_settings_account_key = Field::Value(account.to_owned());
+    record.provider = Field::Value(provider);
+    record.permission_mode =
+        Some(studio_runtime_schema::claude_permissions::PermissionMode::from_full_access(yolo));
+    record.name = Some(name.to_owned());
+    record.prompt = Field::Value(prompt.to_owned());
+    record.cwd = Some(cwd.to_owned());
+    record.role = Field::Value(role);
+    record.is_lead = Some(is_lead);
+    record.naming = if draft {
+        AgentNaming::PendingTitle
+    } else {
+        AgentNaming::Automatic
+    };
+    record.model = Some(crate::provider_adapter::default_model(provider).to_owned());
+    record.effort = Field::Value("medium".to_owned());
+    record.fast_mode = Some(false);
+    record.daybreak_enabled = Some(false);
+    record.cyber_access_program = Field::Value(StoredTransferValue::Known("standard".to_owned()));
+    record.capacity = AgentCapacity::Automatic {
+        max: studio_runtime_schema::AgentCounter::from_i64(max_agents)
+            .ok_or(CreateError::InvalidCreation("capacity"))?,
+    };
+    record.auto_wake = Some(true);
+    record.in_flight = Some(false);
+    record.turn_epoch = Some(0);
+    record.usage_resume_enabled = Some(true);
+    record.compactions = Some(0);
+    record.events = Some(0);
+    record.created = Field::Value(
+        studio_runtime_schema::NonnegativeNumber::from_f64(created)
+            .ok_or(CreateError::InvalidCreation("created"))?,
+    );
+    record.error = Field::Null;
+    record.profile_id = Field::Null;
+    record.profile_instructions = Field::Value(String::new());
+    record.tail = Some(String::new());
+    record.worktree = Some(false);
+    record.workspace_mode = Some(workspace);
+    record.execution_mode = Some(AgentExecutionMode::Native);
+    record.host_project_path = Field::Value(cwd.to_owned());
+    record.layr_ready = Some(false);
+    record.workspace_in_git = Some(false);
+    record.worktree_ready = Some(false);
+    record.environment = Field::Value(StoredTransferValue::Known(WorkerEnvironment::Host));
+    record.workspace_mode_explicit = Some(false);
+    record.concurrency = concurrency
+        .map(TryInto::try_into)
+        .transpose()
+        .map_err(|_| CreateError::InvalidCreation("concurrency"))?;
     if is_lead {
-        record["workerDefaults"] = json!({"model":"gpt-6-luna","effort":"high","fastMode":false,"daybreakEnabled":false,"delegationDepth":1});
-        record["reviewDefaults"] = json!({"model":null,"effort":null});
+        record.worker_defaults = Field::Value(StoredWorkerDefaults::Known(
+            studio_runtime_store::transfer_record::TransferWorkerDefaults {
+                model: Field::Value("gpt-6-luna".into()),
+                effort: Field::Value("high".into()),
+                fast_mode: Field::Value(false),
+                daybreak_enabled: Field::Value(false),
+                delegation_depth: Field::Value(1.try_into().expect("valid depth")),
+                ..Default::default()
+            },
+        ));
+        record.review_defaults = Some(Box::new(
+            studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
+                model: None,
+                effort: None,
+                fast_mode: None,
+            },
+        ));
     }
     if draft {
-        record["quickCreate"] = json!(true);
-        record["quickCreateRequest"] = json!(quick_create_signature);
+        record.quick_create = Some(true);
+        record.quick_create_request = quick_create_signature;
     }
-    record
-}
-
-fn merge_records<const N: usize>(parts: [Value; N]) -> Value {
-    let mut merged = serde_json::Map::new();
-    for part in parts {
-        if let Some(fields) = part.as_object() {
-            merged.extend(fields.clone());
-        }
-    }
-    Value::Object(merged)
+    Ok(record)
 }
 
 async fn mutate(
@@ -3810,7 +4050,9 @@ mod tests {
             false,
             1.0,
             None,
-        );
+        )
+        .unwrap()
+        .value();
         root["workerDefaults"] = json!({});
         store.transaction(move |tx| {
             tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", rusqlite::params!["root", root.to_string()])?;
@@ -3938,7 +4180,7 @@ mod tests {
                 "cleared",
                 "reviewer",
                 CreationIntent {
-                    effort: Field::Null,
+                    effort: EffortSelection::Clear,
                     ..Default::default()
                 },
             ),
@@ -3967,7 +4209,7 @@ mod tests {
                     "explicit",
                     "implementer",
                     CreationIntent {
-                        effort: Field::Value("xhigh".into()),
+                        effort: EffortSelection::Set("xhigh".into()),
                         ..Default::default()
                     }
                 )
@@ -4416,7 +4658,7 @@ mod tests {
             "id":"conversation",
             "provider":studio_runtime_schema::ProviderKind::Codex,
             "accountKey":"conversation-account",
-            "rootId":"conversation",
+            "rootId":"conversation", "epoch":0, "status":"idle", "compactions":0,
             "workerDefaults":{"accountKey":"worker-default-account"}
         });
         store
@@ -4711,14 +4953,29 @@ mod tests {
             child_role_workspace(Some("orchestrator"), None, "worktree", false),
             Err(OperationError::Invalid("Invalid agent role"))
         ));
-        let mut vm = json!({"id":"vm-worker","cwd":"/guest/project/lines/main"});
+        let mut vm = AgentRecord::test_defaults();
+        vm.cwd = Some("/guest/project/lines/main".into());
         set_vm_workspace_fields(&mut vm, "/host/project");
-        assert_eq!(vm["workspaceMode"], "layr");
-        assert_eq!(vm["executionMode"], "vm");
-        assert_eq!(vm["environment"], "linux");
-        assert_eq!(vm["hostProjectPath"], "/host/project");
-        assert_eq!(vm["cwd"], "/guest/project/lines/main");
-        assert_eq!(vm["worktree"], false);
+        assert_eq!(
+            vm.workspace_mode,
+            Some(studio_runtime_schema::records::WorkspaceMode::Layr)
+        );
+        assert_eq!(
+            vm.execution_mode,
+            Some(studio_runtime_store::AgentExecutionMode::Vm)
+        );
+        assert!(matches!(
+            vm.environment.value(),
+            Some(studio_runtime_store::StoredTransferValue::Known(
+                studio_runtime_schema::project_ingress::WorkerEnvironment::Linux
+            ))
+        ));
+        assert_eq!(
+            vm.host_project_path.value().map(String::as_str),
+            Some("/host/project")
+        );
+        assert_eq!(vm.cwd.as_deref(), Some("/guest/project/lines/main"));
+        assert_eq!(vm.worktree, Some(false));
         assert_eq!(
             child_role_workspace(None, None, "layr", true)
                 .expect("VM implementer inherits layr workspace"),
@@ -5029,7 +5286,9 @@ mod tests {
             false,
             1.0,
             None,
-        );
+        )
+        .unwrap()
+        .value();
         let project = json!({"id":cwd,"path":cwd,"name":"Layr only","workspacePolicy":"layr-native","workspacePolicyRevision":1});
         store
             .transaction_with::<_, StoreError>(move |tx| {

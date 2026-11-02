@@ -190,7 +190,8 @@ pub fn prepare(
             true,
             created,
             None,
-        );
+        )?
+        .value();
         if value["naming"] != "manual" {
             value["naming"] = json!("automatic");
         }
@@ -281,7 +282,8 @@ pub fn prepare_work_item(
         false,
         created,
         None,
-    );
+    )?
+    .value();
     draft["rootId"] = json!(root_id.0);
     draft["parentId"] = json!(parent_id.0);
     draft["isLead"] = json!(false);
@@ -826,7 +828,9 @@ mod tests {
             true,
             1.0,
             None,
-        );
+        )
+        .unwrap()
+        .value();
         parent["autoWake"] = json!(true);
         crate::agents_create::set_capacity(&mut parent, DEFAULT_MAX_TEAM_AGENTS, false)
             .expect("valid capacity");

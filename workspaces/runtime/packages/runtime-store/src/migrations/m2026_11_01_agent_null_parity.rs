@@ -128,6 +128,10 @@ mod tests {
                 [
                     "concurrency",
                     "layrStoreRoot",
+                    "layrProjectId",
+                    "layrReadCwd",
+                    "layrSubpath",
+                    "layrBaseState",
                     "projectId",
                     "projectServerId",
                     "agentMode",

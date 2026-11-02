@@ -383,6 +383,14 @@ pub struct AgentRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layr_store_root: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layr_project_id: Option<Box<str>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layr_read_cwd: Option<Box<str>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layr_subpath: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layr_base_state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_server_id: Option<String>,
@@ -397,7 +405,7 @@ pub struct AgentRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quick_create: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub review_defaults: Option<studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto>,
+    pub review_defaults: Option<Box<studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_warning: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1124,14 +1132,20 @@ impl AgentRecord {
         self.deleted_at.is_some_and(|at| at != 0.0)
     }
 
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn test_defaults() -> Self {
+    /// Start an agent record with its required identity and lifecycle state.
+    pub fn new(
+        id: AgentId,
+        root_id: AgentId,
+        epoch: i64,
+        status: AgentStatus,
+        account_key: String,
+    ) -> Self {
         Self {
-            id: AgentId::from(""),
+            id,
             draft: None,
-            root_id: AgentId::from(""),
-            epoch: 0,
-            status: AgentStatus::Unknown,
+            root_id,
+            epoch,
+            status,
             parent_id: None,
             deleted_at: None,
             agent_archive: None,
@@ -1146,6 +1160,10 @@ impl AgentRecord {
             agent_mode_revision: None,
             subagent_concurrency_version: None,
             layr_store_root: None,
+            layr_project_id: None,
+            layr_read_cwd: None,
+            layr_subpath: None,
+            layr_base_state: None,
             project_id: None,
             project_server_id: None,
             worktree: None,
@@ -1226,7 +1244,7 @@ impl AgentRecord {
             claude_options: Default::default(),
             execution_mode: None,
             turn_epoch: None,
-            account_key: crate::cost_aggregate::DEFAULT_ACCOUNT.to_owned(),
+            account_key,
             thread_id: None,
             turn_id: Default::default(),
             title_job: None,
@@ -1246,6 +1264,17 @@ impl AgentRecord {
             lazy_account_transfer: studio_runtime_schema::queue_command::Field::Missing,
             extra: BTreeMap::new(),
         }
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn test_defaults() -> Self {
+        Self::new(
+            AgentId::from(""),
+            AgentId::from(""),
+            0,
+            AgentStatus::Unknown,
+            crate::cost_aggregate::DEFAULT_ACCOUNT.to_owned(),
+        )
     }
 
     pub fn active_execution(&self) -> Result<Option<ActiveExecutionView>, serde_json::Error> {
