@@ -124,15 +124,14 @@ Use the socket from `native-layr paths` when you start that root's daemon.
 
 ## First import
 
-The native import includes the whole project folder, including Git-ignored data and `.env` files.
-These files enter Layr history in the first main state.
+The native import omits Git-ignored data, including ignored `.env` files.
 The VM archive rules remain unchanged.
 
 Studio selects all paths and rejects case or Unicode collisions before it writes imported entries.
 It sorts path references and checks sibling names once per directory.
 The validator retains tables only for the current directory and its parents.
 It makes a staging tree outside the checkout with APFS clones on macOS or btrfs reflinks on Linux.
-It runs `layr init <project> --from <folder> --include-ignored`.
+It runs `layr init <project> --from <folder>`.
 It then permits the owner to save directly in protected main.
 No tar archive is created.
 
@@ -143,18 +142,12 @@ A `target` folder becomes a cache only beside `Cargo.toml`.
 Studio omits cache content from the initial state, registers each cache, clones its files, and saves the warm caches.
 New lines receive these caches without a rebuild.
 
-Studio appends `!*` to a cloned `.layrignore` beside each ignore file and at each cache parent.
-It then adds rules that ignore the cache folders again.
-The source ignore files remain unchanged.
-This makes ignored data visible to Layr while build output remains a cache.
-
-Layr creates its own root `.git` bridge.
-Studio retains the complete source `.git` tree in `.studio-native-import/git`, including local refs and unpushed objects.
-A source that already contains `.studio-native-import` is refused.
-Nested `.git` directories enter history.
-An invalid Git marker remains plain versioned data, with all its bytes preserved.
-The `plainGitMetadata` report lists each path and the reason. Studio does not read its repository status.
-Internal submodule pointers and `core.worktree` use the cloned metadata.
+Layr imports the source Git history and creates its own root `.git` bridge. A clean
+source tree has no additional import commit. Submodules are not supported in
+native Layr import yet; Studio refuses them before writing imported entries.
+Nested `.git` directories enter history. An invalid Git marker remains plain
+versioned data, with its bytes preserved. The `plainGitMetadata` report lists
+each path and the reason. Studio does not read its repository status.
 Git pointers, common directories, and object alternates inside the whole project are admitted.
 This boundary also applies when one imported worktree refers to another repository in the project.
 Stores outside the project cause refusal. The report lists their paths.
@@ -167,7 +160,7 @@ Studio excludes registered linked worktree folders from main.
 Ordinary files and folders under `.worktrees` remain versioned data.
 The `worktreeData` report lists them.
 The migration command imports their files into separate lines.
-It includes their ignored data and warm build caches.
+It omits their Git-ignored data and retains warm build caches.
 The `cachePathChanges` report lists paths whose role differs between main and an imported line.
 On APFS, a line can keep versioned files at a path that is a cache in main.
 Main retains its cache. The imported line reports `not a cache: has versioned files`.
@@ -397,7 +390,7 @@ These limits remain outside the current reviewer isolation changes.
 The migration keeps the original project and its Git worktrees.
 Each worktree becomes a native line with a stable name.
 The line replaces only its repository subtree.
-The import includes uncommitted files and all ignored data.
+The import includes uncommitted files and omits Git-ignored data.
 It excludes the worktree's `.git` pointer. Build output becomes warm caches.
 Prunable worktrees are reported and skipped.
 Completed receipts make a repeated migration idempotent.
@@ -463,7 +456,7 @@ curl -s -X POST "http://127.0.0.1:$port/api/agents/workspace-mode" \
 
 Switch the lead first. Its workspace becomes the project's Layr main line, with the same project identity rules as a new Layr chat.
 Then switch each implementer. Studio creates `agent-<SHA-256 of agent ID>` from main and imports the worker's Git worktree into it, as the migration does.
-The import includes ignored data and warm caches.
+The import omits Git-ignored data and retains warm caches.
 An implementer can switch only when its parent is a ready Layr chat.
 Its worktree must have no uncommitted or untracked files, and its HEAD must be on a remote-tracking branch.
 Studio does not fetch. Push the branch first.
