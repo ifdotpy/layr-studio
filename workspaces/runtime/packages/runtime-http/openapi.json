@@ -4390,6 +4390,9 @@
             ],
             "title": "Layrstateid"
           },
+          "manualConnectionCheck": {
+            "$ref": "#/components/schemas/ManualConnectionCheck"
+          },
           "movedFrom": {
             "anyOf": [
               {
@@ -5599,6 +5602,9 @@
               }
             ],
             "title": "Layrstateid"
+          },
+          "manualConnectionCheck": {
+            "$ref": "#/components/schemas/ManualConnectionCheck"
           },
           "model": {
             "anyOf": [
@@ -9068,6 +9074,9 @@
             "default": null,
             "title": "Layrstateid"
           },
+          "manualConnectionCheck": {
+            "$ref": "#/components/schemas/ManualConnectionCheck"
+          },
           "model": {
             "anyOf": [
               {
@@ -10169,6 +10178,9 @@
               }
             ],
             "title": "Lastreadat"
+          },
+          "manualConnectionCheck": {
+            "$ref": "#/components/schemas/ManualConnectionCheck"
           },
           "model": {
             "anyOf": [
@@ -30711,6 +30723,30 @@
       },
       "ManagedProcessRecord": {
         "$ref": "#/components/schemas/ProcessView"
+      },
+      "ManualConnectionCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "receipt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConnectionCheckDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "available",
+          "receipt"
+        ],
+        "title": "ManualConnectionCheck",
+        "type": "object"
       },
       "McpReconnectRequest": {
         "additionalProperties": false,
