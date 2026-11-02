@@ -652,31 +652,6 @@ impl Snapshot {
                                 false
                             }
                         };
-<<<<<<< head
-                        // Input queued during the hold set `queued`; keep it so the
-                        // pending input is claimable after the cancel.
-                        let input_queued = a["status"] == json!("queued");
-                        for field in SOURCE_STATE_FIELDS {
-                            if *field == "status" && input_queued {
-                                continue;
-                            }
-                            match lazy["sourceState"].get(*field) {
-                                Some(value) if exact || !value.is_null() => {
-                                    a[*field] = value.clone()
-                                }
-                                Some(_) => remove(a, &[*field])?,
-                                None if exact => remove(a, &[*field])?,
-                                None => {}
-||||||| base
-                        for field in SOURCE_STATE_FIELDS {
-                            match lazy["sourceState"].get(*field) {
-                                Some(value) if exact || !value.is_null() => {
-                                    a[*field] = value.clone()
-                                }
-                                Some(_) => remove(a, &[*field])?,
-                                None if exact => remove(a, &[*field])?,
-                                None => {}
-=======
                         if exact && !lazy.source_state.is_some() {
                             unreadable = true;
                         }
@@ -690,7 +665,6 @@ impl Snapshot {
                             }
                             if let Some(account) = source.account_key.value() {
                                 a.account_key = account.as_str().to_owned();
->>>>>>> origin/main
                             }
                             restore_source_field(&source.provider, &mut a.provider, exact);
                             restore_optional(&source.model, &mut a.model, exact);
@@ -753,7 +727,13 @@ impl Snapshot {
                                 .clone()
                                 .map(studio_runtime_store::NativeFailureHold::Boolean);
                             restore_source_field(&hold, &mut a.native_failure_hold, exact);
-                            if let Some(status) = source.status.value() {
+                            // Input queued during the hold sets `queued`; keep it so the
+                            // pending input is claimable after the cancel.
+                            if let Some(status) = source
+                                .status
+                                .value()
+                                .filter(|_| a.status != studio_runtime_store::AgentStatus::Queued)
+                            {
                                 a.status = status.clone();
                             }
                         }
