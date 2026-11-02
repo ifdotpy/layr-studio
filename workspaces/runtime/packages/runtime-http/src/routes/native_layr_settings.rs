@@ -70,12 +70,13 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
-    #[test]
-    fn reports_installed_identity_and_missing_binary() {
+    #[tokio::test]
+    async fn reports_installed_identity_and_missing_binary() {
         let temp = tempfile::tempdir().expect("state");
         let binary = temp.path().join("layr");
-        std::fs::write(&binary, "#!/bin/sh\nprintf '%s' '{\"binary\":{\"format\":1,\"version\":\"0.14.2\",\"build\":\"a6879be\"},\"store\":null,\"compatible\":true,\"state\":\"compatible\"}'\n").expect("fixture");
-        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755))
+        tokio::fs::write(&binary, "#!/bin/sh\nprintf '%s' '{\"binary\":{\"format\":1,\"version\":\"0.14.2\",\"build\":\"a6879be\"},\"store\":null,\"compatible\":true,\"state\":\"compatible\"}'\n").await.expect("fixture");
+        tokio::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755))
+            .await
             .expect("executable");
         let found = settings_response(temp.path(), Some(&binary));
         let version = found.version.expect("version");
