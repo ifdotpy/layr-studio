@@ -1,0 +1,30 @@
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+	logallrefupdates = true
+	hooksPath = .githooks
+[remote "origin"]
+	url = https://github.com/ifdotpy/layr-studio.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "main"]
+	remote = origin
+	merge = refs/heads/main
+[branch "types/types-analytics-rollout-records"]
+	remote = origin
+	merge = refs/heads/types/types-analytics-rollout-records
+[branch "simplify/simplify-checks"]
+	remote = origin
+	merge = refs/heads/main
+[branch "simplify/dumb-client"]
+	remote = origin
+	merge = refs/heads/main
+[branch "simplify/claude-failure"]
+	remote = origin
+	merge = refs/heads/main
+[branch "types/agent-record-more-fields"]
+	remote = origin
+	merge = refs/heads/types/agent-record-more-fields
+[branch "types/agent-create-helpers"]
+	remote = origin
+	merge = refs/heads/types/agent-create-helpers

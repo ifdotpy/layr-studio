@@ -1,0 +1,4 @@
+
+# Studio native import: version data; retain build caches.
+!*
+/__pycache__/

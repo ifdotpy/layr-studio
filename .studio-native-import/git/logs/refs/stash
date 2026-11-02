@@ -1,0 +1,7 @@
+0000000000000000000000000000000000000000 b594fbe6b085b4084b7820962ff7c695473203c2 Alex Fomin <magritte@tutamail.com> 1793620248 +0100	On types/agent-record-create-fields: agent create intent and constructor work in progress
+b594fbe6b085b4084b7820962ff7c695473203c2 5170d98ae8490ce3d3e3f29c89900fb4c01be34b Alex Fomin <magritte@tutamail.com> 1793622530 +0100	On types/types-agent-create: creation WIP after prerequisite
+5170d98ae8490ce3d3e3f29c89900fb4c01be34b 84b11d4b8aff86490aab2d9592cce16db41838d0 Alex Fomin <magritte@tutamail.com> 1793624435 +0100	On types/types-agent-create: creation intent WIP after seven-field split
+84b11d4b8aff86490aab2d9592cce16db41838d0 551878be1f2f36b13f85d6abb4a38a4c7dcc8ce3 Alex Fomin <magritte@tutamail.com> 1793625655 +0100	On types/agent-mode-fields: mode and typed creation WIP
+551878be1f2f36b13f85d6abb4a38a4c7dcc8ce3 531afe70800d6e9d507aa547ffeb9fd17c7b1a7c Alex Fomin <magritte@tutamail.com> 1793625975 +0100	On types/agent-create-helpers: typed creation helpers WIP
+531afe70800d6e9d507aa547ffeb9fd17c7b1a7c 7bb3ba1da1777fa9d0cb6e90114060311f8192a2 Alex Fomin <magritte@tutamail.com> 1793629088 +0100	On types/agent-mode-fields: mode and creation typed WIP after integration
+7bb3ba1da1777fa9d0cb6e90114060311f8192a2 814a2ff338444a1796f1b15865f6ed9ded92ac84 Alex Fomin <magritte@tutamail.com> 1793631326 +0100	On types/agent-mode-fields: wip creation typed boundary before restack 2026-11-02

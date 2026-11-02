@@ -1,0 +1,4 @@
+0000000000000000000000000000000000000000 a9570dfc00149f68042b7c44a6042d4ba57b2a14 Alex Fomin <magritte@tutamail.com> 1793625444 +0100	branch: Created from HEAD
+a9570dfc00149f68042b7c44a6042d4ba57b2a14 39c5be7bfb0b1e5fc63c626fee90e1b4c242b458 Alex Fomin <magritte@tutamail.com> 1793628413 +0100	rebase (finish): refs/heads/types/agent-mode-fields onto 39c5be7bfb0b1e5fc63c626fee90e1b4c242b458
+39c5be7bfb0b1e5fc63c626fee90e1b4c242b458 25b8c832b4cc8025b3be1cdaa39d7868fc25cd2a Alex Fomin <magritte@tutamail.com> 1793630018 +0100	rebase (finish): refs/heads/types/agent-mode-fields onto 25b8c832b4cc8025b3be1cdaa39d7868fc25cd2a
+25b8c832b4cc8025b3be1cdaa39d7868fc25cd2a 586f00077e8a86ddda42862d62ceee39664adae4 Alex Fomin <magritte@tutamail.com> 1793632430 +0100	rebase (finish): refs/heads/types/agent-mode-fields onto 586f00077e8a86ddda42862d62ceee39664adae4
