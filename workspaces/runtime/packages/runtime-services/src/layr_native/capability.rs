@@ -55,6 +55,12 @@ fn resolve_binary_in_path(path: &std::ffi::OsStr) -> Result<PathBuf, NativeLayrC
             let Ok(metadata) = std::fs::metadata(path) else {
                 return false;
             };
+            if !matches!(
+                super::git_guard::has_marker(path, super::git_guard::LAUNCHER_MARKER),
+                Ok(false)
+            ) {
+                return false;
+            }
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -130,6 +136,31 @@ fn has_listener(table: &str, socket: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn native_capability_skips_studio_launcher() {
+        use std::os::unix::fs::PermissionsExt;
+        let first = tempfile::tempdir().expect("launcher directory");
+        let second = tempfile::tempdir().expect("binary directory");
+        let launcher = first.path().join("layr");
+        let binary = second.path().join("layr");
+        std::fs::write(&launcher, "#!/bin/sh\n# Studio native Layr launcher.\n").expect("launcher");
+        std::fs::write(&binary, "#!/bin/sh\nexit 0\n").expect("binary");
+        for path in [&launcher, &binary] {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+                .expect("executable");
+        }
+        let path = std::env::join_paths([first.path(), second.path()]).expect("path");
+        assert_eq!(
+            resolve_binary_in_path(&path),
+            Ok(
+                studio_runtime_store::path_identity::CanonicalPath::existing(binary)
+                    .expect("canonical binary")
+                    .into_path_buf()
+            )
+        );
+    }
 
     #[cfg(unix)]
     #[test]

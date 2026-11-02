@@ -10,7 +10,7 @@ use std::{
 use studio_runtime_store::path_identity::CanonicalPath;
 
 const MARKER: &str = "# Studio native Layr Git guard.";
-const LAUNCHER_MARKER: &str = "# Studio native Layr launcher.";
+pub(super) const LAUNCHER_MARKER: &str = "# Studio native Layr launcher.";
 const COMMIT_REFUSAL: &str =
     "Git commit is disabled inside a native Layr line. Use layr save -m \"message\".";
 
@@ -94,6 +94,12 @@ fn hook_script() -> String {
     )
 }
 
+pub(super) fn has_marker(path: &Path, marker: &str) -> std::io::Result<bool> {
+    let mut prefix = Vec::new();
+    fs::File::open(path)?.take(128).read_to_end(&mut prefix)?;
+    Ok(String::from_utf8_lossy(&prefix).contains(marker))
+}
+
 fn find_real_git() -> Result<PathBuf, NativeLayrError> {
     for directory in std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()) {
         let candidate = directory.join("git");
@@ -110,11 +116,7 @@ fn find_real_git() -> Result<PathBuf, NativeLayrError> {
                 continue;
             }
         }
-        let mut prefix = Vec::new();
-        fs::File::open(&candidate)?
-            .take(128)
-            .read_to_end(&mut prefix)?;
-        if String::from_utf8_lossy(&prefix).contains(MARKER) {
+        if has_marker(&candidate, MARKER)? {
             continue;
         }
         return Ok(CanonicalPath::existing(candidate)?.into_path_buf());
@@ -135,6 +137,11 @@ fn install_layr_entry(
     executable: &Path,
 ) -> Result<(), NativeLayrError> {
     let entry = binary_path(state_dir);
+    if executable == entry {
+        return Err(NativeLayrError::Refused(
+            "The Layr executable is the managed launcher".into(),
+        ));
+    }
     let git_directory = real_git
         .parent()
         .ok_or_else(|| NativeLayrError::Refused("Missing real Git directory".into()))?;
@@ -273,6 +280,14 @@ mod tests {
     use super::*;
     use crate::bounded_child::{self, ChildError, Request};
     use std::{ffi::OsStr, fs, time::Duration};
+
+    #[test]
+    fn launcher_refuses_to_execute_itself() {
+        let state = tempfile::tempdir().expect("state");
+        let entry = binary_path(state.path());
+        assert!(install_layr_entry(state.path(), Path::new("/usr/bin/git"), &entry).is_err());
+        assert!(!entry.exists());
+    }
 
     fn invoke(program: &Path, cwd: &Path, args: &[&str]) -> Result<String, ChildError> {
         invoke_environment(program, cwd, args, &[])
