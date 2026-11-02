@@ -1364,12 +1364,17 @@ pub(crate) async fn prepare_monitor_command(
             .filter(|id| !id.is_empty())
             .ok_or_else(|| refusal("monitor-preparation/thread-required".into()))?
             .to_owned();
-        let settings = monitor_command_settings(
+        let mut settings = monitor_command_settings(
             &current,
             &snapshot.actor.cwd,
             snapshot.settings.role,
             snapshot.settings.yolo_mode,
         )?;
+        if let Some(environment) =
+            resources_for_snapshot.monitor_environment(&state_root, &current)?
+        {
+            settings["env"] = Value::Object(environment);
+        }
         Ok(super::PreparedMonitorCommand {
             thread_id,
             settings,

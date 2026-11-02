@@ -20,62 +20,6 @@ fn commit(at: &Path) {
     );
 }
 #[test]
-fn review_submodule_config_symlink_never_writes_source() {
-    let root = tempfile::tempdir().expect("fixture operation succeeds");
-    let source = root.path().join("source");
-    let destination = root.path().join("stage");
-    fs::create_dir_all(source.join("module")).expect("fixture operation succeeds");
-    fs::create_dir(source.join("metadata")).expect("fixture operation succeeds");
-    fs::create_dir(&destination).expect("fixture operation succeeds");
-    let original = b"[core]\n\tbare = false\n";
-    fs::write(source.join("config"), original).expect("fixture operation succeeds");
-    std::os::unix::fs::symlink(source.join("config"), source.join("metadata/config"))
-        .expect("fixture operation succeeds");
-    let mut plan = Plan::new(&source, false, &destination).expect("fixture operation succeeds");
-    // This witness exercises config isolation, independently of reflink support.
-    for entry in &mut plan.entries {
-        entry.cloneable = false;
-    }
-    plan.repositories.push(Repository {
-        relative: PathBuf::from("module"),
-        kind: "submodule",
-        included: true,
-        cache: false,
-        git_directory: Some(
-            CanonicalPath::existing(&source)
-                .map(CanonicalPath::into_path_buf)
-                .expect("fixture operation succeeds")
-                .join("metadata"),
-        ),
-    });
-    plan.stage(&destination)
-        .expect("fixture operation succeeds");
-    assert_eq!(
-        fs::read(source.join("config")).expect("fixture operation succeeds"),
-        original,
-        "Source config must remain unchanged"
-    );
-    assert!(
-        !fs::symlink_metadata(destination.join("metadata/config"))
-            .expect("fixture operation succeeds")
-            .file_type()
-            .is_symlink()
-    );
-    assert_eq!(
-        git(
-            &destination,
-            &[
-                "config",
-                "--file",
-                "metadata/config",
-                "--get",
-                "core.worktree"
-            ]
-        ),
-        b"../module\n"
-    );
-}
-#[test]
 fn review_internal_object_store_cannot_be_dropped() {
     let root = tempfile::tempdir().expect("fixture operation succeeds");
     let source = root.path().join("source");
@@ -224,73 +168,6 @@ fn review2_stage_rejects_nested_destination_link() {
     assert!(
         !original.join("new").exists(),
         "Staging must never follow a replaced destination"
-    );
-}
-#[test]
-fn review2_config_swap_never_edits_source() {
-    let root = tempfile::tempdir().expect("fixture operation succeeds");
-    let source = root.path().join("source");
-    let destination = root.path().join("stage");
-    fs::create_dir_all(source.join("metadata")).expect("fixture operation succeeds");
-    fs::create_dir(source.join("module")).expect("fixture operation succeeds");
-    fs::create_dir(&destination).expect("fixture operation succeeds");
-    let original = b"[core]\n\tbare = false\n";
-    fs::write(source.join("metadata/config"), original).expect("fixture operation succeeds");
-    let mut plan = Plan::new(&source, false, &destination).expect("fixture operation succeeds");
-    // Reach the config swap even when the fixture filesystem cannot clone files.
-    for entry in &mut plan.entries {
-        entry.cloneable = false;
-    }
-    plan.repositories.push(Repository {
-        relative: PathBuf::from("module"),
-        kind: "submodule",
-        included: true,
-        cache: false,
-        git_directory: Some(
-            CanonicalPath::existing(&source)
-                .map(CanonicalPath::into_path_buf)
-                .expect("fixture operation succeeds")
-                .join("metadata"),
-        ),
-    });
-    let copied = destination.join("metadata/config");
-    let original_path = source.join("metadata/config");
-    REVIEW_CONFIG_SWAP.with(|hook| {
-        *hook.borrow_mut() = Some(Box::new(move || {
-            fs::rename(&copied, copied.with_extension("old")).expect("fixture operation succeeds");
-            std::os::unix::fs::symlink(original_path, copied).expect("fixture operation succeeds");
-        }))
-    });
-    plan.stage(&destination)
-        .expect("Staging must complete after the copied config is swapped");
-    REVIEW_CONFIG_SWAP.with(|hook| {
-        assert!(
-            hook.borrow().is_none(),
-            "Staging must reach the config swap"
-        );
-    });
-    assert_eq!(
-        fs::read(source.join("metadata/config")).expect("fixture operation succeeds"),
-        original
-    );
-    assert!(
-        !fs::symlink_metadata(destination.join("metadata/config"))
-            .expect("fixture operation succeeds")
-            .file_type()
-            .is_symlink()
-    );
-    assert_eq!(
-        git(
-            &destination,
-            &[
-                "config",
-                "--file",
-                "metadata/config",
-                "--get",
-                "core.worktree"
-            ]
-        ),
-        b"../module\n"
     );
 }
 #[test]

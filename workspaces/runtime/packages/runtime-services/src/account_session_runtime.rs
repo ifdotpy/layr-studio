@@ -23,6 +23,9 @@ use studio_runtime_store::path_identity::CanonicalPath;
 use thiserror::Error;
 use tokio::sync::Notify;
 
+/// Maximum observation age in seconds before turn activity requests a provider read.
+const LIMITS_STALE_AFTER_SECONDS: f64 = 60.0;
+
 pub type AccountSessionFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, AccountSessionError>> + Send + 'a>>;
 
@@ -239,6 +242,9 @@ pub trait AccountSessionPort: Send + Sync {
     /// read; repeat refreshes must not create unbounded tasks or native requests.
     fn refresh_limits<'a>(&'a self, _account: &'a str) -> AccountSessionFuture<'a, ()> {
         Box::pin(async { Err(AccountSessionError::Requires(LIMITS_REQUIRED)) })
+    }
+    fn refresh_limits_if_stale<'a>(&'a self, account: &'a str) -> AccountSessionFuture<'a, ()> {
+        self.refresh_limits(account)
     }
     /// Read only `account/rateLimits/read`, then commit telemetry and publish the
     /// fresh snapshot through the existing notification/usage-resume adapters.
@@ -1709,6 +1715,23 @@ impl AccountSessionPort for AccountSessionRuntime {
             Ok(())
         })
     }
+    fn refresh_limits_if_stale<'a>(&'a self, account: &'a str) -> AccountSessionFuture<'a, ()> {
+        Box::pin(async move {
+            let snapshot = LimitsSnapshot::read(account, self.limits_snapshot(account)?)?;
+            let last_check = snapshot
+                .response
+                .at
+                .into_iter()
+                .chain(snapshot.response.checked_at)
+                .fold(0.0, f64::max);
+            if timestamp()
+                .is_ok_and(|now| last_check > 0.0 && now - last_check < LIMITS_STALE_AFTER_SECONDS)
+            {
+                return Ok(());
+            }
+            self.refresh_limits(account).await
+        })
+    }
     fn login<'a>(&'a self, request: LoginRequest) -> AccountSessionFuture<'a, LoginReply> {
         let runtime = self.clone();
         Box::pin(async move {
@@ -2709,6 +2732,73 @@ mod limits_runtime_tests {
             entered_rx,
             release,
         )
+    }
+
+    #[tokio::test]
+    async fn read_replaces_pending_after_account_identity_changes() {
+        let (f, _, _) = fixture(
+            [
+                Reply::Data(json!({"accountId":"old"})),
+                Reply::Data(json!({"accountId":"new"})),
+            ],
+            false,
+        )
+        .await;
+        f.runtime.read_limits("default").await.unwrap();
+        let store = f.runtime.store.as_ref().unwrap();
+        store
+            .transaction(|tx| {
+                let observation = studio_runtime_schema::usage_limits::UsageLimitsResponse {
+                    account_key: "default".into(),
+                    ..Default::default()
+                };
+                studio_runtime_store::SyncDocumentsRepository::put_entity(
+                    tx,
+                    "rateLimit",
+                    "default",
+                    studio_runtime_schema::usage_limits::RateLimitView::from_observation(
+                        observation,
+                        0.0,
+                    ),
+                    false,
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let read = f.runtime.read_limits("default").await.unwrap();
+        assert_eq!(read["data"]["accountId"], "new");
+    }
+
+    #[tokio::test]
+    async fn turn_refresh_reads_stale_observations_once_and_skips_fresh() {
+        let (f, entered, release) =
+            fixture([Reply::Data(json!({"accountId":"fixture-account"}))], true).await;
+        let at = super::timestamp().unwrap();
+        f.runtime
+            .persist_limits(
+                "default",
+                &json!({"accountKey":"default","at":at,"data":{}}),
+            )
+            .await
+            .unwrap();
+        f.runtime.refresh_limits_if_stale("default").await.unwrap();
+        assert_eq!(f.provider.calls.load(Ordering::SeqCst), 0);
+        f.runtime
+            .persist_limits(
+                "default",
+                &json!({"accountKey":"default","at":at-super::LIMITS_STALE_AFTER_SECONDS-1.0,"data":{}}),
+            )
+            .await
+            .unwrap();
+        f.runtime.refresh_limits_if_stale("default").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), entered)
+            .await
+            .unwrap()
+            .unwrap();
+        f.runtime.refresh_limits_if_stale("default").await.unwrap();
+        assert_eq!(f.provider.calls.load(Ordering::SeqCst), 1);
+        release.send(()).unwrap();
     }
 
     #[tokio::test]

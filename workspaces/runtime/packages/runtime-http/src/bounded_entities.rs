@@ -466,11 +466,37 @@ async fn changed_agent_roots(
 
 async fn publish_accounts(state: &HttpState) -> Result<(), StoreError> {
     let snapshot = accounts(state).await?;
+    let pending_accounts: Vec<(String, Option<String>)> = snapshot
+        .accounts
+        .iter()
+        .filter(|account| {
+            account.status.as_str() == Some("ready") && account.provider.as_str().is_some()
+        })
+        .filter_map(|account| {
+            account.id.as_str().map(|id| {
+                (
+                    id.to_owned(),
+                    account.account_id.as_str().map(str::to_owned),
+                )
+            })
+        })
+        .collect();
     // Only this allowlisted DTO reaches sync_entities/RxDB. Login receipts,
     // URLs, device codes and credentials stay in the transient auth owner.
     let value = accounts_summary(snapshot);
-    state.store.as_ref().ok_or(StoreError::ReadTaskFailed)?
+    let changed_identities = state.store.as_ref().ok_or(StoreError::ReadTaskFailed)?
         .transaction_with(move |tx| {
+            let mut changed_identities = Vec::new();
+            for (account, current_identity) in pending_accounts {
+                let stored_identity: Option<Option<String>> = tx.query_row("SELECT CASE WHEN json_valid(payload) THEN json_extract(payload,'$.value.observation.data.accountId') END FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0", [&account], |row| row.get(0)).optional()?;
+                let mismatch = studio_runtime_schema::usage_limits::account_identity_mismatch(current_identity.as_deref(), stored_identity.as_ref().and_then(Option::as_deref));
+                if stored_identity.is_none() || mismatch {
+                    let observation = studio_runtime_schema::usage_limits::UsageLimitsResponse { account_key: account.clone(), ..Default::default() };
+                    let view = studio_runtime_schema::usage_limits::RateLimitView::from_observation(observation, 0.0);
+                    SyncDocumentsRepository::put_entity(tx, "rateLimit", &account, view, false)?;
+                    if mismatch { changed_identities.push(account); }
+                }
+            }
             let payload = json!({"collection":"accounts","id":"current","value":value});
             if !studio_runtime_schema::validate_sync_entity_payload_strict("accounts", "current", false, &payload)
                 .map_err(StoreError::SchemaValidation)? {
@@ -489,8 +515,16 @@ async fn publish_accounts(state: &HttpState) -> Result<(), StoreError> {
                 studio_runtime_services::sync_policy::publish_entity_changes(tx, &changes, server_id.as_deref(), &|_, _, _, _| true)?;
                 tx.execute("INSERT OR IGNORE INTO sync_entity_meta(key,value) VALUES('account_destinations_projection_v1','1')", [])?;
             }
-            Ok(())
-        }).await
+            Ok(changed_identities)
+        }).await?;
+    if let Some(session) = &state.account_session {
+        for account in changed_identities {
+            if let Err(error) = session.refresh_limits(&account).await {
+                eprintln!("limits refresh for {account} failed: {error}");
+            }
+        }
+    }
+    Ok(())
 }
 
 fn accounts_summary(snapshot: studio_runtime_services::account_policy::AccountsSnapshot) -> Value {
@@ -2214,6 +2248,97 @@ mod tests {
             .shutdown_services()
             .await
             .expect("fixture refresh tasks drained");
+    }
+
+    struct IdentityRefresh(std::sync::Mutex<Vec<String>>);
+    impl studio_runtime_services::account_session_runtime::AccountSessionPort for IdentityRefresh {
+        fn refresh_limits<'a>(
+            &'a self,
+            account: &'a str,
+        ) -> studio_runtime_services::account_session_runtime::AccountSessionFuture<'a, ()>
+        {
+            Box::pin(async move {
+                self.0.lock().unwrap().push(account.into());
+                Ok(())
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn account_identity_change_hides_old_limits_until_matching_read() {
+        let (_root, mut state) = state().await;
+        let refresh = Arc::new(IdentityRefresh(Default::default()));
+        state.account_session = Some(refresh.clone());
+        let registry = json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,
+            "defaultAccountKey":"default","accounts":{"default":{"id":"default","home":"/fixture",
+            "label":"Source account","source":"fixture","provider":"codex","status":"ready","accountId":"new"}},"logins":{}});
+        state.account_policy = Some(Arc::new(
+            studio_runtime_services::account_policy::AccountPolicyState::from_startup(
+                Some(registry.to_string().as_bytes()),
+                [],
+            )
+            .unwrap(),
+        ));
+        let store = state.store.as_ref().unwrap();
+        store
+            .transaction(|tx| {
+                let old =
+                    serde_json::from_str(r#"{"accountKey":"default","data":{"accountId":"old"}}"#)?;
+                SyncDocumentsRepository::put_entity(
+                    tx,
+                    "rateLimit",
+                    "default",
+                    studio_runtime_schema::usage_limits::RateLimitView::from_observation(old, 0.0),
+                    false,
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        publish_accounts(&state).await.unwrap();
+        let pending = entity(&state, "rateLimit", "default");
+        assert_eq!(pending["projection"]["status"]["kind"], "pending");
+        assert!(pending["observation"]["data"].is_null());
+        assert_eq!(*refresh.0.lock().unwrap(), ["default"]);
+        store
+            .transaction(|tx| {
+                let new =
+                    serde_json::from_str(r#"{"accountKey":"default","data":{"accountId":"new"}}"#)?;
+                SyncDocumentsRepository::put_entity(
+                    tx,
+                    "rateLimit",
+                    "default",
+                    studio_runtime_schema::usage_limits::RateLimitView::from_observation(new, 0.0),
+                    false,
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        publish_accounts(&state).await.unwrap();
+        assert_eq!(
+            entity(&state, "rateLimit", "default")["observation"]["data"]["accountId"],
+            "new"
+        );
+    }
+
+    #[tokio::test]
+    async fn ready_account_without_observation_publishes_pending_limits() {
+        let (_root, mut state) = state().await;
+        let registry = json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,
+            "defaultAccountKey":"default","accounts":{"default":{"id":"default","home":"/fixture",
+            "label":"Source account","source":"fixture","provider":"codex","status":"ready"}},"logins":{}});
+        state.account_policy = Some(Arc::new(
+            studio_runtime_services::account_policy::AccountPolicyState::from_startup(
+                Some(registry.to_string().as_bytes()),
+                [],
+            )
+            .unwrap(),
+        ));
+        publish_accounts(&state).await.unwrap();
+        let limits = entity(&state, "rateLimit", "default");
+        assert_eq!(limits["observation"]["accountKey"], "default");
+        assert_eq!(limits["projection"]["status"]["kind"], "pending");
     }
 
     #[tokio::test]

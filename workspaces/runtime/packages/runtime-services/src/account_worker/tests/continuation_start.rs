@@ -28,7 +28,7 @@ async fn child_of_lead(state: &State) {
                 lead.status = studio_runtime_store::AgentStatus::Completed;
                 lead.in_flight = Some(false);
                 lead.thread_id = Some("lead-thread".to_string());
-                lead.extra.insert("concurrency".into(), json!(8));
+                lead.concurrency = Some(8.try_into().unwrap());
                 lead.start_attempt.take();
                 AgentRepository::put(tx, &lead)?;
                 row.root_id = AgentId::from(LEAD);
