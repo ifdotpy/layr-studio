@@ -36262,6 +36262,39 @@
             ],
             "title": "Name"
           },
+          "peerLeads": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "grant": {
+                  "title": "Grant",
+                  "type": "string"
+                },
+                "label": {
+                  "title": "Label",
+                  "type": "string"
+                },
+                "remoteProject": {
+                  "title": "Remoteproject",
+                  "type": "string"
+                },
+                "server": {
+                  "title": "Server",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "grant",
+                "remoteProject",
+                "server",
+                "label"
+              ],
+              "title": "PeerLead",
+              "type": "object"
+            },
+            "title": "Peerleads",
+            "type": "array"
+          },
           "projectPath": {
             "anyOf": [
               {
