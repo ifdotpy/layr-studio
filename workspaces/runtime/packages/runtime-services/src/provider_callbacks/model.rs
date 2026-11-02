@@ -19,6 +19,8 @@ pub enum CallbackError {
     Dependency(&'static str),
     #[error("Callback identity or session changed")]
     Stale,
+    #[error("{0}")]
+    Refusal(String),
     #[error("Request identity already has different content")]
     Conflict,
     #[error("Callback delivery is uncertain; inspect the saved receipt, do not resend")]
