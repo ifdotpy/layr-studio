@@ -610,7 +610,6 @@ async fn accept_project_peer_with(
                     }],
                 )?;
             }
-<<<<<<< head
             crate::sync_policy::publish_peer_teams(tx)?;
             Ok::<_, StoreError>(())
         })
@@ -644,40 +643,6 @@ async fn revoke_project_grant(
                 ));
             }
             crate::sync_policy::publish_peer_teams(tx)?;
-||||||| base
-=======
-            Ok::<_, StoreError>(())
-        })
-        .await?;
-    project_grants_view(&store, project_id).await
-}
-
-/// Revoke one project pairing on this side. Final: the peer link drops the key when no other
-/// pairing uses it. Queued project messages do not exist yet, so none are dropped.
-async fn revoke_project_grant(
-    store: Arc<RuntimeStore>,
-    grant_id: &str,
-) -> Result<Value, FederationError> {
-    let now = unix_time()? as i64;
-    let grant_id_for_write = grant_id.to_owned();
-    let project = store
-        .transaction_with(move |tx| {
-            let project: Option<String> = tx
-                .query_row(
-                    "SELECT local_project FROM project_grants WHERE grant_id=?1 LIMIT 1",
-                    [&grant_id_for_write],
-                    |row| row.get(0),
-                )
-                .optional()
-                .map_err(StoreError::from)?;
-            let project = project
-                .ok_or_else(|| FederationError::Refused("Unknown project pairing".to_owned()))?;
-            if project_grants::revoke(tx, &grant_id_for_write, now)? == 0 {
-                return Err(FederationError::Refused(
-                    "This project pairing is already revoked".to_owned(),
-                ));
-            }
->>>>>>> origin/feat/project-pairing-routes
             Ok::<_, FederationError>(project)
         })
         .await?;
