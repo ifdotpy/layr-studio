@@ -10416,6 +10416,7 @@ export interface components {
         | "unsupported_by_model"
         | "media_budget"
         | undefined;
+      message?: string | undefined;
       promptTokens?: number | undefined;
       /** @enum {string} */
       provider?:
@@ -10436,6 +10437,7 @@ export interface components {
         | "host_managed"
         | "model_access"
         | undefined;
+      title?: string | undefined;
     };
     ClaudeFileBackupsRequest: {
       id: string;

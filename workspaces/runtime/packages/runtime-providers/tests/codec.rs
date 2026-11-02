@@ -367,7 +367,7 @@ fn claude_failure_metadata_is_bounded_and_redacted_before_retention() {
     let value: Value = serde_json::from_str(&encoded).expect("encoded frame is JSON");
     assert_eq!(
         value["params"]["turn"]["error"]["claudeFailure"],
-        json!({"apiError":"provider_credentials","apiErrorStatus":401,"apiErrorCode":"new_gate","provider":"bedrock","remedy":"refresh_credentials","promptTokens":210001,"maxContextTokens":200000})
+        json!({"apiError":"provider_credentials","apiErrorStatus":401,"apiErrorCode":"new_gate","provider":"bedrock","remedy":"refresh_credentials","promptTokens":210001,"maxContextTokens":200000,"title":"Provider credentials failed","message":"The cloud provider refused the credentials or access. Check this account's sign-in and model access. Context: 210001 tokens. Limit: 200000 tokens."})
     );
     assert_eq!(
         value["params"]["turn"]["error"]["codexErrorInfo"],

@@ -326,6 +326,11 @@ fn claude_failure_metadata_reaches_stored_analytics_without_text_or_credentials(
     let (mut db, agent) = started_turn();
     let metadata = json!({"apiError":"tool_history_mismatch","apiErrorStatus":400,"apiErrorCode":"tool_pair_gate","promptTokens":210001,"maxContextTokens":200000});
     let mut unsafe_metadata = metadata.clone();
+    let mut metadata = metadata;
+    metadata["title"] = json!("Tool history does not match");
+    metadata["message"] = json!(
+        "The conversation's tool calls and results do not match. Rewind the conversation or start a new chat. Context: 210001 tokens. Limit: 200000 tokens."
+    );
     unsafe_metadata["error_details"] = json!("secret prompt");
     unsafe_metadata["credential"] = json!("Bearer secret");
     capture(
