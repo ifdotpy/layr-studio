@@ -3127,6 +3127,95 @@ mod tests {
         }
     }
 
+    async fn dispatch_item_for(
+        root: &std::path::Path,
+        provider: &'static str,
+        item: Value,
+    ) -> Result<(), super::NotificationDispatchError> {
+        let store = studio_runtime_store::RuntimeStore::open(Some(root))
+            .await
+            .unwrap();
+        let notification = json!({"method":"item/completed","params":{
+            "threadId":"thread","turnId":"turn","item":item
+        }});
+        store
+            .transaction_with(move |tx| {
+                tx.execute(
+                    "INSERT INTO runtime_agents(id,record) VALUES('agent',?1)",
+                    [json!({"compactions":0,
+                        "id":"agent","rootId":"agent","epoch":1,"status":"running","threadId":"thread",
+                        "accountKey":"default","provider":provider,"turnId":"turn","inFlight":true,
+                        "autoWake":true,"activeTools":[],"events":0,"isLead":true
+                    })
+                    .to_string()],
+                )
+                .map_err(studio_runtime_store::StoreError::from)?;
+                super::dispatch_notification(
+                    tx,
+                    "agent",
+                    &PublicationContext::default(),
+                    &NotificationStreamBuffer::default(),
+                    &identity(1),
+                    &frame(&notification),
+                    100.0,
+                )?;
+                Ok::<_, super::NotificationDispatchError>(())
+            })
+            .await
+    }
+
+    #[tokio::test]
+    async fn provider_item_of_unknown_kind_is_stored_raw_and_survives_reload() {
+        for provider in ["codex", "claude"] {
+            let root = tempfile::tempdir().unwrap();
+            let item = json!({"id":"future-1","type":"futureItem","payload":{"n":1,"text":"x"}});
+            dispatch_item_for(root.path(), provider, item.clone())
+                .await
+                .unwrap();
+            // Reopen the store so the record is read back from disk, not from the writer.
+            let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+                .await
+                .unwrap();
+            let raw: String = store
+                .test_reader()
+                .unwrap()
+                .query_row(
+                    "SELECT record FROM runtime_items WHERE id='agent:future-1'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let record: Value = serde_json::from_str(&raw).unwrap();
+            assert_eq!(record["role"], "output", "{provider}");
+            assert_eq!(record["title"], "futureItem", "{provider}");
+            assert_eq!(
+                record["providerUnknown"]["kind"], "futureItem",
+                "{provider}"
+            );
+            assert_eq!(record["providerUnknown"]["raw"], item, "{provider}");
+        }
+    }
+
+    #[tokio::test]
+    async fn known_provider_item_with_wrong_field_type_is_still_rejected() {
+        let root = tempfile::tempdir().unwrap();
+        let item = json!({"id":"cmd-1","type":"commandExecution","cwd":1,"status":"inProgress"});
+        assert!(dispatch_item_for(root.path(), "codex", item).await.is_err());
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        let count: i64 = store
+            .test_reader()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM runtime_items WHERE id='agent:cmd-1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
     #[test]
     fn stale_safety_notice_keeps_current_turn_stream_pending() {
         let mut connection = database();
