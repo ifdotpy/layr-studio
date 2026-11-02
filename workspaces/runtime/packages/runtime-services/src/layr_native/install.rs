@@ -318,9 +318,7 @@ mod tests {
     #[test]
     fn version_check_accepts_the_build_suffix_only() {
         assert!(version_matches("layr version 0.11.0"));
-        assert!(version_matches(
-            "layr version 0.11.0 (782cd81 2026-11-01)"
-        ));
+        assert!(version_matches("layr version 0.11.0 (782cd81 2026-11-01)"));
         assert!(!version_matches("layr version 0.11.00"));
         assert!(!version_matches("layr version 0.3.0 (73eb679 2026-10-28)"));
         assert!(!version_matches("layr version 0.11.0 (unclosed"));
