@@ -340,7 +340,7 @@ export function RequestCard({
   request: RequestDto;
   messageId?: string;
 }) {
-  const { post: apiPost } = useServerApi();
+  const { post: apiPost, command: commands } = useServerApi();
   const services = useServerServices();
   const answerStorage = useServerStorage();
 
@@ -415,7 +415,13 @@ export function RequestCard({
     setSending(true);
     setRequestError("");
     try {
-      const approve = () => apiPost("/api/answer", { ...body, id: r.id });
+      // The answer command returns the sign-in link (`result`) with the approval.
+      const approve = async () => {
+        const response = await commands.answer(r.id, body);
+        if (response.kind !== "answer")
+          throw new Error("Studio returned another result for an answer.");
+        return response.result;
+      };
       if (browserOpen && body.decision === "accept")
         await approveSignInPage({
           url: browserOpen.url,

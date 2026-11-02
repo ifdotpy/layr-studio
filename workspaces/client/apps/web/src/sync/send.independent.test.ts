@@ -132,6 +132,7 @@ it("keeps an uncertain server receipt retryable with the exact command", async (
   const buffer = new MemoryBuffer();
   const post = vi.fn(async (request) => ({
     status: "applied" as const,
+    kind: "send" as const,
     ref_kind: "message",
     ref_id: request.id,
     rev: 1,
@@ -177,6 +178,7 @@ it("continues sending when storage fails", async () => {
   vi.spyOn(buffer, "put").mockRejectedValue(new Error("disk full"));
   const post = vi.fn(async (request) => ({
     status: "applied" as const,
+    kind: "send" as const,
     ref_kind: "message",
     ref_id: request.id,
     rev: 1,
@@ -381,6 +383,7 @@ it("removes a confirmed command even when its response omits the receipt", async
   const buffer = new MemoryBuffer();
   const post = vi.fn(async (request) => ({
     status: "applied" as const,
+    kind: "send" as const,
     ref_kind: "message",
     ref_id: request.id,
     seq: 1,
@@ -517,6 +520,7 @@ it("dispatches immediately when the buffer write never finishes", async () => {
   vi.spyOn(buffer, "put").mockImplementation(() => new Promise(() => {}));
   const post = vi.fn(async (request) => ({
     status: "applied" as const,
+    kind: "send" as const,
     ref_kind: "message",
     ref_id: request.id,
     rev: 1,
@@ -576,6 +580,7 @@ it("retries initialization after a storage failure", async () => {
     .mockRejectedValueOnce(new Error("offline"))
     .mockImplementation(async (request) => ({
       status: "applied" as const,
+      kind: "send" as const,
       ref_kind: "message",
       ref_id: request.id,
       rev: 1,

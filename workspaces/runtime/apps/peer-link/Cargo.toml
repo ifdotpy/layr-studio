@@ -11,12 +11,17 @@ path = "src/main.rs"
 
 [dependencies]
 getrandom.workspace = true
-quinn = { version = "=0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+iroh = "=1.3.0"
 rustls.workspace = true
 rustls-pki-types.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["io-std"] }
+
+[dev-dependencies]
+base64.workspace = true
+iroh-relay = { version = "=1.3.0", features = ["server"] }
+iroh = { version = "=1.3.0", features = ["test-utils"] }
 
 [lints]
 workspace = true

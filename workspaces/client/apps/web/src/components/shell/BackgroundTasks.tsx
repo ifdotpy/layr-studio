@@ -790,7 +790,7 @@ export function TaskDetail({
   onStop: () => void;
   controlPending: boolean;
 }) {
-  const { get, post } = useServerApi();
+  const { get, post, command } = useServerApi();
   const summary = activity.value;
   const process = activity.source === "process" ? activity.value : undefined;
 
@@ -842,6 +842,19 @@ export function TaskDetail({
         result.error
       )
         throw new Error(displayError(result.error));
+      void refresh().catch((error) => notify(errorText(error)));
+      return true;
+    } catch (error) {
+      notify(errorText(error));
+      return false;
+    } finally {
+      setPending(false);
+    }
+  };
+  const approve = async (approval: string) => {
+    setPending(true);
+    try {
+      await command.answer(approval, { decision: "accept" });
       void refresh().catch((error) => notify(errorText(error)));
       return true;
     } catch (error) {
@@ -1128,9 +1141,7 @@ export function TaskDetail({
               size="xs"
               variant="light"
               loading={pending}
-              onClick={() =>
-                void act("/api/answer", { id: request.id, decision: "accept" })
-              }
+              onClick={() => void approve(request.id)}
             >
               Approve command
             </Button>

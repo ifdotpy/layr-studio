@@ -489,6 +489,61 @@ test("Linux keeps its existing delivery owner and exact commit argument", () => 
   assert.equal(at(at(plan, 0).args, 1), "a".repeat(40));
 });
 
+test(
+  "Linux delivery forwards only set Layr transport variables to its unit",
+  { skip: process.platform !== "linux" },
+  (t) => {
+    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "delivery-env-"));
+    t.after(() => fs.rmSync(fixture, { recursive: true, force: true }));
+    const bashEnv = path.join(fixture, "bash-env");
+    fs.writeFileSync(
+      bashEnv,
+      `
+git() { case "$*" in *--show-toplevel*) echo "$PROJECT";; *--verify*) echo fixture-commit;; esac; }
+systemd-run() { if [ "$1" = --version ]; then echo 'systemd 254'; else printf '%s\\n' "$@" > "$HOME/args"; fi; }
+journalctl() { :; }
+`,
+    );
+    const script = path.join(
+      repository,
+      "workspaces/runtime/apps/runtime-server/deliver.sh",
+    );
+    for (const set of [true, false]) {
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        HOME: fixture,
+        BASH_ENV: bashEnv,
+        PROJECT: repository,
+        CODEX_STUDIO_SERVER_ROOT: path.join(fixture, "root"),
+      };
+      delete env.CODEX_STUDIO_DELIVER_IN_UNIT;
+      delete env.CODEX_STUDIO_DELIVER_TEST_IN_PROCESS;
+      for (const name of ["LAYR_ROOT", "LAYR_SOCKET", "LAYR_DIRECT"] as const) {
+        if (set) env[name] = `fixture-${name}`;
+        else delete env[name];
+      }
+      fs.rmSync(path.join(fixture, "args"), { force: true });
+      const result = spawnSync("/bin/bash", [script], {
+        cwd: repository,
+        env,
+        encoding: "utf8",
+      });
+      assert.equal(result.status, 1);
+      assert.match(
+        result.stderr,
+        /delivery unit did not record a verified invocation/,
+      );
+      const args = fs
+        .readFileSync(path.join(fixture, "args"), "utf8")
+        .split("\n");
+      for (const name of ["LAYR_ROOT", "LAYR_SOCKET", "LAYR_DIRECT"]) {
+        assert.equal(args.includes(`--setenv=${name}`), set, name);
+        assert.ok(!args.some((arg) => arg.includes(`fixture-${name}`)));
+      }
+    }
+  },
+);
+
 test("Mac runs the canary before the only live write through the recovery owner", () => {
   const options = parseDeliveryArguments(["HEAD", "--app", fixtureApp]);
   const plan = deliveryPlan({

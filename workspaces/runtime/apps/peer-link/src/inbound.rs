@@ -5,7 +5,7 @@
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
-use quinn::{Connection, Endpoint, RecvStream, SendStream, VarInt};
+use iroh::endpoint::{Connection, Endpoint, IncomingAddr, RecvStream, SendStream, VarInt};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -17,7 +17,6 @@ pub struct Inbound {
     pub forwarded_host: String,
     /// Sent with the connection identity so the backend knows the link set it.
     pub link_token: String,
-    pub loopback: bool,
 }
 
 /// Tailscale addresses (CGNAT range and the Tailscale ULA prefix). The backend runs whois on it.
@@ -34,13 +33,14 @@ pub fn tailnet(address: IpAddr) -> bool {
     }
 }
 
+/// Accepts connections. The endpoint hooks refuse a key that is not paired before this point.
 pub async fn serve(endpoint: Endpoint, inbound: Arc<Inbound>, links: Arc<Links>) {
     while let Some(incoming) = endpoint.accept().await {
-        let source = incoming.remote_address().ip();
-        if !(tailnet(source) || (inbound.loopback && source.is_loopback())) {
-            incoming.refuse();
-            continue;
-        }
+        let peer = if let IncomingAddr::Ip(address) = incoming.remote_addr() {
+            address.ip()
+        } else {
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+        };
         let inbound = inbound.clone();
         let links = links.clone();
         tokio::spawn(async move {
@@ -48,13 +48,12 @@ pub async fn serve(endpoint: Endpoint, inbound: Arc<Inbound>, links: Arc<Links>)
                 return;
             };
             links.track_inbound(&connection);
-            accept_streams(connection, inbound).await;
+            accept_streams(connection, peer, inbound).await;
         });
     }
 }
 
-async fn accept_streams(connection: Connection, inbound: Arc<Inbound>) {
-    let peer = connection.remote_address().ip();
+async fn accept_streams(connection: Connection, peer: IpAddr, inbound: Arc<Inbound>) {
     let Some(id) = connection_id() else {
         connection.close(VarInt::from_u32(3), b"no identity");
         return;

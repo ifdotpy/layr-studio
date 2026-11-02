@@ -8,11 +8,15 @@ import { required } from "../componentTestFixtures";
 const controls = vi.hoisted(() => ({
   cards: [] as Array<{ post(body: Record<string, unknown>): Promise<boolean> }>,
   post: vi.fn(),
+  answer: vi.fn(),
   storage: {},
   write: vi.fn(() => null),
 }));
 vi.mock("../../servers/ServerServicesContext", () => ({
-  useServerApi: () => ({ post: controls.post }),
+  useServerApi: () => ({
+    post: controls.post,
+    command: { answer: controls.answer },
+  }),
   useServerServices: () => ({ owner: { id: "remote", label: "Build server" } }),
   useServerLocalDrafts: () => ({ writeLocalDraft: controls.write }),
   useServerStorage: () => controls.storage,
@@ -74,6 +78,7 @@ function card() {
 beforeEach(() => {
   controls.cards.length = 0;
   controls.post.mockReset();
+  controls.answer.mockReset();
   controls.write.mockClear();
   vi.stubGlobal("window", {});
 });
@@ -113,10 +118,13 @@ it("the actual request card prepares native sign-in before a slow approval and o
     return { id: request.id, result: false };
   });
   vi.stubGlobal("__TAURI__", { core: { invoke } });
-  controls.post.mockImplementation(async () => {
+  controls.answer.mockImplementation(async () => {
     trace.push("approve");
     elapsed = 2000;
-    return { status: "answered", openUrl: link, forward };
+    return {
+      kind: "answer",
+      result: { status: "answered", openUrl: link, forward },
+    };
   });
   const { post, notify, refresh } = card();
   const first = post({ decision: "accept", window: "desktop" });
@@ -124,8 +132,7 @@ it("the actual request card prepares native sign-in before a slow approval and o
   expect(await first).toBe(true);
   expect(notify).not.toHaveBeenCalled();
   expect(trace).toEqual(["prepare", "approve", "open", "cancel"]);
-  expect(controls.post).toHaveBeenCalledExactlyOnceWith("/api/answer", {
-    id: requestId,
+  expect(controls.answer).toHaveBeenCalledExactlyOnceWith(requestId, {
     decision: "accept",
     window: "desktop",
   });
@@ -140,7 +147,7 @@ it("does not approve the card when native preparation lacks a user action", asyn
   vi.stubGlobal("__TAURI__", { core: { invoke } });
   const { post, notify } = card();
   expect(await post({ decision: "accept" })).toBe(false);
-  expect(controls.post).not.toHaveBeenCalled();
+  expect(controls.answer).not.toHaveBeenCalled();
   expect(invoke).toHaveBeenCalledOnce();
   expect(notify).toHaveBeenCalledExactlyOnceWith(
     "Use a desktop button or keyboard action.",
@@ -158,10 +165,10 @@ it("cancels a prepared intent after an uncertain approval without opening or ret
     };
   });
   vi.stubGlobal("__TAURI__", { core: { invoke } });
-  controls.post.mockRejectedValue(new Error("Approval outcome is unknown."));
+  controls.answer.mockRejectedValue(new Error("Approval outcome is unknown."));
   const { post, notify } = card();
   expect(await post({ decision: "accept" })).toBe(false);
-  expect(controls.post).toHaveBeenCalledOnce();
+  expect(controls.answer).toHaveBeenCalledOnce();
   expect(methods).toEqual(["desktop.prepareSignIn", "desktop.cancelSignIn"]);
   expect(notify).toHaveBeenCalledExactlyOnceWith(
     "Approval outcome is unknown.",
@@ -171,7 +178,10 @@ it("cancels a prepared intent after an uncertain approval without opening or ret
 it("does not prepare or open a browser for a declined sign-in", async () => {
   const invoke = vi.fn();
   vi.stubGlobal("__TAURI__", { core: { invoke } });
-  controls.post.mockResolvedValue({ status: "answered" });
+  controls.answer.mockResolvedValue({
+    kind: "answer",
+    result: { status: "answered" },
+  });
   const { post } = card();
   expect(await post({ decision: "decline" })).toBe(true);
   expect(invoke).not.toHaveBeenCalled();

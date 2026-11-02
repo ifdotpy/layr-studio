@@ -3,7 +3,7 @@
 use super::extractors::ApiJson;
 use super::manifest::{OperationStatus, RouteGroup, post};
 use axum::Json;
-use axum::extract::{ConnectInfo, State};
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use serde_json::Value;
 use std::sync::Arc;
@@ -19,7 +19,6 @@ use crate::router::HttpState;
 
 pub(crate) fn routes() -> RouteGroup {
     RouteGroup::new(vec![
-        post("/api/answer", OperationStatus::Implemented, answer),
         post("/api/complaints", OperationStatus::Implemented, complaints),
         post(
             "/api/questions/delete",
@@ -34,22 +33,23 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
-async fn answer(
-    State(state): State<HttpState>,
-    ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
-    headers: HeaderMap,
-    monitor: Option<
-        axum::Extension<Arc<studio_runtime_services::monitor_runtime_wiring::MonitorRuntime>>,
-    >,
-    ApiJson(body): ApiJson<crate::generated::AnswerBody>,
-) -> Result<Json<crate::generated::AnswerResult>, ApiError> {
-    let id = body.id.clone();
-    let data = serde_json::to_value(&body).map_err(|_| ApiError::internal())?;
+/// Answer one approval, question or request. The answer command is its only caller, so every
+/// answer takes the same path. `data` is the answer body
+/// with its `id`.
+pub(crate) async fn answer_approval(
+    state: &HttpState,
+    peer: std::net::SocketAddr,
+    headers: &HeaderMap,
+    monitor: Option<Arc<studio_runtime_services::monitor_runtime_wiring::MonitorRuntime>>,
+    id: &str,
+    data: Value,
+) -> Result<studio_runtime_schema::command::AnswerResult, ApiError> {
+    let id = id.to_owned();
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let async_store = store.clone();
     let browser_store = store.clone();
     let browser_id = id.clone();
-    let local_window = super::browser::local_window(&headers, peer);
+    let local_window = super::browser::local_window(headers, peer);
     let vm_state_dir = state.vm_state_dir.clone();
     let browser_guest = state.browser_answer_guest.clone();
     let browser_host_guest = state.browser_answer_host_guest.clone();
@@ -116,9 +116,9 @@ async fn answer(
     .map_err(browser_answer_error)?;
     if let Some(answer) = browser_answer {
         state.event_wake.notify_one();
-        return Ok(Json(
-            super::generated_json::<crate::generated::AnswerResult>(answer.response)?,
-        ));
+        return super::generated_json::<studio_runtime_schema::command::AnswerResult>(
+            answer.response,
+        );
     }
     if let Some(answer) = questions_write::answer_async_question_in_store(
         async_store,
@@ -130,9 +130,9 @@ async fn answer(
     .map_err(async_question_error)?
     {
         state.event_wake.notify_one();
-        return Ok(Json(
-            super::generated_json::<crate::generated::AnswerResult>(answer.response)?,
-        ));
+        return super::generated_json::<studio_runtime_schema::command::AnswerResult>(
+            answer.response,
+        );
     }
     let monitor_available = monitor.is_some();
     if let Some(answer) = studio_runtime_services::monitor_runtime::answer_approval(
@@ -149,14 +149,13 @@ async fn answer(
             monitor
                 .as_ref()
                 .ok_or_else(|| ApiError::dependency("monitor-driver/start-dispatch"))?
-                .0
                 .dispatch_wake_handle()
                 .notify_one();
         }
         state.event_wake.notify_one();
-        return Ok(Json(
-            super::generated_json::<crate::generated::AnswerResult>(answer.response)?,
-        ));
+        return super::generated_json::<studio_runtime_schema::command::AnswerResult>(
+            answer.response,
+        );
     }
     // Native callback delivery requires the retained reply runtime. Without
     // it, refuse before parsing callback-only stored context or writing.
@@ -172,9 +171,7 @@ async fn answer(
         .await
         .map_err(answer_callback_error)?;
     state.event_wake.notify_one();
-    Ok(Json(
-        super::generated_json::<crate::generated::AnswerResult>(value)?,
-    ))
+    super::generated_json::<studio_runtime_schema::command::AnswerResult>(value)
 }
 
 fn browser_answer_error(
