@@ -41,6 +41,13 @@ pub struct ConnectionCheckDto {
     pub epoch: Field<SafeInteger>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ManualConnectionCheck {
+    pub available: bool,
+    pub receipt: Option<ConnectionCheckDto>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativeThreadBlockDto {
@@ -90,11 +97,15 @@ pub struct NativeSafetyRetryDto {
     pub stage: Field<NativeSafetyStage>,
 }
 
-pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 5], String> {
+pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 6], String> {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
         .into_generator();
     let mut schemas = [
+        (
+            "ManualConnectionCheck",
+            ManualConnectionCheck::json_schema(&mut generator).to_value(),
+        ),
         (
             "ConnectionCheckDto",
             ConnectionCheckDto::json_schema(&mut generator).to_value(),
@@ -121,7 +132,7 @@ pub(crate) fn schemas() -> Result<[(&'static str, serde_json::Value); 5], String
             .as_object_mut()
             .ok_or_else(|| format!("{name} must be an object"))?;
         schema_object.insert("title".into(), (*name).into());
-        if *name == "NativeSafetyStage" {
+        if *name == "NativeSafetyStage" || *name == "ManualConnectionCheck" {
             continue;
         }
         let properties = schema_object
