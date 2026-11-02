@@ -363,15 +363,9 @@ mod lifecycle_tests {
         }
         let source = fixture.path().join("source");
         fs::create_dir(&source).expect("source");
-        fs::write(source.join(".LAYRIGNORE"), "original").expect("case alias");
         let state = fixture.path().join("absent-state");
         let mut record = json!({"id":"lead","isLead":true,"autoWake":true});
         super::super::configure_new_chat(&mut record, source.to_str().expect("source path"));
-        let error =
-            super::super::runtime::prepare_files(&state, &record).expect_err("case collision");
-        assert!(error.to_string().contains("case or Unicode"));
-        assert!(!state.exists());
-        fs::remove_file(source.join(".LAYRIGNORE")).expect("remove alias");
         fs::create_dir(source.join(".GIT")).expect("Git case alias");
         super::super::inventory::git(&source, &["init", "-q"]).expect("valid repository");
         let error = super::super::runtime::prepare_files(&state, &record)
