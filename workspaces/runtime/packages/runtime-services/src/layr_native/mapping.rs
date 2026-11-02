@@ -276,6 +276,19 @@ pub(super) fn resolve(state: &Path, root: &Path, record: &Value) -> Result<Strin
             .ok_or_else(|| NativeLayrError::Refused("Missing project source".into()))?,
     )?
     .into_path_buf();
+    if let Some(root) = CanonicalPath::missing_tail(root)
+        && let Ok(relative) = source.strip_prefix(root.as_path().join("projects"))
+        && let [
+            std::path::Component::Normal(project),
+            std::path::Component::Normal(lines),
+            std::path::Component::Normal(_),
+            ..,
+        ] = relative.components().collect::<Vec<_>>().as_slice()
+        && *lines == "lines"
+        && let Some(project) = project.to_str().filter(|name| valid_name(name))
+    {
+        return Ok(project.to_owned());
+    }
     let fallback = project_id(record)?;
     let source_key = studio_runtime_store::sha256_hex(source.to_string_lossy().as_bytes());
     let metadata = settings::metadata(state, root);
@@ -435,6 +448,25 @@ null"#;
             &["remote", "add", "origin", "git@example.test:org/repo.git"],
         )
         .expect("origin");
+    }
+
+    #[test]
+    fn native_line_is_identified_when_git_origin_is_temporarily_absent() {
+        let fixture = tempfile::tempdir().unwrap();
+        let state = fixture.path().join("state");
+        let root = fixture.path().join("store");
+        let main = root.join("projects/studio/lines/main");
+        commit(&main, "shared");
+        let objects = root.join("projects/studio/git/objects");
+        fs::create_dir_all(&objects).unwrap();
+        fs::write(
+            main.join(".git/objects/info/alternates"),
+            format!("{}\n", objects.display()),
+        )
+        .unwrap();
+        git(&main, &["remote", "remove", "origin"]).unwrap();
+        let record = json!({"hostProjectPath":main});
+        assert_eq!(resolve(&state, &root, &record).unwrap(), "studio");
     }
 
     #[test]
