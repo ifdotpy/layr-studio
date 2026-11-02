@@ -1663,7 +1663,7 @@ mod tests {
     fn parsed_numbers_follow_json_schema_and_object_keys_remain_data() {
         let registry = Registry::compile(&[
             ("POST".to_owned(), "/api/agents".to_owned()),
-            ("POST".to_owned(), "/api/answer".to_owned()),
+            ("POST".to_owned(), "/api/commands".to_owned()),
         ])
         .expect("request schemas compile");
 
@@ -1687,7 +1687,7 @@ mod tests {
         );
 
         let object: Value = crate::json_body::parse_bounded(
-            br#"{"id":"x","answers":{"$serde_json::private::Number":"1"}}"#,
+            br#"{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"answer","target":"x","body":{"answers":{"$serde_json::private::Number":"1"}}}"#,
             1024,
         )
         .expect("magic key object parses");
@@ -1695,7 +1695,7 @@ mod tests {
             registry
                 .validate_route(
                     "POST",
-                    "/api/answer",
+                    "/api/commands",
                     RawRequest {
                         body: Some(object.clone()),
                         ..RawRequest::default()

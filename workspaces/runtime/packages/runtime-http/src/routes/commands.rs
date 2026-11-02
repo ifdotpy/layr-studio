@@ -13,7 +13,9 @@ use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, StatusCode};
 use axum::{Extension, Json, extract::State};
 use serde_json::Value;
-use studio_runtime_schema::command::{Command, CommandRequest, CommandResponse, CommandRow};
+use studio_runtime_schema::command::{
+    Command, CommandOutcome, CommandRequest, CommandResponse, CommandRow,
+};
 use studio_runtime_services::agent_lifecycle_runtime::LifecyclePorts;
 use studio_runtime_services::commands::{self, CommandError, Start};
 use studio_runtime_services::principal::Principal;
@@ -74,6 +76,8 @@ async fn command(
     let now_ms = now_ms()?;
     let chat = request.command.target().to_owned();
     let mut extra_rows = Vec::new();
+    // Set by the answer arm: the answer result is part of the response of an answer.
+    let mut answer = None;
     let reference = match request.command.clone() {
         Command::Withdraw { .. }
         | Command::Stop { .. }
@@ -108,34 +112,38 @@ async fn command(
             executed.reference
         }
         Command::Answer { target, body } => {
-            // The answer goes through the same dispatch as `POST /api/answer`. The command
-            // reference is recorded after the answer, so a lost response is retried as the
-            // same command, and the approval itself refuses a different answer.
+            // The answer runs the same dispatch as every answer. The approval itself replays
+            // the same answer and refuses a different one, so a replayed command runs the
+            // dispatch again to rebuild its result (a sign-in link). The reference is recorded
+            // after the first answer, so a lost response is retried as the same command.
             let id = target.as_str().to_owned();
             let mut data = body.0;
             data.insert("id".into(), Value::String(id.clone()));
             let data = Value::Object(data);
             serde_json::from_value::<crate::generated::AnswerBody>(data.clone())
                 .map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "Invalid answer"))?;
-            match begin(&state, &principal, &request, now_ms).await? {
+            let start = begin(&state, &principal, &request, now_ms).await?;
+            let result = answer_approval(
+                &state,
+                peer,
+                &headers,
+                monitor.map(|Extension(monitor)| monitor),
+                &id,
+                data,
+            )
+            .await?;
+            let reference = match start {
                 Start::Replay(reference) => reference,
                 Start::Fresh(begun) => {
-                    answer_approval(
-                        &state,
-                        peer,
-                        &headers,
-                        monitor.map(|Extension(monitor)| monitor),
-                        &id,
-                        data,
-                    )
-                    .await?;
                     let reference = commands::approval_reference(&id);
                     store
                         .transaction_with_error(move |tx| commands::finish(tx, &begun, &reference))
                         .await
                         .map_err(command_error)?
                 }
-            }
+            };
+            answer = Some(result);
+            reference
         }
         Command::Send { target, body } => {
             match begin(&state, &principal, &request, now_ms).await? {
@@ -217,9 +225,13 @@ async fn command(
             }
         }
     };
+    let outcome = match answer {
+        Some(result) => CommandOutcome::Answer { result },
+        None => CommandOutcome::without_result(&request.command).ok_or_else(ApiError::internal)?,
+    };
     let mut response = store
         .read_async("runtime-http/routes/commands", move |connection| {
-            commands::response(connection, &reference, &chat)
+            commands::response(connection, &reference, &chat, outcome)
         })
         .await
         .map_err(command_error)?;

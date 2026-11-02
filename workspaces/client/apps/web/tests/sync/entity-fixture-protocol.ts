@@ -3,7 +3,7 @@ import type { ChildProcess } from "node:child_process";
 import { waitForFixturePort } from "../fixture-readiness.ts";
 import type { SyncPullResponse, SyncEntity } from "../playwright.ts";
 import type { components } from "../../src/generated/api.ts";
-import type { ApiGetPath, GetResult, PostBody } from "../../src/apiTypes.ts";
+import type { ApiGetPath, GetResult } from "../../src/apiTypes.ts";
 
 type JsonValue = components["schemas"]["JsonValue"];
 /** Indexed view of the legacy fixture documents, including fields no longer emitted. */
@@ -117,7 +117,7 @@ export function fixtureObject(value: unknown): FixtureObject {
 
 /** Both intercepted mutations consume only their generated request ID field. */
 export function fixtureRequestId(value: unknown) {
-  return (value as Pick<PostBody<"/api/answer">, "id">).id;
+  return (value as { id: string }).id;
 }
 
 export function fixtureItem<T>(items: readonly T[], index: number): T {

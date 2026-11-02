@@ -329,10 +329,7 @@ async fn human_http_roundtrip_requires_consumer_and_authenticated_user() {
     let unwired = router(state.clone()).unwrap();
     let body = json!({"id":id,"answers":{"secret":{"answers":["private"]}}});
     let before = stored(&store, &id);
-    assert_eq!(
-        call(&unwired, "/api/answer", body.clone(), "token").await.0,
-        501
-    );
+    assert_eq!(answer(&unwired, body.clone(), "token").await.0, 501);
     assert_eq!(stored(&store, &id), before);
     assert_eq!(
         call(&unwired, "/api/questions/delete", json!({"id":id}), "token")
@@ -350,14 +347,11 @@ async fn human_http_roundtrip_requires_consumer_and_authenticated_user() {
         state.with_callback_runtime(Arc::new(CallbackRuntime::new(store.clone(), port.clone()))),
     )
     .unwrap();
-    assert_eq!(
-        call(&app, "/api/answer", body.clone(), "wrong").await.0,
-        403
-    );
+    assert_eq!(answer(&app, body.clone(), "wrong").await.0, 403);
     assert_eq!(stored(&store, &id), before);
-    let (status, value) = call(&app, "/api/answer", body.clone(), "token").await;
+    let (status, value) = answer(&app, body.clone(), "token").await;
     assert_eq!(status, 200, "{value}");
-    assert_eq!(value["status"], "answered");
+    assert_eq!(value["result"]["status"], "answered");
     assert_eq!(port.port.calls.lock().unwrap().len(), 1);
     let reply = port.port.calls.lock().unwrap()[0].clone();
     let context_copy = context.clone();
@@ -407,9 +401,9 @@ async fn human_http_roundtrip_requires_consumer_and_authenticated_user() {
         })
         .await
         .unwrap();
-    let (status, value) = call(&app, "/api/answer", body, "token").await;
+    let (status, value) = answer(&app, body, "token").await;
     assert_eq!(status, 200, "{value}");
-    assert_eq!(value["replayed"], true);
+    assert_eq!(value["result"]["replayed"], true);
     assert_eq!(port.port.calls.lock().unwrap().len(), 1);
     assert!(!stored(&store, &id).to_string().contains("private"));
     let (status, value) = call(&app, "/api/questions/delete", json!({"id":id}), "token").await;
@@ -503,7 +497,7 @@ async fn enabled_native_backend_serves_success_and_null_refusal() {
             } else {
                 json!({"id":id,"decision":decision})
             };
-            let (status, body) = call(&app, "/api/answer", body, "token").await;
+            let (status, body) = answer(&app, body, "token").await;
             assert_eq!(status, expected, "{body}");
             if expected == 400 {
                 assert_eq!(
@@ -715,4 +709,19 @@ async fn live_permissions_receipt_distinguishes_omitted_effort_from_null() {
     let (status, value) = call(&app, "/api/conversation", body, "token").await;
     assert_eq!(status, 409, "changed content must conflict: {value}");
     assert_eq!(value["error"], "This request ID has different content");
+}
+
+/// The answer of an approval as one command: the approval id is the target, the rest is the body.
+async fn answer(app: &axum::Router, body: Value, token: &str) -> (u16, Value) {
+    let (target, body) = split_answer(body);
+    let command = json!({"id":studio_runtime_schema::persistence::RequestIdentity::issue_root(),"client":"answer-test","number":1,"kind":"answer","target":target,"body":body});
+    call(app, "/api/commands", command, token).await
+}
+
+fn split_answer(mut body: Value) -> (Value, Value) {
+    let target = body
+        .as_object_mut()
+        .and_then(|object| object.remove("id"))
+        .expect("answer id");
+    (target, body)
 }

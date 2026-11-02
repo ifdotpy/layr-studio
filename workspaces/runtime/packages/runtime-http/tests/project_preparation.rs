@@ -106,13 +106,13 @@ async fn async_question_answer_wakes_idle_lead_once() {
     ))
     .expect("test fixture");
     let body = json!({"id":question_id,"answers":{"scope":{"answers":["One file"]}}});
-    let (status, value) = call(&app, "/api/answer", body.clone(), "token").await;
+    let (status, value) = answer(&app, body.clone(), "token").await;
     assert_eq!(status, 200, "{value}");
-    assert_eq!(value["status"], "answered");
+    assert_eq!(value["result"]["status"], "answered");
 
-    let (status, value) = call(&app, "/api/answer", body, "token").await;
+    let (status, value) = answer(&app, body, "token").await;
     assert_eq!(status, 200, "{value}");
-    assert_eq!(value["replayed"], true);
+    assert_eq!(value["result"]["replayed"], true);
     let db = store.test_reader().expect("test fixture");
     let count: i64 = db
         .query_row(
@@ -142,4 +142,13 @@ async fn async_question_answer_wakes_idle_lead_once() {
             }]
         }
     );
+}
+
+/// The answer of an approval as one command: the approval id is the target, the rest is the body.
+async fn answer(app: &axum::Router, body: Value, token: &str) -> (u16, Value) {
+    let target = body.get("id").cloned().expect("answer id");
+    let mut body = body;
+    body.as_object_mut().expect("answer object").remove("id");
+    let command = json!({"id":studio_runtime_schema::persistence::RequestIdentity::issue_root(),"client":"answer-test","number":1,"kind":"answer","target":target,"body":body});
+    call(app, "/api/commands", command, token).await
 }

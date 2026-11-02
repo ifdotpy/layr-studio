@@ -17,7 +17,8 @@ use crate::agent_lifecycle_runtime::LifecyclePorts;
 use crate::agent_management::Action;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use studio_runtime_schema::command::{
-    COMMAND_ROW_MAX_BYTES, Command, CommandRequest, CommandResponse, CommandRow, CommandStatus,
+    COMMAND_ROW_MAX_BYTES, Command, CommandOutcome, CommandRequest, CommandResponse, CommandRow,
+    CommandStatus,
 };
 use studio_runtime_schema::persistence::{
     RequestIdentity, RequestIdentityError, RequestReferenceKind,
@@ -439,6 +440,7 @@ pub fn response(
     conn: &Connection,
     reference: &RequestReference,
     chat: &str,
+    outcome: CommandOutcome,
 ) -> Result<CommandResponse, CommandError> {
     let mut statement = conn.prepare_cached(
         "SELECT collection,id,seq,payload FROM sync_entities WHERE id IN (?1,?2) AND deleted=0 ORDER BY collection,id",
@@ -481,6 +483,7 @@ pub fn response(
         rev: reference.revision,
         seq,
         rows,
+        outcome,
     })
 }
 

@@ -231,8 +231,8 @@ pub struct ResolveBody {
     pub action: ResolveAction,
 }
 
-/// The answer of an approval: the fields of `POST /api/answer` without `id`. The answer
-/// route owns the field rules (`AnswerBody`), so this schema is an open object.
+/// The answer of an approval: the answer fields, without the approval id (the command target).
+/// The answer route owns the field rules (`AnswerBody`), so this schema is an open object.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
 pub struct AnswerCommandBody(
@@ -263,6 +263,7 @@ pub enum CommandStatus {
 
 /// The one response form, on the first run and on a replay. `ref_*` and `rev` are exact.
 /// `rows` are read when the response is built and can be newer than after the first run.
+/// `outcome` carries the kind of the command and its kind-specific result.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CommandResponse {
     pub status: CommandStatus,
@@ -273,6 +274,66 @@ pub struct CommandResponse {
     /// holds a row with `seq` at or above this value needs no pending layer.
     pub seq: i64,
     pub rows: Vec<CommandRow>,
+    #[serde(flatten)]
+    pub outcome: CommandOutcome,
+}
+
+/// The kind of an applied command and its kind-specific result. Only `answer` has a result.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CommandOutcome {
+    Send,
+    Withdraw,
+    Stop,
+    Resolve,
+    Pause,
+    Answer { result: AnswerResult },
+}
+
+impl CommandOutcome {
+    /// The outcome of a command that has no kind-specific result. `None` for `answer`, whose
+    /// result the answer path makes.
+    pub fn without_result(command: &Command) -> Option<Self> {
+        Some(match command {
+            Command::Send { .. } => Self::Send,
+            Command::Withdraw { .. } => Self::Withdraw,
+            Command::Stop { .. } => Self::Stop,
+            Command::Resolve { .. } => Self::Resolve,
+            Command::Pause { .. } => Self::Pause,
+            Command::Answer { .. } => return None,
+        })
+    }
+}
+
+/// The result of an answer. A sign-in answer carries the link to open in the browser; other
+/// answers carry only the status. `forward` is set when a paired server opens the link here.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AnswerResult {
+    pub status: AnswerStatus,
+    #[serde(rename = "openUrl")]
+    pub open_url: Option<String>,
+    pub forward: Option<BrowserForward>,
+    pub replayed: Option<bool>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AnswerStatus {
+    Answered,
+}
+
+/// The redirect of a sign-in that a paired server approved for a window on this Mac.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BrowserForward {
+    pub server: String,
+    #[serde(rename = "bridgeId")]
+    pub bridge_id: String,
+    pub host: String,
+    pub port: u16,
+    pub path: String,
+    #[serde(rename = "expiresAt")]
+    pub expires_at: f64,
+    pub token: String,
 }
 
 /// One entity row with its stream `seq`.

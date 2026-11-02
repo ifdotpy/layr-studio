@@ -11,7 +11,10 @@ const h = vi.hoisted(() => ({
   cells: [] as ComponentHookCell[],
   storage: {},
   post: vi.fn(async () => ({})),
-  answer: vi.fn(async () => ({})),
+  answer: vi.fn(async () => ({
+    kind: "answer",
+    result: { status: "answered" },
+  })),
 }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),

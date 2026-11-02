@@ -2,8 +2,6 @@ import type { AddressInfo } from "node:net";
 import { phoneSignInUrl } from "./sign-in.fixture.ts";
 import type {} from "./sign-in-card-phone-ui.fixture.tsx";
 import { createFixtureViteServer } from "../playwright.ts";
-import { requestBody } from "../messages/helpers.ts";
-import type { PostBody, PostResult } from "../../src/apiTypes.ts";
 // A sign-in card at phone width (docs/vm-browser-bridge.md, section 6.2). The window has no
 // desktop bridge and is not on the server's own Mac, so it opens the link in paste mode,
 // then sends the pasted address of the page that did not load once. A device code card
@@ -14,6 +12,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test, expect } from "../playwright.ts";
 import { browserExecutablePath } from "../browser-executable.ts";
+import {
+  answerReply,
+  answerRequest,
+  isAnswerRequest,
+  type AnswerRequest,
+} from "../answer-command";
 
 const PASTED = "http://127.0.0.1:40645/oauth/callback?code=c1&state=s1";
 // A host name that is not a loopback name: the window acts as a phone on the tailnet. The
@@ -102,23 +106,20 @@ test("Sign-in card at phone width uses paste mode and the device code", async ({
         },
       });
     }, PASTED);
-    const answers: PostBody<"/api/answer">[] = [];
+    const answers: AnswerRequest[] = [];
     await page.route("**/api/**", async (route) => {
-      if (route.request().method() !== "POST")
-        return route.fulfill({ json: {} });
-      const body = requestBody<PostBody<"/api/answer">>(route);
+      if (!isAnswerRequest(route.request())) return route.fulfill({ json: {} });
+      const body = answerRequest(route.request());
       answers.push(body);
       if (body.decision === "accept")
         return route.fulfill({
-          json: {
+          json: answerReply({
             status: "answered",
             openUrl:
               body.id === "redirect" ? phoneSignInUrl : "https://x.invalid/",
-          } satisfies PostResult<"/api/answer">,
+          }),
         });
-      return route.fulfill({
-        json: { status: "answered" } satisfies PostResult<"/api/answer">,
-      });
+      return route.fulfill({ json: answerReply({ status: "answered" }) });
     });
     // The first load waits for the Vite dependency scan.
     await page.goto(`${ORIGIN}/check`, { timeout: 30_000 });

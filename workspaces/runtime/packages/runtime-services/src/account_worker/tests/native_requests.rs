@@ -4,7 +4,7 @@
 //! answered -32601 "Provider callback is not supported by this runtime", the
 //! chat showed "Tool permission request failed", and the agent continued
 //! without the user's answer. A native request of a lead must wait as a card
-//! until the user answers it through the `/api/answer` runtime.
+//! until the user answers it through the answer command (`/api/commands`) runtime.
 use super::*;
 use crate::account_worker::retained::RetainedSessionPort;
 use crate::callback_runtime::{CallbackReplyFuture, CallbackReplyPort, CallbackRuntime};

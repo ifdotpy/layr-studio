@@ -415,23 +415,25 @@ export function RequestCard({
     setSending(true);
     setRequestError("");
     try {
-      // A sign-in card stays on `/api/answer`: an accepted sign-in reads the link to open from
-      // that result, which the command response does not carry. Other approvals use the
-      // command path.
-      const signIn = () => apiPost("/api/answer", { ...body, id: r.id });
-      const approve = () => commands.answer(r.id, body);
+      // The answer command returns the sign-in link (`result`) with the approval.
+      const approve = async () => {
+        const response = await commands.answer(r.id, body);
+        if (response.kind !== "answer")
+          throw new Error("Studio returned another result for an answer.");
+        return response.result;
+      };
       if (browserOpen && body.decision === "accept")
         await approveSignInPage({
           url: browserOpen.url,
           requestId: r.id,
           owner: services?.owner.id,
-          approve: signIn,
+          approve,
           onOpenError: (error) =>
             notify(
               `Studio approved the link, but could not confirm that its page opened: ${errorText(error)}`,
             ),
         });
-      else await (browserOpen ? signIn() : approve());
+      else await approve();
       void removeAnswerDraft(
         answerStorage,
         services?.owner.id ?? serverViewId ?? "local",

@@ -19,7 +19,6 @@ use crate::router::HttpState;
 
 pub(crate) fn routes() -> RouteGroup {
     RouteGroup::new(vec![
-        post("/api/answer", OperationStatus::Implemented, answer),
         post("/api/complaints", OperationStatus::Implemented, complaints),
         post(
             "/api/questions/delete",
@@ -34,30 +33,8 @@ pub(crate) fn routes() -> RouteGroup {
     ])
 }
 
-async fn answer(
-    State(state): State<HttpState>,
-    ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
-    headers: HeaderMap,
-    monitor: Option<
-        axum::Extension<Arc<studio_runtime_services::monitor_runtime_wiring::MonitorRuntime>>,
-    >,
-    ApiJson(body): ApiJson<crate::generated::AnswerBody>,
-) -> Result<Json<crate::generated::AnswerResult>, ApiError> {
-    let data = serde_json::to_value(&body).map_err(|_| ApiError::internal())?;
-    let answer = answer_approval(
-        &state,
-        peer,
-        &headers,
-        monitor.map(|axum::Extension(monitor)| monitor),
-        &body.id,
-        data,
-    )
-    .await?;
-    Ok(Json(answer))
-}
-
-/// Answer one approval, question or request. `POST /api/answer` and the answer command both
-/// call it, so an answer is applied the same way on each path. `data` is the answer body
+/// Answer one approval, question or request. The answer command is its only caller, so every
+/// answer takes the same path. `data` is the answer body
 /// with its `id`.
 pub(crate) async fn answer_approval(
     state: &HttpState,
@@ -66,7 +43,7 @@ pub(crate) async fn answer_approval(
     monitor: Option<Arc<studio_runtime_services::monitor_runtime_wiring::MonitorRuntime>>,
     id: &str,
     data: Value,
-) -> Result<crate::generated::AnswerResult, ApiError> {
+) -> Result<studio_runtime_schema::command::AnswerResult, ApiError> {
     let id = id.to_owned();
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
     let async_store = store.clone();
@@ -139,7 +116,9 @@ pub(crate) async fn answer_approval(
     .map_err(browser_answer_error)?;
     if let Some(answer) = browser_answer {
         state.event_wake.notify_one();
-        return super::generated_json::<crate::generated::AnswerResult>(answer.response);
+        return super::generated_json::<studio_runtime_schema::command::AnswerResult>(
+            answer.response,
+        );
     }
     if let Some(answer) = questions_write::answer_async_question_in_store(
         async_store,
@@ -151,7 +130,9 @@ pub(crate) async fn answer_approval(
     .map_err(async_question_error)?
     {
         state.event_wake.notify_one();
-        return super::generated_json::<crate::generated::AnswerResult>(answer.response);
+        return super::generated_json::<studio_runtime_schema::command::AnswerResult>(
+            answer.response,
+        );
     }
     let monitor_available = monitor.is_some();
     if let Some(answer) = studio_runtime_services::monitor_runtime::answer_approval(
@@ -172,7 +153,9 @@ pub(crate) async fn answer_approval(
                 .notify_one();
         }
         state.event_wake.notify_one();
-        return super::generated_json::<crate::generated::AnswerResult>(answer.response);
+        return super::generated_json::<studio_runtime_schema::command::AnswerResult>(
+            answer.response,
+        );
     }
     // Native callback delivery requires the retained reply runtime. Without
     // it, refuse before parsing callback-only stored context or writing.
@@ -188,7 +171,7 @@ pub(crate) async fn answer_approval(
         .await
         .map_err(answer_callback_error)?;
     state.event_wake.notify_one();
-    super::generated_json::<crate::generated::AnswerResult>(value)
+    super::generated_json::<studio_runtime_schema::command::AnswerResult>(value)
 }
 
 fn browser_answer_error(

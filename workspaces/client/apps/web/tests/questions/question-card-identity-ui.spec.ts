@@ -1,7 +1,11 @@
 import { fileURLToPath } from "node:url";
 import { createFixtureViteServer, test, expect } from "../playwright.ts";
-import { requestBody } from "../messages/helpers.ts";
-import type { PostBody, PostResult } from "../../src/apiTypes.ts";
+import {
+  answerReply,
+  answerRequest,
+  isAnswerRequest,
+  type AnswerRequest,
+} from "../answer-command";
 
 test("questions and confirmations edit their original mounted card", async ({
   page,
@@ -28,19 +32,18 @@ test("questions and confirmations edit their original mounted card", async ({
     server: { host: "127.0.0.1", port: 0, hmr: false },
   });
   await server.listen();
-  const answers: PostBody<"/api/answer">[] = [];
+  const answers: AnswerRequest[] = [];
   let release: (() => void) | undefined;
   try {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    await page.route("**/api/answer", async (route) => {
-      answers.push(requestBody<PostBody<"/api/answer">>(route));
+    await page.route("**/api/commands", async (route) => {
+      if (!isAnswerRequest(route.request())) return route.fallback();
+      answers.push(answerRequest(route.request()));
       await new Promise<void>((resolve) => {
         release = resolve;
       });
-      await route.fulfill({
-        json: { status: "answered" } satisfies PostResult<"/api/answer">,
-      });
+      await route.fulfill({ json: answerReply({ status: "answered" }) });
     });
     const origin = server.resolvedUrls?.local[0];
     if (!origin) throw new Error("Missing fixture origin");
