@@ -254,6 +254,8 @@ A push still requires the user's authorization.
 
 ## Agents and tasks
 
+The managed Git guard permits writes targeting repositories or explicit config files outside native Layr lines.
+
 The lead uses `projects/<project>/lines/main` in the host store.
 An implementer uses `agent-<SHA-256 of agent ID>`.
 Studio creates this line from the requested `base_ref` revision, or from main when none is specified.
