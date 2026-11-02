@@ -2100,6 +2100,25 @@ impl crate::monitor_runtime::WorkspaceAdmission for AllowWorkspace {
 }
 
 struct CreationEnvironment;
+struct ChangedProjectWorkspace;
+impl crate::monitor_runtime::WorkspaceAdmission for ChangedProjectWorkspace {
+    fn check(
+        &self,
+        tx: &studio_runtime_store::Transaction<'_>,
+        actor: &AgentRecord,
+    ) -> Result<(), crate::monitor_policy::MonitorError> {
+        let cwd = actor.cwd.as_deref().unwrap();
+        tx.execute(
+            "INSERT INTO runtime_projects(id,record) VALUES(?1,?2)",
+            params![
+                cwd,
+                json!({"id":cwd,"path":cwd,"name":"Changed"}).to_string()
+            ],
+        )
+        .map_err(StoreError::from)?;
+        Ok(())
+    }
+}
 struct FakeVmReviewGuest;
 thread_local! {
     static VM_REVIEW_GUEST_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -2128,6 +2147,7 @@ impl crate::linux_vm_guest::GuestRpc for FakeVmReviewGuest {
 }
 thread_local! {
     static FAIL_MANAGED_WORKSPACE_PREPARATION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static CHANGE_PROJECT_DURING_ADMISSION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 impl crate::managed_child_create::ManagedCreationEnvironment for CreationEnvironment {
     fn guest_rpc(
@@ -2219,6 +2239,9 @@ impl crate::managed_child_create::ManagedCreationEnvironment for CreationEnviron
                     "workspace-state/host-preparation",
                 ),
             );
+        }
+        if CHANGE_PROJECT_DURING_ADMISSION.with(std::cell::Cell::get) {
+            return Ok(Box::new(ChangedProjectWorkspace));
         }
         Ok(Box::new(AllowWorkspace))
     }
@@ -2672,6 +2695,113 @@ async fn managed_reviewer_defaults_reach_public_spawn_tool() {
                 .unwrap();
             assert_eq!(count_after, count_before, "{label}/{tool} duplicate child");
         }
+    }
+}
+
+#[tokio::test]
+async fn managed_spawn_dispatch_reports_worker_recheck_refusal_as_not_sent() {
+    let (_root, store, context) = fixture().await;
+    let call_id = "spawn-project-changed";
+    let frame = call(
+        &context,
+        call_id,
+        "orchestration_spawn",
+        &json!({
+            "agents":[{"name":"Worker","prompt":"Do the task","role":"implementer","workspace":"shared"}]
+        }),
+    );
+    let monitor = Arc::new(crate::monitor_runtime_wiring::MonitorRuntime::new(
+        Arc::clone(&store),
+        Arc::new(ScriptedRetainedMonitorPort {
+            certainty: crate::managed_host_tools::DeliveryCertainty::Written,
+            calls: AtomicUsize::new(0),
+            tickets: Mutex::new(Vec::new()),
+        }),
+        Arc::new(tokio::sync::Notify::new()),
+    ));
+    let runtime = crate::provider_callbacks::ManagedToolRuntime::with_creation(
+        monitor,
+        Arc::new(NoopLifecyclePorts),
+        Arc::new(CreationEnvironment),
+    );
+    let ports = shared_ports(
+        crate::provider_callbacks::managed_tool_ports_with_bundle(
+            &store,
+            &context,
+            &frame,
+            Arc::new(tokio::sync::Notify::new()),
+            Arc::new(tokio::sync::Notify::new()),
+            Some(&runtime),
+        )
+        .await
+        .unwrap(),
+    );
+    CHANGE_PROJECT_DURING_ADMISSION.with(|flag| flag.set(true));
+    let decision = dispatch_with_managed_tools(Arc::clone(&store), &context, &frame, 20.0, ports)
+        .await
+        .unwrap();
+    CHANGE_PROJECT_DURING_ADMISSION.with(|flag| flag.set(false));
+    let (success, text) = tool_reply(decision);
+    assert!(!success);
+    assert_eq!(
+        text,
+        "The account or project changed; reload before creating the agent"
+    );
+    let receipt = claim_settlement::request_row(&store, call_id);
+    assert_eq!(receipt["outcome"], "not_applied");
+    assert_eq!(receipt["deliveryCertainty"], "not_sent");
+}
+
+#[tokio::test]
+async fn managed_spawn_native_layr_lead_uses_project_binding() {
+    let (directory, store, context) = fixture().await;
+    let line = directory.path().join("line");
+    std::fs::create_dir(&line).unwrap();
+    let project_path = directory.path().to_string_lossy().into_owned();
+    let line_path = line.to_string_lossy().into_owned();
+    let actor_value = store
+        .transaction_with::<_, StoreError>(move |tx| {
+            let mut parent = AgentRepository::get(tx, &AgentId::from(LEAD))?
+                .unwrap()
+                .value();
+            parent["cwd"] = json!(line_path);
+            parent["projectId"] = json!(project_path);
+            parent["hostProjectPath"] = json!(project_path);
+            parent["workspaceMode"] = json!("layr-native");
+            parent["layrReady"] = json!(true);
+            parent["provider"] = json!("claude");
+            parent["accountKey"] = json!("claude-profile-fixture");
+            parent["epoch"] = json!(0);
+            let record = AgentRecord::from_value(parent.clone()).unwrap();
+            AgentRepository::put(tx, &record)?;
+            studio_runtime_store::ProjectsRepository::put_project(
+                tx,
+                &json!({"id":project_path,"path":project_path,"name":"Project"}),
+            )?;
+            Ok(parent)
+        })
+        .await
+        .unwrap();
+    let actor = Actor::from_record(&actor_value, &context.agent, 0).unwrap();
+    for (request, workspace) in [
+        ("native-explicit", Some("layr-native")),
+        ("native-default", None),
+    ] {
+        let mut spec = json!({"name":"Worker","prompt":"Do the task","role":"implementer"});
+        if let Some(workspace) = workspace {
+            spec["workspace"] = json!(workspace);
+        }
+        let spawned = crate::managed_child_create::spawn_agents(
+            &store,
+            &actor,
+            &json!({"agents":[spec]}),
+            request,
+            20.0,
+            &CreationEnvironment,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{request}: {error:?}"));
+        assert!(spawned.result().test_value()["agents"][0]["id"].is_string());
     }
 }
 

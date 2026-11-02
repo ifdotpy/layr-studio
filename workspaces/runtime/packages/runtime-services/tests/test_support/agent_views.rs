@@ -3,6 +3,20 @@
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+/// Remove server projections that postdate the frozen Python agent oracle.
+pub(crate) fn normalize_frozen_projection(fields: &mut serde_json::Map<String, Value>) {
+    if fields.get("kind").and_then(Value::as_str) == Some("agent") {
+        for key in [
+            "accountChange",
+            "accountTransferProgress",
+            "accountDestinations",
+            "manualConnectionCheck",
+        ] {
+            fields.remove(key);
+        }
+    }
+}
+
 #[allow(dead_code)]
 pub(crate) fn materialize_agent_defaults(value: &mut Value) {
     let fields = value.as_object_mut().expect("agent fixture");

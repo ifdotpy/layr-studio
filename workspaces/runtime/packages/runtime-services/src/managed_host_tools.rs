@@ -168,6 +168,8 @@ pub(crate) enum Error {
     Invalid(&'static str),
     #[error("The caller identity changed")]
     Stale,
+    #[error("{0}")]
+    Refusal(String),
     #[error("invalid stored object {table}/{id} at {location}")]
     InvalidStored {
         table: &'static str,
