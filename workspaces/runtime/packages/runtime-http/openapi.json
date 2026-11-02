@@ -918,6 +918,30 @@
         "title": "AcceptPeerRequest",
         "type": "object"
       },
+      "AcceptProjectPeerRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "accept_project_peer",
+            "title": "Action",
+            "type": "string"
+          },
+          "invitation": {
+            "$ref": "#/components/schemas/FederationInvitation"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "invitation",
+          "project_id"
+        ],
+        "title": "AcceptProjectPeerRequest",
+        "type": "object"
+      },
       "AccessAudit": {
         "additionalProperties": false,
         "properties": {
@@ -25104,6 +25128,26 @@
         "title": "CreateLeadRequest",
         "type": "object"
       },
+      "CreateProjectInviteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "create_project_invite",
+            "title": "Action",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "project_id"
+        ],
+        "title": "CreateProjectInviteRequest",
+        "type": "object"
+      },
       "CreateRoomRequest": {
         "additionalProperties": false,
         "properties": {
@@ -28745,8 +28789,28 @@
             "title": "Leadname"
           },
           "origin": {
-            "title": "Origin",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "default": null,
+            "title": "Origin"
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "default": null,
+            "title": "Projectid"
           },
           "protocol": {
             "const": 1,
@@ -28758,6 +28822,21 @@
           "publicKey": {
             "title": "Publickey",
             "type": "string"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "enum": [
+                  "project"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scope"
           },
           "stateId": {
             "title": "Stateid",
@@ -28797,7 +28876,6 @@
           "token",
           "stateId",
           "label",
-          "origin",
           "publicKey",
           "expires"
         ],
@@ -30319,6 +30397,26 @@
           }
         },
         "title": "LinuxVMStatus",
+        "type": "object"
+      },
+      "ListProjectGrantsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "list_project_grants",
+            "title": "Action",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "project_id"
+        ],
+        "title": "ListProjectGrantsRequest",
         "type": "object"
       },
       "LiveUpdateState": {
@@ -35201,6 +35299,30 @@
             "title": "Origin",
             "type": "string"
           },
+          "peerProjectId": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "default": null,
+            "title": "Peerprojectid"
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "default": null,
+            "title": "Projectid"
+          },
           "protocol": {
             "const": 1,
             "maximum": 1,
@@ -35211,6 +35333,21 @@
           "publicKey": {
             "title": "Publickey",
             "type": "string"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "enum": [
+                  "project"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scope"
           },
           "stateId": {
             "title": "Stateid",
@@ -44978,6 +45115,26 @@
           "state_id"
         ],
         "title": "RevokePeerRequest",
+        "type": "object"
+      },
+      "RevokeProjectGrantRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "revoke_project_grant",
+            "title": "Action",
+            "type": "string"
+          },
+          "grant_id": {
+            "title": "Grant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "grant_id"
+        ],
+        "title": "RevokeProjectGrantRequest",
         "type": "object"
       },
       "RoomDeleteBody": {
@@ -72582,11 +72739,15 @@
                 "discriminator": {
                   "mapping": {
                     "accept_peer": "#/components/schemas/AcceptPeerRequest",
+                    "accept_project_peer": "#/components/schemas/AcceptProjectPeerRequest",
                     "approve_peer": "#/components/schemas/ApprovePeerRequest",
                     "approve_room": "#/components/schemas/ApproveRoomRequest",
                     "create_invite": "#/components/schemas/CreateInviteRequest",
+                    "create_project_invite": "#/components/schemas/CreateProjectInviteRequest",
                     "create_room": "#/components/schemas/CreateRoomRequest",
+                    "list_project_grants": "#/components/schemas/ListProjectGrantsRequest",
                     "revoke_peer": "#/components/schemas/RevokePeerRequest",
+                    "revoke_project_grant": "#/components/schemas/RevokeProjectGrantRequest",
                     "room_options": "#/components/schemas/RoomOptionsRequest",
                     "set_enabled": "#/components/schemas/SetEnabledRequest",
                     "status": "#/components/schemas/StatusActionRequest"
@@ -72620,6 +72781,18 @@
                   },
                   {
                     "$ref": "#/components/schemas/StatusActionRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CreateProjectInviteRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AcceptProjectPeerRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ListProjectGrantsRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RevokeProjectGrantRequest"
                   }
                 ],
                 "title": "Body"

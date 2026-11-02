@@ -56,6 +56,20 @@ pub enum FederationRequest {
         #[serde(deserialize_with = "crate::http_ingress::deserialize_object")]
         invitation: FederationInvitation,
     },
+    CreateProjectInvite {
+        project_id: String,
+    },
+    AcceptProjectPeer {
+        #[serde(deserialize_with = "crate::http_ingress::deserialize_object")]
+        invitation: FederationInvitation,
+        project_id: String,
+    },
+    ListProjectGrants {
+        project_id: String,
+    },
+    RevokeProjectGrant {
+        grant_id: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -76,15 +90,30 @@ pub struct FederationInvitation {
     pub token: String,
     pub state_id: String,
     pub label: String,
-    pub origin: String,
+    /// The Serve origin of the inviting server. Required to accept a project invitation
+    /// and optional otherwise; server invitations always carry it.
+    #[serde(default)]
+    pub origin: Option<String>,
     pub public_key: String,
     pub expires: BoundedInteger<0, { crate::shared_values::MAX_SAFE_INTEGER as u64 }>,
+    /// `Some(Project)` for a pairing of one project (decision 2026-11-01).
+    #[serde(default)]
+    pub scope: Option<InvitationScope>,
+    /// The inviting project. Set when `scope` is `Project`.
+    #[serde(default)]
+    pub project_id: Option<String>,
     #[serde(default)]
     pub lead_name: Option<String>,
     #[serde(default)]
     pub tailscale_status: Option<TailscaleStatus>,
     #[serde(default)]
     pub tailscale_user: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InvitationScope {
+    Project,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

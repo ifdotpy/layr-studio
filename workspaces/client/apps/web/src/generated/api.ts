@@ -2617,6 +2617,17 @@ export interface components {
       action: "accept_peer";
       invitation: components["schemas"]["FederationInvitation"];
     };
+    /** AcceptProjectPeerRequest */
+    AcceptProjectPeerRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      action: "accept_project_peer";
+      invitation: components["schemas"]["FederationInvitation"];
+      /** Project Id */
+      project_id: string;
+    };
     /** AccessAudit */
     AccessAudit: {
       /**
@@ -12356,6 +12367,16 @@ export interface components {
        */
       yolo_mode?: boolean | undefined;
     };
+    /** CreateProjectInviteRequest */
+    CreateProjectInviteRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      action: "create_project_invite";
+      /** Project Id */
+      project_id: string;
+    };
     /** CreateRoomRequest */
     CreateRoomRequest: {
       /**
@@ -13810,8 +13831,16 @@ export interface components {
        * @default null
        */
       leadName?: null | string | undefined;
-      /** Origin */
-      origin: string;
+      /**
+       * Origin
+       * @default null
+       */
+      origin?: null | string | undefined;
+      /**
+       * Projectid
+       * @default null
+       */
+      projectId?: null | string | undefined;
       /**
        * Protocol
        * @constant
@@ -13819,6 +13848,11 @@ export interface components {
       protocol: 1;
       /** Publickey */
       publicKey: string;
+      /**
+       * Scope
+       * @default null
+       */
+      scope?: "project" | null | undefined;
       /** Stateid */
       stateId: string;
       /** @default null */
@@ -14401,6 +14435,16 @@ export interface components {
       state?: null | string | undefined;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
+    };
+    /** ListProjectGrantsRequest */
+    ListProjectGrantsRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      action: "list_project_grants";
+      /** Project Id */
+      project_id: string;
     };
     /**
      * LiveUpdateState
@@ -16598,12 +16642,27 @@ export interface components {
       /** Origin */
       origin: string;
       /**
+       * Peerprojectid
+       * @default null
+       */
+      peerProjectId?: null | string | undefined;
+      /**
+       * Projectid
+       * @default null
+       */
+      projectId?: null | string | undefined;
+      /**
        * Protocol
        * @constant
        */
       protocol: 1;
       /** Publickey */
       publicKey: string;
+      /**
+       * Scope
+       * @default null
+       */
+      scope?: "project" | null | undefined;
       /** Stateid */
       stateId: string;
       /**
@@ -20265,6 +20324,16 @@ export interface components {
       action: "revoke_peer";
       /** State Id */
       state_id: string;
+    };
+    /** RevokeProjectGrantRequest */
+    RevokeProjectGrantRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      action: "revoke_project_grant";
+      /** Grant Id */
+      grant_id: string;
     };
     /** RoomDeleteBody */
     RoomDeleteBody: {
@@ -32079,7 +32148,11 @@ export interface operations {
           | components["schemas"]["RevokePeerRequest"]
           | components["schemas"]["RoomOptionsRequest"]
           | components["schemas"]["SetEnabledRequest"]
-          | components["schemas"]["StatusActionRequest"];
+          | components["schemas"]["StatusActionRequest"]
+          | components["schemas"]["CreateProjectInviteRequest"]
+          | components["schemas"]["AcceptProjectPeerRequest"]
+          | components["schemas"]["ListProjectGrantsRequest"]
+          | components["schemas"]["RevokeProjectGrantRequest"];
       };
     };
     responses: {
