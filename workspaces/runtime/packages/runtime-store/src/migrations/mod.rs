@@ -83,6 +83,7 @@ mod m2026_11_01_transfer_summary;
 mod m2026_11_01_work_detail_policy;
 mod m2026_11_02_agent_worker_base_ref;
 mod m2026_11_02_legacy_vm_transfers;
+mod m2026_11_02_retired_status_columns;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -1436,6 +1437,16 @@ static CATALOG: &[&dyn Migration] = &[
         },
         apply: |c| m2026_11_01_legacy_question_history::apply(c.transaction),
     },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-02-retired-status-columns",
+            introduced: NOVEMBER_2,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent status, in-flight and turn columns that the chat and turn rows replace",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_02_retired_status_columns::apply(c.transaction),
+    },
 ];
 
 /// Operator-facing catalog; implementation and metadata have one owner.
@@ -2095,6 +2106,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reopen_keeps_retired_status_columns_gone_and_the_marker_current() {
+        let root = tempfile::tempdir().expect("state");
+        let first = crate::RuntimeStore::open(Some(root.path()))
+            .await
+            .expect("first open");
+        drop(first);
+        let store = crate::RuntimeStore::open(Some(root.path()))
+            .await
+            .expect("reopen");
+        let db = store.test_reader().expect("reader");
+        let retired: i64 = db
+            .query_row(
+                "SELECT count(*) FROM pragma_table_xinfo('runtime_agents') WHERE name IN ('status','in_flight','turn_id')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("columns read");
+        assert_eq!(retired, 0);
+        let wake_index: i64 = db
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='runtime_agent_account_wake_candidates_v7'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("index read");
+        assert_eq!(wake_index, 1);
+        let stored: String = db
+            .query_row(
+                "SELECT value FROM sync_entity_meta WHERE key='migration_catalog'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("catalog marker");
+        let fingerprint = catalog_fingerprint(CATALOG, MigrationTarget::Canvas);
+        assert_eq!(
+            stored,
+            catalog_marker(&db, &fingerprint).expect("current marker")
+        );
+    }
+
+    #[tokio::test]
     async fn catalog_change_runs_new_body_and_failure_rolls_back_marker() {
         fn first(c: &SqlContext<'_, '_>) -> StoreResult<()> {
             c.transaction
@@ -2305,6 +2357,10 @@ mod tests {
         };
         assert!(position("2026-10-28-receipts-tools") < position("2026-10-28-receipts-requests"));
         assert!(position("2026-10-28-receipts-requests") < position("2026-10-28-receipts-remote"));
+        assert!(
+            position("2026-11-01-chat-busy-indexes")
+                < position("2026-11-02-retired-status-columns")
+        );
         assert!(
             position("2026-10-31-retired-start-indexes")
                 < position("2026-10-30-unused-agent-columns")

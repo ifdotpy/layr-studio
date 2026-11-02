@@ -207,9 +207,8 @@ fn release_held_sql() -> String {
                    json_extract(a.record,'$.error'), \
                    (SELECT MIN(e.created) FROM runtime_events e WHERE e.agent=a.id \
                       AND e.epoch=json_extract(a.record,'$.epoch') AND e.status='pending') AS first \
-                 FROM runtime_agents a \
-                 WHERE a.status='failed' \
-                   AND EXISTS(SELECT 1 FROM chats ch WHERE ch.id=a.id AND ch.auto_wake=1) \
+                 FROM chats ch JOIN runtime_agents a ON a.id=ch.id \
+                 WHERE ch.status='failed' AND ch.auto_wake=1 \
                    AND NOT {busy} AND a.deleted_at IS NULL \
                    AND json_extract(a.record,'$.autoWake')=1 \
                    AND COALESCE(json_extract(a.record,'$.inFlight'),0)=0 \
@@ -368,7 +367,7 @@ mod tests {
             )
             .unwrap();
             db.execute(
-                "INSERT INTO chats(id,state,status,auto_wake) VALUES(?1,'idle','idle',1)",
+                "INSERT INTO chats(id,state,status,auto_wake) VALUES(?1,'idle','failed',1)",
                 [id],
             )
             .unwrap();

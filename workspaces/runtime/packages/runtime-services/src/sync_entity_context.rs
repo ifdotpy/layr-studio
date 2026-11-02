@@ -371,7 +371,8 @@ pub(crate) fn agent_view_context(
     })
 }
 
-pub(crate) const TEAM_COUNT_INPUTS_SQL: &str = "SELECT status,json_extract(record,'$.autoWake') FROM runtime_agents INDEXED BY runtime_agent_live_root_v2 WHERE root_id=?1 AND deleted_at IS NULL AND id<>?1 AND COALESCE(json_extract(record,'$.isLead'),0)=0";
+/// The status is read from the chat row (`domain`), not from the retired agent column.
+pub(crate) const TEAM_COUNT_INPUTS_SQL: &str = "SELECT COALESCE((SELECT status FROM chats WHERE id=runtime_agents.id),''),json_extract(record,'$.autoWake') FROM runtime_agents INDEXED BY runtime_agent_live_root_v2 WHERE root_id=?1 AND deleted_at IS NULL AND id<>?1 AND COALESCE(json_extract(record,'$.isLead'),0)=0";
 
 fn team_counts(
     transaction: &Transaction<'_>,
