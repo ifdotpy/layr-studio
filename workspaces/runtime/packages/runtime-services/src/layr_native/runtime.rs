@@ -1064,6 +1064,17 @@ pub(crate) fn stage_turn_save(
 mod review_tests {
     use super::*;
 
+    /// Linux preparation checks the daemon identity before an import.
+    #[cfg(target_os = "linux")]
+    fn fixture_daemon(state: &Path) -> std::thread::JoinHandle<()> {
+        let socket = super::super::selected_socket_path(state).unwrap();
+        fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        super::super::versions::serve_daemon_identity(
+            &socket,
+            br#"{"format":1,"version":"0.14.2","build":"fixture"}"#,
+        )
+    }
+
     #[cfg(unix)]
     #[test]
     fn successful_import_removes_staging_remote() {
@@ -1087,6 +1098,8 @@ esac
         fs::write(&binary, script).unwrap();
         fs::set_permissions(&binary, fs::Permissions::from_mode(0o700)).unwrap();
         super::super::capability::TEST_BINARY.with(|value| *value.borrow_mut() = Some(binary));
+        #[cfg(target_os = "linux")]
+        let _daemon = fixture_daemon(&state);
         let mut record = json!({"id":"lead","isLead":true,"autoWake":true});
         super::super::configure_new_chat(&mut record, source.to_str().unwrap());
         prepare_files(&state, &record).expect("fixture import succeeds");
@@ -1118,6 +1131,8 @@ esac
         fs::write(&binary, script).unwrap();
         fs::set_permissions(&binary, fs::Permissions::from_mode(0o700)).unwrap();
         super::super::capability::TEST_BINARY.with(|value| *value.borrow_mut() = Some(binary));
+        #[cfg(target_os = "linux")]
+        let _daemon = fixture_daemon(&state);
         let mut record = json!({"id":"lead","isLead":true,"autoWake":true});
         super::super::configure_new_chat(&mut record, source.to_str().unwrap());
         let error = prepare_files(&state, &record).unwrap_err();
