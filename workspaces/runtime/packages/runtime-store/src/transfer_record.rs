@@ -736,6 +736,9 @@ pub struct TransferRecord {
     pub finish_history: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub requests: Field<BTreeMap<String, TransferRequestIdentity>>,
+    /// Flag that the retired backend wrote on VM account switches. Read and kept; nothing acts on it.
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub vm: Field<bool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -776,6 +779,7 @@ impl TransferRecord {
             scope: Field::Value(TransferScope::Team),
             finish_history: Field::Missing,
             requests: Field::Value(BTreeMap::from([(id, request)])),
+            vm: Field::Missing,
         }
     }
 
@@ -1071,6 +1075,14 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn legacy_vm_flag_of_the_retired_backend_is_read_and_kept() {
+        let raw = r#"{"id":"move","leadId":"lead","targetAccountKey":"target","status":"completed","created":1,"members":{},"vm":true,"updated":2}"#;
+        let record: super::TransferRecord = serde_json::from_str(raw).unwrap();
+        let value = serde::Serialize::serialize(&record, serde_json::value::Serializer).unwrap();
+        assert_eq!(value["vm"], true);
     }
 
     #[test]
