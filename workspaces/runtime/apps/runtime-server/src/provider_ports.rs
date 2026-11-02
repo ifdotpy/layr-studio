@@ -237,6 +237,7 @@ impl studio_runtime_services::diagnostics::ProviderDiagnosticsPort for ProviderD
                     native_accounts: json!({}),
                     studio_loaded_threads: 0,
                     queues: serde_json::Map::new(),
+                    account_workers: json!({}),
                 };
             };
             // The durable counts and every account's live read are independent;
@@ -262,7 +263,30 @@ impl studio_runtime_services::diagnostics::ProviderDiagnosticsPort for ProviderD
                         deadline,
                     )
                 }));
-            let (queue_counts, account_reads) = tokio::join!(queue_counts, account_reads);
+            // A worker answers in its own loop; a busy worker reports as unresponsive.
+            let worker_reads =
+                futures_util::future::join_all(active.iter().map(|(account, _, _)| {
+                    let session = Arc::clone(&self.session);
+                    let account = account.clone();
+                    async move {
+                        tokio::time::timeout(
+                            DIAGNOSTICS_ACCOUNT_DEADLINE,
+                            session.worker_diagnostics(account),
+                        )
+                        .await
+                    }
+                }));
+            let (queue_counts, account_reads, worker_reads) =
+                tokio::join!(queue_counts, account_reads, worker_reads);
+            let mut account_workers = serde_json::Map::new();
+            for (index, read) in worker_reads.into_iter().enumerate() {
+                let value = match read {
+                    Ok(Some(value)) => value,
+                    Ok(None) => json!({"error": "unavailable"}),
+                    Err(_) => json!({"error": "unresponsive"}),
+                };
+                account_workers.insert(format!("account{}", index + 1), value);
+            }
             let (local_queues, idle_limit_seconds) =
                 queue_counts.unwrap_or_else(|_| (vec![(0, 0); active.len()], 0));
             let mut native_accounts = serde_json::Map::new();
@@ -312,6 +336,7 @@ impl studio_runtime_services::diagnostics::ProviderDiagnosticsPort for ProviderD
                 native_accounts: Value::Object(native_accounts),
                 studio_loaded_threads: loaded_threads,
                 queues,
+                account_workers: Value::Object(account_workers),
             }
         })
     }

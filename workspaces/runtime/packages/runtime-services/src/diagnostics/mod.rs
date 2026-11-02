@@ -219,6 +219,8 @@ pub struct ProviderDiagnosticsSnapshot {
     pub native_accounts: serde_json::Value,
     pub studio_loaded_threads: u64,
     pub queues: serde_json::Map<String, serde_json::Value>,
+    /// Each account worker's wake and start state, keyed like `native_accounts`.
+    pub account_workers: serde_json::Value,
 }
 
 /// Supervisor status is owned by runtime-server, which injects this snapshot
