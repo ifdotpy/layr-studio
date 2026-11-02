@@ -114,7 +114,7 @@ impl TransferExecutor for Executor<'_> {
                     .phase,
                 studio_runtime_store::transfer_record::TransferPhase::Reading
             );
-            assert_eq!(input.agent()["threadId"], "source-thread");
+            assert_eq!(input.agent().thread_id.as_deref(), Some("source-thread"));
             assert_eq!(operation(self.store)["members"]["lead"]["phase"], "reading");
             if matches!(self.behavior, Behavior::PreparationFailed) {
                 return Err(TransferError::Refused("Fixture history unavailable"));
