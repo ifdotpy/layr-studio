@@ -944,7 +944,10 @@ fn discovery_never_creates_the_home_claude_account() {
     f.accounts.discover_local(&f.directory).expect("discover");
     let snapshot = f.accounts.snapshot().expect("snapshot");
     assert!(
-        !snapshot.accounts.iter().any(|a| a.id.as_str() == Some("claude-local")),
+        !snapshot
+            .accounts
+            .iter()
+            .any(|a| a.id.as_str() == Some("claude-local")),
         "Studio must not register an account backed by ~/.claude"
     );
 }

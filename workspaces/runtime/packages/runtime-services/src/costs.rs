@@ -1667,9 +1667,7 @@ fn account_claude_config(
         .and_then(|options| options.config_dir.as_str())
         .filter(|path| !path.is_empty());
     let home = account.home.as_str().filter(|path| !path.is_empty());
-    let path = config_dir
-        .or(home)
-        .map(PathBuf::from)?;
+    let path = config_dir.or(home).map(PathBuf::from)?;
     Some(expand_home(path))
 }
 

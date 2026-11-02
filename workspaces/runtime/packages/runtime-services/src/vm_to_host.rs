@@ -169,7 +169,6 @@ pub fn profile_dir(account: &crate::account_policy::PublicAccount) -> Option<Pat
                 .as_ref()
                 .and_then(|options| options.config_dir.as_str()),
         )
-
     } else {
         text(account.home.as_str())
     }
