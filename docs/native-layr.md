@@ -256,7 +256,7 @@ A push still requires the user's authorization.
 
 The lead uses `projects/<project>/lines/main` in the host store.
 An implementer uses `agent-<SHA-256 of agent ID>`.
-Studio creates this line with `layr line new <name> main`.
+Studio creates this line from the requested `base_ref` revision, or from main when none is specified.
 Workspace readiness and cleanup use the existing runtime hooks.
 The agent record has `workspaceMode: layr-native`, `executionMode: native`, and `layrReady: true` after preparation.
 `layrProjectId`, `layrLine`, `layrStateId`, and `cwd` identify the association.
