@@ -412,12 +412,12 @@ pub fn recheck_worker(
     let frozen_account = draft.extra.get("_p02ParentAccountKey");
     if parent.cwd.as_deref() != frozen_cwd.and_then(Value::as_str)
         || Some(parent.account_key.as_str()) != frozen_account.and_then(Value::as_str)
-        || parent.extra.get("projectId").and_then(Value::as_str)
+        || parent.project_id.as_deref()
             != draft
                 .extra
                 .get("_p02ParentProjectId")
                 .and_then(Value::as_str)
-        || parent.extra.get("projectServerId").and_then(Value::as_str)
+        || parent.project_server_id.as_deref()
             != draft
                 .extra
                 .get("_p02ParentProjectServerId")
@@ -498,7 +498,7 @@ fn recheck_parent_epoch(
     if root.is_lead != Some(true)
         || root.deleted_at.is_some()
         || root.auto_wake == Some(false)
-        || root.extra.get("concurrency").and_then(Value::as_i64) == Some(0)
+        || root.concurrency.map(|value| value.get()) == Some(0)
     {
         return Err(CreateError::IdentityChanged);
     }

@@ -662,7 +662,7 @@ pub(crate) async fn spawn_agents(
             )
             .into());
         }
-        if !vm_actor && requested_base_ref.is_some() && !in_git {
+        if !vm_actor && workspace != "layr-native" && requested_base_ref.is_some() && !in_git {
             return Err(crate::managed_host_tools::Error::Invalid(
                 "base_ref requires an implementer in a Git repository",
             )
@@ -782,6 +782,19 @@ pub(crate) async fn spawn_agents(
             .value();
         if workspace == "layr-native" {
             crate::layr_native::configure_child(&mut record, &parent_value, &root_value);
+            if let Some(base_ref) = requested_base_ref {
+                let base_state = crate::layr_native::run(
+                    store.state_dir(),
+                    Path::new(parent_cwd),
+                    &["rev-parse", base_ref],
+                )
+                .map_err(|_| {
+                    crate::managed_host_tools::Error::Invalid(
+                        "Native Layr base revision could not be resolved",
+                    )
+                })?;
+                record["layrBaseState"] = json!(base_state);
+            }
         } else if vm_workspace {
             record["workspaceMode"] = json!("layr");
             let (child_cwd, subpath) = vm_directory.as_ref().ok_or(Error::Refused)?;

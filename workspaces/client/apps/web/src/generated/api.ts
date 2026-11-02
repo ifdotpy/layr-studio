@@ -3077,6 +3077,10 @@ export interface components {
     AccountLimitsStatus:
       | {
           /** @constant */
+          kind: "pending";
+        }
+      | {
+          /** @constant */
           kind: "current";
         }
       | {

@@ -1,7 +1,6 @@
 import { MessageSendStatus } from "./generated/api.ts";
 import {
   AgentStatus as GeneratedApiAgentStatus,
-  AccountStatus,
   AgentSource as GeneratedApiAgentSource,
   AgentRole as GeneratedApiAgentRole,
   WorkspaceMode as GeneratedApiWorkspaceMode,
@@ -1143,8 +1142,6 @@ export default function App({ active = true }: { active?: boolean }) {
     }
     setNavigationTarget(undefined);
   }, [navigationTarget, data, agents, notify]);
-  const accountsForLimits = useRef(accounts.data.accounts);
-  accountsForLimits.current = accounts.data.accounts;
   const reloadLimitsFor = useCallback(
     (key: string, force = false) => {
       const pending = force ? undefined : limitsRequests.current.get(key);
@@ -1173,87 +1170,32 @@ export default function App({ active = true }: { active?: boolean }) {
   }, [accountKey, reloadLimitsFor]);
   const reloadLimitsForRef = useRef(reloadLimitsFor);
   reloadLimitsForRef.current = reloadLimitsFor;
-  const usageTeamIndicators = team
-    .map((item) => indicators.get(item.id)?.kind || "")
-    .join(",");
-  const nextUsageAccounts = useMemo<UsageAccount[]>(() => {
-    if (!agent) return [];
-    const rootId = agent.rootId || agent.id;
-    // The lead's current account and the accounts of working subagents take
-    // part in this chat. Finished workers keep an account the chat left.
-    const teamAgents = team.filter(
-      (item) =>
-        !item.deletedAt &&
-        (item.id === rootId ||
-          (item.rootId === rootId &&
-            !item.archived &&
-            (item.inFlight ||
-              ["running", "queued", "approval", "starting"].includes(
-                item.status ?? "",
-              ) ||
-              (["waiting", "parked"].includes(item.status ?? "") &&
-                ["answer", "working"].includes(
-                  indicators.get(item.id)?.kind || "",
-                ))))),
-    );
-    const keys = new Set(
-      teamAgents.map((item) => item.accountKey || "default"),
-    );
-    keys.add(agent.accountKey || "default");
-    const labelFor = (key: string) => {
-      const account = accountsForLimits.current.find((item) => item.id === key);
-      return account?.email || account?.label || key;
-    };
-    return [...keys]
-      .sort((a, b) =>
-        a === (agent.accountKey || "default")
-          ? -1
-          : b === (agent.accountKey || "default")
-            ? 1
-            : labelFor(a).localeCompare(labelFor(b)),
-      )
-      .map((key) => {
-        const account = accounts.data.accounts.find((item) => item.id === key);
-        const snapshot =
-          data?.runtime?.rateLimitsByAccount?.[key] ||
-          (key === "default" ? data?.runtime?.rateLimits : null);
-        const matching = accountLimits(
-          snapshot?.observation,
-          key,
-          account?.accountId,
-        );
-        const limits = matching;
+  const nextUsageAccounts = useMemo<UsageAccount[]>(
+    () =>
+      accounts.data.accounts.map((account) => {
+        const key = account.id;
+        const snapshot = data?.runtime?.rateLimitsByAccount?.[key];
         return {
           key,
-          label: account?.label || key,
-          email: account?.email,
-          provider: account?.provider ?? undefined,
-          plan: account?.plan,
-          accountId: account?.accountId,
-          signedOut: !!account && account.status !== AccountStatus.ready,
-          runway: matching ? snapshot?.projection.runway : undefined,
-          reset: matching ? snapshot?.projection.reset : undefined,
-          buckets: matching ? snapshot?.projection.buckets : undefined,
-          agents: matching ? snapshot?.projection.agents : undefined,
-          status: matching ? snapshot?.projection.status : undefined,
-          limits,
+          label: account.label || key,
+          email: account.email,
+          provider: account.provider ?? undefined,
+          plan: account.plan,
+          accountId: account.accountId,
+          runway: snapshot?.projection.runway,
+          reset: snapshot?.projection.reset,
+          buckets: snapshot?.projection.buckets,
+          agents: snapshot?.projection.agents,
+          status: snapshot?.projection.status,
+          limits: snapshot?.observation ?? null,
           loading: !!limitsLoading[key],
-          // Reads the latest loader, so an equal account keeps its old closure.
           reload: async (force) => {
             await reloadLimitsForRef.current(key, force);
           },
         };
-      });
-  }, [
-    agent,
-    team,
-    usageTeamIndicators,
-    accounts.data.accounts,
-    data?.runtime?.rateLimitsByAccount,
-    data?.runtime?.rateLimits,
-    limitsLoading,
-    reloadLimitsFor,
-  ]);
+      }),
+    [accounts.data.accounts, data?.runtime?.rateLimitsByAccount, limitsLoading],
+  );
   const usageAccounts = useRetainedUsageAccounts(nextUsageAccounts);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
