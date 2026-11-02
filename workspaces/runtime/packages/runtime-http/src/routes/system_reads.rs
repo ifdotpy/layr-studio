@@ -23,6 +23,7 @@ const DIAGNOSTICS_RESPONSE_FIELDS: &[&str] = &[
     "hostResources",
     "resourceAttribution",
     "nativeAccounts",
+    "accountWorkers",
     "studioLoadedThreads",
     "queues",
     "runtimeLockSamples",
@@ -318,6 +319,7 @@ async fn diagnostics(
             "hostResources": host_resources,
             "resourceAttribution": attribution,
             "nativeAccounts": provider.native_accounts,
+            "accountWorkers": provider.account_workers,
             "studioLoadedThreads": provider.studio_loaded_threads,
             "queues": queues,
             "runtimeLockSamples": studio_runtime_services::diagnostics::runtime_lock_samples(),
@@ -885,6 +887,20 @@ mod diagnostics_http_tests {
                     }),
                     studio_loaded_threads: 3,
                     queues: serde_json::Map::new(),
+                    // One busy and one idle worker, shaped like the worker's diagnostics.
+                    account_workers: json!({
+                        "account1": {
+                            "closing": false,
+                            "preparing": [{"agent": "agent-1", "rewake": true, "ageMs": 1200}],
+                            "preparationWaits": ["agent-2"],
+                            "gate": {
+                                "running": [{"agent": "agent-3", "claimed": true, "ageMs": 4000}],
+                                "waiters": [{"agent": "agent-4", "wait": "pause", "ageMs": 900}],
+                                "recentAdmits": [{"agent": "agent-3", "claimed": true, "ageMs": 4000}]
+                            }
+                        },
+                        "account2": {"error": "unresponsive"}
+                    }),
                 }
             })
         }
