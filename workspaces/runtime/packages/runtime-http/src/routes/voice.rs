@@ -41,7 +41,7 @@ async fn records(
 ) -> Result<Json<crate::generated::VoiceRecordsResponse>, ApiError> {
     let store = state.store.ok_or_else(ApiError::internal)?;
     let agent_id = body.agent;
-    let after = body.after.unwrap_or_default();
+    let after = body.after.map_or(0, |value| value.get());
     let result = voice::records(&store, &agent_id, after)
         .await
         .map_err(voice_error)?;

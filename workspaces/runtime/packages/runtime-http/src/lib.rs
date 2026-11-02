@@ -6,6 +6,9 @@ extern crate studio_test_deps;
 mod bounded_entities;
 pub mod error;
 mod http_body_limits;
+#[cfg(test)]
+mod ingress_parity_tests;
+mod ingress_pattern;
 mod json_body;
 pub mod middleware;
 mod model_entities;

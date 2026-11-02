@@ -349,7 +349,7 @@ async fn list_secrets(
     State(state): State<HttpState>,
     ApiJson(body): ApiJson<crate::generated::ProjectSecretsListRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let project_id = body.project_id;
+    let project_id = body.project_id.as_str().to_owned();
     guest_call(&state, false, move |rpc| {
         project_secrets::list_names(rpc, &project_id)
     })
@@ -360,10 +360,10 @@ async fn set_secret(
     State(state): State<HttpState>,
     ApiJson(body): ApiJson<crate::generated::ProjectSecretSetRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let project_id = body.project_id;
-    let name = body.name;
-    let value = body.value;
-    let request_id = body.request_id;
+    let project_id = body.project_id.as_str().to_owned();
+    let name = body.name.as_str().to_owned();
+    let value = body.value.as_str().to_owned();
+    let request_id = body.request_id.as_str().to_owned();
     guest_call(&state, true, move |rpc| {
         project_secrets::set_secret(rpc, &project_id, &name, &value, &request_id)
     })
@@ -374,9 +374,9 @@ async fn remove_secret(
     State(state): State<HttpState>,
     ApiJson(body): ApiJson<crate::generated::ProjectSecretRemoveRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let project_id = body.project_id;
-    let name = body.name;
-    let request_id = body.request_id;
+    let project_id = body.project_id.as_str().to_owned();
+    let name = body.name.as_str().to_owned();
+    let request_id = body.request_id.as_str().to_owned();
     guest_call(&state, true, move |rpc| {
         project_secrets::remove_secret(rpc, &project_id, &name, &request_id)
     })
@@ -387,17 +387,11 @@ async fn aws_login(
     State(state): State<HttpState>,
     ApiJson(body): ApiJson<crate::generated::VaultLoginRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let profile = body.profile;
-    let request_id = body.request_id;
+    let profile = body.profile.as_str().to_owned();
+    let request_id = body.request_id.as_str().to_owned();
     let job_client = vault_job_client(&state)?;
     if let Some(job) = find_job(&job_client, VaultJobKind::Login, &request_id).await? {
         return Ok(Json(job));
-    }
-    if !studio_runtime_services::vault::valid_profile(&profile) {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "Name an AWS profile",
-        ));
     }
     let host_command = state
         .vault_host_command
@@ -416,8 +410,8 @@ async fn pull(
     State(state): State<HttpState>,
     ApiJson(body): ApiJson<crate::generated::VaultPullRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let project_id = body.project_id;
-    let request_id = body.request_id;
+    let project_id = body.project_id.as_str().to_owned();
+    let request_id = body.request_id.as_str().to_owned();
     let job_client = vault_job_client(&state)?;
     if let Some(job) = find_job(&job_client, VaultJobKind::Pull, &request_id).await? {
         return Ok(Json(job));
@@ -444,7 +438,10 @@ async fn pull(
     let home = std::env::var_os("HOME")
         .map(std::path::PathBuf::from)
         .ok_or_else(ApiError::internal)?;
-    let requested_parent = body.to.as_ref().and_then(Option::as_deref);
+    let requested_parent = body
+        .to
+        .as_ref()
+        .and_then(|v| v.as_ref().map(|v| v.as_str()));
     let parent = match requested_parent {
         Some("~") => home.clone(),
         Some(path) if path.starts_with("~/") => home.join(&path[2..]),
@@ -481,15 +478,15 @@ async fn setup(
     State(state): State<HttpState>,
     ApiJson(body): ApiJson<crate::generated::VaultSetupRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let project_id = body.project_id;
-    let request_id = body.request_id;
+    let project_id = body.project_id.as_str().to_owned();
+    let request_id = body.request_id.as_str().to_owned();
     let job_client = vault_job_client(&state)?;
     if let Some(job) = find_job(&job_client, VaultJobKind::Setup, &request_id).await? {
         return Ok(Json(job));
     }
-    let requested_prefix = body.prefix;
-    let profile = body.profile;
-    let region = body.region;
+    let requested_prefix = body.prefix.as_str().to_owned();
+    let profile = body.profile.as_str().to_owned();
+    let region = body.region.as_str().to_owned();
     let host_command = state
         .vault_host_command
         .as_ref()
@@ -531,8 +528,11 @@ async fn setup_facts(
     State(state): State<HttpState>,
     ApiJson(body): ApiJson<crate::generated::VaultSetupFactsRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let project_id = &body.project_id;
-    let requested_prefix = body.prefix.as_ref().and_then(Option::as_deref);
+    let project_id = body.project_id.as_str();
+    let requested_prefix = body
+        .prefix
+        .as_ref()
+        .and_then(|v| v.as_ref().map(|v| v.as_str()));
     let vm_state_dir = state.vm_state_dir.clone();
     studio_runtime_services::vault::prepare_setup_facts(
         &vm_state_dir,
@@ -1013,8 +1013,8 @@ async fn unlock(
     State(state): State<HttpState>,
     ApiJson(body): ApiJson<crate::generated::VaultUnlockRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let project_id = body.project_id;
-    let words = body.words;
+    let project_id = body.project_id.as_str().to_owned();
+    let words = body.words.as_str().to_owned();
     let view = studio_runtime_services::vault::view(&state.vm_state_dir, &project_id)
         .map_err(vault_error)?
         .filter(|view| {
@@ -2351,8 +2351,8 @@ else exit 94; fi"#;
         let replay = super::pull(
             axum::extract::State(without_command),
             super::ApiJson(crate::generated::VaultPullRequest::new(
-                "p1".into(),
-                "pull-fixture".into(),
+                "p1".to_owned().try_into().unwrap(),
+                "pull-fixture".to_owned().try_into().unwrap(),
             )),
         )
         .await

@@ -38,7 +38,9 @@ async fn delete(
 ) -> Result<Json<generated::DeletedResponse>, ApiError> {
     dispatch::<generated::DeletedResponse>(
         state,
-        Action::Delete { target: body.id },
+        Action::Delete {
+            target: body.id.as_str().to_owned(),
+        },
         ports.map(|Extension(ports)| ports),
     )
     .await
@@ -119,8 +121,8 @@ async fn native_action(
     ApiJson(body): ApiJson<generated::NativeActionRequest>,
 ) -> Result<Json<Value>, ApiError> {
     if let Some(root) = body.request_id.as_ref().and_then(Option::as_ref) {
-        let root = root.clone();
-        let agent_id = body.id.clone();
+        let root = root.as_str().to_owned();
+        let agent_id = body.id.as_str().to_owned();
         let reserved = state
             .store
             .as_ref()
@@ -852,9 +854,9 @@ mod native_review_preflight_tests {
                 action: generated::NativeActionRequestAction::NativeAction(
                     generated::NativeAction::Compact,
                 ),
-                id: "agent".into(),
+                id: "agent".to_owned().try_into().unwrap(),
                 context: None,
-                request_id: Some(request_id),
+                request_id: Some(request_id.map(|id| id.try_into().unwrap())),
             };
             let error = Box::pin(native_action(
                 State(state.clone()),
