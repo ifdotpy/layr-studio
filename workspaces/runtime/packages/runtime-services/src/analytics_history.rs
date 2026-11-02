@@ -461,12 +461,8 @@ fn read_history_checkpoint_stage(
         if valid {
             return Ok((Some(value), None));
         }
-        let (diagnostic, invalid_pointers) = if value.get("id").and_then(Value::as_str) != Some(key)
-        {
-            (
-                analytics_field_diagnostic(key, "/id", "row_id_mismatch", &value),
-                vec!["/id".to_owned()],
-            )
+        let diagnostic = if value.get("id").and_then(Value::as_str) != Some(key) {
+            analytics_field_diagnostic(key, "/id", "row_id_mismatch", &value)
         } else {
             let errors = studio_runtime_schema::validation_errors("AnalyticsHistory", &value)
                 .map_err(studio_runtime_store::StoreError::SchemaValidation)?;
@@ -474,35 +470,13 @@ fn read_history_checkpoint_stage(
                 .iter()
                 .map(|(pointer, reason)| analytics_field_diagnostic(key, pointer, reason, &value))
                 .collect::<Vec<_>>();
-            let pointers = errors
-                .into_iter()
-                .map(|(pointer, _)| pointer)
-                .collect::<Vec<_>>();
-            let diagnostic = if details.is_empty() {
+            if details.is_empty() {
                 format!("analytics_history/{key}: schema_invalid")
             } else {
                 details.join("; ")
-            };
-            (diagnostic, pointers)
-        };
-        let replacement = if let Some(mut retained) = value.as_object().cloned().map(Value::Object)
-        {
-            for pointer in &invalid_pointers {
-                remove_json_pointer(&mut retained, pointer);
             }
-            retained["status"] = json!("invalidRecord");
-            retained["error"] = json!(diagnostic);
-            retained["invalidRecordDiagnostic"] = json!(diagnostic);
-            if retained.get("id").and_then(Value::as_str) == Some(key)
-                && CaptureTable::History.validate(&retained).is_ok()
-            {
-                retained
-            } else {
-                initial_history_checkpoint(key, agent, &diagnostic)
-            }
-        } else {
-            initial_history_checkpoint(key, agent, &diagnostic)
         };
+        let replacement = initial_history_checkpoint(key, agent, &diagnostic);
         return Ok((None, Some((key.to_owned(), raw, replacement))));
     }
     let diagnostic = format!(
@@ -511,39 +485,6 @@ fn read_history_checkpoint_stage(
     );
     let replacement = initial_history_checkpoint(key, agent, &diagnostic);
     Ok((None, Some((key.to_owned(), raw, replacement))))
-}
-
-fn remove_json_pointer(value: &mut Value, pointer: &str) {
-    if pointer.is_empty() || pointer == "/" {
-        return;
-    }
-    let parts = pointer
-        .strip_prefix('/')
-        .unwrap_or(pointer)
-        .split('/')
-        .map(|part| part.replace("~1", "/").replace("~0", "~"))
-        .collect::<Vec<_>>();
-    let Some((last, parents)) = parts.split_last() else {
-        return;
-    };
-    let mut parent = value;
-    for part in parents {
-        let Some(next) = (if let Ok(index) = part.parse::<usize>() {
-            parent.get_mut(index)
-        } else {
-            parent.get_mut(part.as_str())
-        }) else {
-            return;
-        };
-        parent = next;
-    }
-    if let Some(object) = parent.as_object_mut() {
-        object.remove(last);
-    } else if let (Ok(index), Some(array)) = (last.parse::<usize>(), parent.as_array_mut())
-        && index < array.len()
-    {
-        array.remove(index);
-    }
 }
 
 fn analytics_value_shape(value: Option<&Value>) -> (&'static str, String) {
@@ -1599,6 +1540,36 @@ mod invalid_record_tests {
             br#"{"type":"session_meta"} trailing"#,
             "t"
         ));
+    }
+
+    #[tokio::test]
+    async fn corrupt_history_checkpoint_restarts_from_initial_state() {
+        let root = tempfile::tempdir().expect("temporary runtime");
+        let store = RuntimeStore::open(Some(root.path())).await.expect("store");
+        let db =
+            rusqlite::Connection::open(root.path().join("analytics.sqlite3")).expect("database");
+        let key = "agent:default:thread";
+        let record = json!({"id":key,"agent":"agent","accountKey":"default","threadId":"thread","offset":37,"importedRecords":5,"malformedLines":0,"extra":"retained before reset","context":{"threadId":"thread","window":"invalid"}});
+        db.execute(
+            "INSERT INTO analytics_history(id,agent,record) VALUES (?1,?2,?3)",
+            rusqlite::params![key, "agent", record.to_string()],
+        )
+        .expect("checkpoint");
+        drop(db);
+        let agent = json!({"id":"agent","accountKey":"default","threadId":"thread"});
+        let replacement = read_history_checkpoint(&store, key, &agent)
+            .await
+            .expect("recovery")
+            .expect("checkpoint");
+        assert_eq!(replacement["offset"], 0);
+        assert_eq!(replacement["importedRecords"], 0);
+        assert!(replacement.get("extra").is_none());
+        assert!(
+            replacement["invalidRecordDiagnostic"]
+                .as_str()
+                .expect("diagnostic")
+                .contains("/context/window")
+        );
     }
 
     #[tokio::test]

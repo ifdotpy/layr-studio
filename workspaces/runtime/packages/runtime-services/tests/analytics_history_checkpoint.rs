@@ -76,6 +76,54 @@ fn checkpoint(store: &RuntimeStore) -> Option<Value> {
         .expect("read");
     Repo::read(&db, CaptureTable::History, "a:default:thread").expect("checkpoint")
 }
+
+#[tokio::test]
+async fn resetting_checkpoint_and_rescanning_does_not_duplicate_items() {
+    let (root, agent) = fixture();
+    let lines = [
+        json!({"type":"session_meta","timestamp":1,"payload":{"id":"thread"}}),
+        json!({"type":"event_msg","timestamp":2,"payload":{"type":"item_completed","turn_id":"turn","item":{"id":"item","type":"AgentMessage","text":"hello"}}}),
+        json!({"type":"response_item","timestamp":3,"payload":{"type":"message","role":"assistant","content":"hello"}}),
+    ];
+    let path = file(root.path(), &lines, b"");
+    let store = RuntimeStore::open(Some(root.path())).await.expect("store");
+    let cancel = AtomicBool::new(false);
+    let epoch = studio_runtime_schema::usage::ledger::LedgerEpoch::Current;
+    let import = |previous| {
+        history::prepare(
+            HistorySnapshot::from_records(agent.clone(), previous, epoch).expect("snapshot"),
+            root.path(),
+            RolloutPath::Found(path.clone()),
+            BatchLimits::default(),
+            200.,
+            &cancel,
+        )
+        .expect("batch")
+    };
+    import(None)
+        .commit(&store, 200.)
+        .await
+        .expect("first import");
+    let db = rusqlite::Connection::open(root.path().join("analytics.sqlite3")).expect("database");
+    let count = || {
+        db.query_row("SELECT COUNT(*) FROM analytics_items", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .expect("item count")
+    };
+    assert_eq!(count(), 2);
+    let reset = json!({"id":"a:default:thread","agent":"a","accountKey":"default","threadId":"thread","offset":0,"importedRecords":0,"malformedLines":0,"context":{"threadId":"thread"},"status":"invalidRecord","error":"diagnostic","invalidRecordDiagnostic":"diagnostic"});
+    db.execute(
+        "UPDATE analytics_history SET record=?1 WHERE id=?2",
+        rusqlite::params![reset.to_string(), "a:default:thread"],
+    )
+    .expect("reset checkpoint");
+    import(Some(reset))
+        .commit(&store, 200.)
+        .await
+        .expect("rescan");
+    assert_eq!(count(), 2);
+}
 #[tokio::test]
 async fn restart_after_ack_loss_retains_exact_effects_and_cursor() {
     let (root, agent) = fixture();

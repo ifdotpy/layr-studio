@@ -16,6 +16,7 @@ use studio_runtime_schema::usage::{
     parse_analytics_usage_row, parse_legacy_totals, parse_token_usage,
 };
 use studio_runtime_store::CachedSql;
+use studio_runtime_store::analytics::Notification;
 use studio_runtime_store::analytics_capture::{AnalyticsCaptureRepository as Repo, CaptureTable};
 use studio_runtime_store::{RuntimeStore, StoreError, python_json_compact, sha256_hex};
 use thiserror::Error;
@@ -520,7 +521,7 @@ pub struct CaptureDecision {
     pub unknown_usage: Option<Value>,
     pub usage_conflict: Option<studio_runtime_schema::usage::ledger::UsageReplayConflict>,
     pub rows: Vec<(CaptureTable, Value)>,
-    pub notifications: Vec<Value>,
+    notifications: Vec<Notification>,
     pub limit: Option<Value>,
     pub generation_roots: Vec<String>,
     pub response_rate: Option<ResponseRateAssociation>,
@@ -556,7 +557,7 @@ impl CaptureDecision {
             Repo::write(tx, *table, row)?;
         }
         for n in &self.notifications {
-            tx.execute_cached("INSERT INTO analytics_notifications VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET count=count+excluded.count,bytes=bytes+excluded.bytes",params![n["id"].as_str(),n["agent"].as_str(),n["root"].as_str(),n["method"].as_str(),n["hour"].as_i64(),n["count"].as_i64().unwrap_or(1),n["bytes"].as_i64()])?;
+            tx.execute_cached("INSERT INTO analytics_notifications VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET count=count+excluded.count,bytes=bytes+excluded.bytes",params![n.id,n.agent,n.root,n.method,n.hour,n.count,n.bytes])?;
         }
         if let Some(n) = &self.limit {
             tx.execute_cached(
@@ -782,16 +783,14 @@ fn apply_stream_metrics(
     decision.notifications = metrics
         .hours
         .iter()
-        .map(|hour| {
-            json!({
-                "id": python_json_compact(&json!([meta["agentId"], prepared.method, hour.hour])),
-                "agent": meta["agentId"],
-                "root": meta["rootId"],
-                "method": prepared.method,
-                "hour": hour.hour,
-                "count": hour.count,
-                "bytes": hour.encoded_bytes,
-            })
+        .map(|hour| Notification {
+            id: python_json_compact(&json!([meta["agentId"], prepared.method, hour.hour])),
+            agent: meta["agentId"].as_str().map(str::to_owned),
+            root: meta["rootId"].as_str().map(str::to_owned),
+            method: Some(prepared.method.clone()),
+            hour: i64::try_from(hour.hour).ok(),
+            count: i64::try_from(hour.count).unwrap_or(1),
+            bytes: i64::try_from(hour.encoded_bytes).ok(),
         })
         .collect();
 
@@ -842,22 +841,6 @@ pub(crate) fn encoded_len(value: &Value) -> usize {
     count.0
 }
 
-/// The identity fields of a stored agent that a capture must still match.
-/// Thread null and absence are equivalent; account and epoch preserve exact identity.
-#[derive(serde::Deserialize)]
-struct CaptureIdentity {
-    #[serde(rename = "threadId", default)]
-    thread_id: Option<String>,
-    #[serde(rename = "accountKey", default, deserialize_with = "present")]
-    account_key: Option<Value>,
-    #[serde(default, deserialize_with = "present")]
-    epoch: Option<Value>,
-}
-
-fn present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Value>, D::Error> {
-    <Value as serde::Deserialize>::deserialize(deserializer).map(Some)
-}
-
 /// Check agent identities on a Canvas read snapshot before the analytics commit. The
 /// analytics write then needs no Canvas writer admission. An identity that changes
 /// between the check and the commit lets one capture of the old identity land, as if
@@ -882,15 +865,15 @@ pub(crate) fn check_identity(canvas: &Connection, agent: &Value) -> Result<(), C
             |r| r.get(0),
         )
         .optional()?;
-    let current: CaptureIdentity = raw
+    let current: studio_runtime_store::AgentRecord = raw
         .map(|r| serde_json::from_str(&r).map_err(StoreError::from))
         .transpose()?
         .ok_or(CaptureError::StaleIdentity)?;
-    let expected: CaptureIdentity =
-        serde::Deserialize::deserialize(agent.clone()).map_err(StoreError::from)?;
+    let expected: studio_runtime_store::AgentRecord =
+        serde::Deserialize::deserialize(agent).map_err(StoreError::from)?;
     if current.thread_id != expected.thread_id
-        || current.account_key.as_ref() != agent.get("accountKey")
-        || current.epoch.as_ref() != agent.get("epoch")
+        || current.account_key != expected.account_key
+        || current.epoch != expected.epoch
     {
         return Err(CaptureError::StaleIdentity);
     }
@@ -938,9 +921,15 @@ pub fn decide(
     result.rows.push((CaptureTable::Agents, agent));
     if q.source == CaptureSource::Live && !q.model {
         let hour = (at / 3600.).floor() as i64 * 3600;
-        result.notifications.push(
-            json!({"id":python_json_compact(&json!([q.agent["id"],method,hour])),"agent":q.agent["id"],"root":meta["rootId"],"method":method,"hour":hour,"count":1,"bytes":p.to_string().len()}),
-        );
+        result.notifications.push(Notification {
+            id: python_json_compact(&json!([q.agent["id"], method, hour])),
+            agent: q.agent["id"].as_str().map(str::to_owned),
+            root: meta["rootId"].as_str().map(str::to_owned),
+            method: Some(method.to_owned()),
+            hour: Some(hour),
+            count: 1,
+            bytes: i64::try_from(p.to_string().len()).ok(),
+        });
     }
     if method == "thread/tokenUsage/updated" {
         let provider = ProviderKind::of_record(&q.agent)
@@ -1937,6 +1926,28 @@ mod usage_contract_tests {
 #[cfg(test)]
 mod identity_read_tests {
     use super::*;
+
+    #[test]
+    fn identity_check_rejects_stale_account_and_epoch() {
+        let db = Connection::open_in_memory().expect("database");
+        db.execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL)")
+            .expect("table");
+        let current = r#"{"id":"agent","rootId":"agent","status":"idle","accountKey":"account","epoch":3,"threadId":"thread"}"#;
+        db.execute("INSERT INTO runtime_agents VALUES ('agent',?1)", [current])
+            .expect("agent");
+        let agent: Value = serde_json::from_str(current).expect("agent fixture");
+        assert!(check_identity(&db, &agent).is_ok());
+        for stale in [
+            r#"{"id":"agent","rootId":"agent","status":"idle","accountKey":"other","epoch":3,"threadId":"thread"}"#,
+            r#"{"id":"agent","rootId":"agent","status":"idle","accountKey":"account","epoch":2,"threadId":"thread"}"#,
+        ] {
+            let agent: Value = serde_json::from_str(stale).expect("stale agent fixture");
+            assert!(matches!(
+                check_identity(&db, &agent),
+                Err(CaptureError::StaleIdentity)
+            ));
+        }
+    }
 
     #[tokio::test]
     async fn identity_check_reads_a_snapshot_and_takes_no_writer_admission() {
