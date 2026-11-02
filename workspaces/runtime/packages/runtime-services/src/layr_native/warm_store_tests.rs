@@ -58,8 +58,7 @@ fn cargo_build(cwd: &Path) -> (Duration, Vec<Value>) {
 #[test]
 #[ignore = "requires STUDIO_LAYR_NATIVE_TEST_BINARY, the cached memchr crate, and APFS or btrfs"]
 fn real_native_preparation_reuses_an_existing_projects_saved_rust_cache() {
-    let binary =
-        PathBuf::from(std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY").expect("host binary"));
+    let binary = PathBuf::from(crate::layr_native::test_binary().expect("host binary"));
     let fixture = tempfile::tempdir().expect("fixture");
     let fixture_root = CanonicalPath::existing(fixture.path())
         .expect("canonical fixture")
@@ -116,7 +115,6 @@ fn real_native_preparation_reuses_an_existing_projects_saved_rust_cache() {
     ]);
     fs::create_dir_all(binary_path(&state).parent().expect("bin folder")).expect("bin folder");
     fs::copy(binary, binary_path(&state)).expect("private binary");
-    install::ensure_binary(&state).expect("private installation");
     let root = store_path(&state);
     run(
         &state,
@@ -259,9 +257,7 @@ fn real_native_preparation_reuses_an_existing_projects_saved_rust_cache() {
         .expect_err("incompatible store must refuse")
         .to_string();
     assert!(
-        error.contains("9.9.9")
-            && error.contains(LAYR_VERSION)
-            && error.contains(root.to_str().expect("root")),
+        error.contains("9.9.9") && error.contains(root.to_str().expect("root")),
         "{error}"
     );
 }

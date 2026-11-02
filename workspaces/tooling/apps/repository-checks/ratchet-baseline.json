@@ -1956,14 +1956,6 @@
       "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_executor.rs",
-      "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
-    },
-    {
-      "file": "workspaces/runtime/packages/runtime-services/src/account_transfer_executor.rs",
-      "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:1"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-services/src/account_worker/connection_recovery.rs",
       "fingerprint": "a8a2929f25fa5a52e86b1aaa53c30a886d25438e0ca884d8e019bc756c5bfd99:0"
     },
@@ -3290,10 +3282,6 @@
     }
   ],
   "ts-json-parse-cast": [
-    {
-      "file": "workspaces/client/apps/desktop/layr-binary.ts",
-      "fingerprint": "30c951a519de8b24758a9f9c2d334f4eb0fcda25e2c2f29d17ea27b8cd71f73a:0"
-    },
     {
       "file": "workspaces/client/apps/desktop/restart-environment.ts",
       "fingerprint": "7b2e2faea7f4dfe66d482b7eb2e06d91a55ed917b960409bbf8a60a762f71532:0"

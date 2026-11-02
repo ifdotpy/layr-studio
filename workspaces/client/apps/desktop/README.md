@@ -12,7 +12,7 @@ updates still use:
 - `recover_backend.py`, `install_update.py`, `deliver_server.py`, `desktop_*.py`: recovery, update, and delivery helpers.
   The server delivery path (`workspaces/runtime/apps/runtime-server/deliver.ts`) runs them. Do not delete them before a
   TypeScript or Rust port replaces them.
-- `package.ts`, `signing*.ts`, `release-binaries.ts`, `layr-binary.ts`, `runtime-binaries.ts`, `python-resources.ts`,
+- `package.ts`, `signing*.ts`, `release-binaries.ts`, `runtime-binaries.ts`, `python-resources.ts`,
   `bundle-name.ts`, `native/`: the resources and signing that `../native/package.ts` bundles.
 - `speech.ts`, `frame-owner.ts`: shared with web tests.
 - `export-profile.ts`, `export-browser-profile.ts`, `export-server-credentials.ts`: the export of an old Electron

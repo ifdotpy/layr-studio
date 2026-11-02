@@ -1006,7 +1006,7 @@ pub async fn prepared_member(
     store: &RuntimeStore,
     operation: &str,
     agent: &str,
-    target_settings: Value,
+    target_settings: studio_runtime_store::transfer_record::DestinationSettings,
     portable_history: Option<Value>,
     now: f64,
 ) -> Result<(), TransferError> {
@@ -1116,13 +1116,13 @@ fn check_durable_blockers(tx: &Transaction<'_>, agent: &str) -> Result<(), Trans
 /// are prepared outside the writer transaction from these checked records.
 pub struct TransferPreparation {
     operation: TransferRecord,
-    agent: Value,
+    agent: studio_runtime_store::AgentRecord,
 }
 impl TransferPreparation {
     pub fn operation(&self) -> &TransferRecord {
         &self.operation
     }
-    pub fn agent(&self) -> &Value {
+    pub fn agent(&self) -> &studio_runtime_store::AgentRecord {
         &self.agent
     }
 }
@@ -1190,7 +1190,7 @@ pub async fn execute_member(
             let decision = snapshot.begin_read(&transaction_agent_id)?;
             let input = TransferPreparation {
                 operation: decision.operation.clone(),
-                agent: snapshot.agent(&transaction_agent_id)?.value(),
+                agent: snapshot.agent(&transaction_agent_id)?.clone(),
             };
             persist(tx, decision, now)?;
             Ok::<_, TransferError>(Ok(input))

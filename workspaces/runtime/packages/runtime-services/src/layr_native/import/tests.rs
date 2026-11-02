@@ -378,7 +378,7 @@ mod lifecycle_tests {
     #[ignore = "requires the real vendored Layr binary on APFS or btrfs"]
     fn native_import_versions_ignored_data_and_keeps_main_and_migration_caches_warm() {
         let binary =
-            PathBuf::from(std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY").expect("Layr binary"));
+            PathBuf::from(crate::layr_native::test_binary().expect("Layr binary"));
         let state = tempfile::tempdir().expect("state");
         let source = tempfile::tempdir().expect("source");
         let git = |args: &[&str]| {
@@ -532,7 +532,7 @@ mod lifecycle_tests {
         )
         .expect("state");
         fs::copy(
-            std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY").expect("binary"),
+            crate::layr_native::test_binary().expect("binary"),
             super::super::binary_path(&state),
         )
         .expect("binary copy");

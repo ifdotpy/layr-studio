@@ -47,6 +47,7 @@ pub mod monitor_record;
 pub mod multi_server_access;
 pub mod multi_server_ingress;
 pub mod multi_server_protocol;
+pub mod native_layr;
 pub mod notification_text;
 pub mod peer_team_ingress;
 pub mod persistence;

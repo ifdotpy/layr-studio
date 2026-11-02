@@ -19,8 +19,7 @@ only the integration:
 ## Set up a vault
 
 "Set up vault…" in the LAYR menu of a project on this Mac opens `VaultSetup.tsx`. It runs the
-steps of layr-desk's `docs/design.md` ("Set up a vault for a project") with the layr-desk that
-the app carries (`Resources/workspace/bin/layr-desk`):
+steps of layr-desk's `docs/design.md` ("Set up a vault for a project") with an installed `layr-desk`:
 
 1. Paper key: the desktop app writes a one-time `.command` script and opens it in Terminal
    (`desktop/vault-keys.ts`), which runs `layr-desk keys --project <prefix> --clear`. The words
@@ -113,12 +112,8 @@ The project menu of an imported layr project shows its vault:
   no reply, log or error repeats them. The Keychain then keeps the vault key.
 - **Show in Finder** opens the vault's folder on the Desk disk (`~/Desk/<prefix>`).
 
-Studio carries `layr-desk` (`Resources/workspace/bin`, built from the vendored source in
-`workspaces/runtime/apps/layr-desk` by the package script), so nothing is installed by hand.
-When a vault has a Desk site, the server keeps the Desk disk agent (`layr-desk service`) on
-this Mac for that site with the app's own binary, and asks `layr-desk status` which vaults
-this Mac keeps a key for. A `layr-desk` outside the app (a development build on `PATH`) only
-reports; it never replaces the agent.
+Install `layr-desk` separately. An external `layr-desk` reports vault status; it does not
+replace the Desk disk agent.
 
 The Rust backend does not ask the VM for `vault.status`. It only reads the report in
 `layr-projects/<id>/vault.json` (`vault::view`). The sidebar reads only that record, so a quiet vault
