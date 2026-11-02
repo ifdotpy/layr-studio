@@ -105,13 +105,16 @@ async fn resetting_checkpoint_and_rescanning_does_not_duplicate_items() {
         .await
         .expect("first import");
     let db = rusqlite::Connection::open(root.path().join("analytics.sqlite3")).expect("database");
-    let count = || {
-        db.query_row("SELECT COUNT(*) FROM analytics_items", [], |row| {
-            row.get::<_, i64>(0)
-        })
-        .expect("item count")
+    let ids = || {
+        db.prepare("SELECT id FROM analytics_items ORDER BY id")
+            .expect("item query")
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("item rows")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("item ids")
     };
-    assert_eq!(count(), 2);
+    let original = ids();
+    assert_eq!(original.len(), 2);
     let reset = json!({"id":"a:default:thread","agent":"a","accountKey":"default","threadId":"thread","offset":0,"importedRecords":0,"malformedLines":0,"context":{"threadId":"thread"},"status":"invalidRecord","error":"diagnostic","invalidRecordDiagnostic":"diagnostic"});
     db.execute(
         "UPDATE analytics_history SET record=?1 WHERE id=?2",
@@ -122,7 +125,7 @@ async fn resetting_checkpoint_and_rescanning_does_not_duplicate_items() {
         .commit(&store, 200.)
         .await
         .expect("rescan");
-    assert_eq!(count(), 2);
+    assert_eq!(ids(), original);
 }
 #[tokio::test]
 async fn restart_after_ack_loss_retains_exact_effects_and_cursor() {
