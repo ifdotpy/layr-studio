@@ -1234,6 +1234,11 @@ fn terminal_claude_error_keeps_only_bounded_failure_metadata() {
     connection.execute_batch("INSERT INTO runtime_events VALUES('message','agent','user','message','dispatching',2,0,NULL,NULL);").expect("event writes");
     let metadata = json!({"apiError":"provider_credentials","apiErrorStatus":401,"apiErrorCode":"cloud_access_denied","provider":"bedrock","remedy":"refresh_credentials"});
     let mut unsafe_metadata = metadata.clone();
+    let mut metadata = metadata;
+    metadata["title"] = json!("Provider credentials failed");
+    metadata["message"] = json!(
+        "The cloud provider refused the credentials or access. Check this account's sign-in and model access."
+    );
     unsafe_metadata["error_details"] = json!("secret request text");
     unsafe_metadata["credentials"] = json!("Bearer secret");
     let error = json!({"codexErrorInfo":"unauthorized","claudeFailure":unsafe_metadata});

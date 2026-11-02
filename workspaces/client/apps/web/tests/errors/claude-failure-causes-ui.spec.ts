@@ -21,11 +21,11 @@ test("Claude failure causes at 320 and 1200 pixels", async ({
     import TurnHistory from '/src/components/conversation/transcript/TurnHistory.tsx';
     import {NativeNotice} from '/src/components/NativeNotice.tsx';
     const agent={id:'agent',threadId:'thread',provider:'claude',status:'failed',epoch:1};
-    const failure={message:'Provider failed',codexErrorInfo:'badRequest',claudeFailure:{apiError:'tool_history_mismatch',apiErrorStatus:400,apiErrorCode:'tool_pair_gate'}};
+    const failure={message:'Provider failed',codexErrorInfo:'badRequest',claudeFailure:{title:'Tool history does not match',message:"The conversation's tool calls and results do not match. Rewind the conversation or start a new chat.",apiError:'tool_history_mismatch',apiErrorStatus:400,apiErrorCode:'tool_pair_gate'}};
     const items=[{id:'input',role:'user',text:'Update the report.',turnId:'turn',turnStatus:'failed',turnError:failure}];
     const notice={id:'notice',role:'system',text:'Provider failed',nativeNotice:'error',nativeError:failure};
-    const tokenNotice={...notice,id:'tokens',nativeError:{claudeFailure:{apiErrorCode:'context_gate',promptTokens:210001,maxContextTokens:200000}}};
-    const credentials={...notice,id:'credentials',nativeError:{claudeFailure:{apiError:'provider_credentials',provider:'bedrock',remedy:'refresh_credentials'}}};
+    const tokenNotice={...notice,id:'tokens',nativeError:{claudeFailure:{title:'Claude request failed',message:'Claude could not complete the request. Check the cause details before continuing. Context: 210001 tokens. Limit: 200000 tokens.',apiErrorCode:'context_gate',promptTokens:210001,maxContextTokens:200000}}};
+    const credentials={...notice,id:'credentials',nativeError:{claudeFailure:{title:'Provider credentials failed',message:"The cloud provider refused the credentials or access. Check this account's sign-in and model access.",apiError:'provider_credentials',provider:'bedrock',remedy:'refresh_credentials'}}};
     createRoot(document.getElementById('root')).render(React.createElement(MantineProvider,null,
       React.createElement('main',{style:{maxWidth:900,margin:'auto',padding:12}},
         React.createElement('h1',null,'Claude failure causes'),

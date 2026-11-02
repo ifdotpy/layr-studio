@@ -104,6 +104,10 @@ impl<'de> Deserialize<'de> for AgentError {
         if original.get(STUDIO_RAW_EVIDENCE).is_some()
             && let Ok(canonical) = NativeProviderError::deserialize(original.clone())
         {
+            let mut canonical = canonical;
+            if let Some(failure) = &mut canonical.claude_failure {
+                failure.present();
+            }
             return Ok(Self::Provider(Box::new(canonical)));
         }
         let mut fields = original.as_object().cloned().unwrap_or_default();
@@ -127,9 +131,11 @@ impl<'de> Deserialize<'de> for AgentError {
         let codex_error_info = fields
             .remove("codexErrorInfo")
             .and_then(|value| CodexErrorInfo::deserialize(value).ok());
-        let claude_failure = fields
-            .remove("claudeFailure")
-            .and_then(|value| crate::claude_failure::ClaudeFailure::deserialize(value).ok());
+        let claude_failure = fields.remove("claudeFailure").and_then(|value| {
+            let mut failure = crate::claude_failure::ClaudeFailure::deserialize(value).ok()?;
+            failure.present();
+            Some(failure)
+        });
         let raw = |value: Value| serde_json::value::RawValue::from_string(value.to_string());
         let data = fields
             .remove("data")
