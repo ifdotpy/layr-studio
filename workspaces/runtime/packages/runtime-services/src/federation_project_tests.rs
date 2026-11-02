@@ -99,7 +99,8 @@ async fn manage(
     body: Value,
     origin: Option<&str>,
 ) -> Result<Value, FederationError> {
-    let request: FederationRequest = serde_json::from_value(body).expect("request parses");
+    let request: FederationRequest =
+        serde_json::from_str(&body.to_string()).expect("request parses");
     manage_with_origin(Arc::clone(store), &request, origin).await
 }
 
@@ -126,7 +127,7 @@ async fn invite(server: &Arc<RuntimeStore>, project: &str) -> FederationInvitati
     )
     .await
     .expect("project invitation");
-    serde_json::from_value(created["invitation"].clone()).expect("invitation parses")
+    serde_json::from_str(&created["invitation"].to_string()).expect("invitation parses")
 }
 
 async fn accept(
