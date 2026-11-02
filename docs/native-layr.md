@@ -12,11 +12,8 @@ An operator can select an existing host store with `native-layr configure --stor
 Studio saves this setting in `<Studio state>/layr-native/settings.json`.
 Each prepared chat records its store in `layrStoreRoot`.
 A root switch changes the destination for new chats. Existing chats retain their store and line.
-The managed `bin/layr` entry starts `bin/layr-real` with the real Git directory first in its child process's `PATH`.
-Layr can maintain its Git object store and export commits through that entry.
-The agent's `PATH` still selects the managed Git guard, which refuses Git writes in native lines.
-An existing installation receives this entry when Studio checks its managed binary.
-`NATIVE_LAYR_DIRECTORY` in `runtime-store/src/path.rs` owns the installation directory.
+The agent's `PATH` selects the managed Git guard, which refuses Git writes in native lines.
+`NATIVE_LAYR_DIRECTORY` in `runtime-store/src/path.rs` owns the native metadata directory.
 `STORE_DIRECTORY` in `layr_native.rs` owns the store subdirectory.
 The state directory must stay outside project folders.
 New imports use the SHA-256 of the canonical source folder path as the project ID.
@@ -25,32 +22,15 @@ An explicit mapping selects a project when more than one project matches.
 Studio refuses an origin or history mismatch.
 Readiness records and operation receipts are separate for each store. The default store retains its original receipt paths.
 
-Studio installs Layr 0.11.0 at `<Studio state>/layr-native/bin/layr`.
-It never selects `~/.cargo/bin/layr` for runtime operations.
-The package build compiles the vendored source once and includes the signed executable, version, and SHA-256 manifest.
-The first native turn verifies that manifest and copies the executable into the managed binary folder.
-Later turns verify the package and the managed copy.
-A missing or invalid packaged executable returns an error and never starts Cargo.
-The installer waits at most 60 seconds for its lock and reports a timeout.
-Outside an installed package, the developer fallback verifies the source manifest and builds with Cargo, the lock file, and four jobs.
-Developer build output stays below the Studio state directory.
-To install it before a chat, run:
-
-```sh
-studio-runtime-server native-layr install --state /path/to/studio-state
-studio-runtime-server native-layr paths --state /path/to/studio-state
-```
-
-For a developer build outside an installed package, select the approved upstream source explicitly:
-
-```sh
-studio-runtime-server native-layr install --state /path/to/studio-state \
-  --source /Users/igor/Projects/layr
-```
+Install Layr separately and make `layr` available on the server's `PATH`.
+For a systemd service, install it in a directory on the unit's `Environment` PATH or add its installation directory to that PATH, which may omit user-local binary directories.
+Studio uses that executable and does not require a particular Layr version for now.
+Use `studio-runtime-server native-layr paths --state /path/to/studio-state` to inspect the store and daemon paths.
 
 The host must use APFS on macOS or btrfs on Linux.
-The new chat selector reads `nativeLayr.ready` and `nativeLayr.reason` from `/api/ui-summary`.
-Linux defaults to WT unless its native capability is ready.
+The new chat selector reads the tagged `nativeLayr` capability, default workspace mode,
+and unavailable message from `/api/ui-summary`. The server defaults to WT unless the
+native capability is ready.
 The probe requires a btrfs store and a listening root daemon at `<Studio state>/layr-native/layr.sock`.
 On macOS, commands run as the Studio user with `LAYR_ROOT` set to the owned store.
 `LAYR_DIRECT=1` selects the macOS backend without another service.
@@ -66,11 +46,10 @@ On Linux, start its daemon with the paths from `native-layr paths`:
 ```sh
 sudo env LAYR_ROOT=/path/to/studio-state/layr-native/store \
   LAYR_SOCKET=/path/to/studio-state/layr-native/layr.sock \
-  /path/to/studio-state/layr-native/bin/layr daemon
+  /path/to/installed/layr daemon
 ```
 
 The daemon must run before a native chat or migration on Linux.
-Version checks of an installed Linux binary also use this daemon.
 macOS does not require this step.
 
 ## Select a shared store
@@ -124,14 +103,6 @@ Then run:
 ```sh
 studio-runtime-server native-layr upgrade-store --state /path/to/studio-state
 ```
-
-For a shared root, Studio also inspects `~/.local/bin/layr`.
-The capability probe uses a private temporary root, so an old binary cannot change the selected store during the probe.
-That binary must support `store-version` and use the same store format as the bundled binary.
-The store format is the compatibility contract, so a newer or older layr release of the same format may share the root.
-Studio reports a different release or build as `layrVersionWarning` on the prepared chat.
-Upgrade an old developer binary before you use the shared root.
-The format guard cannot protect a store from an old binary that does not implement the guard.
 
 To select the original default for new chats, run:
 
@@ -230,11 +201,7 @@ APFS thin layers are counted conservatively, including their base entries, witho
 The estimate also includes the largest local saved cache tree for each cache path.
 It counts this tree even when the main working cache is empty or absent.
 Same-volume clones add no payload bytes to this estimate.
-The estimate follows the required host Layr version.
-Layr 0.2.1 requires a full HEAD allowance and an allowance for copies into existing HEAD files.
-From 0.2.2, matching regular source files can share blocks with HEAD.
-The estimate reads source blob hashes without filters or Git writes to identify files that can share blocks.
-Missing files, modified files, and symlinks require new HEAD bytes.
+The estimate conservatively allows for every HEAD blob and copies into overlapping source files.
 A margin retains at least 64 MiB or ten percent of the estimate, whichever is larger.
 A same-volume clone failure causes refusal, without a byte-copy fallback.
 Cross-volume files require a byte copy and sufficient space before import.
@@ -258,7 +225,7 @@ Known Layr limits, last checked on 0.5.1:
   A directory attribute change alone can be absent from the saved head.
   A successful metadata fixture does not establish support for this case.
 
-The bundled Layr 0.11.0 includes Studio's earlier fixes for private directory metadata and warm cache copies.
+Layr 0.11.0 includes Studio's earlier fixes for private directory metadata and warm cache copies.
 It keeps private directories writable until metadata updates finish.
 The final state and line retain source directory and file modes, including `0555` and `0444`.
 The source modes stay unchanged.
@@ -374,7 +341,6 @@ Other real Git index reads describe the exported head, including `ls-files` with
 Git writes remain refused with a Layr command hint.
 Layr also keeps the `.git` folder of a line read only (mode 0555), so a real Git write fails with `Permission denied`.
 Layr opens the folder around its own writes. Studio does the same when it installs the commit hook and when an import moves `.git` aside, and it restores the mode.
-The installed binary check reads the version from the first words of `layr --version`. A build id and date may follow in parentheses.
 Read commands with `--output` also fail because that option writes a file.
 Outside native lines, the wrapper passes the original arguments to real Git.
 Explicit Git configuration and repository selectors use the real Git read path.
@@ -565,10 +531,10 @@ Run the focused Rust tests:
 cargo test -j 4 -p studio-runtime-services --lib layr_native
 ```
 
-Run the real host lifecycle check with a Studio-built Layr 0.11.0 binary:
+Run the real host lifecycle check with an installed Layr binary:
 
 ```sh
-STUDIO_LAYR_NATIVE_TEST_BINARY=/path/to/studio-state/layr-native/bin/layr \
+STUDIO_LAYR_NATIVE_TEST_BINARY=/path/to/installed/layr \
   cargo test -j 4 -p studio-runtime-services --lib \
   layr_native::receipt_tests::real_host_import_worker_merge_archive_and_warm_caches \
   -- --ignored --nocapture
@@ -579,10 +545,10 @@ It verifies import exclusions, warm caches, exact-state merge, deletion, and ret
 It does not prove a live model turn or the HTTP path.
 On Linux, run this isolated check as root on btrfs.
 
-Check the managed Layr entry with a real Git repository and a local bare remote:
+Check Layr integration with a real Git repository and a local bare remote:
 
 ```sh
-STUDIO_LAYR_NATIVE_TEST_BINARY=/path/to/layr-0.11.0 \
+STUDIO_LAYR_NATIVE_TEST_BINARY=/path/to/installed/layr \
   CARGO_INCREMENTAL=0 cargo test -j 4 -p studio-runtime-services --lib \
   layr_native::git_guard::tests::real_managed_layr_ \
   -- --ignored --test-threads=1
@@ -594,7 +560,7 @@ They also verify that the managed Git entry still refuses agent writes.
 Check the proxy with real Layr, Git, Cargo, and pnpm callers:
 
 ```sh
-STUDIO_LAYR_NATIVE_TEST_BINARY=/path/to/layr-0.11.0 \
+STUDIO_LAYR_NATIVE_TEST_BINARY=/path/to/installed/layr \
   CARGO_INCREMENTAL=0 cargo test -j 4 -p studio-runtime-services --lib \
   layr_native::git_guard::tests::real_managed_git_proxy_ -- --ignored
 ```
@@ -602,7 +568,7 @@ STUDIO_LAYR_NATIVE_TEST_BINARY=/path/to/layr-0.11.0 \
 Measure the real preparation caller against a small existing-store fixture:
 
 ```sh
-STUDIO_LAYR_NATIVE_TEST_BINARY=/path/to/layr-0.11.0 \
+STUDIO_LAYR_NATIVE_TEST_BINARY=/path/to/installed/layr \
   CARGO_INCREMENTAL=0 cargo test -j 4 -p studio-runtime-services --lib \
   layr_native::warm_store_tests::real_native_preparation_reuses_an_existing_projects_saved_rust_cache \
   -- --ignored --nocapture

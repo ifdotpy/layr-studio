@@ -17,7 +17,7 @@ impl JsonRecord for AccountTransferRecord {
     const QUERY_SHAPE: RecordQueryShape = RecordQueryShape::None;
     const TYPED_SHAPE: bool = true;
     fn record_key(&self) -> Option<&String> {
-        Some(&self.id)
+        Some(self.id.as_string())
     }
 }
 pub const MAX_TRANSFER_RECORD_BYTES: usize = 8 * 1024 * 1024;
@@ -44,23 +44,11 @@ impl AccountTransferRepository {
         Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_account_transfers')", [], |row| row.get(0))?)
     }
     pub fn get(db: &Connection, id: &str) -> StoreResult<Option<Value>> {
-        Ok(Self::get_with_raw(db, id)?.map(|(value, _)| value))
-    }
-
-    /// Keep the original text for the ordered transfer snapshot decoder.
-    pub fn get_with_raw(db: &Connection, id: &str) -> StoreResult<Option<(Value, String)>> {
         Self::get_typed_with_raw(db, id)?
-            .map(|(record, raw)| {
-                let value = record.serialize(serde_json::value::Serializer)?;
-                if !studio_runtime_schema::validate("PersistedAccountTransferRecord", &value)
-                    .map_err(StoreError::SchemaValidation)?
-                {
-                    return Err(StoreError::InvalidStoredObject {
-                        table: "runtime_account_transfers",
-                        id: id.into(),
-                    });
-                }
-                Ok((value, raw))
+            .map(|(record, _)| {
+                record
+                    .serialize(serde_json::value::Serializer)
+                    .map_err(Into::into)
             })
             .transpose()
     }
@@ -72,9 +60,18 @@ impl AccountTransferRepository {
     ) -> StoreResult<Option<(AccountTransferRecord, String)>> {
         bounded_record(db, "runtime_account_transfers", id)?
             .map(|raw| {
-                Table::<AccountTransferRecord>::new(db)
-                    .decode_stored(id, &raw)
-                    .map(|record| (record, raw))
+                let record: AccountTransferRecord =
+                    Table::<AccountTransferRecord>::new(db).decode_stored(id, &raw)?;
+                let value = record.serialize(serde_json::value::Serializer)?;
+                if !studio_runtime_schema::validate("PersistedAccountTransferRecord", &value)
+                    .map_err(StoreError::SchemaValidation)?
+                {
+                    return Err(StoreError::InvalidStoredObject {
+                        table: "runtime_account_transfers",
+                        id: id.into(),
+                    });
+                }
+                Ok((record, raw))
             })
             .transpose()
     }

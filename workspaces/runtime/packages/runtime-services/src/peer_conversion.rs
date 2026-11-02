@@ -224,7 +224,7 @@ fn put(db: &Transaction<'_>, table: &'static str, value: &Value) -> Result<(), P
     Ok(())
 }
 fn transfer_involves(transfer: &studio_runtime_store::AccountTransferRecord, agent: &str) -> bool {
-    transfer.lead_id == agent || transfer.members.0.iter().any(|(id, _)| id == agent)
+    transfer.lead_id.as_str() == agent || transfer.members.0.iter().any(|(id, _)| id == agent)
 }
 /// Shared idle gate for user actions that change a chat's owner or workspace.
 /// `uncertain_blocks` is true for a move to another owner, which must carry an

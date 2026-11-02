@@ -2,7 +2,6 @@ import { buildLinuxVM } from "./native/linux-vm/build.ts";
 import { signingIdentity, signCode } from "./signing.ts";
 import { runtimeBinaries, runtimeBinaryName } from "./runtime-binaries.ts";
 import { pythonResources } from "./python-resources.ts";
-import { bundleLayrBinary } from "./layr-binary.ts";
 import {
   cargoReleaseArguments,
   prebuiltReleaseDirectory,
@@ -99,44 +98,6 @@ try {
   await mkdir(path.join(resources, "web"), { recursive: true });
   if (!uiOnly) {
     await mkdir(path.join(resources, "bin"), { recursive: true });
-    await bundleLayrBinary({
-      repository: repositoryRoot,
-      workspace: resources,
-      targetDirectory: cargoTargetDirectory,
-      sign: (binary) => signCode(binary, identity),
-    });
-    // layr-desk for the Desk disk, vault unlock and Pull on this Mac (docs/vault.md), from
-    // the vendored source; Studio installs the disk agent with this binary.
-    const layrDeskTarget = path.join(cargoTargetDirectory, "layr-desk");
-    execFileSync(
-      "cargo",
-      [
-        "build",
-        "--locked",
-        "--release",
-        "--manifest-path",
-        path.join(
-          repositoryRoot,
-          "workspaces/runtime/apps/layr-desk/Cargo.toml",
-        ),
-        "-p",
-        "layr-desk",
-        "--target-dir",
-        layrDeskTarget,
-      ],
-      {
-        cwd: repositoryRoot,
-        stdio: "inherit",
-        env: {
-          ...process.env,
-          CARGO_PROFILE_RELEASE_DEBUG: "0",
-          CARGO_PROFILE_RELEASE_STRIP: "symbols",
-        },
-      },
-    );
-    const layrDesk = path.join(resources, "bin", "layr-desk");
-    await cp(path.join(layrDeskTarget, "release/layr-desk"), layrDesk);
-    signCode(layrDesk, identity);
     await cp(diagnosticsBinary, path.join(resources, "bin/codex-diagnostics"));
     for (const { binary } of runtimeBinaries) {
       const name = runtimeBinaryName(binary);

@@ -98,8 +98,11 @@ mod tests {
 
     #[test]
     fn missing_state_directory_is_created() {
+        // macOS temporary folders sit under /var, a symlink to /private/var. The
+        // helper returns the real path, so the expected root must be real too.
         let parent = tempfile::tempdir().unwrap();
-        let state = parent.path().join("missing/state");
+        let parent_root = crate::path_identity::CanonicalPath::existing(parent.path()).unwrap();
+        let state = parent_root.join("missing/state");
         assert_eq!(
             canonical_existing_dir(state.clone())
                 .unwrap()

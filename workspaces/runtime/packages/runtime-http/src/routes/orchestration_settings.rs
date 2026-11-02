@@ -45,11 +45,14 @@ impl<'de, const MIN: u64, const MAX: u64> Deserialize<'de> for Bounded<MIN, MAX>
         }
     }
 }
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum Quiet {
-    Disabled(Bounded<0, 0>),
-    Enabled(Bounded<{ shell_policy::QUIET_MIN_MS }, { MAX_SAFE_INTEGER as u64 }>),
+struct Quiet(u64);
+impl<'de> Deserialize<'de> for Quiet {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = u64::deserialize(d)?;
+        (value == 0 || (shell_policy::QUIET_MIN_MS..=MAX_SAFE_INTEGER as u64).contains(&value))
+            .then_some(Self(value))
+            .ok_or_else(|| serde::de::Error::custom("value outside bounds"))
+    }
 }
 fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     d: D,
@@ -131,10 +134,7 @@ async fn write_settings(
     ApiJson(settings): ApiJson<SettingsInput>,
 ) -> Result<Json<SettingsResponse>, ApiError> {
     let shells = settings.shell_policy.map(|value| shell_policy::Settings {
-        quiet_threshold_ms: match value.quiet_threshold_ms {
-            Quiet::Disabled(value) => value.0,
-            Quiet::Enabled(value) => value.0,
-        },
+        quiet_threshold_ms: value.quiet_threshold_ms.0,
         pressure_cleanup: value.pressure_cleanup,
     });
     let idle = settings

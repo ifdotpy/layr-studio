@@ -177,7 +177,7 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
         &self,
         options: Map<String, Value>,
         label: &str,
-        default_home: &Path,
+        _default_home: &Path,
         metadata: &AuthMetadata,
     ) -> Result<String, ClaudeAccountError> {
         if metadata.status != AuthStatus::Ready
@@ -249,52 +249,12 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
             }
             return Ok(key);
         }
-        if let Some(local) = updated
-            .get_mut("accounts")
-            .and_then(|a| a.get_mut("claude-local"))
-            .and_then(Value::as_object_mut)
-        {
-            let local_options = local.get("claudeOptions").and_then(Value::as_object);
-            let same_paths = ["binaryPath", "configDir"].iter().all(|k| {
-                local_options.and_then(|o| o.get(*k)).unwrap_or(&json!(""))
-                    == options.get(*k).unwrap_or(&json!(""))
-            });
-            let same_login = local
-                .get("accountId")
-                .is_none_or(|v| !truthy_value(v) || v.as_str() == metadata.account_id.as_deref());
-            let same_credential = local
-                .get("_credentialIdentity")
-                .and_then(Value::as_str)
-                .is_none_or(|old| {
-                    metadata
-                        .credential_identity
-                        .as_deref()
-                        .is_some_and(|new| claude_identity::accepts(old, new))
-                });
-            if local.get("provider") == Some(&json!(ProviderKind::Claude.key()))
-                && same_paths
-                && same_login
-                && same_credential
-            {
-                if local_options.is_some_and(|o| !o.is_empty() && o != &options) {
-                    return Err(ClaudeAccountError::SettingsChanged);
-                }
-                if !options.is_empty() {
-                    local.insert("claudeOptions".into(), Value::Object(options));
-                }
-                apply_registration_metadata(local, metadata);
-                local.insert("label".into(), json!(label.trim()));
-                local.remove("deleted");
-                self.persist(&mut state, updated)?;
-                return Ok("claude-local".into());
-            }
-        }
         let home = options
             .get("configDir")
             .and_then(Value::as_str)
             .filter(|v| !v.is_empty())
             .map(str::to_owned)
-            .unwrap_or_else(|| default_home.to_string_lossy().into_owned());
+            .ok_or(ClaudeAccountError::InvalidProfile)?;
         let mut row = Map::from_iter([
             ("id".into(), json!(key)),
             ("provider".into(), json!(ProviderKind::Claude.key())),

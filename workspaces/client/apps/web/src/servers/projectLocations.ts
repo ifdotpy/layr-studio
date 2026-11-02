@@ -28,6 +28,10 @@ export type ProjectServerChoice = {
   system?: string | undefined;
   hasStudioVm?: boolean | undefined;
   nativeLayr?: GetResult<"/api/ui-summary">["nativeLayr"] | undefined;
+  nativeLayrMessage?: string | undefined;
+  defaultWorkspaceMode?:
+    | GetResult<"/api/ui-summary">["defaultWorkspaceMode"]
+    | undefined;
   connection?: StudioServer | undefined;
 };
 export function projectServerChoices(

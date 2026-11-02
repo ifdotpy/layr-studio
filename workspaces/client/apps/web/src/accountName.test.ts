@@ -20,7 +20,7 @@ describe("account names", () => {
   });
   it("allows a pinned native proof attempt without claiming authentication", () => {
     const account = {
-      id: "claude-local",
+      id: "claude-profile-fixture",
       home: "/profile",
       label: "Work",
       source: "Claude",

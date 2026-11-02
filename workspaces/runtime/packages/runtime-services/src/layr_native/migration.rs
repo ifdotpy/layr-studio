@@ -420,7 +420,7 @@ pub fn migrate_with_options(
     all_estimate["linesToCreate"] = json!(all_lines_to_create);
     let mut dirty_estimate = json!(size_dirty);
     dirty_estimate["linesToCreate"] = json!(dirty_lines_to_create);
-    let mut report = json!({"dryRun":dry_run,"withoutGit":options.without_git,"worktreeSelection":options.worktrees.as_str(),"selectionEstimates":{"all":all_estimate,"dirty":dirty_estimate},"skipWorktrees":options.skip_worktrees,"gitMetadataDisposition":if options.without_git {"Top-level .git is omitted and is not preserved. Source files and nested repositories follow normal admission. The source folder remains unchanged."} else {"Git metadata follows normal admission and preservation."},"projectId":project_id,"source":project,"layrVersion":super::LAYR_VERSION,"allocationModel":super::import::allocation_model(),"mainSize":clone_main.size,"sourceSize":main_plan.size,"worktreeData":main_plan.worktree_data,"worktreeSummary":super::inventory::worktree_summary(&lines),"linesToCreate":lines_to_create,"sizesComplete":sizes_complete,"excludedWorktreeFolders":main_plan.excluded_worktree_folders,"repositories":repositories,"plainGitMetadata":super::inventory::plain_git_metadata(&project, &main_plan),"refusals":refusals,"admissible":refusals.is_empty()});
+    let mut report = json!({"dryRun":dry_run,"withoutGit":options.without_git,"worktreeSelection":options.worktrees.as_str(),"selectionEstimates":{"all":all_estimate,"dirty":dirty_estimate},"skipWorktrees":options.skip_worktrees,"gitMetadataDisposition":if options.without_git {"Top-level .git is omitted and is not preserved. Source files and nested repositories follow normal admission. The source folder remains unchanged."} else {"Git metadata follows normal admission and preservation."},"projectId":project_id,"source":project,"allocationModel":super::import::allocation_model(),"mainSize":clone_main.size,"sourceSize":main_plan.size,"worktreeData":main_plan.worktree_data,"worktreeSummary":super::inventory::worktree_summary(&lines),"linesToCreate":lines_to_create,"sizesComplete":sizes_complete,"excludedWorktreeFolders":main_plan.excluded_worktree_folders,"repositories":repositories,"plainGitMetadata":super::inventory::plain_git_metadata(&project, &main_plan),"refusals":refusals,"admissible":refusals.is_empty()});
     if let Some(fields) = serde_json::to_value(size)
         .map_err(|error| NativeLayrError::Refused(error.to_string()))?
         .as_object()
@@ -875,7 +875,7 @@ mod tests {
         )
         .expect("fixture operation succeeds");
         fs::copy(
-            std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY").expect("fixture operation succeeds"),
+            crate::layr_native::test_binary().expect("fixture operation succeeds"),
             binary_path(&state),
         )
         .expect("fixture operation succeeds");
@@ -988,7 +988,7 @@ mod tests {
         let state = fixture.path().join("state");
         fs::create_dir_all(binary_path(&state).parent().expect("bin parent")).expect("bin");
         fs::copy(
-            std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY").expect("binary"),
+            crate::layr_native::test_binary().expect("binary"),
             binary_path(&state),
         )
         .expect("binary copy");
@@ -1180,7 +1180,7 @@ mod tests {
         let state = fixture.path().join("state");
         fs::create_dir_all(binary_path(&state).parent().expect("bin parent")).expect("bin");
         fs::copy(
-            std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY").expect("binary"),
+            crate::layr_native::test_binary().expect("binary"),
             binary_path(&state),
         )
         .expect("binary copy");

@@ -43,6 +43,7 @@ mod m2026_10_31_access_invites;
 mod m2026_10_31_agent_batch_55;
 mod m2026_10_31_agent_core;
 mod m2026_10_31_agent_permissions;
+mod m2026_10_31_claude_home_account;
 mod m2026_10_31_current_checks;
 mod m2026_10_31_drop_old_outbox_tables;
 mod m2026_10_31_message_send_projections;
@@ -1266,6 +1267,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_10_31_current_checks::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-10-31-claude-home-account",
+            introduced: OCTOBER_31,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agents and projects on the claude-local account backed by ~/.claude",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_10_31_claude_home_account::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {

@@ -70,6 +70,10 @@
   display: grid;
   gap: 6px;
 }
+
+.native-layr-error {
+  color: var(--mantine-color-red-6);
+}
 .new-chat-model-settings {
   margin: 0;
   padding: 4px 0;
