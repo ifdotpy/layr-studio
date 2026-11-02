@@ -1,5 +1,0 @@
-0000000000000000000000000000000000000000 944b060594ff76c8b497b25f0fe2642d1e39b30c Alex Fomin <magritte@tutamail.com> 1793624435 +0100	branch: Created from HEAD
-944b060594ff76c8b497b25f0fe2642d1e39b30c a9570dfc00149f68042b7c44a6042d4ba57b2a14 Alex Fomin <magritte@tutamail.com> 1793625433 +0100	commit: refactor(runtime): type agent mode and project fields
-a9570dfc00149f68042b7c44a6042d4ba57b2a14 5d27b74573282d22bfd491a8933c4230a47d733f Alex Fomin <magritte@tutamail.com> 1793627994 +0100	rebase (finish): refs/heads/types/agent-record-more-fields onto 654d0b84cb696ba81708285e9440ba6af33625bf
-5d27b74573282d22bfd491a8933c4230a47d733f b0b6db38d0b19123f533df249b6e607c9a91371f Alex Fomin <magritte@tutamail.com> 1793630018 +0100	rebase (finish): refs/heads/types/agent-record-more-fields onto 86d7db322271f0b9be2b0562cd224dfb8658f389
-b0b6db38d0b19123f533df249b6e607c9a91371f 85e7782f6d7ab1e0ff35f46a6f6670b376689758 Alex Fomin <magritte@tutamail.com> 1793631339 +0100	rebase (finish): refs/heads/types/agent-record-more-fields onto d461ee0b80829ab443cbbcffbe0cc266d8aaa2ab

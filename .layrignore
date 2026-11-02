@@ -1,5 +1,0 @@
-
-# Studio native import: version data; retain build caches.
-!*
-/node_modules/
-/target/
