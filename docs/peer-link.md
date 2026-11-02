@@ -20,7 +20,7 @@ process that each request starts, and the Serve hop.
 
 ## Process
 
-`studio-peer-link` (`workspaces/runtime/apps/peer-link`, Rust, `quinn` and `rustls`) is a child
+`studio-peer-link` (`workspaces/runtime/apps/peer-link`, Rust, `iroh` 1.3.0 on its QUIC stack `noq`) is a child
 of the backend (`runtime-server/src/peer_link.rs`). The backend writes its configuration as the first stdin
 line, so the private key is never in the arguments or the environment:
 
@@ -32,7 +32,9 @@ line, so the private key is never in the arguments or the environment:
   "peers": ["<SPKI PEM>"],
   "backendPort": 4620,
   "forwardedHost": "<Serve host>",
-  "socket": "<state>/multi-server/peer-link.sock"
+  "socket": "<state>/multi-server/peer-link.sock",
+  "linkToken": "<secret>",
+  "relays": []
 }
 ```
 
@@ -43,31 +45,25 @@ an exit it starts the process again with a doubling delay of at most 30 seconds;
 after 60 seconds of healthy run. It listens on the Tailscale IPv4 address of the Mac, on UDP
 port 4621, or on a free port when 4621 is in use.
 
+`relays` is a list of relay URLs (optional, default empty). Empty means direct paths only: the
+process uses no relay, so no public relay sees the traffic. The owner turns relays on by adding
+URLs to the backend's link configuration. A relay forwards encrypted QUIC only.
+
 ## Identity
 
-TLS 1.3 with raw public keys (RFC 7250), ALPN `studio-peer/1`. Each side presents its Ed25519
-pairing key:
+One iroh endpoint with the ALPN `studio-peer/1`. The endpoint key is the server's Ed25519 pairing
+key, so the endpoint id is the paired public key. The TLS 1.3 handshake of iroh authenticates
+both sides by that key (mutual, no second key).
 
-- the client accepts only the key of the paired server that it dials;
-- the server accepts only a client key of a paired server;
-- the server refuses a source address outside the Tailscale ranges before the handshake.
-
-The receiving backend checks each request as a Serve request (below), including the request
-signature. The Tailscale owner check (`tailscale status` and `tailscale whois`, about 190 ms
-together) runs once for each connection, not for each request:
-
-- The link gives each accepted connection a random name and sends it as
-  `X-Studio-Link-Connection`, with the secret `X-Studio-Link-Token`. The backend generates the
-  secret at start and writes it in the link configuration (`linkToken`). The link removes both
-  headers (and every `X-Studio-Link-*` header) from the peer's own request.
-- The backend uses the name only when the secret matches. It never takes a check result from a
-  request. The first request of a connection runs the check. Later requests of the same
-  connection and source address reuse the result.
-- A request that has a `Tailscale-User-Login` or an auto-pair probe is always checked. A request
-  without the secret (Serve, HTTPS) is always checked.
-- A result is dropped after 60 seconds without a request, the idle timeout of the link. A closed
-  connection cannot send a request, and its name is never used again. A new connection is
-  checked again. A removed paired key closes its connections (see Process).
+- The process refuses a key outside `peers` before any stream. Its `EndpointHooks` check the
+  remote key before a dial (`before_connect`) and after the handshake of an accepted connection
+  (`after_handshake`). A refused connection closes with the code `0x100`.
+- The dialer and the accepting side both use the same check, so a key removed by `{"peers": ...}`
+  closes its connections.
+- The process accepts any network path for a paired key: a direct address, the Tailscale address
+  when it is one, or a relay. The network path gives no rights.
+- The backend's Tailscale owner check (below) still runs for each request. It is removed by the
+  project grants change, not by this link.
 
 ## Contract version
 
@@ -147,6 +143,27 @@ command exits and worker state. A queued request wakes the delivery at once, so 
 one exchange (10 ms over the link) instead of waiting for the 1-second scheduler tick. The tick
 stays the fallback, and a wake that comes before its transaction commits checks the outbox once
 more after 50 ms. Request identities, receipts and the lost-response rules do not change.
+
+## Dial by key (iroh)
+
+`studio-peer-link` dials a paired server by its key and the last address the backend learned
+(`X-Studio-Link`). The address is a direct hint. iroh tries it, then the relays in `relays`, if any.
+Hole punching needs a relay to exchange addresses. Without a relay, only the address hint and
+the listen address of the bound socket are used.
+
+Limit: the process binds the configured listen address (the Tailscale address). Other interfaces
+are not bound, so a path through another network needs the listen address on that network. The
+owner decides the bind address (backend change, not in this link).
+
+Tests (`workspaces/runtime/apps/peer-link/src/tests.rs`): a direct connection by key on loopback; a
+key outside `peers` is refused by the server and never dialed by the client; a reconnect after a
+drop emits `connected` again; a connection through a local relay with no direct path (the test
+relay runs in the test process, with its self-signed certificate as the only root).
+
+Measured 2026-11-02 on the build Mac, loopback, release-free debug test build (`cargo test -p
+studio-peer-link loopback_round_trip_time -- --nocapture`): one small request (new stream, four bytes
+out, four bytes back), median of 200 requests: 0.42 ms. The QUIC link on Tailscale (2026-10-14) took
+10 ms for the same request. That number includes the path, so it is not comparable.
 
 ## Not yet
 
