@@ -266,9 +266,7 @@ pub(crate) fn commit_steer(
     snapshot.artifact_paths = prepared.snapshot.artifact_paths.clone();
     snapshot.asset_paths = prepared.snapshot.asset_paths.clone();
     let current = turn::compile(&snapshot, &events).map_err(|e| refusal(e.to_string()))?;
-    if serde_json::to_value(current).map_err(|_| invalid("steer compilation"))?
-        != serde_json::to_value(&prepared.compiled).map_err(|_| invalid("steer compilation"))?
-    {
+    if current != prepared.compiled {
         return Err(refusal("steer-preparation/snapshot-changed".into()));
     }
     Ok(())
@@ -2061,12 +2059,7 @@ pub(crate) fn commit(
             turn::compile(&current_submission, &current_events)
         })
         .map_err(|e| refusal(e.to_string()))?;
-        if stage("turn_submission.commit.compare", || {
-            Ok::<_, WorkerError>(
-                serde_json::to_value(&recompiled).map_err(|_| invalid("compiler result"))?
-                    != serde_json::to_value(compiled).map_err(|_| invalid("compiler result"))?,
-            )
-        })? {
+        if recompiled != *compiled {
             // Name the changed compiler inputs; a change seen only in the
             // output (its events) names the output fields instead.
             let mut fields = changed_fields(baseline, &current_submission)?;

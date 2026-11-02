@@ -1458,10 +1458,8 @@ pub(super) fn submission_snapshot(
         let author = complaint
             .author
             .ok_or_else(|| invalid("complaint/author"))?;
-        let author_name = AgentRepository::get(tx, &AgentId::from(author.as_str()))?
-            .map(|a| text(&a.value(), "name"))
-            .transpose()?
-            .flatten();
+        let author_name =
+            AgentRepository::get(tx, &AgentId::from(author.as_str()))?.and_then(|agent| agent.name);
         complaints.push(turn::Complaint {
             id: complaint.id,
             lead_id: intent.agent_id.clone(),
@@ -1527,16 +1525,13 @@ pub(super) fn submission_snapshot(
     };
     for (_, raw) in team {
         let worker: AgentRecord = serde_json::from_str(&raw).map_err(|_| invalid("worker"))?;
-        let v = worker.value();
         let status = turn::WorkerStatus::from_agent_status(worker.status.as_str());
         workers.push(turn::Worker {
             id: worker.id.0,
             root_id: root_id.into(),
-            parent_id: text(&v, "parentId")?,
-            worktree_ready: flag(&v, "worktreeReady")?,
-            deleted: v
-                .get("deletedAt")
-                .is_some_and(|v| !v.is_null() && v != &json!(0)),
+            parent_id: worker.parent_id,
+            worktree_ready: worker.worktree_ready.unwrap_or(false),
+            deleted: worker.deleted_at.is_some(),
             status,
             auto_wake: worker.auto_wake.unwrap_or(false),
         });
@@ -1565,12 +1560,12 @@ pub(super) fn submission_snapshot(
         let owner = text(&v, "agentId")?
             .or(text(&v, "agent")?)
             .ok_or_else(|| invalid("asset/agent"))?;
-        let owner = agent(tx, &owner)?.value();
+        let owner = agent(tx, &owner)?;
         assets.push(turn::Asset {
             id,
-            owner_id: decode(owner["id"].clone(), "owner/id")?,
-            owner_root_id: decode(owner["rootId"].clone(), "owner/rootId")?,
-            owner_deleted: owner.get("deletedAt").is_some_and(|v| !v.is_null()),
+            owner_id: owner.id.0,
+            owner_root_id: owner.root_id.0,
+            owner_deleted: owner.deleted_at.is_some(),
             image: flag(&v, "image")?,
             path: decode(v["path"].clone(), "asset/path")?,
             name: decode(v["name"].clone(), "asset/name")?,
@@ -1672,23 +1667,26 @@ fn can_delegate(tx: &Transaction<'_>, record: &Value, root: &Value) -> Result<bo
         .as_u64()
         .filter(|v| (1..=3).contains(v))
         .unwrap_or(1);
-    let mut cursor = record.clone();
+    let root_id = text(root, "id")?.ok_or_else(|| invalid("delegation/root"))?;
+    let mut cursor_id = text(record, "id")?.ok_or_else(|| invalid("delegation/id"))?;
+    let mut parent_id = text(record, "parentId")?;
     let mut depth = 0;
     let mut seen = BTreeSet::new();
-    while cursor["id"] != root["id"] {
-        if !seen.insert(text(&cursor, "id")?.ok_or_else(|| invalid("delegation/id"))?) {
+    while cursor_id != root_id {
+        if !seen.insert(cursor_id) {
             return Ok(false);
         }
-        let Some(parent) = text(&cursor, "parentId")? else {
+        let Some(parent) = parent_id else {
             return Ok(false);
         };
         let Some(parent) = AgentRepository::get(tx, &AgentId::from(parent.as_str()))? else {
             return Ok(false);
         };
-        cursor = parent.value();
-        if cursor["rootId"] != root["id"] {
+        if parent.root_id.0 != root_id {
             return Ok(false);
         }
+        cursor_id = parent.id.0;
+        parent_id = parent.parent_id;
         depth += 1;
         if depth >= limit {
             return Ok(false);
@@ -1766,6 +1764,25 @@ mod resource_tests {
         )
         .expect("malformed live row");
         assert!(super::event_authorization_inputs(&db, "agent", vec![]).is_err());
+    }
+
+    #[tokio::test]
+    async fn delegation_uses_the_typed_parent_chain_and_depth_limit() {
+        use super::*;
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        store.transaction_with_error(|tx| {
+            let root = serde_json::from_str(r#"{"id":"lead","rootId":"lead","isLead":true,"epoch":0,"status":"idle","accountKey":"default","provider":"codex","compactions":0,"concurrency":32,"workerDefaults":{"delegationDepth":2}}"#).unwrap();
+            let child = serde_json::from_str(r#"{"id":"child","rootId":"lead","parentId":"lead","epoch":0,"status":"idle","accountKey":"default","provider":"codex","compactions":0}"#).unwrap();
+            let leaf = serde_json::from_str(r#"{"id":"leaf","rootId":"lead","parentId":"child","epoch":0,"status":"idle","accountKey":"default","provider":"codex","compactions":0}"#).unwrap();
+            for record in [&root, &child, &leaf] {
+                let agent: AgentRecord = serde::Deserialize::deserialize(record).unwrap();
+                AgentRepository::put(tx, &agent)?;
+            }
+            assert!(super::can_delegate(tx, &child, &root)?);
+            assert!(!super::can_delegate(tx, &leaf, &root)?);
+            Ok::<_, WorkerError>(())
+        }).await.unwrap();
     }
 
     #[test]
