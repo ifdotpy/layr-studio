@@ -85,31 +85,8 @@ pub fn text(value: &Value) -> &str {
     value.as_str().unwrap_or("None")
 }
 
-pub fn repair_checkpoint_cursor(state: &Value) -> StoreResult<(i64, i64)> {
-    let read = |field| {
-        state[field]
-            .as_i64()
-            .filter(|number| *number >= 0)
-            .ok_or(StoreError::RecordContract(
-                "invalid analytics repair cursor/end",
-            ))
-    };
-    Ok((read("cursor")?, read("end")?))
-}
-
 pub struct AnalyticsCaptureRepository;
 impl AnalyticsCaptureRepository {
-    pub fn metadata(db: &Connection, key: &str) -> StoreResult<Option<Value>> {
-        let raw: Option<String> = db
-            .query_row(
-                "SELECT value FROM analytics_meta WHERE key=?1",
-                [key],
-                |row| row.get(0),
-            )
-            .optional()?;
-        raw.map(|raw| serde_json::from_str(&raw).map_err(Into::into))
-            .transpose()
-    }
     /// Resolve legacy usage's explicit provenance or its referenced agent identity.
     /// Missing owners and malformed explicit provenance never select a provider.
     pub(crate) fn legacy_usage_provider(db: &Connection, row: &Value) -> StoreResult<ProviderKind> {
@@ -220,15 +197,13 @@ impl AnalyticsCaptureRepository {
     pub fn usage_response(
         db: &Connection,
         agent: &str,
-        thread: &Value,
-        response: &Value,
+        thread: Option<&str>,
+        response: &str,
     ) -> StoreResult<Option<Value>> {
         let raw: Option<String> = db
-            .query_row_cached(
-                USAGE_RESPONSE_SQL,
-                params![agent, thread.as_str(), response.as_str()],
-                |r| r.get(0),
-            )
+            .query_row_cached(USAGE_RESPONSE_SQL, params![agent, thread, response], |r| {
+                r.get(0)
+            })
             .optional()?;
         Self::usage_raw(raw)
     }
@@ -312,11 +287,11 @@ impl AnalyticsCaptureRepository {
     pub fn usage_prior(
         db: &Connection,
         agent: &str,
-        thread: &Value,
+        thread: Option<&str>,
         at: f64,
         domain: &str,
     ) -> StoreResult<Option<Value>> {
-        let raw: Option<String> = db.query_row_cached("SELECT record FROM analytics_usage WHERE agent=? AND thread IS ? AND at<=? AND json_extract(record,'$.counterDomain')=? ORDER BY at DESC,seq DESC LIMIT 1",params![agent,thread.as_str(),at,domain],|r|r.get(0)).optional()?;
+        let raw: Option<String> = db.query_row_cached("SELECT record FROM analytics_usage WHERE agent=? AND thread IS ? AND at<=? AND json_extract(record,'$.counterDomain')=? ORDER BY at DESC,seq DESC LIMIT 1",params![agent,thread,at,domain],|r|r.get(0)).optional()?;
         Self::usage_raw(raw)
     }
     fn usage_raw(raw: Option<String>) -> StoreResult<Option<Value>> {
@@ -327,11 +302,11 @@ impl AnalyticsCaptureRepository {
         })
         .transpose()
     }
-    pub fn last_limit(db: &Connection, account: &Value) -> StoreResult<Option<Value>> {
+    pub fn last_limit(db: &Connection, account: Option<&str>) -> StoreResult<Option<Value>> {
         let raw: Option<String> = db
             .query_row_cached(
                 "SELECT record FROM analytics_limits WHERE account=? ORDER BY at DESC LIMIT 1",
-                [account.as_str()],
+                [account],
                 |r| r.get(0),
             )
             .optional()?;

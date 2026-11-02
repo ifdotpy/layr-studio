@@ -37,6 +37,48 @@ fn started_turn() -> (Connection, Value) {
     (db, agent)
 }
 
+#[test]
+fn legacy_counter_capture_persists_one_unknown_receipt() {
+    let (mut db, mut agent) = fixture();
+    agent["provider"] = json!("claude");
+    let epoch = studio_runtime_schema::usage::ledger::LedgerEpoch::Legacy;
+    let params = json!({"threadId":"thread","tokenUsage":{"total":{"totalTokens":23},"last":{"totalTokens":7}}});
+    for _ in 0..2 {
+        let prepared = PreparedCapture::event(
+            &agent,
+            "thread/tokenUsage/updated",
+            &params,
+            10.,
+            200.,
+            CaptureSource::Live,
+            epoch,
+        )
+        .expect("capture");
+        let tx = db.transaction().expect("transaction");
+        let decision = decide(
+            CaptureSnapshot::load(&tx, prepared.into()).expect("snapshot"),
+            epoch,
+        )
+        .expect("decision");
+        decision.apply(&tx).expect("apply");
+        tx.commit().expect("commit");
+    }
+    let (count, record): (i64, String) = db.query_row("SELECT COUNT(*), MIN(value) FROM analytics_meta WHERE key LIKE 'unknownUsageReceipt:%'", [], |row| Ok((row.get(0)?,row.get(1)?))).expect("receipt");
+    assert_eq!(count, 1);
+    let record: Value = serde_json::from_str(&record).expect("receipt JSON");
+    assert_eq!(record["fault"], "unknownUsageReceipt");
+    assert_eq!(record["identity"]["agent"], agent["id"]);
+    assert!(
+        record["observationKey"]
+            .as_str()
+            .is_some_and(|key| !key.is_empty())
+    );
+    let usage_count: i64 = db
+        .query_row("SELECT COUNT(*) FROM analytics_usage", [], |row| row.get(0))
+        .expect("usage count");
+    assert_eq!(usage_count, 0);
+}
+
 fn capture(db: &mut Connection, agent: &Value, method: &str, params: Value, at: f64) {
     let prepared = PreparedCapture::event(
         agent,

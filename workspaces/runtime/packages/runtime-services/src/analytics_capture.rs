@@ -7,6 +7,7 @@ use crate::notification_dispatch::NotificationStreamMetrics;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::{Value, json};
 use std::sync::Arc;
+use studio_runtime_schema::json_compat::python_json_compact_serialized;
 use studio_runtime_schema::provider_kind::ProviderKind;
 use studio_runtime_schema::usage::ledger::{
     UsageCorrection, UsageIdentity, UsageLedgerRow, correction,
@@ -16,8 +17,9 @@ use studio_runtime_schema::usage::{
     parse_analytics_usage_row, parse_legacy_totals, parse_token_usage,
 };
 use studio_runtime_store::CachedSql;
+use studio_runtime_store::analytics::Notification;
 use studio_runtime_store::analytics_capture::{AnalyticsCaptureRepository as Repo, CaptureTable};
-use studio_runtime_store::{RuntimeStore, StoreError, python_json_compact, sha256_hex};
+use studio_runtime_store::{RuntimeStore, StoreError, sha256_hex};
 use thiserror::Error;
 
 pub const MAX_CAPTURE_BYTES: usize = 64 * 1024 * 1024;
@@ -66,7 +68,7 @@ pub struct PreparedCapture {
     legacy_usage: Option<LegacyUsageTotals>,
     rejected_usage: Option<studio_runtime_schema::usage::ledger::UsageReplayConflict>,
     ledger_since: studio_runtime_schema::usage::ledger::LedgerEpoch,
-    usage_unknown: bool,
+    unknown_usage_key: Option<String>,
 }
 impl PreparedCapture {
     pub fn event(
@@ -177,7 +179,7 @@ impl PreparedCapture {
             legacy_usage,
             rejected_usage: None,
             ledger_since,
-            usage_unknown: false,
+            unknown_usage_key: None,
         })
     }
     pub(crate) fn model_payload_shared(
@@ -236,10 +238,12 @@ impl PreparedCapture {
         epoch: studio_runtime_schema::usage::ledger::LedgerEpoch,
     ) -> Result<(), CaptureError> {
         self.ledger_since = epoch;
-        self.usage_unknown = unknown_usage_receipt(
+        self.unknown_usage_key = unknown_usage_receipt(
             analytics,
-            &self.agent,
-            &self.params,
+            text(&self.agent["id"]),
+            self.params["threadId"]
+                .as_str()
+                .or_else(|| self.agent["threadId"].as_str()),
             self.usage.as_ref(),
             self.legacy_usage.as_ref(),
         )?;
@@ -454,11 +458,11 @@ impl CaptureSnapshot {
             let id = usage_key(&meta, observation);
             rows.usage = Repo::read(db, CaptureTable::Usage, &id)?;
             if rows.usage.is_none() && prepared.legacy_counter_era() {
-                let old_id = hash(&json!([
-                    meta["agentId"],
-                    meta["threadId"],
-                    fingerprint(observation)
-                ]));
+                let old_id = hash(&(
+                    &meta["agentId"],
+                    &meta["threadId"],
+                    fingerprint(observation),
+                ));
                 rows.usage = Repo::read(db, CaptureTable::Usage, &old_id)?;
             }
             if let UsageObservation::Response { response_id, .. }
@@ -467,22 +471,22 @@ impl CaptureSnapshot {
                 let response = Repo::read(
                     db,
                     CaptureTable::Usage,
-                    &hash(&json!([meta["agentId"], response_id])),
+                    &hash(&(&meta["agentId"], response_id)),
                 )?;
                 rows.exact_response = match response {
                     Some(row) => Some(row),
                     None => Repo::usage_response(
                         db,
                         text(&meta["agentId"]),
-                        &meta["threadId"],
-                        &json!(response_id),
+                        meta["threadId"].as_str(),
+                        response_id,
                     )?,
                 };
             }
             rows.prior_usage = Repo::usage_prior(
                 db,
                 text(&meta["agentId"]),
-                &meta["threadId"],
+                meta["threadId"].as_str(),
                 prepared.at,
                 domain(observation),
             )?;
@@ -502,7 +506,7 @@ impl CaptureSnapshot {
             }
         }
         if prepared.method == "analytics/rateLimits" {
-            rows.last_limit = Repo::last_limit(db, &meta["accountKey"])?;
+            rows.last_limit = Repo::last_limit(db, meta["accountKey"].as_str())?;
         }
         Self::from_records(prepared, rows)
     }
@@ -517,14 +521,38 @@ pub struct ResponseRateAssociation {
 }
 #[derive(Default)]
 pub struct CaptureDecision {
-    pub unknown_usage: Option<Value>,
+    unknown_usage: Option<UnknownUsageReceipt>,
     pub usage_conflict: Option<studio_runtime_schema::usage::ledger::UsageReplayConflict>,
     pub rows: Vec<(CaptureTable, Value)>,
-    pub notifications: Vec<Value>,
+    notifications: Vec<Notification>,
     pub limit: Option<Value>,
     pub generation_roots: Vec<String>,
     pub response_rate: Option<ResponseRateAssociation>,
     pub response_replay_conflict: bool,
+}
+enum UnknownUsageOwner {
+    Agent(String),
+    Identity(UsageIdentity),
+}
+struct UnknownUsageReceipt {
+    owner: UnknownUsageOwner,
+    observation_key: String,
+}
+impl serde::Serialize for UnknownUsageReceipt {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(3))?;
+        match &self.owner {
+            UnknownUsageOwner::Agent(agent) => map.serialize_entry("agent", agent)?,
+            UnknownUsageOwner::Identity(identity) => map.serialize_entry("identity", identity)?,
+        }
+        map.serialize_entry("observationKey", &self.observation_key)?;
+        map.serialize_entry(
+            "fault",
+            studio_runtime_schema::usage::ledger::UNKNOWN_USAGE_RECEIPT,
+        )?;
+        map.end()
+    }
 }
 impl CaptureDecision {
     pub fn apply(&self, tx: &Transaction<'_>) -> Result<(), CaptureError> {
@@ -532,8 +560,8 @@ impl CaptureDecision {
             tx.execute_cached(
                 "INSERT INTO analytics_meta(key,value) VALUES (?1,?2) ON CONFLICT(key) DO NOTHING",
                 params![
-                    format!("unknownUsageReceipt:{}", text(&unknown["observationKey"])),
-                    unknown.to_string()
+                    format!("unknownUsageReceipt:{}", unknown.observation_key),
+                    python_json_compact_serialized(unknown).map_err(StoreError::from)?
                 ],
             )?;
         }
@@ -546,7 +574,9 @@ impl CaptureDecision {
                 &self
                     .usage_conflict
                     .as_ref()
-                    .map(|conflict| json!(conflict).to_string())
+                    .map(|conflict| {
+                        python_json_compact_serialized(conflict).expect("usage conflict serializes")
+                    })
                     .unwrap_or_else(|| {
                         "Response replay changed final usage; first evidence retained".into()
                     }),
@@ -556,7 +586,7 @@ impl CaptureDecision {
             Repo::write(tx, *table, row)?;
         }
         for n in &self.notifications {
-            tx.execute_cached("INSERT INTO analytics_notifications VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET count=count+excluded.count,bytes=bytes+excluded.bytes",params![n["id"].as_str(),n["agent"].as_str(),n["root"].as_str(),n["method"].as_str(),n["hour"].as_i64(),n["count"].as_i64().unwrap_or(1),n["bytes"].as_i64()])?;
+            tx.execute_cached("INSERT INTO analytics_notifications VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET count=count+excluded.count,bytes=bytes+excluded.bytes",params![n.id,n.agent,n.root,n.method,n.hour,n.count,n.bytes])?;
         }
         if let Some(n) = &self.limit {
             tx.execute_cached(
@@ -575,45 +605,36 @@ impl CaptureDecision {
     }
 }
 /// Primary-key-only lookup of durable zero-debit replay protection.
-pub(crate) fn unknown_usage_receipt(
+fn unknown_usage_receipt(
     analytics: &Connection,
-    agent: &Value,
-    params: &Value,
+    agent: &str,
+    thread: Option<&str>,
     usage: Option<&UsageObservation>,
     legacy: Option<&LegacyUsageTotals>,
-) -> Result<bool, StoreError> {
+) -> Result<Option<String>, StoreError> {
     let key = match usage {
-        Some(observation @ UsageObservation::Cumulative { .. }) => Some(
-            UsageLedgerRow::capture(
-                text(&agent["id"]),
-                params["threadId"]
-                    .as_str()
-                    .or_else(|| agent["threadId"].as_str()),
-                observation.clone(),
-            )
-            .observation_key(),
-        ),
+        Some(observation @ UsageObservation::Cumulative { .. }) => {
+            Some(UsageLedgerRow::capture(agent, thread, observation.clone()).observation_key())
+        }
         _ => legacy
             .filter(|legacy| legacy.response_id.is_none())
             .map(|legacy| {
                 studio_runtime_schema::usage::ledger::legacy_counter_observation_key(
-                    text(&agent["id"]),
-                    params["threadId"]
-                        .as_str()
-                        .or_else(|| agent["threadId"].as_str()),
-                    legacy,
+                    agent, thread, legacy,
                 )
             }),
     };
     key.map(|key| {
-        analytics.query_row(
-            "SELECT EXISTS(SELECT 1 FROM analytics_meta WHERE key=?1)",
-            [format!("unknownUsageReceipt:{key}")],
-            |row| row.get::<_, bool>(0),
-        )
+        analytics
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM analytics_meta WHERE key=?1)",
+                [format!("unknownUsageReceipt:{key}")],
+                |row| row.get::<_, bool>(0),
+            )
+            .map(|found| found.then_some(key))
     })
     .transpose()
-    .map(|found| found.unwrap_or(false))
+    .map(Option::flatten)
     .map_err(StoreError::from)
 }
 
@@ -686,16 +707,7 @@ pub(crate) fn capture_logged_effect(
     {
         prepared.rejected_usage = Some((**conflict).clone());
     }
-    if let Effect::Analytics { ledger_since, .. } = effect {
-        prepared.ledger_since = *ledger_since;
-    }
-    prepared.usage_unknown = unknown_usage_receipt(
-        tx,
-        &prepared.agent,
-        &prepared.params,
-        prepared.usage.as_ref(),
-        prepared.legacy_usage.as_ref(),
-    )?;
+    prepared.bind_budget(tx, epoch)?;
     let prepared = std::sync::Arc::new(prepared);
     let mut decision = decide(
         CaptureSnapshot::load(tx, std::sync::Arc::clone(&prepared))?,
@@ -782,16 +794,15 @@ fn apply_stream_metrics(
     decision.notifications = metrics
         .hours
         .iter()
-        .map(|hour| {
-            json!({
-                "id": python_json_compact(&json!([meta["agentId"], prepared.method, hour.hour])),
-                "agent": meta["agentId"],
-                "root": meta["rootId"],
-                "method": prepared.method,
-                "hour": hour.hour,
-                "count": hour.count,
-                "bytes": hour.encoded_bytes,
-            })
+        .map(|hour| Notification {
+            id: python_json_compact_serialized(&(&meta["agentId"], &prepared.method, hour.hour))
+                .expect("notification identity serializes"),
+            agent: meta["agentId"].as_str().map(str::to_owned),
+            root: meta["rootId"].as_str().map(str::to_owned),
+            method: Some(prepared.method.clone()),
+            hour: i64::try_from(hour.hour).ok(),
+            count: i64::try_from(hour.count).unwrap_or(1),
+            bytes: i64::try_from(hour.encoded_bytes).ok(),
         })
         .collect();
 
@@ -825,8 +836,8 @@ fn apply_stream_metrics(
     }
 }
 
-/// The compact JSON length of `value` in bytes, counted without building the text.
-pub(crate) fn encoded_len(value: &Value) -> usize {
+/// The serialized JSON length in bytes, counted without building the text.
+pub(crate) fn encoded_len(value: &(impl serde::Serialize + ?Sized)) -> usize {
     struct Count(usize);
     impl std::io::Write for Count {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
@@ -838,24 +849,16 @@ pub(crate) fn encoded_len(value: &Value) -> usize {
         }
     }
     let mut count = Count(0);
-    serde_json::to_writer(&mut count, value).expect("JSON values serialize");
+    serde_json::to_writer(&mut count, value).expect("analytics values serialize");
     count.0
 }
 
-/// The identity fields of a stored agent that a capture must still match.
-/// Thread null and absence are equivalent; account and epoch preserve exact identity.
 #[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct CaptureIdentity {
-    #[serde(rename = "threadId", default)]
     thread_id: Option<String>,
-    #[serde(rename = "accountKey", default, deserialize_with = "present")]
-    account_key: Option<Value>,
-    #[serde(default, deserialize_with = "present")]
-    epoch: Option<Value>,
-}
-
-fn present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Value>, D::Error> {
-    <Value as serde::Deserialize>::deserialize(deserializer).map(Some)
+    account_key: Option<String>,
+    epoch: Option<i64>,
 }
 
 /// Check agent identities on a Canvas read snapshot before the analytics commit. The
@@ -887,10 +890,10 @@ pub(crate) fn check_identity(canvas: &Connection, agent: &Value) -> Result<(), C
         .transpose()?
         .ok_or(CaptureError::StaleIdentity)?;
     let expected: CaptureIdentity =
-        serde::Deserialize::deserialize(agent.clone()).map_err(StoreError::from)?;
+        serde::Deserialize::deserialize(agent).map_err(StoreError::from)?;
     if current.thread_id != expected.thread_id
-        || current.account_key.as_ref() != agent.get("accountKey")
-        || current.epoch.as_ref() != agent.get("epoch")
+        || current.account_key != expected.account_key
+        || current.epoch != expected.epoch
     {
         return Err(CaptureError::StaleIdentity);
     }
@@ -938,9 +941,16 @@ pub fn decide(
     result.rows.push((CaptureTable::Agents, agent));
     if q.source == CaptureSource::Live && !q.model {
         let hour = (at / 3600.).floor() as i64 * 3600;
-        result.notifications.push(
-            json!({"id":python_json_compact(&json!([q.agent["id"],method,hour])),"agent":q.agent["id"],"root":meta["rootId"],"method":method,"hour":hour,"count":1,"bytes":p.to_string().len()}),
-        );
+        result.notifications.push(Notification {
+            id: python_json_compact_serialized(&(&q.agent["id"], method, hour))
+                .expect("notification identity serializes"),
+            agent: q.agent["id"].as_str().map(str::to_owned),
+            root: meta["rootId"].as_str().map(str::to_owned),
+            method: Some(method.to_owned()),
+            hour: Some(hour),
+            count: 1,
+            bytes: i64::try_from(p.to_string().len()).ok(),
+        });
     }
     if method == "thread/tokenUsage/updated" {
         let provider = ProviderKind::of_record(&q.agent)
@@ -1049,7 +1059,7 @@ pub fn decide(
             legacy_usage: q.legacy_usage.clone(),
             rejected_usage: q.rejected_usage.clone(),
             ledger_since: q.ledger_since,
-            usage_unknown: q.usage_unknown,
+            unknown_usage_key: q.unknown_usage_key.clone(),
         };
         let recursive = decide(
             CaptureSnapshot::from_records(std::sync::Arc::new(next), rows)?,
@@ -1380,8 +1390,12 @@ fn timestamp_source(q: &PreparedCapture) -> Value {
             "record"
         }))
 }
-fn hash(v: &Value) -> String {
-    sha256_hex(python_json_compact(v).as_bytes())
+fn hash(v: &impl serde::Serialize) -> String {
+    sha256_hex(
+        python_json_compact_serialized(v)
+            .expect("identity serializes")
+            .as_bytes(),
+    )
 }
 
 fn domain(observation: &UsageObservation) -> &'static str {
@@ -1399,7 +1413,7 @@ fn domain(observation: &UsageObservation) -> &'static str {
     }
 }
 fn fingerprint(observation: &UsageObservation) -> String {
-    hash(&json!(observation))
+    hash(observation)
 }
 fn usage_key(meta: &Value, observation: &UsageObservation) -> String {
     match UsageIdentity::new(
@@ -1409,9 +1423,9 @@ fn usage_key(meta: &Value, observation: &UsageObservation) -> String {
     ) {
         UsageIdentity::Response { agent, response_id } => {
             if matches!(observation, UsageObservation::Gap { .. }) {
-                hash(&json!([agent, "gap", response_id]))
+                hash(&(agent, "gap", response_id))
             } else {
-                hash(&json!([agent, response_id]))
+                hash(&(agent, response_id))
             }
         }
         UsageIdentity::Cumulative { .. } => UsageLedgerRow::capture(
@@ -1440,7 +1454,7 @@ fn legacy_usage_key(meta: &Value, legacy: &LegacyUsageTotals, params: &Value) ->
 }
 fn old_legacy_usage_key(meta: &Value, legacy: &LegacyUsageTotals, params: &Value) -> String {
     if let Some(response) = &legacy.response_id {
-        return hash(&json!([meta["agentId"], response]));
+        return hash(&(&meta["agentId"], response));
     }
     let identity = studio_runtime_schema::usage::legacy_notice_identity(
         text(&meta["agentId"]),
@@ -1465,10 +1479,11 @@ fn usage(
     rows: &CaptureRows,
     out: &mut CaptureDecision,
 ) {
-    if q.usage_unknown {
-        out.unknown_usage = Some(
-            json!({"agent":meta["agentId"],"observationKey":q.usage.as_ref().map(|observation|UsageLedgerRow::capture(text(&meta["agentId"]),meta["threadId"].as_str(),observation.clone()).observation_key()).or_else(||q.legacy_usage.as_ref().map(|legacy|legacy_usage_key(meta,legacy,&q.params))),"fault":studio_runtime_schema::usage::ledger::UNKNOWN_USAGE_RECEIPT}),
-        );
+    if let Some(observation_key) = &q.unknown_usage_key {
+        out.unknown_usage = Some(UnknownUsageReceipt {
+            owner: UnknownUsageOwner::Agent(text(&meta["agentId"]).to_owned()),
+            observation_key: observation_key.clone(),
+        });
         return;
     }
     if let Some(conflict) = &q.rejected_usage {
@@ -1482,9 +1497,14 @@ fn usage(
                 return;
             }
             if q.legacy_counter_era() {
-                out.unknown_usage = Some(
-                    json!({"identity":UsageIdentity::Cumulative {agent:text(&meta["agentId"]).into(),thread_id:meta["threadId"].as_str().map(str::to_owned),scope:legacy.scope},"observationKey":legacy_usage_key(meta,legacy,&q.params),"fault":studio_runtime_schema::usage::ledger::UNKNOWN_USAGE_RECEIPT}),
-                );
+                out.unknown_usage = Some(UnknownUsageReceipt {
+                    owner: UnknownUsageOwner::Identity(UsageIdentity::Cumulative {
+                        agent: text(&meta["agentId"]).into(),
+                        thread_id: meta["threadId"].as_str().map(str::to_owned),
+                        scope: legacy.scope,
+                    }),
+                    observation_key: legacy_usage_key(meta, legacy, &q.params),
+                });
                 return;
             }
             let mut last = json!({});
@@ -1540,9 +1560,10 @@ fn usage(
             meta["threadId"].as_str(),
             observation,
         );
-        out.unknown_usage = Some(
-            json!({"identity":ledger.usage_identity(),"observationKey":ledger.observation_key(),"fault":studio_runtime_schema::usage::ledger::UNKNOWN_USAGE_RECEIPT}),
-        );
+        out.unknown_usage = Some(UnknownUsageReceipt {
+            owner: UnknownUsageOwner::Identity(ledger.usage_identity().clone()),
+            observation_key: ledger.observation_key(),
+        });
         return;
     }
     if let Some(previous) = existing
@@ -1707,7 +1728,7 @@ pub async fn capture_limit(
     }
     store
         .analytics_projection_transaction(move |tx| {
-            let previous = Repo::last_limit(tx, &json!(account))?;
+            let previous = Repo::last_limit(tx, Some(&account))?;
             if previous.as_ref().map(limit_content) != Some(limit_content(&value)) {
                 tx.execute_cached(
                     "INSERT INTO analytics_limits(account,at,record) VALUES (?,?,?)",
@@ -1722,6 +1743,99 @@ pub async fn capture_limit(
 #[cfg(test)]
 mod usage_contract_tests {
     use super::*;
+
+    #[test]
+    fn unknown_receipt_reuses_the_exact_lookup_key() {
+        let agent: Value = serde_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"claude","accountKey":"default","threadId":"thread"}"#).expect("agent");
+        let params: Value = serde_json::from_str(
+            r#"{"threadId":"","tokenUsage":{"total":{"totalTokens":23},"last":{"totalTokens":7}}}"#,
+        )
+        .expect("params");
+        let epoch = studio_runtime_schema::usage::ledger::LedgerEpoch::Current;
+        let mut prepared = PreparedCapture::event(
+            &agent,
+            "thread/tokenUsage/updated",
+            &params,
+            1.,
+            2.,
+            CaptureSource::Live,
+            epoch,
+        )
+        .expect("capture");
+        let legacy = prepared.legacy_usage.as_ref().expect("legacy usage");
+        let key = studio_runtime_schema::usage::ledger::legacy_counter_observation_key(
+            "agent",
+            Some(""),
+            legacy,
+        );
+        let db = Connection::open_in_memory().expect("database");
+        db.execute_batch("CREATE TABLE analytics_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+            .expect("table");
+        db.execute(
+            "INSERT INTO analytics_meta VALUES (?1,'{}')",
+            [format!("unknownUsageReceipt:{key}")],
+        )
+        .expect("receipt");
+        prepared.bind_budget(&db, epoch).expect("bind");
+        let decision = decide(
+            CaptureSnapshot::from_records(Arc::new(prepared), CaptureRows::default())
+                .expect("snapshot"),
+            epoch,
+        )
+        .expect("decision");
+        assert_eq!(
+            decision
+                .unknown_usage
+                .expect("unknown receipt")
+                .observation_key,
+            key
+        );
+    }
+
+    #[test]
+    fn unknown_usage_receipts_preserve_both_stored_shapes() {
+        let receipts = [
+            (
+                UnknownUsageReceipt {
+                    owner: UnknownUsageOwner::Agent("agent".into()),
+                    observation_key: "key".into(),
+                },
+                r#"{"agent":"agent","fault":"unknownUsageReceipt","observationKey":"key"}"#,
+            ),
+            (
+                UnknownUsageReceipt {
+                    owner: UnknownUsageOwner::Identity(UsageIdentity::Cumulative {
+                        agent: "agent".into(),
+                        thread_id: Some("thread".into()),
+                        scope: UsageScope::CodexThread,
+                    }),
+                    observation_key: "key".into(),
+                },
+                r#"{"fault":"unknownUsageReceipt","identity":{"agent":"agent","kind":"cumulative","scope":"codexThread","threadId":"thread"},"observationKey":"key"}"#,
+            ),
+        ];
+        for (receipt, expected) in receipts {
+            assert_eq!(
+                python_json_compact_serialized(&receipt).expect("serialize"),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn typed_usage_identity_keeps_legacy_hash() {
+        let raw = r#"{"kind":"response","responseId":"résponse","model":"model","evidence":"live","tokens":{"uncachedInput":10,"cacheReadInput":3,"cacheWriteInput":2,"output":7}}"#;
+        let observation: UsageObservation = serde_json::from_str(raw).expect("usage observation");
+        assert_eq!(
+            fingerprint(&observation),
+            "652b1851ea247a0d6b76e1b383f4b9cc7c8478f08e0b49bca10106359c03961d"
+        );
+        let tuple = ("agent", "résponse");
+        assert_eq!(
+            hash(&tuple),
+            "bc48ea7cafb6dacb4f868dfa49767e025ab93a46e29130ae86152884c4a85524"
+        );
+    }
 
     #[test]
     fn provider_identity_invalid_capture_is_refused() {
@@ -1937,6 +2051,28 @@ mod usage_contract_tests {
 #[cfg(test)]
 mod identity_read_tests {
     use super::*;
+
+    #[test]
+    fn identity_check_rejects_stale_account_and_epoch() {
+        let db = Connection::open_in_memory().expect("database");
+        db.execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL)")
+            .expect("table");
+        let current = r#"{"id":"agent","rootId":"agent","status":"idle","accountKey":"account","epoch":3,"threadId":"thread"}"#;
+        db.execute("INSERT INTO runtime_agents VALUES ('agent',?1)", [current])
+            .expect("agent");
+        let agent: Value = serde_json::from_str(current).expect("agent fixture");
+        assert!(check_identity(&db, &agent).is_ok());
+        for stale in [
+            r#"{"id":"agent","rootId":"agent","status":"idle","accountKey":"other","epoch":3,"threadId":"thread"}"#,
+            r#"{"id":"agent","rootId":"agent","status":"idle","accountKey":"account","epoch":2,"threadId":"thread"}"#,
+        ] {
+            let agent: Value = serde_json::from_str(stale).expect("stale agent fixture");
+            assert!(matches!(
+                check_identity(&db, &agent),
+                Err(CaptureError::StaleIdentity)
+            ));
+        }
+    }
 
     #[tokio::test]
     async fn identity_check_reads_a_snapshot_and_takes_no_writer_admission() {
