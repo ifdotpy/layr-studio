@@ -559,7 +559,7 @@ impl CaptureDecision {
                 "INSERT INTO analytics_meta(key,value) VALUES (?1,?2) ON CONFLICT(key) DO NOTHING",
                 params![
                     format!("unknownUsageReceipt:{}", unknown.observation_key),
-                    serde_json::to_string(unknown).map_err(StoreError::from)?
+                    python_json_compact_serialized(unknown).map_err(StoreError::from)?
                 ],
             )?;
         }
@@ -1798,11 +1798,10 @@ mod usage_contract_tests {
             ),
         ];
         for (receipt, expected) in receipts {
-            let actual: Value =
-                serde_json::from_str(&serde_json::to_string(&receipt).expect("serialize"))
-                    .expect("JSON");
-            let expected: Value = serde_json::from_str(expected).expect("expected JSON");
-            assert_eq!(actual, expected);
+            assert_eq!(
+                python_json_compact_serialized(&receipt).expect("serialize"),
+                expected
+            );
         }
     }
 
@@ -1810,13 +1809,15 @@ mod usage_contract_tests {
     fn typed_usage_identity_keeps_legacy_hash() {
         let raw = r#"{"kind":"response","responseId":"résponse","model":"model","evidence":"live","tokens":{"uncachedInput":10,"cacheReadInput":3,"cacheWriteInput":2,"output":7}}"#;
         let observation: UsageObservation = serde_json::from_str(raw).expect("usage observation");
-        let value: Value =
-            serde_json::from_str(&serde_json::to_string(&observation).expect("JSON"))
-                .expect("legacy JSON value");
-        assert_eq!(fingerprint(&observation), hash(&value));
+        assert_eq!(
+            fingerprint(&observation),
+            "652b1851ea247a0d6b76e1b383f4b9cc7c8478f08e0b49bca10106359c03961d"
+        );
         let tuple = ("agent", "résponse");
-        let old: Value = serde_json::from_str(r#"["agent","résponse"]"#).expect("identity JSON");
-        assert_eq!(hash(&tuple), hash(&old));
+        assert_eq!(
+            hash(&tuple),
+            "bc48ea7cafb6dacb4f868dfa49767e025ab93a46e29130ae86152884c4a85524"
+        );
     }
 
     #[test]
