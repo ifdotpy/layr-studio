@@ -12,6 +12,11 @@ use process_wrap::std::ProcessGroup;
 use process_wrap::std::{ChildWrapper, CommandWrap};
 use studio_runtime_process::child_priority::ChildPriority;
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static TEST_TIMEOUT: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+}
+
 // Each test thread can expire one pipe-drain deadline after leader exit.
 // This seam is absent from production builds and leaves termination unchanged.
 #[cfg(test)]
@@ -131,6 +136,8 @@ fn run_with_environment(request: Request<'_>, remove_git: bool) -> Result<Output
         stderr_limit,
         timeout,
     } = request;
+    #[cfg(test)]
+    TEST_TIMEOUT.set(Some(timeout));
     let deadline = Instant::now() + timeout;
     let mut command = Command::new(program);
     if remove_git {

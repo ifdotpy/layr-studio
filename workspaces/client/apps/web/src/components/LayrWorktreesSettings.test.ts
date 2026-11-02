@@ -1,0 +1,70 @@
+import { MantineProvider } from "@mantine/core";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { beforeEach, expect, it, vi } from "vitest";
+
+const fixture = vi.hoisted(() => ({ configuration: null as unknown }));
+vi.mock("react", async (original) => ({
+  ...(await original<typeof import("react")>()),
+  useState: (initial: unknown) => [
+    initial === null ? fixture.configuration : initial,
+    vi.fn(),
+  ],
+  useEffect: () => {},
+}));
+vi.mock("../servers/ServerServicesContext", () => ({
+  useServerApi: () => ({ get: vi.fn() }),
+}));
+import { LayrWorktreesSettings } from "./LayrWorktreesSettings";
+import { studioSettingsTabs } from "./StudioSettingsTabs";
+
+beforeEach(() => {
+  fixture.configuration = null;
+});
+function render(configuration: unknown) {
+  fixture.configuration = configuration;
+  return renderToStaticMarkup(
+    createElement(
+      MantineProvider,
+      null,
+      createElement(LayrWorktreesSettings, { active: true }),
+    ),
+  );
+}
+it("lists the settings tab and displays the installed version and store", () => {
+  expect(studioSettingsTabs).toContainEqual([
+    "layr-worktrees",
+    "Layr & worktrees",
+  ]);
+  const html = render({
+    version: { version: "0.14.2", build: "a6879be" },
+    storeRoot: "/store",
+  });
+  expect(html).toContain("0.14.2 (a6879be)");
+  expect(html).toContain("/store");
+  expect(html).toContain("Worktrees");
+});
+it("displays the missing binary", () => {
+  expect(render({ version: null, storeRoot: "/store" })).toContain(
+    "Not installed",
+  );
+});
+it("displays an unavailable version and the inspection error", () => {
+  const html = render({
+    version: null,
+    storeRoot: "/store",
+    error: "Inspection failed",
+  });
+  expect(html).toContain("Unavailable");
+  expect(html).toContain("Inspection failed");
+  expect(html).not.toContain("Not installed");
+});
+it("displays the store error", () => {
+  const html = render({
+    version: null,
+    storeRoot: null,
+    error: "Invalid settings",
+  });
+  expect(html).toContain("Unavailable");
+  expect(html).toContain("Invalid settings");
+});

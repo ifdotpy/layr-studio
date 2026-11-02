@@ -27,6 +27,8 @@ pub enum NativeLayrError {
 
 type Result<T> = std::result::Result<T, NativeLayrError>;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
+/// Deadline for the potentially long first import, in seconds (24 hours).
+const IMPORT_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 const OUTPUT_BYTES: usize = 2 * 1024 * 1024;
 
 // Receipt intent and result are opaque evidence; status controls replay only.
@@ -170,7 +172,11 @@ pub(super) fn run_with_binary(
         input: None,
         stdout_limit: OUTPUT_BYTES,
         stderr_limit: OUTPUT_BYTES,
-        timeout: COMMAND_TIMEOUT,
+        timeout: if args.first() == Some(&"init") {
+            IMPORT_TIMEOUT
+        } else {
+            COMMAND_TIMEOUT
+        },
     })
     .map_err(|error| match error {
         ChildError::Failed(detail) => NativeLayrError::Refused(format!(
@@ -580,6 +586,8 @@ pub(super) fn prepare_files_with_git_policy(
                 if staging.path().join(".git").is_dir() {
                     super::import::validate_private_git(staging.path())?;
                 }
+                // A client error does not prove the daemon stopped reading the source.
+                let staging = staging.keep();
                 run_in_store(
                     state_dir,
                     &root,
@@ -588,9 +596,30 @@ pub(super) fn prepare_files_with_git_policy(
                         "init",
                         &project,
                         "--from",
-                        staging.path().to_str().unwrap_or_default(),
+                        staging.to_str().unwrap_or_default(),
                     ],
-                )?;
+                )
+                .map_err(|error| {
+                    let retained = format!(
+                        " The import staging folder {} is retained; see docs/native-layr.md.",
+                        staging.display()
+                    );
+                    match error {
+                        NativeLayrError::Unknown(message) => {
+                            NativeLayrError::Unknown(format!("{message}{retained}"))
+                        }
+                        NativeLayrError::Refused(message) => {
+                            NativeLayrError::Refused(format!("{message}{retained}"))
+                        }
+                        other @ (NativeLayrError::Io(_)
+                        | NativeLayrError::Store(_)
+                        | NativeLayrError::Worker) => {
+                            NativeLayrError::Refused(format!("{other}{retained}"))
+                        }
+                    }
+                })?;
+                run(state_dir, &main, &["git", "remote", "remove", "local"])?;
+                fs::remove_dir_all(staging)?;
                 run(state_dir, &main, &["protect", "main", "--direct"])?;
                 if plan.restore_directory_attributes(&main)? {
                     save_imported_tree(state_dir, &main, "Preserve imported directory attributes")?;
@@ -1034,6 +1063,116 @@ pub(crate) fn stage_turn_save(
 #[cfg(test)]
 mod review_tests {
     use super::*;
+
+    /// Linux preparation checks the daemon identity before an import.
+    #[cfg(target_os = "linux")]
+    fn fixture_daemon(state: &Path) -> std::thread::JoinHandle<()> {
+        let socket = super::super::selected_socket_path(state).unwrap();
+        fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        super::super::versions::serve_daemon_identity(
+            &socket,
+            br#"{"format":1,"version":"0.14.2","build":"fixture"}"#,
+        )
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn successful_import_removes_staging_remote() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = tempfile::tempdir().unwrap();
+        let state = fixture.path().join("state");
+        let source = fixture.path().join("source");
+        fs::create_dir_all(&state).unwrap();
+        fs::create_dir_all(&source).unwrap();
+        let binary = fixture.path().join("layr");
+        let script = format!(
+            r#"#!/bin/sh
+case "$*" in
+  *store-version*) printf '%s\n' '{{"binary":{{"format":1,"version":"0.14.2","build":"fixture"}},"store":null,"compatible":true,"state":"compatible"}}' ;;
+  *' init '*) while [ "$1" != "init" ]; do shift; done; mkdir -p "$LAYR_ROOT/projects/$2/lines/main" ;;
+  *' git remote remove local') touch '{}' ;;
+esac
+"#,
+            fixture.path().join("removed").display()
+        );
+        fs::write(&binary, script).unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o700)).unwrap();
+        super::super::capability::TEST_BINARY.with(|value| *value.borrow_mut() = Some(binary));
+        #[cfg(target_os = "linux")]
+        let _daemon = fixture_daemon(&state);
+        let mut record = json!({"id":"lead","isLead":true,"autoWake":true});
+        super::super::configure_new_chat(&mut record, source.to_str().unwrap());
+        prepare_files(&state, &record).expect("fixture import succeeds");
+        assert!(
+            fixture.path().join("removed").exists(),
+            "staging remote was not removed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_import_keeps_staging_for_a_daemon_still_reading() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = tempfile::tempdir().unwrap();
+        let state = fixture.path().join("state");
+        let source = fixture.path().join("source");
+        fs::create_dir_all(&state).unwrap();
+        fs::create_dir_all(&source).unwrap();
+        let binary = fixture.path().join("layr");
+        let script = format!(
+            r#"#!/bin/sh
+case "$*" in
+  *store-version*) printf '%s\n' '{{"binary":{{"format":1,"version":"0.14.2","build":"fixture"}},"store":null,"compatible":true,"state":"compatible"}}' ;;
+  *' init '*) while [ "$1" != "--from" ]; do shift; done; printf '%s' "$2" > '{}'; exit 1 ;;
+esac
+"#,
+            fixture.path().join("staging-path").display()
+        );
+        fs::write(&binary, script).unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o700)).unwrap();
+        super::super::capability::TEST_BINARY.with(|value| *value.borrow_mut() = Some(binary));
+        #[cfg(target_os = "linux")]
+        let _daemon = fixture_daemon(&state);
+        let mut record = json!({"id":"lead","isLead":true,"autoWake":true});
+        super::super::configure_new_chat(&mut record, source.to_str().unwrap());
+        let error = prepare_files(&state, &record).unwrap_err();
+        let path = fs::read_to_string(fixture.path().join("staging-path")).expect("init reached");
+        assert!(
+            error.to_string().contains(&path),
+            "error must name retained staging: {error}"
+        );
+        assert!(
+            Path::new(&path).is_dir(),
+            "staging disappeared after client error"
+        );
+    }
+
+    #[test]
+    fn import_has_a_longer_deadline_than_regular_commands() {
+        let state = tempfile::tempdir().unwrap();
+        run_with_binary(
+            state.path(),
+            state.path(),
+            state.path(),
+            &["init", "project", "--from", "/source"],
+            Path::new("/bin/true"),
+        )
+        .unwrap();
+        let import = bounded_child::TEST_TIMEOUT.get().unwrap();
+        run_with_binary(
+            state.path(),
+            state.path(),
+            state.path(),
+            &["status"],
+            Path::new("/bin/true"),
+        )
+        .unwrap();
+        let regular = bounded_child::TEST_TIMEOUT.get().unwrap();
+        assert!(
+            import > regular,
+            "import and regular commands both use {regular:?}"
+        );
+    }
     #[cfg(target_os = "macos")]
     #[test]
     fn failed_import_discards_only_its_private_project_before_retry() {

@@ -5,10 +5,10 @@ use std::time::Duration;
 type Result<T> = std::result::Result<T, NativeLayrError>;
 
 #[derive(serde::Deserialize)]
-struct Identity {
+pub struct Identity {
     format: u64,
-    version: String,
-    build: String,
+    pub version: String,
+    pub build: String,
 }
 #[derive(serde::Deserialize)]
 struct Inspection {
@@ -39,6 +39,11 @@ fn inspect(binary: &Path, root: &Path) -> Result<Inspection> {
         stdout_limit: 16 * 1024, stderr_limit: 4096, timeout: Duration::from_secs(10),
     }).map_err(|e| NativeLayrError::Refused(format!("Cannot inspect Layr at {} for store {root}: {e:?}. Upgrade this binary to the Studio Layr release; see docs/native-layr.md.", binary.display())))?;
     serde_json::from_slice(&result.stdout.bytes).map_err(|e| NativeLayrError::Refused(format!("Layr at {} has no valid store-version response for {root}: {e}. Upgrade this binary; see docs/native-layr.md.", binary.display())))
+}
+
+/// Read the identity reported by the same bounded store inspection used for verification.
+pub fn binary_version(binary: &Path, root: &Path) -> Result<Identity> {
+    Ok(inspect(binary, root)?.binary)
 }
 
 pub(super) fn verify(state: &Path, root: &Path) -> Result<Option<String>> {
@@ -183,6 +188,29 @@ fn check_daemon_identity(client: &Identity, daemon: &Identity) -> std::result::R
     Ok(())
 }
 
+/// Test daemon: answers one version handshake (Layr `src/service.rs` `negotiate`) with `identity`.
+#[cfg(all(test, target_os = "linux"))]
+pub(super) fn serve_daemon_identity(
+    socket: &Path,
+    identity: &'static [u8],
+) -> std::thread::JoinHandle<()> {
+    use std::io::{Read, Write};
+    let listener = std::os::unix::net::UnixListener::bind(socket).expect("listener");
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let mut length = [0; 4];
+        stream.read_exact(&mut length).expect("length");
+        let mut request = vec![0; u32::from_be_bytes(length) as usize];
+        stream.read_exact(&mut request).expect("request");
+        assert_eq!(request, br#"{"hello":true}"#);
+        stream.write_all(b"V").expect("kind");
+        stream
+            .write_all(&(identity.len() as u32).to_be_bytes())
+            .expect("length");
+        stream.write_all(identity).expect("response");
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,27 +218,10 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn daemon_handshake_reads_identity_without_a_command() {
-        use std::io::{Read, Write};
-        use std::os::unix::net::UnixListener;
         let dir = tempfile::tempdir().expect("socket directory");
         let path = dir.path().join("socket");
-        let listener = UnixListener::bind(&path).expect("listener");
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept");
-            let mut length = [0; 4];
-            stream.read_exact(&mut length).expect("length");
-            let mut request = vec![0; u32::from_be_bytes(length) as usize];
-            stream.read_exact(&mut request).expect("request");
-            assert_eq!(request, br#"{"hello":true}"#);
-            let response = br#"{"format":1,"version":"0.11.0","build":"old"}"#;
-            stream.write_all(b"V").expect("kind");
-            stream
-                .write_all(&(response.len() as u32).to_be_bytes())
-                .expect("length");
-            stream.write_all(response).expect("response");
-            let mut end = [0];
-            assert_eq!(stream.read(&mut end).expect("closed"), 0);
-        });
+        let server =
+            serve_daemon_identity(&path, br#"{"format":1,"version":"0.11.0","build":"old"}"#);
         let daemon = daemon_identity(&path).expect("identity");
         assert_eq!(daemon.version, "0.11.0");
         server.join().expect("server");
