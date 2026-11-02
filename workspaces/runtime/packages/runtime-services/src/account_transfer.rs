@@ -727,7 +727,13 @@ impl Snapshot {
                                 .clone()
                                 .map(studio_runtime_store::NativeFailureHold::Boolean);
                             restore_source_field(&hold, &mut a.native_failure_hold, exact);
-                            if let Some(status) = source.status.value() {
+                            // Input queued during the hold sets `queued`; keep it so the
+                            // pending input is claimable after the cancel.
+                            if let Some(status) = source
+                                .status
+                                .value()
+                                .filter(|_| a.status != studio_runtime_store::AgentStatus::Queued)
+                            {
                                 a.status = status.clone();
                             }
                         }
