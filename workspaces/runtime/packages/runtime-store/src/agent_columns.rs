@@ -101,10 +101,9 @@ const PROVIDER_COLUMN: AgentColumn =
 
 /// The indexed agent fields; see the module documentation. Changing this list
 /// changes the table and needs a new dated migration.
-pub const AGENT_COLUMNS: [AgentColumn; 34] = [
+pub const AGENT_COLUMNS: [AgentColumn; 31] = [
     column("root_id", "TEXT", "record->>'$.rootId'", ""),
     column("parent_id", "TEXT", "record->>'$.parentId'", ""),
-    column("status", "TEXT", "record->>'$.status'", ""),
     column(
         "account_key",
         "TEXT",
@@ -114,7 +113,6 @@ pub const AGENT_COLUMNS: [AgentColumn; 34] = [
     PROVIDER_COLUMN,
     column("role", "TEXT", "record->>'$.role'", ""),
     column("deleted_at", "", "record->>'$.deletedAt'", ""),
-    column("turn_id", "TEXT", "record->>'$.turnId'", ""),
     column("cwd", "TEXT", "record->>'$.cwd'", ""),
     column(
         "workspace_operation",
@@ -122,7 +120,6 @@ pub const AGENT_COLUMNS: [AgentColumn; 34] = [
         "record->>'$.workspaceOperation'",
         "",
     ),
-    column("in_flight", "INTEGER", "record->>'$.inFlight'", ""),
     column("remote_worker", "", "record->>'$.remoteWorker'", ""),
     column("remote_anchor", "", "record->>'$.remoteAnchor'", ""),
     column(
@@ -431,6 +428,9 @@ mod tests {
             "capacity_retry_status",
             "capacity_retry_due_at",
             "start_attempt_action",
+            "status",
+            "in_flight",
+            "turn_id",
         ] {
             let exists: bool = connection.query_row(
                 "SELECT EXISTS(SELECT 1 FROM pragma_table_xinfo('runtime_agents') WHERE name=?1)",
@@ -459,7 +459,10 @@ mod tests {
                 .query_map([], |row| row.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
             let old_table = table_sql("runtime_agents_legacy_start_fixture").replace(
                 "record TEXT NOT NULL",
-                "auto_wake AS (record->>'$.autoWake') STORED,\
+                "status AS (record->>'$.status') STORED,\
+                 turn_id AS (record->>'$.turnId') STORED,\
+                 in_flight AS (record->>'$.inFlight') STORED,\
+                 auto_wake AS (record->>'$.autoWake') STORED,\
                  thread_id AS (record->>'$.threadId') STORED,\
                  start_attempt_submitted AS (record->>'$.startAttempt.submitted') STORED,\
                  start_attempt_connection_generation AS (record->>'$.startAttempt.connectionGeneration') STORED,\
@@ -543,7 +546,7 @@ mod tests {
             )
             .expect("agent updates");
         let status: String = connection
-            .query_row("SELECT status FROM runtime_agents", [], |row| row.get(0))
+            .query_row("SELECT record->>'$.status' FROM runtime_agents", [], |row| row.get(0))
             .expect("columns");
         assert_eq!(status, "queued");
         connection

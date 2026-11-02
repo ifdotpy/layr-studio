@@ -1,6 +1,6 @@
 use super::*;
 use crate::CachedSql;
-use crate::domain::{chat_busy_sql, chat_status_sql};
+use crate::domain::{chat_busy_sql, chat_status_sql, unfinished_provider_turn_sql};
 use std::sync::LazyLock;
 
 #[derive(serde::Serialize, serde::Deserialize, PartialEq)]
@@ -116,31 +116,18 @@ fn saved_identity(saved: &crate::ExecutionAttempt) -> StoreResult<Vec<InputIdent
         .map_err(|_| invalid())
 }
 
-/// `_v5` removes the obsolete capacity-start predicate. The 2026-10-21
-/// migration drops v4 before removing its generated column.
-const ACCOUNT_WAKE_INDEX: &str = "runtime_agent_account_wake_candidates_v6";
+/// `_v7` drops the agent status, in-flight and turn terms: the agent columns
+/// that were retired are read through the chat and turn rows (`domain`).
+const ACCOUNT_WAKE_INDEX: &str = "runtime_agent_account_wake_candidates_v7";
 
-/// Owns the agent-only superset of all rows the account wake page may return.
-/// Event existence and invalid-agent hold receipts are checked after this
-/// indexed candidate selection because SQLite partial indexes cannot use them.
-/// Each predicate reads the agent columns of the `runtime_agents` row whose
-/// column prefix is `a` (`""` or an alias with its dot, such as `"a."`).
-fn account_wake_candidate_predicate(a: &str) -> String {
-    format!(
-        "({} OR {} OR {})",
-        account_wake_queued_candidate(a, false),
-        account_wake_steer_candidate(a, false),
-        account_wake_recovery(a, false)
-    )
-}
-
+/// The agent-column part of a wake candidate: a live agent that is not a remote
+/// worker or anchor. The index predicate and the queries share this text. The
+/// queries add the candidate state exactly, from the chat and turn rows.
 fn account_wake_index_eligibility(a: &str) -> String {
     format!(
         "{a}deleted_at IS NULL \
          AND COALESCE({a}remote_worker,0)=0 \
-         AND COALESCE({a}remote_anchor,0)=0 \
-         AND {}",
-        account_wake_candidate_predicate(a)
+         AND COALESCE({a}remote_anchor,0)=0"
     )
 }
 
@@ -161,41 +148,44 @@ fn agent_id(a: &str) -> String {
     }
 }
 
-fn account_wake_queued_candidate(a: &str, exact: bool) -> String {
-    let auto_wake = if exact {
-        format!("AND {} ", chat_has(a, "ch.auto_wake=1"))
-    } else {
-        String::new()
-    };
-    let idle = if exact {
-        format!("AND NOT {} ", chat_busy_sql(&agent_id(a)))
-    } else {
-        String::new()
-    };
+/// SQL: the chat status of the agent row `a`, read from the chat row.
+fn agent_chat_status(a: &str) -> String {
+    chat_status_sql(&agent_id(a))
+}
+
+/// SQL: the provider turn of the unfinished turn of the agent row `a`.
+fn agent_provider_turn(a: &str) -> String {
+    unfinished_provider_turn_sql(&agent_id(a))
+}
+
+fn account_wake_queued_candidate(a: &str) -> String {
     format!(
-        "({a}status='queued' {auto_wake}{idle}\
-         AND COALESCE({a}native_failure_hold,0)=0)"
+        "({status}='queued' \
+         AND {auto_wake} \
+         AND NOT {busy} \
+         AND COALESCE({a}native_failure_hold,0)=0)",
+        status = agent_chat_status(a),
+        auto_wake = chat_has(a, "ch.auto_wake=1"),
+        busy = chat_busy_sql(&agent_id(a)),
     )
 }
 
 /// A running turn that may receive queued user input by `turn/steer`.
 /// `SchedulerRepository::claim_steer` owns the exact eligibility check.
-fn account_wake_steer_candidate(a: &str, exact: bool) -> String {
-    let chat = if exact {
-        format!(
-            "AND {} AND {} AND NOT {} ",
-            chat_busy_sql(&agent_id(a)),
-            chat_has(a, "ch.auto_wake=1"),
-            chat_has(a, "ch.execution_mode='vm'")
-        )
-    } else {
-        String::new()
-    };
+fn account_wake_steer_candidate(a: &str) -> String {
+    let turn = agent_provider_turn(a);
     format!(
-        "({a}status='running' \
-         AND {a}turn_id IS NOT NULL \
-         AND COALESCE({a}steer_rejected_turn_id,'')<>{a}turn_id \
-         AND COALESCE({a}native_failure_hold,0)=0 {chat})"
+        "({status}='running' \
+         AND {turn} IS NOT NULL \
+         AND COALESCE({a}steer_rejected_turn_id,'')<>{turn} \
+         AND COALESCE({a}native_failure_hold,0)=0 \
+         AND {busy} \
+         AND {auto_wake} \
+         AND NOT {vm})",
+        status = agent_chat_status(a),
+        busy = chat_busy_sql(&agent_id(a)),
+        auto_wake = chat_has(a, "ch.auto_wake=1"),
+        vm = chat_has(a, "ch.execution_mode='vm'"),
     )
 }
 
@@ -250,7 +240,7 @@ fn deliverable_pending(agent: &str, epoch: &str, held_after: &str) -> String {
 fn account_wake_native_review(a: &str) -> String {
     format!(
         "({} AND json_extract({a}record,'$.nativeReview.status')='pending')",
-        account_wake_queued_candidate(a, true)
+        account_wake_queued_candidate(a)
     )
 }
 
@@ -266,38 +256,31 @@ fn account_wake_pending(a: &str, held_after: &str) -> String {
              AND e.epoch=json_extract({a}record,'$.epoch') AND e.status='pending' \
              AND e.kind NOT IN ({dedicated_kinds}))) \
          OR {})",
-        account_wake_queued_candidate(a, true),
+        account_wake_queued_candidate(a),
         deliverable_pending(
             "a.id",
             &format!("json_extract({a}record,'$.epoch')"),
             held_after,
         ),
-        account_wake_steer_candidate(a, true),
+        account_wake_steer_candidate(a),
         account_wake_native_review(a)
     )
 }
 
-/// `exact` adds the start attempt facts that live on the owner turn row. An
-/// index predicate cannot read another table, so the index uses the broader
-/// form and the query adds the exact one.
-fn account_wake_recovery(a: &str, exact: bool) -> String {
-    let attempt = if exact {
-        format!(
-            "AND EXISTS(SELECT 1 FROM turns t WHERE t.chat={a}id AND t.attempt_submitted=1 \
-             AND t.attempt_connection_generation IS NOT NULL) "
-        )
-    } else {
-        String::new()
-    };
+/// The recovery candidate. The start attempt lives on the owner turn row, and
+/// the status on the chat row; the index does not read either.
+fn account_wake_recovery(a: &str) -> String {
+    let status = agent_chat_status(a);
     format!(
         "(({a}provider='codex' \
-           {attempt}\
-           AND {a}status IN ('starting','running','waiting','paused','interrupted')) \
+           AND EXISTS(SELECT 1 FROM turns t WHERE t.chat={a}id AND t.attempt_submitted=1 \
+             AND t.attempt_connection_generation IS NOT NULL) \
+           AND {status} IN ('starting','running','waiting','paused','interrupted')) \
          OR ({a}has_disconnect_recovery=1 AND ( \
-           COALESCE({a}status,'') NOT IN ('completed','waiting','paused','parked') \
+           COALESCE({status},'') NOT IN ('completed','waiting','paused','parked') \
            OR {a}disconnect_recovery_stage IS NOT NULL)) \
          OR ({a}has_restart_recovery=1 AND ( \
-           COALESCE({a}status,'') NOT IN ('completed','waiting','paused','parked') \
+           COALESCE({status},'') NOT IN ('completed','waiting','paused','parked') \
            OR COALESCE({a}restart_recovery_stage,'') \
                NOT IN ('finished','continued','reattached','input_restored'))))"
     )
@@ -306,7 +289,7 @@ fn account_wake_recovery(a: &str, exact: bool) -> String {
 fn account_wake_target_filter(a: &str, held_after: &str) -> String {
     let eligibility = account_wake_index_eligibility(a);
     let pending = account_wake_pending(a, held_after);
-    let recovery = account_wake_recovery(a, true);
+    let recovery = account_wake_recovery(a);
     format!(
         "{eligibility} \
          AND {a}hold_status=?1 \
@@ -634,7 +617,7 @@ impl SchedulerRepository {
             table: "runtime_agents",
             create_sql: format!(
                 "CREATE INDEX IF NOT EXISTS {ACCOUNT_WAKE_INDEX} \
-                 ON runtime_agents(account_key,id) WHERE {eligibility}"
+                 ON runtime_agents(account_key,hold_status,id) WHERE {eligibility}"
             ),
         }
     }
@@ -2020,8 +2003,9 @@ pub(super) fn select_turn_batch(
 #[cfg(test)]
 mod account_wake_index_tests {
     use super::{
-        ACCOUNT_WAKE_INDEX, SchedulerRepository, account_wake_accounts_query,
-        account_wake_index_eligibility,
+        ACCOUNT_WAKE_INDEX, SchedulerRepository, account_wake_account_target_query,
+        account_wake_accounts_query, account_wake_index_eligibility,
+        account_wake_invalid_target_query, account_wake_pending_agents_query,
     };
     use rusqlite::Connection;
     use serde_json::json;
@@ -2451,6 +2435,41 @@ mod account_wake_index_tests {
             SchedulerRepository::account_wake_page(&connection, "", &BTreeMap::new(), 4, 4, 0.0)
                 .expect("candidate selection reads the columns");
         assert_eq!(page.keys().cloned().collect::<Vec<_>>(), vec!["default"]);
+    }
+
+    #[test]
+    fn account_wake_queries_use_the_index_without_retired_agent_columns() {
+        let mut connection = old_schema();
+        install_index(&mut connection);
+        let retired: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM pragma_table_xinfo('runtime_agents') WHERE name IN ('status','in_flight','turn_id')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("columns read");
+        assert_eq!(retired, 0, "the agent table keeps no retired column");
+        for sql in [
+            account_wake_accounts_query(),
+            account_wake_account_target_query(),
+            account_wake_invalid_target_query(),
+            account_wake_pending_agents_query(),
+        ] {
+            let mut statement = connection
+                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .expect("wake query prepares against its index");
+            let count = statement.parameter_count();
+            let plan = statement
+                .query_map(
+                    rusqlite::params_from_iter(vec![rusqlite::types::Value::Null; count]),
+                    |row| row.get::<_, String>(3),
+                )
+                .expect("plan loads")
+                .collect::<Result<Vec<_>, _>>()
+                .expect("plan rows load")
+                .join(" ");
+            assert!(plan.contains(ACCOUNT_WAKE_INDEX), "{plan}");
+        }
     }
 
     #[test]

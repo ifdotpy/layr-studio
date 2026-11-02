@@ -208,7 +208,7 @@ fn release_held_sql() -> String {
                    (SELECT MIN(e.created) FROM runtime_events e WHERE e.agent=a.id \
                       AND e.epoch=json_extract(a.record,'$.epoch') AND e.status='pending') AS first \
                  FROM runtime_agents a \
-                 WHERE a.status='failed' \
+                 WHERE {status}='failed' \
                    AND EXISTS(SELECT 1 FROM chats ch WHERE ch.id=a.id AND ch.auto_wake=1) \
                    AND NOT {busy} AND a.deleted_at IS NULL \
                    AND json_extract(a.record,'$.autoWake')=1 \
@@ -217,6 +217,7 @@ fn release_held_sql() -> String {
                    AND first IS NOT NULL \
                  ORDER BY first,a.rowid",
         busy = studio_runtime_store::domain::chat_busy_sql("a.id"),
+        status = studio_runtime_store::domain::chat_status_sql("a.id"),
     )
 }
 
