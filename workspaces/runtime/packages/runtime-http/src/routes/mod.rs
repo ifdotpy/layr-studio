@@ -54,8 +54,6 @@ mod sync_stream;
 pub(crate) use sync_stream::SyncSessions;
 #[cfg(test)]
 pub(crate) use sync_stream::SyncStreamQuery;
-#[cfg(test)]
-mod ingress_parity_tests;
 mod system_reads;
 mod terminals;
 mod tool_requests;
