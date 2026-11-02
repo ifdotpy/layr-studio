@@ -38,7 +38,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         };
         let terminal = value
             .get("status")
-            .and_then(|status| serde_json::from_value::<TransferStatus>(status.clone()).ok())
+            .and_then(|status| <TransferStatus as serde::Deserialize>::deserialize(status).ok())
             .is_some_and(|status| {
                 matches!(
                     status,
