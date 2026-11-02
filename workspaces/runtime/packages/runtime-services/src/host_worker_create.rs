@@ -443,8 +443,14 @@ pub fn recheck_worker(
         .get("_p02ProjectBinding")
         .filter(|value| !value.is_null())
         .cloned();
-    let current_project =
-        ProjectsRepository::get(transaction, project_path)?.map(|(_, value)| value);
+    let lookup_id = draft
+        .extra
+        .get("_p02ProjectLookupId")
+        .and_then(Value::as_str)
+        .unwrap_or(project_path);
+    let current_project = ProjectsRepository::get(transaction, lookup_id)?
+        .or(ProjectsRepository::get(transaction, project_path)?)
+        .map(|(_, value)| value);
     if current_project != frozen_project {
         return Err(CreateError::IdentityChanged);
     }
