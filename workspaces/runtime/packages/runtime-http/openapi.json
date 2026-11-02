@@ -44772,8 +44772,7 @@
           }
         },
         "required": [
-          "model",
-          "effort"
+          "model"
         ],
         "title": "ReviewDefaultsDto",
         "type": "object"

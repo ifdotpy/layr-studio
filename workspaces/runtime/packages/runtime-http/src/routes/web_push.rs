@@ -73,10 +73,10 @@ async fn subscribe(
     blocking(move || {
         let row = web_push::Subscriptions::new(&root).add(
             web_push::NewSubscription {
-                endpoint: body.endpoint,
-                p256dh: body.p256dh,
-                auth: body.auth,
-                device: body.device,
+                endpoint: body.endpoint.as_str().to_owned(),
+                p256dh: body.p256dh.as_str().to_owned(),
+                auth: body.auth.as_str().to_owned(),
+                device: body.device.as_str().to_owned(),
             },
             false,
             web_push::now_seconds(),
@@ -93,7 +93,7 @@ async fn remove(
 ) -> Result<Json<generated::WebPushRemoveResponse>, ApiError> {
     let root = std::path::PathBuf::from(&state.state_dir);
     blocking(move || {
-        let removed = web_push::Subscriptions::new(&root).remove(&body.id)?;
+        let removed = web_push::Subscriptions::new(&root).remove(body.id.as_str())?;
         Ok(generated::WebPushRemoveResponse { removed })
     })
     .await

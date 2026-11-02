@@ -20172,7 +20172,7 @@ export interface components {
     /** ReviewDefaultsDto */
     ReviewDefaultsDto: {
       /** Effort */
-      effort: null | string;
+      effort?: null | string | undefined;
       fastMode?: boolean | null | undefined;
       /** Model */
       model: null | string;

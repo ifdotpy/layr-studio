@@ -58,7 +58,7 @@ impl ReviewerArchiveRepository {
     /// Completed reviewers that can be newly scheduled. The partial index
     /// excludes historical markers using the same predicate as this query.
     pub fn candidates(connection: &Connection) -> StoreResult<Vec<(String, String)>> {
-        let eligibility = candidate_eligibility("a.");
+        let eligibility = candidate_query("a.");
         let mut statement = connection.prepare(&format!(
             "SELECT a.id,a.record FROM runtime_agents AS a INDEXED BY {PENDING_INDEX} \
              WHERE {eligibility} ORDER BY a.id"
@@ -93,7 +93,7 @@ impl ReviewerArchiveRepository {
 
     /// Durable archive markers whose retry deadline has elapsed.
     pub fn due_retries(connection: &Connection, now: f64) -> StoreResult<Vec<(String, String)>> {
-        let eligibility = retry_eligibility("");
+        let eligibility = retry_query("");
         let mut statement = connection.prepare(&format!(
             "SELECT id,record FROM runtime_agents INDEXED BY {RETRY_DUE_INDEX} \
              WHERE {eligibility} AND {RETRY_DEADLINE}<=?1 ORDER BY id"
@@ -107,7 +107,7 @@ impl ReviewerArchiveRepository {
     /// Earliest persisted retry deadline using the same eligibility predicate
     /// and index as `due_retries`.
     pub fn next_retry_at(connection: &Connection, after: f64) -> StoreResult<Option<f64>> {
-        let eligibility = retry_eligibility("");
+        let eligibility = retry_query("");
         connection
             .query_row(
                 &format!(
@@ -125,29 +125,50 @@ impl ReviewerArchiveRepository {
     }
 }
 
-/// Owns the candidate index predicate and its consuming query predicate,
-/// over the agent columns with prefix `a` (`""` or an alias with its dot).
+/// Owns the candidate index predicate over the agent columns with prefix `a`
+/// (`""` or an alias with its dot). The index does not read the agent status.
 fn candidate_eligibility(a: &str) -> String {
     format!(
-        "{a}role='reviewer' AND {a}status='completed' \
+        "{a}role='reviewer' \
          AND NOT {a}agent_archived AND NOT {a}review_archive_failed \
          AND NOT {a}review_archive_scheduled"
     )
 }
 
-/// Owns the durable retry index predicate and its consuming query predicate.
+/// Owns the durable retry index predicate over the agent columns with prefix `a`.
 fn retry_eligibility(a: &str) -> String {
     format!(
-        "{a}role='reviewer' AND {a}status='completed' \
+        "{a}role='reviewer' \
          AND NOT {a}agent_archived AND {a}review_archive_marked"
     )
+}
+
+/// SQL: the reviewer's chat is completed. The agent status is read from the
+/// chat row (`domain`), so the query adds this term and the index does not.
+fn completed(a: &str) -> String {
+    let id = if a.is_empty() {
+        "runtime_agents.id".to_owned()
+    } else {
+        format!("{a}id")
+    };
+    format!("{} = 'completed'", crate::domain::chat_status_sql(&id))
+}
+
+/// The candidate query predicate: the index predicate and the completed chat.
+fn candidate_query(a: &str) -> String {
+    format!("{} AND {}", candidate_eligibility(a), completed(a))
+}
+
+/// The retry query predicate: the index predicate and the completed chat.
+fn retry_query(a: &str) -> String {
+    format!("{} AND {}", retry_eligibility(a), completed(a))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         PENDING_INDEX, RETRY_DEADLINE, RETRY_DUE_INDEX, ReviewerArchiveRepository as Repository,
-        candidate_eligibility, retry_eligibility,
+        candidate_query, retry_query,
     };
     use crate::Connection;
     use serde_json::{Value, json};
@@ -169,6 +190,9 @@ mod tests {
         connection
             .execute_batch(crate::agent_volatile::agent_volatile_table_sql())
             .expect("volatile agent table creates");
+        connection
+            .execute_batch(&crate::domain::tables_sql())
+            .expect("domain tables create");
         let transaction = connection.transaction().expect("index transaction starts");
         Repository::prepare_indexes(&transaction).expect("archive indexes create");
         transaction.commit().expect("index transaction commits");
@@ -187,6 +211,7 @@ mod tests {
                 rusqlite::params![id, record.to_string()],
             )
             .expect("agent inserts");
+        crate::domain::project(connection, id, &record).expect("chat row follows the record");
     }
 
     #[test]
@@ -213,15 +238,19 @@ mod tests {
             );
         }
         put_agent(&connection, "eligible-missing-markers", json!({}));
+        let whitespace = r#"{"id":"eligible-whitespace-object","provider":"codex","role":"reviewer","status":"completed","parentId":"parent","agentArchive":{ }}"#;
         connection
             .execute(
                 "INSERT INTO runtime_agents(id,record) VALUES (?1,?2)",
-                [
-                    "eligible-whitespace-object",
-                    r#"{"id":"eligible-whitespace-object","provider":"codex","role":"reviewer","status":"completed","parentId":"parent","agentArchive":{ }}"#,
-                ],
+                ["eligible-whitespace-object", whitespace],
             )
             .expect("whitespace empty object inserts");
+        crate::domain::project(
+            &connection,
+            "eligible-whitespace-object",
+            &serde_json::from_str(whitespace).expect("fixture record"),
+        )
+        .expect("chat row follows the record");
         for (index, scheduled) in [
             Value::Null,
             json!(false),
@@ -333,7 +362,7 @@ mod tests {
         let candidates = format!(
             "EXPLAIN QUERY PLAN SELECT a.id,a.record FROM runtime_agents AS a \
              INDEXED BY {PENDING_INDEX} WHERE {} ORDER BY a.id",
-            candidate_eligibility("a.")
+            candidate_query("a.")
         );
         let details = connection
             .prepare(&candidates)
@@ -351,7 +380,7 @@ mod tests {
         let retries = format!(
             "EXPLAIN QUERY PLAN SELECT id,record FROM runtime_agents \
              INDEXED BY {RETRY_DUE_INDEX} WHERE {} AND {RETRY_DEADLINE}<=?1 ORDER BY id",
-            retry_eligibility("")
+            retry_query("")
         );
         let details = connection
             .prepare(&retries)

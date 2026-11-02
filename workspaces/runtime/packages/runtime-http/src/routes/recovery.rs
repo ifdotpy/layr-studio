@@ -20,7 +20,7 @@ async fn recover(
     ApiJson(body): ApiJson<crate::generated::IdRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let store = state.store.clone().ok_or_else(ApiError::internal)?;
-    let id = body.id;
+    let id = body.id.as_str().to_owned();
     let lookup_id = id.clone();
     let account = store
         .read_async("runtime-http/routes/recovery", move |connection| {

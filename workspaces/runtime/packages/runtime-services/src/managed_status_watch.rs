@@ -659,13 +659,14 @@ fn status_path_inputs(
     connection: &Connection,
     root_id: &str,
 ) -> Result<Vec<StatusPathInput>, StatusError> {
-    let mut statement = connection.prepare(
+    let mut statement = connection.prepare(&format!(
         "SELECT id,cwd, \
          COALESCE((typeof(workspace_operation)='text' AND workspace_operation<>''),0) \
          FROM runtime_agents WHERE (deleted_at IS NULL OR deleted_at IN (0,'')) AND \
          ((typeof(workspace_operation)='text' AND workspace_operation<>'') OR \
-          (root_id=?1 AND status='queued')) ORDER BY id",
-    )?;
+          (root_id=?1 AND {} ='queued')) ORDER BY id",
+        studio_runtime_store::domain::chat_status_sql("runtime_agents.id"),
+    ))?;
     let rows = statement
         .query_map([root_id], |row| {
             Ok((

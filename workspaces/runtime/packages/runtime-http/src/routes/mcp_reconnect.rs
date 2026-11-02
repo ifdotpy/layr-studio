@@ -58,8 +58,8 @@ fn matches_agent(
     !agent.is_deleted()
         && agent.extra.get("deleted") != Some(&json!(true))
         && agent.thread_id.as_deref() == Some(expected.thread.as_str())
-        && agent.epoch == expected.epoch
-        && agent.account_key == expected.account
+        && agent.epoch == expected.epoch.get()
+        && agent.account_key == expected.account.as_str()
 }
 
 async fn reconnect(
@@ -85,9 +85,9 @@ async fn execute(
     let signature = serde_json::to_value(&body)
         .map_err(|_| ApiError::internal())?
         .to_string();
-    let id = body.id;
+    let id = body.id.as_str().to_owned();
     let expected = body.session;
-    let account = expected.account.clone();
+    let account = expected.account.as_str().to_owned();
     // Account-wide config/mcpServer/reload is not a per-server, per-thread
     // equivalent. Do not broaden a user's selected reconnect into that action.
     let policy = state
@@ -124,8 +124,8 @@ async fn execute(
         .ok_or_else(ApiError::internal)?;
     let scope = port.current_scope(&account).ok_or_else(changed)?;
     if scope.account != account
-        || expected.connection != scope.connection
-        || u64::try_from(expected.generation).ok() != Some(scope.generation)
+        || expected.connection.as_str() != scope.connection
+        || u64::try_from(expected.generation.get()).ok() != Some(scope.generation)
     {
         return Err(changed());
     }
@@ -166,10 +166,11 @@ async fn execute(
         agent: id,
         epoch: expected
             .epoch
+            .get()
             .try_into()
             .map_err(|_| ApiError::internal())?,
         account,
-        thread: Some(expected.thread),
+        thread: Some(expected.thread.as_str().to_owned()),
         connection: scope.connection.clone(),
         generation: scope.generation,
         request: key.clone(),

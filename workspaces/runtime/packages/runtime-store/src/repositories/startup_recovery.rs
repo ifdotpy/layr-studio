@@ -39,31 +39,24 @@ fn cleanup_intent_predicate(_exact: bool) -> String {
 }
 
 /// SQL predicate: a deleted agent that may still hold an active turn, the
-/// rows whose deletion settlement a restart must finish.
-/// `exact` adds the busy chat (an unfinished turn) and the reservation flag from
-/// the owner turn rows, which an index predicate cannot read.
+/// rows whose deletion settlement a restart must finish. The index predicate is
+/// the deleted flag alone. `exact` (the query) adds the busy chat, the unfinished
+/// turn, the chat status and the reservation flag from the chat and turn rows.
 fn deleted_unsettled_predicate(exact: bool) -> String {
+    let deleted = nonfalsy("deleted_at");
+    if !exact {
+        return deleted;
+    }
     let statuses = ACTIVE_AGENT_STATUSES
         .iter()
         .map(|status| format!("'{status}'"))
         .collect::<Vec<_>>()
         .join(",");
-    let reservation = if exact {
-        "EXISTS(SELECT 1 FROM turns t WHERE t.chat=runtime_agents.id AND t.attempt_active_at_reservation=1)"
-    } else {
-        "0"
-    };
-    let busy = if exact {
-        crate::domain::chat_busy_sql("runtime_agents.id")
-    } else {
-        "0".to_owned()
-    };
     format!(
-        "{} AND ({} OR {} OR status IN ({statuses}) OR {})",
-        nonfalsy("deleted_at"),
-        busy,
-        nonfalsy("turn_id"),
-        reservation,
+        "{deleted} AND ({} OR {} IS NOT NULL OR {} IN ({statuses}) OR EXISTS(SELECT 1 FROM turns t WHERE t.chat=runtime_agents.id AND t.attempt_active_at_reservation=1))",
+        crate::domain::chat_busy_sql("runtime_agents.id"),
+        crate::domain::unfinished_provider_turn_sql("runtime_agents.id"),
+        crate::domain::chat_status_sql("runtime_agents.id"),
     )
 }
 
@@ -586,6 +579,19 @@ mod tests {
                 )
                 .expect("row");
         }
+        // The status and the turn live on the chat and turn rows, which the record write projects.
+        crate::domain::project(
+            &connection,
+            "c-running",
+            &serde_json::json!({"status":"running","deletedAt":5}),
+        )
+        .expect("project the running chat");
+        connection
+            .execute(
+                "INSERT INTO turns(id,chat,state) VALUES('t-d','d-turn','starting')",
+                [],
+            )
+            .expect("turn");
         // The start attempt lives on a turn row, which the record write projects.
         crate::domain::project(
             &connection,

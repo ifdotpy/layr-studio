@@ -571,7 +571,7 @@ fn build(tx: &Transaction<'_>, now: f64) -> Result<(Vec<StudioError>, Baseline),
         );
     }
 
-    let mut agents=tx.prepare_cached("SELECT id FROM runtime_agents WHERE deleted_at IS NULL AND status IN ('failed','interrupted','paused')")?;
+    let mut agents=tx.prepare_cached(&format!("SELECT id FROM runtime_agents WHERE deleted_at IS NULL AND {} IN ('failed','interrupted','paused')", studio_runtime_store::domain::chat_status_sql("runtime_agents.id")))?;
     let ids = agents
         .query_map([], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;

@@ -148,18 +148,25 @@ fn claude_child_inherits_auto_plan_accept_edits_and_default() {
 
 #[tokio::test]
 async fn claude_child_uses_immediate_parent_instead_of_root() {
-    spawn_permission_case("plan", "implementer", None, "plan", true).await;
+    Box::pin(spawn_permission_case(
+        "plan",
+        "implementer",
+        None,
+        "plan",
+        true,
+    ))
+    .await;
 }
 
 #[tokio::test]
 async fn claude_child_reviewer_stays_plan_even_with_bypass_override() {
-    spawn_permission_case(
+    Box::pin(spawn_permission_case(
         "bypassPermissions",
         "reviewer",
         Some(json!("bypassPermissions")),
         "plan",
         false,
-    )
+    ))
     .await;
 }
 
@@ -198,7 +205,14 @@ fn claude_child_maps_codex_permission_mode() {
 
 #[tokio::test]
 async fn claude_child_rejects_invalid_override_without_child_record() {
-    spawn_permission_case("auto", "implementer", Some(json!("unknown")), "", false).await;
+    Box::pin(spawn_permission_case(
+        "auto",
+        "implementer",
+        Some(json!("unknown")),
+        "",
+        false,
+    ))
+    .await;
 }
 
 #[tokio::test]

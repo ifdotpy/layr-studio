@@ -37,6 +37,7 @@ uuid = { workspace = true, features = ["serde", "v4"] }
 [build-dependencies]
 openapi-to-rust = { version = "=0.22.0", default-features = false }
 serde_json = { workspace = true }
+studio-runtime-schema = { path = "../runtime-schema" }
 
 [dev-dependencies]
 studio-test-deps = { path = "../test-deps" }

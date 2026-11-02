@@ -5,7 +5,8 @@ use crate::recovery_record::SafeInteger;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::LazyLock;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
+#[serde(transparent)]
 pub struct AccountGroup(String);
 
 impl AccountGroup {
