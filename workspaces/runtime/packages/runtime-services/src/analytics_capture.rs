@@ -572,7 +572,9 @@ impl CaptureDecision {
                 &self
                     .usage_conflict
                     .as_ref()
-                    .map(|conflict| json!(conflict).to_string())
+                    .map(|conflict| {
+                        python_json_compact_serialized(conflict).expect("usage conflict serializes")
+                    })
                     .unwrap_or_else(|| {
                         "Response replay changed final usage; first evidence retained".into()
                     }),
