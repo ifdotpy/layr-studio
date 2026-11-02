@@ -3192,7 +3192,15 @@ mod tests {
                 record["providerUnknown"]["kind"], "futureItem",
                 "{provider}"
             );
-            assert_eq!(record["providerUnknown"]["raw"], item, "{provider}");
+            // `raw` is the provider item as JSON text; it must be a string, not an object.
+            let raw_text = record["providerUnknown"]["raw"]
+                .as_str()
+                .expect("raw is JSON text");
+            assert_eq!(
+                serde_json::from_str::<Value>(raw_text).unwrap(),
+                item,
+                "{provider}"
+            );
         }
     }
 

@@ -1,6 +1,6 @@
 import type { Message } from "../../../types";
 
-/** A provider item whose kind Studio does not know, kept as the raw provider item. */
+/** A provider item whose kind Studio does not know; raw is its JSON text. */
 export type ProviderUnknown = NonNullable<Message["providerUnknown"]>;
 
 /** Reads the typed `providerUnknown` field of a stored item. Owner: openapi.json. */
@@ -12,7 +12,7 @@ export default function ProviderUnknownItem({ kind, raw }: ProviderUnknown) {
   return (
     <details className="tool-card provider-unknown">
       <summary>{kind}</summary>
-      <pre>{JSON.stringify(raw, null, 2)}</pre>
+      <pre>{raw}</pre>
     </details>
   );
 }

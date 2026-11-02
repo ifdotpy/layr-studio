@@ -30,9 +30,10 @@ const KNOWN_ITEM_KINDS: &[&str] = &[
 ];
 
 /// Adds `providerUnknown: {kind, raw}` to an item record of a kind Studio does not know.
+/// `raw` is the provider item as JSON text, opaque to Studio (never decoded as a typed value).
 pub(super) fn item_metadata(kind: &str, raw: &Value, mut metadata: Value) -> Value {
     if !KNOWN_ITEM_KINDS.contains(&kind) {
-        metadata["providerUnknown"] = json!({"kind": kind, "raw": raw});
+        metadata["providerUnknown"] = json!({"kind": kind, "raw": raw.to_string()});
     }
     metadata
 }

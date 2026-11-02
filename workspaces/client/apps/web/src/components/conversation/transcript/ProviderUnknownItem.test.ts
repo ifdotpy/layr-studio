@@ -14,7 +14,7 @@ function item(extra: Partial<Message> = {}): Message {
 }
 
 it("reads the kind and raw provider item of an unknown item", () => {
-  const raw = { id: "i", type: "futureItem", payload: { n: 1 } };
+  const raw = '{"id":"i","type":"futureItem","payload":{"n":1}}';
   assert.deepEqual(
     providerUnknown(item({ providerUnknown: { kind: "futureItem", raw } })),
     { kind: "futureItem", raw },

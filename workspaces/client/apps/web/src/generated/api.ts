@@ -25278,13 +25278,11 @@ export interface components {
       phase?: null | string | undefined;
       /** @default null */
       previousError?: components["schemas"]["JsonValue"] | null | undefined;
-      /** @description Set on a stored provider item whose kind Studio does not know; carries the raw provider item. */
+      /** @description Set on a stored provider item whose kind Studio does not know. raw is the provider item as opaque JSON text. */
       providerUnknown?:
         | {
             kind: string;
-            raw: {
-              [key: string]: unknown;
-            };
+            raw: string;
           }
         | undefined;
       /**
