@@ -49,6 +49,10 @@ sudo env LAYR_ROOT=/path/to/studio-state/layr-native/store \
   /path/to/installed/layr daemon
 ```
 
+On Linux, install Bubblewrap for reviewer checks. If you use a systemd unit for the daemon,
+set its `ExecStart` to the installed Layr binary. Restart the daemon after every Layr upgrade
+so it runs the updated binary.
+
 The daemon must run before a native chat or migration on Linux.
 macOS does not require this step.
 
