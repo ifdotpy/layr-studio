@@ -37,8 +37,8 @@ pub(super) fn repositories(source: &Path, plan: &Plan, lines: &[Value]) -> Vec<V
     plan.repositories.iter().map(|repo| {
         let path = source.join(&repo.relative);
         let mut report = json!({"path":path,"relativePath":repo.relative,"kind":repo.kind,"included":repo.included,"cache":repo.cache,
-            "files":"All files, including Git-ignored data, enter Layr history. Build output becomes a warm cache.",
-            "gitMetadata":if repo.kind=="worktree" {"The .git pointer is omitted. Parent Git metadata comes from the first main import. Later Git refs and objects are not refreshed. The original Git store remains intact; inspect the unpushed commit report before retiring it."} else if repo.relative.as_os_str().is_empty() {"The complete source .git tree is retained in .studio-native-import/git. Layr creates its own root Git bridge."} else if repo.kind=="submodule" {"Internal Git metadata is retained. The cloned .git pointer and core.worktree point to that metadata."} else {"The nested .git tree enters Layr history, including local refs and objects."},
+            "files":"Git-ignored files are omitted. Build output becomes a warm cache.",
+            "gitMetadata":if repo.kind=="worktree" {"The .git pointer is omitted. Parent Git metadata comes from the first main import. Later Git refs and objects are not refreshed. The original Git store remains intact; inspect the unpushed commit report before retiring it."} else if repo.relative.as_os_str().is_empty() {"Layr imports source Git history into its Git bridge."} else if repo.kind=="submodule" {"Submodules are not supported in native Layr import yet."} else {"The nested .git tree enters Layr history, including local refs and objects."},
             "worktrees":lines.iter().filter(|line| line["repository"].as_str().is_some_and(|r| Path::new(r)==repo.relative)).cloned().collect::<Vec<_>>()});
         if repo.cache {
             report["files"]=json!("This repository is inside build output. Its complete folder becomes a warm cache, outside Layr history.");
@@ -83,7 +83,7 @@ pub(super) fn plain_git_metadata(source: &Path, plan: &Plan) -> Vec<Value> {
         "relativePath":item.relative_path,
         "reason":item.reason,
         "cache":item.cache,
-        "treatment":if item.cache {"Preserved byte-for-byte as plain data inside a warm build cache, outside history. No repository status read or worktree discovery."} else if item.relative_path == Path::new(".git") {"Versioned as plain data in .studio-native-import/git. No source Git store is imported."} else {"Versioned byte-for-byte as plain data. No repository admission, status read, or worktree discovery."}
+        "treatment":if item.cache {"Preserved byte-for-byte as plain data inside a warm build cache, outside history. No repository status read or worktree discovery."} else if item.relative_path == Path::new(".git") {"The root Git marker is omitted. No source Git store is imported."} else {"Versioned byte-for-byte as plain data. No repository admission, status read, or worktree discovery."}
     })).collect()
 }
 
