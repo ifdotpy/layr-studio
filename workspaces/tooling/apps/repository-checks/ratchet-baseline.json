@@ -2497,7 +2497,7 @@
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/account_worker.rs",
-      "fingerprint": "6296da9c5653861dd94d2803607e900e379a1be6c88bac6412696b6b1bba42ea:0"
+      "fingerprint": "6a766d4723e08c5ec50991a322e95cfe288559ab09ef83491825f399ae709f39:0"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/account_worker/tests.rs",

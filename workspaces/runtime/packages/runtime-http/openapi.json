@@ -3573,6 +3573,45 @@
         "title": "AccountTransferSummaryRecordResponse",
         "type": "object"
       },
+      "AccountWorkerDiagnostics": {
+        "additionalProperties": false,
+        "description": "One account worker's wake and start state. Ages are in milliseconds.",
+        "properties": {
+          "closing": {
+            "description": "The worker is shutting down and starts nothing new.",
+            "type": "boolean"
+          },
+          "error": {
+            "description": "Why the worker state is missing: unavailable (no live worker) or unresponsive (the worker did not answer in time).",
+            "type": "string"
+          },
+          "gate": {
+            "$ref": "#/components/schemas/StartGateDiagnostics"
+          },
+          "preparationWaits": {
+            "description": "Agents with a pending wait for a catalog refresh, a disk recheck or agent-row changes.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "preparing": {
+            "description": "Agents with a turn preparation in flight.",
+            "items": {
+              "$ref": "#/components/schemas/PreparingAgentDiagnostics"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "AccountWorkerDiagnosticsMap": {
+        "additionalProperties": {
+          "$ref": "#/components/schemas/AccountWorkerDiagnostics"
+        },
+        "description": "Each account's worker state, keyed account1, account2 in the order of nativeAccounts. An account with an error has no other fields.",
+        "type": "object"
+      },
       "AccountsResource": {
         "additionalProperties": false,
         "properties": {
@@ -25759,6 +25798,9 @@
       "DiagnosticsResponse": {
         "additionalProperties": false,
         "properties": {
+          "accountWorkers": {
+            "$ref": "#/components/schemas/AccountWorkerDiagnosticsMap"
+          },
           "analyticsCapture": {
             "$ref": "#/components/schemas/AnalyticsCaptureStatus"
           },
@@ -25880,6 +25922,7 @@
           "hostResources",
           "resourceAttribution",
           "nativeAccounts",
+          "accountWorkers",
           "studioLoadedThreads",
           "queues",
           "runtimeLockSamples",
@@ -29001,6 +29044,78 @@
           "remote"
         ],
         "type": "string"
+      },
+      "GateAdmitDiagnostics": {
+        "additionalProperties": false,
+        "properties": {
+          "ageMs": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "claimed": {
+            "description": "true when the claim made the turn in flight; false when the admitted slot was dropped unclaimed.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "agent",
+          "claimed",
+          "ageMs"
+        ],
+        "type": "object"
+      },
+      "GateSlotDiagnostics": {
+        "additionalProperties": false,
+        "properties": {
+          "ageMs": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "claimed": {
+            "description": "The claim made the turn in flight; false while the start is only admitted.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "agent",
+          "claimed",
+          "ageMs"
+        ],
+        "type": "object"
+      },
+      "GateWaiterDiagnostics": {
+        "additionalProperties": false,
+        "properties": {
+          "ageMs": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "wait": {
+            "description": "queued: no decision yet; slot: every running slot is taken; pause: the burst pause runs; behind: free to start, behind an earlier start.",
+            "enum": [
+              "queued",
+              "slot",
+              "pause",
+              "behind"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent",
+          "wait",
+          "ageMs"
+        ],
+        "type": "object"
       },
       "Grant": {
         "enum": [
@@ -36821,6 +36936,29 @@
           }
         },
         "title": "PreparedContextRecordResponse",
+        "type": "object"
+      },
+      "PreparingAgentDiagnostics": {
+        "additionalProperties": false,
+        "properties": {
+          "ageMs": {
+            "description": "Milliseconds since the current phase began.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "rewake": {
+            "description": "A wake arrived during the preparation and runs after it.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "agent",
+          "rewake",
+          "ageMs"
+        ],
         "type": "object"
       },
       "Principal": {
@@ -50159,6 +50297,38 @@
           }
         },
         "title": "StartAttemptRecordResponse",
+        "type": "object"
+      },
+      "StartGateDiagnostics": {
+        "additionalProperties": false,
+        "description": "The account's turn start throttle: admitted slots, queued starts and the latest admit outcomes.",
+        "properties": {
+          "recentAdmits": {
+            "description": "The latest admits, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/GateAdmitDiagnostics"
+            },
+            "type": "array"
+          },
+          "running": {
+            "items": {
+              "$ref": "#/components/schemas/GateSlotDiagnostics"
+            },
+            "type": "array"
+          },
+          "waiters": {
+            "description": "Queued starts in arrival order; only the first may be admitted.",
+            "items": {
+              "$ref": "#/components/schemas/GateWaiterDiagnostics"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "running",
+          "waiters",
+          "recentAdmits"
+        ],
         "type": "object"
       },
       "StartModelSettingsRecordResponse": {

@@ -109,6 +109,10 @@ pub struct ProfileRequest {
 /// registry/store lock. These defaults also allow composition one capability at a
 /// time without advertising success for an absent consumer.
 pub trait AccountSessionPort: Send + Sync {
+    /// The account worker's diagnostics snapshot; `None` when no worker serves it.
+    fn worker_diagnostics(&self, _account: String) -> WorkerDiagnosticsFuture {
+        Box::pin(async { None })
+    }
     /// Ensure the account's retained worker is live before an account-scoped read.
     fn ensure_session<'a>(
         &'a self,
@@ -740,6 +744,8 @@ pub type SessionFuture =
     Pin<Box<dyn Future<Output = Result<SessionReceipt, AccountSessionError>> + Send>>;
 pub type BarrierFuture = Pin<Box<dyn Future<Output = Result<(), AccountSessionError>> + Send>>;
 pub type RecoveryFuture = Pin<Box<dyn Future<Output = Result<Value, AccountSessionError>> + Send>>;
+/// A worker's diagnostics snapshot, or `None` when no worker serves the account.
+pub type WorkerDiagnosticsFuture = Pin<Box<dyn Future<Output = Option<Value>> + Send>>;
 pub type ManagedRecoveryFuture = Pin<
     Box<dyn Future<Output = Result<crate::recovery::RecoveryReceipt, AccountSessionError>> + Send>,
 >;
@@ -760,6 +766,9 @@ pub trait RetainedAccountSession: Send + Sync {
     }
     fn current_scope(&self, _account: &str) -> Option<ConnectionScope> {
         None
+    }
+    fn worker_diagnostics(&self, _account: String) -> WorkerDiagnosticsFuture {
+        Box::pin(async { None })
     }
     fn ensure_session(&self, _account: String) -> SessionFutureScope {
         Box::pin(async {
@@ -1370,6 +1379,12 @@ impl AccountSessionRuntime {
     }
 }
 impl AccountSessionPort for AccountSessionRuntime {
+    fn worker_diagnostics(&self, account: String) -> WorkerDiagnosticsFuture {
+        match self.session.as_ref() {
+            Some(session) => session.worker_diagnostics(account),
+            None => Box::pin(async { None }),
+        }
+    }
     fn current_scope(&self, account: &str) -> Option<ConnectionScope> {
         self.session.as_ref()?.current_scope(account)
     }
