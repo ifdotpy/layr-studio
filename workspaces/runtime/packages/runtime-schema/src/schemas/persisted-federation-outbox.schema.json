@@ -47,7 +47,7 @@
       "type": "string"
     },
     "kind": {
-      "enum": ["chat-message", "room-invite", "room-accept"],
+      "enum": ["chat-message", "room-invite", "room-accept", "lead-message"],
       "title": "Kind",
       "type": "string"
     },

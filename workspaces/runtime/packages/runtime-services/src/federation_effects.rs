@@ -74,7 +74,7 @@ pub struct SignedRequest<'a> {
 impl SignedRequest<'_> {
     /// The bytes the sender signed. The unified scheme binds the recipient (`local_id`),
     /// the sender and the request id. The retired scheme is accepted for one release.
-    fn signing_bytes(&self, local_id: &str) -> Result<Vec<u8>> {
+    pub(crate) fn signing_bytes(&self, local_id: &str) -> Result<Vec<u8>> {
         let Some(unified) = self.unified else {
             return Ok(transport::federation_signing_bytes(
                 "POST",
@@ -101,7 +101,7 @@ impl SignedRequest<'_> {
         ))
     }
 
-    fn validate_nonce(&self, now: i64) -> Result<()> {
+    pub(crate) fn validate_nonce(&self, now: i64) -> Result<()> {
         if let Some(unified) = self.unified {
             transport::validate_multi_server_nonce(self.nonce, self.timestamp, now)?;
             transport::validate_identifier(unified.request_id)?;
@@ -161,7 +161,7 @@ pub(crate) fn snapshot(tx: &Transaction<'_>, peer: &str, room: &str, now: f64) -
         Repo::room_rate(tx, peer, room, now)?,
     )
 }
-fn consume_nonce(
+pub(crate) fn consume_nonce(
     tx: &Transaction<'_>,
     peer: &str,
     nonce: &str,
@@ -211,6 +211,12 @@ pub async fn handle(
         return handle_pair(Arc::clone(&store), request, observed, body, now).await;
     }
     let body: Value = serde_json::from_slice(request.raw).map_err(|_| Error::Invalid("body"))?;
+    // A lead message is authorized by its project grant, not by a federation peer.
+    if matches!(request.action, FederationAction::Message)
+        && crate::federation_lead::is_lead_envelope(&body)
+    {
+        return crate::federation_lead::receive(store, &request, body, now).await;
+    }
     let identity = transport::load_federation_identity(&store).await?;
     let identity = Arc::new(identity);
     let action = request.action;
