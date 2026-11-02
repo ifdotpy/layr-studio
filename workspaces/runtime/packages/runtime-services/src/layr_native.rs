@@ -106,11 +106,11 @@ mod tests {
     }
 }
 
-mod capability;
+pub mod capability;
 mod git_guard;
 pub mod mapping;
 pub mod settings;
-mod versions;
+pub mod versions;
 #[cfg(test)]
 mod warm_store_tests;
 pub use capability::{NativeLayrCapability, capability, resolve_binary};
