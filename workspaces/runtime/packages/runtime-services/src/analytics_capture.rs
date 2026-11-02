@@ -826,8 +826,8 @@ fn apply_stream_metrics(
     }
 }
 
-/// The compact JSON length of `value` in bytes, counted without building the text.
-pub(crate) fn encoded_len(value: &Value) -> usize {
+/// The serialized JSON length in bytes, counted without building the text.
+pub(crate) fn encoded_len(value: &(impl serde::Serialize + ?Sized)) -> usize {
     struct Count(usize);
     impl std::io::Write for Count {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
@@ -839,8 +839,16 @@ pub(crate) fn encoded_len(value: &Value) -> usize {
         }
     }
     let mut count = Count(0);
-    serde_json::to_writer(&mut count, value).expect("JSON values serialize");
+    serde_json::to_writer(&mut count, value).expect("analytics values serialize");
     count.0
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CaptureIdentity {
+    thread_id: Option<String>,
+    account_key: Option<String>,
+    epoch: Option<i64>,
 }
 
 /// Check agent identities on a Canvas read snapshot before the analytics commit. The
@@ -867,11 +875,11 @@ pub(crate) fn check_identity(canvas: &Connection, agent: &Value) -> Result<(), C
             |r| r.get(0),
         )
         .optional()?;
-    let current: studio_runtime_store::AgentRecord = raw
+    let current: CaptureIdentity = raw
         .map(|r| serde_json::from_str(&r).map_err(StoreError::from))
         .transpose()?
         .ok_or(CaptureError::StaleIdentity)?;
-    let expected: studio_runtime_store::AgentRecord =
+    let expected: CaptureIdentity =
         serde::Deserialize::deserialize(agent).map_err(StoreError::from)?;
     if current.thread_id != expected.thread_id
         || current.account_key != expected.account_key
