@@ -231,6 +231,7 @@ mod tests {
                         capability: Capability::LeadMessages,
                         created_at: 1,
                         revoked_at: None,
+                        peer_label: "Peer".into(),
                     }],
                 )?;
                 Ok::<_, studio_runtime_store::StoreError>(())
