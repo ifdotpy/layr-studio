@@ -318,6 +318,16 @@ fn import_restore_writes_xattrs_of_read_only_folders() {
     let destination = root.path().join("destination");
     fs::create_dir_all(source.join("locked")).expect("fixture operation succeeds");
     fs::create_dir(&destination).expect("fixture operation succeeds");
+    fs::create_dir_all(source.join(".git/hooks")).expect("fixture operation succeeds");
+    fs::create_dir_all(source.join("nested/.git/hooks")).expect("fixture operation succeeds");
+    fs::create_dir_all(destination.join("nested/.git/hooks")).expect("fixture operation succeeds");
+    lsetxattr(
+        source.join("nested/.git/hooks"),
+        attr,
+        b"nested",
+        XattrFlags::empty(),
+    )
+    .expect("fixture operation succeeds");
     lsetxattr(
         source.join("locked"),
         attr,
@@ -338,6 +348,9 @@ fn import_restore_writes_xattrs_of_read_only_folders() {
     let mut value = [0u8; 64];
     let len = lgetxattr(&locked, attr, &mut value).expect("fixture operation succeeds");
     assert_eq!(&value[..len], b"attribute");
+    let len = lgetxattr(destination.join("nested/.git/hooks"), attr, &mut value)
+        .expect("fixture operation succeeds");
+    assert_eq!(&value[..len], b"nested");
     assert_eq!(
         fs::metadata(&locked)
             .expect("fixture operation succeeds")

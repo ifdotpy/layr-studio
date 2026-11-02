@@ -466,7 +466,7 @@ impl Plan {
     pub fn files(&self) -> impl Iterator<Item = &Path> {
         self.entries
             .iter()
-            .filter(|e| !e.metadata.is_dir() && !e.cache && !e.relative.starts_with(".git"))
+            .filter(|e| !e.metadata.is_dir() && !e.cache && !is_root_git(&e.relative))
             .map(|e| e.relative.as_path())
     }
 
@@ -591,7 +591,10 @@ impl Plan {
         let destination = Directory::open(destination)?;
         let mut changed = false;
         for entry in self.entries.iter().filter(|entry| {
-            entry.metadata.is_dir() && !entry.cache && !entry.relative.as_os_str().is_empty()
+            entry.metadata.is_dir()
+                && !entry.cache
+                && !entry.relative.as_os_str().is_empty()
+                && !is_root_git(&entry.relative)
         }) {
             changed |= attributes::copy(
                 &self.source,
@@ -614,6 +617,10 @@ impl Plan {
         }
         Ok(())
     }
+}
+
+fn is_root_git(relative: &Path) -> bool {
+    relative.starts_with(".git")
 }
 
 fn source_changed() -> NativeLayrError {
