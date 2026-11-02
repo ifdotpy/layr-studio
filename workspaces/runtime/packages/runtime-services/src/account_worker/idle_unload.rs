@@ -467,6 +467,7 @@ enum UnloadResult {
 #[derive(Debug)]
 pub struct IdleObservation {
     pub(super) provider_blocked: BTreeSet<String>,
+    pub(super) durable_blocked: BTreeSet<String>,
     pub(super) released: BTreeSet<String>,
     pub(super) initialized: bool,
     pub(super) retry_at: Option<Instant>,
@@ -478,6 +479,7 @@ impl Worker {
     pub(super) fn idle_observation(&self) -> IdleObservation {
         IdleObservation {
             provider_blocked: self.idle_clocks.blocked_by(IdleBlocker::Provider),
+            durable_blocked: self.idle_clocks.blocked_by(IdleBlocker::Durable),
             released: self.idle_clocks.released.clone(),
             initialized: self.idle_initialized,
             retry_at: self.idle_clocks.retry_at,
