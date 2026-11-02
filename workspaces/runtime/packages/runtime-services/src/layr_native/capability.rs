@@ -146,7 +146,15 @@ mod tests {
         );
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755))
             .expect("executable");
-        assert_eq!(resolve_binary_in_path(&path), Ok(binary));
+        // The resolver returns the canonical path (/private/var on macOS, not the /var alias).
+        assert_eq!(
+            resolve_binary_in_path(&path),
+            Ok(
+                studio_runtime_store::path_identity::CanonicalPath::existing(&binary)
+                    .expect("canonical fixture")
+                    .into_path_buf()
+            )
+        );
     }
 
     #[test]

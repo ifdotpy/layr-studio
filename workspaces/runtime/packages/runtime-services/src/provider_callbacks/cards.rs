@@ -1032,6 +1032,7 @@ fn provider_context(
         }
         error @ CallbackError::Expired
         | error @ CallbackError::Invalid(_)
+        | error @ CallbackError::Refusal(_)
         | error @ CallbackError::InvalidResultSchema(_)
         | error @ CallbackError::Dependency(_)
         | error @ CallbackError::Conflict

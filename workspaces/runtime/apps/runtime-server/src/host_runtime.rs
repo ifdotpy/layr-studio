@@ -1144,6 +1144,7 @@ async fn read_vm_codex_bootstrap(
                             studio_runtime_services::provider_callbacks::CallbackError::Invalid(_)
                             | studio_runtime_services::provider_callbacks::CallbackError::InvalidResultSchema(_)
                             | studio_runtime_services::provider_callbacks::CallbackError::Dependency(_)
+                            | studio_runtime_services::provider_callbacks::CallbackError::Refusal(_)
                             | studio_runtime_services::provider_callbacks::CallbackError::Stale
                             | studio_runtime_services::provider_callbacks::CallbackError::Conflict
                             | studio_runtime_services::provider_callbacks::CallbackError::Stored(_) => WorkerError::PreparationRefused("vm-auth/refresh-owner-changed".into()),
