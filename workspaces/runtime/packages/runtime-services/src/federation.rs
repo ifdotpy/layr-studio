@@ -593,6 +593,7 @@ async fn accept_project_peer_with(
     let state_id_for_write = state_id.to_owned();
     let remote_project_for_write = remote_project.to_owned();
     let local_project = project_id.to_owned();
+    let peer_label_for_write = invitation.label.trim().to_owned();
     store
         .transaction_with(move |tx| {
             if project_grants::grant_active(tx, &grant_id)?.is_none() {
@@ -607,6 +608,7 @@ async fn accept_project_peer_with(
                         capability: Capability::LeadMessages,
                         created_at: now as i64,
                         revoked_at: None,
+                        peer_label: peer_label_for_write,
                     }],
                 )?;
             }

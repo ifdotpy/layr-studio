@@ -83,6 +83,7 @@ mod m2026_11_01_transfer_summary;
 mod m2026_11_01_work_detail_policy;
 mod m2026_11_02_agent_worker_base_ref;
 mod m2026_11_02_legacy_vm_transfers;
+mod m2026_11_02_project_grant_peer_label;
 mod m2026_11_02_project_grants;
 mod m2026_11_02_request_reference_approval;
 mod m2026_11_02_retired_status_columns;
@@ -1468,6 +1469,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_02_project_grants::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-02-project-grant-peer-label",
+            introduced: NOVEMBER_2,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations with the project grant table and no peer label",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_02_project_grant_peer_label::apply(c.transaction),
     },
 ];
 
