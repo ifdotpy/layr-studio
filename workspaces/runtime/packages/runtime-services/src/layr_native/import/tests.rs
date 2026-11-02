@@ -420,8 +420,12 @@ mod lifecycle_tests {
         let binary = super::super::binary_path(state.path());
         fs::create_dir_all(binary.parent().unwrap()).unwrap();
         fs::copy(crate::layr_native::test_binary().expect("Layr binary"), binary).unwrap();
-        let mut record = json!({"id":"lead","isLead":true,"autoWake":true});
+        let mut record = studio_runtime_store::AgentRecord::test_defaults();
+        record.id = "lead".into();
+        record.is_lead = Some(true);
+        record.auto_wake = Some(true);
         super::super::configure_new_chat(&mut record, source.path().to_str().unwrap());
+        let record = record.value();
         let ready = super::super::runtime::prepare_files(state.path(), &record).expect("import");
         let main = PathBuf::from(ready["cwd"].as_str().unwrap());
         assert_eq!(git(&main, &["rev-parse", "HEAD"]), head);
