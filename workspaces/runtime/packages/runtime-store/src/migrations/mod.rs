@@ -278,6 +278,16 @@ fn apply_projection_records(tx: &Transaction<'_>) -> StoreResult<()> {
 }
 
 #[cfg(test)]
+mod pending_copy_tests {
+    #[test]
+    #[ignore = "manual verification on a disposable reflink copy of the state root"]
+    fn verify_all_pending_migrations_on_copy() {
+        let root = std::env::var_os("STUDIO_MIGRATION_COPY_ROOT").unwrap();
+        super::run(std::path::Path::new(&root), None).unwrap();
+    }
+}
+
+#[cfg(test)]
 mod projection_copy_tests {
     use super::*;
     use serde::Deserialize;
