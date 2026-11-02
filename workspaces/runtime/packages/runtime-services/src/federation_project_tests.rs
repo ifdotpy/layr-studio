@@ -310,17 +310,8 @@ async fn accept_shows_the_peer_lead_in_the_team_and_revoke_removes_it() {
     let (a, _a_root) = server("project-a").await;
     let (b, _b_root) = server("project-b").await;
     let invitation = invite(&a, "project-a").await;
-    let (a_state, _) = identity(&a).await;
-    // The peer lead is shown only for a paired server: a paired access client of `a`.
+    // No paired access client of `a` exists: the peer lead comes from the grant label alone.
     b.transaction_with(move |tx| {
-        tx.execute(
-            "INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2)",
-            (
-                a_state.clone(),
-                json!({"id": a_state, "clientId": "client", "kind": "server", "label": "Server A", "created": 1, "publicKey": "public", "status": "paired"}).to_string(),
-            ),
-        )
-        .map_err(StoreError::from)?;
         for id in ["a1", "a2"] {
             tx.execute(
                 "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
@@ -341,6 +332,12 @@ async fn accept_shows_the_peer_lead_in_the_team_and_revoke_removes_it() {
         .await
         .expect("accept writes the grant");
     let grant = format!("\"grant\":\"{}\"", invitation.invite_id);
+    assert!(
+        peer_team_payload(&b)
+            .await
+            .contains("\"label\":\"Studio server\""),
+        "the label comes from the grant"
+    );
     assert!(
         peer_team_payload(&b).await.contains(&grant),
         "peer lead appears"
