@@ -204,6 +204,27 @@ async fn observe_idle(
     observed
 }
 
+/// Poll the worker's idle observation until `ready` holds, within the progress
+/// deadline. Each poll is one worker command, so a regression fails at the deadline.
+async fn wait_for_idle_observation(
+    worker: &AccountHandle,
+    peer: &mut Peer,
+    evidence: &str,
+    ready: impl Fn(&super::super::idle_unload::IdleObservation) -> bool,
+) -> super::super::idle_unload::IdleObservation {
+    let evidence = json!(evidence);
+    tokio::time::timeout(PROGRESS_GUARD, async {
+        loop {
+            let observed = observe_idle(worker, peer, &evidence, false).await;
+            if ready(&observed) {
+                return observed;
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("idle observation never reached {evidence}"))
+}
+
 async fn assert_idle_blocked(
     worker: &AccountHandle,
     peer: &mut Peer,
@@ -555,11 +576,14 @@ async fn input_arriving_during_native_checks_prevents_unsubscribe() {
     let queue = progress(peer.write("thread/queue/list")).await;
     state.enqueue("arrived-during-idle-checks").await;
     progress(peer.reply(&queue, json!({"data": [], "nextCursor": null}))).await;
-    progress(worker_barrier(&worker)).await;
-    assert!(
-        peer.writes.try_recv().is_err(),
-        "new input keeps its thread loaded"
-    );
+    // The durable blocker is recorded only after the worker rechecks the store.
+    // Observing it proves the decision, and observe_idle fails on any write.
+    let observed =
+        wait_for_idle_observation(&worker, &mut peer, "durable input blocker", |observed| {
+            observed.durable_blocked.contains(THREAD)
+        })
+        .await;
+    assert!(!observed.released.contains(THREAD), "{observed:?}");
     progress(worker.shutdown()).await.unwrap();
 }
 
