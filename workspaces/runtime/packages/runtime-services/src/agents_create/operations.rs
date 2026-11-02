@@ -4743,7 +4743,7 @@ mod tests {
                     "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
                     rusqlite::params![
                         "conversation",
-                        json!({"id":"conversation","provider":studio_runtime_schema::ProviderKind::Codex,"accountKey":"old-account"}).to_string()
+                        json!({"id":"conversation","rootId":"conversation","epoch":0,"status":"idle","compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"accountKey":"old-account"}).to_string()
                     ],
                 )?;
                 Ok(())
@@ -4820,7 +4820,7 @@ mod tests {
                     "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
                     rusqlite::params![
                         "conversation",
-                        json!({"id":"conversation","provider":studio_runtime_schema::ProviderKind::Claude,"accountKey":"claude-own"}).to_string()
+                        json!({"id":"conversation","rootId":"conversation","epoch":0,"status":"idle","compactions":0,"provider":studio_runtime_schema::ProviderKind::Claude,"accountKey":"claude-own"}).to_string()
                     ],
                 )?;
                 Ok(())
