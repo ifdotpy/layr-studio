@@ -1,12 +1,13 @@
-//! The QUIC link between paired Studio servers (docs/peer-link.md).
+//! The link between paired Studio servers (docs/peer-link.md).
 //!
 //! The backend starts this process and writes the configuration as the first stdin line. Later
-//! lines replace the paired keys. The process exits when stdin closes.
+//! lines replace the paired keys. The process exits when stdin closes. The link uses one iroh
+//! endpoint: a peer is dialed and accepted by its key, over a direct path or a relay.
 
 mod frame;
+mod identity;
 mod inbound;
 mod outbound;
-mod tls;
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -16,12 +17,12 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
-use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
-use quinn::{Connection, Endpoint, TransportConfig, VarInt};
-use rustls::crypto::CryptoProvider;
-use rustls::sign::CertifiedKey;
+use iroh::endpoint::{Connection, IdleTimeout, QuicTransportConfig, VarInt, presets};
+use iroh::{Endpoint, PublicKey, RelayMode, RelayUrl, SecretKey};
 use serde::Deserialize;
 use tokio::io::{AsyncBufReadExt, BufReader};
+
+use identity::PairedKeys;
 
 const CONNECT_SECONDS: u64 = 5;
 
@@ -37,6 +38,9 @@ struct Config {
     socket: PathBuf,
     /// Secret shared with the backend. The link sends it with the connection identity.
     link_token: String,
+    /// Relay URLs. Empty (the default) means direct paths only: no relay is used.
+    #[serde(default)]
+    relays: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -48,25 +52,32 @@ struct Update {
 /// The paired keys and the open connections. A connection whose key leaves the set closes.
 pub struct Links {
     endpoint: Endpoint,
-    provider: Arc<CryptoProvider>,
-    key: Arc<CertifiedKey>,
-    transport: Arc<TransportConfig>,
-    keys: tls::PairedKeys,
+    keys: PairedKeys,
     /// The PEM of each paired key, to name a connection in the `connected` line.
-    names: RwLock<HashMap<Vec<u8>, String>>,
+    names: RwLock<HashMap<PublicKey, String>>,
     inbound: Mutex<Vec<Connection>>,
-    outbound: tokio::sync::Mutex<HashMap<(SocketAddr, Vec<u8>), Connection>>,
-}
-
-fn peer_key(connection: &Connection) -> Option<Vec<u8>> {
-    let identity = connection.peer_identity()?;
-    let keys = identity
-        .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
-        .ok()?;
-    keys.first().map(|key| key.as_ref().to_vec())
+    outbound: tokio::sync::Mutex<HashMap<PublicKey, Connection>>,
+    /// Receives each `connected` line. The process writes it to stdout.
+    on_connected: Box<dyn Fn(&str) + Send + Sync>,
 }
 
 impl Links {
+    fn new(
+        endpoint: Endpoint,
+        keys: PairedKeys,
+        names: HashMap<PublicKey, String>,
+        on_connected: Box<dyn Fn(&str) + Send + Sync>,
+    ) -> Self {
+        Self {
+            endpoint,
+            keys,
+            names: RwLock::new(names),
+            inbound: Mutex::new(Vec::new()),
+            outbound: tokio::sync::Mutex::new(HashMap::new()),
+            on_connected,
+        }
+    }
+
     fn track_inbound(&self, connection: &Connection) {
         if let Ok(mut connections) = self.inbound.lock() {
             connections.retain(|connection| connection.close_reason().is_none());
@@ -75,69 +86,53 @@ impl Links {
         self.announce(connection);
     }
 
-    /// Tell the backend that a connection to a paired server opened: one JSON line on
-    /// stdout. The backend then sends the outbox entries of that server at once.
+    /// Tell the backend that a connection to a paired server opened. The backend then sends the
+    /// outbox entries of that server at once.
     fn announce(&self, connection: &Connection) {
-        let Some(key) = peer_key(connection) else {
-            return;
-        };
         let name = self
             .names
             .read()
             .ok()
-            .and_then(|names| names.get(&key).cloned());
-        let Some(name) = name else {
-            return;
-        };
-        let mut stdout = std::io::stdout().lock();
-        writeln!(stdout, "{}", serde_json::json!({"connected": name})).ok();
-        stdout.flush().ok();
+            .and_then(|names| names.get(&connection.remote_id()).cloned());
+        if let Some(name) = name {
+            (self.on_connected)(&serde_json::json!({"connected": name}).to_string());
+        }
     }
 
-    async fn connect(&self, address: SocketAddr, key: Vec<u8>) -> Result<Connection, String> {
-        let paired = self
-            .keys
-            .read()
-            .map(|keys| keys.contains(&key))
-            .unwrap_or(false);
-        if !paired {
-            return Err("The server is not paired".to_owned());
-        }
+    /// The connection to a paired server. It is reused while open, and dialed again after a drop.
+    /// The address is a direct hint; iroh also uses the relays and the paths it learns.
+    async fn connect(&self, address: SocketAddr, id: PublicKey) -> Result<Connection, String> {
         let mut connections = self.outbound.lock().await;
-        let slot = (address, key.clone());
         if let Some(connection) = connections
-            .get(&slot)
+            .get(&id)
             .filter(|connection| connection.close_reason().is_none())
         {
             return Ok(connection.clone());
         }
-        let crypto = tls::client_config(self.provider.clone(), self.key.clone(), key)?;
-        let crypto = QuicClientConfig::try_from(crypto).map_err(|error| error.to_string())?;
-        let mut config = quinn::ClientConfig::new(Arc::new(crypto));
-        config.transport_config(self.transport.clone());
-        let connecting = self
-            .endpoint
-            .connect_with(config, address, "studio-peer")
-            .map_err(|error| error.to_string())?;
-        let connection = tokio::time::timeout(Duration::from_secs(CONNECT_SECONDS), connecting)
-            .await
-            .map_err(|_| "The QUIC handshake timed out".to_owned())?
-            .map_err(|error| error.to_string())?;
-        connections.insert(slot, connection.clone());
+        let remote = iroh::EndpointAddr::new(id).with_ip_addr(address);
+        let connection = tokio::time::timeout(
+            Duration::from_secs(CONNECT_SECONDS),
+            self.endpoint.connect(remote, identity::ALPN),
+        )
+        .await
+        .map_err(|_| "The connection timed out".to_owned())?
+        .map_err(|error| error.to_string())?;
+        connections.insert(id, connection.clone());
         self.announce(&connection);
         Ok(connection)
     }
 
-    async fn replace_keys(&self, keys: HashSet<Vec<u8>>, names: HashMap<Vec<u8>, String>) {
-        let revoked =
-            |connection: &Connection| peer_key(connection).is_none_or(|key| !keys.contains(&key));
+    async fn replace_keys(&self, keys: HashSet<PublicKey>, names: HashMap<PublicKey, String>) {
         if let Ok(connections) = self.inbound.lock() {
-            for connection in connections.iter().filter(|connection| revoked(connection)) {
+            for connection in connections
+                .iter()
+                .filter(|connection| !keys.contains(&connection.remote_id()))
+            {
                 connection.close(VarInt::from_u32(2), b"revoked");
             }
         }
-        self.outbound.lock().await.retain(|(_, key), connection| {
-            if keys.contains(key) {
+        self.outbound.lock().await.retain(|id, connection| {
+            if keys.contains(id) {
                 return true;
             }
             connection.close(VarInt::from_u32(2), b"revoked");
@@ -152,32 +147,56 @@ impl Links {
     }
 }
 
-fn paired_keys(peers: &[String]) -> Result<HashSet<Vec<u8>>, String> {
-    peers.iter().map(|peer| tls::spki(peer)).collect()
-}
-
-fn peer_names(peers: &[String]) -> Result<HashMap<Vec<u8>, String>, String> {
+fn paired_keys(peers: &[String]) -> Result<HashSet<PublicKey>, String> {
     peers
         .iter()
-        .map(|peer| Ok((tls::spki(peer)?, peer.clone())))
+        .map(|peer| identity::endpoint_id(&identity::spki(peer)?))
         .collect()
 }
 
-fn transport() -> Result<TransportConfig, String> {
-    let mut transport = TransportConfig::default();
-    transport
-        .keep_alive_interval(Some(Duration::from_secs(10)))
-        .max_idle_timeout(Some(
-            Duration::from_secs(60)
-                .try_into()
-                .map_err(|_| "The idle timeout is invalid".to_owned())?,
-        ))
-        .stream_receive_window(VarInt::from_u32(16 * 1024 * 1024))
-        .receive_window(VarInt::from_u32(64 * 1024 * 1024))
-        .send_window(64 * 1024 * 1024)
-        .max_concurrent_bidi_streams(VarInt::from_u32(128))
-        .max_concurrent_uni_streams(VarInt::from_u32(0));
-    Ok(transport)
+fn peer_names(peers: &[String]) -> Result<HashMap<PublicKey, String>, String> {
+    peers
+        .iter()
+        .map(|peer| Ok((identity::endpoint_id(&identity::spki(peer)?)?, peer.clone())))
+        .collect()
+}
+
+fn relay_mode(relays: &[String]) -> Result<RelayMode, String> {
+    if relays.is_empty() {
+        return Ok(RelayMode::Disabled);
+    }
+    let urls = relays
+        .iter()
+        .map(|relay| {
+            relay
+                .parse::<RelayUrl>()
+                .map_err(|_| "A relay URL is invalid".to_owned())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(RelayMode::custom(urls))
+}
+
+fn transport() -> Result<QuicTransportConfig, String> {
+    let idle = IdleTimeout::try_from(Duration::from_secs(60))
+        .map_err(|_| "The idle timeout is invalid".to_owned())?;
+    Ok(QuicTransportConfig::builder()
+        .keep_alive_interval(Duration::from_secs(10))
+        .max_idle_timeout(Some(idle))
+        .build())
+}
+
+/// The endpoint without a bind address. The caller adds the sockets.
+fn builder(
+    secret: SecretKey,
+    keys: PairedKeys,
+    relay_mode: RelayMode,
+) -> Result<iroh::endpoint::Builder, String> {
+    Ok(Endpoint::builder(presets::Minimal)
+        .secret_key(secret)
+        .alpns(vec![identity::ALPN.to_vec()])
+        .relay_mode(relay_mode)
+        .transport_config(transport()?)
+        .hooks(identity::Pairing { keys }))
 }
 
 fn valid_host(host: &str) -> bool {
@@ -185,6 +204,12 @@ fn valid_host(host: &str) -> bool {
         && host
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || b".-:".contains(&byte))
+}
+
+fn print_line(line: &str) {
+    let mut stdout = std::io::stdout().lock();
+    writeln!(stdout, "{line}").ok();
+    stdout.flush().ok();
 }
 
 async fn run() -> Result<(), String> {
@@ -200,47 +225,33 @@ async fn run() -> Result<(), String> {
     if !(inbound::tailnet(config.listen.ip()) || loopback) || !valid_host(&config.forwarded_host) {
         return Err("Listen on a Tailscale address and use the Serve host".to_owned());
     }
-    let provider = tls::provider();
-    let key = tls::certified_key(&provider, &config.private_key, &config.public_key)?;
-    let keys: tls::PairedKeys = Arc::new(RwLock::new(paired_keys(&config.peers)?));
-    let transport = Arc::new(transport()?);
-    let crypto = tls::server_config(provider.clone(), key.clone(), keys.clone())?;
-    let crypto = QuicServerConfig::try_from(crypto).map_err(|error| error.to_string())?;
-    let mut server = quinn::ServerConfig::with_crypto(Arc::new(crypto));
-    server.transport_config(transport.clone());
-    let endpoint = Endpoint::server(server, config.listen).map_err(|error| error.to_string())?;
-    let listener = outbound::bind(&config.socket).map_err(|error| error.to_string())?;
-    let links = Arc::new(Links {
-        endpoint: endpoint.clone(),
-        provider,
-        key,
-        transport,
-        keys,
-        names: RwLock::new(peer_names(&config.peers)?),
-        inbound: Mutex::new(Vec::new()),
-        outbound: tokio::sync::Mutex::new(HashMap::new()),
-    });
-    let port = endpoint
-        .local_addr()
+    let secret = identity::secret_key(&config.private_key, &config.public_key)?;
+    let keys: PairedKeys = Arc::new(RwLock::new(paired_keys(&config.peers)?));
+    let endpoint = builder(secret, keys.clone(), relay_mode(&config.relays)?)?
+        .bind_addr(config.listen)
         .map_err(|error| error.to_string())?
-        .port();
+        .bind()
+        .await
+        .map_err(|error| error.to_string())?;
+    let listener = outbound::bind(&config.socket).map_err(|error| error.to_string())?;
+    let port = endpoint
+        .bound_sockets()
+        .first()
+        .map(|address| address.port())
+        .ok_or("The endpoint has no socket")?;
+    let links = Arc::new(Links::new(
+        endpoint.clone(),
+        keys,
+        peer_names(&config.peers)?,
+        Box::new(print_line),
+    ));
     let inbound = Arc::new(inbound::Inbound {
         backend_port: config.backend_port,
         forwarded_host: config.forwarded_host,
         link_token: config.link_token,
-        loopback,
     });
     // The ready line comes first: a `connected` line may follow it, never precede it.
-    {
-        let mut stdout = std::io::stdout().lock();
-        writeln!(
-            stdout,
-            "{}",
-            serde_json::json!({"ready": true, "port": port})
-        )
-        .map_err(|error| error.to_string())?;
-        stdout.flush().map_err(|error| error.to_string())?;
-    }
+    print_line(&serde_json::json!({"ready": true, "port": port}).to_string());
     tokio::spawn(inbound::serve(endpoint.clone(), inbound, links.clone()));
     tokio::spawn(outbound::listen(listener, links.clone()));
     while let Some(line) = lines.next_line().await.map_err(|error| error.to_string())? {
@@ -250,7 +261,7 @@ async fn run() -> Result<(), String> {
             .replace_keys(paired_keys(&update.peers)?, peer_names(&update.peers)?)
             .await;
     }
-    endpoint.close(VarInt::from_u32(0), b"exit");
+    endpoint.close().await;
     std::fs::remove_file(&config.socket).ok();
     Ok(())
 }
@@ -272,3 +283,6 @@ fn main() -> ExitCode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
