@@ -244,13 +244,6 @@ fn replay_in(
     ))
 }
 
-fn excludes_account(agent: &studio_runtime_store::AgentRecord, target: &str) -> bool {
-    agent
-        .excluded_account_keys
-        .value()
-        .is_some_and(|keys| keys.iter().any(|key| key == target))
-}
-
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
 enum ResumeString<'a> {
@@ -267,10 +260,8 @@ struct ResumeIdentity<'a> {
 }
 
 /// The single compatibility accessor for per-chat account exclusions.
-pub(crate) fn account_is_excluded(exclusions: Option<&Value>, target: &str) -> bool {
-    exclusions
-        .and_then(Value::as_array)
-        .is_some_and(|keys| keys.iter().any(|key| key.as_str() == Some(target)))
+pub(crate) fn account_is_excluded(exclusions: Option<&[String]>, target: &str) -> bool {
+    exclusions.is_some_and(|keys| keys.iter().any(|key| key == target))
 }
 
 /// Return a retained request before consulting mutable account eligibility.
@@ -336,7 +327,10 @@ pub async fn request(
                     "Choose the orchestrator to transfer its team",
                 ));
             }
-            if excludes_account(&actor, &target) {
+            if account_is_excluded(
+                actor.excluded_account_keys.value().map(Vec::as_slice),
+                &target,
+            ) {
                 return Err(TransferError::Refused(
                     "This account is disabled for this chat",
                 ));
@@ -421,8 +415,10 @@ pub async fn request(
                 ));
             }
             let operation = TransferRecord::new_team(
-                operation_id.clone(),
-                lead.clone(),
+                transfer_id,
+                lead.clone()
+                    .try_into()
+                    .map_err(|_| TransferError::Refused("Invalid transfer identity"))?,
                 target_key,
                 provider,
                 serde_json::Number::from_f64(now)
@@ -517,14 +513,15 @@ fn persist_request(
         .map_err(|_| TransferError::Refused("Invalid transfer response"));
     }
     let operation = &decision.operation;
-    let old = decision.agents.get(&operation.lead_id).and_then(|agent| {
-        match agent.account_transfer.value() {
+    let old = decision
+        .agents
+        .get(operation.lead_id.as_str())
+        .and_then(|agent| match agent.account_transfer.value() {
             Some(studio_runtime_store::transfer_record::AgentTransferState::Summary(summary)) => {
                 Some(summary.id.as_str())
             }
             _ => None,
-        }
-    });
+        });
     let previous_created = old
         .map(|id| Repository::get_typed_with_raw(tx, id))
         .transpose()?
@@ -537,7 +534,7 @@ fn persist_request(
     }
     let raw = decision.encoded()?;
     let operation = &decision.operation;
-    Repository::put(tx, &operation.id, &raw)?;
+    Repository::put(tx, operation.id.as_str(), &raw)?;
     let mut agents = std::mem::take(&mut decision.agents);
     for (id, agent) in &mut agents {
         let prior = AgentRepository::get(tx, &AgentId::from(id.as_str()))?;
@@ -1009,7 +1006,7 @@ pub async fn prepared_member(
     store: &RuntimeStore,
     operation: &str,
     agent: &str,
-    target_settings: Value,
+    target_settings: studio_runtime_store::transfer_record::DestinationSettings,
     portable_history: Option<Value>,
     now: f64,
 ) -> Result<(), TransferError> {
@@ -1119,13 +1116,13 @@ fn check_durable_blockers(tx: &Transaction<'_>, agent: &str) -> Result<(), Trans
 /// are prepared outside the writer transaction from these checked records.
 pub struct TransferPreparation {
     operation: TransferRecord,
-    agent: Value,
+    agent: studio_runtime_store::AgentRecord,
 }
 impl TransferPreparation {
     pub fn operation(&self) -> &TransferRecord {
         &self.operation
     }
-    pub fn agent(&self) -> &Value {
+    pub fn agent(&self) -> &studio_runtime_store::AgentRecord {
         &self.agent
     }
 }
@@ -1193,7 +1190,7 @@ pub async fn execute_member(
             let decision = snapshot.begin_read(&transaction_agent_id)?;
             let input = TransferPreparation {
                 operation: decision.operation.clone(),
-                agent: snapshot.agent(&transaction_agent_id)?.value(),
+                agent: snapshot.agent(&transaction_agent_id)?.clone(),
             };
             persist(tx, decision, now)?;
             Ok::<_, TransferError>(Ok(input))
@@ -1768,6 +1765,53 @@ mod request_tests {
         assert_eq!(cancelled["status"], "cancelled");
         let replay = request(&store, id, "lead", "target", "team", "codex", 30.0).unwrap();
         assert_eq!(replay, first, "retry returns the original accepted result");
+    }
+
+    #[test]
+    fn cancel_wakes_input_queued_during_the_transfer() {
+        let (_root, store) = store_with_agents();
+        run_async(store.transaction_with_error(|tx| {
+            tx.execute(
+                "UPDATE runtime_agents SET record=json_set(record,'$.autoWake',json('true')) WHERE id='lead'",
+                [],
+            )?;
+            Ok::<_, studio_runtime_store::StoreError>(())
+        }))
+        .expect("enable auto wake on the lead");
+        let id = "5a300f72-4ea6-4d30-8a0e-9b2c13c42260";
+        request(&store, id, "lead", "target", "team", "codex", 10.0).unwrap();
+        run_async(store.transaction_with_error(|tx| {
+            let lead = AgentRepository::get(tx, &AgentId::from("lead"))?.expect("lead exists");
+            crate::event_write::enqueue_event(
+                tx,
+                &lead,
+                "queued-during-transfer".into(),
+                "user",
+                "continue".into(),
+                15.0,
+            )
+            .expect("input queues during the transfer");
+            Ok::<_, studio_runtime_store::StoreError>(())
+        }))
+        .expect("queue input");
+        assert_eq!(stored(&store, "lead")["status"], "queued");
+        let cancelled = run_async(action(&store, id, Action::Cancel, 20.0)).unwrap();
+        assert_eq!(cancelled["status"], "cancelled");
+        let lead = stored(&store, "lead");
+        assert_eq!(lead["accountKey"], "source");
+        assert!(lead.get("accountTransferId").is_none_or(Value::is_null));
+        let wake = studio_runtime_store::SchedulerRepository::account_wake_for_accounts(
+            &store.test_reader().expect("database is readable"),
+            ["source"],
+            10,
+            21.0,
+        )
+        .expect("wake selection reads");
+        assert!(
+            wake.get("source")
+                .is_some_and(|agents| agents.iter().any(|agent| agent.agent_id == "lead")),
+            "the lead with queued input is claimable on its source account after cancel: {wake:?}"
+        );
     }
 
     #[test]

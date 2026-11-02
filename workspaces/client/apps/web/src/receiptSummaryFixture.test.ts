@@ -7,7 +7,7 @@ import {
   readEntities,
 } from "../tests/fixtures/rust-ui-fixture.ts";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readResourceBaselines } from "../tests/fixtures/resource-baselines.ts";
@@ -17,7 +17,8 @@ it("uses a disposable project instead of the enclosing checkout", () => {
   const root = mkdtempSync(join(tmpdir(), "studio-fixture-project-"));
   try {
     const project = fixtureProjectDirectory(root);
-    expect(project).toBe(join(root, "project"));
+    // The fixture resolves symlinks (macOS /var is /private/var), so compare the real root.
+    expect(project).toBe(join(realpathSync(root), "project"));
     expect(
       execFileSync("git", ["-C", project, "rev-parse", "--verify", "HEAD"], {
         encoding: "utf8",

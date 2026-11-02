@@ -107,7 +107,7 @@ fn text<'a>(record: &'a Value, key: &str) -> Result<&'a str> {
         .ok_or_else(|| NativeLayrError::Refused(format!("Missing {key}")))
 }
 
-/// Run only the Studio-owned binary. Ambient Layr and Git selectors never escape this store.
+/// Run the installed binary. Ambient Layr and Git selectors never escape this store.
 pub fn run(state_dir: &Path, cwd: &Path, args: &[&str]) -> Result<String> {
     let root = settings::root_from_cwd(cwd)
         .map(Ok)
@@ -121,9 +121,21 @@ pub(super) fn run_in_store(
     cwd: &Path,
     args: &[&str],
 ) -> Result<String> {
+    let binary = super::capability::resolve_binary().map_err(|capability| {
+        NativeLayrError::Refused(capability.message().unwrap_or("Layr is unavailable").into())
+    })?;
+    run_with_binary(state_dir, root, cwd, args, &binary)
+}
+
+pub(super) fn run_with_binary(
+    state_dir: &Path,
+    root: &Path,
+    cwd: &Path,
+    args: &[&str],
+    binary: &Path,
+) -> Result<String> {
     // APFS clonefile traversal refuses symlink ancestors, including macOS /var and /tmp.
     let state_dir = CanonicalPath::existing(state_dir).map(CanonicalPath::into_path_buf)?;
-    let binary = binary_path(&state_dir);
     let mut argv = vec![
         "-u",
         "LAYR_SOCKET",
@@ -483,7 +495,13 @@ pub(super) fn prepare_files_with_git_policy(
     } else {
         None
     };
-    super::install::ensure_binary(state_dir)?;
+    {
+        let _binary_lock = lock(state_dir, "binary")?;
+        let binary = super::capability::resolve_binary().map_err(|capability| {
+            NativeLayrError::Refused(capability.message().unwrap_or("Layr is unavailable").into())
+        })?;
+        super::git_guard::ensure(state_dir, &binary)?;
+    }
     let version_warning = super::versions::verify(state_dir, &root)?;
     fs::create_dir_all(&metadata)?;
     let _project_lock = lock(state_dir, &format!("{}:project:{project}", root.display()))?;

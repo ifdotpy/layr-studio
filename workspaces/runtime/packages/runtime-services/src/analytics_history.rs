@@ -893,10 +893,9 @@ impl SessionHeader {
 }
 
 pub(crate) fn native_rollout_header_matches(header: &[u8], thread: &str) -> bool {
-    serde_json::from_slice::<Value>(header)
+    serde_json::from_slice::<studio_runtime_schema::json_object::JsonObject<SessionHeader>>(header)
         .ok()
-        .and_then(|value| SessionHeader::from_value(&value))
-        .is_some_and(|header| header.is_session() && header.first_id(thread))
+        .is_some_and(|header| header.0.is_session() && header.0.first_id(thread))
 }
 
 pub fn prepare(
@@ -1539,8 +1538,6 @@ mod invalid_record_tests {
             r#"{"type":"session_meta","payload":{"id":7,"session_id":"t","history_base":false}}"#,
             r#"{"type":"session_meta","payload":{"id":"","forked_from_id":null,"timestamp":7,"context_window":null}}"#,
             r#"{"type":"session_meta","payload":{"id":"t","forked_from_id":false,"timestamp":"time","context_window":4}}"#,
-            r#"{"type":"other","type":"session_meta","payload":{"id":"t","extra":1}}"#,
-            r#"{"type":"session_meta","payload":{"id":"t","id":"other"}}"#,
         ] {
             let value: Value = serde_json::from_str(raw).expect("valid fixture");
             let header = SessionHeader::from_value(&value);
@@ -1592,6 +1589,10 @@ mod invalid_record_tests {
                 "{raw}"
             );
         }
+        assert!(!native_rollout_header_matches(
+            br#"{"type":"other","type":"session_meta","payload":{"id":"t"}}"#,
+            "t"
+        ));
         let deep = format!("{}0{}", "[".repeat(140), "]".repeat(140));
         assert!(!native_rollout_header_matches(deep.as_bytes(), "t"));
         assert!(!native_rollout_header_matches(

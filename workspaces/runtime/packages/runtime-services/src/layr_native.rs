@@ -1,4 +1,4 @@
-//! Host Layr workspaces. The Studio state directory owns the store and binary.
+//! Host Layr workspaces. The Studio state directory owns the store and guard.
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use studio_runtime_store::path_identity::CanonicalPath;
@@ -8,8 +8,6 @@ pub use studio_runtime_store::NATIVE_LAYR_DIRECTORY;
 pub const STORE_DIRECTORY: &str = "store";
 /// Length of a SHA-256 project ID, in hexadecimal bytes.
 pub(super) const PROJECT_ID_HEX_BYTES: usize = 64;
-/// Host Layr release required by Studio's command contract.
-pub const LAYR_VERSION: &str = "0.11.0";
 
 pub fn store_path(state_dir: &Path) -> PathBuf {
     state_dir.join(NATIVE_LAYR_DIRECTORY).join(STORE_DIRECTORY)
@@ -110,13 +108,18 @@ mod tests {
 
 mod capability;
 mod git_guard;
-pub mod install;
 pub mod mapping;
 pub mod settings;
 mod versions;
 #[cfg(test)]
 mod warm_store_tests;
-pub use capability::{NativeLayrCapability, capability};
+pub use capability::{NativeLayrCapability, capability, resolve_binary};
+#[cfg(test)]
+fn test_binary() -> Option<std::ffi::OsString> {
+    let binary = std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY")?;
+    capability::TEST_BINARY.with(|value| *value.borrow_mut() = Some(PathBuf::from(&binary)));
+    Some(binary)
+}
 mod failed_import;
 mod private_tree;
 mod runtime;
@@ -308,8 +311,7 @@ mod receipt_tests {
     fn real_host_import_worker_merge_archive_and_warm_caches() {
         use std::{fs, path::PathBuf};
         let binary = PathBuf::from(
-            std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY")
-                .expect("Set STUDIO_LAYR_NATIVE_TEST_BINARY"),
+            crate::layr_native::test_binary().expect("Set STUDIO_LAYR_NATIVE_TEST_BINARY"),
         );
         let state = tempfile::tempdir().expect("fixture operation succeeds");
         let source = tempfile::tempdir().expect("fixture operation succeeds");
@@ -740,6 +742,9 @@ esac
 "#).expect("fixture operation succeeds");
         fs::set_permissions(binary_path(state.path()), fs::Permissions::from_mode(0o755))
             .expect("fixture operation succeeds");
+        // Cargo's test runner can execute fixtures concurrently in one process.
+        capability::TEST_BINARY
+            .with(|binary| *binary.borrow_mut() = Some(binary_path(state.path())));
         let project = studio_runtime_store::sha256_hex(b"/fast-source");
         let line = format!("agent-{}", studio_runtime_store::sha256_hex(b"fast-worker"));
         let cwd = main_path(state.path(), &project)
@@ -925,8 +930,7 @@ esac
         )
         .expect("fixture operation succeeds");
         fs::copy(
-            std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY")
-                .expect("Set STUDIO_LAYR_NATIVE_TEST_BINARY"),
+            crate::layr_native::test_binary().expect("Set STUDIO_LAYR_NATIVE_TEST_BINARY"),
             binary_path(state.path()),
         )
         .expect("fixture operation succeeds");

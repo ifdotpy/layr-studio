@@ -1,9 +1,6 @@
 import type { PostBody } from "./api";
 import { statusLabel, type Agent } from "./types";
-import {
-  defaultWorkspaceMode,
-  type NewChatWorkspaceMode,
-} from "./components/newChatSettings";
+import { type NewChatWorkspaceMode } from "./components/newChatSettings";
 
 type AssertNever<T extends never> = T;
 
@@ -22,7 +19,6 @@ export type NewChatModeUsesRequestOwner = AssertNever<
 >;
 
 const acceptsAgentStatus: (status: Agent["status"]) => string = statusLabel;
-const defaultMode: NewChatWorkspaceMode = defaultWorkspaceMode();
 // @ts-expect-error Agent status must come from the generated closed domain.
 statusLabel("unrecognized-status");
 // @ts-expect-error Missing agent status is passed directly, without an empty-string sentinel.
@@ -36,6 +32,5 @@ const invalidWorkspace: Agent = {
 };
 
 void acceptsAgentStatus;
-void defaultMode;
 void invalidChatMode;
 void invalidWorkspace;
