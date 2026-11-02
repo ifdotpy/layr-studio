@@ -931,6 +931,7 @@ fn callback_refusal(error: crate::provider_callbacks::CallbackError) -> Error {
         C::Dependency(name) => Error::Unavailable(name),
         C::Store(error) => Error::Store(error),
         C::Stored(location) => Error::StoredAt(location),
+        C::Refusal(message) => Error::Refusal(message),
         C::InvalidResultSchema(_) | C::Stale | C::Conflict | C::Unknown => Error::Stale,
     }
 }

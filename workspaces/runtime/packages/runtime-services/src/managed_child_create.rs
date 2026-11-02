@@ -1334,9 +1334,6 @@ fn map_recheck_error(
         crate::agents_create::MutationError::Store(error) => {
             crate::managed_host_tools::Error::Store(error)
         }
-        crate::agents_create::MutationError::Request(error) => {
-            crate::managed_host_tools::Error::Store(error.into())
-        }
         error => crate::managed_host_tools::Error::Refusal(error.to_string()),
     }
 }

@@ -221,6 +221,7 @@ fn callback_error(error: callbacks::CallbackError) -> WorkerError {
         callbacks::CallbackError::Store(error) => WorkerError::Store(error),
         callbacks::CallbackError::Invalid(_)
         | callbacks::CallbackError::InvalidResultSchema(_)
+        | callbacks::CallbackError::Refusal(_)
         | callbacks::CallbackError::Dependency(_)
         | callbacks::CallbackError::Stale
         | callbacks::CallbackError::Conflict

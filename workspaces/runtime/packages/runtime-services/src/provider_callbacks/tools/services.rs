@@ -207,6 +207,7 @@ fn callback_refusal(error: CallbackError) -> crate::managed_host_tools::Error {
         CallbackError::Dependency(name) => crate::managed_host_tools::Error::Unavailable(name),
         CallbackError::Invalid(message) => crate::managed_host_tools::Error::Invalid(message),
         CallbackError::Stored(location) => crate::managed_host_tools::Error::StoredAt(location),
+        CallbackError::Refusal(message) => crate::managed_host_tools::Error::Refusal(message),
         CallbackError::InvalidResultSchema(_)
         | CallbackError::Stale
         | CallbackError::Conflict
@@ -269,6 +270,7 @@ impl crate::managed_host_tools::InterruptPort for ProductionPorts {
             CallbackError::Expired => crate::managed_host_tools::Error::Expired,
             CallbackError::Store(error) => crate::managed_host_tools::Error::Store(error),
             CallbackError::Stored(location) => crate::managed_host_tools::Error::StoredAt(location),
+            CallbackError::Refusal(message) => crate::managed_host_tools::Error::Refusal(message),
             CallbackError::Invalid(message) => crate::managed_host_tools::Error::Invalid(message),
             CallbackError::InvalidResultSchema(_)
             | CallbackError::Dependency(_)
@@ -673,6 +675,9 @@ pub(super) async fn resolve_interrupt_target(
                         CallbackError::Stored(location) => {
                             crate::managed_host_tools::Error::StoredAt(location)
                         }
+                        CallbackError::Refusal(message) => {
+                            crate::managed_host_tools::Error::Refusal(message)
+                        }
                         CallbackError::Invalid(message) => {
                             crate::managed_host_tools::Error::Invalid(message)
                         }
@@ -717,6 +722,9 @@ pub(super) async fn resolve_send_target(
                         }
                         CallbackError::Stored(location) => {
                             crate::managed_host_tools::Error::StoredAt(location)
+                        }
+                        CallbackError::Refusal(message) => {
+                            crate::managed_host_tools::Error::Refusal(message)
                         }
                         CallbackError::Invalid(message) => {
                             crate::managed_host_tools::Error::Invalid(message)
@@ -1095,7 +1103,7 @@ pub(super) fn managed_error(error: crate::managed_host_tools::Error) -> Callback
         E::Invalid(message) => CallbackError::Invalid(message),
         E::Expired => CallbackError::Expired,
         E::Stale => CallbackError::Stale,
-        E::Refusal(message) => CallbackError::Stored(message),
+        E::Refusal(message) => CallbackError::Refusal(message),
         E::InvalidStored {
             table,
             id,

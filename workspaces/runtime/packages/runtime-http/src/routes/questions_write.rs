@@ -281,6 +281,7 @@ fn answer_callback_error(
         @ studio_runtime_services::provider_callbacks::CallbackError::InvalidResultSchema(
             _,
         )
+        | other @ studio_runtime_services::provider_callbacks::CallbackError::Refusal(_)
         | other @ studio_runtime_services::provider_callbacks::CallbackError::Stale
         | other @ studio_runtime_services::provider_callbacks::CallbackError::Conflict
         | other @ studio_runtime_services::provider_callbacks::CallbackError::Unknown
@@ -333,7 +334,7 @@ fn callback_error(error: studio_runtime_services::provider_callbacks::CallbackEr
         E::Dependency(name) => ApiError::dependency(name),
         E::Store(error) => ApiError::stored(error),
         E::Stored(location) => ApiError::invalid_stored("provider_callbacks", &location),
-        E::Invalid(_) | E::Conflict | E::Unknown | E::Stale => {
+        E::Invalid(_) | E::Refusal(_) | E::Conflict | E::Unknown | E::Stale => {
             ApiError::new(StatusCode::BAD_REQUEST, error.to_string())
         }
     }

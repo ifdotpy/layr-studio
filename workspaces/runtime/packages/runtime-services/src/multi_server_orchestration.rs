@@ -1751,7 +1751,9 @@ fn callback_error(error: crate::provider_callbacks::CallbackError) -> AccessErro
             "request_conflict",
             "This request conflicts with a saved message",
         ),
-        Callback::Stale => refused(409, "worker_stopped", "The worker was stopped"),
+        Callback::Stale | Callback::Refusal(_) => {
+            refused(409, "worker_stopped", "The worker was stopped")
+        }
         Callback::Unknown => refused(503, "message_unknown", "The message outcome is unknown"),
         Callback::Stored(_) => refused(503, "invalid_record", "A stored message record is invalid"),
     }
