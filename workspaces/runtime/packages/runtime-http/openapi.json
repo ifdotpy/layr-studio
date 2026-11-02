@@ -20824,6 +20824,9 @@
             ],
             "type": "string"
           },
+          "message": {
+            "type": "string"
+          },
           "promptTokens": {
             "maximum": 9007199254740991,
             "minimum": 0,
@@ -20850,6 +20853,9 @@
               "host_managed",
               "model_access"
             ],
+            "type": "string"
+          },
+          "title": {
             "type": "string"
           }
         },
