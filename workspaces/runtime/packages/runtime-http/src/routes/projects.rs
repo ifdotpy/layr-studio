@@ -340,10 +340,10 @@ async fn delete_project(
     let result = project_deletion::execute(
         store,
         project_deletion::Request {
-            id: body.id,
-            request_id: body.request_id,
-            expected_workspace_id: body.expected_workspace_id,
-            expected_project_seq: body.expected_project_seq,
+            id: body.id.as_str().to_owned(),
+            request_id: body.request_id.as_str().to_owned(),
+            expected_workspace_id: body.expected_workspace_id.as_str().to_owned(),
+            expected_project_seq: body.expected_project_seq.get(),
         },
         now,
         ports,
