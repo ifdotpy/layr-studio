@@ -538,9 +538,15 @@ pub fn maintain_entity_projections_with_server_id(
                         project_context(value.and_then(|value| value.get("vault")))?,
                     )
                 };
-                if let Some(projected) =
-                    crate::project_projection::project_record(*project, readiness, sync, vault)
-                {
+                let peer_leads =
+                    crate::project_projection::peer_leads_of(transaction, &project.id)?;
+                if let Some(projected) = crate::project_projection::project_record(
+                    *project,
+                    readiness,
+                    sync,
+                    vault,
+                    &peer_leads,
+                ) {
                     SyncDocumentsRepository::put_entity(
                         transaction,
                         "project",
@@ -2282,6 +2288,8 @@ struct PeerTeamProjection {
     project_path: String,
     members: Vec<String>,
     revision: Option<u64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    peer_leads: Vec<studio_runtime_schema::project_record::PeerLead>,
 }
 
 fn maintain_peer_team_entities(
@@ -2328,6 +2336,7 @@ fn maintain_peer_team_entities(
         else {
             continue;
         };
+        let peer_leads = crate::project_projection::peer_leads_of(transaction, &project.id)?;
         let revision = match project.peer_teams_revision {
             studio_runtime_schema::queue_command::Field::Missing => Some(0),
             studio_runtime_schema::queue_command::Field::Null => None,
@@ -2362,6 +2371,7 @@ fn maintain_peer_team_entities(
                             .map(|member| bound(&member, ""))
                             .collect(),
                         revision,
+                        peer_leads: peer_leads.clone(),
                     },
                 );
             }

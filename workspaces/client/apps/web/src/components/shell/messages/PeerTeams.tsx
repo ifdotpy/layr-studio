@@ -32,6 +32,20 @@ type RadioRequest = {
   rejected?: boolean;
 };
 
+/** A lead of a paired project, shown in its team as a peer. Read only. */
+export function PeerLeadRows({ leads }: { leads: PeerTeam["peerLeads"] }) {
+  return (leads ?? []).map((lead) => (
+    <div
+      key={lead.grant}
+      className="peer-team-peer"
+      data-peer-lead={lead.grant}
+    >
+      <span className="peer-team-peer-label">{lead.label}</span>
+      <span className="peer-team-peer-mark">Peer</span>
+    </div>
+  ));
+}
+
 export function PeerTeamGroup({
   team,
   closed,
@@ -206,6 +220,7 @@ export function PeerTeamGroup({
         </div>
       )}
       {children}
+      <PeerLeadRows leads={team.peerLeads} />
     </section>
   );
 }
