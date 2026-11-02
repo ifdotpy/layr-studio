@@ -324,18 +324,23 @@ fn codex_usage_event(
     ))
 }
 pub fn timestamp(value: &Value) -> Option<f64> {
-    deserialize_timestamp(value).ok().flatten()
+    deserialize_timestamp(value).ok().flatten().map(|at| at.0)
 }
-fn deserialize_timestamp<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+#[derive(Debug, PartialEq)]
+struct Timestamp(f64);
+
+fn deserialize_timestamp<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Timestamp>, D::Error> {
     use serde::de::{IgnoredAny, MapAccess, SeqAccess, Visitor};
     struct TimestampVisitor;
     impl<'de> Visitor<'de> for TimestampVisitor {
-        type Value = Option<f64>;
+        type Value = Option<Timestamp>;
         fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             f.write_str("a provider timestamp")
         }
         fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Self::Value, E> {
-            Ok((v.is_finite() && v >= 0.).then_some(v))
+            Ok((v.is_finite() && v >= 0.).then_some(Timestamp(v)))
         }
         fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
             self.visit_f64(v as f64)
@@ -346,7 +351,7 @@ fn deserialize_timestamp<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Optio
         fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
             Ok(chrono::DateTime::parse_from_rfc3339(v)
                 .ok()
-                .map(|t| t.timestamp() as f64 + t.timestamp_subsec_nanos() as f64 / 1e9))
+                .map(|t| Timestamp(t.timestamp() as f64 + t.timestamp_subsec_nanos() as f64 / 1e9)))
         }
         fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<Self::Value, E> {
             Ok(None)
@@ -466,7 +471,7 @@ mod tests {
         #[derive(serde::Deserialize)]
         struct Record {
             #[serde(default, deserialize_with = "super::deserialize_timestamp")]
-            timestamp: Option<f64>,
+            timestamp: Option<super::Timestamp>,
         }
         for raw in ["null", "true", "-1", "\"bad\"", "{}", "[]"] {
             let record: Record =
@@ -485,10 +490,10 @@ mod tests {
             );
         }
         let number: Record = serde_json::from_str(r#"{"timestamp":2.5}"#).expect("number");
-        assert_eq!(number.timestamp, Some(2.5));
+        assert_eq!(number.timestamp, Some(super::Timestamp(2.5)));
         let text: Record =
             serde_json::from_str(r#"{"timestamp":"1970-01-01T00:00:03Z"}"#).expect("text");
-        assert_eq!(text.timestamp, Some(3.0));
+        assert_eq!(text.timestamp, Some(super::Timestamp(3.0)));
     }
 
     #[tokio::test]
