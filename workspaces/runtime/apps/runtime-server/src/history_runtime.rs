@@ -1590,7 +1590,9 @@ mod tests {
         std::fs::create_dir_all(home.join("sessions/day")).expect("sessions");
         std::fs::create_dir_all(&other).expect("second profile");
         // The watcher stores real paths (macOS /var is /private/var).
-        let other_real = std::fs::canonicalize(&other).expect("real second profile");
+        let other_real = studio_runtime_store::path_identity::CanonicalPath::existing(&other)
+            .expect("real second profile")
+            .into_path_buf();
         let mut watcher =
             HistoryWatcher::new(root.path(), Arc::new(HistoryWake::default())).expect("watcher");
         let first = BTreeMap::from([("first".into(), home)]);
