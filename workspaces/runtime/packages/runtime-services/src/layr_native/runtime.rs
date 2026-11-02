@@ -444,6 +444,46 @@ fn admit_git_policy_in_store(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn create_worker_line(
+    state_dir: &Path,
+    root: &Path,
+    main: &Path,
+    project: &str,
+    line: &str,
+    cwd: &Path,
+    record: &Value,
+    default_start: &str,
+) -> Result<Value> {
+    let requested = record["layrBaseState"].as_str();
+    let start = requested.unwrap_or(default_start);
+    let mut intent = json!({"project":project,"line":line});
+    if requested.is_some() {
+        intent["start"] = json!(start);
+    }
+    operation_with_preflight_in_store(
+        state_dir,
+        root,
+        &format!("line:{}", text(record, "id")?),
+        &intent,
+        || {
+            if requested.is_some() {
+                run(state_dir, main, &["rev-parse", start]).map_err(|error| match error {
+                    NativeLayrError::Refused(detail) => NativeLayrError::Refused(format!(
+                        "Native Layr base revision could not be resolved: {detail}"
+                    )),
+                    other => other,
+                })?;
+            }
+            Ok(())
+        },
+        || {
+            run(state_dir, main, &["line", "new", line, start])?;
+            Ok(json!({"path":cwd,"line":line}))
+        },
+    )
+}
+
 pub(super) fn prepare_files(state_dir: &Path, record: &Value) -> Result<Value> {
     prepare_files_with_git_policy(state_dir, record, false)
 }
@@ -587,15 +627,8 @@ pub(super) fn prepare_files_with_git_policy(
         .ok_or_else(|| NativeLayrError::Refused("Invalid main path".into()))?
         .join(&line);
     if !lead && !reviewer {
-        operation_in_store(
-            state_dir,
-            &root,
-            &format!("line:{}", text(record, "id")?),
-            &json!({"project":project,"line":line}),
-            || {
-                run(state_dir, &main, &["line", "new", &line, &start])?;
-                Ok(json!({"path":cwd,"line":line}))
-            },
+        create_worker_line(
+            state_dir, &root, &main, &project, &line, &cwd, record, &start,
         )?;
     }
     super::git_guard::install_hook(state_dir, &cwd)?;
@@ -1302,5 +1335,131 @@ mod review_tests {
             .expect("fixture operation succeeds"),
             json!("retried")
         );
+    }
+}
+
+#[cfg(test)]
+mod worker_base_tests {
+    use super::*;
+    #[test]
+    fn native_layr_worker_line_uses_requested_base() {
+        let state = tempfile::tempdir().unwrap();
+        let root = super::super::store_path(state.path());
+        let main = main_path(state.path(), "project");
+        std::fs::create_dir_all(&main).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let binary = state.path().join("fake-layr");
+        std::fs::write(
+            &binary,
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> "$LAYR_ROOT/commands"
+if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; fi
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        super::super::capability::TEST_BINARY.with(|slot| *slot.borrow_mut() = Some(binary));
+        let record = json!({"id":"worker", "layrBaseState":"requested"});
+        let result = create_worker_line(
+            state.path(),
+            &root,
+            &main,
+            "project",
+            "worker",
+            &main,
+            &record,
+            "main",
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let receipt_path = settings::metadata(state.path(), &root)
+            .join("receipts")
+            .join(format!(
+                "{}.json",
+                studio_runtime_store::sha256_hex(b"line:worker")
+            ));
+        let receipt: Value = serde_json::from_slice(&std::fs::read(receipt_path).unwrap()).unwrap();
+        assert_eq!(receipt["intent"]["start"], "requested");
+        let commands = std::fs::read_to_string(root.join("commands")).unwrap();
+        assert!(commands.contains("line new worker requested"));
+        let replay = create_worker_line(
+            state.path(),
+            &root,
+            &main,
+            "project",
+            "worker",
+            &main,
+            &record,
+            "main",
+        )
+        .unwrap();
+        assert_eq!(replay, result.unwrap());
+        let changed = json!({"id":"worker", "layrBaseState":"other"});
+        assert!(
+            create_worker_line(
+                state.path(),
+                &root,
+                &main,
+                "project",
+                "worker",
+                &main,
+                &changed,
+                "main"
+            )
+            .is_err()
+        );
+        let default = json!({"id":"default"});
+        let legacy_intent = json!({"project":"project","line":"default"});
+        let legacy_result = json!({"path":main,"line":"default"});
+        operation_in_store(state.path(), &root, "line:default", &legacy_intent, || {
+            Ok(legacy_result.clone())
+        })
+        .unwrap();
+        assert_eq!(
+            create_worker_line(
+                state.path(),
+                &root,
+                &main,
+                "project",
+                "default",
+                &main,
+                &default,
+                "cached-main"
+            )
+            .unwrap(),
+            legacy_result
+        );
+        let default = json!({"id":"default-new"});
+        create_worker_line(
+            state.path(),
+            &root,
+            &main,
+            "project",
+            "default",
+            &main,
+            &default,
+            "cached-main",
+        )
+        .unwrap();
+        let missing = json!({"id":"missing", "layrBaseState":"missing"});
+        let error = create_worker_line(
+            state.path(),
+            &root,
+            &main,
+            "project",
+            "missing",
+            &main,
+            &missing,
+            "main",
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("base revision could not be resolved")
+        );
+        let commands = std::fs::read_to_string(root.join("commands")).unwrap();
+        assert!(commands.contains("line new default cached-main"));
+        assert!(!commands.contains("line new missing"));
+        assert!(!commands.contains("line new worker other"));
     }
 }

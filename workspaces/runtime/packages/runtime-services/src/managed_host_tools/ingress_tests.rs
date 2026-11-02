@@ -2783,11 +2783,24 @@ async fn managed_spawn_native_layr_lead_uses_project_binding() {
         .await
         .unwrap();
     let actor = Actor::from_record(&actor_value, &context.agent, 0).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let binary = directory.path().join("fake-layr");
+    std::fs::write(
+        &binary,
+        "#!/bin/sh\nif [ \"$4\" = missing ]; then exit 1; fi\nprintf 'resolved-state-id\\n'\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::layr_native::set_test_binary(binary);
     for (request, workspace) in [
         ("native-explicit", Some("layr-native")),
         ("native-default", None),
+        ("native-base", Some("layr-native")),
     ] {
         let mut spec = json!({"name":"Worker","prompt":"Do the task","role":"implementer"});
+        if request == "native-base" {
+            spec["base_ref"] = json!("origin/main");
+        }
         if let Some(workspace) = workspace {
             spec["workspace"] = json!(workspace);
         }
@@ -2801,8 +2814,20 @@ async fn managed_spawn_native_layr_lead_uses_project_binding() {
         )
         .await
         .unwrap_or_else(|error| panic!("{request}: {error:?}"));
-        assert!(spawned.result().test_value()["agents"][0]["id"].is_string());
+        let result = spawned.result().test_value();
+        let id = result["agents"][0]["id"].as_str().unwrap();
+        if request == "native-base" {
+            let child = AgentRepository::get(&store.test_reader().unwrap(), &AgentId::from(id))
+                .unwrap()
+                .unwrap()
+                .value();
+            assert_eq!(child["layrBaseState"], "resolved-state-id");
+        }
     }
+    let refused = crate::managed_child_create::spawn_agents(&store, &actor,
+        &json!({"agents":[{"name":"Missing","prompt":"Work","workspace":"layr-native","base_ref":"missing"}]}),
+        "native-missing-base", 20.0, &CreationEnvironment).await;
+    assert!(refused.is_err());
 }
 
 #[tokio::test]
