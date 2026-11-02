@@ -86,6 +86,12 @@ impl<'de> Deserialize<'de> for AgentCounter {
 #[serde(transparent)]
 pub struct NonnegativeNumber(serde_json::Number);
 impl NonnegativeNumber {
+    pub fn from_f64(value: f64) -> Option<Self> {
+        (value >= 0.0)
+            .then(|| serde_json::Number::from_f64(value))
+            .flatten()
+            .map(Self)
+    }
     pub fn number(&self) -> &serde_json::Number {
         &self.0
     }

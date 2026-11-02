@@ -87,14 +87,14 @@ fn template(root: &Path) {
 const NOW: f64 = 1_234_567.5;
 
 fn seed_records() -> Value {
-    let mut lead = json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"lead","rootId":"lead","parentId":null,"epoch":3,"status":"idle","name":"Lead","cwd":"/fixture","isLead":true,"autoWake":true,"inFlight":false,"created":1.0});
+    let mut lead: studio_runtime_store::AgentRecord = serde_json::from_str(r#"{"compactions":0,"accountKey":"default","provider":"codex","id":"lead","rootId":"lead","parentId":null,"epoch":3,"status":"idle","name":"Lead","cwd":"/fixture","isLead":true,"autoWake":true,"inFlight":false,"created":1.0}"#).expect("agent fixture");
     let mut worker = lead.clone();
-    worker["id"] = json!("worker");
-    worker["parentId"] = json!("lead");
-    worker["isLead"] = json!(false);
-    worker["status"] = json!("completed");
-    worker["name"] = json!("Worker");
-    worker["epoch"] = json!(8);
+    worker.id = "worker".into();
+    worker.parent_id = Some("lead".into());
+    worker.is_lead = Some(false);
+    worker.status = studio_runtime_store::AgentStatus::Completed;
+    worker.name = Some("Worker".into());
+    worker.epoch = 8;
     mode_fields(&mut lead);
     mode_fields(&mut worker);
     json!({"tables":{"runtime_agents":[lead, worker]}})

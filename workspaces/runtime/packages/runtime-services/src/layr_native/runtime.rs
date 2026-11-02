@@ -1100,9 +1100,9 @@ esac
         super::super::capability::TEST_BINARY.with(|value| *value.borrow_mut() = Some(binary));
         #[cfg(target_os = "linux")]
         let _daemon = fixture_daemon(&state);
-        let mut record = json!({"id":"lead","isLead":true,"autoWake":true});
+        let mut record = super::super::fixture_agent("lead", true);
         super::super::configure_new_chat(&mut record, source.to_str().unwrap());
-        prepare_files(&state, &record).expect("fixture import succeeds");
+        prepare_files(&state, &record.value()).expect("fixture import succeeds");
         assert!(
             fixture.path().join("removed").exists(),
             "staging remote was not removed"
@@ -1133,9 +1133,9 @@ esac
         super::super::capability::TEST_BINARY.with(|value| *value.borrow_mut() = Some(binary));
         #[cfg(target_os = "linux")]
         let _daemon = fixture_daemon(&state);
-        let mut record = json!({"id":"lead","isLead":true,"autoWake":true});
+        let mut record = super::super::fixture_agent("lead", true);
         super::super::configure_new_chat(&mut record, source.to_str().unwrap());
-        let error = prepare_files(&state, &record).unwrap_err();
+        let error = prepare_files(&state, &record.value()).unwrap_err();
         let path = fs::read_to_string(fixture.path().join("staging-path")).expect("init reached");
         assert!(
             error.to_string().contains(&path),

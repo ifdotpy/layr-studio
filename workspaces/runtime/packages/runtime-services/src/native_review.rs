@@ -4,6 +4,7 @@ use crate::native_actions::{NativeError, Result, bounded, checked_agent, decode}
 use rusqlite::Transaction;
 use serde_json::{Value, json};
 use studio_runtime_providers::ProviderKind;
+use studio_runtime_schema::creation_intent::EffortSelection;
 use studio_runtime_schema::start_attempt::ReviewTarget as Target;
 use studio_runtime_store::{AgentRecord, AgentRepository, ContextRepairRepository};
 
@@ -73,7 +74,7 @@ pub(crate) fn execution_settings(
     actor: &Value,
     root: &Value,
     requested_model: &studio_runtime_schema::queue_command::Field<String>,
-    requested_effort: &studio_runtime_schema::queue_command::Field<String>,
+    requested_effort: &EffortSelection,
 ) -> (Option<String>, Option<String>, Option<bool>) {
     let defaults = &root["reviewDefaults"];
     let model = requested_model
@@ -82,8 +83,8 @@ pub(crate) fn execution_settings(
         .or_else(|| defaults.get("model").and_then(Value::as_str))
         .or_else(|| actor.get("model").and_then(Value::as_str))
         .map(str::to_owned);
-    let effort = if !requested_effort.is_missing() {
-        requested_effort.value().cloned()
+    let effort = if !requested_effort.is_inherit() {
+        requested_effort.selected().cloned()
     } else if requested_model.is_missing()
         && defaults.get("model").and_then(Value::as_str).is_some()
     {
@@ -152,7 +153,9 @@ impl ReviewPlan {
         let requested_effort = args
             .get("effort")
             .and_then(Value::as_str)
-            .map_or(Field::Missing, |value| Field::Value(value.to_owned()));
+            .map_or(EffortSelection::Inherit, |value| {
+                EffortSelection::Set(value.to_owned())
+            });
         let (model, effort, fast_mode) =
             execution_settings(&actor, &root, &requested_model, &requested_effort);
         let fast_mode = fast_mode
@@ -171,7 +174,7 @@ impl ReviewPlan {
             role: Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer),
             prompt: Some(prompt.chars().take(MAX_PROMPT).collect()),
             model: model.map_or(Field::Null, Field::Value),
-            effort: effort.map_or(Field::Null, Field::Value),
+            effort: effort.map_or(EffortSelection::Clear, EffortSelection::Set),
             fast_mode: Field::Value(fast_mode),
             daybreak_enabled: Field::Value(false),
             ..Default::default()
@@ -208,7 +211,13 @@ impl ReviewPlan {
                 }
             }
             matches(&self.args.model, child.get("model"))
-                && matches(&self.args.effort, child.get("effort"))
+                && match &self.args.effort {
+                    EffortSelection::Inherit => true,
+                    EffortSelection::Clear => child.get("effort").is_some_and(Value::is_null),
+                    EffortSelection::Set(expected) => {
+                        child.get("effort").and_then(Value::as_str) == Some(expected.as_str())
+                    }
+                }
         };
         if child.get("id").and_then(Value::as_str) != self.spec.id.value().map(String::as_str)
             || review["requestId"] != self.key

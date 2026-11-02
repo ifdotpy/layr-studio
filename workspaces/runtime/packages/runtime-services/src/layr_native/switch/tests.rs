@@ -1,5 +1,6 @@
 use super::*;
 use std::fs;
+use studio_runtime_store::StoreError;
 
 async fn store_with(records: &[Value]) -> (tempfile::TempDir, Arc<RuntimeStore>) {
     let directory = tempfile::tempdir().expect("state directory");
@@ -207,11 +208,21 @@ async fn a_switched_lead_records_layr_fields_keeps_its_thread_and_workers_inheri
         crate::managed_child_create::default_workspace("implementer", false, &lead),
         "layr-native"
     );
-    let mut child = json!({"id":"new-worker","role":"implementer","isLead":false});
-    configure_child(&mut child, &lead, &lead);
-    assert_eq!(child["workspaceMode"], "layr-native");
-    assert_eq!(child["hostProjectPath"], "/fixture/project");
-    assert_eq!(child["layrStoreRoot"], "/store");
+    let parent = fixture_native_parent(&lead);
+    let mut child = fixture_agent("new-worker", false);
+    child.role = studio_runtime_schema::queue_command::Field::Value(
+        studio_runtime_schema::creation_intent::AgentRole::Implementer,
+    );
+    configure_child(&mut child, &parent, &parent);
+    assert_eq!(
+        child.workspace_mode,
+        Some(studio_runtime_schema::records::WorkspaceMode::LayrNative)
+    );
+    assert_eq!(
+        child.host_project_path.value().map(String::as_str),
+        Some("/fixture/project")
+    );
+    assert_eq!(child.layr_store_root.as_deref(), Some("/store"));
 }
 
 #[tokio::test]

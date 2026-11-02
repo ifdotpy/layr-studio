@@ -8,7 +8,7 @@ use serde_json::Value;
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::{
     claude_permissions::PermissionMode,
-    creation_intent::{AgentRole, CreationIntent, ReviewDefaults, WorkerDefaults},
+    creation_intent::{AgentRole, CreationIntent, EffortSelection, ReviewDefaults, WorkerDefaults},
     queue_command::Field,
     records::WorkspaceMode,
 };
@@ -54,7 +54,11 @@ fn lead_intent(body: &generated::CreateLeadRequest) -> CreationIntent {
         account_key: body.account_key.clone(),
         cwd: body.cwd.clone(),
         daybreak_enabled: nullable_field!(body.daybreak_enabled),
-        effort: nullable_field!(body.effort.clone()),
+        effort: match &body.effort {
+            None => EffortSelection::Inherit,
+            Some(None) => EffortSelection::Clear,
+            Some(Some(value)) => EffortSelection::Set(value.clone()),
+        },
         fast_mode: nullable_field!(body.fast_mode),
         id: nullable_field!(body.id.clone()),
         model: nullable_field!(body.model.clone()),
@@ -89,7 +93,11 @@ fn agent_intent(body: &generated::CreateAgentRequest) -> CreationIntent {
         concurrency: body.concurrency,
         cwd: body.cwd.clone(),
         daybreak_enabled: nullable_field!(body.daybreak_enabled),
-        effort: nullable_field!(body.effort.clone()),
+        effort: match &body.effort {
+            None => EffortSelection::Inherit,
+            Some(None) => EffortSelection::Clear,
+            Some(Some(value)) => EffortSelection::Set(value.clone()),
+        },
         fast_mode: nullable_field!(body.fast_mode),
         id: nullable_field!(body.id.clone()),
         max_agents: body.max_agents,
@@ -546,7 +554,7 @@ impl studio_runtime_services::monitor_runtime::WorkspaceAdmission for VmManagedW
             || actor.cwd.as_deref() != Some(self.cwd.as_str())
             || actor.execution_mode != Some(studio_runtime_store::AgentExecutionMode::Vm)
             || actor.layr_ready != Some(true)
-            || extra.get("layrProjectId").and_then(Value::as_str) != Some(self.project_id.as_str())
+            || actor.layr_project_id.as_deref() != Some(self.project_id.as_str())
             || extra.get("layrLine").and_then(Value::as_str) != Some(self.line.as_str())
         {
             return Err(
@@ -2173,7 +2181,10 @@ mod conversation_catalog_admission_tests {
         ).unwrap();
         let intent = super::agent_intent(&body);
         assert_eq!(intent.model, Field::Value("gpt-6-luna".into()));
-        assert_eq!(intent.effort, Field::Null);
+        assert_eq!(
+            intent.effort,
+            studio_runtime_schema::creation_intent::EffortSelection::Clear
+        );
         assert!(intent.fast_mode.is_missing());
         assert_eq!(
             intent.permission_mode,

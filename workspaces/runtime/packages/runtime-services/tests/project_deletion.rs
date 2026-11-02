@@ -505,7 +505,7 @@ async fn agent_creation_assigns_task_and_replays_without_reassignment() {
         prompt: "Task".into(),
         intent: studio_runtime_schema::creation_intent::CreationIntent {
             model: studio_runtime_schema::queue_command::Field::Value("gpt-fixture".into()),
-            effort: studio_runtime_schema::queue_command::Field::Null,
+            effort: studio_runtime_schema::creation_intent::EffortSelection::Clear,
             task_id: Some("task".into()),
             ..Default::default()
         },
@@ -569,7 +569,7 @@ async fn project_deletion_fences_prepared_spawn_and_includes_prior_spawn() {
                         model: studio_runtime_schema::queue_command::Field::Value(
                             "gpt-fixture".into(),
                         ),
-                        effort: studio_runtime_schema::queue_command::Field::Null,
+                        effort: studio_runtime_schema::creation_intent::EffortSelection::Clear,
                         ..Default::default()
                     },
                     ..Default::default()
