@@ -660,7 +660,13 @@ impl Snapshot {
                                 ));
                             }
                         };
+                        // Input queued during the hold set `queued`; keep it so the
+                        // pending input is claimable after the cancel.
+                        let input_queued = a["status"] == json!("queued");
                         for field in SOURCE_STATE_FIELDS {
+                            if *field == "status" && input_queued {
+                                continue;
+                            }
                             match lazy["sourceState"].get(*field) {
                                 Some(value) if exact || !value.is_null() => {
                                     a[*field] = value.clone()

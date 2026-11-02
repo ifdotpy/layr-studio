@@ -1751,6 +1751,53 @@ mod request_tests {
     }
 
     #[test]
+    fn cancel_wakes_input_queued_during_the_transfer() {
+        let (_root, store) = store_with_agents();
+        run_async(store.transaction_with_error(|tx| {
+            tx.execute(
+                "UPDATE runtime_agents SET record=json_set(record,'$.autoWake',json('true')) WHERE id='lead'",
+                [],
+            )?;
+            Ok::<_, studio_runtime_store::StoreError>(())
+        }))
+        .expect("enable auto wake on the lead");
+        let id = "5a300f72-4ea6-4d30-8a0e-9b2c13c42260";
+        request(&store, id, "lead", "target", "team", "codex", 10.0).unwrap();
+        run_async(store.transaction_with_error(|tx| {
+            let lead = AgentRepository::get(tx, &AgentId::from("lead"))?.expect("lead exists");
+            crate::event_write::enqueue_event(
+                tx,
+                &lead,
+                "queued-during-transfer".into(),
+                "user",
+                "continue".into(),
+                15.0,
+            )
+            .expect("input queues during the transfer");
+            Ok::<_, studio_runtime_store::StoreError>(())
+        }))
+        .expect("queue input");
+        assert_eq!(stored(&store, "lead")["status"], "queued");
+        let cancelled = run_async(action(&store, id, Action::Cancel, 20.0)).unwrap();
+        assert_eq!(cancelled["status"], "cancelled");
+        let lead = stored(&store, "lead");
+        assert_eq!(lead["accountKey"], "source");
+        assert!(lead.get("accountTransferId").is_none_or(Value::is_null));
+        let wake = studio_runtime_store::SchedulerRepository::account_wake_for_accounts(
+            &store.test_reader().expect("database is readable"),
+            ["source"],
+            10,
+            21.0,
+        )
+        .expect("wake selection reads");
+        assert!(
+            wake.get("source")
+                .is_some_and(|agents| agents.iter().any(|agent| agent.agent_id == "lead")),
+            "the lead with queued input is claimable on its source account after cancel: {wake:?}"
+        );
+    }
+
+    #[test]
     fn legacy_request_without_original_result_fails_closed() {
         let (_root, store) = store_with_agents();
         let id = "5a300f72-4ea6-4d30-8a0e-9b2c13c4226c";
