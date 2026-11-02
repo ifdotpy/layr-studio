@@ -14,3 +14,6 @@ __pycache__/
 workspaces/runtime/apps/server/src/.studio-update.lock
 /target/
 /.layr-retest/
+# LLVM coverage output from instrumented builds (layr retest); never source.
+*.profraw
+*.profdata
