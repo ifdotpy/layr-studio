@@ -1,13 +1,16 @@
 //! Typed public project sync view.
 use crate::sync_views::{SYNC_ARRAY_ITEMS, bound_sync_text};
 use serde::Serialize;
+use std::collections::{BTreeMap, BTreeSet};
 use studio_runtime_schema::project_projection::{
     ProjectReadiness, ProjectSync, ProjectVault, ReadinessState,
 };
 use studio_runtime_schema::project_record::{
-    ProjectAlias, ProjectFolder, ProjectLive, ProjectLocation, ProjectPeerTeam,
+    PeerLead, ProjectAlias, ProjectFolder, ProjectLive, ProjectLocation, ProjectPeerTeam,
 };
 use studio_runtime_schema::queue_command::Field;
+use studio_runtime_store::StoreResult;
+use studio_runtime_store::project_grants::{self, GrantRow};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,11 +79,58 @@ fn strings(field: &mut Field<Vec<String>>) {
     }
 }
 
+/// The peer leads of one local project: one per active grant of it whose paired server is
+/// still paired. A revoked grant gives none (decision 2026-11-01, "Leads in one team").
+/// `servers` maps a paired server id to its label.
+pub fn active_peer_leads(
+    project_id: &str,
+    grants: &[GrantRow],
+    servers: &BTreeMap<String, String>,
+) -> Vec<PeerLead> {
+    let mut seen = BTreeSet::new();
+    grants
+        .iter()
+        .filter(|row| row.local_project == project_id && row.revoked_at.is_none())
+        .filter(|row| seen.insert(row.grant_id.clone()))
+        .filter_map(|row| {
+            servers.get(&row.peer).map(|label| PeerLead {
+                grant: row.grant_id.clone(),
+                remote_project: row.remote_project.clone(),
+                server: row.peer.clone(),
+                label: label.clone(),
+            })
+        })
+        .collect()
+}
+
+/// The peer leads of a local project, read from the store. Used by every writer of a
+/// peer team, so the team entities and the project record agree.
+pub fn peer_leads_of(
+    tx: &rusqlite::Transaction<'_>,
+    project_id: &str,
+) -> StoreResult<Vec<PeerLead>> {
+    let grants = project_grants::all_rows(tx)?;
+    if grants.is_empty() {
+        return Ok(Vec::new());
+    }
+    let servers = crate::multi_server::paired_servers(tx)?
+        .into_iter()
+        .map(|server| {
+            (
+                server.id.as_str().to_owned(),
+                server.label.as_str().to_owned(),
+            )
+        })
+        .collect();
+    Ok(active_peer_leads(project_id, &grants, &servers))
+}
+
 pub fn project_record(
     mut project: ProjectLive,
     mut readiness: Field<ProjectReadiness>,
     mut sync: Field<ProjectSync>,
     mut vault: Field<ProjectVault>,
+    peer_leads: &[PeerLead],
 ) -> Option<ProjectProjection> {
     if matches!(readiness, Field::Null) {
         readiness = Field::Missing;
@@ -110,6 +160,7 @@ pub fn project_record(
             for member in &mut team.members {
                 *member = bound_sync_text(member, "");
             }
+            team.peer_leads = peer_leads.to_vec();
         }
     }
     if let Field::Value(locations) = &mut project.locations {
@@ -212,7 +263,7 @@ mod tests {
         let mut project = *project;
         project.account_groups = Field::Value(vec!["x".repeat(12_001); 201]);
         let projection =
-            project_record(project, Field::Null, Field::Missing, Field::Missing).unwrap();
+            project_record(project, Field::Null, Field::Missing, Field::Missing, &[]).unwrap();
         let encoded = serde_json::to_string(&projection).unwrap();
         let actual: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         assert_eq!(actual["name"], json!(null));
@@ -226,5 +277,99 @@ mod tests {
         assert!(actual.get("layrReadiness").is_none());
         assert!(actual.get("sidebarHidden").is_none());
         assert!(actual.get("workspacePolicy").is_none());
+    }
+
+    fn grant(grant_id: &str, capability: &str, revoked_at: Option<i64>) -> GrantRow {
+        GrantRow {
+            grant_id: grant_id.into(),
+            peer: "server-b".into(),
+            peer_public_key: "PEM".into(),
+            local_project: "proj-a".into(),
+            remote_project: "proj-b".into(),
+            capability: capability.parse().unwrap(),
+            created_at: 10,
+            revoked_at,
+        }
+    }
+
+    fn servers() -> BTreeMap<String, String> {
+        BTreeMap::from([("server-b".to_owned(), "Laptop".to_owned())])
+    }
+
+    fn team_project() -> ProjectLive {
+        let ProjectRecord::Live(project) = serde_json::from_str(r#"{"recordKind":"live","id":"proj-a","path":"/a","peerTeams":[{"id":"t1","name":"Team","members":["lead-a","sub-a"]}],"locations":[]}"#).unwrap() else { panic!("live") };
+        *project
+    }
+
+    #[test]
+    fn active_grant_gives_one_peer_lead_on_each_team() {
+        let grants = [grant("g1", "LeadMessages", None)];
+        let leads = active_peer_leads("proj-a", &grants, &servers());
+        assert_eq!(
+            leads,
+            vec![PeerLead {
+                grant: "g1".into(),
+                remote_project: "proj-b".into(),
+                server: "server-b".into(),
+                label: "Laptop".into(),
+            }]
+        );
+        let projection = project_record(
+            team_project(),
+            Field::Null,
+            Field::Missing,
+            Field::Missing,
+            &leads,
+        )
+        .unwrap();
+        let encoded = serde_json::to_string(&projection).unwrap();
+        assert!(
+            encoded.contains(
+                r#""peerLeads":[{"grant":"g1","remoteProject":"proj-b","server":"server-b","label":"Laptop"}]"#
+            ),
+            "{encoded}"
+        );
+    }
+
+    #[test]
+    fn revoked_grant_gives_no_peer_lead() {
+        let grants = [grant("g1", "LeadMessages", Some(20))];
+        assert!(active_peer_leads("proj-a", &grants, &servers()).is_empty());
+        let projection = project_record(
+            team_project(),
+            Field::Null,
+            Field::Missing,
+            Field::Missing,
+            &[],
+        )
+        .unwrap();
+        let encoded = serde_json::to_string(&projection).unwrap();
+        assert!(!encoded.contains("peerLeads"), "{encoded}");
+        assert!(
+            encoded.contains(r#""members":["lead-a","sub-a"]"#),
+            "{encoded}"
+        );
+    }
+
+    #[test]
+    fn unpaired_server_and_other_project_give_no_peer_lead() {
+        let other_project = GrantRow {
+            local_project: "proj-z".into(),
+            ..grant("g2", "LeadMessages", None)
+        };
+        let unpaired = GrantRow {
+            peer: "server-c".into(),
+            ..grant("g3", "LeadMessages", None)
+        };
+        assert!(active_peer_leads("proj-a", &[other_project, unpaired], &servers()).is_empty());
+    }
+
+    #[test]
+    fn two_capabilities_of_one_grant_give_one_peer_lead() {
+        let grants = [
+            grant("g1", "LeadMessages", None),
+            grant("g1", "LeadMessages", None),
+        ];
+        assert_eq!(active_peer_leads("proj-a", &grants, &servers()).len(), 1);
     }
 }

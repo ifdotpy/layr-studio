@@ -171,10 +171,11 @@ pub async fn convert(
             }
             crate::radio_runtime::publish_room(db,&room,&prepared)?;
         }
+        let peer_leads=crate::project_projection::peer_leads_of(db,project["id"].as_str().unwrap_or_default())?;
         for team in &teams {
             let id=team["id"].as_str().ok_or(ProjectsError::Invalid("team ID invalid"))?;
             let next=next_teams.iter().find(|t|t["id"]==id);
-            let view=next.map(|t|peer_team_projection(t,&path,next_revision)).transpose()?;
+            let view=next.map(|t|peer_team_projection(t,&path,next_revision,&peer_leads)).transpose()?;
             SyncDocumentsRepository::put_entity(db,"peerTeam",id,view.unwrap_or(json!({})),next.is_none())?;
         }
         let result=ConversionReply { id: source, parent_id: target.clone(), root_id: target, moved_agents: moving_ids.into_iter().map(str::to_owned).collect(), peer_teams_revision: next_revision };

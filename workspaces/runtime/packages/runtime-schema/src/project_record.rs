@@ -153,11 +153,29 @@ pub struct ProjectAlias {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectPeerTeam {
     pub id: String,
     pub name: String,
     pub members: Vec<String>,
+    /// Derived at projection time from the active project grants. Never stored.
+    #[serde(default, skip_deserializing, skip_serializing_if = "Vec::is_empty")]
+    pub peer_leads: Vec<PeerLead>,
+}
+
+/// The lead of a paired project, shown in a team as a peer (decision 2026-11-01, "Leads in
+/// one team"). The receiving server resolves its own root lead, so no chat id is carried.
+#[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PeerLead {
+    /// The project grant id (`project_grants.grant_id`).
+    pub grant: String,
+    /// The paired project id on the peer server.
+    pub remote_project: String,
+    /// The paired server id.
+    pub server: String,
+    /// The paired server label from the pairing record.
+    pub label: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]

@@ -17039,6 +17039,19 @@ export interface components {
       members?: string[] | null | undefined;
       /** Name */
       name?: null | string | undefined;
+      /** Peerleads */
+      peerLeads?:
+        | {
+            /** Grant */
+            grant: string;
+            /** Label */
+            label: string;
+            /** Remoteproject */
+            remoteProject: string;
+            /** Server */
+            server: string;
+          }[]
+        | undefined;
       /** Projectpath */
       projectPath?: null | string | undefined;
       /** Revision */
