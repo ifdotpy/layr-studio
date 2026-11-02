@@ -326,6 +326,7 @@ fn codex_usage_event(
 pub fn timestamp(value: &Value) -> Option<f64> {
     deserialize_timestamp(value).ok().flatten().map(|at| at.0)
 }
+/// Provider timestamp in Unix epoch seconds.
 #[derive(Debug, PartialEq)]
 struct Timestamp(f64);
 
