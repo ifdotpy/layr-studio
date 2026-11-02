@@ -2,8 +2,6 @@ import { browserSignInUrl } from "./sign-in.fixture.ts";
 import type { DesktopBridge } from "../../src/desktop.ts";
 import type {} from "./browser-open-approval-ui.fixture.tsx";
 import { createFixtureViteServer } from "../playwright.ts";
-import { requestBody } from "../messages/helpers.ts";
-import type { PostBody, PostResult } from "../../src/apiTypes.ts";
 // A VM agent's sign-in link (browser/open, docs/vm-browser-bridge.md) renders as a sign-in
 // card. Nothing opens before the approval; after it, the desktop opens only the link that the
 // server returned. A refusal from the server, such as a remote window, opens nothing.
@@ -11,6 +9,12 @@ import type { PostBody, PostResult } from "../../src/apiTypes.ts";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test, expect } from "../playwright.ts";
+import {
+  answerReply,
+  answerRequest,
+  isAnswerRequest,
+  type AnswerRequest,
+} from "../answer-command";
 
 const REMOTE =
   "Open this chat in the window of the Mac that runs its server to sign in, or use the tool's device-code mode.";
@@ -57,25 +61,22 @@ test("Browser Open Approval Ui", async ({ page }) => {
         },
       };
     });
-    const answers: PostBody<"/api/answer">[] = [];
+    const answers: AnswerRequest[] = [];
     await page.route("**/api/**", async (route) => {
-      if (route.request().method() !== "POST")
-        return route.fulfill({ json: {} });
-      const body = requestBody<PostBody<"/api/answer">>(route);
+      if (!isAnswerRequest(route.request())) return route.fulfill({ json: {} });
+      const body = answerRequest(route.request());
       answers.push(body);
       if (body.id === "remote")
         return route.fulfill({ status: 400, json: { error: REMOTE } });
       if (body.decision === "accept")
         return route.fulfill({
-          json: {
+          json: answerReply({
             status: "answered",
             openUrl:
               body.id === "approve" ? browserSignInUrl : "https://x.invalid/",
-          } satisfies PostResult<"/api/answer">,
+          }),
         });
-      return route.fulfill({
-        json: { status: "answered" } satisfies PostResult<"/api/answer">,
-      });
+      return route.fulfill({ json: answerReply({ status: "answered" }) });
     });
     await page.route("**/check", (route) =>
       route.fulfill({

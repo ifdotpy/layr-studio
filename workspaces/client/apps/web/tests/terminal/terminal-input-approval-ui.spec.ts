@@ -1,6 +1,4 @@
-import type { PostBody } from "../../src/apiTypes.ts";
 import assert from "node:assert/strict";
-import { fixturePostBody } from "../teams/helpers.ts";
 import { createFixtureViteServer as createServer } from "../playwright.ts";
 // Exercise the Codex 0.159 write_stdin_approval request through the real card and answer API.
 import { mkdtemp, rm } from "node:fs/promises";
@@ -8,6 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "../playwright.ts";
+import {
+  answerReply,
+  answerRequest,
+  isAnswerRequest,
+  type AnswerRequest,
+} from "../answer-command";
 
 test("Terminal Input Approval Ui", async ({
   browser: _testBrowser,
@@ -32,11 +36,11 @@ test("Terminal Input Approval Ui", async ({
   try {
     const page = testPage;
     page.setDefaultTimeout(5000);
-    const answers: PostBody<"/api/answer">[] = [];
+    const answers: AnswerRequest[] = [];
     await page.route("**/api/**", async (route) => {
-      if (route.request().method() === "POST") {
-        answers.push(fixturePostBody(route, "/api/answer"));
-        return route.fulfill({ json: { status: "answered" } });
+      if (isAnswerRequest(route.request())) {
+        answers.push(answerRequest(route.request()));
+        return route.fulfill({ json: answerReply({ status: "answered" }) });
       }
       return route.fulfill({ json: {} });
     });

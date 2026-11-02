@@ -266,6 +266,7 @@ export const RequestReferenceKindValues = [
   "room",
   "work",
   "outbox",
+  "approval",
 ] as const;
 export type RequestReferenceKind = (typeof RequestReferenceKindValues)[number];
 export const OutboxKindValues = [

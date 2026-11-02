@@ -37,7 +37,8 @@ impl Directory {
     }
     pub fn child(&self, relative: &Path, create: bool) -> std::io::Result<Self> {
         let mut fd = rustix::io::dup(&self.0)?;
-        for part in relative.components() {
+        let mut parts = relative.components().peekable();
+        while let Some(part) = parts.next() {
             let Component::Normal(name) = part else {
                 return Err(std::io::Error::other(
                     "Private path contains a parent traversal",
@@ -49,7 +50,15 @@ impl Directory {
                     Err(e) => return Err(e.into()),
                 }
             }
-            fd = openat(&fd, name, flags(), Mode::empty())?;
+            #[cfg(target_os = "linux")]
+            let open_flags = if parts.peek().is_some() {
+                OFlags::PATH | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC
+            } else {
+                flags()
+            };
+            #[cfg(not(target_os = "linux"))]
+            let open_flags = flags();
+            fd = openat(&fd, name, open_flags, Mode::empty())?;
         }
         Ok(Self(fd))
     }
@@ -97,6 +106,24 @@ impl Directory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn walks_search_only_intermediate_directory() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("create fixture");
+        let a = root.path().join("a");
+        std::fs::create_dir_all(a.join("b")).expect("create directories");
+        let pinned = Directory::open(root.path()).expect("pin root");
+        std::fs::set_permissions(&a, std::fs::Permissions::from_mode(0o311))
+            .expect("restrict directory");
+        let opened = Directory::open(&a.join("b"));
+        let child = pinned.child(Path::new("a/b"), false);
+        std::fs::set_permissions(&a, std::fs::Permissions::from_mode(0o700))
+            .expect("restore directory permissions");
+        opened.expect("open through search-only directory");
+        child.expect("walk through search-only directory");
+    }
     #[test]
     fn review2_pinned_destination_survives_path_replacement() {
         let root = tempfile::tempdir().expect("fixture operation succeeds");

@@ -41,6 +41,7 @@ export function sentMessage(
 export function sendReply(receipt: MessageDelivery): CommandResponse {
   return {
     status: "applied",
+    kind: "send",
     ref_kind: "message",
     ref_id: receipt.id,
     rev: 1,

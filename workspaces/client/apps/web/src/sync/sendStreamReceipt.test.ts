@@ -41,6 +41,7 @@ it("settles a sent message when the answer lists the stream receipt row first", 
   const { createOutbox } = await import("./send");
   const response: CommandResponse = {
     status: "applied",
+    kind: "send",
     ref_kind: "message",
     ref_id: "stable-id",
     rev: 1,

@@ -1682,7 +1682,7 @@ mod tests {
     fn parsed_numbers_follow_json_schema_and_object_keys_remain_data() {
         let registry = Registry::compile(&[
             ("POST".to_owned(), "/api/agents".to_owned()),
-            ("POST".to_owned(), "/api/answer".to_owned()),
+            ("POST".to_owned(), "/api/commands".to_owned()),
         ])
         .expect("request schemas compile");
 
@@ -1706,7 +1706,7 @@ mod tests {
         );
 
         let object: Value = crate::json_body::parse_bounded(
-            br#"{"id":"x","answers":{"$serde_json::private::Number":"1"}}"#,
+            br#"{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"answer","target":"x","body":{"answers":{"$serde_json::private::Number":"1"}}}"#,
             1024,
         )
         .expect("magic key object parses");
@@ -1714,7 +1714,7 @@ mod tests {
             registry
                 .validate_route(
                     "POST",
-                    "/api/answer",
+                    "/api/commands",
                     RawRequest {
                         body: Some(object.clone()),
                         ..RawRequest::default()
@@ -1723,7 +1723,10 @@ mod tests {
                 .is_ok(),
             "the same key remains ordinary object data where objects are allowed"
         );
-        assert_eq!(object["answers"]["$serde_json::private::Number"], "1");
+        assert_eq!(
+            object["body"]["answers"]["$serde_json::private::Number"],
+            "1"
+        );
 
         let almost_integer: Value =
             serde_json::from_slice(br#"{"prompt":"x","concurrency":1.00000000000000000001}"#)
