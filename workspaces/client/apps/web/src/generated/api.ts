@@ -1396,6 +1396,23 @@ export interface paths {
     patch?: never | undefined;
     trace?: never | undefined;
   };
+  "/api/native-layr/settings": {
+    parameters: {
+      query?: never | undefined;
+      header?: never | undefined;
+      path?: never | undefined;
+      cookie?: never | undefined;
+    };
+    /** Native Layr Settings */
+    get: operations["native_layr_settings_get"];
+    put?: never | undefined;
+    post?: never | undefined;
+    delete?: never | undefined;
+    options?: never | undefined;
+    head?: never | undefined;
+    patch?: never | undefined;
+    trace?: never | undefined;
+  };
   "/api/orchestration/settings": {
     parameters: {
       query?: never | undefined;
@@ -15815,6 +15832,15 @@ export interface components {
           /** @constant */
           status: "notReady";
         };
+    /** NativeLayrSettingsResponse */
+    NativeLayrSettingsResponse: {
+      error?: string | undefined;
+      storeRoot: string | null;
+      version: {
+        build: string;
+        version: string;
+      } | null;
+    };
     /** NativeNameFailureRecordResponse */
     NativeNameFailureRecordResponse: {
       /**
@@ -34289,6 +34315,51 @@ export interface operations {
       500: components["responses"]["ApiError500"];
       /** @description Bad Gateway */
       502: components["responses"]["ApiError502"];
+      /** @description Service Unavailable */
+      503: components["responses"]["ApiError503"];
+    };
+  };
+  native_layr_settings_get: {
+    parameters: {
+      query?: never | undefined;
+      header?: never | undefined;
+      path?: never | undefined;
+      cookie?: never | undefined;
+    };
+    requestBody?: never | undefined;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
+          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
+          "Cache-Control": components["headers"]["CacheControl"];
+          "Content-Encoding": components["headers"]["ContentEncoding"];
+          "Content-Length": components["headers"]["ContentLength"];
+          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
+          "Content-Type": components["headers"]["ContentType"];
+          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
+          "Server-Timing": components["headers"]["ServerTiming"];
+          Vary: components["headers"]["Vary"];
+          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
+          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
+          "X-Studio-Server": components["headers"]["StudioServer"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["NativeLayrSettingsResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: components["responses"]["ApiError400"];
+      /** @description Unauthorized */
+      401: components["responses"]["ApiError401"];
+      /** @description Forbidden */
+      403: components["responses"]["ApiError403"];
+      /** @description Too Many Requests */
+      429: components["responses"]["ApiError429"];
+      /** @description Internal Server Error */
+      500: components["responses"]["ApiError500"];
       /** @description Service Unavailable */
       503: components["responses"]["ApiError503"];
     };
