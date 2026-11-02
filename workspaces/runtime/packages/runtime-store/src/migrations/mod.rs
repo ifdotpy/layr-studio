@@ -83,12 +83,8 @@ mod m2026_11_01_transfer_summary;
 mod m2026_11_01_work_detail_policy;
 mod m2026_11_02_agent_worker_base_ref;
 mod m2026_11_02_legacy_vm_transfers;
-<<<<<<< head
 mod m2026_11_02_request_reference_approval;
-||||||| base
-=======
 mod m2026_11_02_retired_status_columns;
->>>>>>> origin/main
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
