@@ -9,12 +9,16 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use rusqlite::{OptionalExtension, Transaction, params};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use studio_runtime_store::federation_messaging::{
+    FederationMessagingRepository as Repo, FederationTable as Table,
+};
 use studio_runtime_store::project_grants::{self, Capability};
-use studio_runtime_store::{AgentId, AgentRepository, RuntimeStore};
+use studio_runtime_store::{AgentId, AgentRepository, RuntimeStore, StoreError};
 
 use crate::event_write::{CallerAdmission, RequestKey, begin_request, settle_request};
-use crate::federation_effects::{SignedRequest, consume_nonce, signed_response};
+use crate::federation_effects::{SignedRequest, consume_nonce, signed_response, snapshot};
 use crate::federation_messaging::{
     self as core, FederationMessageError as Error, MessageReceipt, PROTOCOL, Result,
 };
@@ -103,6 +107,7 @@ pub(crate) async fn receive(
                     return Ok(saved);
                 }
             };
+            let grant = first.grant_id.clone();
             let lead = root_lead(tx, &message.room, &local_id)?
                 .ok_or(Error::Forbidden("the project has no root lead"))?;
             let text = message.payload["text"]
@@ -112,6 +117,7 @@ pub(crate) async fn receive(
                 "source": "peer_lead",
                 "untrusted": true,
                 "peerServer": peer,
+                "grant": grant,
                 "projectId": message.room,
                 "text": text,
             }))?;
@@ -139,6 +145,114 @@ pub(crate) async fn receive(
         json!({"protocol": result.protocol, "messageId": result.message_id, "accepted": result.accepted, "room": result.room, "sequence": null}),
         now as i64,
     )
+}
+
+/// The accepted reply of one lead message. `id` is the outbox id of the message.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeadSendReply {
+    pub id: String,
+    pub grant: String,
+}
+
+/// Queue one lead message to the paired peer lead named by `grant`, in the caller's
+/// transaction. Only the root lead of the grant's local project may send. The outbox row
+/// is delivered later by the federation pump. A retry with the same `key` returns the
+/// first reply and queues nothing.
+pub(crate) fn send_in_transaction(
+    tx: &Transaction<'_>,
+    sender: &Value,
+    grant: &str,
+    text: &str,
+    key: &str,
+    now: f64,
+) -> Result<LeadSendReply> {
+    let root = sender["isLead"] == json!(true) && sender["parentId"].is_null();
+    if !root {
+        return Err(Error::Forbidden("only the root lead sends to a peer lead"));
+    }
+    let rows = project_grants::rows_of_grant(tx, grant)?;
+    let first = rows
+        .first()
+        .ok_or(Error::Forbidden("the peer lead is unknown"))?;
+    if first.revoked_at.is_some() {
+        return Err(Error::Forbidden("the peer lead is no longer paired"));
+    }
+    if sender["projectId"] != json!(first.local_project) {
+        return Err(Error::Forbidden("the peer lead belongs to another project"));
+    }
+    let text = crate::event_write::python_strip(text);
+    let payload = json!({"text": text});
+    core::validate("FederationLeadPayload", &payload, "payload")?;
+    if key.len() > 4096 {
+        return Err(Error::Invalid("request id"));
+    }
+    snapshot(tx, &first.peer, "", now)?.authorize(false)?;
+    let state_id: String = tx
+        .query_row(
+            "SELECT json_extract(record,'$.stateId') FROM runtime_federation_identity WHERE id='local'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(StoreError::from)?
+        .ok_or(Error::Unavailable("federation-credentials/private-key"))?;
+    let namespace =
+        uuid::Uuid::parse_str(&state_id).map_err(|_| Error::Invalid("identity.stateId"))?;
+    let message_id = uuid::Uuid::new_v5(&namespace, key.as_bytes()).to_string();
+    let sender_id = sender["id"].as_str().ok_or(Error::Invalid("agent.id"))?;
+    let signature = crate::event_write::request_signature(&json!({
+        "sender": sender_id,"grant": grant,"text": text,
+    }));
+    let admitted = match begin_request::<LeadSendReply>(
+        tx,
+        RequestKey::new("federation-lead-send", &[sender_id], key).raw(&message_id),
+        &signature,
+        chrono::Utc::now().timestamp_millis(),
+    )? {
+        CallerAdmission::Fresh(admitted) => admitted,
+        CallerAdmission::Replay(saved) => return Ok(saved),
+    };
+    let immutable = json!({"protocol":PROTOCOL,"senderServer":state_id,"id":message_id,
+        "kind":core::MessageKind::LeadMessage.as_str(),"room":first.remote_project,
+        "payload":payload,"created":now});
+    let delivery_signature = core::envelope_hash(&immutable)?;
+    let peer = first.peer.as_str();
+    let delivery_key = studio_runtime_store::multi_server_delivery::remote_result_key(
+        "federation-outbox",
+        &[peer],
+        key,
+    );
+    let delivery_admission = match begin_request::<core::FederationDeliveryReply>(
+        tx,
+        RequestKey::new("federation-outbox", &[peer], key).raw(&delivery_key),
+        &delivery_signature,
+        chrono::Utc::now().timestamp_millis(),
+    )? {
+        CallerAdmission::Fresh(admitted) => admitted,
+        CallerAdmission::Replay(_) => {
+            return Err(Error::Conflict("message delivery already settled"));
+        }
+    };
+    let item = json!({"id":message_id,"requestId":key,
+        "kind":core::MessageKind::LeadMessage.as_str(),"room":first.remote_project,
+        "payload":payload,"created":now,
+        "status":studio_runtime_schema::persistence::FederationDeliveryState::Queued.as_str(),
+        "attempts":0,"nextAt":0,"error":null,
+        "admission":{"id":delivery_admission.id(),"signature":delivery_admission.signature(),
+            "created":delivery_admission.created()}});
+    let item = core::decide_queue(
+        Repo::record(tx, Table::Outbox, &message_id, peer)?.as_ref(),
+        item,
+        Repo::queue_size(tx, peer)?,
+    )?;
+    Repo::put(tx, Table::Outbox, &message_id, peer, &item)?;
+    let reply = LeadSendReply {
+        id: message_id,
+        grant: grant.to_owned(),
+    };
+    settle_request(tx, &admitted, Some(sender_id), &reply)?;
+    Ok(reply)
 }
 
 /// The root lead of a local project: a lead without a parent, bound to the project.
