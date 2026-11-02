@@ -12,6 +12,7 @@ import {
   readFileSync,
   mkdirSync,
   rmSync,
+  statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -29,34 +30,66 @@ const fakeStep = (
   ...extra,
 });
 
-test("gate starts sccache before switching to disposable scratch", () => {
+// Runs the gate with fake node and sccache. Returns the scratch folder the gate
+// created and the TMPDIR that the shared sccache server was started with.
+function runGateWithFakeTools(directory: string) {
+  const bin = path.join(directory, "bin");
+  mkdirSync(bin);
+  const capture = path.join(directory, "sccache-env");
+  writeFileSync(
+    path.join(bin, "node"),
+    '#!/bin/sh\ncase "$*" in *test-fast*) printf "%s" "$TMPDIR" > "$CAPTURE.gate";; esac\necho 4\n',
+    { mode: 0o755 },
+  );
+  writeFileSync(
+    path.join(bin, "sccache"),
+    '#!/bin/sh\nprintf "%s\\n%s\\n%s\\n" "$TMPDIR" "$SCCACHE_IDLE_TIMEOUT" "$*" > "$CAPTURE"\n',
+    { mode: 0o755 },
+  );
+  const result = spawnSync("just", ["_test-gate", "test-fast"], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: bin + path.delimiter + process.env.PATH,
+      TMPDIR: directory,
+      CAPTURE: capture,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const [serverTemp = "", idle, args] = readFileSync(capture, "utf8").split("\n");
+  assert.equal(idle, "0");
+  assert.equal(args, "--start-server");
+  return {
+    scratch: readFileSync(`${capture}.gate`, "utf8"),
+    serverTemp,
+  };
+}
+
+test("gate starts the shared sccache server outside the disposable scratch", () => {
   const directory = mkdtempSync(path.join(tmpdir(), "studio-gate-sccache-"));
   try {
-    const bin = path.join(directory, "bin");
-    mkdirSync(bin);
-    const capture = path.join(directory, "sccache-env");
-    writeFileSync(path.join(bin, "node"), "#!/bin/sh\necho 4\n", {
-      mode: 0o755,
-    });
-    writeFileSync(
-      path.join(bin, "sccache"),
-      '#!/bin/sh\nprintf "%s\\n%s\\n%s\\n" "$TMPDIR" "$SCCACHE_IDLE_TIMEOUT" "$*" > "$CAPTURE"\n',
-      { mode: 0o755 },
-    );
-    const result = spawnSync("just", ["_test-gate", "test-fast"], {
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        PATH: bin + path.delimiter + process.env.PATH,
-        TMPDIR: directory,
-        CAPTURE: capture,
-      },
-    });
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(
-      readFileSync(capture, "utf8"),
-      `${directory}\n0\n--start-server\n`,
-    );
+    const { scratch, serverTemp } = runGateWithFakeTools(directory);
+    // The gate deletes its scratch at exit. A server keeps its start TMPDIR, so
+    // that TMPDIR must be a stable folder, not the caller's scratch.
+    assert.equal(serverTemp.startsWith(directory), false, serverTemp);
+    assert.equal(serverTemp.startsWith(scratch), false, serverTemp);
+    assert.equal(statSync(serverTemp).isDirectory(), true);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("gate scratch sits in the short macOS temporary root", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "studio-gate-scratch-"));
+  try {
+    const { scratch } = runGateWithFakeTools(directory);
+    // Unix socket paths must stay short. The per-user folder is long and under
+    // a /var symlink, so macOS uses the root temporary folder for the gate scratch.
+    const root =
+      process.platform === "darwin"
+        ? path.join(path.sep, "private", "tmp")
+        : directory;
+    assert.equal(path.dirname(scratch), root);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

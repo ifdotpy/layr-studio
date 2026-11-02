@@ -90,7 +90,10 @@ _test-gate gate:
     set -euo pipefail
     # Gate scratch free space, KiB: measured peak 1005908 KiB plus 1091244 KiB margin.
     required_kib=2097152
-    scratch="$(mktemp -d "${TMPDIR:-/tmp}/studio-gate.XXXXXX")"
+    # macOS uses a short root: Unix socket paths must stay under 104 bytes, and the
+    # per-user TMPDIR (/var/folders/...) is long and reached through a /var symlink.
+    if [ "$(uname -s)" = Darwin ]; then scratch_root=/private/tmp; else scratch_root="${TMPDIR:-/tmp}"; fi
+    scratch="$(mktemp -d "$scratch_root/studio-gate.XXXXXX")"
     trap 'chmod -R u+rwX "$scratch"; rm -rf -- "$scratch"' EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
@@ -103,8 +106,9 @@ _test-gate gate:
     else
       echo "Gate scratch $scratch is not memory-backed" >&2
     fi
-    # Start with a lasting temp directory; an existing server retains its own temp directory and idle timeout.
-    SCCACHE_IDLE_TIMEOUT=0 sccache --start-server || true
+    # A server keeps the TMPDIR it starts with, and the gate deletes its scratch at exit.
+    # Start it with a stable folder; an already running server keeps its own.
+    TMPDIR=/tmp SCCACHE_IDLE_TIMEOUT=0 sccache --start-server || true
     export TMPDIR="$scratch"
     echo "Gate scratch: $TMPDIR"
     node {{quote(facade)}} {{quote(gate)}}

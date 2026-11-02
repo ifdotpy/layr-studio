@@ -1589,6 +1589,8 @@ mod tests {
         std::fs::create_dir_all(root.path().join("accounts")).expect("accounts");
         std::fs::create_dir_all(home.join("sessions/day")).expect("sessions");
         std::fs::create_dir_all(&other).expect("second profile");
+        // The watcher stores real paths (macOS /var is /private/var).
+        let other_real = std::fs::canonicalize(&other).expect("real second profile");
         let mut watcher =
             HistoryWatcher::new(root.path(), Arc::new(HistoryWake::default())).expect("watcher");
         let first = BTreeMap::from([("first".into(), home)]);
@@ -1601,7 +1603,7 @@ mod tests {
         watcher.watch_profiles(both).expect("added account");
         assert_eq!(
             watcher.watch_registrations,
-            vec![(other, RecursiveMode::NonRecursive)]
+            vec![(other_real, RecursiveMode::NonRecursive)]
         );
         watcher.watch_registrations.clear();
         watcher.watch_profiles(first).expect("removed account");
