@@ -210,6 +210,7 @@ import SessionActivity from "./components/agents/SessionActivity";
 import { useWorkerModels } from "./components/agents/WorkerModelPicker";
 import { FederationSettings } from "./components/FederationSettings";
 import { LinuxVMSettings } from "./components/LinuxVMSettings";
+import { LayrWorktreesSettings } from "./components/LayrWorktreesSettings";
 import { SignInPushSettings } from "./components/SignInPushSettings";
 import { OrchestrationSettings } from "./components/OrchestrationSettings";
 import ProviderUpdateSettings from "./components/ProviderUpdateSettings";
@@ -3412,6 +3413,9 @@ export default function App({ active = true }: { active?: boolean }) {
             </Tabs.Panel>
             <Tabs.Panel value="linux-vm" pt="md">
               <LinuxVMSettings active={studioSettingsOpen} />
+            </Tabs.Panel>
+            <Tabs.Panel value="layr-worktrees" pt="md">
+              <LayrWorktreesSettings active={studioSettingsOpen} />
             </Tabs.Panel>
             <Tabs.Panel value="phone-alerts" pt="md" keepMounted={false}>
               <SignInPushSettings active={studioSettingsOpen} />
