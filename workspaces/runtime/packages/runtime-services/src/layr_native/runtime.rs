@@ -478,14 +478,10 @@ fn create_worker_line(
                     NativeLayrError::Refused(detail) => NativeLayrError::Refused(format!(
                         "Native Layr base revision could not be resolved: {detail}"
                     )),
-<<<<<<< head
-                    other => other,
-=======
                     other @ (NativeLayrError::Unknown(_)
                     | NativeLayrError::Io(_)
                     | NativeLayrError::Store(_)
                     | NativeLayrError::Worker) => other,
->>>>>>> agent-91aa5720c4daebdb35f5cf1935a651227062746655e5604dbba3659502b898bc
                 })?;
             }
             Ok(())
@@ -601,10 +597,6 @@ pub(super) fn prepare_files_with_git_policy(
                         &project,
                         "--from",
                         staging.to_str().unwrap_or_default(),
-<<<<<<< head
-                        "--include-ignored",
-=======
->>>>>>> agent-91aa5720c4daebdb35f5cf1935a651227062746655e5604dbba3659502b898bc
                     ],
                 )
                 .map_err(|error| {
@@ -619,15 +611,11 @@ pub(super) fn prepare_files_with_git_policy(
                         NativeLayrError::Refused(message) => {
                             NativeLayrError::Refused(format!("{message}{retained}"))
                         }
-<<<<<<< head
-                        other => NativeLayrError::Refused(format!("{other}{retained}")),
-=======
                         other @ (NativeLayrError::Io(_)
                         | NativeLayrError::Store(_)
                         | NativeLayrError::Worker) => {
                             NativeLayrError::Refused(format!("{other}{retained}"))
                         }
->>>>>>> agent-91aa5720c4daebdb35f5cf1935a651227062746655e5604dbba3659502b898bc
                     }
                 })?;
                 run(state_dir, &main, &["git", "remote", "remove", "local"])?;
@@ -1114,11 +1102,7 @@ esac
         let _daemon = fixture_daemon(&state);
         let mut record = json!({"id":"lead","isLead":true,"autoWake":true});
         super::super::configure_new_chat(&mut record, source.to_str().unwrap());
-<<<<<<< head
-        let _ = prepare_files(&state, &record);
-=======
         prepare_files(&state, &record).expect("fixture import succeeds");
->>>>>>> agent-91aa5720c4daebdb35f5cf1935a651227062746655e5604dbba3659502b898bc
         assert!(
             fixture.path().join("removed").exists(),
             "staging remote was not removed"

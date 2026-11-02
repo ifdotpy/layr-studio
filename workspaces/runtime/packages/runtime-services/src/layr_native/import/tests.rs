@@ -501,15 +501,7 @@ mod lifecycle_tests {
         let remotes = super::super::run(state.path(), &main, &["git", "remote", "-v"])
             .expect("Git bridge remotes");
         assert!(!remotes.lines().any(|line| line.split_whitespace().next() == Some("local")), "staging remote remains: {remotes}");
-<<<<<<< head
-        assert_eq!(
-            super::super::run(state.path(), &main, &["show", "head:data/file"])
-                .expect("versioned ignored data"),
-            "ignored data"
-        );
-=======
         assert!(super::super::run(state.path(), &main, &["show", "head:data/file"]).is_err());
->>>>>>> agent-91aa5720c4daebdb35f5cf1935a651227062746655e5604dbba3659502b898bc
         assert!(
             super::super::run(state.path(), &main, &["show", "head:node_modules/warm"]).is_err()
         );

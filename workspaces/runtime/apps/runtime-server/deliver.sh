@@ -135,12 +135,10 @@ if [ "$in_delivery_unit" != true ] && [ "$test_fixture" != true ]; then
   environment=(--setenv=CODEX_STUDIO_DELIVER_IN_UNIT=1)
   # A user manager does not inherit the invoking shell's toolchain and paths.
   # Pass variable names rather than exposing their values in the argument list.
-  # Layr transport names are owned by layr_native::transport_environment_in_store.
   for name in HOME PATH XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME \
     XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS CODEX_STUDIO_SERVER_ROOT \
     CODEX_STUDIO_DELIVER_UNIT CODEX_STUDIO_DELIVER_INVOCATION_FILE \
     CARGO_HOME RUSTUP_HOME CARGO_BUILD_JOBS RUSTFLAGS CARGO_ENCODED_RUSTFLAGS \
-    LAYR_ROOT LAYR_SOCKET LAYR_DIRECT \
     CODEX_NODE PNPM_HOME TMPDIR HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY \
     http_proxy https_proxy all_proxy no_proxy; do
     if [[ -v $name ]]; then environment+=("--setenv=$name"); fi
