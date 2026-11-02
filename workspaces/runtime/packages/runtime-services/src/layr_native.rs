@@ -120,6 +120,10 @@ fn test_binary() -> Option<std::ffi::OsString> {
     capability::TEST_BINARY.with(|value| *value.borrow_mut() = Some(PathBuf::from(&binary)));
     Some(binary)
 }
+#[cfg(test)]
+pub(crate) fn set_test_binary(binary: PathBuf) {
+    capability::TEST_BINARY.with(|value| *value.borrow_mut() = Some(binary));
+}
 mod failed_import;
 mod private_tree;
 mod runtime;

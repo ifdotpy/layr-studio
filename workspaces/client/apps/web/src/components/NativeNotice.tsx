@@ -3,10 +3,7 @@ import { displayError, errorDetails } from "../errorPresentation";
 import { currentCapacityRetry } from "../capacityRetry";
 import CapacityRetry from "./CapacityRetry";
 import LimitRecoveryNotice from "./LimitRecoveryNotice";
-import ConnectionRecovery, {
-  canCheckConnection,
-  matchingConnectionCheck,
-} from "./ConnectionRecovery";
+import ConnectionRecovery from "./ConnectionRecovery";
 import type { Agent, Message } from "../types";
 import type { components } from "../generated/api";
 import { agentErrorLabel } from "../types";
@@ -86,7 +83,7 @@ export function NativeError({
       usageResume.reason === "Automatic resume is off for this chat.");
   const retry = currentCapacityRetry(agent);
   const blocked = nativeThreadError(agent);
-  const connectionCheck = matchingConnectionCheck(agent);
+  const connectionCheck = agent.manualConnectionCheck?.receipt;
   const error = nativeErrorView(blocked || agent.error, planType);
   const detailView = connectionCheck
     ? nativeErrorView(agent.error, planType)
@@ -142,7 +139,7 @@ export function NativeError({
           retry={retry}
         />
       )}
-      {refresh && canCheckConnection(agent) && (
+      {refresh && agent.manualConnectionCheck?.available && (
         <ConnectionRecovery
           key={JSON.stringify([
             agent.id,
