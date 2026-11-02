@@ -117,6 +117,15 @@ struct CapturedRefresh {
     calls: tokio::sync::mpsc::UnboundedSender<String>,
 }
 impl crate::account_session_runtime::AccountSessionPort for CapturedRefresh {
+    fn refresh_limits<'a>(
+        &'a self,
+        account: &'a str,
+    ) -> crate::account_session_runtime::AccountSessionFuture<'a, ()> {
+        Box::pin(async move {
+            self.calls.send(account.to_owned()).unwrap();
+            Ok(())
+        })
+    }
     fn refresh_account<'a>(
         &'a self,
         account: &'a str,
@@ -126,6 +135,30 @@ impl crate::account_session_runtime::AccountSessionPort for CapturedRefresh {
             Ok(())
         })
     }
+}
+
+#[tokio::test]
+async fn completed_turn_refreshes_missing_limits() {
+    let state = State::new().await;
+    let (calls, mut received) = tokio::sync::mpsc::unbounded_channel();
+    let mut resources = test_resources().unwrap();
+    resources.account_session = Some(Arc::new(CapturedRefresh { calls }));
+    let mut peer = Peer::new();
+    let mut worker = peer
+        .open_worker_with_resources(state.bridge.clone(), resources)
+        .await;
+    let start = state.start(&mut peer, &worker).await;
+    peer.accepted(&start).await;
+    let cursor = peer.frame(json!({"method":"turn/completed","params":{"threadId":"fake-thread-0","turn":{"id":"turn","status":"completed"}}})).await;
+    peer.acknowledged(cursor).await;
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), received.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+        "default"
+    );
+    worker.shutdown().await.unwrap();
 }
 
 #[tokio::test]

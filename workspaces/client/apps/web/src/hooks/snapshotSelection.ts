@@ -24,7 +24,6 @@ export function retainUsageAccounts(
         old.provider === value.provider &&
         old.plan === value.plan &&
         old.accountId === value.accountId &&
-        old.signedOut === value.signedOut &&
         old.limits === value.limits &&
         old.runway === value.runway &&
         old.reset === value.reset &&
