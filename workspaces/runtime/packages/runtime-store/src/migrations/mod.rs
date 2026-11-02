@@ -64,13 +64,9 @@ mod m2026_11_01_annotation_record;
 mod m2026_11_01_approval_secrets;
 mod m2026_11_01_chat_busy_deleted_index;
 mod m2026_11_01_chat_busy_indexes;
-<<<<<<< head
-mod m2026_11_01_outbox_cancelled;
-||||||| base
-=======
 mod m2026_11_01_legacy_question_history;
 mod m2026_11_01_normalize_limits;
->>>>>>> origin/main
+mod m2026_11_01_outbox_cancelled;
 mod m2026_11_01_plan_record;
 mod m2026_11_01_project_context;
 mod m2026_11_01_project_revisions;
