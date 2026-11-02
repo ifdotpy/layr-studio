@@ -221,14 +221,7 @@ pub trait AccountSessionPort: Send + Sync {
     fn shutdown_durable_operations<'a>(&'a self) -> AccountSessionFuture<'a, ()> {
         Box::pin(async { Ok(()) })
     }
-    fn discover<'a>(&'a self) -> AccountSessionFuture<'a, Value> {
-        Box::pin(async {
-            Err(AccountSessionError::Requires(
-                "provider-session/claude-discovery",
-            ))
-        })
-    }
-    fn profile<'a>(&'a self, _request: ProfileRequest) -> AccountSessionFuture<'a, Value> {
+    fn profile<'a>(&'a self, _request: ProfileRequest) -> AccountSessionFuture<'a, ()> {
         Box::pin(async {
             Err(AccountSessionError::Requires(
                 "provider-session/claude-profile-auth",
@@ -1221,19 +1214,7 @@ impl AccountSessionRuntime {
             _ => Err(AccountSessionError::Unknown),
         }
     }
-    fn accounts(&self) -> Result<Value, AccountSessionError> {
-        let snapshot = self.driver.listing_snapshot().map_err(account_error)?;
-        Ok(
-            serde_json::json!({"accounts":snapshot.accounts,"archivedAccounts":snapshot.archived_accounts,"defaultAccountKey":snapshot.default_account_key,"logins":snapshot.logins,"supportsDisconnect":true,"supportsDelete":true}),
-        )
-    }
-    fn discover_sync(&self) -> Result<Value, AccountSessionError> {
-        self.driver
-            .discover_local(&self.home)
-            .map_err(mutation_error)?;
-        self.accounts()
-    }
-    fn profile_sync(&self, request: ProfileRequest) -> Result<Value, AccountSessionError> {
+    fn profile_sync(&self, request: ProfileRequest) -> Result<(), AccountSessionError> {
         let options = normalize_profile(request.options.unwrap_or_default(), &self.home)?;
         if let Some(account) = request.account_key {
             self.driver
@@ -1262,7 +1243,7 @@ impl AccountSessionRuntime {
                 )
                 .map_err(|_| AccountSessionError::Refused("Cannot register this Claude profile"))?;
         }
-        self.accounts()
+        Ok(())
     }
     /// Recreate the missing home of a Studio sign-in account before it signs
     /// in again. Such a home is `<accounts root>/login-<request UUID>` and
@@ -2001,13 +1982,7 @@ impl AccountSessionPort for AccountSessionRuntime {
             Ok(())
         })
     }
-    fn discover<'a>(&'a self) -> AccountSessionFuture<'a, Value> {
-        Box::pin(async move {
-            let runtime = self.clone();
-            spawn_account_driver(move || runtime.discover_sync()).await?
-        })
-    }
-    fn profile<'a>(&'a self, request: ProfileRequest) -> AccountSessionFuture<'a, Value> {
+    fn profile<'a>(&'a self, request: ProfileRequest) -> AccountSessionFuture<'a, ()> {
         Box::pin(async move {
             let runtime = self.clone();
             spawn_account_driver(move || runtime.profile_sync(request)).await?
