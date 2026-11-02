@@ -106,9 +106,9 @@ _test-gate gate:
     else
       echo "Gate scratch $scratch is not memory-backed" >&2
     fi
-    # A server keeps the TMPDIR it starts with, and the gate deletes its scratch at exit.
-    # Start it with a stable folder; an already running server keeps its own.
-    TMPDIR=/tmp SCCACHE_IDLE_TIMEOUT=0 sccache --start-server || true
+    # No compiler cache in gates: a cache server keeps the TMPDIR it started with, and the
+    # gate deletes its scratch at exit. Empty values make cargo compile without a wrapper.
+    export RUSTC_WRAPPER= CARGO_BUILD_RUSTC_WRAPPER=
     export TMPDIR="$scratch"
     echo "Gate scratch: $TMPDIR"
     node {{quote(facade)}} {{quote(gate)}}

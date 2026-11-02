@@ -12,7 +12,7 @@ import {
   readFileSync,
   mkdirSync,
   rmSync,
-  statSync,
+  existsSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -30,20 +30,22 @@ const fakeStep = (
   ...extra,
 });
 
-// Runs the gate with fake node and sccache. Returns the scratch folder the gate
-// created and the TMPDIR that the shared sccache server was started with.
+// Runs the gate with a fake node and a fake sccache. The caller sets a compiler
+// wrapper, as a developer shell might. Returns the scratch folder the gate created,
+// the compiler wrapper variables the gate passed on ("unset" when absent), and
+// whether the fake sccache ran.
 function runGateWithFakeTools(directory: string) {
   const bin = path.join(directory, "bin");
   mkdirSync(bin);
-  const capture = path.join(directory, "sccache-env");
+  const capture = path.join(directory, "gate-env");
   writeFileSync(
     path.join(bin, "node"),
-    '#!/bin/sh\ncase "$*" in *test-fast*) printf "%s" "$TMPDIR" > "$CAPTURE.gate";; esac\necho 4\n',
+    '#!/bin/sh\ncase "$*" in *test-fast*) printf "%s\\n%s\\n%s" "$TMPDIR" "${RUSTC_WRAPPER-unset}" "${CARGO_BUILD_RUSTC_WRAPPER-unset}" > "$CAPTURE";; esac\necho 4\n',
     { mode: 0o755 },
   );
   writeFileSync(
     path.join(bin, "sccache"),
-    '#!/bin/sh\nprintf "%s\\n%s\\n%s\\n" "$TMPDIR" "$SCCACHE_IDLE_TIMEOUT" "$*" > "$CAPTURE"\n',
+    '#!/bin/sh\necho "$*" > "$CAPTURE.sccache"\n',
     { mode: 0o755 },
   );
   const result = spawnSync("just", ["_test-gate", "test-fast"], {
@@ -53,27 +55,33 @@ function runGateWithFakeTools(directory: string) {
       PATH: bin + path.delimiter + process.env.PATH,
       TMPDIR: directory,
       CAPTURE: capture,
+      RUSTC_WRAPPER: "sccache",
+      CARGO_BUILD_RUSTC_WRAPPER: "sccache",
     },
   });
   assert.equal(result.status, 0, result.stderr);
-  const [serverTemp = "", idle, args] = readFileSync(capture, "utf8").split("\n");
-  assert.equal(idle, "0");
-  assert.equal(args, "--start-server");
+  const [scratch = "", wrapper = "", buildWrapper = ""] = readFileSync(
+    capture,
+    "utf8",
+  ).split("\n");
   return {
-    scratch: readFileSync(`${capture}.gate`, "utf8"),
-    serverTemp,
+    scratch,
+    wrapper,
+    buildWrapper,
+    sccacheRan: existsSync(`${capture}.sccache`),
   };
 }
 
-test("gate starts the shared sccache server outside the disposable scratch", () => {
-  const directory = mkdtempSync(path.join(tmpdir(), "studio-gate-sccache-"));
+test("gate clears the compiler wrapper and never starts sccache", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "studio-gate-wrapper-"));
   try {
-    const { scratch, serverTemp } = runGateWithFakeTools(directory);
-    // The gate deletes its scratch at exit. A server keeps its start TMPDIR, so
-    // that TMPDIR must be a stable folder, not the caller's scratch.
-    assert.equal(serverTemp.startsWith(directory), false, serverTemp);
-    assert.equal(serverTemp.startsWith(scratch), false, serverTemp);
-    assert.equal(statSync(serverTemp).isDirectory(), true);
+    const { wrapper, buildWrapper, sccacheRan } =
+      runGateWithFakeTools(directory);
+    // A compiler cache server keeps the temporary folder it started with, and the
+    // gate deletes its scratch at exit. The gate builds without a compiler cache.
+    assert.equal(wrapper, "");
+    assert.equal(buildWrapper, "");
+    assert.equal(sccacheRan, false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
