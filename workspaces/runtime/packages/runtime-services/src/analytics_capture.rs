@@ -240,8 +240,10 @@ impl PreparedCapture {
         self.ledger_since = epoch;
         self.usage_unknown = unknown_usage_receipt(
             analytics,
-            &self.agent,
-            &self.params,
+            text(&self.agent["id"]),
+            self.params["threadId"]
+                .as_str()
+                .or_else(|| self.agent["threadId"].as_str()),
             self.usage.as_ref(),
             self.legacy_usage.as_ref(),
         )?;
@@ -603,33 +605,22 @@ impl CaptureDecision {
     }
 }
 /// Primary-key-only lookup of durable zero-debit replay protection.
-pub(crate) fn unknown_usage_receipt(
+fn unknown_usage_receipt(
     analytics: &Connection,
-    agent: &Value,
-    params: &Value,
+    agent: &str,
+    thread: Option<&str>,
     usage: Option<&UsageObservation>,
     legacy: Option<&LegacyUsageTotals>,
 ) -> Result<bool, StoreError> {
     let key = match usage {
-        Some(observation @ UsageObservation::Cumulative { .. }) => Some(
-            UsageLedgerRow::capture(
-                text(&agent["id"]),
-                params["threadId"]
-                    .as_str()
-                    .or_else(|| agent["threadId"].as_str()),
-                observation.clone(),
-            )
-            .observation_key(),
-        ),
+        Some(observation @ UsageObservation::Cumulative { .. }) => {
+            Some(UsageLedgerRow::capture(agent, thread, observation.clone()).observation_key())
+        }
         _ => legacy
             .filter(|legacy| legacy.response_id.is_none())
             .map(|legacy| {
                 studio_runtime_schema::usage::ledger::legacy_counter_observation_key(
-                    text(&agent["id"]),
-                    params["threadId"]
-                        .as_str()
-                        .or_else(|| agent["threadId"].as_str()),
-                    legacy,
+                    agent, thread, legacy,
                 )
             }),
     };
@@ -714,16 +705,7 @@ pub(crate) fn capture_logged_effect(
     {
         prepared.rejected_usage = Some((**conflict).clone());
     }
-    if let Effect::Analytics { ledger_since, .. } = effect {
-        prepared.ledger_since = *ledger_since;
-    }
-    prepared.usage_unknown = unknown_usage_receipt(
-        tx,
-        &prepared.agent,
-        &prepared.params,
-        prepared.usage.as_ref(),
-        prepared.legacy_usage.as_ref(),
-    )?;
+    prepared.bind_budget(tx, epoch)?;
     let prepared = std::sync::Arc::new(prepared);
     let mut decision = decide(
         CaptureSnapshot::load(tx, std::sync::Arc::clone(&prepared))?,
