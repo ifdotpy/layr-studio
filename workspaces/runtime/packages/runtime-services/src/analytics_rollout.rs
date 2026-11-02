@@ -66,12 +66,8 @@ impl RolloutContext {
         if !p.is_object() {
             return Ok(vec![]);
         }
-        let at = timestamp(&record["timestamp"]).unwrap_or(fallback_at);
-        let time_source = if timestamp(&record["timestamp"]).is_some() {
-            "record"
-        } else {
-            "fileModifiedEstimate"
-        };
+        let (at, time_source) = timestamp(&record["timestamp"])
+            .map_or((fallback_at, "fileModifiedEstimate"), |at| (at, "record"));
         let mut actions = Vec::new();
         match record["type"].as_str().unwrap_or("") {
             "session_meta" => {
