@@ -8,6 +8,11 @@ pub(super) const OPTIONAL_FIELDS: &[&str] = &[
     "workspaceInGit",
     "quickCreate",
     "reviewDefaults",
+    "worktreeWarning",
+    "workerBaseCommit",
+    "workerBaseBehindMain",
+    "workerBaseMainRef",
+    "quickCreateRequest",
 ];
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
@@ -40,7 +45,7 @@ mod tests {
     fn removes_only_null_worker_base_refs() {
         let mut db = rusqlite::Connection::open_in_memory().unwrap();
         db.execute_batch(r#"CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT);
-            INSERT INTO runtime_agents VALUES ('null', '{"worktree":null,"workerBaseRef":null,"workspaceModeExplicit":null,"workspaceInGit":null,"quickCreate":null,"large":1e40,"reviewDefaults":{"model":null,"effort":null}}'), ('missing', '{}'), ('value', '{"workerBaseRef":"main","reviewDefaults":{"model":"m","effort":"high"}}'), ('one', '{"workerBaseRef":"main","reviewDefaults":{"model":"m","effort":null}}'), ('other', '{"workerBaseRef":null,"reviewDefaults":{"model":"m","effort":"high"}}'), ('review', '{"reviewDefaults":null}'), ('empty', '{"reviewDefaults":{}}');"#).unwrap();
+            INSERT INTO runtime_agents VALUES ('null', '{"worktree":null,"workerBaseRef":null,"workspaceModeExplicit":null,"workspaceInGit":null,"quickCreate":null,"worktreeWarning":null,"workerBaseCommit":null,"workerBaseBehindMain":null,"workerBaseMainRef":null,"quickCreateRequest":null,"large":1e40,"reviewDefaults":{"model":null,"effort":null}}'), ('missing', '{}'), ('value', '{"workerBaseRef":"main","reviewDefaults":{"model":"m","effort":"high"}}'), ('one', '{"workerBaseRef":"main","reviewDefaults":{"model":"m","effort":null}}'), ('other', '{"workerBaseRef":null,"reviewDefaults":{"model":"m","effort":"high"}}'), ('review', '{"reviewDefaults":null}'), ('empty', '{"reviewDefaults":{}}');"#).unwrap();
         let tx = db.transaction().unwrap();
         super::apply(&tx).unwrap();
         let read = |id: &str| {

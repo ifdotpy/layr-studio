@@ -60,10 +60,6 @@
     "imageWorkspaceHasGit": false,
     "imageWorkspaceCreatedAt": null,
     "imageWorkspaceError": null,
-    "worktreeWarning": null,
-    "workerBaseCommit": null,
-    "workerBaseBehindMain": null,
-    "workerBaseMainRef": null,
     "workerDefaults": {
       "model": "gpt-6-luna",
       "effort": "high",

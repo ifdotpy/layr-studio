@@ -381,6 +381,20 @@ pub struct AgentRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_defaults: Option<studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_warning: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_base_commit: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_safe_counter"
+    )]
+    pub worker_base_behind_main: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_base_main_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quick_create_request: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<studio_runtime_schema::claude_permissions::PermissionMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -1115,6 +1129,11 @@ impl AgentRecord {
             workspace_in_git: None,
             quick_create: None,
             review_defaults: None,
+            worktree_warning: None,
+            worker_base_commit: None,
+            worker_base_behind_main: None,
+            worker_base_main_ref: None,
+            quick_create_request: None,
             permission_mode: None,
             model: None,
             cwd: None,
@@ -3665,6 +3684,8 @@ mod tests {
             json!({"id":"agent","rootId":"agent","epoch":2,"status":"idle",
             "accountKey":"default","compactions":0,"worktree":true,"workerBaseRef":"main",
             "workspaceModeExplicit":false,"workspaceInGit":true,"quickCreate":true,
+            "worktreeWarning":"warning","workerBaseCommit":"abc","workerBaseBehindMain":3,
+            "workerBaseMainRef":"main","quickCreateRequest":"signature",
             "reviewDefaults":{"model":null,"effort":"high"}}),
         );
         for key in [
@@ -3674,11 +3695,18 @@ mod tests {
             "workspaceInGit",
             "quickCreate",
             "reviewDefaults",
+            "worktreeWarning",
+            "workerBaseCommit",
+            "workerBaseBehindMain",
+            "workerBaseMainRef",
+            "quickCreateRequest",
         ] {
             assert!(!record.extra.contains_key(key), "{key}");
         }
         let encoded = record.value();
         assert_eq!(encoded["workerBaseRef"], "main");
+        assert_eq!(encoded["workerBaseBehindMain"], 3);
+        assert_eq!(encoded["quickCreateRequest"], "signature");
         assert_eq!(
             encoded["reviewDefaults"],
             json!({"model":null,"effort":"high"})
