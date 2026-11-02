@@ -704,22 +704,21 @@ pub fn stage_tick(
 pub fn stage_limits_changed_for_account(
     tx: &Transaction<'_>,
     account_key: &str,
-    raw_limits: &Value,
+    raw_limits: &studio_runtime_schema::usage_limits::UsageLimitsResponse,
     now: f64,
 ) -> Result<bool> {
     if raw_limits
-        .get("error")
-        .is_some_and(|value| value.as_str().is_some_and(|text| !text.is_empty()))
+        .error
+        .as_deref()
+        .is_some_and(|text| !text.is_empty())
         || raw_limits
-            .get("data")
-            .and_then(Value::as_object)
-            .is_none_or(|data| data.is_empty())
+            .data
+            .as_ref()
+            .is_none_or(|data| data.0 == Default::default())
     {
         return Ok(false);
     }
-    let mut observation = raw_limits.clone();
-    observation["accountKey"] = json!(account_key);
-    let limits = LimitsObservation::from_record(observation, None)?;
+    let limits = LimitsObservation::from_response(raw_limits.clone());
     let rows = tx
         .prepare_cached(
             "SELECT id,agent FROM runtime_usage_resumes WHERE json_extract(record,'$.status')='scheduled' AND json_extract(record,'$.accountKey')=?1 ORDER BY id",

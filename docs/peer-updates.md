@@ -119,6 +119,13 @@ The backend never replaces the installed app itself.
    with `installedAt` after an install), remove the pending file and the staged copy, and open
    the window again with `open -g` if it ran.
 7. The recovery agent exits after an install. launchd starts it again from the new app.
+8. The new recovery agent replaces an old supervisor of another protocol. It reads no protocol
+   from it: when `supervisor.sqlite3` (and its `-wal`) has had no write for 10 minutes
+   (`SUPERVISOR_QUIET_SECONDS`), it runs `launchctl bootout` and `bootstrap` for the supervisor
+   job, then sends SIGTERM to the backend so that it reconnects. While the journal is active
+   the backend waits and the check repeats on each tick. A supervisor job that launchd did not
+   start (for example, its program path was missing during the swap) is loaded again the same
+   way. Limit: a turn silent for 10 minutes is not seen as live work.
 
 A failed step before the swap leaves the installed app unchanged. A failed swap moves the
 previous app back. After a failure the installer opens the window again if it quit it. The VM

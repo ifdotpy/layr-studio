@@ -3065,10 +3065,26 @@ export interface components {
     };
     /** @description Server-owned account presentation; each field is derived from the same observation. */
     AccountLimitsProjection: {
+      /** @default {} */
+      agents: {
+        [key: string]: components["schemas"]["AgentLimitProjection"];
+      };
       buckets: components["schemas"]["BucketProjection"];
       reset: components["schemas"]["ResetProjection"];
       runway: components["schemas"]["WeeklyRunway"];
+      status: components["schemas"]["AccountLimitsStatus"];
     };
+    AccountLimitsStatus:
+      | {
+          /** @constant */
+          kind: "current";
+        }
+      | {
+          /** @constant */
+          kind: "checking";
+          /** Format: double */
+          resetAt: number;
+        };
     /** AccountLoginResponse */
     AccountLoginResponse: {
       /** Accountkey */
@@ -4497,6 +4513,10 @@ export interface components {
       text: string;
       /** Title */
       title: string;
+    };
+    AgentLimitProjection: {
+      eligibility: components["schemas"]["UsageEligibility"];
+      recovery: components["schemas"]["LimitRecovery"] | null;
     };
     /**
      * AgentMode
@@ -9479,6 +9499,12 @@ export interface components {
        */
       skillRoot?: null | string | undefined;
     };
+    BucketCreditBalance: string | number | boolean;
+    BucketCredits: {
+      balance?: components["schemas"]["BucketCreditBalance"] | null | undefined;
+      hasCredits?: boolean | null | undefined;
+      unlimited?: boolean | null | undefined;
+    };
     BucketProjection: {
       current: components["schemas"]["BucketState"];
       next: components["schemas"]["BucketState"];
@@ -10590,6 +10616,39 @@ export interface components {
       /** @default null */
       options?: components["schemas"]["ClaudeOptions"] | null | undefined;
     };
+    ClaudeRateInfo: {
+      isUsingOverage?: boolean | null | undefined;
+      overageInUse?: boolean | null | undefined;
+      /** Format: double */
+      overageResetsAt?: number | null | undefined;
+      overageStatus?:
+        | components["schemas"]["ClaudeRateStatus"]
+        | null
+        | undefined;
+      rateLimitType?:
+        | components["schemas"]["ClaudeRateType"]
+        | null
+        | undefined;
+      /** Format: double */
+      resetsAt?: number | null | undefined;
+      status: components["schemas"]["ClaudeRateStatus"];
+      /** Format: double */
+      utilization?: number | null | undefined;
+    };
+    /** @description Unknown provider evidence is retained only as an unsupported decision. */
+    ClaudeRateLimit:
+      | components["schemas"]["ClaudeRateInfo"]
+      | components["schemas"]["UnsupportedRateInfo"];
+    /** @enum {string} */
+    ClaudeRateStatus: "allowed" | "allowed_warning" | "rejected";
+    /** @enum {string} */
+    ClaudeRateType:
+      | "five_hour"
+      | "seven_day"
+      | "seven_day_opus"
+      | "seven_day_sonnet"
+      | "seven_day_overage_included"
+      | "overage";
     ClaudeRepairReport: {
       invalidSequence: boolean;
       nativeHistoryConfirmed: boolean | null;
@@ -12730,6 +12789,12 @@ export interface components {
     EdgeKind: "chat" | "spawn";
     /** @enum {string} */
     ElicitationAction: "accept" | "decline" | "cancel";
+    EligibilityBucket: {
+      id: string;
+      overageAllowed: boolean;
+    };
+    /** @enum {string} */
+    EligibilityState: "stale" | "allowed" | "blocked";
     /** EmptyTransferRecoveryRecordResponse */
     EmptyTransferRecoveryRecordResponse: {
       /**
@@ -14092,6 +14157,12 @@ export interface components {
      * @enum {string}
      */
     LimitColor: "paused" | "unread" | "answer" | "error";
+    LimitRecovery: {
+      action: components["schemas"]["RecoveryAction"];
+      message: string;
+      timing: components["schemas"]["RecoveryTiming"];
+      title: string;
+    };
     /** LimitResetResponse */
     LimitResetResponse: {
       /** Account Id */
@@ -16409,6 +16480,8 @@ export interface components {
       read_state?: components["schemas"]["ReadStateBody"] | null | undefined;
     };
     Origin: string;
+    /** @enum {string} */
+    Overage: "allowed" | "in_use" | "rejected" | "unavailable";
     /** PairRequest */
     PairRequest: {
       /** Inviteid */
@@ -18805,81 +18878,61 @@ export interface components {
      * @enum {string}
      */
     RadioStatus: "idle" | "waiting" | "speaking" | "stopping" | "blocked";
-    /**
-     * RateLimitBucket
-     * @description Known rate-limit fields plus provider-owned fields passed through unchanged.
-     */
     RateLimitBucket: {
+      claudeRateLimit?:
+        | components["schemas"]["ClaudeRateLimit"]
+        | null
+        | undefined;
+      credits?: components["schemas"]["BucketCredits"] | null | undefined;
       individualLimit?:
         | components["schemas"]["RateLimitIndividualLimit"]
         | null
         | undefined;
-      /** Limitid */
       limitId?: string | null | undefined;
-      /** Limitname */
       limitName?: string | null | undefined;
-      /** Plantype */
       planType?: string | null | undefined;
       primary?: components["schemas"]["RateLimitWindow"] | null | undefined;
-      /** Ratelimitreachedtype */
       rateLimitReachedType?: string | null | undefined;
       secondary?: components["schemas"]["RateLimitWindow"] | null | undefined;
-      /** Spendcontrolreached */
       spendControlReached?: boolean | null | undefined;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
     RateLimitBucketDto: components["schemas"]["RateLimitBucket"];
-    /** RateLimitIndividualLimit */
     RateLimitIndividualLimit: {
-      /** Remainingpercent */
+      /** Format: double */
       remainingPercent?: number | null | undefined;
     };
-    /**
-     * RateLimitResetCredit
-     * @description A provider reset-credit record; native service fields remain extensible.
-     */
     RateLimitResetCredit: {
-      /** Expiresat */
+      description?: string | null | undefined;
+      /** Format: double */
       expiresAt?: number | null | undefined;
-      /** Grantedat */
+      /** Format: double */
       grantedAt?: number | null | undefined;
-      /** Id */
       id: string;
-      /** Resettype */
       resetType: string;
-      /** Status */
       status: string;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
+      title?: string | null | undefined;
     };
-    /**
-     * RateLimitResetCredits
-     * @description Provider-owned reset-credit summary with the known count and credit fields.
-     */
     RateLimitResetCredits: {
-      /** Availablecount */
-      availableCount?: number | null | undefined;
-      /** Credits */
-      credits?: components["schemas"]["RateLimitResetCredit"][] | undefined;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
+      availableCount?:
+        | components["schemas"]["StoredJsonInteger"]
+        | null
+        | undefined;
+      /** @default [] */
+      credits: components["schemas"]["RateLimitResetCredit"][];
     };
     RateLimitsDataDto: components["schemas"]["UsageLimitsData"];
+    /** @description The retained observation and its server-owned presentation travel together. */
     RateLimitView: {
-      observation: components["schemas"]["AccountRateLimitsDto"];
+      observation: components["schemas"]["UsageLimitsResponse"];
       projection: components["schemas"]["AccountLimitsProjection"];
     };
-    /** RateLimitWindow */
     RateLimitWindow: {
-      /** Resetsat */
+      /** Format: double */
       resetsAt?: number | null | undefined;
-      /** Usedpercent */
+      /** Format: double */
       usedPercent?: number | null | undefined;
-      /** Windowdurationmins */
+      /** Format: double */
       windowDurationMins?: number | null | undefined;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
     RateLimitWindowDto: components["schemas"]["RateLimitWindow"];
     /** @enum {string} */
@@ -18934,6 +18987,22 @@ export interface components {
       error?: string | null | undefined;
       status: components["schemas"]["DeliveryStatus"];
     };
+    RecoveryAction:
+      | {
+          /** @constant */
+          kind: "none";
+        }
+      | {
+          href: string;
+          /** @constant */
+          kind: "link";
+          label: string;
+        }
+      | {
+          /** @constant */
+          kind: "ask_owner";
+          request: string;
+        };
     /**
      * RecoveryConnectionGeneration
      * @description A recovery receipt `supervisor` that earlier releases wrote when the start attempt had no supervisor identity. It holds only the start attempt's `connectionGeneration` and identifies no supervisor; current releases write null instead.
@@ -19008,6 +19077,35 @@ export interface components {
       | "tool_response_delivered"
       | "superseded"
       | "unconfirmed";
+    RecoveryTiming:
+      | {
+          /** @constant */
+          kind: "unknown";
+        }
+      | {
+          /** @constant */
+          kind: "waiting";
+          /** Format: double */
+          resetAt: number;
+        }
+      | {
+          /** @constant */
+          kind: "checking";
+          /** Format: double */
+          resetAt: number;
+        }
+      | {
+          /** @constant */
+          kind: "confirmed";
+          /** Format: double */
+          resetAt: number;
+        }
+      | {
+          /** @constant */
+          kind: "unconfirmed";
+          /** Format: double */
+          resetAt: number;
+        };
     /** RegisterAccountRequest */
     RegisterAccountRequest: {
       /** Home */
@@ -22339,6 +22437,8 @@ export interface components {
       /** Stopped */
       stopped: string[];
     };
+    /** @description A JSON Schema integer, preserving integral decimal spellings and large values. */
+    StoredJsonInteger: number;
     /**
      * AgentRole
      * @enum {string}
@@ -25805,22 +25905,20 @@ export interface components {
       /** Requestid */
       requestId: string;
     };
+    UnsupportedRateInfo: {
+      type: components["schemas"]["UnsupportedRateKind"];
+    };
+    /** @enum {string} */
+    UnsupportedRateKind: "unsupported";
     UsageEligibility: {
       accountKey: string;
       agentId: string;
-      allowed: boolean;
-      buckets: {
-        id: string;
-        overageAllowed: boolean;
-      }[];
-      canRun: boolean;
-      checkedAt: number;
-      fresh: boolean;
+      buckets: components["schemas"]["EligibilityBucket"][];
       model: string;
-      /** @enum {string} */
-      overage: "allowed" | "in_use" | "rejected" | "unavailable";
+      overage: components["schemas"]["Overage"];
       provider: string;
-      resetAt: number | null;
+      state: components["schemas"]["EligibilityState"];
+      /** Format: double */
       validUntil: number | null;
     };
     /**
@@ -25870,68 +25968,58 @@ export interface components {
       /** @description Immutable logical usage identity; dimensionless. */
       usageIdentity: components["schemas"]["UsageIdentity"];
     };
-    /**
-     * UsageLimitsData
-     * @description Known usage projection plus account-service fields passed through unchanged.
-     */
     UsageLimitsData: {
-      /** Accountid */
       accountId?: string | null | undefined;
-      /** Ordinaryusageallowed */
+      claudeRateLimit?:
+        | components["schemas"]["ClaudeRateLimit"]
+        | null
+        | undefined;
       ordinaryUsageAllowed?: boolean | null | undefined;
       rateLimitResetCredits?:
         | components["schemas"]["RateLimitResetCredits"]
         | null
         | undefined;
       rateLimits?: components["schemas"]["RateLimitBucket"] | null | undefined;
-      /** Ratelimitsbylimitid */
       rateLimitsByLimitId?:
         | {
             [key: string]: components["schemas"]["RateLimitBucket"];
           }
         | null
         | undefined;
-      /** Signedin */
       signedIn?: boolean | null | undefined;
-      /** Source */
       source?: string | null | undefined;
-      /** Status */
       status?: string | null | undefined;
-    } & {
-      [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
-    /** UsageLimitsResponse */
     UsageLimitsResponse: {
-      /** Accountkey */
+      _syncEntities?:
+        | components["schemas"]["UsageLimitsSyncEntity"][]
+        | null
+        | undefined;
+      _syncEntitiesAfter?:
+        | components["schemas"]["StoredJsonInteger"]
+        | null
+        | undefined;
       accountKey: string;
-      /**
-       * At
-       * @default null
-       */
-      at?: null | number | undefined;
-      /**
-       * Checkedat
-       * @default null
-       */
-      checkedAt?: null | number | undefined;
-      /** @default null */
+      /** Format: double */
+      at?: number | null | undefined;
+      /** Format: double */
+      checkedAt?: number | null | undefined;
       data?: components["schemas"]["UsageLimitsData"] | null | undefined;
-      eligibility?: components["schemas"]["UsageEligibility"] | undefined;
-      /**
-       * Error
-       * @default null
-       */
-      error?: null | string | undefined;
-      /**
-       * Processedat
-       * @default null
-       */
-      processedAt?: null | number | undefined;
-      /**
-       * Readat
-       * @default null
-       */
-      readAt?: null | number | undefined;
+      eligibility?:
+        | components["schemas"]["UsageEligibility"]
+        | null
+        | undefined;
+      error?: string | null | undefined;
+      /** Format: double */
+      processedAt?: number | null | undefined;
+      /** Format: double */
+      readAt?: number | null | undefined;
+    };
+    UsageLimitsSyncEntity: {
+      _deleted: boolean;
+      id: string;
+      payload: string;
+      seq: components["schemas"]["StoredJsonInteger"];
     };
     /** @description Accounting evidence, preserving response identity and cumulative counter scope. */
     UsageObservation:
@@ -38738,6 +38826,21 @@ export const ChatOperationalKind = {
   none: "none",
 } as const;
 export type ChatOperationalKind = components["schemas"]["ChatOperationalKind"];
+export const ClaudeRateStatus = {
+  allowed: "allowed",
+  allowed_warning: "allowed_warning",
+  rejected: "rejected",
+} as const;
+export type ClaudeRateStatus = components["schemas"]["ClaudeRateStatus"];
+export const ClaudeRateType = {
+  five_hour: "five_hour",
+  seven_day: "seven_day",
+  seven_day_opus: "seven_day_opus",
+  seven_day_sonnet: "seven_day_sonnet",
+  seven_day_overage_included: "seven_day_overage_included",
+  overage: "overage",
+} as const;
+export type ClaudeRateType = components["schemas"]["ClaudeRateType"];
 export const CommandErrorCode = { receipt_expired: "receipt_expired" } as const;
 export type CommandErrorCode = components["schemas"]["CommandErrorCode"];
 export const ComplaintResponseStatus = {
@@ -38797,6 +38900,12 @@ export const ElicitationAction = {
   cancel: "cancel",
 } as const;
 export type ElicitationAction = components["schemas"]["ElicitationAction"];
+export const EligibilityState = {
+  stale: "stale",
+  allowed: "allowed",
+  blocked: "blocked",
+} as const;
+export type EligibilityState = components["schemas"]["EligibilityState"];
 export const ExecutionAction = {
   review: "review",
   compact: "compact",
@@ -39041,6 +39150,13 @@ export const NonSteerableTurnKind = {
 } as const;
 export type NonSteerableTurnKind =
   components["schemas"]["NonSteerableTurnKind"];
+export const Overage = {
+  allowed: "allowed",
+  in_use: "in_use",
+  rejected: "rejected",
+  unavailable: "unavailable",
+} as const;
+export type Overage = components["schemas"]["Overage"];
 export const ParticipantRole = { lead: "lead", agent: "agent" } as const;
 export type ParticipantRole = components["schemas"]["ParticipantRole"];
 export const PayloadMigrationName = {
@@ -39433,6 +39549,8 @@ export const TransferStatus = {
   cancelled: "cancelled",
 } as const;
 export type TransferStatus = components["schemas"]["TransferStatus"];
+export const UnsupportedRateKind = { unsupported: "unsupported" } as const;
+export type UnsupportedRateKind = components["schemas"]["UnsupportedRateKind"];
 export const UsageEvidence = {
   live: "live",
   recovered: "recovered",

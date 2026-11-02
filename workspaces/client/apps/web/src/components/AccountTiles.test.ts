@@ -1,7 +1,7 @@
 import { AccountStatus as GeneratedApiAccountStatus } from "../generated/api.ts";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { projectedLimits } from "../usage/accountLimits.fixture";
 import type { AccountLimitsSnapshot } from "../usage/accountUsage";
 import type { Account } from "./Accounts";
@@ -36,56 +36,54 @@ test("an account picker tile states the remaining limit next to the name", () =>
 
 test("the remaining limit is known only for a signed-in account with data", () => {
   expect(
-    accountLimitView(
-      account(),
-      reading(),
-      200,
-      true,
-      projectedLimits("work", 100),
-    ).remaining,
+    accountLimitView(account(), reading(), true, projectedLimits("work", 100))
+      .remaining,
   ).toBe(33);
   expect(
-    accountLimitView(
-      account(GeneratedApiAccountStatus.signedOut),
-      reading(),
-      200,
-    ).remaining,
+    accountLimitView(account(GeneratedApiAccountStatus.signedOut), reading())
+      .remaining,
   ).toBe(null);
   const failed = accountLimitView(
     account(),
     reading({ data: null, error: "Offline" }),
-    200,
   );
   expect(failed.remaining).toBeNull();
   expect(failed.error).toBe("Offline");
   // A reading of another account never shows.
   expect(
-    accountLimitView(account(), reading({ accountKey: "other" }), 200)
-      .remaining,
+    accountLimitView(account(), reading({ accountKey: "other" })).remaining,
   ).toBeNull();
-  expect(accountLimitView(account(), null, 200).reading).toBe(true);
+  expect(accountLimitView(account(), null).reading).toBe(true);
   // A picker still marks a signed-out account whose limit is used up.
   expect(
     accountLimitView(
       account(GeneratedApiAccountStatus.signedOut),
       reading(),
-      200,
       false,
       projectedLimits("work", 100),
     ).remaining,
   ).toBe(33);
 });
 
-test("the projection is scoped to its observation and expires at the server deadline", () => {
+test("only a new server projection changes the shown remaining limit", () => {
   const view = projectedLimits("work", 100);
+  vi.useFakeTimers();
+  vi.setSystemTime(249_000);
+  expect(accountLimitView(account(), reading(), true, view).remaining).toBe(33);
+  vi.setSystemTime(250_000);
+  expect(accountLimitView(account(), reading(), true, view).remaining).toBe(33);
+  const updated = {
+    ...view,
+    projection: {
+      ...view.projection,
+      buckets: {
+        ...view.projection.buckets,
+        current: view.projection.buckets.next,
+      },
+    },
+  };
   expect(
-    accountLimitView(account(), reading(), 249, true, view).remaining,
-  ).toBe(33);
-  expect(
-    accountLimitView(account(), reading(), 250, true, view).remaining,
+    accountLimitView(account(), reading(), true, updated).remaining,
   ).toBeNull();
-  expect(
-    accountLimitView(account(), reading({ at: 101 }), 200, true, view)
-      .remaining,
-  ).toBe(33);
+  vi.useRealTimers();
 });

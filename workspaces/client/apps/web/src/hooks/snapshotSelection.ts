@@ -29,6 +29,8 @@ export function retainUsageAccounts(
         old.runway === value.runway &&
         old.reset === value.reset &&
         old.buckets === value.buckets &&
+        old.agents === value.agents &&
+        old.status === value.status &&
         old.loading === value.loading
       );
     })

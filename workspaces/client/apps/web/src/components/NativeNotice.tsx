@@ -1,8 +1,6 @@
 import { AgentStatus as GeneratedApiAgentStatus } from "../generated/api.ts";
-import { useEffect, useState } from "react";
 import { displayError, errorDetails } from "../errorPresentation";
 import { currentCapacityRetry } from "../capacityRetry";
-import { limitRecovery } from "../usage/limitRecovery";
 import CapacityRetry from "./CapacityRetry";
 import LimitRecoveryNotice from "./LimitRecoveryNotice";
 import ConnectionRecovery, {
@@ -10,7 +8,7 @@ import ConnectionRecovery, {
   matchingConnectionCheck,
 } from "./ConnectionRecovery";
 import type { Agent, Message } from "../types";
-import type { AccountLimitsSnapshot } from "../usage/accountUsage";
+import type { components } from "../generated/api";
 import { agentErrorLabel } from "../types";
 import { Button } from "@mantine/core";
 import { CircleAlert } from "lucide-react";
@@ -64,7 +62,7 @@ export function isNonBlockingWarning(item: Message): boolean {
 export function NativeError({
   agent,
   planType,
-  limits,
+  recovery,
   openLimits,
   refreshLimits,
   newChat,
@@ -73,7 +71,7 @@ export function NativeError({
 }: {
   agent: Agent;
   planType?: string | undefined;
-  limits?: AccountLimitsSnapshot | null;
+  recovery?: components["schemas"]["LimitRecovery"] | null | undefined;
   openLimits?: () => void;
   /** Read the account limits of this chat again. */
   refreshLimits?: () => void;
@@ -81,14 +79,6 @@ export function NativeError({
   chooseChat?: (() => void) | undefined;
   refresh?: () => Promise<void>;
 }) {
-  const [now, setNow] = useState(() => Date.now() / 1000);
-  useEffect(() => {
-    if (!limits) return;
-    const timer = setInterval(() => setNow(Date.now() / 1000), 1000);
-    return () => clearInterval(timer);
-  }, [limits]);
-  const modelLimits = limits ?? null;
-  const recovery = limitRecovery(agent, modelLimits, now);
   const usageResume = agent.usageResume;
   const authResume =
     usageResume?.cause === "auth" &&
@@ -228,10 +218,6 @@ export function NativeNotice({
     error &&
     ["usageLimitExceeded", "rateLimitExceeded"].includes(error.kind)
   ) {
-    const reportedReset = error.message.match(/\btry again at\s+([^\r\n]+)/i);
-    const message = reportedReset
-      ? `Try again at ${reportedReset[1]}`
-      : error.hint;
     const raw = details || error.message;
     return (
       <div
@@ -243,7 +229,7 @@ export function NativeNotice({
           <CircleAlert size={16} aria-hidden="true" />
           <strong>{error.title}</strong>
         </div>
-        <p>{message}</p>
+        <p>{error.hint}</p>
         {raw && (
           <details>
             <summary>Details</summary>

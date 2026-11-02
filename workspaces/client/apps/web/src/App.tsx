@@ -1146,27 +1146,30 @@ export default function App({ active = true }: { active?: boolean }) {
   const accountsForLimits = useRef(accounts.data.accounts);
   accountsForLimits.current = accounts.data.accounts;
   const reloadLimitsFor = useCallback(
-    (key: string) => {
-      const pending = limitsRequests.current.get(key);
+    (key: string, force = false) => {
+      const pending = force ? undefined : limitsRequests.current.get(key);
       if (pending) return pending;
       setLimitsLoading((old) => ({ ...old, [key]: true }));
       const request = get("/api/limits", {
-        query: key === "default" ? undefined : { account_key: key },
+        query: {
+          ...(key === "default" ? {} : { account_key: key }),
+          ...(force ? {} : { cached: "1" as const }),
+        },
         timeoutMs: 25000,
       })
         .then(limitsReadSucceeded)
         .catch(() => false)
         .finally(() => {
-          limitsRequests.current.delete(key);
+          if (!force) limitsRequests.current.delete(key);
           setLimitsLoading((old) => ({ ...old, [key]: false }));
         });
-      limitsRequests.current.set(key, request);
+      if (!force) limitsRequests.current.set(key, request);
       return request;
     },
     [get],
   );
   const forceReloadLimits = useCallback(async () => {
-    await reloadLimitsFor(accountKey);
+    await reloadLimitsFor(accountKey, true);
   }, [accountKey, reloadLimitsFor]);
   const reloadLimitsForRef = useRef(reloadLimitsFor);
   reloadLimitsForRef.current = reloadLimitsFor;
@@ -1228,15 +1231,16 @@ export default function App({ active = true }: { active?: boolean }) {
           plan: account?.plan,
           accountId: account?.accountId,
           signedOut: !!account && account.status !== AccountStatus.ready,
-          runway: limits === matching ? snapshot?.projection.runway : undefined,
-          reset: limits === matching ? snapshot?.projection.reset : undefined,
-          buckets:
-            limits === matching ? snapshot?.projection.buckets : undefined,
+          runway: matching ? snapshot?.projection.runway : undefined,
+          reset: matching ? snapshot?.projection.reset : undefined,
+          buckets: matching ? snapshot?.projection.buckets : undefined,
+          agents: matching ? snapshot?.projection.agents : undefined,
+          status: matching ? snapshot?.projection.status : undefined,
           limits,
           loading: !!limitsLoading[key],
           // Reads the latest loader, so an equal account keeps its old closure.
-          reload: async () => {
-            await reloadLimitsForRef.current(key);
+          reload: async (force) => {
+            await reloadLimitsForRef.current(key, force);
           },
         };
       });

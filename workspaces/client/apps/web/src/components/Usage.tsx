@@ -10,9 +10,6 @@ import {
   jsonObject,
   type AccountLimitsSnapshot,
 } from "../usage/accountUsage";
-import { weeklyRunway } from "../usage/weeklyRunway";
-import { accountBuckets } from "../usage/accountBuckets";
-import { resetCreditEnabled } from "../usage/resetCredits";
 import {
   lazy,
   Suspense,
@@ -31,10 +28,8 @@ import {
 } from "lucide-react";
 import type { Agent, Snapshot } from "../types";
 import { errorText, type GetResult } from "../api";
-import { limitRecovery } from "../usage/limitRecovery";
 import LimitRecoveryNotice from "./LimitRecoveryNotice";
 import { useServerSync } from "../servers/ServerServicesContext";
-export { limitRecovery } from "../usage/limitRecovery";
 import "./Usage.css";
 import { remainingLimitColor } from "./accountLimitColor";
 import TokenRate from "./TokenRate";
@@ -61,6 +56,12 @@ export type UsageAccount = Pick<Account, "label"> & {
     | undefined;
   buckets?:
     | import("../generated/api").components["schemas"]["BucketProjection"]
+    | undefined;
+  status?:
+    | import("../generated/api").components["schemas"]["AccountLimitsStatus"]
+    | undefined;
+  agents?:
+    | import("../generated/api").components["schemas"]["AccountLimitsProjection"]["agents"]
     | undefined;
   limits: UsageLimitSnapshot | null;
   loading: boolean;
@@ -95,14 +96,6 @@ const dollars = (value: unknown) =>
         maximumFractionDigits: 2,
       }).format(value)
     : "Unavailable";
-function resetIn(reset: number, now: number) {
-  const minutes = Math.max(0, Math.ceil((reset - now) / 60));
-  if (!minutes) return "Awaiting update";
-  if (minutes < 60) return `in ${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `in ${hours}h ${minutes % 60}m`;
-  return `in ${Math.floor(hours / 24)}d ${hours % 24}h`;
-}
 export default function Usage({
   agent,
   stateDir,
@@ -163,7 +156,6 @@ export default function Usage({
   const loadingLimits =
     !limits?.data &&
     (activeAccount?.loading ?? limitsLoading ?? !reportedLimits);
-  const accountAgent = { ...agent, accountKey: selectedAccountKey };
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -171,7 +163,7 @@ export default function Usage({
     if (refreshing) return;
     setRefreshing(true);
     try {
-      await (activeAccount?.reload(true) ?? reload());
+      await (activeAccount ? activeAccount.reload(true) : reload());
     } finally {
       setRefreshing(false);
     }
@@ -238,7 +230,7 @@ export default function Usage({
           );
           break;
       }
-      void (activeAccount?.reload(true) ?? reload());
+      void (activeAccount ? activeAccount.reload(true) : reload());
     } catch (error) {
       setResetError(errorText(error));
     } finally {
@@ -363,11 +355,6 @@ export default function Usage({
       stop();
     };
   }, [stateDir, accountKey, subscribeStateProjection, sendCostInterest]);
-  const [now, setNow] = useState(() => Date.now() / 1000);
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now() / 1000), 30000);
-    return () => window.clearInterval(timer);
-  }, []);
   const contextUsage = jsonObject(agent.contextUsage);
   const contextTokens = contextUsage?.tokens;
   const contextWindow = contextUsage?.window;
@@ -376,19 +363,6 @@ export default function Usage({
   const percent = known
     ? Math.round((contextTokens / contextWindow) * 100)
     : null;
-  // The current chat's model decision stays with its mounted account panel,
-  // including while another account is selected. Never request that decision
-  // using the selected account's unrelated limit snapshot.
-  const currentAccount = usageAccounts.find((item) => item.key === fallbackKey);
-  const currentLimits = accountLimits(
-    currentAccount?.limits,
-    fallbackKey,
-    currentAccount?.accountId,
-  );
-  const modelLimits = currentLimits;
-  const selectedLimits =
-    selectedAccountKey === fallbackKey ? modelLimits : limits;
-  const selectedRecovery = limitRecovery(accountAgent, selectedLimits, now);
   useEffect(() => {
     autoReloadedAccounts.current.clear();
   }, [agent.id]);
@@ -399,9 +373,7 @@ export default function Usage({
     autoReloadedAccounts.current.add(selectedAccountKey);
     void activeAccountReload.current?.(false);
   }, [limitsOpened, selectedAccountKey, fallbackKey]);
-  const lowAccount = usageAccounts.find(
-    (item) => accountBuckets(item.buckets, now)?.low,
-  );
+  const lowAccount = usageAccounts.find((item) => item.buckets?.current.low);
   return (
     <div
       className="usage-footer"
@@ -517,9 +489,7 @@ export default function Usage({
           aria-label="Account weekly allowance"
         >
           {usageAccounts.map((item) => {
-            const projection = item.signedOut
-              ? null
-              : weeklyRunway(item.runway, now);
+            const projection = item.signedOut ? null : item.runway?.current;
             const current = item.key === fallbackKey;
             const provider = providerLabel(accountProvider(item));
             const label = humanAccountLabel(item);
@@ -535,7 +505,7 @@ export default function Usage({
                 : []),
               ...(projection?.windows ?? []).map(
                 (window) =>
-                  `${window.name} weekly: ${window.remaining === null ? "remaining allowance unavailable" : `${formatPercent(window.remaining)} left`}. ${window.reset === null ? "Reset time unavailable." : window.reset <= now ? "Cached reset passed." : `Resets ${localDateTime(new Date(window.reset * 1000), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}.`}${window.days !== null && Number.isFinite(window.days) ? ` About ${window.days.toFixed(1)} days left at the current rate.` : ""}${window.resetFirst ? " Resets before this allowance runs out." : ""}`,
+                  `${window.name} weekly: ${window.remaining === null ? "remaining allowance unavailable" : `${formatPercent(window.remaining)} left`}. ${window.reset === null ? "Reset time unavailable." : `Resets ${localDateTime(new Date(window.reset * 1000), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}.`}${window.days !== null && Number.isFinite(window.days) ? ` About ${window.days.toFixed(1)} days left at the current rate.` : ""}${window.resetFirst ? " Resets before this allowance runs out." : ""}`,
               ),
               !projection || (projection.days === null && !projection.unlimited)
                 ? "Projected days unavailable."
@@ -636,7 +606,9 @@ export default function Usage({
                   variant="subtle"
                   loading={!limits?.data && (refreshing || loadingLimits)}
                   onClick={() =>
-                    void (activeAccount?.reload(true) ?? refreshLimits())
+                    void (activeAccount
+                      ? activeAccount.reload(true)
+                      : refreshLimits())
                   }
                   leftSection={<RefreshCw size={13} />}
                 >
@@ -683,10 +655,7 @@ export default function Usage({
                         <Tabs.List aria-label="Accounts with limits">
                           {usageAccounts.map((item, index) => {
                             if (accountProvider(item) !== provider) return null;
-                            const bucketState = accountBuckets(
-                              item.buckets,
-                              now,
-                            );
+                            const bucketState = item.buckets?.current;
                             const remaining = bucketState?.remaining ?? null;
                             return (
                               <Tabs.Tab
@@ -751,17 +720,8 @@ export default function Usage({
                     activeAccount.accountId,
                   );
                   const loadingLimits = !limits?.data && activeAccount.loading;
-                  const buckets =
-                    accountBuckets(activeAccount.buckets, now)?.buckets ?? [];
-                  const recovery = isSelected
-                    ? selectedRecovery
-                    : limitRecovery(
-                        { ...agent, accountKey: activeAccount.key },
-                        activeAccount.key === fallbackKey
-                          ? modelLimits
-                          : limits,
-                        now,
-                      );
+                  const buckets = activeAccount.buckets?.current.buckets ?? [];
+                  const recovery = activeAccount.agents?.[agent.id]?.recovery;
                   const resetCredits = activeAccount.reset;
                   const availableResets = resetCredits?.credits ?? [];
                   return (
@@ -787,14 +747,15 @@ export default function Usage({
                             <small>{activeAccount?.key || fallbackKey}</small>
                           )}
                       </div>
+                      {activeAccount.status?.kind === "checking" && (
+                        <p role="status">Checking account limits…</p>
+                      )}
                       {recovery && (
                         <LimitRecoveryNotice
                           key={JSON.stringify(recovery)}
                           recovery={recovery}
                           tabIndex={isSelected ? undefined : -1}
-                          onRefresh={() =>
-                            activeAccount.reload(true) ?? refreshLimits()
-                          }
+                          onRefresh={() => activeAccount.reload(true)}
                         />
                       )}
                       <div
@@ -864,7 +825,7 @@ export default function Usage({
                                         <span>
                                           {window.expired
                                             ? "Reset passed"
-                                            : `Resets ${resetIn(window.reset, now)}`}
+                                            : "Resets"}
                                         </span>
                                         <time
                                           dateTime={new Date(
@@ -977,8 +938,7 @@ export default function Usage({
                                   <span>
                                     {credit.expiresAt !== null ? (
                                       <>
-                                        Expires {resetIn(credit.expiresAt, now)}{" "}
-                                        ·{" "}
+                                        Expires{" "}
                                         <time
                                           dateTime={new Date(
                                             credit.expiresAt * 1000,
@@ -1012,7 +972,7 @@ export default function Usage({
                                         activeAccount.key,
                                       ),
                                     ) ||
-                                    !resetCreditEnabled(credit, now)
+                                    !credit.enabled
                                   }
                                   onClick={() => {
                                     setConfirmReset(credit.id);
@@ -1056,10 +1016,7 @@ export default function Usage({
                                       tabIndex={isSelected ? undefined : -1}
                                       size="compact-xs"
                                       loading={resetPending}
-                                      disabled={
-                                        resetPending ||
-                                        !resetCreditEnabled(credit, now)
-                                      }
+                                      disabled={resetPending || !credit.enabled}
                                       onClick={() => void applyReset(credit.id)}
                                     >
                                       Use one reset credit
@@ -1121,9 +1078,12 @@ export default function Usage({
                       : costs?.stale
                         ? "Stale estimate"
                         : "Saved estimate"}
-                  {number(costs?.at) &&
-                    ` · Updated ${Math.max(0, Math.round(now - costs!.at!))} seconds ago`}
                 </p>
+                {number(costs?.at) && (
+                  <p className="account-cost-caption">
+                    {`Updated ${Math.max(0, Math.round(Date.now() / 1000 - costs.at))} seconds ago`}
+                  </p>
+                )}
                 {(costs?.data?.coverage === "partial" ||
                   costs?.stale ||
                   costs?.error) && (

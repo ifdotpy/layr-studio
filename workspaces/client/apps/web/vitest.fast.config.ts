@@ -69,6 +69,7 @@ export default {
       "src/components/ConversationWarnings.test.ts",
       "src/components/Conversation.connection.test.ts",
       "src/components/Conversation.limits.test.ts",
+      "src/components/Conversation.paging.test.ts",
       // web unit safety witnesses
       "src/uuid.test.ts",
       "src/sha256.test.ts",

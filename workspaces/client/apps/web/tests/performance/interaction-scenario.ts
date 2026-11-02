@@ -291,7 +291,6 @@ import type { Host } from "../../src/native/host.ts";
     await measure(
       "older-page",
       async () => {
-        button("Earlier messages")!.click();
         await delay(50);
         scroller.dispatchEvent(
           new WheelEvent("wheel", { deltaY: -10000, bubbles: true }),

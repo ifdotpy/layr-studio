@@ -2136,16 +2136,11 @@ pub(super) async fn journal_batch(
                 Some(
                     store
                         .read_async("runtime-services/account_worker_journal_snapshot", move |tx| {
-                            let limits = studio_runtime_store::account_state::limits_snapshots(tx)?
-                                .snapshots
-                                .into_iter()
-                                .find(|(key, _)| key == &account_for_read)
-                                .map(|(_, limits)| limits)
-                                .unwrap_or_else(|| {
-                                    json!({"accountKey":account_for_read,"at":null,"error":null,"data":null,"stale":true})
-                                });
-                            crate::usage_resume::LimitsObservation::from_record(limits, None)
-                                .map_err(|error| WorkerError::PreparationRefused(error.to_string()))
+                            let response = studio_runtime_store::account_state::limits_snapshots(tx)?
+                                .snapshots.into_iter().find(|(key, _)| key == &account_for_read)
+                                .map(|(_, response)| response)
+                                .unwrap_or_else(|| studio_runtime_schema::usage_limits::UsageLimitsResponse { account_key: account_for_read, ..Default::default() });
+                            Ok::<_, WorkerError>(crate::usage_resume::LimitsObservation::from_response(response))
                         })
                         .await?,
                 )
@@ -2544,6 +2539,12 @@ fn journal_one(
                 )
                 .map_err(|_| invalid(&operation))?;
                 effect = Some(Effect::LimitsUpdated(update));
+            }
+        } else if let Some(("account/updated", _)) = notice {
+            if publication.native_source.as_ref().is_some_and(|source| {
+                source.account == account && source.generation == Some(entry.generation.0)
+            }) {
+                effect = Some(Effect::AccountUpdated);
             }
         } else if let Some((method, params)) = notice
             && record_manual_release_closure(
@@ -3934,9 +3935,14 @@ async fn publish_pending(
                     .pointer("/turn/id")
                     .and_then(Value::as_str)
             {
-                crate::layr_native::save_turn(store, agent, turn)
-                    .await
-                    .map_err(|error| WorkerError::PreparationPending(error.to_string().into()))?;
+                // A save error belongs to this chat. Its save stays `pending` in
+                // `layrTurnSaves`, and the next turn preparation of this chat retries
+                // the save and reports the error. Other chats on the account go on.
+                if let Err(error) = crate::layr_native::save_turn(store, agent, turn).await {
+                    crate::diagnostics::log_stderr(format_args!(
+                        "native Layr turn save of agent {agent} stays pending: {error}"
+                    ));
+                }
             }
             sink.publish(&effect).await?;
         }

@@ -389,6 +389,8 @@ async fn persisted_account_limits_retime_waits_and_report_scheduler_wake() {
         "data":{"rateLimits":{"primary":{"usedPercent":100.0,"resetsAt":1300.0}}},
         "error":null
     });
+    let value: studio_runtime_schema::usage_limits::UsageLimitsResponse =
+        serde::Deserialize::deserialize(value).unwrap();
     let changed = store
         .transaction_with(move |tx| {
             continuation_runtime::stage_limits_changed_for_account(tx, "default", &value, 1000.0)

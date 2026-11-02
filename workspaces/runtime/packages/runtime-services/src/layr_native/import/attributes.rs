@@ -1,6 +1,23 @@
 //! Preserve attributes through descriptors, without following copied links.
 use super::*;
-use rustix::fs::{Mode, OFlags, XattrFlags, fgetxattr, flistxattr, fsetxattr, openat};
+use rustix::fs::{Mode, OFlags, XattrFlags, fchmod, fgetxattr, flistxattr, fsetxattr, openat};
+
+/// Write one attribute. A read-only entry gets owner write access only during this write.
+fn set_attribute(file: &File, name: &std::ffi::OsStr, value: &[u8]) -> std::io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    match fsetxattr(file, name, value, XattrFlags::empty()) {
+        Err(error)
+            if std::io::Error::from(error).kind() == std::io::ErrorKind::PermissionDenied =>
+        {
+            let mode = (file.metadata()?.mode() & 0o7777) as rustix::fs::RawMode;
+            fchmod(file, Mode::from_raw_mode(mode | 0o200))?;
+            let written = fsetxattr(file, name, value, XattrFlags::empty());
+            fchmod(file, Mode::from_raw_mode(mode))?;
+            written.map_err(std::io::Error::from)
+        }
+        result => result.map_err(std::io::Error::from),
+    }
+}
 
 fn copy_descriptors(source: &File, destination: &File) -> std::io::Result<bool> {
     let count = match flistxattr(source, &mut [] as &mut [u8]) {
@@ -27,12 +44,31 @@ fn copy_descriptors(source: &File, destination: &File) -> std::io::Result<bool> 
         {
             continue;
         }
-        fsetxattr(destination, name, &value[..count], XattrFlags::empty())?;
+        set_attribute(destination, name, &value[..count])?;
     }
     Ok(count != 0)
 }
 
+/// Copy the attributes of one entry, naming its path in any error.
 pub(super) fn copy(
+    source: &Path,
+    relative: &Path,
+    destination: &Directory,
+    target: &Path,
+    symlink: bool,
+) -> std::io::Result<bool> {
+    copy_attributes(source, relative, destination, target, symlink).map_err(|error| {
+        std::io::Error::new(
+            error.kind(),
+            format!(
+                "Cannot copy attributes of {}: {error}",
+                source.join(relative).display()
+            ),
+        )
+    })
+}
+
+fn copy_attributes(
     source: &Path,
     relative: &Path,
     destination: &Directory,
