@@ -265,6 +265,7 @@ export const RequestReferenceKindValues = [
   "project",
   "room",
   "work",
+  "outbox",
 ] as const;
 export type RequestReferenceKind = (typeof RequestReferenceKindValues)[number];
 export const OutboxKindValues = [
@@ -294,6 +295,7 @@ export const OutboxStatusValues = [
   "submitted",
   "unknown",
   "committed",
+  "cancelled",
   "unrecognized",
 ] as const;
 export type OutboxStatus = (typeof OutboxStatusValues)[number];

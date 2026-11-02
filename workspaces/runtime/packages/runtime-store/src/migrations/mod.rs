@@ -66,11 +66,13 @@ mod m2026_11_01_chat_busy_deleted_index;
 mod m2026_11_01_chat_busy_indexes;
 mod m2026_11_01_legacy_question_history;
 mod m2026_11_01_normalize_limits;
+mod m2026_11_01_outbox_cancelled;
 mod m2026_11_01_plan_record;
 mod m2026_11_01_project_context;
 mod m2026_11_01_project_revisions;
 mod m2026_11_01_radio_controls;
 mod m2026_11_01_rate_limit_view;
+mod m2026_11_01_request_reference_outbox;
 mod m2026_11_01_room_leads;
 mod m2026_11_01_status_turn_indexes;
 mod m2026_11_01_transfer_delegation_depth;
@@ -1273,6 +1275,26 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_01_work_detail_policy::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-outbox-cancelled",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Stores whose outbox status CHECK lacks cancelled",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_outbox_cancelled::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-01-request-reference-outbox",
+            introduced: NOVEMBER_1,
+            target: MigrationTarget::Canvas,
+            supported_source: "Stores whose request result reference kind CHECK lacks outbox",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_01_request_reference_outbox::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {

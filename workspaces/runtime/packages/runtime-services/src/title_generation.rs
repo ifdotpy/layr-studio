@@ -37,6 +37,17 @@ pub(crate) fn hold_job(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<(), T
     job.status = TitleStatus::Unknown;
     write_job(tx, &job, false)
 }
+/// Give an unknown title job its user-settled status. The caller sets the outbox status.
+pub(crate) fn resolve_job(
+    tx: &rusqlite::Transaction<'_>,
+    id: &str,
+    status: TitleStatus,
+) -> Result<(), TitleError> {
+    let row = Outbox::get::<TitleJob>(tx, id)?.ok_or(TitleError::Conflict)?;
+    let mut job = row.payload;
+    job.status = status;
+    write_job(tx, &job, false)
+}
 const MAX_ITEM_BYTES: usize = 1_048_576;
 /// Python's one-shot title generation deadline (`codex_rename.py:109-110`).
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);

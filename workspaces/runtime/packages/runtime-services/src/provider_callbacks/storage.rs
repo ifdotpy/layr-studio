@@ -147,6 +147,17 @@ pub(crate) fn hold_response(tx: &Transaction<'_>, id: &str) -> Result<(), Callba
     Ok(())
 }
 
+/// Settle the delivery of an unknown callback response with `outcome`.
+pub(crate) fn resolve_response(
+    tx: &Transaction<'_>,
+    id: &str,
+    outcome: DeliveryOutcome,
+) -> Result<(), CallbackError> {
+    let row: Response = Outbox::get(tx, id)?.ok_or(CallbackError::Unknown)?;
+    delivery_in(tx, &row.payload.identity, outcome)?;
+    Ok(())
+}
+
 pub(super) fn snapshot(
     tx: &Transaction<'_>,
     context: &CallbackContext,
@@ -375,9 +386,10 @@ pub(super) fn saved_reply_signed(
         OutboxStatus::Committed => Err(CallbackError::Stored(
             "completed callback still has a response obligation".into(),
         )),
-        OutboxStatus::Submitted | OutboxStatus::Unknown | OutboxStatus::Unrecognized => {
-            Err(CallbackError::Unknown)
-        }
+        OutboxStatus::Submitted
+        | OutboxStatus::Unknown
+        | OutboxStatus::Cancelled
+        | OutboxStatus::Unrecognized => Err(CallbackError::Unknown),
     }
 }
 
@@ -396,7 +408,10 @@ pub async fn submission_ready(store: &RuntimeStore, reply: &Reply) -> Result<boo
             match saved.status {
                 OutboxStatus::Committed => return Ok(false),
                 OutboxStatus::Pending => {}
-                OutboxStatus::Submitted | OutboxStatus::Unknown | OutboxStatus::Unrecognized => {
+                OutboxStatus::Submitted
+                | OutboxStatus::Unknown
+                | OutboxStatus::Cancelled
+                | OutboxStatus::Unrecognized => {
                     return Err(CallbackError::Unknown);
                 }
             }

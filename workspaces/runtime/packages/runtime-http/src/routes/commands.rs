@@ -39,6 +39,9 @@ pub(crate) fn command_error(error: CommandError) -> ApiError {
         CommandError::Invalid(message) => ApiError::new(StatusCode::BAD_REQUEST, message),
         CommandError::Conflict(message) => ApiError::new(StatusCode::CONFLICT, message),
         CommandError::NotFound => ApiError::new(StatusCode::NOT_FOUND, error.to_string()),
+        CommandError::Missing(message) => ApiError::new(StatusCode::NOT_FOUND, message),
+        CommandError::Entity(message) => ApiError::new(StatusCode::CONFLICT, message),
+        CommandError::Outbox(error) => studio_runtime_store::StoreError::from(error).into(),
         CommandError::RequestResult(error) => error.into(),
         CommandError::Store(error) => error.into(),
         CommandError::Lifecycle(error) => super::agent_management::management_error(error),
@@ -64,7 +67,7 @@ async fn command(
     let chat = request.command.target().to_owned();
     let mut extra_rows = Vec::new();
     let reference = match request.command.clone() {
-        Command::Withdraw { .. } | Command::Stop { .. } => {
+        Command::Withdraw { .. } | Command::Stop { .. } | Command::Resolve { .. } => {
             let ports = ports.map(|Extension(ports)| ports);
             let (for_transaction, request) = (ports.clone(), request.clone());
             let now = now_ms as f64 / 1000.0;
@@ -819,6 +822,148 @@ mod tests {
             })
             .await
             .expect("count")
+    }
+
+    /// Seed an outbox entry of `kind` for the agent `workspace` with `status`.
+    async fn seed_entry(store: &RuntimeStore, kind: &'static str, status: &'static str) {
+        store
+            .transaction(move |tx| {
+                tx.execute(
+                    "INSERT INTO runtime_outbox(id,kind,owner_kind,owner_id,request_id,signature,status,account,stream_id,generation,ordinal,next_at,payload,created,target) VALUES('entry',?1,'agent','workspace',NULL,'sig',?2,NULL,NULL,NULL,NULL,NULL,'{}',1,NULL)",
+                    [kind, status],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("seed outbox entry");
+    }
+
+    async fn entry_row(store: &RuntimeStore) -> (String, Option<i64>, String) {
+        store
+            .transaction(|tx| {
+                Ok(tx.query_row(
+                    "SELECT status,next_at,payload FROM runtime_outbox WHERE id='entry'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )?)
+            })
+            .await
+            .expect("entry row")
+    }
+
+    fn resolve(id: &str, number: u64, action: &str) -> Value {
+        json!({"id":id,"client":"web-1","number":number,"kind":"resolve","target":"entry","body":{"action":action}})
+    }
+
+    #[tokio::test]
+    async fn resolve_retry_queues_the_same_entry_with_its_body() {
+        let (app, store, _directory) = app_with_queue().await;
+        seed_entry(&store, "provider_call", "unknown").await;
+        let (status, body) = post(
+            &app,
+            None,
+            resolve(&RequestIdentity::issue_root(), 1, "retry"),
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(body["ref_kind"], "outbox");
+        assert_eq!(body["ref_id"], "entry");
+        let (status, next_at, payload) = entry_row(&store).await;
+        assert_eq!(status, "pending");
+        assert!(next_at.is_some(), "a retry is due");
+        assert_eq!(payload, "{}", "the body is unchanged");
+    }
+
+    #[tokio::test]
+    async fn resolve_delivered_commits_the_entry() {
+        let (app, store, _directory) = app_with_queue().await;
+        seed_entry(&store, "provider_call", "unknown").await;
+        let (status, body) = post(
+            &app,
+            None,
+            resolve(&RequestIdentity::issue_root(), 1, "delivered"),
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        let (status, next_at, _) = entry_row(&store).await;
+        assert_eq!(status, "committed");
+        assert_eq!(next_at, None);
+    }
+
+    #[tokio::test]
+    async fn resolve_discard_cancels_the_entry_and_keeps_its_payload() {
+        let (app, store, _directory) = app_with_queue().await;
+        seed_entry(&store, "provider_call", "unknown").await;
+        let (status, body) = post(
+            &app,
+            None,
+            resolve(&RequestIdentity::issue_root(), 1, "discard"),
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        let (status, next_at, payload) = entry_row(&store).await;
+        assert_eq!(status, "cancelled");
+        assert_eq!(next_at, None);
+        assert_eq!(payload, "{}", "the row keeps its payload");
+    }
+
+    #[tokio::test]
+    async fn resolve_refuses_an_entry_that_is_not_unknown() {
+        let (app, store, _directory) = app_with_queue().await;
+        seed_entry(&store, "provider_call", "pending").await;
+        let (status, _) = post(
+            &app,
+            None,
+            resolve(&RequestIdentity::issue_root(), 1, "delivered"),
+        )
+        .await;
+        assert_eq!(status, 409);
+        assert_eq!(entry_row(&store).await.0, "pending");
+    }
+
+    #[tokio::test]
+    async fn resolve_refuses_a_steer_retry_and_leaves_it_unknown() {
+        let (app, store, _directory) = app_with_queue().await;
+        seed_entry(&store, "steer", "unknown").await;
+        let (status, _) = post(
+            &app,
+            None,
+            resolve(&RequestIdentity::issue_root(), 1, "retry"),
+        )
+        .await;
+        assert_eq!(status, 400);
+        assert_eq!(entry_row(&store).await.0, "unknown");
+    }
+
+    #[tokio::test]
+    async fn resolve_replay_returns_the_first_reference_and_changes_nothing_again() {
+        let (app, store, _directory) = app_with_queue().await;
+        seed_entry(&store, "provider_call", "unknown").await;
+        let id = RequestIdentity::issue_root();
+        let (status, first) = post(&app, None, resolve(&id, 1, "delivered")).await;
+        assert_eq!(status, 200, "{first}");
+        let (status, again) = post(&app, None, resolve(&id, 1, "delivered")).await;
+        assert_eq!(status, 200, "{again}");
+        assert_eq!(first["ref_id"], again["ref_id"]);
+        assert_eq!(entry_row(&store).await.0, "committed");
+    }
+
+    #[tokio::test]
+    async fn an_observe_device_cannot_resolve() {
+        let (app, store, _directory) = app_with_queue().await;
+        seed_entry(&store, "provider_call", "unknown").await;
+        let observe = Principal::Device {
+            id: "phone".into(),
+            grant: Grant::Observe,
+        };
+        let (status, _) = post(
+            &app,
+            Some(observe),
+            resolve(&RequestIdentity::issue_root(), 1, "delivered"),
+        )
+        .await;
+        assert_eq!(status, 403);
+        assert_eq!(entry_row(&store).await.0, "unknown");
     }
 
     /// Records the lifecycle effects that a command stages in its transaction.

@@ -527,6 +527,38 @@ impl SchedulerRepository {
         receipt.stage = SteerState::Held;
         store(tx, id, &receipt)
     }
+    /// Settle a steer whose outcome is unknown: its held events take `status`. Returns the
+    /// text of the user messages among them, in receipt order.
+    pub fn settle_unknown_steer(
+        tx: &Transaction<'_>,
+        id: &str,
+        status: studio_runtime_schema::persistence::EventStatus,
+    ) -> StoreResult<Vec<String>> {
+        let receipt = load(tx, id)?.ok_or_else(|| invalid_receipt(id))?;
+        if !matches!(receipt.stage, SteerState::Unconfirmed(_) | SteerState::Held) {
+            return Err(invalid_receipt(id));
+        }
+        let mut texts = Vec::new();
+        for event in &receipt.events {
+            let found: Option<(String, String)> = tx
+                .query_row(
+                    "SELECT kind,text FROM runtime_events WHERE id=?1 AND status='uncertain'",
+                    [event],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            if let Some((kind, text)) = found
+                && kind == "user"
+            {
+                texts.push(text);
+            }
+        }
+        tx.execute(
+            "UPDATE runtime_events SET status=?2 WHERE status='uncertain' AND id IN (SELECT value FROM json_each(?1))",
+            params![serde_json::to_string(&receipt.events)?, status.as_str()],
+        )?;
+        Ok(texts)
+    }
     /// Read-only check whether `claim_steer` could reserve input now, so a busy
     /// turn's wake does not open a write transaction while its queue is blocked.
     pub fn steer_claimable(

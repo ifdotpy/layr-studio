@@ -33,6 +33,24 @@ pub(crate) fn hold_effect(tx: &Transaction<'_>, id: &str) -> Result<(), VoicePro
     Ok(())
 }
 
+/// Set the outcome of an unknown voice effect. The caller sets its status.
+pub(crate) fn settle_effect(
+    tx: &Transaction<'_>,
+    id: &str,
+    outcome: VoiceStopOutcome,
+) -> Result<(), VoiceProviderError> {
+    let mut row = Outbox::get::<VoiceEffect>(tx, id)?.ok_or(VoiceProviderError::ContextChanged)?;
+    let VoiceEffectAuthority::Admitted {
+        outcome: current, ..
+    } = &mut row.payload.authority
+    else {
+        return Err(VoiceProviderError::ContextChanged);
+    };
+    *current = outcome;
+    Outbox::put(tx, &row)?;
+    Ok(())
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VoiceDeleteSession {
     pub session_id: String,

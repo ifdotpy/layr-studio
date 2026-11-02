@@ -147,7 +147,7 @@ domain!(SafetyRetryCertainty { Written=>"written", NotSent=>"not_sent", Unknown=
 domain!(WorkStatus { Ready=>"ready", Blocked=>"blocked", Running=>"running", Review=>"review", Accepted=>"accepted", Cancelled=>"cancelled" });
 domain!(OwnerKind { Agent=>"agent", Task=>"task", Account=>"account", Vm=>"vm", Project=>"project", Monitor=>"monitor", Terminal=>"terminal", Message=>"message", Request=>"request", Server=>"server" });
 domain!(RequestResultStatus { Applied=>"applied", Rejected=>"rejected" });
-domain!(RequestReferenceKind { Agent=>"agent", Annotation=>"annotation", Complaint=>"complaint", Message=>"message", Project=>"project", Room=>"room", Work=>"work" });
+domain!(RequestReferenceKind { Agent=>"agent", Annotation=>"annotation", Complaint=>"complaint", Message=>"message", Project=>"project", Room=>"room", Work=>"work", Outbox=>"outbox" });
 domain!(OutboxKind { ProviderCall=>"provider_call", ProviderCallback=>"provider_callback", JournalEntry=>"journal_entry", Publication=>"publication", StreamFlush=>"stream_flush", FollowupEffect=>"followup_effect", Steer=>"steer", VoiceStop=>"voice_stop", VoiceDelete=>"voice_delete", WorkArchive=>"work_archive", WorkVm=>"work_vm", TitleGeneration=>"title_generation", NativeAction=>"native_action", TerminalAction=>"terminal_action", MonitorInput=>"monitor_input", McpReconnect=>"mcp_reconnect", ProjectRegistration=>"project_registration", RemoteDelivery=>"remote_delivery", ManagedTool=>"managed_tool" });
 /// Restart rule of an outbox kind after an unclean stop (target architecture, "Command execution").
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -188,7 +188,7 @@ impl OutboxKind {
         }
     }
 }
-domain!(OutboxStatus { Pending=>"pending", Submitted=>"submitted", Unknown=>"unknown", Committed=>"committed", Unrecognized=>"unrecognized" });
+domain!(OutboxStatus { Pending=>"pending", Submitted=>"submitted", Unknown=>"unknown", Committed=>"committed", Cancelled=>"cancelled", Unrecognized=>"unrecognized" });
 domain!(HoldStatus { Clear=>"clear", Invalid=>"invalid", Unrecognized=>"unrecognized" });
 domain!(ToolRequestKind { ManagedTool=>"managed_tool", ProviderCallback=>"provider_callback", Unrecognized=>"unrecognized" });
 domain!(ToolRequestStatus { Queued=>"queued", Running=>"running", Cancelled=>"cancelled", Interrupted=>"interrupted", Failed=>"failed", Unknown=>"unknown", Completed=>"completed" });

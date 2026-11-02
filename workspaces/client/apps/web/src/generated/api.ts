@@ -8113,7 +8113,8 @@ export interface components {
         | "message"
         | "project"
         | "room"
-        | "work";
+        | "work"
+        | "outbox";
       rev: number;
       rows: components["schemas"]["SyncEntity"][];
       /** @enum {string} */
@@ -11003,7 +11004,21 @@ export interface components {
     CommandRequest:
       | components["schemas"]["CommandRequestSend"]
       | components["schemas"]["CommandRequestWithdraw"]
-      | components["schemas"]["CommandRequestStop"];
+      | components["schemas"]["CommandRequestStop"]
+      | components["schemas"]["CommandRequestResolve"];
+    CommandRequestResolve: {
+      body: components["schemas"]["CommandResolveBody"];
+      client: string;
+      id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "resolve";
+      number: number;
+      /** @description Outbox entry id */
+      target: string;
+    };
     CommandRequestSend: {
       body: components["schemas"]["CommandSendBody"];
       client: string;
@@ -11039,6 +11054,10 @@ export interface components {
       kind: "withdraw";
       number: number;
       target: string;
+    };
+    CommandResolveBody: {
+      /** @enum {string} */
+      action: "retry" | "delivered" | "discard";
     };
     CommandResponse: {
       ref_id: string;
