@@ -209,8 +209,11 @@ test("usage accounts ui", async ({ browser: _browser }) => {
       "true",
       "ArrowRight selects the next account tile",
     );
-    await page.waitForFunction(() =>
-      window.reloadCalls.some(([key, force]) => key === "team" && !force),
+    assert.equal(
+      await page.evaluate(() =>
+        window.reloadCalls.some(([key, force]) => key === "team" && !force),
+      ),
+      false,
     );
     const selectedTeamLimit = accountPanel.getByText("8% left", {
       exact: false,

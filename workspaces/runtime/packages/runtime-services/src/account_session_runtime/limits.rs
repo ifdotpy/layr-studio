@@ -144,7 +144,15 @@ fn commit(
             before,
             value,
         } => {
-            if old.as_ref().is_some_and(|old| *old != before) {
+            // An identity change replaces the published observation with pending;
+            // the cached pre-read value may still belong to the previous identity.
+            let pending = committed_view.as_ref().is_some_and(|view| {
+                matches!(
+                    view.projection.status,
+                    studio_runtime_schema::usage_limits::AccountLimitsStatus::Pending
+                )
+            });
+            if !pending && old.as_ref().is_some_and(|old| *old != before) {
                 old.clone().unwrap_or_else(|| value.response.clone())
             } else {
                 stamp.cursor = if stamp.scope.as_ref() == Some(&scope) {
@@ -169,7 +177,8 @@ fn commit(
                     studio_runtime_schema::usage_limits::AccountLimitsStatus::Checking {
                         reset_at,
                     } => Some(reset_at),
-                    studio_runtime_schema::usage_limits::AccountLimitsStatus::Current => None,
+                    studio_runtime_schema::usage_limits::AccountLimitsStatus::Current
+                    | studio_runtime_schema::usage_limits::AccountLimitsStatus::Pending => None,
                 });
             if stamp.scope.as_ref() == Some(&scope) && stamp.cursor >= cursor {
                 return Ok((old, false));
@@ -237,8 +246,24 @@ fn commit(
         crate::continuation_runtime::stage_limits_changed_for_account(tx, account, &value, now)
             .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
     }
+    let current_identity: Option<String> = tx.query_row("SELECT json_extract(j.value,'$.accountId') FROM sync_entities e, json_each(CASE WHEN json_valid(e.payload) THEN e.payload ELSE '{}' END,'$.value.accounts') j WHERE e.collection='accounts' AND e.id='current' AND e.deleted=0 AND json_extract(j.value,'$.id')=?1", [account], |row| row.get(0)).optional()?.flatten();
+    let observation_identity = value
+        .data
+        .as_ref()
+        .and_then(|data| data.0.account_id.as_deref());
+    let published = if studio_runtime_schema::usage_limits::account_identity_mismatch(
+        current_identity.as_deref(),
+        observation_identity,
+    ) {
+        UsageLimitsResponse {
+            account_key: account.to_owned(),
+            ..Default::default()
+        }
+    } else {
+        value.clone()
+    };
     let mut view =
-        studio_runtime_schema::usage_limits::RateLimitView::from_observation(value.clone(), now);
+        studio_runtime_schema::usage_limits::RateLimitView::from_observation(published, now);
     populate_agents(tx, &mut view, now)?;
     if let Some(reset_at) = checking {
         mark_checking(&mut view, reset_at);
@@ -400,7 +425,13 @@ pub(crate) fn seed_agents(tx: &studio_runtime_store::Transaction<'_>) -> Result<
                 [&account],
             )?;
         }
-        value.projection.status = studio_runtime_schema::usage_limits::AccountLimitsStatus::Current;
+        if matches!(
+            value.projection.status,
+            studio_runtime_schema::usage_limits::AccountLimitsStatus::Checking { .. }
+        ) {
+            value.projection.status =
+                studio_runtime_schema::usage_limits::AccountLimitsStatus::Current;
+        }
         populate_agents(tx, &mut value, now)?;
         SyncDocumentsRepository::put_entity(tx, "rateLimit", &account, value, false)?;
     }
