@@ -2647,7 +2647,7 @@ mod tests {
         connection
             .execute_batch(
                 "INSERT INTO chats(id,state,status) VALUES('agent','active','running');
-                 INSERT INTO turns(id,chat,state,provider_turn) VALUES('agent:turn','agent','running','turn');",
+                 INSERT INTO turns(id,chat,state,provider_turn) VALUES('agent:turn','agent','starting','turn');",
             )
             .expect("notification dispatch chat and turn");
         connection
