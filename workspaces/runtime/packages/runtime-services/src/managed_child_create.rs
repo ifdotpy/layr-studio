@@ -865,27 +865,6 @@ pub(crate) async fn spawn_agents(
             draft.workspace_admission.check(tx, &actor_record)
                 .map_err(|error| match error {
                     crate::monitor_policy::MonitorError::Store(error) => crate::managed_host_tools::Error::Store(error),
-<<<<<<< head
-                    error @ crate::monitor_policy::MonitorError::Expired
-                    | error @ crate::monitor_policy::MonitorError::InvalidStored { .. }
-                    | error @ crate::monitor_policy::MonitorError::InvalidResultReceipt(_)
-                    | error @ crate::monitor_policy::MonitorError::InvalidDeliveryIdentity(_)
-                    | error @ crate::monitor_policy::MonitorError::InvalidOutputReceipt(_)
-                    | error @ crate::monitor_policy::MonitorError::TaskFailed
-                    | error @ crate::monitor_policy::MonitorError::Refused(_)
-                    | error @ crate::monitor_policy::MonitorError::InputOutcomeUnknown
-                    | error @ crate::monitor_policy::MonitorError::Unavailable(_)
-                    | error @ crate::monitor_policy::MonitorError::ProviderRequest { .. }
-                    | error @ crate::monitor_policy::MonitorError::ConfigurationRejected { .. }
-                    | error @ crate::monitor_policy::MonitorError::ConfigurationReceipt { .. }
-                    | error @ crate::monitor_policy::MonitorError::Event(_)
-                    | error @ crate::monitor_policy::MonitorError::Rules(_)
-                    | error @ crate::monitor_policy::MonitorError::Io(_) => {
-                        crate::managed_host_tools::Error::Refusal(error.to_string())
-                    }
-||||||| base
-                    error => crate::managed_host_tools::Error::Refusal(error.to_string()),
-=======
                     error @ (crate::monitor_policy::MonitorError::Expired
                         | crate::monitor_policy::MonitorError::InvalidStored { .. }
                         | crate::monitor_policy::MonitorError::InvalidResultReceipt(_)
@@ -901,7 +880,6 @@ pub(crate) async fn spawn_agents(
                         | crate::monitor_policy::MonitorError::Event(_)
                         | crate::monitor_policy::MonitorError::Rules(_)
                         | crate::monitor_policy::MonitorError::Io(_)) => crate::managed_host_tools::Error::Refusal(error.to_string()),
->>>>>>> origin/main
                 })?;
             crate::host_worker_create::recheck_worker(tx, &draft.typed, draft.epoch, &draft.account)
                 .map_err(map_recheck_error)?;
@@ -1370,27 +1348,6 @@ fn map_recheck_error(
         crate::agents_create::MutationError::Store(error) => {
             crate::managed_host_tools::Error::Store(error)
         }
-<<<<<<< head
-        error @ crate::agents_create::MutationError::Conflict
-        | error @ crate::agents_create::MutationError::MissingCreationIntent
-        | error @ crate::agents_create::MutationError::Deleted
-        | error @ crate::agents_create::MutationError::UnknownAgent
-        | error @ crate::agents_create::MutationError::LeadRequired
-        | error @ crate::agents_create::MutationError::RequestIdRequired
-        | error @ crate::agents_create::MutationError::InvalidCreation(_)
-        | error @ crate::agents_create::MutationError::BaseUnresolved
-        | error @ crate::agents_create::MutationError::ModelUnavailable
-        | error @ crate::agents_create::MutationError::CapabilityUnavailable(_)
-        | error @ crate::agents_create::MutationError::IdentityChanged
-        | error @ crate::agents_create::MutationError::Internal
-        | error @ crate::agents_create::MutationError::Stale
-        | error @ crate::agents_create::MutationError::CurrentAccountExcluded
-        | error @ crate::agents_create::MutationError::InFlight
-        | error @ crate::agents_create::MutationError::InvalidStoredObject { .. }
-        | error @ crate::agents_create::MutationError::Request(_) => {
-||||||| base
-        error => crate::managed_host_tools::Error::Refusal(error.to_string()),
-=======
         error @ (crate::agents_create::MutationError::Conflict
         | crate::agents_create::MutationError::MissingCreationIntent
         | crate::agents_create::MutationError::Deleted
@@ -1408,7 +1365,6 @@ fn map_recheck_error(
         | crate::agents_create::MutationError::InFlight
         | crate::agents_create::MutationError::InvalidStoredObject { .. }
         | crate::agents_create::MutationError::Request(_)) => {
->>>>>>> origin/main
             crate::managed_host_tools::Error::Refusal(error.to_string())
         }
     }
