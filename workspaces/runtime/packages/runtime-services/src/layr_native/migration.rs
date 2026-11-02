@@ -540,7 +540,7 @@ pub(super) fn import_worktree_line(
             .collect();
         clear_at(&destination, &cache_roots)?;
         // Reuse the pinned subtree even if its pathname was replaced after opening it.
-        plan.stage_open(&destination, &line_directory, relative)
+        plan.stage_open(&destination)
     })?;
     // A top-level line is a private container, distinct from a nested repository root.
     if relative.as_os_str().is_empty() {

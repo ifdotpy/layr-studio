@@ -121,7 +121,6 @@ pub(super) struct Plan {
     pub excluded_worktree_folders: Vec<PathBuf>,
     pub plain_git_metadata: Vec<metadata::PlainMetadata>,
     pub worktree_data: Vec<PathBuf>,
-    git_backed: bool,
     pub size: Size,
     destination_volume: u64,
 }
@@ -271,11 +270,7 @@ impl Plan {
                 entry.cloneable = volume == destination_volume;
             }
             if meta.is_file() && !entry.cloneable {
-                let copies =
-                    stage_destinations(&entry.relative, entry.cache, git_backed).len() as u64;
-                size.cross_volume_bytes = size
-                    .cross_volume_bytes
-                    .saturating_add(meta.len().saturating_mul(copies));
+                size.cross_volume_bytes = size.cross_volume_bytes.saturating_add(meta.len());
             }
             if meta.is_file()
                 && (entry.relative.starts_with(".git")
@@ -306,7 +301,6 @@ impl Plan {
             excluded_worktree_folders: tree.excluded_worktree_folders,
             plain_git_metadata: tree.plain_git_metadata,
             worktree_data: tree.worktree_data,
-            git_backed,
         })
     }
 
@@ -356,7 +350,6 @@ impl Plan {
             excluded_worktree_folders: Vec::new(),
             plain_git_metadata: Vec::new(),
             worktree_data: Vec::new(),
-            git_backed: false,
             size,
             destination_volume: volume_id(existing_ancestor(destination)?)?,
         })
@@ -492,15 +485,10 @@ impl Plan {
 
     pub fn stage_at(&self, project: &Directory, relative: &Path) -> Result<()> {
         let destination = project.child(relative, true)?;
-        self.stage_open(&destination, project, relative)
+        self.stage_open(&destination)
     }
 
-    pub fn stage_open(
-        &self,
-        destination: &Directory,
-        _project: &Directory,
-        _relative: &Path,
-    ) -> Result<()> {
+    pub fn stage_open(&self, destination: &Directory) -> Result<()> {
         self.stage_entries(destination, false)?;
         self.directory_modes(destination, false)
     }
@@ -518,55 +506,54 @@ impl Plan {
             if entry.cache != caches || entry.relative.as_os_str().is_empty() {
                 continue;
             }
-            for relative in stage_destinations(&entry.relative, caches, self.git_backed) {
-                let meta = &entry.metadata;
-                if meta.is_dir() {
-                    destination.child(&relative, true)?;
-                    continue;
+            let relative = &entry.relative;
+            let meta = &entry.metadata;
+            if meta.is_dir() {
+                destination.child(relative, true)?;
+                continue;
+            }
+            let (parent, name) = destination.parent(relative, true)?;
+            if meta.file_type().is_symlink() {
+                symlinkat(
+                    fs::read_link(self.source.join(&entry.relative))?,
+                    &parent.0,
+                    &name,
+                )
+                .map_err(std::io::Error::from)?;
+            } else {
+                let source = open_source(&self.source, &entry.relative)?;
+                if vm_archive_identity(&source.metadata()?) != vm_archive_identity(meta) {
+                    return Err(source_changed());
                 }
-                let (parent, name) = destination.parent(&relative, true)?;
-                if meta.file_type().is_symlink() {
-                    symlinkat(
-                        fs::read_link(self.source.join(&entry.relative))?,
-                        &parent.0,
-                        &name,
-                    )
-                    .map_err(std::io::Error::from)?;
+                if entry.cloneable {
+                    clone_file(&source,&parent.0,&name).map_err(|error|NativeLayrError::Refused(format!("Cannot clone {}: {error}. Native import does not fall back to an unbudgeted byte copy.",self.source.join(&entry.relative).display())))?;
                 } else {
-                    let source = open_source(&self.source, &entry.relative)?;
-                    if vm_archive_identity(&source.metadata()?) != vm_archive_identity(meta) {
-                        return Err(source_changed());
-                    }
-                    if entry.cloneable {
-                        clone_file(&source,&parent.0,&name).map_err(|error|NativeLayrError::Refused(format!("Cannot clone {}: {error}. Native import does not fall back to an unbudgeted byte copy.",self.source.join(&entry.relative).display())))?;
-                    } else {
-                        let mut copy = File::from(
-                            openat(
-                                &parent.0,
-                                &name,
-                                OFlags::CREATE
-                                    | OFlags::EXCL
-                                    | OFlags::WRONLY
-                                    | OFlags::NOFOLLOW
-                                    | OFlags::CLOEXEC,
-                                Mode::from_raw_mode(0o600),
-                            )
-                            .map_err(std::io::Error::from)?,
-                        );
-                        std::io::copy(&mut &source, &mut copy)?;
-                    }
-                    let file = File::from(
+                    let mut copy = File::from(
                         openat(
                             &parent.0,
                             &name,
-                            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-                            Mode::empty(),
+                            OFlags::CREATE
+                                | OFlags::EXCL
+                                | OFlags::WRONLY
+                                | OFlags::NOFOLLOW
+                                | OFlags::CLOEXEC,
+                            Mode::from_raw_mode(0o600),
                         )
                         .map_err(std::io::Error::from)?,
                     );
-                    file.set_permissions(fs::Permissions::from_mode(meta.mode() & 0o7777))?;
-                    file.set_times(fs::FileTimes::new().set_modified(meta.modified()?))?;
+                    std::io::copy(&mut &source, &mut copy)?;
                 }
+                let file = File::from(
+                    openat(
+                        &parent.0,
+                        &name,
+                        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                        Mode::empty(),
+                    )
+                    .map_err(std::io::Error::from)?,
+                );
+                file.set_permissions(fs::Permissions::from_mode(meta.mode() & 0o7777))?;
+                file.set_times(fs::FileTimes::new().set_modified(meta.modified()?))?;
             }
         }
         for entry in self
@@ -574,15 +561,13 @@ impl Plan {
             .iter()
             .filter(|entry| entry.cache == caches && !entry.relative.as_os_str().is_empty())
         {
-            for relative in stage_destinations(&entry.relative, caches, self.git_backed) {
-                attributes::copy(
-                    &self.source,
-                    &entry.relative,
-                    destination,
-                    &relative,
-                    entry.metadata.file_type().is_symlink(),
-                )?;
-            }
+            attributes::copy(
+                &self.source,
+                &entry.relative,
+                destination,
+                &entry.relative,
+                entry.metadata.file_type().is_symlink(),
+            )?;
         }
         self.verify_source()
     }
@@ -594,11 +579,9 @@ impl Plan {
             .rev()
             .filter(|entry| entry.cache == caches && entry.metadata.is_dir())
         {
-            for relative in stage_destinations(&entry.relative, caches, self.git_backed) {
-                destination
-                    .child(&relative, false)?
-                    .set_mode(entry.metadata.mode() & 0o7777)?;
-            }
+            destination
+                .child(&entry.relative, false)?
+                .set_mode(entry.metadata.mode() & 0o7777)?;
         }
         Ok(())
     }
@@ -610,10 +593,13 @@ impl Plan {
         for entry in self.entries.iter().filter(|entry| {
             entry.metadata.is_dir() && !entry.cache && !entry.relative.as_os_str().is_empty()
         }) {
-            for target in stage_destinations(&entry.relative, false, false) {
-                changed |=
-                    attributes::copy(&self.source, &entry.relative, &destination, &target, false)?;
-            }
+            changed |= attributes::copy(
+                &self.source,
+                &entry.relative,
+                &destination,
+                &entry.relative,
+                false,
+            )?;
         }
         self.verify_source()?;
         Ok(changed)
@@ -628,10 +614,6 @@ impl Plan {
         }
         Ok(())
     }
-}
-
-fn stage_destinations(relative: &Path, _caches: bool, _git_backed: bool) -> Vec<PathBuf> {
-    vec![relative.to_owned()]
 }
 
 fn source_changed() -> NativeLayrError {

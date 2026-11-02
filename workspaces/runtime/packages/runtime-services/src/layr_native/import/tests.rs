@@ -27,7 +27,6 @@ mod tests {
         assert!(plan.files().any(|path| path == Path::new("forced")));
         assert!(!plan.files().any(|path| path.starts_with("dist")));
         assert!(!plan.files().any(|path| path == Path::new(".env")));
-        assert_eq!(stage_destinations(Path::new(".git/HEAD"), false, true), vec![PathBuf::from(".git/HEAD")]);
     }
 
     #[test]
