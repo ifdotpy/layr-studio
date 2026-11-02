@@ -204,9 +204,8 @@ Both gates create a private scratch directory, export it as `TMPDIR` to their
 test processes, and remove it on exit. The parent is `${TMPDIR:-/tmp}`, except on
 macOS, where it is `/private/tmp`: Unix socket paths must stay under 104 bytes,
 and the per-user temporary folder is too long. On Linux tmpfs they require 2 GiB
-free before starting. The gate starts the shared sccache server with `TMPDIR=/tmp`,
-so deleting the scratch cannot break it. A server that was already running keeps its
-own temporary folder.
+free before starting. The gates clear `RUSTC_WRAPPER` and `CARGO_BUILD_RUSTC_WRAPPER`
+and never start sccache (rule 2 above).
 A disk-backed override runs on disk and prints a notice. Cargo target and
 build outputs stay in their normal locations. The requirement covers a sampled
 peak of 1005908 KiB plus 1091244 KiB margin. The installer test fixture uses the
