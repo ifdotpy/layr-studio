@@ -116,6 +116,29 @@ async fn live_limits_worker_delivers_account_notification_to_session_owner() {
 struct CapturedRefresh {
     calls: tokio::sync::mpsc::UnboundedSender<String>,
 }
+
+struct NoLimitsSupport;
+impl crate::account_session_runtime::AccountSessionPort for NoLimitsSupport {}
+
+#[tokio::test]
+async fn completed_turn_survives_unsupported_limits_read() {
+    let state = State::new().await;
+    let mut resources = test_resources().unwrap();
+    resources.account_session = Some(Arc::new(NoLimitsSupport));
+    let mut peer = Peer::new();
+    let mut worker = peer
+        .open_worker_with_resources(state.bridge.clone(), resources)
+        .await;
+    let start = state.start(&mut peer, &worker).await;
+    peer.accepted(&start).await;
+    let cursor = peer.frame(json!({"method":"turn/completed","params":{"threadId":"fake-thread-0","turn":{"id":"turn","status":"completed"}}})).await;
+    peer.acknowledged_or_worker_exits(cursor, &mut worker).await;
+    let done = state
+        .wait_record(|record| record["status"] == "completed")
+        .await;
+    assert_eq!(done["lastCompletedTurn"], "turn");
+    worker.shutdown().await.unwrap();
+}
 impl crate::account_session_runtime::AccountSessionPort for CapturedRefresh {
     fn refresh_limits<'a>(
         &'a self,

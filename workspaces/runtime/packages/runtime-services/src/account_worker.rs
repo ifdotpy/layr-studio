@@ -1537,11 +1537,10 @@ impl Worker {
                 self.wake(agent, epoch).await?;
             }
             Effect::TurnCompleted { agent, epoch, .. } => {
-                if let Some(session) = self.resources.account_session.as_ref() {
-                    session
-                        .refresh_limits_if_stale(&self.account)
-                        .await
-                        .map_err(|error| WorkerError::PreparationRefused(error.to_string()))?;
+                if let Some(session) = self.resources.account_session.as_ref()
+                    && let Err(error) = session.refresh_limits_if_stale(&self.account).await
+                {
+                    eprintln!("limits refresh for {} failed: {error}", self.account);
                 }
                 self.wake(agent, epoch).await?;
             }
