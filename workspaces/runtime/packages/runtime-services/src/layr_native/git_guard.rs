@@ -1093,6 +1093,102 @@ fn main() {
     }
 
     #[test]
+    fn proxy_allows_writes_targeting_outside_the_line() {
+        let (root, wrapper, line) = review_proxy_fixture();
+        let outside = root.path().join("outside");
+        fs::create_dir(&outside).expect("outside");
+        let outside = outside.to_str().expect("outside path");
+        let config = root.path().join("config");
+        let config = config.to_str().expect("config path");
+        for args in [
+            vec!["init", outside],
+            vec!["-C", outside, "config", "test.key", "value"],
+            vec!["--git-dir", outside, "commit"],
+            vec!["--work-tree", outside, "commit"],
+            vec!["config", "--file", config, "test.key", "value"],
+            vec!["config", &format!("--file={config}"), "test.key", "value"],
+        ] {
+            assert!(invoke(&wrapper, &line, &args).is_ok(), "{args:?}");
+        }
+        assert!(invoke_environment(&wrapper, &line, &["commit"], &[("GIT_DIR", outside)]).is_ok());
+        assert!(
+            invoke_environment(
+                &wrapper,
+                &line,
+                &["config", "--global", "--list"],
+                &[("GIT_CONFIG_GLOBAL", config)]
+            )
+            .is_ok()
+        );
+        for args in [
+            vec!["commit"],
+            vec!["config", "test.key", "value"],
+            vec!["init", "."],
+        ] {
+            assert!(invoke(&wrapper, &line, &args).is_err(), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn proxy_runs_real_git_against_outside_targets() {
+        let (root, wrapper, line) = review_proxy_fixture();
+        let state = root.path().join("state");
+        let real_git = find_real_git().expect("real Git");
+        crate::atomic_file::replace(
+            &wrapper,
+            wrapper_script(&state, &real_git)
+                .expect("wrapper")
+                .as_bytes(),
+            Some(0o755),
+            false,
+        )
+        .expect("wrapper");
+        let outside = root.path().join("repository");
+        let outside = outside.to_str().expect("outside");
+        let config = root.path().join("config");
+        let config = config.to_str().expect("config");
+        invoke(&wrapper, &line, &["init", "-q", outside]).expect("outside init");
+        invoke(
+            &wrapper,
+            &line,
+            &["-C", outside, "config", "test.key", "value"],
+        )
+        .expect("outside repository config");
+        invoke(
+            &wrapper,
+            &line,
+            &["config", "--file", config, "test.key", "value"],
+        )
+        .expect("outside file config");
+        assert_eq!(
+            invoke(
+                &real_git,
+                &line,
+                &["config", "--file", config, "--get", "test.key"]
+            )
+            .expect("read config"),
+            "value\n"
+        );
+        for args in [vec!["commit"], vec!["config", "test.key", "value"]] {
+            assert!(invoke(&wrapper, &line, &args).is_err(), "{args:?}");
+        }
+        assert!(
+            invoke(
+                &wrapper,
+                root.path(),
+                &[
+                    "config",
+                    "--file",
+                    line.join("config").to_str().unwrap(),
+                    "test.key",
+                    "value"
+                ]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn proxy_optional_values_do_not_hide_output_writes() {
         let (_root, wrapper, line) = review_proxy_fixture();
         for option in ["--pretty", "--format", "--abbrev", "--color", "--decorate"] {

@@ -32,6 +32,7 @@ mod models;
 mod monitor_runtime;
 mod monitors;
 mod multi_server;
+mod native_layr_settings;
 mod orchestration_settings;
 mod panels;
 mod process_controls;

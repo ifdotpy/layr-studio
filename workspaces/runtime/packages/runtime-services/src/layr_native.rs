@@ -106,11 +106,11 @@ mod tests {
     }
 }
 
-mod capability;
+pub mod capability;
 mod git_guard;
 pub mod mapping;
 pub mod settings;
-mod versions;
+pub mod versions;
 #[cfg(test)]
 mod warm_store_tests;
 pub use capability::{NativeLayrCapability, capability, resolve_binary};
@@ -119,6 +119,10 @@ fn test_binary() -> Option<std::ffi::OsString> {
     let binary = std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY")?;
     capability::TEST_BINARY.with(|value| *value.borrow_mut() = Some(PathBuf::from(&binary)));
     Some(binary)
+}
+#[cfg(test)]
+pub(crate) fn set_test_binary(binary: PathBuf) {
+    capability::TEST_BINARY.with(|value| *value.borrow_mut() = Some(binary));
 }
 mod failed_import;
 mod private_tree;

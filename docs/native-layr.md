@@ -49,6 +49,10 @@ sudo env LAYR_ROOT=/path/to/studio-state/layr-native/store \
   /path/to/installed/layr daemon
 ```
 
+On Linux, install Bubblewrap for reviewer checks. If you use a systemd unit for the daemon,
+set its `ExecStart` to the installed Layr binary. Restart the daemon after every Layr upgrade
+so it runs the updated binary.
+
 The daemon must run before a native chat or migration on Linux.
 macOS does not require this step.
 
@@ -231,6 +235,7 @@ A ready project cannot be removed by this recovery.
 Pending and unknown receipts stay held for inspection.
 On btrfs, automatic removal of a partial project is unavailable.
 The error names the private project that needs daemon-owned subvolume removal.
+For a pending import on btrfs, first confirm the daemon has finished using the retained staging folder; do not retry or delete that folder while the outcome is unknown. Inspect the private project and import receipt, then have an operator either complete the remaining preparation and record the verified result, or remove the partial project with daemon-owned subvolume removal before an explicit retry. Preserve the staging folder until that inspection is complete.
 
 Capacity checks run before the pending receipt. A shortage can retry with the same request after capacity increases.
 
@@ -250,9 +255,11 @@ A push still requires the user's authorization.
 
 ## Agents and tasks
 
+The managed Git guard permits writes targeting repositories or explicit config files outside native Layr lines.
+
 The lead uses `projects/<project>/lines/main` in the host store.
 An implementer uses `agent-<SHA-256 of agent ID>`.
-Studio creates this line with `layr line new <name> main`.
+Studio creates this line from the requested `base_ref` revision, or from main when none is specified.
 Workspace readiness and cleanup use the existing runtime hooks.
 The agent record has `workspaceMode: layr-native`, `executionMode: native`, and `layrReady: true` after preparation.
 `layrProjectId`, `layrLine`, `layrStateId`, and `cwd` identify the association.

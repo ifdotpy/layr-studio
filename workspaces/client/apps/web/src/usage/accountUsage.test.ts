@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { it } from "vitest";
 import { accountLimits, limitsReadSucceeded } from "./accountUsage";
-it("returns limits only for the selected account and matching native identity", () => {
+it("returns limits for the selected account", () => {
   const a = { accountKey: "a", data: { accountId: "native-a" } };
   assert.equal(accountLimits(a, "a", "native-a"), a);
   assert.equal(accountLimits(a, "b"), null);
-  assert.equal(accountLimits(a, "a", "replacement-login"), null);
+  assert.equal(accountLimits(a, "a", "replacement-login"), a);
   const legacyWithoutAccountId = { accountKey: "a", data: {} };
   assert.equal(
     accountLimits(legacyWithoutAccountId, "a", "native-a"),

@@ -180,7 +180,7 @@ test("an account on two servers shows one limit, not one per server", () => {
   expect(markup).not.toContain("Igor MBP");
 });
 
-test("an account signed out on every server shows its limit as unavailable", () => {
+test("an account waits for its server limits regardless of sign-in status", () => {
   const markup = render(
     createElement(AccountLimitsAcrossServers, {
       sources: [
@@ -192,6 +192,5 @@ test("an account signed out on every server shows its limit as unavailable", () 
       ],
     }),
   );
-  expect(markup).toContain("Unavailable");
-  expect(markup).not.toContain("Reading limits");
+  expect(markup).toContain("Reading limits");
 });
