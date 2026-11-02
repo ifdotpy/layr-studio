@@ -15421,7 +15421,8 @@
               "project",
               "room",
               "work",
-              "outbox"
+              "outbox",
+              "approval"
             ],
             "type": "string"
           },

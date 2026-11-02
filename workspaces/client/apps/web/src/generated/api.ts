@@ -8114,7 +8114,8 @@ export interface components {
         | "project"
         | "room"
         | "work"
-        | "outbox";
+        | "outbox"
+        | "approval";
       rev: number;
       rows: components["schemas"]["SyncEntity"][];
       /** @enum {string} */

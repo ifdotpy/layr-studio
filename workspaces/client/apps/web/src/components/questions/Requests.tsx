@@ -415,8 +415,9 @@ export function RequestCard({
     setSending(true);
     setRequestError("");
     try {
-      // A sign-in approval reads the link to open from the `/api/answer` result, which the
-      // command response does not carry. Other approvals use the command path.
+      // A sign-in card stays on `/api/answer`: an accepted sign-in reads the link to open from
+      // that result, which the command response does not carry. Other approvals use the
+      // command path.
       const signIn = () => apiPost("/api/answer", { ...body, id: r.id });
       const approve = () => commands.answer(r.id, body);
       if (browserOpen && body.decision === "accept")
@@ -430,7 +431,7 @@ export function RequestCard({
               `Studio approved the link, but could not confirm that its page opened: ${errorText(error)}`,
             ),
         });
-      else await approve();
+      else await (browserOpen ? signIn() : approve());
       void removeAnswerDraft(
         answerStorage,
         services?.owner.id ?? serverViewId ?? "local",
