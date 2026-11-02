@@ -780,6 +780,22 @@ mod tests {
         let project = fixture.path().join("project");
         cache_policy_fixture(&project);
         let state = fixture.path().join("state");
+        // Every layr call in this test uses this fixture binary, never a layr found on PATH.
+        let binary = binary_path(&state);
+        fs::create_dir_all(binary.parent().expect("fixture operation succeeds"))
+            .expect("fixture operation succeeds");
+        fs::write(
+            &binary,
+            format!(
+                "#!/bin/sh\ncase \"$*\" in\n*store-version*) printf '%s\\n' '{{\"binary\":{{\"format\":1,\"version\":\"fixture\",\"build\":\"fixture\"}},\"store\":{{\"format\":1,\"version\":\"fixture\",\"build\":\"fixture\"}},\"compatible\":true,\"state\":\"current\"}}' ;;\n*) printf '%s\\n' '[{{\"name\":\"main\",\"head\":\"{}\"}}]' ;;\nesac\n",
+                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+            ),
+        )
+        .expect("fixture operation succeeds");
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o700))
+            .expect("fixture operation succeeds");
+        crate::layr_native::capability::TEST_BINARY
+            .with(|value| *value.borrow_mut() = Some(binary.clone()));
         let initial = migrate(&state, &project, true).expect("fixture operation succeeds");
         let id = initial["projectId"]
             .as_str()
@@ -799,19 +815,6 @@ mod tests {
             )
             .expect("fixture operation succeeds");
         }
-        let binary = binary_path(&state);
-        fs::create_dir_all(binary.parent().expect("fixture operation succeeds"))
-            .expect("fixture operation succeeds");
-        fs::write(
-            &binary,
-            format!(
-                "#!/bin/sh\nprintf '%s\\n' '[{{\"name\":\"main\",\"head\":\"{}\"}}]'\n",
-                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-            ),
-        )
-        .expect("fixture operation succeeds");
-        fs::set_permissions(&binary, fs::Permissions::from_mode(0o700))
-            .expect("fixture operation succeeds");
         let partial_report = migrate(&state, &project, true).expect("partial import report");
         assert_eq!(
             partial_report["lines"][0]["lineNewEntries"], initial["lines"][0]["lineNewEntries"],
