@@ -371,6 +371,29 @@ impl PreparationResources {
         }
     }
 
+    pub(super) fn monitor_environment(
+        &self,
+        state_root: &Path,
+        record: &Value,
+    ) -> Result<Option<Map<String, Value>>, WorkerError> {
+        if !crate::layr_native::is_native(record) {
+            return Ok(None);
+        }
+        let captured = self.native_layr(state_root, record)?;
+        if record["role"] == "reviewer" {
+            let scratch = record["layrScratch"]
+                .as_str()
+                .ok_or_else(|| invalid("native-reviewer/scratch"))?;
+            let (_, environment) = captured
+                .reviewer
+                .as_ref()
+                .filter(|(stored, _)| stored == scratch)
+                .ok_or_else(|| self.native_layr_changed("native-layr/scratch-changed"))?;
+            return Ok(Some(environment.clone()));
+        }
+        Ok(Some(captured.environment.clone()))
+    }
+
     pub(super) fn validate_native_layr_source(
         &self,
         state_root: &Path,
@@ -2780,6 +2803,15 @@ mod workspace_fence_tests {
                 .root,
             root
         );
+        let env = resources
+            .monitor_environment(state.path(), &record)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            env,
+            crate::layr_native::reviewer_environment(state.path(), scratch.to_str().unwrap())
+        );
+        assert!(env.keys().all(|key| !key.starts_with("LAYR_")));
     }
 
     #[tokio::test]
@@ -2842,6 +2874,35 @@ mod workspace_fence_tests {
             assert_eq!(captured.environment["LAYR_DIRECT"], "1");
             assert_eq!(captured.environment["LAYR_ROOT"], json!(alias));
         }
+        let monitor_env = resources
+            .monitor_environment(state.path(), &record)
+            .expect("monitor environment")
+            .expect("native");
+        assert_eq!(monitor_env, captured.environment);
+        for provider in ["codex", "claude"] {
+            let mut provider_record = record.clone();
+            provider_record["provider"] = json!(provider);
+            assert_eq!(
+                resources
+                    .monitor_environment(state.path(), &provider_record)
+                    .unwrap(),
+                Some(captured.environment.clone()),
+                "{provider} monitor environment"
+            );
+        }
+        assert!(monitor_env["PATH"].as_str().unwrap().starts_with(&format!(
+                "{}:",
+                crate::layr_native::binary_path(state.path())
+                    .parent()
+                    .unwrap()
+                    .display()
+            )));
+        assert!(
+            resources
+                .monitor_environment(state.path(), &json!({}))
+                .unwrap()
+                .is_none()
+        );
         let changed = json!({"workspaceMode":"layr-native", "layrStoreRoot":root});
         assert!(resources.native_layr(state.path(), &changed).is_err());
 
