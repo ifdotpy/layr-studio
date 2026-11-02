@@ -3307,10 +3307,6 @@
   ],
   "ts-json-parse-cast": [
     {
-      "file": "workspaces/client/apps/desktop/layr-binary.ts",
-      "fingerprint": "30c951a519de8b24758a9f9c2d334f4eb0fcda25e2c2f29d17ea27b8cd71f73a:0"
-    },
-    {
       "file": "workspaces/client/apps/desktop/restart-environment.ts",
       "fingerprint": "7b2e2faea7f4dfe66d482b7eb2e06d91a55ed917b960409bbf8a60a762f71532:0"
     },

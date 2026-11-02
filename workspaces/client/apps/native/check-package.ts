@@ -5,7 +5,6 @@ import { execFileSync } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
-import { verifyBundledLayr } from "../desktop/layr-binary.ts";
 import {
   runtimeBinaries,
   runtimeBinaryName,
@@ -33,7 +32,6 @@ if (!application) throw new Error("Supply the packaged .app path.");
 const bundle = path.resolve(application);
 const resources = path.join(bundle, "Contents/Resources");
 const workspace = path.join(resources, "workspace");
-await verifyBundledLayr(workspace);
 const plist = (key: string) =>
   execFileSync(
     "plutil",
@@ -109,6 +107,6 @@ console.log(
     executable,
     commit: stamp.commit,
     checks:
-      "bundle resources, Python helper imports, Rust runtime executables, native Layr hash and version, desktop icon, code signature",
+      "bundle resources, Python helper imports, Rust runtime executables, desktop icon, code signature",
   }),
 );
