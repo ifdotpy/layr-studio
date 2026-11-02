@@ -36,6 +36,9 @@ describe("new chat actions", () => {
     );
     expect(markup).toContain("Workspace");
     expect(markup).toContain("Layr");
+    expect(
+      markup.match(/<input(?=[^>]*value="layr-native")[^>]*>/)?.[0],
+    ).toContain('disabled=""');
     expect(markup).toContain("Layr VM");
     expect(markup).toContain("WT");
     expect(markup).toContain('aria-label="Agent role" role="radiogroup"');
@@ -68,7 +71,12 @@ it("disables unavailable native Layr on Linux and explains the fallback", () => 
             label: "Linux",
             system: "Linux",
             hasStudioVm: false,
-            nativeLayr: { ready: false, reason: "A btrfs store is required." },
+            nativeLayr: {
+              status: "notReady",
+              reason: "A btrfs store is required.",
+            },
+            nativeLayrMessage: "A btrfs store is required.",
+            defaultWorkspaceMode: "worktree",
           },
         ],
         onChoose: () => {},
@@ -78,10 +86,71 @@ it("disables unavailable native Layr on Linux and explains the fallback", () => 
     ),
   );
   expect(markup).toContain("A btrfs store is required.");
+  expect(markup).toContain(
+    'class="native-layr-error" title="A btrfs store is required."',
+  );
   expect(
     markup.match(/<input(?=[^>]*value="layr-native")[^>]*>/)?.[0],
   ).toContain('disabled=""');
   expect(markup.match(/<input(?=[^>]*value="worktree")[^>]*>/)?.[0]).toContain(
     'checked=""',
   );
+});
+
+it("shows the server's install message on the disabled Layr option", () => {
+  const markup = renderToStaticMarkup(
+    createElement(
+      MantineProvider,
+      { theme },
+      createElement(ProjectServerCards, {
+        project: { id: "p", name: "P", path: "/p" },
+        servers: [
+          {
+            id: "local",
+            label: "Server",
+            system: "Darwin",
+            hasStudioVm: false,
+            nativeLayr: { status: "notInstalled" },
+            nativeLayrMessage: "Install layr",
+            defaultWorkspaceMode: "worktree",
+          },
+        ],
+        onChoose: () => {},
+        onAdd: () => {},
+        onCancel: () => {},
+      }),
+    ),
+  );
+  expect(markup).toContain('class="native-layr-error" title="Install layr"');
+  expect(
+    markup.match(/<input(?=[^>]*value="layr-native")[^>]*>/)?.[0],
+  ).toContain('disabled=""');
+});
+
+it("selects the server's default when Layr is ready", () => {
+  const markup = renderToStaticMarkup(
+    createElement(
+      MantineProvider,
+      { theme },
+      createElement(ProjectServerCards, {
+        project: { id: "p", name: "P", path: "/p" },
+        servers: [
+          {
+            id: "local",
+            label: "Server",
+            system: "Linux",
+            hasStudioVm: false,
+            nativeLayr: { status: "ready" },
+            defaultWorkspaceMode: "layr-native",
+          },
+        ],
+        onChoose: () => {},
+        onAdd: () => {},
+        onCancel: () => {},
+      }),
+    ),
+  );
+  const option = markup.match(/<input(?=[^>]*value="layr-native")[^>]*>/)?.[0];
+  expect(option).toContain('checked=""');
+  expect(option).not.toContain('disabled=""');
 });

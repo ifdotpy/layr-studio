@@ -1,9 +1,7 @@
 import { expect, test } from "vitest";
 import {
-  defaultWorkspaceMode,
   isNewChatSettings,
   projectAllowsWorktree,
-  workspaceModeForProject,
   settingsForNewChatRequest,
   settingsForNewChatAccount,
   type NewChatWorkspaceMode,
@@ -50,14 +48,6 @@ test("new chat accepts explicit reviewer Fast mode and rejects malformed review 
   }
 });
 
-test.each([
-  ["Darwin", "layr-native"],
-  ["Linux", "worktree"],
-  ["Windows", "worktree"],
-  [undefined, "worktree"],
-])("%s defaults to %s", (system, mode) =>
-  expect(defaultWorkspaceMode(system)).toBe(mode),
-);
 test("accepts the actual selector values and rejects receipt overrides", () => {
   const settings = {
     workspaceMode: "layr",
@@ -213,33 +203,12 @@ test("a Claude lead request leaves worker defaults to the server unless explicit
   ).toEqual(worker_defaults);
 });
 
-test("Linux without a native capability uses worktree", () => {
-  expect(defaultWorkspaceMode("Linux")).toBe("worktree");
-});
-
-test("Linux uses native Layr only when the server capability is ready", () => {
-  expect(defaultWorkspaceMode("Linux", { ready: true, reason: null })).toBe(
-    "layr-native",
-  );
-  expect(
-    defaultWorkspaceMode("Linux", {
-      ready: false,
-      reason: "A btrfs store is required.",
-    }),
-  ).toBe("worktree");
-});
-
-test("a Layr-only project preselects Layr and offers no WT", () => {
+test("a Layr-only project offers no WT", () => {
   const layrOnly = { workspacePolicy: "layr-native" };
   expect(projectAllowsWorktree(layrOnly)).toBe(false);
-  expect(workspaceModeForProject(layrOnly, "worktree")).toBe("layr-native");
 });
 
 test("a project without a policy keeps the chosen workspace", () => {
   expect(projectAllowsWorktree(undefined)).toBe(true);
   expect(projectAllowsWorktree({ workspacePolicy: null })).toBe(true);
-  expect(workspaceModeForProject({ workspacePolicy: null }, "worktree")).toBe(
-    "worktree",
-  );
-  expect(workspaceModeForProject(undefined, "layr")).toBe("layr");
 });

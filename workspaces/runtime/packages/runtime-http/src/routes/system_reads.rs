@@ -513,12 +513,24 @@ async fn ui_summary(
     .map_err(|_| ApiError::internal())??;
     let value = store
         .read_async("runtime-http/routes/system_reads", move |transaction| {
-            let mut value =
-                system_reads::ui_summary(transaction, accounts).map_err(ApiError::stored)?;
-            value["hasStudioVm"] = Value::Bool(has_studio_vm);
-            value["nativeLayr"] =
-                serde_json::to_value(native_layr).map_err(|_| ApiError::internal())?;
-            super::generated_json::<crate::generated::UiSummaryResponse>(value)
+            let mut summary = super::generated_json::<crate::generated::UiSummaryResponse>(
+                system_reads::ui_summary(transaction, accounts).map_err(ApiError::stored)?,
+            )?;
+            summary.has_studio_vm = Some(has_studio_vm);
+            summary.native_layr_message = native_layr.message().map(str::to_owned);
+            summary.default_workspace_mode = Some(
+                if studio_runtime_schema::workspace_modes::default_chat_workspace_mode(
+                    &summary.system,
+                    native_layr.is_ready(),
+                ) == studio_runtime_schema::workspace_modes::DEFAULT_CHAT_WORKSPACE_MODE
+                {
+                    crate::generated::UiSummaryResponseDefaultWorkspaceMode::LayrNative
+                } else {
+                    crate::generated::UiSummaryResponseDefaultWorkspaceMode::Worktree
+                },
+            );
+            summary.native_layr = Some(native_layr);
+            Ok::<_, ApiError>(summary)
         })
         .await?;
     Ok(Json(value))

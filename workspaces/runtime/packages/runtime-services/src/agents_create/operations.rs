@@ -320,7 +320,7 @@ async fn creation_workspace_mode(
             return Ok(saved);
         }
     }
-    Ok(default_workspace_mode(true, native_capability(context).await?.ready).into())
+    Ok(default_workspace_mode(true, native_capability(context).await?.is_ready()).into())
 }
 
 pub async fn lead(context: &Context<'_>, request: Creation) -> Result<Value, OperationError> {
@@ -810,7 +810,7 @@ async fn create(
     if !studio_runtime_schema::workspace_modes::accepts_chat(&workspace) {
         return Err(OperationError::Invalid("Unknown workspace mode"));
     }
-    if workspace == "layr-native" && !native_capability(context).await?.ready {
+    if workspace == "layr-native" && !native_capability(context).await?.is_ready() {
         return Err(OperationError::Invalid(
             "Native Layr is not ready on this server. Select WT or configure its store and daemon.",
         ));

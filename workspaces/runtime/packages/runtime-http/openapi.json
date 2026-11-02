@@ -24872,7 +24872,7 @@
             "default": null
           },
           "workspaceMode": {
-            "description": "When omitted, the server selects native Layr on macOS, or on Linux when the native capability is ready; otherwise it selects worktree.",
+            "description": "When omitted, the server selects native Layr when available; otherwise it selects worktree.",
             "enum": [
               "layr-native",
               "layr",
@@ -33458,27 +33458,50 @@
         "type": "object"
       },
       "NativeLayrCapability": {
-        "additionalProperties": false,
-        "description": "Native Layr readiness for this server state directory.",
-        "properties": {
-          "ready": {
-            "type": "boolean"
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "oneOf": [
+          {
+            "properties": {
+              "status": {
+                "const": "ready",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "type": "object"
           },
-          "reason": {
-            "anyOf": [
-              {
+          {
+            "properties": {
+              "status": {
+                "const": "notInstalled",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "reason": {
                 "type": "string"
               },
-              {
-                "type": "null"
+              "status": {
+                "const": "notReady",
+                "type": "string"
               }
-            ]
+            },
+            "required": [
+              "status",
+              "reason"
+            ],
+            "type": "object"
           }
-        },
-        "required": [
-          "ready"
         ],
-        "type": "object"
+        "title": "NativeLayrCapability"
       },
       "NativeNameFailureRecordResponse": {
         "additionalProperties": {
@@ -59145,6 +59168,14 @@
             "title": "Chats",
             "type": "array"
           },
+          "defaultWorkspaceMode": {
+            "enum": [
+              "layr-native",
+              "layr",
+              "worktree"
+            ],
+            "type": "string"
+          },
           "hasStudioVm": {
             "default": false,
             "description": "The server has a created Studio Linux VM.",
@@ -59152,6 +59183,9 @@
           },
           "nativeLayr": {
             "$ref": "#/components/schemas/NativeLayrCapability"
+          },
+          "nativeLayrMessage": {
+            "type": "string"
           },
           "projects": {
             "items": {

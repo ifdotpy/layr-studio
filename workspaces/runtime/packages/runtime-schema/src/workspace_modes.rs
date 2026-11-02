@@ -24,8 +24,8 @@ const PROJECT_POLICY_PROPERTIES: [(&str, &str); 3] = [
 ];
 
 pub fn default_chat_workspace_mode(system: &str, native_ready: bool) -> &'static str {
-    if ALWAYS_NATIVE_SYSTEMS.contains(&system)
-        || (native_ready && CAPABILITY_NATIVE_SYSTEMS.contains(&system))
+    if native_ready
+        && (ALWAYS_NATIVE_SYSTEMS.contains(&system) || CAPABILITY_NATIVE_SYSTEMS.contains(&system))
     {
         DEFAULT_CHAT_WORKSPACE_MODE
     } else {
@@ -61,7 +61,7 @@ pub fn update_openapi(document: &mut Value) {
             property["default"] = json!(DEFAULT_AGENT_WORKSPACE_MODE);
         } else {
             property["description"] = json!(
-                "When omitted, the server selects native Layr on macOS, or on Linux when the native capability is ready; otherwise it selects worktree."
+                "When omitted, the server selects native Layr when available; otherwise it selects worktree."
             );
         }
         document["components"]["schemas"][name]["properties"]["workspaceMode"] = property;
@@ -110,7 +110,7 @@ mod tests {
 
     #[test]
     fn platform_defaults_require_the_native_linux_capability() {
-        assert_eq!(default_chat_workspace_mode("Darwin", false), "layr-native");
+        assert_eq!(default_chat_workspace_mode("Darwin", false), "worktree");
         assert_eq!(default_chat_workspace_mode("Linux", true), "layr-native");
         assert_eq!(default_chat_workspace_mode("Linux", false), "worktree");
         assert_eq!(default_chat_workspace_mode("Windows", true), "worktree");
