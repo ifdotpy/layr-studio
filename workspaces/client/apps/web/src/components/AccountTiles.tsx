@@ -1,7 +1,4 @@
-import {
-  AccountStatus as GeneratedApiAccountStatus,
-  LimitColor,
-} from "../generated/api.ts";
+import { LimitColor } from "../generated/api.ts";
 import type { components } from "../generated/api";
 import { useServerSync } from "../servers/ServerServicesContext";
 import { Badge, Radio, SegmentedControl, Tooltip } from "@mantine/core";
@@ -165,11 +162,9 @@ export function useAccountLimitProjection(account: LimitAccount) {
 export function accountLimitView(
   account: LimitAccount,
   limits: AccountLimitsSnapshot | null,
-  signedInOnly = true,
+  _signedInOnly = true,
   projection: AccountProjection | null = null,
 ) {
-  const shown =
-    !signedInOnly || account.status === GeneratedApiAccountStatus.ready;
   const matching = accountLimits(limits, account.id, account.accountId);
   const error = matching?.data ? null : matching?.error || null;
   const matchingProjection =
@@ -180,10 +175,9 @@ export function accountLimitView(
     buckets: state?.buckets ?? [],
     reset: matchingProjection?.reset ?? null,
     error,
-    reading: !matching && shown,
-    remaining: shown && !error ? (state?.remaining ?? null) : null,
-    color:
-      shown && !error ? (state?.color ?? LimitColor.paused) : LimitColor.paused,
+    reading: !matching || matchingProjection?.status.kind === "pending",
+    remaining: !error ? (state?.remaining ?? null) : null,
+    color: !error ? (state?.color ?? LimitColor.paused) : LimitColor.paused,
   };
 }
 export type AccountLimitView = ReturnType<typeof accountLimitView>;

@@ -2786,7 +2786,14 @@ fn journal_one(
                                             .into(),
                                     }
                                 } else {
-                                    Effect::Wake(identity.agent_id, identity.epoch)
+                                    Effect::TurnCompleted {
+                                        agent: identity.agent_id,
+                                        epoch: identity.epoch,
+                                        turn: params["turn"]["id"]
+                                            .as_str()
+                                            .unwrap_or_default()
+                                            .into(),
+                                    }
                                 },
                             );
                         }
