@@ -68,7 +68,7 @@ pub struct PreparedCapture {
     legacy_usage: Option<LegacyUsageTotals>,
     rejected_usage: Option<studio_runtime_schema::usage::ledger::UsageReplayConflict>,
     ledger_since: studio_runtime_schema::usage::ledger::LedgerEpoch,
-    usage_unknown: bool,
+    unknown_usage_key: Option<String>,
 }
 impl PreparedCapture {
     pub fn event(
@@ -179,7 +179,7 @@ impl PreparedCapture {
             legacy_usage,
             rejected_usage: None,
             ledger_since,
-            usage_unknown: false,
+            unknown_usage_key: None,
         })
     }
     pub(crate) fn model_payload_shared(
@@ -238,7 +238,7 @@ impl PreparedCapture {
         epoch: studio_runtime_schema::usage::ledger::LedgerEpoch,
     ) -> Result<(), CaptureError> {
         self.ledger_since = epoch;
-        self.usage_unknown = unknown_usage_receipt(
+        self.unknown_usage_key = unknown_usage_receipt(
             analytics,
             text(&self.agent["id"]),
             self.params["threadId"]
@@ -611,7 +611,7 @@ fn unknown_usage_receipt(
     thread: Option<&str>,
     usage: Option<&UsageObservation>,
     legacy: Option<&LegacyUsageTotals>,
-) -> Result<bool, StoreError> {
+) -> Result<Option<String>, StoreError> {
     let key = match usage {
         Some(observation @ UsageObservation::Cumulative { .. }) => {
             Some(UsageLedgerRow::capture(agent, thread, observation.clone()).observation_key())
@@ -625,14 +625,16 @@ fn unknown_usage_receipt(
             }),
     };
     key.map(|key| {
-        analytics.query_row(
-            "SELECT EXISTS(SELECT 1 FROM analytics_meta WHERE key=?1)",
-            [format!("unknownUsageReceipt:{key}")],
-            |row| row.get::<_, bool>(0),
-        )
+        analytics
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM analytics_meta WHERE key=?1)",
+                [format!("unknownUsageReceipt:{key}")],
+                |row| row.get::<_, bool>(0),
+            )
+            .map(|found| found.then_some(key))
     })
     .transpose()
-    .map(|found| found.unwrap_or(false))
+    .map(Option::flatten)
     .map_err(StoreError::from)
 }
 
@@ -1057,7 +1059,7 @@ pub fn decide(
             legacy_usage: q.legacy_usage.clone(),
             rejected_usage: q.rejected_usage.clone(),
             ledger_since: q.ledger_since,
-            usage_unknown: q.usage_unknown,
+            unknown_usage_key: q.unknown_usage_key.clone(),
         };
         let recursive = decide(
             CaptureSnapshot::from_records(std::sync::Arc::new(next), rows)?,
@@ -1477,27 +1479,10 @@ fn usage(
     rows: &CaptureRows,
     out: &mut CaptureDecision,
 ) {
-    if q.usage_unknown {
-        let observation_key = q
-            .usage
-            .as_ref()
-            .map(|observation| {
-                UsageLedgerRow::capture(
-                    text(&meta["agentId"]),
-                    meta["threadId"].as_str(),
-                    observation.clone(),
-                )
-                .observation_key()
-            })
-            .or_else(|| {
-                q.legacy_usage
-                    .as_ref()
-                    .map(|legacy| legacy_usage_key(meta, legacy, &q.params))
-            })
-            .expect("unknown usage has a key");
+    if let Some(observation_key) = &q.unknown_usage_key {
         out.unknown_usage = Some(UnknownUsageReceipt {
             owner: UnknownUsageOwner::Agent(text(&meta["agentId"]).to_owned()),
-            observation_key,
+            observation_key: observation_key.clone(),
         });
         return;
     }
@@ -1758,6 +1743,54 @@ pub async fn capture_limit(
 #[cfg(test)]
 mod usage_contract_tests {
     use super::*;
+
+    #[test]
+    fn unknown_receipt_reuses_the_exact_lookup_key() {
+        let agent: Value = serde_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"claude","accountKey":"default","threadId":"thread"}"#).expect("agent");
+        let params: Value = serde_json::from_str(
+            r#"{"threadId":"","tokenUsage":{"total":{"totalTokens":23},"last":{"totalTokens":7}}}"#,
+        )
+        .expect("params");
+        let epoch = studio_runtime_schema::usage::ledger::LedgerEpoch::Current;
+        let mut prepared = PreparedCapture::event(
+            &agent,
+            "thread/tokenUsage/updated",
+            &params,
+            1.,
+            2.,
+            CaptureSource::Live,
+            epoch,
+        )
+        .expect("capture");
+        let legacy = prepared.legacy_usage.as_ref().expect("legacy usage");
+        let key = studio_runtime_schema::usage::ledger::legacy_counter_observation_key(
+            "agent",
+            Some(""),
+            legacy,
+        );
+        let db = Connection::open_in_memory().expect("database");
+        db.execute_batch("CREATE TABLE analytics_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+            .expect("table");
+        db.execute(
+            "INSERT INTO analytics_meta VALUES (?1,'{}')",
+            [format!("unknownUsageReceipt:{key}")],
+        )
+        .expect("receipt");
+        prepared.bind_budget(&db, epoch).expect("bind");
+        let decision = decide(
+            CaptureSnapshot::from_records(Arc::new(prepared), CaptureRows::default())
+                .expect("snapshot"),
+            epoch,
+        )
+        .expect("decision");
+        assert_eq!(
+            decision
+                .unknown_usage
+                .expect("unknown receipt")
+                .observation_key,
+            key
+        );
+    }
 
     #[test]
     fn unknown_usage_receipts_preserve_both_stored_shapes() {
