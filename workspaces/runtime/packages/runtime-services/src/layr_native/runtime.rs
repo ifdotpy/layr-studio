@@ -546,7 +546,6 @@ pub(super) fn prepare_files_with_git_policy(
                         &project,
                         "--from",
                         staging.path().to_str().unwrap_or_default(),
-                        "--include-ignored",
                     ],
                 )?;
                 run(state_dir, &main, &["protect", "main", "--direct"])?;
