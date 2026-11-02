@@ -39617,6 +39617,93 @@
         "title": "ProjectFolder",
         "type": "object"
       },
+      "ProjectGrant": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "createdAt": {
+            "title": "Createdat",
+            "type": "integer"
+          },
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "grantId": {
+            "title": "Grantid",
+            "type": "string"
+          },
+          "localProject": {
+            "title": "Localproject",
+            "type": "string"
+          },
+          "peerStateId": {
+            "title": "Peerstateid",
+            "type": "string"
+          },
+          "remoteProject": {
+            "title": "Remoteproject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grantId",
+          "peerStateId",
+          "fingerprint",
+          "localProject",
+          "remoteProject",
+          "capabilities",
+          "createdAt"
+        ],
+        "title": "ProjectGrant",
+        "type": "object"
+      },
+      "ProjectGrantsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "grants": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectGrant"
+            },
+            "title": "Grants",
+            "type": "array"
+          }
+        },
+        "required": [
+          "grants"
+        ],
+        "title": "ProjectGrantsResponse",
+        "type": "object"
+      },
+      "ProjectInviteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "expires": {
+            "title": "Expires",
+            "type": "integer"
+          },
+          "invitation": {
+            "$ref": "#/components/schemas/FederationInvitation"
+          },
+          "warning": {
+            "title": "Warning",
+            "type": "string"
+          }
+        },
+        "required": [
+          "invitation",
+          "expires",
+          "warning"
+        ],
+        "title": "ProjectInviteResponse",
+        "type": "object"
+      },
       "ProjectLayrReadinessDto": {
         "additionalProperties": false,
         "description": "Whether a new layr chat of the project starts without an import (docs/vm-layr.md).\nA ready project has the ID of its layr project.",
@@ -72982,6 +73069,12 @@
                     },
                     {
                       "$ref": "#/components/schemas/FederationSnapshot"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ProjectGrantsResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ProjectInviteResponse"
                     }
                   ],
                   "title": "Response Manage Federation Api Federation Post"

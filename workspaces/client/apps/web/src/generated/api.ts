@@ -18235,6 +18235,36 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /** ProjectGrant */
+    ProjectGrant: {
+      /** Capabilities */
+      capabilities: string[];
+      /** Createdat */
+      createdAt: number;
+      /** Fingerprint */
+      fingerprint: string;
+      /** Grantid */
+      grantId: string;
+      /** Localproject */
+      localProject: string;
+      /** Peerstateid */
+      peerStateId: string;
+      /** Remoteproject */
+      remoteProject: string;
+    };
+    /** ProjectGrantsResponse */
+    ProjectGrantsResponse: {
+      /** Grants */
+      grants: components["schemas"]["ProjectGrant"][];
+    };
+    /** ProjectInviteResponse */
+    ProjectInviteResponse: {
+      /** Expires */
+      expires: number;
+      invitation: components["schemas"]["FederationInvitation"];
+      /** Warning */
+      warning: string;
+    };
     /**
      * ProjectLayrReadinessDto
      * @description Whether a new layr chat of the project starts without an import (docs/vm-layr.md).
@@ -32232,7 +32262,9 @@ export interface operations {
         content: {
           "application/json":
             | components["schemas"]["CreateInviteResponse"]
-            | components["schemas"]["FederationSnapshot"];
+            | components["schemas"]["FederationSnapshot"]
+            | components["schemas"]["ProjectGrantsResponse"]
+            | components["schemas"]["ProjectInviteResponse"];
         };
       };
       /** @description Bad Request */
