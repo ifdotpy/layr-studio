@@ -1,11 +1,5 @@
 export const API_SCHEMA_HASH =
-<<<<<<< head
-  "86a12f123a0c4c66ad79d9353becb0aeafc1c4d395f7feb505706f7795214daf";
-||||||| base
-  "d9902c7c891ce9c696420675ecd70500d8b2ec6c17d519635f3515c780aed0b9";
-=======
-  "3108841cc991336e3d0df1d0fb5c22447af2d3e2dff62d6785c9fd2e6f13f021";
->>>>>>> origin/main
+  "53ef51732a9982f9895edd1871f3cf0c5c4810fd7b44c1d2353a9c9fa6523840";
 export const API_SCHEMA_HASH_HEADER = "X-Studio-API-Schema";
 export const API_SCHEMA_HASH_PARAM = "apiSchema";
 export const API_SCHEMA_MISMATCH_HEADER = "X-Studio-API-Schema-Mismatch";
