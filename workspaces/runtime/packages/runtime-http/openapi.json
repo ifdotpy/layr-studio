@@ -31143,7 +31143,8 @@
         "enum": [
           "chat-message",
           "room-invite",
-          "room-accept"
+          "room-accept",
+          "lead-message"
         ],
         "title": "MessageKind",
         "type": "string"

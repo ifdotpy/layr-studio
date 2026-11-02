@@ -140,6 +140,7 @@ pub(crate) fn checked_envelope(value: &Value) -> Result<Envelope> {
         match envelope.kind {
             MessageKind::ChatMessage => "FederationChatPayload",
             MessageKind::RoomInvite | MessageKind::RoomAccept => "FederationRoomPayload",
+            MessageKind::LeadMessage => "FederationLeadPayload",
         },
         &envelope.payload,
         "envelope.payload",
@@ -273,6 +274,11 @@ pub fn decide_receive(snapshot: &Snapshot, envelope: &Value, now: f64) -> Result
     };
     let mut chat = None;
     let room = match message.kind {
+        MessageKind::LeadMessage => {
+            return Err(FederationMessageError::Forbidden(
+                "lead messages need a project grant",
+            ));
+        }
         MessageKind::RoomInvite | MessageKind::RoomAccept => {
             if message.payload["room"] != message.room {
                 return Err(FederationMessageError::Invalid("payload.room"));

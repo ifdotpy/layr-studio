@@ -188,6 +188,7 @@ export const FederationMessageKindValues = [
   "chat-message",
   "room-invite",
   "room-accept",
+  "lead-message",
 ] as const;
 export type FederationMessageKind =
   (typeof FederationMessageKindValues)[number];

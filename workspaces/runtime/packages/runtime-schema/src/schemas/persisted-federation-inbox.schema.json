@@ -22,7 +22,12 @@
     "kind": {
       "anyOf": [
         {
-          "enum": ["chat-message", "room-invite", "room-accept"],
+          "enum": [
+            "chat-message",
+            "room-invite",
+            "room-accept",
+            "lead-message"
+          ],
           "type": "string"
         },
         {

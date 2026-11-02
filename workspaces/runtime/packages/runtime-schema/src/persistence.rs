@@ -120,7 +120,7 @@ domain!(TerminalInputDelivery { Sent=>"sent", Uncertain=>"uncertain" });
 domain!(ServerDeliveryState { Queued=>"queued", Running=>"running", Waiting=>"waiting", Complete=>"complete" });
 domain!(FederationDeliveryState { Queued=>"queued", Delivered=>"delivered" });
 domain!(FederationAckState { Pending=>"pending", Sent=>"sent", Confirmed=>"confirmed" });
-domain!(FederationMessageKind { ChatMessage=>"chat-message", RoomInvite=>"room-invite", RoomAccept=>"room-accept" });
+domain!(FederationMessageKind { ChatMessage=>"chat-message", RoomInvite=>"room-invite", RoomAccept=>"room-accept", LeadMessage=>"lead-message" });
 domain!(AccessOutboundState { Unknown=>"unknown", Complete=>"complete", Redacted=>"redacted" });
 domain!(RemoteOutcome { Applied=>"applied", NotApplied=>"not_applied", Unknown=>"unknown" });
 domain!(RequestCardStatus { Pending=>"pending", Answering=>"answering", Answered=>"answered", Uncertain=>"uncertain", Resolved=>"resolved", Expired=>"expired", Deleted=>"deleted" });

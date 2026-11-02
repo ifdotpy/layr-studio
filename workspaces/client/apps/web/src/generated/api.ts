@@ -14697,7 +14697,11 @@ export interface components {
      * MessageKind
      * @enum {string}
      */
-    MessageKind: "chat-message" | "room-invite" | "room-accept";
+    MessageKind:
+      | "chat-message"
+      | "room-invite"
+      | "room-accept"
+      | "lead-message";
     /** MessageReceiptEntityDto */
     MessageReceiptEntityDto: {
       /** Agent */
@@ -39153,6 +39157,7 @@ export const MessageKind = {
   "chat-message": "chat-message",
   "room-invite": "room-invite",
   "room-accept": "room-accept",
+  "lead-message": "lead-message",
 } as const;
 export type MessageKind = components["schemas"]["MessageKind"];
 export const MessageSendStatus = {

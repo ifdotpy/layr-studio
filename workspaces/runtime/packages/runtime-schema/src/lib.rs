@@ -292,6 +292,10 @@ const FEDERATION_CHAT_PAYLOAD_URI: &str =
     "https://codex-studio.invalid/federation-chat-payload.schema.json";
 const FEDERATION_CHAT_PAYLOAD: &[u8] =
     include_bytes!("schemas/federation-chat-payload.schema.json");
+const FEDERATION_LEAD_PAYLOAD_URI: &str =
+    "https://codex-studio.invalid/federation-lead-payload.schema.json";
+const FEDERATION_LEAD_PAYLOAD: &[u8] =
+    include_bytes!("schemas/federation-lead-payload.schema.json");
 const FEDERATION_ROOM_PAYLOAD_URI: &str =
     "https://codex-studio.invalid/federation-room-payload.schema.json";
 const FEDERATION_ROOM_PAYLOAD: &[u8] =
@@ -346,6 +350,7 @@ const PERSISTED_SCHEMAS: &[(&str, &[u8])] = &[
     (EXECUTION_RUN_RECORD_URI, EXECUTION_RUN_RECORD),
     (FEDERATION_CHAT_PAYLOAD_URI, FEDERATION_CHAT_PAYLOAD),
     (FEDERATION_INBOX_URI, FEDERATION_INBOX),
+    (FEDERATION_LEAD_PAYLOAD_URI, FEDERATION_LEAD_PAYLOAD),
     (FEDERATION_OUTBOX_URI, FEDERATION_OUTBOX),
     (FEDERATION_PEER_URI, FEDERATION_PEER),
     (FEDERATION_ROOM_PAYLOAD_URI, FEDERATION_ROOM_PAYLOAD),
@@ -948,6 +953,7 @@ fn prepare_schemas() -> SchemaResult<CompiledSchemas> {
             "https://codex-studio.invalid/analytics-usage.schema.json",
         ),
         ("FederationChatPayload", FEDERATION_CHAT_PAYLOAD_URI),
+        ("FederationLeadPayload", FEDERATION_LEAD_PAYLOAD_URI),
         ("FederationRoomPayload", FEDERATION_ROOM_PAYLOAD_URI),
         ("PersistedAccessClient", ACCESS_CLIENT_URI),
         ("PersistedAccessInvite", ACCESS_INVITE_URI),
