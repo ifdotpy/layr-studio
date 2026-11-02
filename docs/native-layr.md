@@ -326,7 +326,7 @@ The wrapper preserves the command's output and exit status. It does not retry fa
 Layr 0.2.1 returns state IDs for commit identities and supports porcelain v1 only.
 The proxy uses Layr only for a small set of verified argument forms.
 Other reads use the real Git executable against the Layr-managed `.git` directory.
-This fallback also serves read commands that Layr does not implement, including `describe` and `cat-file`.
+This fallback also serves read commands that Layr does not implement, including `archive`, `describe` and `cat-file`.
 Git commit IDs therefore match the exported head, including `git rev-parse HEAD` and build stamps.
 The fallback disables optional Git index refreshes.
 Git owns path quoting for porcelain and `ls-files` without `-z`, all grep forms, and unverified history formats.
@@ -341,7 +341,7 @@ Other real Git index reads describe the exported head, including `ls-files` with
 Git writes remain refused with a Layr command hint.
 Layr also keeps the `.git` folder of a line read only (mode 0555), so a real Git write fails with `Permission denied`.
 Layr opens the folder around its own writes. Studio does the same when it installs the commit hook and when an import moves `.git` aside, and it restores the mode.
-Read commands with `--output` also fail because that option writes a file.
+Read commands with `--output` also fail because that option writes a file; `archive -o` is refused for the same reason.
 Outside native lines, the wrapper passes the original arguments to real Git.
 Explicit Git configuration and repository selectors use the real Git read path.
 
