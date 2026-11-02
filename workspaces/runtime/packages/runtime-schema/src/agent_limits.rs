@@ -8,6 +8,11 @@ pub const MIN_SUBAGENT_CONCURRENCY: i64 = 0;
 pub const DEFAULT_SUBAGENT_CONCURRENCY: i64 = 32;
 /// Most concurrent subagents per lead chat.
 pub const MAX_SUBAGENT_CONCURRENCY: i64 = 2048;
+/// Valid stored subagent concurrency, measured in workers.
+pub type SubagentConcurrency = crate::bounded_integer::BoundedInteger<
+    MIN_SUBAGENT_CONCURRENCY,
+    { MAX_SUBAGENT_CONCURRENCY as u64 },
+>;
 /// Fewest agent records per team.
 pub const MIN_TEAM_AGENTS: i64 = 1;
 /// Default agent records per team.

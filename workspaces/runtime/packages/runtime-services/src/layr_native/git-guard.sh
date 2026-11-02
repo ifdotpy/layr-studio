@@ -143,11 +143,12 @@ check() {
     env_guarded=0
     proxy=1
     route=git
-    git_dir_target=''; work_tree_target=''
+    git_dir_target=''; work_tree_target=''; selected=0
     # Known limit: relative environment selectors precede any later -C.
     for candidate in "${GIT_DIR-}" "${GIT_WORK_TREE-}" "${GIT_COMMON_DIR-}"; do
         [ -n "$candidate" ] || continue
         proxy=0
+        selected=1
         case "$candidate" in /*) ;; *) candidate="$here/$candidate" ;; esac
         resolve_candidate || continue
         in_line "$candidate" && env_guarded=1
@@ -163,12 +164,12 @@ check() {
                 esac
                 shift 2 ;;
             --git-dir|--work-tree)
-                proxy=0
+                proxy=0; selected=1
                 [ "$#" -ge 2 ] || return 0
                 case "$1" in --git-dir) git_dir_target=$2 ;; *) work_tree_target=$2 ;; esac
                 shift 2 ;;
-            --git-dir=*) proxy=0; git_dir_target=${1#*=}; shift ;;
-            --work-tree=*) proxy=0; work_tree_target=${1#*=}; shift ;;
+            --git-dir=*) proxy=0; selected=1; git_dir_target=${1#*=}; shift ;;
+            --work-tree=*) proxy=0; selected=1; work_tree_target=${1#*=}; shift ;;
             -c|--config-env|--namespace|--super-prefix)
                 proxy=0; [ "$#" -ge 2 ] || return 0; shift 2 ;;
             --no-pager|-P|--no-optional-locks) shift ;;
@@ -181,15 +182,43 @@ check() {
         esac
     done
     guarded=$env_guarded
-    in_line "$here" && guarded=1
+    if [ "$selected" -eq 0 ]; then in_line "$here" && guarded=1; fi
     for candidate in "$git_dir_target" "$work_tree_target"; do
         [ -n "$candidate" ] || continue
         case "$candidate" in /*) ;; *) candidate="$here/$candidate" ;; esac
         resolve_candidate || continue
         in_line "$candidate" && guarded=1
     done
-    [ "$guarded" -eq 1 ] || return 0
     [ "$#" -gt 0 ] || return 0
+    # init and config can name a target independently of the repository.
+    # Only an unambiguous explicit target can override the current directory.
+    target=''
+    case "$1" in
+        init)
+            shift
+            for arg do
+                case "$arg" in -q|--quiet|--bare) ;; -*) target=''; break ;; *) [ -z "$target" ] || { target=''; break; }; target=$arg ;; esac
+            done
+            set -- init "$@" ;;
+        config)
+            shift
+            case "${1-}" in
+                --file|-f) target=${2-} ;;
+                --file=*) target=${1#*=} ;;
+                --global) target=${GIT_CONFIG_GLOBAL-} ;;
+            esac
+            set -- config "$@" ;;
+    esac
+    if [ -n "$target" ] && [ "$target" != - ]; then
+        candidate=$target
+        case "$candidate" in /*) ;; *) candidate="$here/$candidate" ;; esac
+        if resolve_candidate; then
+            if in_line "$candidate"; then guarded=1
+            elif [ "$env_guarded" -eq 0 ] && [ -z "$git_dir_target$work_tree_target" ]; then guarded=0
+            fi
+        fi
+    fi
+    [ "$guarded" -eq 1 ] || return 0
     read_route "$@" || return 1
     if [ "$proxy" -eq 1 ] && in_line "$here" && [ "$route" = layr ]; then
         proxy_read "$@"

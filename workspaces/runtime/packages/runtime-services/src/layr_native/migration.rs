@@ -484,7 +484,7 @@ pub fn migrate_with_options(
 }
 
 /// Create line `name` from main and replace its `relative` repository subtree with
-/// the worktree files of `plan`, including ignored data and warm caches.
+/// the selected worktree files of `plan` and warm caches.
 /// Callers run this inside a receipt; the source folder stays unchanged.
 pub(super) fn import_worktree_line(
     state_dir: &Path,
@@ -540,7 +540,7 @@ pub(super) fn import_worktree_line(
             .collect();
         clear_at(&destination, &cache_roots)?;
         // Reuse the pinned subtree even if its pathname was replaced after opening it.
-        plan.stage_open(&destination, &line_directory, relative)
+        plan.stage_open(&destination)
     })?;
     // A top-level line is a private container, distinct from a nested repository root.
     if relative.as_os_str().is_empty() {
@@ -711,7 +711,7 @@ mod tests {
         fs::create_dir_all(project.join("sub/target")).expect("source");
         git(project, &["init", "-q"]).expect("Git init");
         fs::write(project.join("Cargo.toml"), "[package]\n").expect("manifest");
-        fs::write(project.join(".gitignore"), "/target/\n").expect("ignore");
+        fs::write(project.join(".gitignore"), "").expect("ignore");
         fs::write(project.join("sub/target/from-main"), "base-data").expect("versioned data");
         git(project, &["add", "."]).expect("Git add");
         git(
@@ -1149,7 +1149,9 @@ mod tests {
         assert!(
             refused["refusals"]
                 .to_string()
-                .contains("outside the project")
+                .contains("outside the project"),
+            "{}",
+            refused["refusals"]
         );
         fs::write(
             project.join("shared/.git/objects/info/alternates"),
@@ -1168,7 +1170,9 @@ mod tests {
         assert!(
             refused["refusals"]
                 .to_string()
-                .contains("outside the project")
+                .contains("outside the project"),
+            "{}",
+            refused["refusals"]
         );
         assert!(!state.exists());
     }
@@ -1305,21 +1309,16 @@ mod tests {
             }
         }
         let retained = fixture.path().join("retained-main");
-        fs::create_dir_all(retained.join(".studio-native-import")).expect("owned main");
         git(
             &project,
             &[
                 "clone",
-                "--bare",
                 "--no-local",
                 project.to_str().expect("project path"),
-                retained
-                    .join(".studio-native-import/git")
-                    .to_str()
-                    .expect("store path"),
+                retained.to_str().expect("store path"),
             ],
         )
-        .expect("retained Git fixture");
+        .expect("bridge Git fixture");
         super::super::import::verify_imported_head(&retained, Path::new(""), head.trim())
             .expect("retained base commit");
         let detached = git(&project.join(".worktrees/detached"), &["rev-parse", "HEAD"])

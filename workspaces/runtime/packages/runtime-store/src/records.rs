@@ -369,6 +369,24 @@ pub struct AgentRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_mode: Option<studio_runtime_schema::records::WorkspaceMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<studio_runtime_schema::agent_limits::SubagentConcurrency>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mode: Option<studio_runtime_schema::agent_entity_nested::AgentMode>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_safe_counter"
+    )]
+    pub agent_mode_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_concurrency_version: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layr_store_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_server_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker_base_ref: Option<String>,
@@ -688,7 +706,7 @@ pub struct AgentRecord {
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub fired_events: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_review_thread: Option<NativeReviewThread>,
+    pub native_review_thread: Option<Box<NativeReviewThread>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vm_launch: Option<VmLaunch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1123,6 +1141,13 @@ impl AgentRecord {
             native_status: None,
             is_lead: None,
             workspace_mode: None,
+            concurrency: None,
+            agent_mode: None,
+            agent_mode_revision: None,
+            subagent_concurrency_version: None,
+            layr_store_root: None,
+            project_id: None,
+            project_server_id: None,
             worktree: None,
             worker_base_ref: None,
             workspace_mode_explicit: None,
@@ -3140,6 +3165,11 @@ pub(crate) fn decode_json_record<T: DeserializeOwned>(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn agent_record_stays_small_for_async_futures() {
+        // Leave room for surrounding state below clippy's 16 KiB large_futures limit.
+        assert!(std::mem::size_of::<super::AgentRecord>() <= 4608);
+    }
+    #[test]
     fn agent_write_rejects_extra_keys_owned_by_named_fields() {
         for (key, value) in [
             ("error", serde_json::json!(null)),
@@ -3712,6 +3742,30 @@ mod tests {
             json!({"model":null,"effort":"high"})
         );
         assert_eq!(record, AgentRecord::from_value(encoded).unwrap());
+    }
+
+    #[test]
+    fn creation_identity_and_mode_fields_are_typed() {
+        let record = agent(
+            json!({"id":"agent","rootId":"agent","epoch":2,"status":"idle",
+            "accountKey":"default","compactions":0,"concurrency":32,"agentMode":"multi",
+            "agentModeRevision":1,"subagentConcurrencyVersion":2,"layrStoreRoot":"/store",
+            "projectId":"project","projectServerId":"server"}),
+        );
+        for key in [
+            "concurrency",
+            "agentMode",
+            "agentModeRevision",
+            "subagentConcurrencyVersion",
+            "layrStoreRoot",
+            "projectId",
+            "projectServerId",
+        ] {
+            assert!(!record.extra.contains_key(key), "{key}");
+        }
+        assert_eq!(record.concurrency.map(|value| value.get()), Some(32));
+        assert_eq!(record.project_id.as_deref(), Some("project"));
+        assert_eq!(record.value()["agentMode"], "multi");
     }
 
     #[test]

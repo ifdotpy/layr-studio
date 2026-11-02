@@ -679,6 +679,13 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
     #[cfg(test)]
     crate::scheduler::publication_work::projection(id);
     let mut view = record.as_object()?.clone();
+    let manual_check = crate::recovery_policy::RecoverySnapshot::from_record(record.clone())
+        .map(|snapshot| snapshot.manual_connection_check())
+        .unwrap_or_default();
+    view.insert(
+        "manualConnectionCheck".into(),
+        serde::Serialize::serialize(&manual_check, serde_json::value::Serializer).ok()?,
+    );
     view.insert(
         studio_runtime_schema::agent_progress::START_WAIT_FIELD.into(),
         serde::Serialize::serialize(
@@ -1143,7 +1150,7 @@ mod projection_plan_tests {
         assert!(projected.get("workspaceBackend").is_none());
         assert_eq!(
             studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
-            "b2ae13a4c60b1d7373b79ab982292d2d02ec8c576b257f881cb777bd35d3178d"
+            "53bb9c6ebdcfbbd45e72b104f3159233ed2b17c1e4c4e8b4b39c6c4feaab00c1"
         );
     }
 
@@ -1156,7 +1163,7 @@ mod projection_plan_tests {
         assert!(projected.get("compactionsObservedOnly").is_none());
         assert_eq!(
             studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
-            "b2ae13a4c60b1d7373b79ab982292d2d02ec8c576b257f881cb777bd35d3178d"
+            "53bb9c6ebdcfbbd45e72b104f3159233ed2b17c1e4c4e8b4b39c6c4feaab00c1"
         );
     }
 
@@ -1189,7 +1196,7 @@ mod projection_plan_tests {
             super::agent_entity_view(&agent.value(), &super::AgentViewContext::default()).unwrap();
         assert_eq!(
             studio_runtime_store::sha256_hex(&serde_json::to_vec(&projected).unwrap()),
-            "69870ccec982e294904c5df141fbc2d9d3f1358ccf49d5e275a02bf299f55a73"
+            "80e14a8a655e664574ce206954aa188b700430e6c5c27f4b0fe887101a76cc64"
         );
     }
 
@@ -1207,7 +1214,7 @@ mod projection_plan_tests {
         assert_eq!(legacy, normalized);
         assert_eq!(
             studio_runtime_store::sha256_hex(&normalized),
-            "b2ae13a4c60b1d7373b79ab982292d2d02ec8c576b257f881cb777bd35d3178d"
+            "53bb9c6ebdcfbbd45e72b104f3159233ed2b17c1e4c4e8b4b39c6c4feaab00c1"
         );
     }
 
