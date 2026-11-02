@@ -6,7 +6,11 @@ import {
 import type { Page, Route } from "@playwright/test";
 import type { SessionResponse } from "../playwright.ts";
 
-import { isAnswerRequest, type AnswerResult } from "../answer-command.ts";
+import {
+  answerRequest,
+  isAnswerRequest,
+  type AnswerResult,
+} from "../answer-command.ts";
 import type { MessageDelivery } from "../../src/commands.ts";
 import { commandOf, sendReply } from "../messages/send-command.ts";
 import {
@@ -425,6 +429,7 @@ async function runSnapshotOrderUi(
       `Loading label ${key} stays stable; before=${JSON.stringify(before)}, during=${JSON.stringify(during)}, frames=${JSON.stringify(geometryFrames)}`,
     );
   const serverAnswer = await pendingAnswer!.fetch();
+  const requestId = answerRequest(pendingAnswer!.request()).id;
   const answerResponse = (await serverAnswer.json()) as {
     kind: string;
     result: AnswerResult;
@@ -437,6 +442,21 @@ async function runSnapshotOrderUi(
     json: answerResponse,
   });
   await card.waitFor({ state: "hidden" });
+  // The removal of the answered request reaches the client through the entity stream: a
+  // pull carries its tombstone. The command response holds live rows only.
+  await expect
+    .poll(
+      () =>
+        entityPulls.some((pull) =>
+          pull.documents.some(
+            (document) =>
+              document.id === `entity:request:${requestId}` &&
+              document._deleted,
+          ),
+        ),
+      { message: "The answer tombstone arrives through the entity stream" },
+    )
+    .toBe(true);
 
   for (const oldFailure of [false, true]) {
     oldRequest = null;
