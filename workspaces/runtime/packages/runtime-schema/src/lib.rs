@@ -294,7 +294,8 @@ const FEDERATION_CHAT_PAYLOAD: &[u8] =
     include_bytes!("schemas/federation-chat-payload.schema.json");
 const FEDERATION_LEAD_PAYLOAD_URI: &str =
     "https://codex-studio.invalid/federation-lead-payload.schema.json";
-const FEDERATION_LEAD_PAYLOAD: &[u8] = include_bytes!("schemas/federation-lead-payload.schema.json");
+const FEDERATION_LEAD_PAYLOAD: &[u8] =
+    include_bytes!("schemas/federation-lead-payload.schema.json");
 const FEDERATION_ROOM_PAYLOAD_URI: &str =
     "https://codex-studio.invalid/federation-room-payload.schema.json";
 const FEDERATION_ROOM_PAYLOAD: &[u8] =
