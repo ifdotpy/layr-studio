@@ -34,10 +34,14 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
                 )
                 .optional()?;
             if let Some(raw) = raw {
-                secrets.extend(super::m2026_10_30_approvals::legacy_secret_ids(
-                    approval.id.as_str(),
-                    &raw,
-                )?);
+                match super::m2026_10_30_approvals::legacy_secret_ids(approval.id.as_str(), &raw) {
+                    Ok(ids) => secrets.extend(ids),
+                    // One legacy row the strict reader cannot place (for example, no createdAt)
+                    // keeps only the secret flags of its approval. It never fails the migration.
+                    Err(error) => eprintln!(
+                        "approval secret redaction used the approval's own secret flags: {error}"
+                    ),
+                }
             }
         }
         let answer = match &mut approval.state {
@@ -127,6 +131,33 @@ mod tests {
             let seq = SyncDocumentsRepository::entity_sequence(tx)?;
             apply(tx)?;
             assert_eq!(seq, SyncDocumentsRepository::entity_sequence(tx)?);
+            Ok::<_, StoreError>(())
+        }).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_legacy_row_without_created_at_is_skipped_for_its_legacy_secrets_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::RuntimeStore::open(Some(dir.path())).await.unwrap();
+        store.transaction(|tx| {
+            // The question history migration converts a row without createdAt with time 0.
+            // The raw row keeps no createdAt, so the strict legacy read cannot place it.
+            let raw = json!({"id":"s","method":"agent/asyncQuestion","agent":"a","status":"answered",
+                "params":{"questions":[{"id":"0","question":"?","isSecret":true}]},
+                "decision":"answer","answeredBy":"user","answeredAt":2.0,
+                "answerHistory":[{"id":"0","question":"?","isSecret":true,"answer":["sensitive-value"]}]});
+            let mut converted = raw.clone();
+            converted["createdAt"] = json!(0.0);
+            let mut approval = super::super::m2026_10_30_approvals::approval_from_record("s", &converted.to_string())?;
+            let ApprovalState::Answered { answer: Answer::Answers { answers }, .. } = &mut approval.state else { panic!("answered"); };
+            answers[0].answer = vec!["sensitive-value".into()]; answers[0].digest = None;
+            approvals::put(tx, &approval)?;
+            tx.execute("INSERT INTO runtime_requests(id,record) VALUES('s',?1)", [raw.to_string()])?;
+            SyncDocumentsRepository::put_entity(tx, "questionHistory", "s", &approval, false)?;
+            apply(tx)?;
+            let row = approvals::get(tx, &ApprovalId("s".into()))?.unwrap();
+            let stored = serde_json::to_string(&row)?;
+            assert!(!stored.contains("sensitive-value"));
             Ok::<_, StoreError>(())
         }).await.unwrap();
     }
