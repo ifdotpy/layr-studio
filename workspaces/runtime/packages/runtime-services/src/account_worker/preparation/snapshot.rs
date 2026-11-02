@@ -1526,12 +1526,13 @@ pub(super) fn submission_snapshot(
     for (_, raw) in team {
         let worker: AgentRecord = serde_json::from_str(&raw).map_err(|_| invalid("worker"))?;
         let status = turn::WorkerStatus::from_agent_status(worker.status.as_str());
+        let deleted = worker.is_deleted();
         workers.push(turn::Worker {
             id: worker.id.0,
             root_id: root_id.into(),
             parent_id: worker.parent_id,
             worktree_ready: worker.worktree_ready.unwrap_or(false),
-            deleted: worker.deleted_at.is_some(),
+            deleted,
             status,
             auto_wake: worker.auto_wake.unwrap_or(false),
         });
@@ -1561,11 +1562,12 @@ pub(super) fn submission_snapshot(
             .or(text(&v, "agent")?)
             .ok_or_else(|| invalid("asset/agent"))?;
         let owner = agent(tx, &owner)?;
+        let owner_deleted = owner.is_deleted();
         assets.push(turn::Asset {
             id,
             owner_id: owner.id.0,
             owner_root_id: owner.root_id.0,
-            owner_deleted: owner.deleted_at.is_some(),
+            owner_deleted,
             image: flag(&v, "image")?,
             path: decode(v["path"].clone(), "asset/path")?,
             name: decode(v["name"].clone(), "asset/name")?,

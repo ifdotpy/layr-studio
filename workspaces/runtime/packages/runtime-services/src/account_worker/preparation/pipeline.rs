@@ -2749,9 +2749,12 @@ mod team_progress_delivery_tests {
                     ("busy", "running"),
                     ("waiting", "queued"),
                 ] {
-                    let child = json!({"compactions":0,"id":id,"rootId":"lead","parentId":"lead","epoch":1,
+                    let mut child = json!({"compactions":0,"id":id,"rootId":"lead","parentId":"lead","epoch":1,
                         "status":status,"autoWake":true,"name":id,"cwd":"/work",
                         "provider":provider,"accountKey":"default"});
+                    if id == "busy" {
+                        child["deletedAt"] = json!(0);
+                    }
                     AgentRepository::put(tx, &AgentRecord::from_value(child).expect("child"))?;
                 }
                 for (index, id) in ["done", "failed"].into_iter().enumerate() {
@@ -2787,6 +2790,14 @@ mod team_progress_delivery_tests {
             })
             .await
             .expect("batch snapshot");
+        assert!(
+            !snapshot
+                .workers
+                .iter()
+                .find(|worker| worker.id == "busy")
+                .unwrap()
+                .deleted
+        );
         for provider in studio_runtime_providers::ProviderKind::ALL {
             snapshot.provider = Some(provider);
             let prepared = turn::compile(&snapshot, &events).expect("provider projection");
