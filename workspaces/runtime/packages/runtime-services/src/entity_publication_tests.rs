@@ -364,6 +364,13 @@ async fn worker_status_changes_publish_lead_team_counts() {
         vec!["worker".into()],
     )
     .await;
+    // The status lives on the chat row, which a raw record write does not project.
+    write(
+        &store,
+        "UPDATE chats SET status='completed' WHERE id=?1",
+        vec!["worker".into()],
+    )
+    .await;
     assert_eq!(
         client_entity(&store, "agentSummary", CHAT).expect("lead").1["teamCounts"],
         json!({"working":0,"total":1})
@@ -1605,6 +1612,13 @@ async fn studio_error_rows_are_published_as_entities_with_their_source_write() {
         &store,
         "UPDATE runtime_agents SET record=json_set(record,'$.status','failed','$.error',?2) WHERE id=?1",
         vec![CHAT.to_owned(), studio_runtime_schema::shared_values::PROVIDER_DISCONNECTED_TURN_ERROR.to_owned()],
+    )
+    .await;
+    // The status lives on the chat row, which a raw record write does not project.
+    write(
+        &store,
+        "UPDATE chats SET status='failed' WHERE id=?1",
+        vec![CHAT.to_owned()],
     )
     .await;
 

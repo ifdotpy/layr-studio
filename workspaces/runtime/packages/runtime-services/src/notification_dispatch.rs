@@ -2624,16 +2624,14 @@ mod tests {
             .expect("notification dispatch tables create");
         studio_runtime_store::receipt_schema::create(&connection).expect("receipt owner tables");
         fixture_attempt(&connection, "attempt");
+        let agent_record = json!({"id":"agent","provider":studio_runtime_schema::ProviderKind::Codex,
+                    "rootId":"agent","epoch":1,"status":"running","threadId":"thread","compactions":0,
+                    "accountKey":"default","turnId":"turn","inFlight":true,"events":0,
+                    "activeTools":[],"autoWake":false,"activeExecution":{"attemptId":"attempt"}});
         connection
             .execute(
                 "INSERT INTO runtime_agents(id,record) VALUES('agent',?1)",
-                [
-                    json!({"id":"agent","provider":studio_runtime_schema::ProviderKind::Codex,
-                    "rootId":"agent","epoch":1,"status":"running","threadId":"thread","compactions":0,
-                    "accountKey":"default","turnId":"turn","inFlight":true,"events":0,
-                    "activeTools":[],"autoWake":false,"activeExecution":{"attemptId":"attempt"}})
-                    .to_string(),
-                ],
+                [agent_record.to_string()],
             )
             .expect("notification dispatch agent");
         connection
@@ -2645,6 +2643,13 @@ mod tests {
                 [],
             )
             .expect("notification dispatch session");
+        // Status and turn live on the chat and turn rows.
+        connection
+            .execute_batch(
+                "INSERT INTO chats(id,state,status) VALUES('agent','active','running');
+                 INSERT INTO turns(id,chat,state,provider_turn) VALUES('agent:turn','agent','running','turn');",
+            )
+            .expect("notification dispatch chat and turn");
         connection
             .execute_batch(studio_runtime_store::agent_volatile::agent_volatile_table_sql())
             .expect("volatile agent table creates");
@@ -4711,7 +4716,7 @@ mod busy_stream_tests {
             .unwrap();
         }
         db.execute(
-            "INSERT INTO turns(id,chat,state) VALUES('t1','busy','starting')",
+            "INSERT INTO turns(id,chat,state,provider_turn) VALUES('t1','busy','starting','turn')",
             [],
         )
         .unwrap();
