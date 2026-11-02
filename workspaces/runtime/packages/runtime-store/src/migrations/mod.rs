@@ -115,7 +115,8 @@ pub fn normalize_agent_fixtures(tx: &rusqlite::Transaction<'_>) -> crate::StoreR
     m2026_10_31_agent_core::apply(tx)?;
     m2026_10_31_agent_batch_55::apply(tx)?;
     m2026_11_01_agent_capacity::apply(tx)?;
-    m2026_11_01_agent_naming::apply(tx)
+    m2026_11_01_agent_naming::apply(tx)?;
+    m2026_11_02_agent_worker_base_ref::apply(tx)
 }
 
 use std::path::Path;
