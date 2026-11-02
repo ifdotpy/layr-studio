@@ -519,7 +519,7 @@ pub struct ResponseRateAssociation {
 }
 #[derive(Default)]
 pub struct CaptureDecision {
-    pub unknown_usage: Option<Value>,
+    unknown_usage: Option<UnknownUsageReceipt>,
     pub usage_conflict: Option<studio_runtime_schema::usage::ledger::UsageReplayConflict>,
     pub rows: Vec<(CaptureTable, Value)>,
     notifications: Vec<Notification>,
@@ -528,14 +528,38 @@ pub struct CaptureDecision {
     pub response_rate: Option<ResponseRateAssociation>,
     pub response_replay_conflict: bool,
 }
+enum UnknownUsageOwner {
+    Agent(String),
+    Identity(UsageIdentity),
+}
+struct UnknownUsageReceipt {
+    owner: UnknownUsageOwner,
+    observation_key: String,
+}
+impl serde::Serialize for UnknownUsageReceipt {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(3))?;
+        match &self.owner {
+            UnknownUsageOwner::Agent(agent) => map.serialize_entry("agent", agent)?,
+            UnknownUsageOwner::Identity(identity) => map.serialize_entry("identity", identity)?,
+        }
+        map.serialize_entry("observationKey", &self.observation_key)?;
+        map.serialize_entry(
+            "fault",
+            studio_runtime_schema::usage::ledger::UNKNOWN_USAGE_RECEIPT,
+        )?;
+        map.end()
+    }
+}
 impl CaptureDecision {
     pub fn apply(&self, tx: &Transaction<'_>) -> Result<(), CaptureError> {
         if let Some(unknown) = &self.unknown_usage {
             tx.execute_cached(
                 "INSERT INTO analytics_meta(key,value) VALUES (?1,?2) ON CONFLICT(key) DO NOTHING",
                 params![
-                    format!("unknownUsageReceipt:{}", text(&unknown["observationKey"])),
-                    unknown.to_string()
+                    format!("unknownUsageReceipt:{}", unknown.observation_key),
+                    serde_json::to_string(unknown).map_err(StoreError::from)?
                 ],
             )?;
         }
@@ -1470,9 +1494,27 @@ fn usage(
     out: &mut CaptureDecision,
 ) {
     if q.usage_unknown {
-        out.unknown_usage = Some(
-            json!({"agent":meta["agentId"],"observationKey":q.usage.as_ref().map(|observation|UsageLedgerRow::capture(text(&meta["agentId"]),meta["threadId"].as_str(),observation.clone()).observation_key()).or_else(||q.legacy_usage.as_ref().map(|legacy|legacy_usage_key(meta,legacy,&q.params))),"fault":studio_runtime_schema::usage::ledger::UNKNOWN_USAGE_RECEIPT}),
-        );
+        let observation_key = q
+            .usage
+            .as_ref()
+            .map(|observation| {
+                UsageLedgerRow::capture(
+                    text(&meta["agentId"]),
+                    meta["threadId"].as_str(),
+                    observation.clone(),
+                )
+                .observation_key()
+            })
+            .or_else(|| {
+                q.legacy_usage
+                    .as_ref()
+                    .map(|legacy| legacy_usage_key(meta, legacy, &q.params))
+            })
+            .expect("unknown usage has a key");
+        out.unknown_usage = Some(UnknownUsageReceipt {
+            owner: UnknownUsageOwner::Agent(text(&meta["agentId"]).to_owned()),
+            observation_key,
+        });
         return;
     }
     if let Some(conflict) = &q.rejected_usage {
@@ -1486,9 +1528,14 @@ fn usage(
                 return;
             }
             if q.legacy_counter_era() {
-                out.unknown_usage = Some(
-                    json!({"identity":UsageIdentity::Cumulative {agent:text(&meta["agentId"]).into(),thread_id:meta["threadId"].as_str().map(str::to_owned),scope:legacy.scope},"observationKey":legacy_usage_key(meta,legacy,&q.params),"fault":studio_runtime_schema::usage::ledger::UNKNOWN_USAGE_RECEIPT}),
-                );
+                out.unknown_usage = Some(UnknownUsageReceipt {
+                    owner: UnknownUsageOwner::Identity(UsageIdentity::Cumulative {
+                        agent: text(&meta["agentId"]).into(),
+                        thread_id: meta["threadId"].as_str().map(str::to_owned),
+                        scope: legacy.scope,
+                    }),
+                    observation_key: legacy_usage_key(meta, legacy, &q.params),
+                });
                 return;
             }
             let mut last = json!({});
@@ -1544,9 +1591,10 @@ fn usage(
             meta["threadId"].as_str(),
             observation,
         );
-        out.unknown_usage = Some(
-            json!({"identity":ledger.usage_identity(),"observationKey":ledger.observation_key(),"fault":studio_runtime_schema::usage::ledger::UNKNOWN_USAGE_RECEIPT}),
-        );
+        out.unknown_usage = Some(UnknownUsageReceipt {
+            owner: UnknownUsageOwner::Identity(ledger.usage_identity().clone()),
+            observation_key: ledger.observation_key(),
+        });
         return;
     }
     if let Some(previous) = existing
@@ -1726,6 +1774,37 @@ pub async fn capture_limit(
 #[cfg(test)]
 mod usage_contract_tests {
     use super::*;
+
+    #[test]
+    fn unknown_usage_receipts_preserve_both_stored_shapes() {
+        let receipts = [
+            (
+                UnknownUsageReceipt {
+                    owner: UnknownUsageOwner::Agent("agent".into()),
+                    observation_key: "key".into(),
+                },
+                r#"{"agent":"agent","fault":"unknownUsageReceipt","observationKey":"key"}"#,
+            ),
+            (
+                UnknownUsageReceipt {
+                    owner: UnknownUsageOwner::Identity(UsageIdentity::Cumulative {
+                        agent: "agent".into(),
+                        thread_id: Some("thread".into()),
+                        scope: UsageScope::CodexThread,
+                    }),
+                    observation_key: "key".into(),
+                },
+                r#"{"fault":"unknownUsageReceipt","identity":{"agent":"agent","kind":"cumulative","scope":"codexThread","threadId":"thread"},"observationKey":"key"}"#,
+            ),
+        ];
+        for (receipt, expected) in receipts {
+            let actual: Value =
+                serde_json::from_str(&serde_json::to_string(&receipt).expect("serialize"))
+                    .expect("JSON");
+            let expected: Value = serde_json::from_str(expected).expect("expected JSON");
+            assert_eq!(actual, expected);
+        }
+    }
 
     #[test]
     fn typed_usage_identity_keeps_legacy_hash() {
