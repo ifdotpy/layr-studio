@@ -77,6 +77,7 @@ failed. Concurrent deliveries using the same release root are refused by
 The launcher passes the invoking shell's toolchain, path, proxy, XDG, and release
 root settings listed in [deliver.sh](../workspaces/runtime/apps/runtime-server/deliver.sh).
 It fails if `systemd-run` is missing instead of delivering in the caller's process.
+Missing user-manager variables default to `/run/user/<uid>` and its bus socket.
 `CODEX_STUDIO_DELIVER_IN_UNIT` is the internal recursion guard. The worker
 accepts it only with a valid manager `INVOCATION_ID` and membership in the
 expected delivery unit in `/proc/self/cgroup`; an inherited guard outside that
