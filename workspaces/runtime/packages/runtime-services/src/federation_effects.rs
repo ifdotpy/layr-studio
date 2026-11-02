@@ -369,7 +369,11 @@ async fn handle_project_pair(
                     created_at: now as i64,
                     revoked_at: None,
                 }])?;
+<<<<<<< head
                 crate::sync_policy::publish_peer_teams(tx)?;
+||||||| base
+=======
+>>>>>>> origin/feat/project-pairing-routes
             }
         }
         if invite["status"] == "open" {

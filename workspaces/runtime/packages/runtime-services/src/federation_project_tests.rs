@@ -289,6 +289,7 @@ async fn revoke_is_final_and_refuses_a_later_pairing_request() {
         Some(1)
     );
 }
+<<<<<<< head
 
 /// Peer team `team` of the local project `project-b`, as stored in its entity payload.
 async fn peer_team_payload(store: &Arc<RuntimeStore>) -> String {
@@ -360,3 +361,6 @@ async fn accept_shows_the_peer_lead_in_the_team_and_revoke_removes_it() {
         "peer lead removed"
     );
 }
+||||||| base
+=======
+>>>>>>> origin/feat/project-pairing-routes
