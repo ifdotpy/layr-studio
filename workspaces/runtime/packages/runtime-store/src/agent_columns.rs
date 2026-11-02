@@ -546,7 +546,11 @@ mod tests {
             )
             .expect("agent updates");
         let status: String = connection
-            .query_row("SELECT record->>'$.status' FROM runtime_agents", [], |row| row.get(0))
+            .query_row(
+                "SELECT record->>'$.status' FROM runtime_agents",
+                [],
+                |row| row.get(0),
+            )
             .expect("columns");
         assert_eq!(status, "queued");
         connection

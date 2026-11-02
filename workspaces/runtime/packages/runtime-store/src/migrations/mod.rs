@@ -80,8 +80,8 @@ mod m2026_11_01_transfer_operations;
 mod m2026_11_01_transfer_pointers;
 mod m2026_11_01_transfer_summary;
 mod m2026_11_01_work_detail_policy;
-mod m2026_11_02_retired_status_columns;
 mod m2026_11_02_legacy_vm_transfers;
+mod m2026_11_02_retired_status_columns;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -2329,7 +2329,8 @@ mod tests {
         assert!(position("2026-10-28-receipts-tools") < position("2026-10-28-receipts-requests"));
         assert!(position("2026-10-28-receipts-requests") < position("2026-10-28-receipts-remote"));
         assert!(
-            position("2026-11-01-chat-busy-indexes") < position("2026-11-02-retired-status-columns")
+            position("2026-11-01-chat-busy-indexes")
+                < position("2026-11-02-retired-status-columns")
         );
         assert!(
             position("2026-10-31-retired-start-indexes")
