@@ -578,6 +578,26 @@ fn main() -> Result<(), Box<dyn Error>> {
         rust_type: "studio_runtime_schema::command::CommandRequest".to_owned(),
         serde_with: None,
     };
+    // The answer result and the forward of a sign-in have one owner too.
+    for (name, rust_type) in [
+        (
+            "AnswerResult",
+            "studio_runtime_schema::command::AnswerResult",
+        ),
+        (
+            "BrowserForward",
+            "studio_runtime_schema::command::BrowserForward",
+        ),
+    ] {
+        analysis
+            .schemas
+            .get_mut(name)
+            .ok_or("missing answer result schema")?
+            .schema_type = SchemaType::Primitive {
+            rust_type: rust_type.to_owned(),
+            serde_with: None,
+        };
+    }
     analysis.schemas.retain(|name, _| {
         !(name.starts_with("CommandRequest") && name != "CommandRequest")
             && !matches!(
@@ -586,6 +606,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     | "CommandWithdrawBody"
                     | "CommandStopBody"
                     | "CommandResponse"
+                    | "CommandResponseApplied"
+                    | "CommandResponseAnswer"
                     | "CommandRow"
             )
     });

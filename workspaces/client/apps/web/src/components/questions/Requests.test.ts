@@ -11,6 +11,10 @@ const h = vi.hoisted(() => ({
   cells: [] as ComponentHookCell[],
   storage: {},
   post: vi.fn(async () => ({})),
+  answer: vi.fn(async () => ({
+    kind: "answer",
+    result: { status: "answered" },
+  })),
 }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
@@ -39,7 +43,7 @@ vi.mock("../../unsent/useUnsentText", () => ({
   useUnsentText: () => [null, vi.fn(), vi.fn(async () => {})],
 }));
 vi.mock("../../servers/ServerServicesContext", () => ({
-  useServerApi: () => ({ post: h.post }),
+  useServerApi: () => ({ post: h.post, command: { answer: h.answer } }),
   useServerServices: () => null,
   useServerStorage: () => h.storage,
   useServerLocalDrafts: () => ({ writeLocalDraft: () => null }),
@@ -71,6 +75,7 @@ function render(
 afterEach(() => {
   h.cells = [];
   h.post.mockClear();
+  h.answer.mockClear();
   refresh.mockClear();
   notify.mockClear();
 });
@@ -136,11 +141,8 @@ for (const decision of ["accept", "decline"] as const) {
     expect(
       nodes(sending).filter((node) => node.props["data-request"]),
     ).toHaveLength(1);
-    expect(h.post).toHaveBeenCalledTimes(1);
-    expect(h.post).toHaveBeenCalledWith("/api/answer", {
-      id: request.id,
-      decision,
-    });
+    expect(h.answer).toHaveBeenCalledTimes(1);
+    expect(h.answer).toHaveBeenCalledWith(request.id, { decision });
     await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
     expect(notify).not.toHaveBeenCalled();
   });
@@ -186,11 +188,8 @@ for (const threadId of [null, "thread-1"]) {
     expect(Boolean(approve)).toBe(threadId === null);
     if (approve) {
       required(approve.props.onClick)();
-      expect(h.post).toHaveBeenCalledWith("/api/answer", {
-        id: "approval",
-        decision: "accept",
-      });
-    } else expect(h.post).not.toHaveBeenCalled();
+      expect(h.answer).toHaveBeenCalledWith("approval", { decision: "accept" });
+    } else expect(h.answer).not.toHaveBeenCalled();
   });
 }
 

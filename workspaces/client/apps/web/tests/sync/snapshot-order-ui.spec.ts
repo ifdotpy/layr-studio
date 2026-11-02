@@ -1,13 +1,16 @@
 import { installSnapshotOrderProbe } from "./snapshot-order.fixture.ts";
 import {
-  legacyMutationDocuments,
   fixtureProtocol,
   fixtureRequestId,
 } from "./entity-fixture-protocol.ts";
 import type { Page, Route } from "@playwright/test";
 import type { SessionResponse } from "../playwright.ts";
 
-import type { PostResult } from "../../src/apiTypes.ts";
+import {
+  answerRequest,
+  isAnswerRequest,
+  type AnswerResult,
+} from "../answer-command.ts";
 import type { MessageDelivery } from "../../src/commands.ts";
 import { commandOf, sendReply } from "../messages/send-command.ts";
 import {
@@ -139,7 +142,8 @@ async function runSnapshotOrderUi(
       } satisfies MessageDelivery),
     });
   });
-  await page.route("**/api/answer", async (route) => {
+  await page.route("**/api/commands", async (route) => {
+    if (!isAnswerRequest(route.request())) return route.fallback();
     pendingAnswer = route;
   });
   await page.addInitScript(installSnapshotOrderProbe);
@@ -424,41 +428,48 @@ async function runSnapshotOrderUi(
       Math.abs(before![key] - during![key]) <= 1,
       `Loading label ${key} stays stable; before=${JSON.stringify(before)}, during=${JSON.stringify(during)}, frames=${JSON.stringify(geometryFrames)}`,
     );
-  const requestId = fixtureRequestId(pendingAnswer!.request().postDataJSON());
   const serverAnswer = await pendingAnswer!.fetch();
-  const answerResponse: PostResult<"/api/answer"> = await serverAnswer.json();
+  const requestId = answerRequest(pendingAnswer!.request()).id;
+  const answerResponse = (await serverAnswer.json()) as {
+    kind: string;
+    result: AnswerResult;
+  };
   assert.equal(serverAnswer.status(), 200);
-  assert.equal(answerResponse.status, "answered");
-  const mutationDocuments = legacyMutationDocuments(answerResponse);
-  const serverTombstone = mutationDocuments?.find(
-    (document) => document.id === `entity:request:${requestId}`,
-  );
-  assert.ok(
-    serverTombstone?._deleted,
-    "The server answer returns the request tombstone",
-  );
-  assert.equal(
-    serverTombstone.payload,
-    JSON.stringify({ collection: "request", id: requestId, value: {} }),
-  );
+  assert.equal(answerResponse.kind, "answer");
+  assert.equal(answerResponse.result.status, "answered");
+  const pullsBeforeAnswer = entityPulls.length;
   await pendingAnswer!.fulfill({
     response: serverAnswer,
     json: answerResponse,
   });
   await card.waitFor({ state: "hidden" });
-  assert.ok(
-    mutationDocuments!.some(
-      (document) => document.id === serverTombstone.id && document._deleted,
-    ),
-  );
+  // The removal of the answered request reaches the client through the entity stream: a
+  // pull carries its tombstone. The command response holds live rows only.
+  await expect
+    .poll(
+      () =>
+        entityPulls.some((pull) =>
+          pull.documents.some(
+            (document) =>
+              document.id === `entity:request:${requestId}` &&
+              document._deleted,
+          ),
+        ),
+      { message: "The answer tombstone arrives through the entity stream" },
+    )
+    .toBe(true);
+  // Same window as the legacy check: the answer tombstone is delivered exactly once.
+  const tombstones = entityPulls
+    .slice(pullsBeforeAnswer)
+    .flatMap((pull) => pull.documents)
+    .filter(
+      (document) =>
+        document.id === `entity:request:${requestId}` && document._deleted,
+    ).length;
   assert.equal(
-    entityPulls.some((pull) =>
-      pull.documents.some(
-        (document) => document.id === serverTombstone.id && document._deleted,
-      ),
-    ),
-    false,
-    "The answer tombstone is applied once from the mutation response, not redelivered by a pull",
+    tombstones,
+    1,
+    "The answer tombstone arrives exactly once through the entity stream",
   );
 
   for (const oldFailure of [false, true]) {

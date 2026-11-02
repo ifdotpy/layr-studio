@@ -467,23 +467,6 @@ export interface paths {
     patch?: never | undefined;
     trace?: never | undefined;
   };
-  "/api/answer": {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    get?: never | undefined;
-    put?: never | undefined;
-    /** Answer */
-    post: operations["answer_api_answer_post"];
-    delete?: never | undefined;
-    options?: never | undefined;
-    head?: never | undefined;
-    patch?: never | undefined;
-    trace?: never | undefined;
-  };
   "/api/assets": {
     parameters: {
       query?: never | undefined;
@@ -8147,7 +8130,8 @@ export interface components {
         | "project"
         | "room"
         | "work"
-        | "outbox";
+        | "outbox"
+        | "approval";
       rev: number;
       rows: components["schemas"]["SyncEntity"][];
       /** @enum {string} */
@@ -11033,6 +11017,10 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /** @description The answer of an approval: the answer fields, without the approval id (the command target). */
+    CommandAnswerBody: {
+      [key: string]: unknown;
+    };
     /** @enum {string} */
     CommandErrorCode: "receipt_expired";
     /** @description Identity of the outbox command that delivers an answer. */
@@ -11045,7 +11033,33 @@ export interface components {
       | components["schemas"]["CommandRequestSend"]
       | components["schemas"]["CommandRequestWithdraw"]
       | components["schemas"]["CommandRequestStop"]
-      | components["schemas"]["CommandRequestResolve"];
+      | components["schemas"]["CommandRequestResolve"]
+      | components["schemas"]["CommandRequestPause"]
+      | components["schemas"]["CommandRequestAnswer"];
+    CommandRequestAnswer: {
+      body: components["schemas"]["CommandAnswerBody"];
+      client: string;
+      id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "answer";
+      number: number;
+      target: string;
+    };
+    CommandRequestPause: {
+      body: components["schemas"]["CommandStopBody"];
+      client: string;
+      id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "pause";
+      number: number;
+      target: string;
+    };
     CommandRequestResolve: {
       body: components["schemas"]["CommandResolveBody"];
       client: string;
@@ -11099,7 +11113,31 @@ export interface components {
       /** @enum {string} */
       action: "retry" | "delivered" | "discard";
     };
-    CommandResponse: {
+    /** @description One applied command. The kind names the kind-specific result; only answer has one. */
+    CommandResponse:
+      | components["schemas"]["CommandResponseApplied"]
+      | components["schemas"]["CommandResponseAnswer"];
+    CommandResponseAnswer: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "answer";
+      ref_id: string;
+      ref_kind: string;
+      result: components["schemas"]["AnswerResult"];
+      rev: number;
+      rows: components["schemas"]["CommandRow"][];
+      seq: number;
+      /** @enum {string} */
+      status: "applied";
+    };
+    CommandResponseApplied: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "pause" | "resolve" | "send" | "stop" | "withdraw";
       ref_id: string;
       ref_kind: string;
       rev: number;
@@ -30458,69 +30496,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AnnotationCommandResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: components["responses"]["ApiError400"];
-      /** @description Unauthorized */
-      401: components["responses"]["ApiError401"];
-      /** @description Forbidden */
-      403: components["responses"]["ApiError403"];
-      /** @description Request Timeout */
-      408: components["responses"]["ApiError408"];
-      /** @description Conflict */
-      409: components["responses"]["ApiError409"];
-      /** @description Gone */
-      410: components["responses"]["ApiError410"];
-      /** @description Content Too Large */
-      413: components["responses"]["ApiError413"];
-      /** @description Unsupported Media Type */
-      415: components["responses"]["ApiError415"];
-      /** @description Upgrade Required */
-      426: components["responses"]["ApiError426"];
-      /** @description Too Many Requests */
-      429: components["responses"]["ApiError429"];
-      /** @description Internal Server Error */
-      500: components["responses"]["ApiError500"];
-      /** @description Bad Gateway */
-      502: components["responses"]["ApiError502"];
-      /** @description Service Unavailable */
-      503: components["responses"]["ApiError503"];
-    };
-  };
-  answer_api_answer_post: {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["AnswerBody"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
-          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
-          "Cache-Control": components["headers"]["CacheControl"];
-          "Content-Encoding": components["headers"]["ContentEncoding"];
-          "Content-Length": components["headers"]["ContentLength"];
-          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
-          "Content-Type": components["headers"]["ContentType"];
-          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
-          "Server-Timing": components["headers"]["ServerTiming"];
-          Vary: components["headers"]["Vary"];
-          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
-          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
-          "X-Studio-Server": components["headers"]["StudioServer"];
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AnswerResult"];
         };
       };
       /** @description Bad Request */

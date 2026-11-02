@@ -3,7 +3,7 @@
 The callback service admits native approval and question cards, commits a user's
 answer, and hands the exact prepared `Reply` to a retained account session. The
 HTTP adapter is enabled with `HttpState::with_callback_runtime`; without it,
-`POST /api/answer` and pending native deletion retain
+the answer command (`POST /api/commands`) and pending native deletion retain
 `provider-session/question-answer`. Async questions, monitor approvals and
 browser opening retain separate named dependencies. Local tool request reads
 and cancellation keep their existing implementation and remote/payload refusals.

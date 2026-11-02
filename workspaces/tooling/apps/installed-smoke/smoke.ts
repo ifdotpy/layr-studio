@@ -1927,13 +1927,11 @@ export class Smoke {
   }
 
   async declineCard(id: string) {
-    const result = await this.backend.post<Schema["AnswerResult"]>(
-      "/api/answer",
-      {
-        id,
-        decision: "decline",
-      },
+    const response = await this.backend.post<CommandResponse>(
+      "/api/commands",
+      this.command("answer", id, { decision: "decline" }),
     );
+    const result = response.kind === "answer" ? response.result : undefined;
     if (result?.status !== "answered") {
       throw new CheckFailed(
         `the decline of card ${id.slice(0, 8)} returned ${JSON.stringify(result?.status)}`,

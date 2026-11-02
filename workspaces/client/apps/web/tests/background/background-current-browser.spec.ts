@@ -115,7 +115,7 @@ test("Background Current Browser", async ({
         return route.fulfill({ json: currentListing });
       if (
         request.method() === "POST" &&
-        url.pathname === "/api/answer" &&
+        url.pathname === "/api/commands" &&
         holdAnswer
       )
         await new Promise<void>((resolve) => {
@@ -434,7 +434,7 @@ test("Background Current Browser", async ({
     const answerRequest = page.waitForRequest(
       (request) =>
         request.method() === "POST" &&
-        new URL(request.url()).pathname === "/api/answer",
+        new URL(request.url()).pathname === "/api/commands",
     );
     await approve.click();
     await answerRequest;
@@ -470,7 +470,7 @@ test("Background Current Browser", async ({
     await notified;
     assert.equal(
       calls.filter(
-        (call) => call.method === "POST" && call.path === "/api/answer",
+        (call) => call.method === "POST" && call.path === "/api/commands",
       ).length,
       1,
     );

@@ -483,12 +483,12 @@ async fn monitor_approval_routes_commit_decision_then_launch_only_accepts() {
             .layer(Extension(runtime.clone()));
         let (status, response) = call(
             &app,
-            "/api/answer",
-            json!({"id":request_id,"decision":decision}),
+            "/api/commands",
+            json!({"id":studio_runtime_schema::persistence::RequestIdentity::issue_root(),"client":"answer-test","number":1,"kind":"answer","target":request_id,"body":{"decision":decision}}),
         )
         .await;
         assert_eq!(status, 200, "{response}");
-        assert_eq!(response["status"], "answered");
+        assert_eq!(response["result"]["status"], "answered");
         let request = studio_runtime_services::provider_callbacks::legacy_view::stored(
             &store.test_reader().expect("read request"),
             &request_id,

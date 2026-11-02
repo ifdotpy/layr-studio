@@ -1,6 +1,10 @@
 import { assert } from "../chat/assertions.ts";
-import { requestBody } from "../messages/helpers.ts";
-import type { PostBody, PostResult } from "../../src/apiTypes.ts";
+import {
+  answerReply,
+  answerRequest,
+  isAnswerRequest,
+  type AnswerRequest,
+} from "../answer-command.ts";
 import type { Page, Route } from "@playwright/test";
 // Isolated HTTP fixture and headless Chrome. No model requests or user state.
 
@@ -135,14 +139,13 @@ test("Questions Ux Ui", async ({
     );
     await mcpForm.getByRole("textbox", { name: "Required scope" }).fill("One");
     await poll(() => mcpSend.isEnabled(), "optional fields do not block Send");
-    let mcpAnswer: PostBody<"/api/answer"> | undefined;
+    let mcpAnswer: AnswerRequest | undefined;
     const captureMcp = async (route: Route) => {
-      mcpAnswer = requestBody<PostBody<"/api/answer">>(route);
-      await route.fulfill({
-        json: { status: "answered" } satisfies PostResult<"/api/answer">,
-      });
+      if (!isAnswerRequest(route.request())) return route.fallback();
+      mcpAnswer = answerRequest(route.request());
+      await route.fulfill({ json: answerReply({ status: "answered" }) });
     };
-    await page.route("**/api/answer", captureMcp);
+    await page.route("**/api/commands", captureMcp);
     await mcpSend.click();
     await poll(() => Boolean(mcpAnswer), "MCP answer was sent");
     assert.deepEqual(mcpAnswer, {
@@ -150,7 +153,7 @@ test("Questions Ux Ui", async ({
       decision: "accept",
       content: { scope: "One" },
     });
-    await page.unroute("**/api/answer", captureMcp);
+    await page.unroute("**/api/commands", captureMcp);
     await page.reload();
     await page
       .locator("[data-chat]")
@@ -368,11 +371,12 @@ test("Questions Ux Ui", async ({
       });
     }
     await page.setViewportSize({ width: 1440, height: 960 });
-    const answers: PostBody<"/api/answer">[] = [];
+    const answers: AnswerRequest[] = [];
     let fail = true,
       answerCommitted = false;
-    await page.route("**/api/answer", async (route) => {
-      answers.push(requestBody<PostBody<"/api/answer">>(route));
+    await page.route("**/api/commands", async (route) => {
+      if (!isAnswerRequest(route.request())) return route.fallback();
+      answers.push(answerRequest(route.request()));
       if (fail) {
         fail = false;
         await route.abort("failed");

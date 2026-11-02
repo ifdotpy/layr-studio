@@ -32,7 +32,6 @@ const ROUTES: &[(&str, &str, CommandClass)] = &[
     ("POST", "/api/agents/move-to-host", Host),
     ("POST", "/api/agents/workspace-mode", Host),
     ("POST", "/api/annotation", ChatControl),
-    ("POST", "/api/answer", ChatControl),
     ("POST", "/api/assets", Host),
     ("POST", "/api/branch", Host),
     ("POST", "/api/browser/forward", Host),
