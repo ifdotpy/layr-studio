@@ -283,6 +283,7 @@ fn entry_paths(entries: &Value) -> Vec<String> {
 fn ignored_folders_and_dependency_folders_stay_but_ignored_files_sync() {
     let fixture = Fixture::new();
     let init = std::process::Command::new("git")
+        .current_dir(&fixture.root)
         .args(["init", "-q"])
         .arg(&fixture.root)
         .status()
