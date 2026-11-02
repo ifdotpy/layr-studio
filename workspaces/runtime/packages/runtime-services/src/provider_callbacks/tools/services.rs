@@ -55,7 +55,7 @@ impl crate::managed_host_tools::SendPort for ProductionPorts {
     fn send(
         &self,
         tx: &Transaction<'_>,
-        _actor: &crate::managed_host_tools::Actor,
+        actor: &crate::managed_host_tools::Actor,
         args: &Value,
         request_id: &str,
         now: f64,
@@ -67,6 +67,24 @@ impl crate::managed_host_tools::SendPort for ProductionPorts {
             .ok_or(crate::managed_host_tools::Error::Invalid(
                 "Supply agent_id for orchestration_send",
             ))?;
+        // A paired peer lead is named by its project grant id. Only the root lead of
+        // that grant's project may send to it; the check is in the federation path.
+        if !studio_runtime_store::project_grants::rows_of_grant(tx, target)
+            .map_err(crate::managed_host_tools::Error::Store)?
+            .is_empty()
+        {
+            let text = args["text"]
+                .as_str()
+                .ok_or(crate::managed_host_tools::Error::Invalid(
+                    "Message must have text",
+                ))?;
+            let sender = actor.record().value();
+            let reply = crate::federation_lead::send_in_transaction(
+                tx, &sender, target, text, request_id, now,
+            )
+            .map_err(lead_send_error)?;
+            return Ok(crate::managed_host_tools::OperationResult::reply(&reply));
+        }
         // Python resolves every orchestration_send agent_id except parent, lead,
         // broadcast, all and workspace as a visible agent ID, so "user" is a
         // too-short ID there. A lead contacts the user with orchestration_message.
@@ -150,6 +168,25 @@ impl crate::managed_host_tools::SendPort for ProductionPorts {
         let value =
             messages::send(tx, &snapshot, &chat_args, request_id, now).map_err(callback_refusal)?;
         Ok(crate::managed_host_tools::OperationResult::raw(value))
+    }
+}
+
+fn lead_send_error(
+    error: crate::federation_messaging::FederationMessageError,
+) -> crate::managed_host_tools::Error {
+    use crate::federation_messaging::FederationMessageError as FederationError;
+    use crate::managed_host_tools::Error;
+    match error {
+        FederationError::Store(error) => Error::Store(error),
+        FederationError::RequestResult(error) => {
+            Error::Store(studio_runtime_store::StoreError::RequestResult(error))
+        }
+        FederationError::Unavailable(dependency) => Error::Unavailable(dependency),
+        FederationError::Forbidden(message) => Error::Invalid(message),
+        FederationError::Invalid(_)
+        | FederationError::Conflict(_)
+        | FederationError::Transport(_)
+        | FederationError::Event(_) => Error::Invalid("The peer lead message was refused"),
     }
 }
 
