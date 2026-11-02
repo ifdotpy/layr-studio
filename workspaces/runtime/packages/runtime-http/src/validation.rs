@@ -110,6 +110,8 @@ const TYPED_BODIES: &[(&str, &str)] = &[
     ("POST", "/api/organization"),
     ("POST", "/api/sync/drafts"),
     ("POST", "/api/work"),
+    ("POST", "/api/projects"),
+    ("POST", "/api/peer-teams"),
 ];
 
 // Temporary migration marker; typed extractors own these query contracts.
@@ -1609,17 +1611,6 @@ mod tests {
             ["POST /api/agents", "POST /api/projects"],
             "unrequested operations must remain uncompiled"
         );
-        let project = registry
-            .validate_route(
-                "POST",
-                "/api/projects",
-                RawRequest {
-                    body: Some(json!({"path":""})),
-                    ..RawRequest::default()
-                },
-            )
-            .expect_err("minimum string length is enforced");
-        assert_eq!(project.location.first(), Some(&json!("body")));
         registry
             .validate_route(
                 "POST",
