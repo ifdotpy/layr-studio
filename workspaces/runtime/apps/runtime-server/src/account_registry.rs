@@ -539,6 +539,18 @@ impl studio_runtime_services::account_session_runtime::RetainedAccountSession
         self.live_scope(account)
     }
 
+    fn worker_diagnostics(
+        &self,
+        account: String,
+    ) -> studio_runtime_services::account_session_runtime::WorkerDiagnosticsFuture {
+        let port = self
+            .sessions
+            .read()
+            .ok()
+            .and_then(|sessions| sessions.get(&account).cloned());
+        Box::pin(async move { port?.worker_diagnostics().await })
+    }
+
     fn deliver_vm_notification(
         &self,
         account: String,

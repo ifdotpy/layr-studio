@@ -1009,6 +1009,11 @@ fn main() {
                 "git\ndescribe\n--always\n--dirty\n",
             ),
             (vec!["blame", "file"], "git\nblame\nfile\n"),
+            (vec!["archive", "HEAD"], "git\narchive\nHEAD\n"),
+            (
+                vec!["archive", "--remote=repo", "HEAD"],
+                "git\narchive\n--remote=repo\nHEAD\n",
+            ),
         ] {
             assert_eq!(
                 invoke(&wrapper, &line, &args).expect("read route"),
@@ -1025,6 +1030,8 @@ fn main() {
             vec!["log", "--output", "changed"],
             vec!["log", "--format=%H", "--out=changed"],
             vec!["ls-files", "--debug", "--output=changed"],
+            vec!["archive", "-o", "changed", "HEAD"],
+            vec!["archive", "--output=changed", "HEAD"],
         ] {
             assert!(
                 invoke(&wrapper, &line, &args).is_err(),

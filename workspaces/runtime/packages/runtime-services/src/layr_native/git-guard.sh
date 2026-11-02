@@ -107,7 +107,7 @@ read_route() {
             if [ "$#" -eq 3 ] && [ "$1" = --is-ancestor ]; then
                 case "$2:$3" in -*|*:-*) ;; *) route=layr; translate_revisions=1 ;; esac
             fi ;;
-        grep|blame|cat-file|describe|for-each-ref|rev-list|ls-tree|show-ref|name-rev|diff-tree|diff-files|diff-index|check-ignore|check-attr|help) ;;
+        archive|grep|blame|cat-file|describe|for-each-ref|rev-list|ls-tree|show-ref|name-rev|diff-tree|diff-files|diff-index|check-ignore|check-attr|help) ;;
         config)
             case "$#:$1" in 2:--get|2:--get-all|2:--get-regexp|1:--list) return 0 ;; esac
             refuse "$command"; return 1 ;;
@@ -131,6 +131,7 @@ read_route() {
         [ "$arg" != -- ] || break
         case "$arg" in
             --o|--o=*|--ou|--ou=*|--out|--out=*|--outp|--outp=*|--outpu|--outpu=*|--output|--output=*) refuse "$command"; return 1 ;;
+            -o*) [ "$command" != archive ] || { refuse "$command"; return 1; } ;;
         esac
         # Existing paths need Git's revision/path disambiguation, even HEAD.
         if [ "$translate_revisions" -eq 1 ] && { [ -e "$here/$arg" ] || [ -L "$here/$arg" ]; }; then route=git; fi
