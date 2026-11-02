@@ -565,6 +565,10 @@ pub enum AccountCommand {
         agent_id: String,
         epoch: i64,
     },
+    /// The worker's wake and start state, read in its own loop for diagnostics.
+    AccountDiagnostics {
+        reply: tokio::sync::oneshot::Sender<Value>,
+    },
     /// Revoke the epoch and interrupt any observed native turn, including before its reply.
     Stop {
         agent_id: String,
@@ -1004,6 +1008,22 @@ pub fn has_callback_reply_demand(
     callback_record::has_reply_demand(connection, account)
 }
 
+/// One agent's preparation in flight: the epoch of a wake that arrived
+/// meanwhile, and when the current phase began (diagnostics only).
+struct Preparing {
+    rewake: Option<i64>,
+    since: tokio::time::Instant,
+}
+
+impl Preparing {
+    fn new(rewake: Option<i64>) -> Self {
+        Self {
+            rewake,
+            since: tokio::time::Instant::now(),
+        }
+    }
+}
+
 struct Worker {
     retained_requests: BTreeMap<RequestId, retained::PendingRequest>,
     retained_frames: BTreeMap<String, retained_frame::PendingFrame>,
@@ -1054,7 +1074,7 @@ struct Worker {
     preparation_aborts: Vec<tokio::task::AbortHandle>,
     /// Agents with a preparation in flight, and the epoch of a wake that
     /// arrived meanwhile (re-run when that preparation is handled).
-    preparing: BTreeMap<String, Option<i64>>,
+    preparing: BTreeMap<String, Preparing>,
     /// Threads this connection loaded, by agent. A proof is published after
     /// its acceptance commits and dropped when the thread may be unloaded.
     thread_proofs: BTreeMap<String, crate::thread_prepare::LoadedIdentity>,
@@ -1779,6 +1799,9 @@ impl Worker {
                 let _sent = reply.send(result);
             }
             AccountCommand::Wake { agent_id, epoch } => self.wake(agent_id, epoch).await?,
+            AccountCommand::AccountDiagnostics { reply } => {
+                let _sent = reply.send(self.diagnostics());
+            }
             AccountCommand::Stop { agent_id } => self.stop_agent(agent_id).await?,
             AccountCommand::RadioInterrupt {
                 agent_id,
@@ -2036,6 +2059,27 @@ impl Worker {
             store::PreparationStep::Settled | store::PreparationStep::Retry => None,
         }
     }
+    /// The worker's wake and start state. Ages are in milliseconds.
+    fn diagnostics(&self) -> Value {
+        let now = tokio::time::Instant::now();
+        let age_ms = |since: tokio::time::Instant| {
+            u64::try_from(now.saturating_duration_since(since).as_millis()).unwrap_or(u64::MAX)
+        };
+        json!({
+            "closing": self.closing,
+            "preparing": self
+                .preparing
+                .iter()
+                .map(|(agent, preparing)| json!({
+                    "agent": agent,
+                    "rewake": preparing.rewake.is_some(),
+                    "ageMs": age_ms(preparing.since),
+                }))
+                .collect::<Vec<_>>(),
+            "preparationWaits": self.preparation_waits.keys().collect::<Vec<_>>(),
+            "gate": self.bridge.start_gates.gate(&self.account).diagnostics(),
+        })
+    }
     async fn wake(&mut self, agent: String, epoch: i64) -> Result<(), WorkerError> {
         if let Some(wait) = self.preparation_waits.remove(&agent) {
             wait.abort();
@@ -2044,11 +2088,11 @@ impl Worker {
             return Ok(());
         }
         // One preparation per agent; a wake meanwhile re-runs after it.
-        if let Some(rewake) = self.preparing.get_mut(&agent) {
-            *rewake = Some(epoch);
+        if let Some(preparing) = self.preparing.get_mut(&agent) {
+            preparing.rewake = Some(epoch);
             return Ok(());
         }
-        self.preparing.insert(agent.clone(), None);
+        self.preparing.insert(agent.clone(), Preparing::new(None));
         let start = self.preparation(&agent, Method::ThreadResume);
         let wake = turn_preparation::Wake {
             bridge: self.bridge.clone(),
@@ -2112,7 +2156,8 @@ impl Worker {
                 return Ok(());
             }
         }
-        self.preparing.insert(intent.agent_id.clone(), None);
+        self.preparing
+            .insert(intent.agent_id.clone(), Preparing::new(None));
         let start = self.preparation(&intent.agent_id, method);
         let run = start(intent, self.effect_in_hand.take());
         let preparation = self.preparations.spawn(turn_preparation::run(run));
@@ -2180,7 +2225,10 @@ impl Worker {
             effect,
             outcome,
         } = done;
-        let mut rewake = self.preparing.remove(&agent_id).flatten();
+        let mut rewake = self
+            .preparing
+            .remove(&agent_id)
+            .and_then(|preparing| preparing.rewake);
         let outcome = match outcome {
             // The agent's own data failed its preparation or commit, whose
             // transaction rolled back: nothing was submitted. Hold the agent,
@@ -2278,7 +2326,8 @@ impl Worker {
                                 .await?;
                         }
                         if !self.closing {
-                            self.preparing.insert(agent_id.clone(), rewake);
+                            self.preparing
+                                .insert(agent_id.clone(), Preparing::new(rewake));
                             self.preparations
                                 .spawn(turn_preparation::commit(agent_id, effect, commit));
                             return Ok(());
@@ -2300,9 +2349,13 @@ impl Worker {
             turn_preparation::Outcome::Committed(committed) => {
                 // Its submitted commit may already bind a turn completion
                 // that arrives before `write` records the request as pending.
-                self.preparing.insert(agent_id.clone(), None);
+                self.preparing
+                    .insert(agent_id.clone(), Preparing::new(None));
                 let written = Box::pin(self.committed(committed)).await;
-                rewake = rewake.or(self.preparing.remove(&agent_id).flatten());
+                rewake = rewake.or(self
+                    .preparing
+                    .remove(&agent_id)
+                    .and_then(|preparing| preparing.rewake));
                 written?;
             }
         }

@@ -544,6 +544,51 @@ journalctl() { :; }
   },
 );
 
+test(
+  "Linux delivery restores missing user manager environment",
+  { skip: process.platform !== "linux" },
+  (t) => {
+    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "delivery-bus-"));
+    t.after(() => fs.rmSync(fixture, { recursive: true, force: true }));
+    const bashEnv = path.join(fixture, "bash-env");
+    fs.writeFileSync(
+      bashEnv,
+      `
+git() { case "$*" in *--show-toplevel*) echo "$PROJECT";; *--verify*) echo fixture-commit;; esac; }
+id() { echo 424242; }
+systemd-run() { if [ "$1" = --version ]; then echo 'systemd 254'; else printf '%s\\n%s\\n' "\${XDG_RUNTIME_DIR:-}" "\${DBUS_SESSION_BUS_ADDRESS:-}" > "$HOME/environment"; fi; }
+journalctl() { :; }
+`,
+    );
+    const script = path.join(
+      repository,
+      "workspaces/runtime/apps/runtime-server/deliver.sh",
+    );
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      HOME: fixture,
+      BASH_ENV: bashEnv,
+      PROJECT: repository,
+      CODEX_STUDIO_SERVER_ROOT: path.join(fixture, "root"),
+    };
+    delete env.XDG_RUNTIME_DIR;
+    delete env.DBUS_SESSION_BUS_ADDRESS;
+    delete env.CODEX_STUDIO_DELIVER_IN_UNIT;
+    delete env.CODEX_STUDIO_DELIVER_TEST_IN_PROCESS;
+    const run = () =>
+      spawnSync("/bin/bash", [script], {
+        cwd: repository,
+        env,
+        encoding: "utf8",
+      });
+    run();
+    assert.equal(
+      fs.readFileSync(path.join(fixture, "environment"), "utf8"),
+      "/run/user/424242\nunix:path=/run/user/424242/bus\n",
+    );
+  },
+);
+
 test("Mac runs the canary before the only live write through the recovery owner", () => {
   const options = parseDeliveryArguments(["HEAD", "--app", fixtureApp]);
   const plan = deliveryPlan({

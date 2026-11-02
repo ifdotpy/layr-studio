@@ -148,11 +148,33 @@ pub enum Wait {
     Behind,
 }
 
+/// Recent admit outcomes kept for diagnostics. Unit: admits.
+const RECENT_ADMITS: usize = 32;
+
+/// An admitted start. `claimed` is `true` once the claim made the turn in flight.
+#[derive(Clone, Copy, Debug)]
+struct Admitted {
+    claimed: bool,
+    since: Instant,
+}
+
+/// A waiting start, as diagnostics shows it.
+struct Queued {
+    agent: String,
+    since: Instant,
+    /// The wait the start last saw; `None` before its first decision.
+    wait: Option<Wait>,
+}
+
 /// One account's admission state.
 #[derive(Default)]
 struct GateState {
-    /// Admitted agents; `true` once the claim made the turn in flight.
-    running: BTreeMap<String, bool>,
+    /// Admitted agents, claimed or not.
+    running: BTreeMap<String, Admitted>,
+    /// Waiting starts by ticket; kept beside `waiters` for diagnostics.
+    queued: BTreeMap<u64, Queued>,
+    /// Outcomes of the latest admits (agent, claimed, time), oldest first.
+    recent: VecDeque<(String, bool, Instant)>,
     /// In-flight turns found when the gate was created are counted.
     seeded: bool,
     /// Starts in the current burst.
@@ -181,10 +203,18 @@ enum Decision {
 
 impl GateState {
     /// Queue a start: a `root` agent's at the front, others' at the back.
-    fn enter(&mut self, root: bool) -> (u64, Arc<Notify>) {
+    fn enter(&mut self, root: bool, agent: &str) -> (u64, Arc<Notify>) {
         let ticket = self.next_ticket;
         self.next_ticket += 1;
         let notify = Arc::new(Notify::new());
+        self.queued.insert(
+            ticket,
+            Queued {
+                agent: agent.to_owned(),
+                since: Instant::now(),
+                wait: None,
+            },
+        );
         if root {
             self.waiters.push_front((ticket, Arc::clone(&notify)));
         } else {
@@ -196,6 +226,7 @@ impl GateState {
     /// Remove `ticket` and let the next waiter look again.
     fn leave(&mut self, ticket: u64) {
         self.waiters.retain(|(waiter, _)| *waiter != ticket);
+        self.queued.remove(&ticket);
         self.wake_first();
     }
 
@@ -241,7 +272,14 @@ impl GateState {
             };
         }
         self.waiters.pop_front();
-        self.running.insert(agent.to_owned(), false);
+        self.queued.remove(&ticket);
+        self.running.insert(
+            agent.to_owned(),
+            Admitted {
+                claimed: false,
+                since: now,
+            },
+        );
         if self
             .last_start_at
             .is_none_or(|last| now >= last + throttle.pause)
@@ -261,8 +299,21 @@ impl GateState {
     /// Free the claimed slot of `agent` when its turn has settled, so its
     /// next wake is a new start and not a pass.
     fn release_settled(&mut self, agent: &str) {
-        if self.running.get(agent) == Some(&true) {
+        if self
+            .running
+            .get(agent)
+            .is_some_and(|admitted| admitted.claimed)
+        {
             self.release(agent);
+        }
+    }
+
+    /// Keep the outcome of one admit for diagnostics.
+    fn record(&mut self, agent: &str, claimed: bool) {
+        self.recent
+            .push_back((agent.to_owned(), claimed, Instant::now()));
+        while self.recent.len() > RECENT_ADMITS {
+            self.recent.pop_front();
         }
     }
 
@@ -302,7 +353,15 @@ impl StartSlot {
     /// agent row is no longer in flight.
     pub fn claimed(mut self) {
         if let Some(gate) = self.gate.take() {
-            gate.lock().running.insert(self.agent.clone(), true);
+            let mut state = gate.lock();
+            state.running.insert(
+                self.agent.clone(),
+                Admitted {
+                    claimed: true,
+                    since: Instant::now(),
+                },
+            );
+            state.record(&self.agent, true);
         }
     }
 }
@@ -310,7 +369,9 @@ impl StartSlot {
 impl Drop for StartSlot {
     fn drop(&mut self) {
         if let Some(gate) = self.gate.take() {
-            gate.lock().release(&self.agent);
+            let mut state = gate.lock();
+            state.record(&self.agent, false);
+            state.release(&self.agent);
         }
     }
 }
@@ -351,7 +412,7 @@ impl StartGate {
             if !in_flight {
                 state.release_settled(agent);
             }
-            state.enter(root)
+            state.enter(root, agent)
         };
         let mut ticket = Ticket {
             gate: self,
@@ -372,7 +433,16 @@ impl StartGate {
             // Mark the current agent-row generation seen before reading the
             // in-flight state, so a commit after the read wakes this waiter.
             sources.agent_changes.borrow_and_update();
-            let decision = self.lock().decide(id, agent, throttle, Instant::now());
+            let decision = {
+                let mut state = self.lock();
+                let decision = state.decide(id, agent, throttle, Instant::now());
+                if let Decision::Wait { wait, .. } = decision
+                    && let Some(queued) = state.queued.get_mut(&id)
+                {
+                    queued.wait = Some(wait);
+                }
+                decision
+            };
             let (wait, first) = match decision {
                 Decision::Admit => {
                     ticket.id = None;
@@ -413,6 +483,46 @@ impl StartGate {
                 }
             }
         }
+    }
+
+    /// The gate state for diagnostics: admitted slots, queued starts and the
+    /// latest admits, each with its age in milliseconds (unit: ms).
+    pub fn diagnostics(&self) -> serde_json::Value {
+        let state = self.lock();
+        let now = Instant::now();
+        let age_ms = |since: Instant| {
+            u64::try_from(now.saturating_duration_since(since).as_millis()).unwrap_or(u64::MAX)
+        };
+        let wait_kind = |wait: Option<Wait>| match wait {
+            None => "queued",
+            Some(Wait::Slot { .. }) => "slot",
+            Some(Wait::Pause { .. }) => "pause",
+            Some(Wait::Behind) => "behind",
+        };
+        let running = state
+            .running
+            .iter()
+            .map(|(agent, admitted)| {
+                json!({"agent": agent, "claimed": admitted.claimed, "ageMs": age_ms(admitted.since)})
+            })
+            .collect::<Vec<_>>();
+        let waiters = state
+            .waiters
+            .iter()
+            .filter_map(|(ticket, _)| state.queued.get(ticket))
+            .map(|queued| {
+                json!({"agent": queued.agent, "wait": wait_kind(queued.wait), "ageMs": age_ms(queued.since)})
+            })
+            .collect::<Vec<_>>();
+        let recent = state
+            .recent
+            .iter()
+            .rev()
+            .map(|(agent, claimed, at)| {
+                json!({"agent": agent, "claimed": claimed, "ageMs": age_ms(*at)})
+            })
+            .collect::<Vec<_>>();
+        json!({"running": running, "waiters": waiters, "recentAdmits": recent})
     }
 
     /// Busy agents of an account (an unfinished turn of the chat), by account.
@@ -456,7 +566,13 @@ impl StartGate {
         if !state.seeded {
             state.seeded = true;
             for agent in in_flight {
-                state.running.insert(agent, true);
+                state.running.insert(
+                    agent,
+                    Admitted {
+                        claimed: true,
+                        since: Instant::now(),
+                    },
+                );
             }
         }
         Ok(())
@@ -469,7 +585,7 @@ impl StartGate {
             .lock()
             .running
             .iter()
-            .filter(|(_, claimed)| **claimed)
+            .filter(|(_, admitted)| admitted.claimed)
             .map(|(agent, _)| agent.clone())
             .collect::<Vec<_>>();
         if claimed.is_empty() {
@@ -490,7 +606,11 @@ impl StartGate {
         let mut state = self.lock();
         let mut freed = false;
         for agent in settled {
-            if state.running.get(&agent) == Some(&true) {
+            if state
+                .running
+                .get(&agent)
+                .is_some_and(|admitted| admitted.claimed)
+            {
                 state.running.remove(&agent);
                 freed = true;
             }
@@ -603,8 +723,13 @@ impl StartGates {
 
 #[cfg(test)]
 mod tests {
-    use super::{Decision, GateState, StartThrottle, Wait};
+    use super::{
+        AccountDriver, Admitted, ContinuationError, Decision, GateState, StartGate, StartSlot,
+        StartSources, StartThrottle, Wait,
+    };
+    use std::sync::Arc;
     use std::time::Duration;
+    use tokio::sync::watch;
     use tokio::time::Instant;
 
     fn throttle(burst: u64, pause: u64, running: u64) -> StartThrottle {
@@ -613,7 +738,7 @@ mod tests {
 
     /// Admit `agent` now, or return why it waits.
     fn try_start(state: &mut GateState, agent: &str, limits: StartThrottle) -> Decision {
-        let (ticket, _) = state.enter(false);
+        let (ticket, _) = state.enter(false, agent);
         let decision = state.decide(ticket, agent, limits, Instant::now());
         if decision != Decision::Admit {
             state.leave(ticket);
@@ -787,7 +912,7 @@ mod tests {
         for second in 0..minutes * 60 {
             loop {
                 let agent = format!("worker-{starts}");
-                let (ticket, _) = state.enter(false);
+                let (ticket, _) = state.enter(false, "test");
                 let mut decision = state.decide(ticket, &agent, limits, Instant::now());
                 if matches!(
                     decision,
@@ -810,7 +935,13 @@ mod tests {
                     state.leave(ticket);
                     break;
                 }
-                state.running.insert(agent.clone(), true);
+                state.running.insert(
+                    agent.clone(),
+                    Admitted {
+                        claimed: true,
+                        since: Instant::now(),
+                    },
+                );
                 finishing.push((Instant::now() + Duration::from_secs(turn), agent));
                 starts += 1;
             }
@@ -847,8 +978,8 @@ mod tests {
         let limits = throttle(1, 1, 8);
         let mut state = GateState::default();
         assert_eq!(try_start(&mut state, "w0", limits), Decision::Admit);
-        let workers: Vec<_> = (1..=20).map(|_| state.enter(false)).collect();
-        let (lead, _) = state.enter(true);
+        let workers: Vec<_> = (1..=20).map(|_| state.enter(false, "test")).collect();
+        let (lead, _) = state.enter(true, "test");
         tokio::time::advance(Duration::from_secs(1)).await;
         let now = Instant::now();
         assert!(matches!(
@@ -871,7 +1002,13 @@ mod tests {
         let limits = throttle(1, 60, 8);
         let mut state = GateState::default();
         assert_eq!(try_start(&mut state, "a", limits), Decision::Admit);
-        state.running.insert("a".into(), true);
+        state.running.insert(
+            "a".into(),
+            Admitted {
+                claimed: true,
+                since: Instant::now(),
+            },
+        );
         // Its turn settled; the next wake releases the slot and is a new start.
         state.release_settled("a");
         assert!(matches!(
@@ -897,8 +1034,8 @@ mod tests {
         let limits = throttle(1, 1, 8);
         let mut state = GateState::default();
         assert_eq!(try_start(&mut state, "a", limits), Decision::Admit);
-        let (first, _) = state.enter(false);
-        let (second, _) = state.enter(false);
+        let (first, _) = state.enter(false, "test");
+        let (second, _) = state.enter(false, "test");
         tokio::time::advance(Duration::from_secs(1)).await;
         let now = Instant::now();
         assert!(matches!(
@@ -995,6 +1132,196 @@ mod tests {
         );
         assert!(gate.lock().running.is_empty());
         assert!(gate.lock().waiters.is_empty());
+    }
+
+    /// The inputs of `admit` for one account, over a fresh store and registry.
+    struct AdmissionFixture {
+        _root: tempfile::TempDir,
+        store: Arc<studio_runtime_store::RuntimeStore>,
+        driver: Arc<AccountDriver>,
+        agent_changes: watch::Sender<u64>,
+    }
+
+    impl AdmissionFixture {
+        async fn new(burst: u64, pause_seconds: u64, max_running: u64) -> Self {
+            use serde_json::json;
+            use studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION;
+            let root = tempfile::tempdir().expect("state directory");
+            let store = Arc::new(
+                studio_runtime_store::RuntimeStore::open(Some(root.path()))
+                    .await
+                    .expect("store"),
+            );
+            let registry = root.path().join("accounts/registry.json");
+            std::fs::create_dir_all(registry.parent().expect("registry parent"))
+                .expect("accounts directory");
+            std::fs::write(&registry, json!({"version":ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"default","accounts":{"default":{"id":"default","provider":"codex","home":root.path(),"label":"Fixture","source":"Codex CLI","status":"signedOut","startThrottle":{"burst":burst,"pauseSeconds":pause_seconds,"maxRunningTurns":max_running}}},"logins":{}}).to_string()).expect("registry");
+            let driver = Arc::new(AccountDriver::open(registry).expect("driver"));
+            assert_eq!(
+                driver.start_throttle("default").expect("throttle"),
+                throttle(burst, pause_seconds, max_running),
+                "the fixture throttle is inside its bounds"
+            );
+            Self {
+                _root: root,
+                store,
+                driver,
+                agent_changes: watch::channel(0).0,
+            }
+        }
+
+        fn sources(&self) -> StartSources {
+            StartSources {
+                store: Arc::clone(&self.store),
+                agent_changes: self.agent_changes.subscribe(),
+                driver: Arc::clone(&self.driver),
+                account: "default".into(),
+            }
+        }
+    }
+
+    /// Yield until `count` waiters are queued. Yielding never advances the
+    /// paused clock, so the wait cannot move the pause.
+    async fn until_queued(gate: &StartGate, count: usize) {
+        for _ in 0..1_000_000 {
+            if gate.lock().waiters.len() >= count {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+        panic!("{count} waiters never queued");
+    }
+
+    /// A start that waits in `admit` and holds its slot once admitted.
+    fn queued_start(
+        gate: &Arc<StartGate>,
+        fixture: &AdmissionFixture,
+        agent: &'static str,
+    ) -> tokio::task::JoinHandle<Result<(), ContinuationError>> {
+        let gate = Arc::clone(gate);
+        let sources = fixture.sources();
+        tokio::spawn(async move {
+            gate.admit(agent, 0, sources)
+                .await
+                .map(|slot| slot.claimed())
+        })
+    }
+
+    #[tokio::test]
+    async fn followers_behind_a_burst_pause_are_admitted_when_it_ends() {
+        // A burst of four starts sets a one second pause. Real time: the store
+        // writes that `admit` makes block, which paused time would race.
+        let fixture = AdmissionFixture::new(4, 1, 32).await;
+        let gate = Arc::new(StartGate::default());
+        for agent in ["s1", "s2", "s3", "s4"] {
+            gate.admit(agent, 0, fixture.sources())
+                .await
+                .expect("burst start")
+                .claimed();
+        }
+        let mut waiters = Vec::new();
+        for agent in ["front", "follower-1", "follower-2", "follower-3"] {
+            waiters.push(queued_start(&gate, &fixture, agent));
+            until_queued(&gate, waiters.len()).await;
+        }
+        let pause_end = Instant::now() + Duration::from_secs(1);
+        tokio::time::sleep_until(pause_end).await;
+        for waiter in waiters {
+            tokio::time::timeout(Duration::from_secs(1), waiter)
+                .await
+                .expect("admitted within a second after the pause ends")
+                .expect("waiter task")
+                .expect("admitted");
+        }
+        assert!(Instant::now() <= pause_end + Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn a_steady_stream_of_new_starts_does_not_delay_queued_followers() {
+        let fixture = AdmissionFixture::new(4, 1, 32).await;
+        let gate = Arc::new(StartGate::default());
+        for agent in ["s1", "s2", "s3", "s4"] {
+            gate.admit(agent, 0, fixture.sources())
+                .await
+                .expect("burst start")
+                .claimed();
+        }
+        let mut followers = Vec::new();
+        for agent in ["front", "follower-1", "follower-2", "follower-3"] {
+            followers.push(queued_start(&gate, &fixture, agent));
+            until_queued(&gate, followers.len()).await;
+        }
+        let pause_end = Instant::now() + Duration::from_secs(1);
+        // One new agent asks for a start each second while the followers wait.
+        let stream = {
+            let gate = Arc::clone(&gate);
+            let sources = fixture.sources();
+            tokio::spawn(async move {
+                let names = [
+                    "stream-0", "stream-1", "stream-2", "stream-3", "stream-4", "stream-5",
+                ];
+                for agent in names {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    let sources = StartSources {
+                        store: Arc::clone(&sources.store),
+                        agent_changes: sources.agent_changes.clone(),
+                        driver: Arc::clone(&sources.driver),
+                        account: sources.account.clone(),
+                    };
+                    let _queued = gate
+                        .admit(agent, 0, sources)
+                        .await
+                        .map(|slot| slot.claimed());
+                }
+            })
+        };
+        tokio::time::sleep_until(pause_end).await;
+        for follower in followers {
+            tokio::time::timeout(Duration::from_secs(1), follower)
+                .await
+                .expect("a follower is admitted within a second after the pause ends")
+                .expect("follower task")
+                .expect("admitted");
+        }
+        stream.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn diagnostics_reports_slots_waits_and_admit_outcomes_with_ages() {
+        use serde_json::json;
+        let gate = Arc::new(StartGate::default());
+        {
+            let mut state = gate.lock();
+            let (ticket, _) = state.enter(false, "waiting");
+            state.queued.get_mut(&ticket).expect("queued start").wait = Some(Wait::Pause {
+                until: Instant::now(),
+            });
+            state.running.insert(
+                "claimed".into(),
+                Admitted {
+                    claimed: true,
+                    since: Instant::now(),
+                },
+            );
+            state.record("claimed", true);
+        }
+        // A slot dropped before its claim records a not-claimed admit.
+        drop(StartSlot {
+            gate: Some(Arc::clone(&gate)),
+            agent: "dropped".into(),
+        });
+        tokio::time::advance(Duration::from_secs(2)).await;
+        assert_eq!(
+            gate.diagnostics(),
+            json!({
+                "running": [{"agent": "claimed", "claimed": true, "ageMs": 2000}],
+                "waiters": [{"agent": "waiting", "wait": "pause", "ageMs": 2000}],
+                "recentAdmits": [
+                    {"agent": "dropped", "claimed": false, "ageMs": 2000},
+                    {"agent": "claimed", "claimed": true, "ageMs": 2000}
+                ]
+            })
+        );
     }
 
     #[test]

@@ -3674,6 +3674,24 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /** @description One account worker's wake and start state. Ages are in milliseconds. */
+    AccountWorkerDiagnostics: {
+      /** @description The worker is shutting down and starts nothing new. */
+      closing?: boolean | undefined;
+      /** @description Why the worker state is missing: unavailable (no live worker) or unresponsive (the worker did not answer in time). */
+      error?: string | undefined;
+      gate?: components["schemas"]["StartGateDiagnostics"] | undefined;
+      /** @description Agents with a pending wait for a catalog refresh, a disk recheck or agent-row changes. */
+      preparationWaits?: string[] | undefined;
+      /** @description Agents with a turn preparation in flight. */
+      preparing?:
+        | components["schemas"]["PreparingAgentDiagnostics"][]
+        | undefined;
+    };
+    /** @description Each account's worker state, keyed account1, account2 in the order of nativeAccounts. An account with an error has no other fields. */
+    AccountWorkerDiagnosticsMap: {
+      [key: string]: components["schemas"]["AccountWorkerDiagnostics"];
+    };
     /** ActionContext */
     ActionContext: {
       /**
@@ -12651,6 +12669,7 @@ export interface components {
     };
     /** DiagnosticsResponse */
     DiagnosticsResponse: {
+      accountWorkers: components["schemas"]["AccountWorkerDiagnosticsMap"];
       analyticsCapture: components["schemas"]["AnalyticsCaptureStatus"];
       /** At */
       at: string;
@@ -13956,6 +13975,27 @@ export interface components {
     };
     /** @enum {string} */
     FrontendLocality: "local" | "remote";
+    GateAdmitDiagnostics: {
+      ageMs: number;
+      agent: string;
+      /** @description true when the claim made the turn in flight; false when the admitted slot was dropped unclaimed. */
+      claimed: boolean;
+    };
+    GateSlotDiagnostics: {
+      ageMs: number;
+      agent: string;
+      /** @description The claim made the turn in flight; false while the start is only admitted. */
+      claimed: boolean;
+    };
+    GateWaiterDiagnostics: {
+      ageMs: number;
+      agent: string;
+      /**
+       * @description queued: no decision yet; slot: every running slot is taken; pause: the burst pause runs; behind: free to start, behind an earlier start.
+       * @enum {string}
+       */
+      wait: "queued" | "slot" | "pause" | "behind";
+    };
     /** @enum {string} */
     Grant: "full" | "observe";
     /** @description History stays: a hidden row is not shown in the default list. */
@@ -17394,6 +17434,13 @@ export interface components {
         | undefined;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
+    };
+    PreparingAgentDiagnostics: {
+      /** @description Milliseconds since the current phase began. */
+      ageMs: number;
+      agent: string;
+      /** @description A wake arrived during the preparation and runs after it. */
+      rewake: boolean;
     };
     /**
      * @description Who acts. Local copy of the permissions work (`feat/principal-permissions`);
@@ -22363,6 +22410,14 @@ export interface components {
       turnId?: string | undefined;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
+    };
+    /** @description The account's turn start throttle: admitted slots, queued starts and the latest admit outcomes. */
+    StartGateDiagnostics: {
+      /** @description The latest admits, newest first. */
+      recentAdmits: components["schemas"]["GateAdmitDiagnostics"][];
+      running: components["schemas"]["GateSlotDiagnostics"][];
+      /** @description Queued starts in arrival order; only the first may be admitted. */
+      waiters: components["schemas"]["GateWaiterDiagnostics"][];
     };
     /** StartModelSettingsRecordResponse */
     StartModelSettingsRecordResponse: {
