@@ -139,6 +139,9 @@ includes line tables for `callgrind_annotate` and DHAT output under
 `#[library_benchmark]` to the owning crate's `benches/hot_paths.rs` and register
 it in its group; use a `#[bench]` setup expression to keep fixture creation out
 of the measured function. Compare results from the same toolchain and fixtures.
+The services benchmark enables rustix's libc auxiliary-vector reader because
+its direct reader can access an unmapped vDSO address under Valgrind. That is a
+benchmark build difference from the normal Linux backend.
 
 Provider callbacks, preparation, monitor starts, recovery, and request identities
 are covered by the witnesses selected in the facade. Shared limits and filters

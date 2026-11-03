@@ -26,7 +26,7 @@ fn database() -> Connection {
 
 #[library_benchmark]
 #[bench::assigned(database())]
-fn create(mut db: Connection) {
+fn create(mut db: Connection) -> Connection {
     let tx = db.transaction().expect("transaction");
     black_box(
         write_as_agent(
@@ -48,6 +48,8 @@ fn create(mut db: Connection) {
         )
         .expect("create"),
     );
+    tx.commit().expect("commit");
+    db
 }
 
 fn submit_database() -> Connection {
@@ -59,7 +61,7 @@ fn submit_database() -> Connection {
 
 #[library_benchmark]
 #[bench::review(submit_database())]
-fn submit(mut db: Connection) {
+fn submit(mut db: Connection) -> Connection {
     let tx = db.transaction().expect("transaction");
     black_box(
         write(
@@ -83,6 +85,8 @@ fn submit(mut db: Connection) {
         )
         .expect("submit"),
     );
+    tx.commit().expect("commit");
+    db
 }
 
 fn agent_fixture() -> (Connection, AgentRecord) {
@@ -95,8 +99,9 @@ fn agent_fixture() -> (Connection, AgentRecord) {
 
 #[library_benchmark]
 #[bench::worker(agent_fixture())]
-fn agent_update((db, agent): (Connection, AgentRecord)) {
+fn agent_update((db, agent): (Connection, AgentRecord)) -> (Connection, AgentRecord) {
     AgentRepository::put(black_box(&db), black_box(&agent)).expect("update");
+    (db, agent)
 }
 
 fn subscribers() -> (
@@ -115,6 +120,9 @@ fn fan_out(
         ResourceNotifications,
         Vec<tokio::sync::broadcast::Receiver<studio_runtime_services::resource_notify::LiveEvent>>,
     ),
+) -> (
+    ResourceNotifications,
+    Vec<tokio::sync::broadcast::Receiver<studio_runtime_services::resource_notify::LiveEvent>>,
 ) {
     notifications.publish_live(LiveDelta {
         agent_id: "worker".into(),
@@ -125,6 +133,7 @@ fn fan_out(
     for receiver in &mut receivers {
         black_box(receiver.try_recv().expect("event"));
     }
+    (notifications, receivers)
 }
 
 library_benchmark_group!(

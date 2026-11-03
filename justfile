@@ -177,9 +177,9 @@ test-rust-many-agents:
 
 [doc("Run manual Callgrind and DHAT backend benchmarks (requires Valgrind and gungraun-runner).")]
 bench-gungraun *args:
-    @CARGO_PROFILE_BENCH_DEBUG=1 cargo bench -j 4 -p studio-runtime-store --bench hot_paths -- {{args}}
-    @CARGO_PROFILE_BENCH_DEBUG=1 cargo bench -j 4 -p studio-runtime-http --features bench-support --bench hot_paths -- {{args}}
-    @CARGO_PROFILE_BENCH_DEBUG=1 cargo bench -j 4 -p studio-runtime-services --bench hot_paths -- {{args}}
+    @PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH" cargo bench -j 4 -p studio-runtime-store --bench hot_paths -- {{args}}
+    @PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH" cargo bench -j 4 -p studio-runtime-http --features bench-support --bench hot_paths -- {{args}}
+    @PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH" cargo bench -j 4 -p studio-runtime-services --features bench-support --bench hot_paths -- {{args}}
 
 [doc("Run the full web browser project with its 900-second global cap.")]
 test-browser:
