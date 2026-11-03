@@ -175,6 +175,12 @@ test-provider-reap-timing:
 test-rust-many-agents:
     @cargo nextest run -p studio-runtime-services --lib --run-ignored only -E 'test(two_hundred_agents_complete_two_exchanges)'
 
+[doc("Run manual Callgrind and DHAT backend benchmarks (requires Valgrind and gungraun-runner).")]
+bench-gungraun *args:
+    @PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH" cargo bench -j 4 -p studio-runtime-store --bench hot_paths -- {{args}}
+    @PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH" cargo bench -j 4 -p studio-runtime-http --features bench-support --bench hot_paths -- {{args}}
+    @PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH" cargo bench -j 4 -p studio-runtime-services --features bench-support --bench hot_paths -- {{args}}
+
 [doc("Run the full web browser project with its 900-second global cap.")]
 test-browser:
     @node {{quote(facade)}} test-browser
