@@ -2617,6 +2617,17 @@ export interface components {
       action: "accept_peer";
       invitation: components["schemas"]["FederationInvitation"];
     };
+    /** AcceptProjectPeerRequest */
+    AcceptProjectPeerRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      action: "accept_project_peer";
+      invitation: components["schemas"]["FederationInvitation"];
+      /** Project Id */
+      project_id: string;
+    };
     /** AccessAudit */
     AccessAudit: {
       /**
@@ -3673,6 +3684,24 @@ export interface components {
       waitingCount?: number | null | undefined;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
+    };
+    /** @description One account worker's wake and start state. Ages are in milliseconds. */
+    AccountWorkerDiagnostics: {
+      /** @description The worker is shutting down and starts nothing new. */
+      closing?: boolean | undefined;
+      /** @description Why the worker state is missing: unavailable (no live worker) or unresponsive (the worker did not answer in time). */
+      error?: string | undefined;
+      gate?: components["schemas"]["StartGateDiagnostics"] | undefined;
+      /** @description Agents with a pending wait for a catalog refresh, a disk recheck or agent-row changes. */
+      preparationWaits?: string[] | undefined;
+      /** @description Agents with a turn preparation in flight. */
+      preparing?:
+        | components["schemas"]["PreparingAgentDiagnostics"][]
+        | undefined;
+    };
+    /** @description Each account's worker state, keyed account1, account2 in the order of nativeAccounts. An account with an error has no other fields. */
+    AccountWorkerDiagnosticsMap: {
+      [key: string]: components["schemas"]["AccountWorkerDiagnostics"];
     };
     /** ActionContext */
     ActionContext: {
@@ -12356,6 +12385,16 @@ export interface components {
        */
       yolo_mode?: boolean | undefined;
     };
+    /** CreateProjectInviteRequest */
+    CreateProjectInviteRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      action: "create_project_invite";
+      /** Project Id */
+      project_id: string;
+    };
     /** CreateRoomRequest */
     CreateRoomRequest: {
       /**
@@ -12651,6 +12690,7 @@ export interface components {
     };
     /** DiagnosticsResponse */
     DiagnosticsResponse: {
+      accountWorkers: components["schemas"]["AccountWorkerDiagnosticsMap"];
       analyticsCapture: components["schemas"]["AnalyticsCaptureStatus"];
       /** At */
       at: string;
@@ -13810,8 +13850,16 @@ export interface components {
        * @default null
        */
       leadName?: null | string | undefined;
-      /** Origin */
-      origin: string;
+      /**
+       * Origin
+       * @default null
+       */
+      origin?: null | string | undefined;
+      /**
+       * Projectid
+       * @default null
+       */
+      projectId?: null | string | undefined;
       /**
        * Protocol
        * @constant
@@ -13819,6 +13867,11 @@ export interface components {
       protocol: 1;
       /** Publickey */
       publicKey: string;
+      /**
+       * Scope
+       * @default null
+       */
+      scope?: "project" | null | undefined;
       /** Stateid */
       stateId: string;
       /** @default null */
@@ -13956,6 +14009,27 @@ export interface components {
     };
     /** @enum {string} */
     FrontendLocality: "local" | "remote";
+    GateAdmitDiagnostics: {
+      ageMs: number;
+      agent: string;
+      /** @description true when the claim made the turn in flight; false when the admitted slot was dropped unclaimed. */
+      claimed: boolean;
+    };
+    GateSlotDiagnostics: {
+      ageMs: number;
+      agent: string;
+      /** @description The claim made the turn in flight; false while the start is only admitted. */
+      claimed: boolean;
+    };
+    GateWaiterDiagnostics: {
+      ageMs: number;
+      agent: string;
+      /**
+       * @description queued: no decision yet; slot: every running slot is taken; pause: the burst pause runs; behind: free to start, behind an earlier start.
+       * @enum {string}
+       */
+      wait: "queued" | "slot" | "pause" | "behind";
+    };
     /** @enum {string} */
     Grant: "full" | "observe";
     /** @description History stays: a hidden row is not shown in the default list. */
@@ -14402,6 +14476,16 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /** ListProjectGrantsRequest */
+    ListProjectGrantsRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      action: "list_project_grants";
+      /** Project Id */
+      project_id: string;
+    };
     /**
      * LiveUpdateState
      * @enum {string}
@@ -14657,7 +14741,11 @@ export interface components {
      * MessageKind
      * @enum {string}
      */
-    MessageKind: "chat-message" | "room-invite" | "room-accept";
+    MessageKind:
+      | "chat-message"
+      | "room-invite"
+      | "room-accept"
+      | "lead-message";
     /** MessageReceiptEntityDto */
     MessageReceiptEntityDto: {
       /** Agent */
@@ -16598,12 +16686,27 @@ export interface components {
       /** Origin */
       origin: string;
       /**
+       * Peerprojectid
+       * @default null
+       */
+      peerProjectId?: null | string | undefined;
+      /**
+       * Projectid
+       * @default null
+       */
+      projectId?: null | string | undefined;
+      /**
        * Protocol
        * @constant
        */
       protocol: 1;
       /** Publickey */
       publicKey: string;
+      /**
+       * Scope
+       * @default null
+       */
+      scope?: "project" | null | undefined;
       /** Stateid */
       stateId: string;
       /**
@@ -16999,6 +17102,19 @@ export interface components {
       members?: string[] | null | undefined;
       /** Name */
       name?: null | string | undefined;
+      /** Peerleads */
+      peerLeads?:
+        | {
+            /** Grant */
+            grant: string;
+            /** Label */
+            label: string;
+            /** Remoteproject */
+            remoteProject: string;
+            /** Server */
+            server: string;
+          }[]
+        | undefined;
       /** Projectpath */
       projectPath?: null | string | undefined;
       /** Revision */
@@ -17390,6 +17506,13 @@ export interface components {
         | undefined;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
+    };
+    PreparingAgentDiagnostics: {
+      /** @description Milliseconds since the current phase began. */
+      ageMs: number;
+      agent: string;
+      /** @description A wake arrived during the preparation and runs after it. */
+      rewake: boolean;
     };
     /**
      * @description Who acts. Local copy of the permissions work (`feat/principal-permissions`);
@@ -18128,6 +18251,36 @@ export interface components {
       parentId?: null | string | undefined;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
+    };
+    /** ProjectGrant */
+    ProjectGrant: {
+      /** Capabilities */
+      capabilities: string[];
+      /** Createdat */
+      createdAt: number;
+      /** Fingerprint */
+      fingerprint: string;
+      /** Grantid */
+      grantId: string;
+      /** Localproject */
+      localProject: string;
+      /** Peerstateid */
+      peerStateId: string;
+      /** Remoteproject */
+      remoteProject: string;
+    };
+    /** ProjectGrantsResponse */
+    ProjectGrantsResponse: {
+      /** Grants */
+      grants: components["schemas"]["ProjectGrant"][];
+    };
+    /** ProjectInviteResponse */
+    ProjectInviteResponse: {
+      /** Expires */
+      expires: number;
+      invitation: components["schemas"]["FederationInvitation"];
+      /** Warning */
+      warning: string;
     };
     /**
      * ProjectLayrReadinessDto
@@ -20266,6 +20419,16 @@ export interface components {
       /** State Id */
       state_id: string;
     };
+    /** RevokeProjectGrantRequest */
+    RevokeProjectGrantRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      action: "revoke_project_grant";
+      /** Grant Id */
+      grant_id: string;
+    };
     /** RoomDeleteBody */
     RoomDeleteBody: {
       /** Id */
@@ -22359,6 +22522,14 @@ export interface components {
       turnId?: string | undefined;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
+    };
+    /** @description The account's turn start throttle: admitted slots, queued starts and the latest admit outcomes. */
+    StartGateDiagnostics: {
+      /** @description The latest admits, newest first. */
+      recentAdmits: components["schemas"]["GateAdmitDiagnostics"][];
+      running: components["schemas"]["GateSlotDiagnostics"][];
+      /** @description Queued starts in arrival order; only the first may be admitted. */
+      waiters: components["schemas"]["GateWaiterDiagnostics"][];
     };
     /** StartModelSettingsRecordResponse */
     StartModelSettingsRecordResponse: {
@@ -32086,7 +32257,11 @@ export interface operations {
           | components["schemas"]["RevokePeerRequest"]
           | components["schemas"]["RoomOptionsRequest"]
           | components["schemas"]["SetEnabledRequest"]
-          | components["schemas"]["StatusActionRequest"];
+          | components["schemas"]["StatusActionRequest"]
+          | components["schemas"]["CreateProjectInviteRequest"]
+          | components["schemas"]["AcceptProjectPeerRequest"]
+          | components["schemas"]["ListProjectGrantsRequest"]
+          | components["schemas"]["RevokeProjectGrantRequest"];
       };
     };
     responses: {
@@ -32111,7 +32286,9 @@ export interface operations {
         content: {
           "application/json":
             | components["schemas"]["CreateInviteResponse"]
-            | components["schemas"]["FederationSnapshot"];
+            | components["schemas"]["FederationSnapshot"]
+            | components["schemas"]["ProjectGrantsResponse"]
+            | components["schemas"]["ProjectInviteResponse"];
         };
       };
       /** @description Bad Request */
@@ -39092,6 +39269,7 @@ export const MessageKind = {
   "chat-message": "chat-message",
   "room-invite": "room-invite",
   "room-accept": "room-accept",
+  "lead-message": "lead-message",
 } as const;
 export type MessageKind = components["schemas"]["MessageKind"];
 export const MessageSendStatus = {

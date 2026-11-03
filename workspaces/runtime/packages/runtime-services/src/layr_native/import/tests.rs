@@ -357,10 +357,11 @@ mod lifecycle_tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn native_import_generated_name_collision_refuses_before_state_creation() {
+        // The volume decides the outcome: a case-insensitive volume maps the
+        // user's `.GIT` onto the generated `.git`, a case-sensitive one keeps both.
+        // Run with TMPDIR on each kind of volume to cover both branches.
         let fixture = tempfile::tempdir().expect("fixture");
-        if case_sensitive(fixture.path()).expect("volume policy") {
-            return;
-        }
+        let case_sensitive = case_sensitive(fixture.path()).expect("volume policy");
         let source = fixture.path().join("source");
         fs::create_dir(&source).expect("source");
         let state = fixture.path().join("absent-state");
@@ -372,10 +373,15 @@ mod lifecycle_tests {
         let record = record.value();
         fs::create_dir(source.join(".GIT")).expect("Git case alias");
         super::super::inventory::git(&source, &["init", "-q"]).expect("valid repository");
-        let error = super::super::runtime::prepare_files(&state, &record)
-            .expect_err("Git bridge case collision");
-        assert!(error.to_string().contains("case or Unicode"));
-        assert!(!state.exists());
+        let result = super::super::runtime::prepare_files(&state, &record);
+        if case_sensitive {
+            result.expect("case-sensitive volume keeps .GIT and .git apart");
+            assert!(state.exists());
+        } else {
+            let error = result.expect_err("Git bridge case collision");
+            assert!(error.to_string().contains("case or Unicode"));
+            assert!(!state.exists());
+        }
     }
 
     #[test]

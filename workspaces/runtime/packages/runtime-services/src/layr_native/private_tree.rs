@@ -35,6 +35,8 @@ impl Directory {
             false,
         )
     }
+    // Only Linux peeks at the next part, so other systems see a plain loop.
+    #[cfg_attr(not(target_os = "linux"), allow(clippy::while_let_on_iterator))]
     pub fn child(&self, relative: &Path, create: bool) -> std::io::Result<Self> {
         let mut fd = rustix::io::dup(&self.0)?;
         let mut parts = relative.components().peekable();

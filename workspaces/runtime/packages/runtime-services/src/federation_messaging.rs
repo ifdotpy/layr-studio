@@ -98,6 +98,20 @@ enum PeerStatus {
     Revoked,
 }
 impl Peer {
+    /// The peer of a pairing request: its key and origin, not yet approved on either side.
+    pub(crate) fn pending(state_id: &str, origin: &str, public_key: &str) -> Self {
+        Self {
+            state_id: state_id.to_owned(),
+            label: String::new(),
+            origin: origin.to_owned(),
+            public_key: public_key.to_owned(),
+            status: PeerStatus::Pending,
+            local_approved: false,
+            remote_approved: false,
+            whois_user: None,
+        }
+    }
+
     pub(crate) fn awaiting_pair(&self) -> bool {
         self.status != PeerStatus::Revoked && self.local_approved && !self.remote_approved
     }
@@ -140,6 +154,7 @@ pub(crate) fn checked_envelope(value: &Value) -> Result<Envelope> {
         match envelope.kind {
             MessageKind::ChatMessage => "FederationChatPayload",
             MessageKind::RoomInvite | MessageKind::RoomAccept => "FederationRoomPayload",
+            MessageKind::LeadMessage => "FederationLeadPayload",
         },
         &envelope.payload,
         "envelope.payload",
@@ -273,6 +288,11 @@ pub fn decide_receive(snapshot: &Snapshot, envelope: &Value, now: f64) -> Result
     };
     let mut chat = None;
     let room = match message.kind {
+        MessageKind::LeadMessage => {
+            return Err(FederationMessageError::Forbidden(
+                "lead messages need a project grant",
+            ));
+        }
         MessageKind::RoomInvite | MessageKind::RoomAccept => {
             if message.payload["room"] != message.room {
                 return Err(FederationMessageError::Invalid("payload.room"));

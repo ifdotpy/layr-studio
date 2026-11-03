@@ -1,0 +1,14 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "text": {
+      "maxLength": 4000,
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+    }
+  },
+  "required": ["text"],
+  "title": "FederationLeadPayload",
+  "type": "object"
+}

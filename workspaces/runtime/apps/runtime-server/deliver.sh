@@ -120,6 +120,8 @@ if [ "$in_delivery_unit" != true ] && [ "$test_fixture" != true ]; then
     echo "systemd $MIN_SYSTEMD_VERSION or newer is required for literal delivery arguments" >&2
     exit 1
   fi
+  export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+  export DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}
   IFS= read -r unique_id < /proc/sys/kernel/random/uuid
   unique_id=${unique_id//-/}
   [[ $unique_id =~ $DELIVERY_UUID_PATTERN ]] || {

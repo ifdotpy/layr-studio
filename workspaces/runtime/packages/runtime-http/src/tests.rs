@@ -200,3 +200,121 @@ fn a_federation_route_gets_no_principal_from_the_edge() {
     );
     assert_eq!(edge_check(Some(&peer), CommandClass::OwnerOnly), Err(()));
 }
+
+#[test]
+fn project_peer_flag_admits_only_the_forwarded_source_outside_the_tailnet() {
+    use crate::middleware::trusted_with;
+    let mut headers = HeaderMap::new();
+    headers.insert(header::HOST, HeaderValue::from_static("127.0.0.1:4312"));
+    headers.insert("x-forwarded-proto", HeaderValue::from_static("https"));
+    headers.insert(
+        "x-forwarded-host",
+        HeaderValue::from_static("studio.example.ts.net"),
+    );
+    headers.insert("x-forwarded-for", HeaderValue::from_static("203.0.113.7"));
+    let origin = Some("https://studio.example.ts.net".to_owned());
+    let path = "/api/federation/v1/message";
+    assert!(!trusted_with(
+        &headers, true, "token", true, 4312, &origin, path, false
+    ));
+    assert!(trusted_with(
+        &headers, true, "token", true, 4312, &origin, path, true
+    ));
+}
+
+#[tokio::test]
+async fn a_lead_message_from_a_granted_peer_outside_the_tailnet_is_admitted() {
+    use crate::middleware::project_peer_source;
+    use studio_runtime_store::project_grants::{Capability, GrantRow, insert_rows};
+    use studio_runtime_store::{RuntimeStore, StoreError};
+    let root = tempfile::tempdir().expect("isolated state");
+    let store = std::sync::Arc::new(
+        RuntimeStore::open(Some(root.path()))
+            .await
+            .expect("runtime store opens"),
+    );
+    store
+        .transaction_with(|tx| {
+            insert_rows(
+                tx,
+                &[GrantRow {
+                    grant_id: "g1".into(),
+                    peer: "peer-1".into(),
+                    peer_public_key: "PEM".into(),
+                    local_project: "proj-a".into(),
+                    remote_project: "proj-b".into(),
+                    capability: Capability::LeadMessages,
+                    created_at: 1,
+                    revoked_at: None,
+                    peer_label: String::new(),
+                }],
+            )?;
+            Ok::<_, StoreError>(())
+        })
+        .await
+        .expect("grant written");
+    let headers = |source: &'static str, peer: &'static str| {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", HeaderValue::from_static(source));
+        headers.insert("x-studio-client", HeaderValue::from_static(peer));
+        headers
+    };
+    let lead = "/api/federation/v1/message";
+    let outside = "203.0.113.7";
+    assert!(
+        project_peer_source(
+            Some(store.clone()),
+            &headers(outside, "peer-1"),
+            &axum::http::Method::POST,
+            lead
+        )
+        .await
+    );
+    // A tailnet source is not an admission: the tailnet rule decides it.
+    assert!(
+        !project_peer_source(
+            Some(store.clone()),
+            &headers("100.75.160.63", "peer-1"),
+            &axum::http::Method::POST,
+            lead
+        )
+        .await
+    );
+    // Another route, another method, an unknown peer, or no store: refused.
+    assert!(
+        !project_peer_source(
+            Some(store.clone()),
+            &headers(outside, "peer-1"),
+            &axum::http::Method::POST,
+            "/api/federation/v1/pull"
+        )
+        .await
+    );
+    assert!(
+        !project_peer_source(
+            Some(store.clone()),
+            &headers(outside, "peer-1"),
+            &axum::http::Method::GET,
+            lead
+        )
+        .await
+    );
+    assert!(
+        !project_peer_source(
+            Some(store.clone()),
+            &headers(outside, "peer-2"),
+            &axum::http::Method::POST,
+            lead
+        )
+        .await
+    );
+    assert!(
+        !project_peer_source(
+            None,
+            &headers(outside, "peer-1"),
+            &axum::http::Method::POST,
+            lead
+        )
+        .await
+    );
+}

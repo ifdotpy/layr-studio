@@ -918,6 +918,30 @@
         "title": "AcceptPeerRequest",
         "type": "object"
       },
+      "AcceptProjectPeerRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "accept_project_peer",
+            "title": "Action",
+            "type": "string"
+          },
+          "invitation": {
+            "$ref": "#/components/schemas/FederationInvitation"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "invitation",
+          "project_id"
+        ],
+        "title": "AcceptProjectPeerRequest",
+        "type": "object"
+      },
       "AccessAudit": {
         "additionalProperties": false,
         "properties": {
@@ -3583,6 +3607,45 @@
           }
         },
         "title": "AccountTransferSummaryRecordResponse",
+        "type": "object"
+      },
+      "AccountWorkerDiagnostics": {
+        "additionalProperties": false,
+        "description": "One account worker's wake and start state. Ages are in milliseconds.",
+        "properties": {
+          "closing": {
+            "description": "The worker is shutting down and starts nothing new.",
+            "type": "boolean"
+          },
+          "error": {
+            "description": "Why the worker state is missing: unavailable (no live worker) or unresponsive (the worker did not answer in time).",
+            "type": "string"
+          },
+          "gate": {
+            "$ref": "#/components/schemas/StartGateDiagnostics"
+          },
+          "preparationWaits": {
+            "description": "Agents with a pending wait for a catalog refresh, a disk recheck or agent-row changes.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "preparing": {
+            "description": "Agents with a turn preparation in flight.",
+            "items": {
+              "$ref": "#/components/schemas/PreparingAgentDiagnostics"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "AccountWorkerDiagnosticsMap": {
+        "additionalProperties": {
+          "$ref": "#/components/schemas/AccountWorkerDiagnostics"
+        },
+        "description": "Each account's worker state, keyed account1, account2 in the order of nativeAccounts. An account with an error has no other fields.",
         "type": "object"
       },
       "AccountsResource": {
@@ -25104,6 +25167,26 @@
         "title": "CreateLeadRequest",
         "type": "object"
       },
+      "CreateProjectInviteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "create_project_invite",
+            "title": "Action",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "project_id"
+        ],
+        "title": "CreateProjectInviteRequest",
+        "type": "object"
+      },
       "CreateRoomRequest": {
         "additionalProperties": false,
         "properties": {
@@ -25957,6 +26040,9 @@
       "DiagnosticsResponse": {
         "additionalProperties": false,
         "properties": {
+          "accountWorkers": {
+            "$ref": "#/components/schemas/AccountWorkerDiagnosticsMap"
+          },
           "analyticsCapture": {
             "$ref": "#/components/schemas/AnalyticsCaptureStatus"
           },
@@ -26078,6 +26164,7 @@
           "hostResources",
           "resourceAttribution",
           "nativeAccounts",
+          "accountWorkers",
           "studioLoadedThreads",
           "queues",
           "runtimeLockSamples",
@@ -28745,8 +28832,28 @@
             "title": "Leadname"
           },
           "origin": {
-            "title": "Origin",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "default": null,
+            "title": "Origin"
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "default": null,
+            "title": "Projectid"
           },
           "protocol": {
             "const": 1,
@@ -28758,6 +28865,21 @@
           "publicKey": {
             "title": "Publickey",
             "type": "string"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "enum": [
+                  "project"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scope"
           },
           "stateId": {
             "title": "Stateid",
@@ -28797,7 +28919,6 @@
           "token",
           "stateId",
           "label",
-          "origin",
           "publicKey",
           "expires"
         ],
@@ -29199,6 +29320,78 @@
           "remote"
         ],
         "type": "string"
+      },
+      "GateAdmitDiagnostics": {
+        "additionalProperties": false,
+        "properties": {
+          "ageMs": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "claimed": {
+            "description": "true when the claim made the turn in flight; false when the admitted slot was dropped unclaimed.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "agent",
+          "claimed",
+          "ageMs"
+        ],
+        "type": "object"
+      },
+      "GateSlotDiagnostics": {
+        "additionalProperties": false,
+        "properties": {
+          "ageMs": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "claimed": {
+            "description": "The claim made the turn in flight; false while the start is only admitted.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "agent",
+          "claimed",
+          "ageMs"
+        ],
+        "type": "object"
+      },
+      "GateWaiterDiagnostics": {
+        "additionalProperties": false,
+        "properties": {
+          "ageMs": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "wait": {
+            "description": "queued: no decision yet; slot: every running slot is taken; pause: the burst pause runs; behind: free to start, behind an earlier start.",
+            "enum": [
+              "queued",
+              "slot",
+              "pause",
+              "behind"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent",
+          "wait",
+          "ageMs"
+        ],
+        "type": "object"
       },
       "Grant": {
         "enum": [
@@ -30321,6 +30514,26 @@
         "title": "LinuxVMStatus",
         "type": "object"
       },
+      "ListProjectGrantsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "list_project_grants",
+            "title": "Action",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "project_id"
+        ],
+        "title": "ListProjectGrantsRequest",
+        "type": "object"
+      },
       "LiveUpdateState": {
         "enum": [
           "idle",
@@ -31028,7 +31241,8 @@
         "enum": [
           "chat-message",
           "room-invite",
-          "room-accept"
+          "room-accept",
+          "lead-message"
         ],
         "title": "MessageKind",
         "type": "string"
@@ -35201,6 +35415,30 @@
             "title": "Origin",
             "type": "string"
           },
+          "peerProjectId": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "default": null,
+            "title": "Peerprojectid"
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "default": null,
+            "title": "Projectid"
+          },
           "protocol": {
             "const": 1,
             "maximum": 1,
@@ -35211,6 +35449,21 @@
           "publicKey": {
             "title": "Publickey",
             "type": "string"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "enum": [
+                  "project"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scope"
           },
           "stateId": {
             "title": "Stateid",
@@ -36262,6 +36515,39 @@
             ],
             "title": "Name"
           },
+          "peerLeads": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "grant": {
+                  "title": "Grant",
+                  "type": "string"
+                },
+                "label": {
+                  "title": "Label",
+                  "type": "string"
+                },
+                "remoteProject": {
+                  "title": "Remoteproject",
+                  "type": "string"
+                },
+                "server": {
+                  "title": "Server",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "grant",
+                "remoteProject",
+                "server",
+                "label"
+              ],
+              "title": "PeerLead",
+              "type": "object"
+            },
+            "title": "Peerleads",
+            "type": "array"
+          },
           "projectPath": {
             "anyOf": [
               {
@@ -37090,6 +37376,29 @@
           }
         },
         "title": "PreparedContextRecordResponse",
+        "type": "object"
+      },
+      "PreparingAgentDiagnostics": {
+        "additionalProperties": false,
+        "properties": {
+          "ageMs": {
+            "description": "Milliseconds since the current phase began.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "rewake": {
+            "description": "A wake arrived during the preparation and runs after it.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "agent",
+          "rewake",
+          "ageMs"
+        ],
         "type": "object"
       },
       "Principal": {
@@ -39340,6 +39649,93 @@
           "name"
         ],
         "title": "ProjectFolder",
+        "type": "object"
+      },
+      "ProjectGrant": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "createdAt": {
+            "title": "Createdat",
+            "type": "integer"
+          },
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "grantId": {
+            "title": "Grantid",
+            "type": "string"
+          },
+          "localProject": {
+            "title": "Localproject",
+            "type": "string"
+          },
+          "peerStateId": {
+            "title": "Peerstateid",
+            "type": "string"
+          },
+          "remoteProject": {
+            "title": "Remoteproject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grantId",
+          "peerStateId",
+          "fingerprint",
+          "localProject",
+          "remoteProject",
+          "capabilities",
+          "createdAt"
+        ],
+        "title": "ProjectGrant",
+        "type": "object"
+      },
+      "ProjectGrantsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "grants": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectGrant"
+            },
+            "title": "Grants",
+            "type": "array"
+          }
+        },
+        "required": [
+          "grants"
+        ],
+        "title": "ProjectGrantsResponse",
+        "type": "object"
+      },
+      "ProjectInviteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "expires": {
+            "title": "Expires",
+            "type": "integer"
+          },
+          "invitation": {
+            "$ref": "#/components/schemas/FederationInvitation"
+          },
+          "warning": {
+            "title": "Warning",
+            "type": "string"
+          }
+        },
+        "required": [
+          "invitation",
+          "expires",
+          "warning"
+        ],
+        "title": "ProjectInviteResponse",
         "type": "object"
       },
       "ProjectLayrReadinessDto": {
@@ -44980,6 +45376,26 @@
         "title": "RevokePeerRequest",
         "type": "object"
       },
+      "RevokeProjectGrantRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "const": "revoke_project_grant",
+            "title": "Action",
+            "type": "string"
+          },
+          "grant_id": {
+            "title": "Grant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "grant_id"
+        ],
+        "title": "RevokeProjectGrantRequest",
+        "type": "object"
+      },
       "RoomDeleteBody": {
         "additionalProperties": false,
         "properties": {
@@ -50428,6 +50844,38 @@
           }
         },
         "title": "StartAttemptRecordResponse",
+        "type": "object"
+      },
+      "StartGateDiagnostics": {
+        "additionalProperties": false,
+        "description": "The account's turn start throttle: admitted slots, queued starts and the latest admit outcomes.",
+        "properties": {
+          "recentAdmits": {
+            "description": "The latest admits, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/GateAdmitDiagnostics"
+            },
+            "type": "array"
+          },
+          "running": {
+            "items": {
+              "$ref": "#/components/schemas/GateSlotDiagnostics"
+            },
+            "type": "array"
+          },
+          "waiters": {
+            "description": "Queued starts in arrival order; only the first may be admitted.",
+            "items": {
+              "$ref": "#/components/schemas/GateWaiterDiagnostics"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "running",
+          "waiters",
+          "recentAdmits"
+        ],
         "type": "object"
       },
       "StartModelSettingsRecordResponse": {
@@ -72598,11 +73046,15 @@
                 "discriminator": {
                   "mapping": {
                     "accept_peer": "#/components/schemas/AcceptPeerRequest",
+                    "accept_project_peer": "#/components/schemas/AcceptProjectPeerRequest",
                     "approve_peer": "#/components/schemas/ApprovePeerRequest",
                     "approve_room": "#/components/schemas/ApproveRoomRequest",
                     "create_invite": "#/components/schemas/CreateInviteRequest",
+                    "create_project_invite": "#/components/schemas/CreateProjectInviteRequest",
                     "create_room": "#/components/schemas/CreateRoomRequest",
+                    "list_project_grants": "#/components/schemas/ListProjectGrantsRequest",
                     "revoke_peer": "#/components/schemas/RevokePeerRequest",
+                    "revoke_project_grant": "#/components/schemas/RevokeProjectGrantRequest",
                     "room_options": "#/components/schemas/RoomOptionsRequest",
                     "set_enabled": "#/components/schemas/SetEnabledRequest",
                     "status": "#/components/schemas/StatusActionRequest"
@@ -72636,6 +73088,18 @@
                   },
                   {
                     "$ref": "#/components/schemas/StatusActionRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CreateProjectInviteRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AcceptProjectPeerRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ListProjectGrantsRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RevokeProjectGrantRequest"
                   }
                 ],
                 "title": "Body"
@@ -72655,6 +73119,12 @@
                     },
                     {
                       "$ref": "#/components/schemas/FederationSnapshot"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ProjectGrantsResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ProjectInviteResponse"
                     }
                   ],
                   "title": "Response Manage Federation Api Federation Post"

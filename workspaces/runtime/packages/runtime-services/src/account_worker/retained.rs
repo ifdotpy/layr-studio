@@ -157,6 +157,16 @@ impl RetainedSessionPort {
     pub fn is_live(&self) -> bool {
         !*self.stop.subscribe().borrow() && !self.commands.is_closed()
     }
+    /// The worker's wake and start state, or `None` when the worker is closed.
+    /// The caller bounds the wait: a worker busy in one step answers late.
+    pub async fn worker_diagnostics(&self) -> Option<Value> {
+        let (reply, receipt) = oneshot::channel();
+        self.commands
+            .send(AccountCommand::AccountDiagnostics { reply })
+            .await
+            .ok()?;
+        receipt.await.ok()
+    }
     pub async fn recover_connection(&self, agent_id: String) -> Result<Value, PortError> {
         self.recover_authorized(agent_id, None)
             .await

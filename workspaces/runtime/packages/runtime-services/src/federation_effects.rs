@@ -12,7 +12,7 @@ use studio_runtime_store::federation_messaging::{
 };
 use studio_runtime_store::{
     AgentId, AgentRepository, RemoteTransportRepository, RuntimeStore, StoreError,
-    SyncDocumentsRepository,
+    SyncDocumentsRepository, project_grants,
 };
 use subtle::ConstantTimeEq;
 
@@ -74,7 +74,7 @@ pub struct SignedRequest<'a> {
 impl SignedRequest<'_> {
     /// The bytes the sender signed. The unified scheme binds the recipient (`local_id`),
     /// the sender and the request id. The retired scheme is accepted for one release.
-    fn signing_bytes(&self, local_id: &str) -> Result<Vec<u8>> {
+    pub(crate) fn signing_bytes(&self, local_id: &str) -> Result<Vec<u8>> {
         let Some(unified) = self.unified else {
             return Ok(transport::federation_signing_bytes(
                 "POST",
@@ -101,7 +101,7 @@ impl SignedRequest<'_> {
         ))
     }
 
-    fn validate_nonce(&self, now: i64) -> Result<()> {
+    pub(crate) fn validate_nonce(&self, now: i64) -> Result<()> {
         if let Some(unified) = self.unified {
             transport::validate_multi_server_nonce(self.nonce, self.timestamp, now)?;
             transport::validate_identifier(unified.request_id)?;
@@ -161,7 +161,7 @@ pub(crate) fn snapshot(tx: &Transaction<'_>, peer: &str, room: &str, now: f64) -
         Repo::room_rate(tx, peer, room, now)?,
     )
 }
-fn consume_nonce(
+pub(crate) fn consume_nonce(
     tx: &Transaction<'_>,
     peer: &str,
     nonce: &str,
@@ -211,6 +211,12 @@ pub async fn handle(
         return handle_pair(Arc::clone(&store), request, observed, body, now).await;
     }
     let body: Value = serde_json::from_slice(request.raw).map_err(|_| Error::Invalid("body"))?;
+    // A lead message is authorized by its project grant, not by a federation peer.
+    if matches!(request.action, FederationAction::Message)
+        && crate::federation_lead::is_lead_envelope(&body)
+    {
+        return crate::federation_lead::receive(store, &request, body, now).await;
+    }
     let identity = transport::load_federation_identity(&store).await?;
     let identity = Arc::new(identity);
     let action = request.action;
@@ -264,6 +270,132 @@ struct PairRequest {
     tailscale_user: Option<String>,
     #[serde(rename = "tailscaleStatus")]
     _tailscale_status: Option<String>,
+    /// `project` for a pairing of one project. Absent for a server pairing.
+    scope: Option<String>,
+    project_id: Option<String>,
+    peer_project_id: Option<String>,
+}
+
+/// Pair one project (decision 2026-11-01, "Pairing per project"). Writes the grant of this
+/// side only; the invitation is one-use, and a retry by the same peer gets the same answer.
+async fn handle_project_pair(
+    store: Arc<RuntimeStore>,
+    request: SignedRequest<'_>,
+    body: PairRequest,
+    now: f64,
+) -> Result<Value> {
+    let identity = transport::load_federation_identity(&store).await?;
+    let (Some(project), Some(peer_project)) = (body.project_id, body.peer_project_id) else {
+        return Err(Error::Invalid("body"));
+    };
+    if body.state_id != request.peer_id
+        || project.is_empty()
+        || peer_project.is_empty()
+        || body.public_key.is_empty()
+    {
+        return Err(Error::Forbidden("pairing identity does not match request"));
+    }
+    uuid::Uuid::parse_str(&body.state_id)
+        .map_err(|_| Error::Forbidden("invalid peer state identity"))?;
+    if body.state_id == identity.id() {
+        return Err(Error::Forbidden("cannot pair a server with itself"));
+    }
+    request.validate_nonce(now as i64)?;
+    transport::verify_signature(
+        &body.public_key,
+        &request.signing_bytes(identity.id())?,
+        request.signature,
+    )?;
+    let local_identity_id = identity.id().to_owned();
+    let nonce = request.nonce.to_owned();
+    let timestamp = request.timestamp;
+    let invite_id = body.invite_id;
+    let token_hash = studio_runtime_store::sha256_hex(body.token.as_bytes());
+    let peer_state = body.state_id;
+    let body_label = body.label.trim().to_owned();
+    let peer_key = body.public_key;
+    let result = store.transaction_with(move |tx| {
+        let current_identity: String = tx.query_row(
+            "SELECT json_extract(record,'$.stateId') FROM runtime_federation_identity WHERE id='local'",
+            [],
+            |row| row.get(0),
+        ).map_err(StoreError::from)?;
+        if current_identity != local_identity_id {
+            return Err(Error::Conflict("local identity changed"));
+        }
+        if !RemoteTransportRepository::consume_federation_nonce(
+            tx,
+            &peer_state,
+            &nonce,
+            timestamp,
+            now as i64,
+        )? {
+            return Err(Error::Forbidden("nonce replay or peer rate limit"));
+        }
+        let local_project_exists: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM runtime_projects WHERE id=?1)",
+            [&project],
+            |row| row.get(0),
+        ).map_err(StoreError::from)?;
+        if !local_project_exists {
+            return Err(Error::Invalid("project"));
+        }
+        let invite: Option<String> = tx
+            .query_row(
+                "SELECT record FROM runtime_federation_invites WHERE id=?1",
+                [&invite_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(StoreError::from)?;
+        let mut invite: Value = invite
+            .map(|raw| serde_json::from_str(&raw))
+            .transpose()
+            .map_err(|_| Error::Invalid("invite"))?
+            .ok_or(Error::Forbidden("invalid pairing invitation"))?;
+        let same_peer = invite["status"] == "used" && invite["usedBy"] == peer_state;
+        let expires = invite["expires"].as_i64().unwrap_or_default();
+        if invite["scope"] != "project"
+            || invite["projectId"] != project
+            || invite["tokenHash"].as_str() != Some(token_hash.as_str())
+            || (!same_peer && (invite["status"] != "open" || expires < now as i64))
+        {
+            return Err(Error::Forbidden("pairing invitation is invalid, expired, or already used"));
+        }
+        match project_grants::grant_active(tx, &invite_id).map_err(Error::from)? {
+            Some(false) => return Err(Error::Forbidden("this project pairing was revoked")),
+            Some(true) => {}
+            None => {
+                project_grants::insert_rows(tx, &[project_grants::GrantRow {
+                    grant_id: invite_id.clone(),
+                    peer: peer_state.clone(),
+                    peer_public_key: peer_key,
+                    local_project: project.clone(),
+                    remote_project: peer_project,
+                    capability: project_grants::Capability::LeadMessages,
+                    created_at: now as i64,
+                    revoked_at: None,
+                    peer_label: body_label.clone(),
+                }])?;
+                crate::sync_policy::publish_peer_teams(tx)?;
+            }
+        }
+        if invite["status"] == "open" {
+            invite["status"] = json!("used");
+            invite["usedBy"] = json!(peer_state);
+            tx.execute(
+                "UPDATE runtime_federation_invites SET record=?1 WHERE id=?2",
+                rusqlite::params![transport::canonical_json(&invite)?, invite_id],
+            ).map_err(StoreError::from)?;
+        }
+        Ok::<_, Error>(json!({
+            "protocol": PROTOCOL,
+            "accepted": true,
+            "stateId": local_identity_id,
+            "projectId": project,
+        }))
+    }).await?;
+    signed_response(&identity, result, now as i64)
 }
 
 async fn handle_pair(
@@ -273,6 +405,9 @@ async fn handle_pair(
     body: PairRequest,
     now: f64,
 ) -> Result<Value> {
+    if body.scope.as_deref() == Some("project") {
+        return handle_project_pair(store, request, body, now).await;
+    }
     let identity = transport::load_federation_identity(&store).await?;
     let origin = transport::validate_federation_origin(&body.origin)?;
     if body.state_id != request.peer_id

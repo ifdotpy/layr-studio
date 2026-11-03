@@ -15,7 +15,7 @@ use iroh_relay::server::{
 use rustls::pki_types::CertificateDer;
 
 use crate::identity::{self, PairedKeys};
-use crate::{Links, builder};
+use crate::{Links, builder, listen_allowed};
 
 const LOCAL: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
 
@@ -325,4 +325,52 @@ async fn loopback_round_trip_time() {
         "loopback round trip: median {median:?} over {} requests",
         times.len()
     );
+}
+
+#[test]
+fn the_listen_address_is_all_interfaces_tailnet_or_loopback() {
+    let ip = |text: &str| {
+        text.parse::<IpAddr>()
+            .unwrap_or_else(|error| panic!("{error}"))
+    };
+    assert!(listen_allowed(ip("0.0.0.0")));
+    assert!(listen_allowed(ip("100.75.160.63")));
+    assert!(listen_allowed(ip("127.0.0.1")));
+    assert!(!listen_allowed(ip("::")));
+    assert!(!listen_allowed(ip("192.168.1.152")));
+}
+
+/// The backend binds all interfaces: a socket on 0.0.0.0 accepts a paired key over loopback.
+#[tokio::test]
+async fn an_all_interfaces_socket_accepts_by_key() {
+    let (a, b) = (node(), node());
+    let secret =
+        identity::secret_key(&b.private, &b.public).unwrap_or_else(|error| panic!("{error}"));
+    let server = builder(secret, keys(&[&a]), RelayMode::Disabled)
+        .unwrap_or_else(|error| panic!("{error}"))
+        .bind_addr(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
+        .unwrap_or_else(|error| panic!("{error}"))
+        .bind()
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    let port = server
+        .bound_sockets()
+        .iter()
+        .find(|address| address.is_ipv4())
+        .map(|address| address.port())
+        .unwrap_or_else(|| panic!("no IPv4 socket"));
+    serve(server.clone());
+    let client = endpoint(&a, keys(&[&b]), RelayMode::Disabled, true, None).await;
+    let loopback = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let connection = client
+        .connect(
+            EndpointAddr::new(b.secret.public()).with_ip_addr(loopback),
+            identity::ALPN,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    round_trip(&connection)
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(connection.remote_id(), b.secret.public());
 }
