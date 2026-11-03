@@ -9,10 +9,10 @@ its benchmark summary for the measured allocation totals.
 
 | Case | Instructions | Allocated blocks | Allocated bytes |
 | --- | ---: | ---: | ---: |
-| Stored text encode, warm context, 116,000 repetitive bytes | 242,466 | 1 | 116,461 |
-| Stored text decode, warm context | 194,461 | 1 | 116,000 |
-| Agent record JSON decode | 9,877 | 4 | 24 |
-| Agent record JSON encode | 5,650 | 2 | 384 |
+| Stored text encode, warm context, 116,000 repetitive bytes | 242,337 | 1 | 116,461 |
+| Stored text decode, warm context | 194,327 | 1 | 116,000 |
+| Agent record JSON decode | 9,837 | 4 | 24 |
+| Agent record JSON encode | 5,287 | 2 | 384 |
 | Generic SSE event JSON | 23,170 | 7 | 523 |
 | Create assigned work and commit | 5,704,492 | 237 | 17,096 |
 | Submit review work and commit | 7,764,843 | 352 | 24,719 |
@@ -23,9 +23,8 @@ The SQLite cases return their fixture after the measured call, excluding databas
 close. Create and submit include transaction commit. The SSE case calls the
 generic event encoder, not the bounded resource encoder. The services build
 uses libc auxiliary-vector lookup under Valgrind; see [testing](testing.md).
-For comparison, first-use stored-text encode measured 642,360 instructions and
-4 blocks; first-use decode measured 195,092 and 3 blocks. Warm contexts are the
-main baseline because the implementation reuses them per thread.
+Warm contexts reflect the implementation's per-thread reuse. Inputs and output
+are returned after the measured call so their destruction is outside it.
 
 Inclusive Callgrind counts overlap; do not add them together:
 

@@ -23,14 +23,16 @@ fn warm_decode() -> Vec<u8> {
 
 #[library_benchmark]
 #[bench::transcript(warm_encode())]
-fn encode(input: String) -> Vec<u8> {
-    stored_text::encode(black_box(&input))
+fn encode(input: String) -> (String, Vec<u8>) {
+    let result = stored_text::encode(black_box(&input));
+    (input, result)
 }
 
 #[library_benchmark]
 #[bench::transcript(warm_decode())]
-fn decode(input: Vec<u8>) -> String {
-    stored_text::decode_blob(black_box(&input)).expect("valid frame")
+fn decode(input: Vec<u8>) -> (Vec<u8>, String) {
+    let result = stored_text::decode_blob(black_box(&input)).expect("valid frame");
+    (input, result)
 }
 
 fn record() -> Value {
@@ -39,14 +41,16 @@ fn record() -> Value {
 
 #[library_benchmark]
 #[bench::agent(record().to_string())]
-fn record_decode(input: String) -> AgentRecord {
-    serde_json::from_str(black_box(&input)).expect("agent record")
+fn record_decode(input: String) -> (String, AgentRecord) {
+    let result = serde_json::from_str(black_box(&input)).expect("agent record");
+    (input, result)
 }
 
 #[library_benchmark]
 #[bench::agent(AgentRecord::from_value(record()).expect("agent record"))]
-fn record_encode(input: AgentRecord) -> String {
-    serde_json::to_string(black_box(&input)).expect("agent record")
+fn record_encode(input: AgentRecord) -> (AgentRecord, String) {
+    let result = serde_json::to_string(black_box(&input)).expect("agent record");
+    (input, result)
 }
 
 library_benchmark_group!(
