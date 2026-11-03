@@ -27647,7 +27647,8 @@ export interface components {
           files?: string[] | undefined;
           id?: string | null | undefined;
           result: components["schemas"]["JsonValue"];
-          revision: string;
+          /** @default  */
+          revision?: string | undefined;
           task_id: string;
           /**
            * Format: int64
