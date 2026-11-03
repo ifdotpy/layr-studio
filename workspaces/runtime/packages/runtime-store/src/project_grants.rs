@@ -182,6 +182,27 @@ pub fn revoke(transaction: &Transaction<'_>, grant_id: &str, now: i64) -> StoreR
     )?)
 }
 
+/// The distinct public keys of the active pairings. The peer link accepts exactly these.
+pub fn active_peer_keys(transaction: &Transaction<'_>) -> StoreResult<Vec<String>> {
+    let mut query = transaction.prepare(
+        "SELECT DISTINCT peer_public_key FROM project_grants WHERE revoked_at IS NULL ORDER BY peer_public_key",
+    )?;
+    Ok(query
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?)
+}
+
+/// The state of a pairing by id: `None` when unknown, `Some(true)` when active and
+/// `Some(false)` when revoked.
+pub fn grant_active(transaction: &Transaction<'_>, grant_id: &str) -> StoreResult<Option<bool>> {
+    let active: Option<bool> = transaction.query_row(
+        "SELECT MAX(revoked_at IS NULL) FROM project_grants WHERE grant_id=?1",
+        [grant_id],
+        |row| row.get(0),
+    )?;
+    Ok(active)
+}
+
 /// The capabilities of the active pairing for `peer` and `local_project`, if any.
 pub fn active_capabilities(
     transaction: &Transaction<'_>,

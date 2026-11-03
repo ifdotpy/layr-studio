@@ -8,6 +8,7 @@ import {
   type ProjectServerChoice,
 } from "../servers/projectLocations";
 import ProjectLocationsSettings from "./ProjectLocationsSettings";
+import { ProjectPeers } from "./ProjectPeers";
 
 export default function ProjectFoldersDialog({
   project: initial,
@@ -40,6 +41,7 @@ export default function ProjectFoldersDialog({
     <Tabs defaultValue="folders">
       <Tabs.List>
         <Tabs.Tab value="folders">Folders</Tabs.Tab>
+        <Tabs.Tab value="peers">Peers</Tabs.Tab>
       </Tabs.List>
       <Tabs.Panel value="folders" pt="md">
         {error && <p role="alert">{error}</p>}
@@ -55,6 +57,9 @@ export default function ProjectFoldersDialog({
             await saved();
           }}
         />
+      </Tabs.Panel>
+      <Tabs.Panel value="peers" pt="md">
+        <ProjectPeers projectId={project.id} notify={setError} />
       </Tabs.Panel>
     </Tabs>
   );
