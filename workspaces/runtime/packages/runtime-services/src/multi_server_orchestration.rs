@@ -3850,6 +3850,24 @@ impl OrchestrationDriver {
                         envelope.key,
                         envelope.action.as_str()
                     );
+                    // An unpaired server cannot accept the row until it pairs again. Hold the
+                    // row (it stays pending) so it is not retried in a loop; release_peer
+                    // makes it due when the server pairs.
+                    if is_not_paired(&error) {
+                        let (key_for_hold, server_for_hold) = (key.clone(), server.clone());
+                        self.store
+                            .transaction_with(move |tx| {
+                                if let Some(entry) = crate::server_outbox::find_for(
+                                    tx,
+                                    &server_for_hold,
+                                    &key_for_hold,
+                                )? {
+                                    crate::server_outbox::hold(tx, &entry)?;
+                                }
+                                Ok::<_, AccessError>(())
+                            })
+                            .await?;
+                    }
                 }
             }
         }
@@ -3983,6 +4001,17 @@ fn require_paired(tx: &Transaction<'_>, id: &str) -> Result<(), AccessError> {
         return Err(refused(403, "client_revoked", "The server is not paired"));
     }
     Ok(())
+}
+/// The refusal from `require_paired`: the server is not paired (or was revoked).
+fn is_not_paired(error: &AccessError) -> bool {
+    matches!(
+        error,
+        AccessError::Refused {
+            status: 403,
+            code: "client_revoked",
+            ..
+        }
+    )
 }
 fn outbox(tx: &Transaction<'_>, key: &str) -> Result<Option<DeliverySnapshot>, AccessError> {
     Ok(
@@ -4170,6 +4199,89 @@ mod tests {
             )
             .unwrap();
         assert!(result.contains("not_applied"));
+    }
+
+    #[tokio::test]
+    async fn unpaired_server_delivery_waits_for_pairing_instead_of_retrying() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            studio_runtime_store::RuntimeStore::open(Some(directory.path()))
+                .await
+                .unwrap(),
+        );
+        store.set_local_server_id(Some("local".into())).unwrap();
+        let request = crate::orchestration_wire::OrchestrationRequest {
+            request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
+            operation: Vec::new(),
+            command: crate::orchestration_wire::OrchestrationCommand::Projects(serde_json::json!(
+                {}
+            )),
+        };
+        let envelope = super::Envelope::from_request(&request)
+            .unwrap()
+            .scoped(super::Direction::Outgoing, "peer");
+        let (key, signature, body) = (
+            envelope.key.clone(),
+            envelope.fingerprint.clone(),
+            envelope.body.clone(),
+        );
+        store
+            .transaction_with(move |tx| {
+                crate::server_outbox::insert(
+                    tx,
+                    "peer",
+                    &key,
+                    &signature,
+                    super::ServerDeliveryState::Queued,
+                    0.0,
+                    &crate::server_outbox::ServerRequestRecord {
+                        body,
+                        admission: studio_runtime_schema::persistence::AdmittedRequest::from_persisted_fields(
+                            key.clone(),
+                            signature.clone(),
+                            chrono::Utc::now().timestamp_millis(),
+                        ),
+                        attempts: 0,
+                        error: None,
+                    },
+                    chrono::Utc::now().timestamp(),
+                )?;
+                Ok::<_, crate::multi_server_auth::AccessError>(())
+            })
+            .await
+            .unwrap();
+        let effects = std::sync::Arc::new(CountEffects(std::sync::atomic::AtomicUsize::new(0)));
+        let driver = super::OrchestrationDriver::new(
+            store.clone(),
+            std::sync::Arc::new(super::HttpsPairedTransport::new(store.clone())),
+            effects.clone(),
+        );
+        let now = chrono::Utc::now().timestamp();
+        // The server is not paired: the row fails once and is held, not retried in a loop.
+        driver.pump_due(now).await.unwrap();
+        assert_eq!(driver.next_due_at().await.unwrap(), None);
+        driver.pump_due(now).await.unwrap();
+        assert_eq!(effects.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let connection = store.test_reader().unwrap();
+        let pending: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM runtime_outbox WHERE kind='remote_delivery' AND status='pending'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending, 1);
+        drop(connection);
+        // A pairing change makes the held row due again.
+        store
+            .transaction_with(move |tx| {
+                Ok::<_, crate::multi_server_auth::AccessError>(crate::server_outbox::release(
+                    tx, "peer", now,
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(driver.next_due_at().await.unwrap(), Some(now));
     }
 
     #[tokio::test]

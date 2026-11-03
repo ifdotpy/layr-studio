@@ -157,6 +157,26 @@ pub(crate) fn update(
     Ok(())
 }
 
+/// Next attempt time of an entry that waits for its server to pair again. Never due by time;
+/// `release` makes it due.
+const HELD_AT: i64 = i64::MAX;
+
+/// Hold an entry whose server is not paired. It keeps its status, record and identity.
+pub(crate) fn hold(tx: &Transaction<'_>, entry: &Entry) -> Result<(), AccessError> {
+    RemoteOutbox::update(
+        tx,
+        EFFECT,
+        &entry.target,
+        &entry.request_id,
+        &entry.signature,
+        entry.status,
+        Some(HELD_AT),
+        &entry.record,
+    )
+    .map_err(failed)?;
+    Ok(())
+}
+
 pub(crate) fn delete(tx: &Transaction<'_>, entry: &Entry) -> Result<(), AccessError> {
     RemoteOutbox::delete(
         tx,
@@ -201,7 +221,7 @@ pub(crate) fn due(
 pub(crate) fn next_due_at(db: &Connection, retry_actions: &str) -> rusqlite::Result<Option<i64>> {
     let known = known_action_sql_values();
     let sql = format!(
-        "SELECT MIN(next_at) FROM runtime_outbox WHERE {FAMILY} \
+        "SELECT MIN(next_at) FROM runtime_outbox WHERE {FAMILY} AND next_at<{HELD_AT} \
          AND (status='pending' OR (status='submitted' AND ({ACTION} IN ({retry_actions}) OR {ACTION} NOT IN ({known}))))"
     );
     db.query_row(&sql, [], |row| row.get::<_, Option<i64>>(0))
