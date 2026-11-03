@@ -10,6 +10,8 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { once } from "node:events";
+import { spawn } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
 import { delimiter, join } from "node:path";
 import test from "node:test";
 import type { BackendStartupMode } from "./backend-startup.child.mts";
@@ -111,5 +113,61 @@ test(
         await closed;
       }
     });
+  },
+);
+
+test(
+  "a backend started by a process stops when that process exits",
+  { timeout: 15000, skip: process.platform === "win32" },
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "rust-startup-leak-"));
+    const binary = join(root, "backend.mts");
+    let pid = 0;
+    try {
+      await copyFile(
+        new URL("./backend-startup.child.mts", import.meta.url),
+        binary,
+      );
+      await chmod(binary, 0o700);
+      const fixture = new URL("./rust-ui-fixture.ts", import.meta.url).href;
+      // The starter exits without calling stop, as a failed test run does.
+      const script = `const { startRustBackend } = await import(${JSON.stringify(fixture)});
+const backend = await startRustBackend(${JSON.stringify(join(root, "state"))});
+console.log(backend.child.pid);
+process.exit(0);`;
+      const starter = spawn(
+        process.execPath,
+        ["--input-type=module", "-e", script],
+        {
+          env: {
+            ...process.env,
+            CODEX_STUDIO_RUNTIME_SERVER: binary,
+            FIXTURE_BACKEND_MODE: "http",
+          },
+          stdio: ["ignore", "pipe", "inherit"],
+        },
+      );
+      const [output] = await once(starter.stdout!, "data");
+      pid = Number(String(output).trim());
+      await once(starter, "exit");
+      const alive = () => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      const deadline = Date.now() + 5000;
+      while (alive() && Date.now() < deadline) await delay(50);
+      assert.equal(alive(), false);
+    } finally {
+      if (pid) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {}
+      }
+      await rm(root, { recursive: true, force: true });
+    }
   },
 );
