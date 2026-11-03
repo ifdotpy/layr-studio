@@ -169,7 +169,7 @@ pub fn all_rows(transaction: &Transaction<'_>) -> StoreResult<Vec<GrantRow>> {
 /// The rows of one pairing, active or revoked. Empty when the grant id is unknown.
 pub fn rows_of_grant(transaction: &Transaction<'_>, grant_id: &str) -> StoreResult<Vec<GrantRow>> {
     let mut query = transaction.prepare(
-        "SELECT grant_id,peer,peer_public_key,local_project,remote_project,capability,created_at,revoked_at
+        "SELECT grant_id,peer,peer_public_key,local_project,remote_project,capability,created_at,revoked_at,peer_label
          FROM project_grants WHERE grant_id=?1 ORDER BY capability",
     )?;
     Ok(query
