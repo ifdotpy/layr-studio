@@ -671,7 +671,7 @@ impl NotificationStreamBuffer {
 
     pub(crate) fn restore_pending(
         &mut self,
-        pending: NotificationPendingStreams,
+        pending: &NotificationPendingStreams,
     ) -> Result<(), NotificationDispatchError> {
         // Index pending keys against metadata once. Walking metadata backwards
         // preserves the old first-match behavior for duplicate stored keys.
@@ -1305,7 +1305,7 @@ mod tests {
         let mut restored = metadata;
         restored.rebuild_runtime_state();
         restored
-            .restore_pending(pending.expect("VM flush obligation"))
+            .restore_pending(&pending.expect("VM flush obligation"))
             .expect("VM pending restored");
         streams
             .merge_owner(restored.clone())
@@ -1340,12 +1340,12 @@ mod tests {
         metadata.entries.push(metadata.entries[0].clone());
         metadata.rebuild_runtime_state();
         let pending = pending.expect("pending entry");
-        metadata.restore_pending(pending.clone()).expect("restore");
+        metadata.restore_pending(&pending).expect("restore");
         assert_eq!(metadata.entries[0].pending, "pending");
         assert_eq!(metadata.entries[1].pending, "");
         let mut missing = pending;
         missing.0[0].key.item = "missing".into();
-        assert!(metadata.restore_pending(missing).is_err());
+        assert!(metadata.restore_pending(&missing).is_err());
     }
 
     #[test]
@@ -1378,7 +1378,7 @@ mod tests {
         restored.rebuild_runtime_state();
         assert!(!restored.has_pending(&key));
         restored
-            .restore_pending(pending)
+            .restore_pending(&pending)
             .expect("restore flush obligation");
         assert!(restored.pending_bytes() > 0);
         assert_eq!(restored.base(&key), Some("authoritative"));

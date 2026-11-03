@@ -4231,7 +4231,7 @@ fn restore_stream_lane(
     )
     .map_err(outbox_error)?
     {
-        saved.metadata.restore_pending(row.payload)?;
+        saved.metadata.restore_pending(&row.payload)?;
     }
     Ok(saved)
 }
