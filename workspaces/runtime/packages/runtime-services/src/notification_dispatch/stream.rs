@@ -1335,7 +1335,7 @@ mod tests {
             method: "delta".into(),
         };
         let mut streams = NotificationStreamBuffer::default();
-        streams.enqueue_delta(key.clone(), "pending", &Value::Null, 0);
+        streams.enqueue_delta(key, "pending", &Value::Null, 0);
         let (mut metadata, pending) = streams.persisted_parts();
         metadata.entries.push(metadata.entries[0].clone());
         metadata.rebuild_runtime_state();
