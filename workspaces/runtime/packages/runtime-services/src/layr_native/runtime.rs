@@ -1545,14 +1545,13 @@ mod worker_base_tests {
         std::fs::create_dir_all(&main).unwrap();
         std::fs::write(root.join("head"), "initial").unwrap();
         for name in ["first", "second", "release"] {
-            rustix::fs::mknodat(
-                rustix::fs::CWD,
-                root.join(name),
-                rustix::fs::FileType::Fifo,
-                rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
-                0,
-            )
-            .unwrap();
+            // rustix has no mknodat on macOS; the fixture runs mkfifo directly.
+            #[allow(clippy::disallowed_methods)]
+            let created = std::process::Command::new("mkfifo")
+                .arg(root.join(name))
+                .status()
+                .unwrap();
+            assert!(created.success());
         }
         let signal = |name: &str| {
             let file = OpenOptions::new()
