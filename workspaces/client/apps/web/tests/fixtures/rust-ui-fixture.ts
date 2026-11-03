@@ -314,6 +314,14 @@ export async function startRustBackend(
     },
   });
   const removeNodeBin = () => rmSync(nodeBin, { recursive: true, force: true });
+  // The server must not outlive the process that started it, even when that
+  // process exits without a stop call (a failed test, an uncaught error).
+  const stopServer = () => {
+    if (child.exitCode === null && child.signalCode === null)
+      child.kill("SIGKILL");
+  };
+  process.once("exit", stopServer);
+  child.once("exit", () => process.off("exit", stopServer));
   child.once("exit", removeNodeBin);
   child.once("error", removeNodeBin);
   let port;

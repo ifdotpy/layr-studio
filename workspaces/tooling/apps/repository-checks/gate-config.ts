@@ -1,6 +1,12 @@
 import { fileURLToPath } from "node:url";
 
-// Maximum Cargo compilation jobs per gate, a job count (including nested builders).
+// Cargo compilation jobs (a job count, including nested builders) for the gate steps that
+// facade.ts runs. One gate runs per machine (layr retest gate, studio-ops wrappers); measured
+// 2026-11-01: 8 jobs save 20 to 30 s against 4.
+export const GATE_CARGO_BUILD_JOBS = 8;
+// Cargo compilation jobs (a job count) for everything else: focused builds and tooling. The
+// justfile exports it to every recipe, worker-env.sh repeats it (tests/layr-sweep-parity.test.ts
+// checks that). AGENTS.md: focused builds use -j 4.
 export const CARGO_BUILD_JOBS = 4;
 // Grace for an owned process group to exit after TERM before KILL, milliseconds.
 export const PROCESS_STOP_GRACE_MS = 500;

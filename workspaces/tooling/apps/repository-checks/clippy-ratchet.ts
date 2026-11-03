@@ -165,7 +165,8 @@ export async function run(
     "--all-targets",
     "--locked",
     "-j",
-    String(CARGO_BUILD_JOBS),
+    // The gate (facade.ts) sets CARGO_BUILD_JOBS to the gate count; just exports the focused count.
+    process.env.CARGO_BUILD_JOBS ?? String(CARGO_BUILD_JOBS),
     "--message-format=json",
     "--",
     "-D",

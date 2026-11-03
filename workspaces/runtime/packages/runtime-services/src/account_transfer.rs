@@ -2048,8 +2048,9 @@ pub fn typed_enroll(
         status: Field::Value(agent.status.clone()),
         error: agent.error.clone().try_map(|value| match value {
             studio_runtime_schema::provider_errors::AgentError::Message(value) => Ok(value),
-            studio_runtime_schema::provider_errors::AgentError::Provider(_) => {
-                Err(invalid("transfer agent", "/error"))
+            // A provider error such as a usage limit is a reason to move, not a blocker.
+            studio_runtime_schema::provider_errors::AgentError::Provider(error) => {
+                Ok::<_, TransferError>(error.message)
             }
         })?,
         native_failure_hold: agent
@@ -2757,6 +2758,34 @@ mod provider_receipt_tests {
         );
         assert!(
             matches!(agent.pending_settings_account_key.value(), Some(studio_runtime_store::StoredTransferValue::Known(key)) if key.as_str() == "target")
+        );
+    }
+
+    #[test]
+    fn enrollment_accepts_a_provider_error_such_as_a_usage_limit() {
+        // A chat that hit its account limit is the main reason to move it.
+        let mut agent: studio_runtime_store::AgentRecord = serde_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"claude","accountKey":"source","epoch":0,"status":"failed","compactions":0,"error":{"message":"You've hit your weekly limit","codexErrorInfo":"rateLimitExceeded","studioRawEvidence":{"message":"You've hit your weekly limit"}}}"#).unwrap();
+        let id = "move".to_owned().try_into().unwrap();
+        let target = "target".to_owned().try_into().unwrap();
+        super::typed_enroll(
+            &mut agent,
+            &id,
+            &target,
+            studio_runtime_schema::ProviderKind::Claude,
+            true,
+        )
+        .unwrap();
+        let source = agent
+            .lazy_account_transfer
+            .value()
+            .and_then(|value| value.pending())
+            .unwrap()
+            .source_state
+            .value()
+            .unwrap();
+        assert_eq!(
+            source.error.value().map(String::as_str),
+            Some("You've hit your weekly limit")
         );
     }
 

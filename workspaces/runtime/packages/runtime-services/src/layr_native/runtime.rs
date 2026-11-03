@@ -337,8 +337,14 @@ pub(super) fn operation_with_preflight_in_store(
         File::open(&folder)?.sync_all()?;
     }
     let outcome = (|| {
+<<<<<<< head
         #[cfg(not(target_os = "linux"))]
         if let Some(project) = retry_import {
+=======
+        if !cfg!(target_os = "linux")
+            && let Some(project) = retry_import
+        {
+>>>>>>> agent-b3a2e6b60c63ba986841c7602cc2c82529d3f7eead2d592193bf68adc90ad2f6
             super::failed_import::discard_in_store(state_dir, root, project)?;
         }
         effect()

@@ -19,7 +19,7 @@ import {
 import { createHash } from "node:crypto";
 import { runLogged } from "./owned-process.ts";
 import {
-  CARGO_BUILD_JOBS,
+  GATE_CARGO_BUILD_JOBS,
   RETEST_ENV,
   RETEST_REAL_ROOT_ENV,
   NATIVE_PACKAGE,
@@ -1152,6 +1152,10 @@ export function gateSteps(root: string, name: string): GateStep[] {
       nodeTest("retired-server", "retired server action witness", [
         "workspaces/tooling/apps/repository-checks/tests/retired-server-action.test.ts",
       ]),
+      nodeTest("fixture-processes", "browser fixture process reaping", [
+        "workspaces/client/apps/web/tests/fixture-process-group.test.ts",
+        "workspaces/client/apps/web/tests/fixtures/rust-ui-fixture.test.ts",
+      ]),
       {
         id: "boundaries",
         label: "workspace boundary guards",
@@ -1393,7 +1397,7 @@ export async function executeRecipe(
   mkdirSync(typeCache, { recursive: true });
   const env = {
     CARGO_TARGET_DIR: cargoTarget(root),
-    CARGO_BUILD_JOBS: String(CARGO_BUILD_JOBS),
+    CARGO_BUILD_JOBS: String(GATE_CARGO_BUILD_JOBS),
     CODEX_NODE: process.execPath,
     NEXTEST_NO_TESTS: "fail",
     STUDIO_TSC_CACHE: typeCache,
@@ -1918,7 +1922,7 @@ export async function execute(
       : {};
     const commandEnv = {
       ...baseEnv,
-      CARGO_BUILD_JOBS: String(CARGO_BUILD_JOBS),
+      CARGO_BUILD_JOBS: String(GATE_CARGO_BUILD_JOBS),
       ...options.env,
       ...retestEnv,
     };
