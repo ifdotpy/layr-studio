@@ -6449,6 +6449,8 @@ export interface components {
       projectFolderRevision?: number | null | undefined;
       /** Projectid */
       projectId?: null | string | undefined;
+      /** Projectpath */
+      projectPath?: string | null | undefined;
       provider?: components["schemas"]["AgentProvider"] | null | undefined;
       readState?: components["schemas"]["ReadStateDto"] | null | undefined;
       /** Readstatesupported */

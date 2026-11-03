@@ -394,7 +394,7 @@ mod lifecycle_tests {
         record.id = "lead".into();
         record.is_lead = Some(true);
         record.auto_wake = Some(true);
-        super::super::configure_new_chat(&mut record, source.to_str().expect("source path"));
+        super::super::configure_new_chat(&mut record, &crate::project_path::ProjectPath::from_stored(source.to_str().expect("source path")));
         let record = record.value();
         fs::create_dir(source.join(".GIT")).expect("Git case alias");
         super::super::inventory::git(&source, &["init", "-q"]).expect("valid repository");
@@ -455,7 +455,7 @@ mod lifecycle_tests {
         record.id = "lead".into();
         record.is_lead = Some(true);
         record.auto_wake = Some(true);
-        super::super::configure_new_chat(&mut record, source.path().to_str().unwrap());
+        super::super::configure_new_chat(&mut record, &crate::project_path::ProjectPath::from_stored(source.path().to_str().unwrap()));
         let record = record.value();
         let ready = super::super::runtime::prepare_files(state.path(), &record).expect("import");
         let main = PathBuf::from(ready["cwd"].as_str().unwrap());
@@ -529,7 +529,7 @@ mod lifecycle_tests {
             .expect("canonical source");
         super::super::configure_new_chat(
             &mut record,
-            canonical_source.to_str().expect("source path"),
+            &crate::project_path::ProjectPath::from_stored(canonical_source.to_str().expect("source path")),
         );
         let record = record.value();
         let ready =

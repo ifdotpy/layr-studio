@@ -1,7 +1,7 @@
 import type { Account } from "../../src/components/Accounts.tsx";
 import type { Project } from "../../src/types.ts";
 import type { AccountRateLimitsDto } from "../playwright.ts";
-import type { BrowserContext, TestInfo } from "@playwright/test";
+import type { Browser, BrowserContext, TestInfo } from "@playwright/test";
 import {
   fixtureAccount,
   fixtureLead,
@@ -46,7 +46,7 @@ test.afterEach(async ({ browser }, testInfo) => {
   );
 });
 
-test("account project ui", async ({ browser: _browser }) => {
+async function accountProjectUi(_browser: Browser, nativeOnly: boolean) {
   test.setTimeout(60_000);
   const root = fileURLToPath(new URL("../../../../../../", import.meta.url));
   const webDist =
@@ -119,6 +119,14 @@ test("account project ui", async ({ browser: _browser }) => {
     makeLead("started", "Started conversation", "default", false),
     makeLead("empty", "New conversation", "default", true),
   ];
+  if (nativeOnly)
+    Object.assign(agents[0]!, {
+      cwd: "/store/projects/example/lines/main",
+      hostProjectPath: projects[0]!.path,
+      projectPath: projects[0]!.path,
+      workspaceMode: "layr-native",
+      executionMode: "native",
+    });
   const bodies: FixtureRequest[] = [];
   let delayed: (() => void) | null = null;
   let delayWork = false;
@@ -173,6 +181,7 @@ test("account project ui", async ({ browser: _browser }) => {
     threads: agents,
     chats: [],
     runtime: {
+      viewScopedAgents: nativeOnly,
       agents,
       projects,
       projectOrganizationVersion: 1,
@@ -183,6 +192,30 @@ test("account project ui", async ({ browser: _browser }) => {
       tasks: [],
       work: [],
       rateLimitsByAccount: snapshotLimits,
+      modelsByAccount: Object.fromEntries(
+        accounts.map((account) => [
+          account.id,
+          [
+            {
+              accountKey: account.id,
+              catalogPosition: 0,
+              provider: "codex",
+              model: "gpt-6-astra",
+              displayName: "Astra 6",
+              isDefault: true,
+              supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
+            },
+          ],
+        ]),
+      ),
+      accountsSummary: {
+        accounts,
+        archivedAccounts,
+        defaultAccountKey,
+        defaultAccountGroups: [],
+        supportsDelete: true,
+        supportsDisconnect: true,
+      },
     },
   });
   const stateListeners = new Set<NotifyResources>();
@@ -233,7 +266,13 @@ test("account project ui", async ({ browser: _browser }) => {
         identity: { serverId: "fixture-server", label: "This computer" },
         servers: [],
       });
-    if (url.pathname === "/api/ui-summary") return json({ system: "Linux" });
+    if (url.pathname === "/api/ui-summary")
+      return json({
+        system: "Linux",
+        hasStudioVm: false,
+        nativeLayr: { status: "ready" },
+        defaultWorkspaceMode: nativeOnly ? "layr-native" : "worktree",
+      });
     if (url.pathname === "/api/models")
       return json({
         data: [
@@ -404,6 +443,8 @@ test("account project ui", async ({ browser: _browser }) => {
         rootId: url.searchParams.get("agent") || "fixture",
         retainedWorktrees: [],
       });
+    if (url.pathname === "/api/processes")
+      return json({ processes: [], activities: [] });
     if (url.pathname.startsWith("/api/"))
       return json({ items: [], sessions: [] });
     try {
@@ -442,16 +483,17 @@ test("account project ui", async ({ browser: _browser }) => {
       if (legacySnapshotRoute.test(request.url()))
         stateRequests.push(request.url());
     });
-    await page.route("**/api/sync/pull**", async (route) => {
-      const response = await route.fetch();
-      const payload = await readFixtureResponse("/api/sync/pull", response);
-      const entity = fixtureAgentEntity(payload.documents, "empty");
-      syncPullResponses.push({
-        after: new URL(route.request().url()).searchParams.get("after"),
-        accountKey: entity?.value?.accountKey,
+    if (!nativeOnly)
+      await page.route("**/api/sync/pull**", async (route) => {
+        const response = await route.fetch();
+        const payload = await readFixtureResponse("/api/sync/pull", response);
+        const entity = fixtureAgentEntity(payload.documents, "empty");
+        syncPullResponses.push({
+          after: new URL(route.request().url()).searchParams.get("after"),
+          accountKey: entity?.value?.accountKey,
+        });
+        await route.fulfill({ response, body: JSON.stringify(payload) });
       });
-      await route.fulfill({ response, body: JSON.stringify(payload) });
-    });
     const errors: string[] = [];
     page.on("pageerror", (error) => {
       errors.push(error.message);
@@ -459,6 +501,37 @@ test("account project ui", async ({ browser: _browser }) => {
     });
     await page.goto(fixtureUrl(server));
     await page.locator("[data-chat]").first().waitFor();
+    if (nativeOnly) {
+      await page.locator('[data-chat="started"]').click();
+      await page.getByRole("button", { name: "New chat", exact: true }).click();
+      const dialog = page.getByRole("dialog", {
+        name: "New chat",
+        exact: true,
+      });
+      const server = dialog.getByRole("button", {
+        name: /This computer Active/,
+      });
+      await server.waitFor();
+      assert.ok((await server.textContent())?.includes(projects[0]!.path!));
+      const created = page.waitForResponse((response) =>
+        response.url().endsWith("/api/leads"),
+      );
+      await dialog
+        .getByRole("button", { name: "Start chat", exact: true })
+        .click();
+      await created;
+      assert.equal(
+        bodies.filter((r) => r.path === "/api/leads").at(-1)!.body.cwd,
+        projects[0]!.path,
+      );
+      assert.equal(
+        bodies.filter((r) => r.path === "/api/leads").at(-1)!.body
+          .workspaceMode,
+        "layr-native",
+      );
+      return;
+    }
+
     assert.ok(
       syncPullRequests.some(
         (url) => new URL(url).searchParams.get("scope") === "state:entities:v1",
@@ -1216,4 +1289,9 @@ test("account project ui", async ({ browser: _browser }) => {
     server.closeAllConnections();
     await new Promise<Error | undefined>((resolve) => server.close(resolve));
   }
-});
+}
+
+test("new chat keeps the native Layr project", async ({ browser }) =>
+  accountProjectUi(browser, true));
+test("account project ui", async ({ browser }) =>
+  accountProjectUi(browser, false));

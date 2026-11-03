@@ -1115,7 +1115,10 @@ esac
         #[cfg(target_os = "linux")]
         let _daemon = fixture_daemon(&state);
         let mut record = super::super::fixture_agent("lead", true);
-        super::super::configure_new_chat(&mut record, source.to_str().unwrap());
+        super::super::configure_new_chat(
+            &mut record,
+            &crate::project_path::ProjectPath::from_stored(source.to_str().unwrap()),
+        );
         prepare_files(&state, &record.value()).expect("fixture import succeeds");
         assert!(
             fixture.path().join("removed").exists(),
@@ -1148,7 +1151,10 @@ esac
         #[cfg(target_os = "linux")]
         let _daemon = fixture_daemon(&state);
         let mut record = super::super::fixture_agent("lead", true);
-        super::super::configure_new_chat(&mut record, source.to_str().unwrap());
+        super::super::configure_new_chat(
+            &mut record,
+            &crate::project_path::ProjectPath::from_stored(source.to_str().unwrap()),
+        );
         let error = prepare_files(&state, &record.value()).unwrap_err();
         let path = fs::read_to_string(fixture.path().join("staging-path")).expect("init reached");
         assert!(

@@ -20,7 +20,8 @@ const agent = (id: string, fields: Partial<Agent> = {}): Agent => ({
   name: id,
   source: GeneratedApiAgentSource.managed,
   isLead: true,
-  cwd: "/work",
+  cwd: "/workspace/line",
+  projectPath: "/work",
   created: 1,
   ...fields,
 });
@@ -183,7 +184,7 @@ describe("incremental sidebar catalog", () => {
   });
   it("retains unaffected project arrays and tracks team/path changes", () => {
     const select = createSidebarCatalogSelector();
-    const rows = [agent("a"), agent("b", { cwd: "/other" })];
+    const rows = [agent("a"), agent("b", { projectPath: "/other" })];
     const before = select(rows, overrides, teams, order);
     const after = select(
       [

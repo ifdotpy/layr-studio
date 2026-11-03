@@ -85,6 +85,7 @@ inherits = "ci"
 # Command replay witnesses feed recorded management commands through decide and compare the canonical outcome.
 # Generated ingress witnesses cover pattern parity and integral-decimal inputs.
 default-filter = '''
+    (package(=studio-runtime-services) & kind(lib) & (test(create_refuses_line_in_symlinked_default_store) | test(unresolved_store_still_checks_lexical_line_paths) | test(agent_projection_uses_host_project_path_or_legacy_cwd) | test(agent_projections_fresh_seed_and_upgrade_marker_are_complete))) |
     (package(=studio-runtime-schema) & kind(lib) & (test(reviewer_spawn_retains_review_state) | test(submission_revision_can_be_omitted_at_ingress))) |
     (package(=studio-runtime-services) & kind(lib) & (test(native_reviewer_submission_needs_no_revision_evidence) | test(managed_spawn_native_layr_lead_uses_project_binding))) |
     (package(=studio-runtime-http) & kind(lib) & (test(chat_read_accepts_projected_room_roots) | test(account_response_includes_server_eligibility))) |
@@ -493,6 +494,7 @@ platform = 'cfg(target_os = "linux")'
 # Command replay witnesses feed recorded management commands through decide and compare the canonical outcome.
 # Generated ingress witnesses cover pattern parity and integral-decimal inputs.
 default-filter = '''
+    (package(=studio-runtime-services) & kind(lib) & (test(create_refuses_line_in_symlinked_default_store) | test(unresolved_store_still_checks_lexical_line_paths) | test(agent_projection_uses_host_project_path_or_legacy_cwd) | test(agent_projections_fresh_seed_and_upgrade_marker_are_complete))) |
     (package(=studio-runtime-schema) & kind(lib) & (test(reviewer_spawn_retains_review_state) | test(submission_revision_can_be_omitted_at_ingress))) |
     (package(=studio-runtime-services) & kind(lib) & (test(native_reviewer_submission_needs_no_revision_evidence) | test(managed_spawn_native_layr_lead_uses_project_binding))) |
     (package(=studio-runtime-http) & kind(lib) & (test(chat_read_accepts_projected_room_roots) | test(account_response_includes_server_eligibility))) |

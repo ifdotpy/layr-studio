@@ -70,10 +70,12 @@ export default function ProjectFolderDialog(props: FolderProps) {
   if (agent.executionMode === "vm") return <VmProjectFolder {...props} />;
   return (
     <>
-      <p>{agent.cwd}</p>
+      <p>{agent.projectPath}</p>
       <p>To use another folder, start a new chat.</p>
-      {canReveal && agent.cwd && (
-        <Button onClick={() => onReveal(agent.cwd!)}>Show folder</Button>
+      {canReveal && agent.projectPath && (
+        <Button onClick={() => onReveal(agent.projectPath!)}>
+          Show folder
+        </Button>
       )}
     </>
   );

@@ -31,6 +31,7 @@ function source(id: string, count = 1, directories = false): SidebarSource {
           ({
             id: "chat-" + i,
             cwd: directories ? path + "/" + i : path,
+            projectPath: directories ? path + "/" + i : path,
             source: AgentSource.managed,
             isLead: true,
             name: "Chat " + i,

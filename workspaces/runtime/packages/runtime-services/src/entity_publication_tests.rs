@@ -1099,13 +1099,27 @@ async fn agent_projections_attention_rejects_stale_requests_and_clears() {
 #[tokio::test]
 async fn agent_projections_fresh_seed_and_upgrade_marker_are_complete() {
     let (_dir, store) = store().await;
+    seed_chat(
+        &store,
+        chat(json!({"cwd":"/store/projects/id/lines/main", "hostProjectPath":"/source/project"})),
+    )
+    .await;
     assert!(
         store
             .test_read_transaction(|tx| crate::sync_policy::has_complete_entity_seed(tx))
             .expect("fresh seed reads")
     );
+    let mut old_summary = client_entity(&store, "agentSummary", CHAT).unwrap().1;
+    old_summary.as_object_mut().unwrap().remove("projectPath");
     store
-        .transaction(|tx| {
+        .transaction(move |tx| {
+            studio_runtime_store::SyncDocumentsRepository::put_entity(
+                tx,
+                "agentSummary",
+                CHAT,
+                old_summary,
+                false,
+            )?;
             tx.execute(
                 "DELETE FROM sync_entity_meta WHERE key=?1",
                 [studio_runtime_store::AGENT_PROJECTIONS_SEED_MARKER],
@@ -1136,6 +1150,10 @@ async fn agent_projections_fresh_seed_and_upgrade_marker_are_complete() {
         store
             .test_read_transaction(|tx| crate::sync_policy::has_complete_entity_seed(tx))
             .expect("upgraded seed reads")
+    );
+    assert_eq!(
+        client_entity(&store, "agentSummary", CHAT).unwrap().1["projectPath"],
+        "/source/project"
     );
 }
 

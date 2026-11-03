@@ -38,11 +38,14 @@ pub fn is_native(record: &Value) -> bool {
 }
 
 /// Creation records intent only. `workspace_ready_git` owns filesystem effects.
-pub fn configure_new_chat(record: &mut studio_runtime_store::AgentRecord, source: &str) {
+pub(crate) fn configure_new_chat(
+    record: &mut studio_runtime_store::AgentRecord,
+    source: &crate::project_path::ProjectPath,
+) {
     record.workspace_mode = Some(studio_runtime_schema::records::WorkspaceMode::LayrNative);
     record.execution_mode = Some(studio_runtime_store::AgentExecutionMode::Native);
     record.host_project_path =
-        studio_runtime_schema::queue_command::Field::Value(source.to_owned());
+        studio_runtime_schema::queue_command::Field::Value(source.as_str().to_owned());
     record.layr_ready = Some(false);
     record.worktree = Some(false);
     record.worktree_ready = Some(false);
@@ -60,7 +63,10 @@ pub fn configure_child(
         .map(String::as_str)
         .or(root.cwd.as_deref())
         .unwrap_or_default();
-    configure_new_chat(record, source);
+    configure_new_chat(
+        record,
+        &crate::project_path::ProjectPath::from_stored(source),
+    );
     record.cwd = parent.cwd.clone();
     if root.layr_project_id.is_some() {
         record.layr_project_id.clone_from(&root.layr_project_id);
@@ -114,7 +120,10 @@ mod tests {
         let mut record = studio_runtime_store::AgentRecord::test_defaults();
         record.cwd = Some("/code".into());
         record.is_lead = Some(true);
-        configure_new_chat(&mut record, "/code");
+        configure_new_chat(
+            &mut record,
+            &crate::project_path::ProjectPath::from_stored("/code"),
+        );
         assert_eq!(
             record.workspace_mode,
             Some(studio_runtime_schema::records::WorkspaceMode::LayrNative)
@@ -425,11 +434,13 @@ mod receipt_tests {
         lead.cwd = Some(source.path().to_string_lossy().into_owned());
         configure_new_chat(
             &mut lead,
-            CanonicalPath::existing(source.path())
-                .map(CanonicalPath::into_path_buf)
-                .expect("fixture operation succeeds")
-                .to_str()
-                .expect("fixture operation succeeds"),
+            &crate::project_path::ProjectPath::from_stored(
+                CanonicalPath::existing(source.path())
+                    .map(CanonicalPath::into_path_buf)
+                    .expect("fixture operation succeeds")
+                    .to_str()
+                    .expect("fixture operation succeeds"),
+            ),
         );
         let mut lead = lead.value();
         let ready =
@@ -1008,7 +1019,9 @@ esac
         lead.cwd = Some(source.path().to_string_lossy().into_owned());
         configure_new_chat(
             &mut lead,
-            source.path().to_str().expect("fixture operation succeeds"),
+            &crate::project_path::ProjectPath::from_stored(
+                source.path().to_str().expect("fixture operation succeeds"),
+            ),
         );
         let mut lead = lead.value();
         let fields =

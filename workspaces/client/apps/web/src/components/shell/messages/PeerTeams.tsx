@@ -339,7 +339,7 @@ export function PeerTeamForm({
       a.source === GeneratedApiAgentSource.managed &&
       a.isLead &&
       !a.deletedAt &&
-      a.cwd === project.path &&
+      a.projectPath === project.path &&
       !teams.some((t) => t.id !== team?.id && (t.members ?? []).includes(a.id)),
   );
   const submit = async () => {

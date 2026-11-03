@@ -10390,6 +10390,17 @@
             ],
             "title": "Projectid"
           },
+          "projectPath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectpath"
+          },
           "provider": {
             "anyOf": [
               {

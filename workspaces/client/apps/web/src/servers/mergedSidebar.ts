@@ -197,7 +197,7 @@ export function mergeSidebar(
       const binding = key(home, chat.projectId);
       if (groups.has(binding)) return binding;
     }
-    return projectKey(source.id, chat.cwd || "");
+    return projectKey(source.id, chat.projectPath || "");
   };
   const threads: Agent[] = [];
   const peerTeams: PeerTeam[] = [];
@@ -211,7 +211,7 @@ export function mergeSidebar(
       chatReferences.set(id, {
         owner: source.id,
         id: chat.id,
-        path: chat.cwd || "",
+        path: chat.projectPath || "",
       });
       // Only a chat that the sidebar shows makes a project group: workers and imported
       // sessions live in worktree folders and would add empty "No chats" groups.
@@ -220,7 +220,7 @@ export function mergeSidebar(
         projects.push({
           id: path,
           path,
-          name: chat.cwd || "Other chats",
+          name: chat.projectPath || "Other chats",
           folders: [],
         });
       }
@@ -230,7 +230,7 @@ export function mergeSidebar(
           : {
               ...chat,
               id,
-              cwd: path,
+              projectPath: path,
               serverId: source.id,
               rootId: chat.rootId
                 ? chatKey(source.id, chat.rootId)
@@ -242,7 +242,11 @@ export function mergeSidebar(
                 ? chatKey(source.id, chat.sharedRoomId)
                 : chat.sharedRoomId,
               projectFolder: chat.projectFolder
-                ? folderKey(source.id, chat.cwd || "", chat.projectFolder)
+                ? folderKey(
+                    source.id,
+                    chat.projectPath || "",
+                    chat.projectFolder,
+                  )
                 : chat.projectFolder,
             },
       );
@@ -458,7 +462,7 @@ export function mergeSidebar(
     }
     for (const team of source.sidebar.peerTeams)
       collapsed.add(JSON.stringify([team.projectPath || "", "team", team.id]));
-    for (const chat of source.sidebar.threads) addPath(chat.cwd || "");
+    for (const chat of source.sidebar.threads) addPath(chat.projectPath || "");
     for (const room of source.sidebar.rooms) addPath(room.projectPath || "");
     preferenceKeys.set(source.id, { compact, collapsed });
   }
