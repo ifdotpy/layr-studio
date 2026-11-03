@@ -502,14 +502,15 @@ pub fn apply_tool_contract(name: &str, input: &mut serde_json::Map<String, Value
 mod tests {
     use super::*;
     #[test]
-<<<<<<< head
     fn submission_revision_can_be_omitted_at_ingress() {
         assert!(
             TaskCommand::parse_tool(
                 &json!({"action":"submit","task_id":"task","result":"reviewed","checks":"read"})
             )
             .is_ok()
-=======
+        );
+    }
+    #[test]
     fn submit_result_limit_is_advertised_and_explained() {
         let limit = crate::task_results::MAX_HTTP_RESULT_TEXT_CODEPOINTS;
         let raw = json!({"action":"submit","task_id":"task","result":"x".repeat(limit + 1),"checks":"checked","revision":"abc"});
@@ -524,7 +525,6 @@ mod tests {
                 .as_str()
                 .unwrap()
                 .contains(&limit.to_string())
->>>>>>> agent-012c28482bb18c734decd1c80987083122613cf27a3d759c55f8885f07b84b18
         );
     }
     #[test]
