@@ -2511,6 +2511,12 @@ fn journal_stage(entry: &JournalEntry) -> &'static str {
     }
 }
 
+/// Whether a provider notification says that its thread is no longer loaded.
+fn unloads_thread(method: &str, params: &Value) -> bool {
+    method == "thread/closed"
+        || (method == "thread/status/changed" && params["status"]["type"] == "notLoaded")
+}
+
 /// Consume only manual release closure, including a completed worker with no
 /// current turn attempt. Other notifications retain their attempt fence.
 fn record_manual_release_closure(
@@ -2521,9 +2527,7 @@ fn record_manual_release_closure(
     method: &str,
     params: &Value,
 ) -> Result<bool, WorkerError> {
-    if method != "thread/closed"
-        && !(method == "thread/status/changed" && params["status"]["type"] == "notLoaded")
-    {
+    if !unloads_thread(method, params) {
         return Ok(false);
     }
     let Some(thread) = params["threadId"]
@@ -2943,6 +2947,16 @@ fn journal_one(
                                 },
                             );
                         }
+                    }
+                    _ if unloads_thread(method, params) => {
+                        // The unloaded thread's start answer is lost: settle it as
+                        // unknown. The input stays pending and is not sent again.
+                        SchedulerRepository::settle_start_outcome(
+                            tx,
+                            &identity,
+                            "uncertain",
+                            None,
+                        )?;
                     }
                     _ => {
                         let dispatched = dispatch_notification_with_effects(
