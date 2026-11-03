@@ -429,6 +429,9 @@ fn send_as_actor(
             && !target.starts_with("remote:")
             && !target.starts_with("federated:")
     }) {
+        let named = resolve_team_target(tx, actor, supplied)?;
+        let supplied = named.as_deref().unwrap_or(supplied);
+        resolved_args.target = supplied.to_owned();
         let exact_team = studio_runtime_store::AgentIndexedReads::message_exact_team(
             tx,
             supplied,
@@ -1041,12 +1044,8 @@ pub(super) fn resolve_target(
     supplied: &str,
 ) -> Result<String, CallbackError> {
     let actor = snapshot.actor();
-    if studio_runtime_store::AgentIndexedReads::message_exact_team(
-        tx,
-        supplied,
-        text(actor, "rootId")?,
-    )? {
-        return Ok(supplied.to_owned());
+    if let Some(id) = resolve_team_target(tx, actor, supplied)? {
+        return Ok(id);
     }
     let agents = message_agents(tx, actor, supplied, true)?;
     let projects = message_projects(tx, &agents, &snapshot.context().agent)?;
@@ -1058,6 +1057,34 @@ pub(super) fn resolve_target(
         &agents,
         &mut authority,
     )
+}
+
+fn resolve_team_target(
+    tx: &Transaction<'_>,
+    actor: &Value,
+    supplied: &str,
+) -> Result<Option<String>, CallbackError> {
+    if studio_runtime_store::AgentIndexedReads::message_exact_team(
+        tx,
+        supplied,
+        text(actor, "rootId")?,
+    )? {
+        return Ok(Some(supplied.to_owned()));
+    }
+    let mut names = tx.prepare_cached("SELECT id FROM runtime_agents WHERE root_id=?1 AND (deleted_at IS NULL OR deleted_at=0) AND CASE WHEN json_valid(record) THEN json_extract(record,'$.name') END=?2 ORDER BY id")?;
+    let matches = names
+        .query_map(rusqlite::params![text(actor, "rootId")?, supplied], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    match matches.as_slice() {
+        [id] => Ok(Some(id.clone())),
+        [_, _, ..] => Err(CallbackError::Refusal(format!(
+            "Ambiguous agent name; use an agent ID: {}",
+            matches.join(", ")
+        ))),
+        _ => Ok(None),
+    }
 }
 
 pub(super) fn resolve_prefix(

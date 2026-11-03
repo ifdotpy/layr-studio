@@ -325,6 +325,9 @@ fn task_brief(task: &Value) -> Value {
     for key in ["id", "title", "owner", "status", "version", "blockedBy"] {
         brief.insert(key.into(), task.get(key).cloned().unwrap_or(Value::Null));
     }
+    if let Some(merge) = task.get("merge").filter(|value| !value.is_null()) {
+        brief.insert("merge".into(), merge.clone());
+    }
     if let Some(archive) = task
         .get("archive")
         .filter(|v| studio_runtime_store::truthy(Some(v)))
@@ -338,6 +341,13 @@ fn task_brief(task: &Value) -> Value {
         brief.insert("archive".into(), Value::Object(kept));
     }
     Value::Object(brief)
+}
+
+#[cfg(test)]
+#[test]
+fn task_brief_retains_accept_merge_receipt() {
+    let merge = json!({"from_state":"old","to_state":"new"});
+    assert_eq!(task_brief(&json!({"merge":merge}))["merge"], merge);
 }
 
 #[derive(Clone)]
