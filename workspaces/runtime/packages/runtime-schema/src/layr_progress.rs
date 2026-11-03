@@ -11,6 +11,10 @@ pub enum CopyPhase {
     RestoringAttributes,
     WarmingCaches,
     Transferring,
+    CreatingLine,
+    Archiving,
+    Uploading,
+    ImportingProject,
     Completed,
     Failed,
 }
