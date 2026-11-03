@@ -1564,7 +1564,7 @@ mod initial_receipt_test {
             };
             newer.dispatch.state = DispatchState::Received;
             newer.accepted_turn_id = Some("accepted-turn".into());
-            let expected = serde_json::to_value(&newer).unwrap();
+            let expected = studio_runtime_store::projection_value(&newer);
             let (release, wait) = tokio::sync::oneshot::channel();
             let stale_store = Arc::clone(&store);
             let stale_retry = tokio::spawn(async move {
@@ -1583,13 +1583,13 @@ mod initial_receipt_test {
             }).await.unwrap();
             release.send(()).unwrap();
             let observed = stale_retry.await.unwrap();
-            assert_eq!(serde_json::to_value(observed).unwrap(), expected);
+            assert_eq!(studio_runtime_store::projection_value(&observed), expected);
             let actual = store
                 .transaction_with(|tx| read_retry(tx, "agent:turn"))
                 .await
                 .unwrap()
                 .unwrap();
-            assert_eq!(serde_json::to_value(actual).unwrap(), expected);
+            assert_eq!(studio_runtime_store::projection_value(&actual), expected);
         }
     }
 
