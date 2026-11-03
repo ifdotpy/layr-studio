@@ -7,7 +7,7 @@ import {
 } from "../generated/api.ts";
 import { randomUUID } from "../uuid";
 import { sendsTextFile } from "../commands";
-import { ProviderKind } from "../generated/providerKind.ts";
+import { ProviderKind, providerSupports } from "../generated/providerKind.ts";
 import type { ComponentProps, ReactNode } from "react";
 import { IdleCompactionNotice } from "./IdleCompactionNotice";
 import {
@@ -807,6 +807,10 @@ export default function Conversation(p: {
         : p.agent,
     [p.agent, liveAgent, p.id],
   );
+  const controls = {
+    steer: providerSupports(agent?.provider, "steer"),
+    fork: providerSupports(agent?.provider, "fork"),
+  };
   useVisibleChatResult(
     scroll,
     p.agent,
@@ -1551,6 +1555,7 @@ export default function Conversation(p: {
         editLoading={editLoading === m.id}
         editDisabled={branching || !!editLoading || m.turnId === agent?.turnId}
         onBranch={
+          controls.fork &&
           !p.room &&
           !explicitQueue(m) &&
           managed &&
@@ -2045,7 +2050,7 @@ export default function Conversation(p: {
                 scope={queueScope}
                 onEdit={messageQueue.edit}
                 onCancel={messageQueue.cancel}
-                onSendNow={messageQueue.sendNow}
+                onSendNow={controls.steer ? messageQueue.sendNow : undefined}
                 onReorder={(ids) =>
                   messageQueue.reorder(
                     mergeQueueOrder(
