@@ -484,15 +484,27 @@ mod tests {
             NotSent,
             Unknown,
         }
-        for phase in ["planned", "uploading", "imported", "not_sent", "unknown"] {
-            let input = serde_json::json!({"projectId":"p", "source":"s", "requestId":"r", "operation":"o", "uploadId":"u", "root":"/", "phase":phase});
-            let current: super::ProjectImport = serde_json::from_value(input).unwrap();
-            let old: BaseProjectImport =
-                serde_json::from_value(serde_json::to_value(current).unwrap()).unwrap();
-            assert_eq!(
-                old.phase,
-                serde_json::from_value(serde_json::json!(phase)).unwrap()
-            );
+        for (phase, expected) in [
+            (super::ProjectImportPhase::Planned, BasePhase::Planned),
+            (super::ProjectImportPhase::Uploading, BasePhase::Uploading),
+            (super::ProjectImportPhase::Imported, BasePhase::Imported),
+            (super::ProjectImportPhase::NotSent, BasePhase::NotSent),
+            (super::ProjectImportPhase::Unknown, BasePhase::Unknown),
+        ] {
+            let current = super::ProjectImport {
+                project_id: "p".into(),
+                source: "s".into(),
+                request_id: "r".into(),
+                operation: "o".into(),
+                upload_id: "u".into(),
+                root: "/".into(),
+                phase,
+                archive_bytes: None,
+                archive_sha256: None,
+            };
+            let serialized = serde_json::to_vec(&current).unwrap();
+            let old: BaseProjectImport = serde_json::from_slice(&serialized).unwrap();
+            assert_eq!(old.phase, expected);
             assert_eq!(
                 (
                     old.project_id,
