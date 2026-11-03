@@ -370,6 +370,15 @@ pub(super) fn hold_agent(
                 };
                 let mut terminal =
                     pending.then_some(studio_runtime_store::TerminalFault::PendingReceipt);
+                if terminal.is_none() && unsubmitted_attempt(&agent).is_none() {
+                    let reserved: bool = tx.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND status='reserved')",
+                        [agent_id], |row| row.get(0),
+                    )?;
+                    if reserved {
+                        terminal = Some(studio_runtime_store::TerminalFault::InvalidAttempt);
+                    }
+                }
                 if let Some(identity) = unsubmitted_attempt(&agent)
                     && !pending
                 {

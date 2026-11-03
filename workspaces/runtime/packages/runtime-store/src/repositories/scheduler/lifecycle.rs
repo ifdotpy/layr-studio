@@ -82,6 +82,12 @@ impl SchedulerRepository {
         let mut held = 0;
         for id in ids {
             let mut agent = load_agent(transaction, &id)?.ok_or_else(|| invalid_agent(&id))?;
+            if matches!(
+                agent.native_failure_hold.value(),
+                Some(crate::NativeFailureHold::Terminal { .. })
+            ) {
+                continue;
+            }
             let attempt = agent
                 .start_attempt
                 .as_ref()
@@ -1091,6 +1097,12 @@ impl SchedulerRepository {
         )?;
         let mut recovered = 0;
         for agent in records {
+            if matches!(
+                agent.native_failure_hold.value(),
+                Some(crate::NativeFailureHold::Terminal { .. })
+            ) {
+                continue;
+            }
             recovered += requeue_unsubmitted(transaction, agent)?.unwrap_or(0);
         }
         Ok(recovered)

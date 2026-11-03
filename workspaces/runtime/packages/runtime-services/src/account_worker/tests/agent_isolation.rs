@@ -817,6 +817,54 @@ async fn invalid_attempt_identity_is_a_terminal_error_with_input_preserved() {
 }
 
 #[tokio::test]
+async fn orphaned_reservation_is_a_terminal_error() {
+    for sql in [
+        "UPDATE runtime_agents SET record=json_remove(record,'$.startAttempt') WHERE id=?1",
+        "UPDATE runtime_agents SET record=json_remove(record,'$.startAttempt.submitted') WHERE id=?1",
+    ] {
+        let state = State::new().await;
+        let id = state.agent.clone();
+        let claim_id = id.clone();
+        let epoch = state.epoch;
+        state
+            .bridge
+            .run(move |store| async move {
+                store::claim(Arc::clone(&store), "default", &claim_id, epoch)
+                    .await?
+                    .unwrap();
+                Ok(())
+            })
+            .await
+            .unwrap();
+        corrupt(&state, &id, sql).await;
+        let fault_id = id.clone();
+        state
+            .bridge
+            .run(move |store| async move {
+                scheduler::lifecycle_transaction_with(&store, move |tx| {
+                    agent_fault::hold_agent(
+                        tx,
+                        None,
+                        &fault_id,
+                        agent_fault::FaultStage::TurnPreparation,
+                        "orphaned reservation",
+                    )?;
+                    Ok::<_, WorkerError>(())
+                })
+                .await
+            })
+            .await
+            .unwrap();
+        let held = record_of(&state, &id).await;
+        assert_eq!(
+            held["nativeFailureHold"]["terminalFault"], "invalid_attempt",
+            "{held}"
+        );
+        assert_eq!(state.event_status("input").await, "reserved");
+    }
+}
+
+#[tokio::test]
 async fn corrupt_notification_metadata_is_quarantined_and_other_agents_keep_working() {
     let state = State::new().await;
     let a = state.agent.clone();

@@ -630,6 +630,14 @@ fn send_followup_inner(
             event_inserted: false,
         });
     }
+    if matches!(
+        recipient.native_failure_hold.value(),
+        Some(studio_runtime_store::NativeFailureHold::Terminal { .. })
+    ) {
+        return Err(CoordinationError::InvalidRequest(
+            "This agent cannot resume. Copy the input into a new agent or message.",
+        ));
+    }
     if sender_identity.is_some() {
         recipient.auto_wake = Some(true);
         recipient.error = studio_runtime_schema::queue_command::Field::Null;
@@ -1405,6 +1413,46 @@ mod tests {
             )
             .unwrap();
         assert_eq!(new_count, 0);
+    }
+
+    #[test]
+    fn terminal_fault_rejects_agent_followup() {
+        let mut connection = database();
+        let mut sender = studio_runtime_store::AgentRepository::get(&connection, &"lead".into())
+            .unwrap()
+            .unwrap();
+        sender.auto_wake = Some(true);
+        studio_runtime_store::AgentRepository::put(&connection, &sender).unwrap();
+        let mut recipient =
+            studio_runtime_store::AgentRepository::get(&connection, &"worker".into())
+                .unwrap()
+                .unwrap();
+        recipient.native_failure_hold = studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_store::NativeFailureHold::Terminal {
+                terminal_fault: studio_runtime_store::TerminalFault::InvalidAttempt,
+            },
+        );
+        studio_runtime_store::AgentRepository::put(&connection, &recipient).unwrap();
+        let tx = connection.transaction().unwrap();
+        let result = super::send_followup(
+            &tx,
+            super::AgentFollowup {
+                sender_id: "lead",
+                sender_epoch: 0,
+                recipient_id: "worker",
+                id: "followup",
+                text: "new input",
+                delivery: DeliveryMoment::CurrentTurn,
+                now: 1.0,
+            },
+            &AllowAdmission,
+        );
+        assert!(result.is_err());
+        let saved = studio_runtime_store::AgentRepository::get(&tx, &"worker".into())
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.native_failure_hold, recipient.native_failure_hold);
+        assert_eq!(count(&tx, "runtime_events"), 0);
     }
 
     #[test]

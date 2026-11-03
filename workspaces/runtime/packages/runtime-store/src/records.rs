@@ -850,6 +850,12 @@ impl AgentRecord {
     }
 
     pub fn clear_native_failure_hold(&mut self) {
+        if matches!(
+            self.native_failure_hold.value(),
+            Some(NativeFailureHold::Terminal { .. })
+        ) {
+            return;
+        }
         self.native_failure_hold = studio_runtime_schema::queue_command::Field::Missing;
     }
 

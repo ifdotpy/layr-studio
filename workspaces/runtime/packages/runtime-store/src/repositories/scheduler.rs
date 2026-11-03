@@ -482,6 +482,31 @@ mod tests {
     }
 
     #[test]
+    fn unclean_startup_skips_terminal_invalid_attempt() {
+        let mut connection = database();
+        let tx = connection.transaction().unwrap();
+        SchedulerRepository::claim(&tx, "agent", 4, "attempt", 10.0, 2).unwrap();
+        tx.commit().unwrap();
+        let mut agent = AgentRepository::get(&connection, &AgentId::from("agent"))
+            .unwrap()
+            .unwrap();
+        agent.start_attempt.as_mut().unwrap().id = None;
+        agent.native_failure_hold = studio_runtime_schema::queue_command::Field::Value(
+            crate::NativeFailureHold::Terminal {
+                terminal_fault: crate::TerminalFault::InvalidAttempt,
+            },
+        );
+        AgentRepository::put(&connection, &agent).unwrap();
+        let tx = connection.transaction().unwrap();
+        assert_eq!(SchedulerRepository::hold_unclean_starts(&tx).unwrap(), 0);
+        assert_eq!(SchedulerRepository::recover_unsubmitted(&tx).unwrap(), 0);
+        let saved = AgentRepository::get(&tx, &AgentId::from("agent"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.native_failure_hold, agent.native_failure_hold);
+    }
+
+    #[test]
     fn restart_requeues_only_an_exact_unsubmitted_reservation() {
         let mut connection = database();
         let transaction = connection.transaction().expect("claim transaction begins");
