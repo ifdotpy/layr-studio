@@ -1078,7 +1078,7 @@ fn resolve_team_target(
         })?
         .collect::<Result<Vec<_>, _>>()?;
     match matches.as_slice() {
-        [id] => return Ok(Some(id.clone())),
+        [id] => Ok(Some(id.clone())),
         [_, _, ..] => Err(CallbackError::Refusal(format!(
             "Ambiguous agent name; use an agent ID: {}",
             matches.join(", ")

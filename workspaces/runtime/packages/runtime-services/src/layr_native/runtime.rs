@@ -1545,13 +1545,14 @@ mod worker_base_tests {
         std::fs::create_dir_all(&main).unwrap();
         std::fs::write(root.join("head"), "initial").unwrap();
         for name in ["first", "second", "release"] {
-            assert!(
-                std::process::Command::new("mkfifo")
-                    .arg(root.join(name))
-                    .status()
-                    .unwrap()
-                    .success()
-            );
+            rustix::fs::mknodat(
+                rustix::fs::CWD,
+                root.join(name),
+                rustix::fs::FileType::Fifo,
+                rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+                0,
+            )
+            .unwrap();
         }
         let signal = |name: &str| {
             let file = OpenOptions::new()
