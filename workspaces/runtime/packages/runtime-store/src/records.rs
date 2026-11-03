@@ -1378,6 +1378,20 @@ impl JsonRecord for AgentRecord {
         Ok(())
     }
 
+    fn decode_list_row(
+        connection: &Connection,
+        row_id: &str,
+        encoded: &str,
+        row: &rusqlite::Row<'_>,
+    ) -> StoreResult<Self> {
+        let _ = connection;
+        let mut agent = parse_agent_record(row_id, encoded)?;
+        if row.get::<_, bool>(crate::agent_volatile::AGENT_VOLATILE_FIELDS.len() + 2)? {
+            crate::agent_volatile::merge_agent_row(row, row_id, &mut agent)?;
+        }
+        Ok(agent)
+    }
+
     fn decode_stored(connection: &Connection, row_id: &str, encoded: &str) -> StoreResult<Self> {
         let mut agent = parse_agent_record(row_id, encoded)?;
         crate::agent_volatile::merge_agent(connection, row_id, &mut agent)?;
@@ -2475,6 +2489,15 @@ pub trait JsonRecord: Serialize + DeserializeOwned {
     fn decode_stored(connection: &Connection, row_id: &str, encoded: &str) -> StoreResult<Self> {
         decode_record::<Self>(connection, row_id, encoded)
     }
+
+    fn decode_list_row(
+        connection: &Connection,
+        row_id: &str,
+        encoded: &str,
+        _row: &rusqlite::Row<'_>,
+    ) -> StoreResult<Self> {
+        Self::decode_stored(connection, row_id, encoded)
+    }
 }
 
 /// Typed access to one id/record JSON table.
@@ -2571,18 +2594,30 @@ impl<'connection, R: JsonRecord> Table<'connection, R> {
         ensure_query::<R>(predicate, order)?;
         let (where_sql, values) = predicate_sql(predicate);
         let where_clause = where_sql.map_or_else(String::new, |sql| format!(" WHERE {sql}"));
-        let sql = format!(
-            "SELECT id,record FROM {}{where_clause} ORDER BY {}",
-            quoted_table::<R>(),
-            order.sql()
-        );
+        let sql = if R::TABLE == AgentRecord::TABLE {
+            format!(
+                "SELECT {},a.id,a.record,v.id IS NOT NULL FROM runtime_agents a LEFT JOIN runtime_agent_volatile v ON v.id=a.id ORDER BY a.rowid",
+                crate::agent_volatile::columns("v.")
+            )
+        } else {
+            format!(
+                "SELECT id,record FROM {}{where_clause} ORDER BY {}",
+                quoted_table::<R>(),
+                order.sql()
+            )
+        };
         let mut statement = self.connection.prepare_cached(&sql)?;
         let mut rows = statement.query(params_from_iter(values.iter()))?;
         let mut records = Vec::new();
         while let Some(row) = rows.next()? {
-            let id = stored_text(row.get_ref(0)?, R::TABLE, "<invalid id>")?;
-            let encoded = stored_text_ref(row.get_ref(1)?, R::TABLE, &id)?;
-            records.push(R::decode_stored(self.connection, &id, encoded)?);
+            let offset = if R::TABLE == AgentRecord::TABLE {
+                crate::agent_volatile::AGENT_VOLATILE_FIELDS.len()
+            } else {
+                0
+            };
+            let id = stored_text(row.get_ref(offset)?, R::TABLE, "<invalid id>")?;
+            let encoded = stored_text_ref(row.get_ref(offset + 1)?, R::TABLE, &id)?;
+            records.push(R::decode_list_row(self.connection, &id, encoded, row)?);
         }
         Ok(records)
     }
@@ -4460,6 +4495,57 @@ mod tests {
         let diagnostic = error.to_string();
         assert!(diagnostic.contains("record_decode"));
         assert!(!diagnostic.contains("private user text"));
+    }
+
+    #[test]
+    fn agent_list_matches_individual_reads() {
+        use crate::agent_volatile::publication_work;
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL)")
+            .unwrap();
+        connection
+            .execute_batch(&crate::agent_volatile::TABLE_SQL)
+            .unwrap();
+        for i in 0..200 {
+            let id = format!("agent-{i:03}");
+            let raw = json!({"id": id, "rootId": id, "epoch": 0, "status": "idle", "accountKey": "default", "compactions": 0, "tail": "legacy"}).to_string();
+            connection
+                .execute(
+                    "INSERT INTO runtime_agents(id,record) VALUES (?1,?2)",
+                    rusqlite::params![id, raw],
+                )
+                .unwrap();
+            if i % 2 == 0 {
+                connection
+                    .execute(
+                        "INSERT INTO runtime_agent_volatile(id,tail) VALUES (?1,?2)",
+                        rusqlite::params![id, r#""updated""#],
+                    )
+                    .unwrap();
+            }
+        }
+        let table = Table::<AgentRecord>::new(&connection);
+        let expected: Vec<_> = (0..200)
+            .map(|i| {
+                table
+                    .get(&AgentId::from(format!("agent-{i:03}")))
+                    .unwrap()
+                    .unwrap()
+                    .value()
+            })
+            .collect();
+        let scope = publication_work::scope();
+        let actual: Vec<_> = table
+            .list()
+            .unwrap()
+            .into_iter()
+            .map(|record| record.value())
+            .collect();
+        drop(scope);
+        let calls = publication_work::take();
+        assert_eq!(calls.values().map(|c| c.volatile_loads).sum::<usize>(), 0);
+        assert_eq!(actual, expected);
     }
 
     #[test]
