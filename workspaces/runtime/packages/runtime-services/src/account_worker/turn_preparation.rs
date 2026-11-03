@@ -241,19 +241,16 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
                 })
                 .flatten()
             });
-            let receipt_operation = match agent.start_outcome_hold.as_ref() {
+            let receipt_continued = match agent.start_outcome_hold.as_ref() {
                 Some(studio_runtime_store::StoredStartOutcomeHold::Known(
                     studio_runtime_store::StartOutcomeHold::Held {
                         reason: Some(reason),
-                        operation_id: Some(operation),
                         ..
                     },
-                )) if reason == store::RECEIPT_PENDING_HOLD => Some(operation.as_str()),
-                _ => None,
-            };
-            let receipt_continued = match receipt_operation {
-                Some(operation) => store::thread_calls_can_continue(db, &owner, operation)?,
-                None => false,
+                )) if reason == store::RECEIPT_PENDING_HOLD => {
+                    store::thread_calls_can_continue(db, &owner)?
+                }
+                _ => false,
             };
             Ok::<_, WorkerError>((
                 {
