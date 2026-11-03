@@ -568,6 +568,12 @@ mod macos_environment_tests {
         // macOS omits the environment of restricted platform binaries such as
         // /bin/sleep from KERN_PROCARGS2, so the probe is this test binary, as
         // a provider child is a third-party binary.
+        // Test binaries link the standard library dynamically (studio-test-deps), so the
+        // child keeps the loader search path that cargo set; it is part of the expected set.
+        let loader: BTreeMap<String, String> = ["DYLD_FALLBACK_LIBRARY_PATH", "DYLD_LIBRARY_PATH"]
+            .into_iter()
+            .filter_map(|name| Some((name.to_owned(), std::env::var(name).ok()?)))
+            .collect();
         let mut child = Command::new(std::env::current_exe().unwrap())
             .args([
                 "--ignored",
@@ -575,6 +581,7 @@ mod macos_environment_tests {
                 "provider_shared::macos_environment_tests::environment_probe_child",
             ])
             .env_clear()
+            .envs(&loader)
             .env("STUDIO_TEST_A", "1")
             .env("STUDIO_TEST_B", "two words=and equals")
             .stdin(Stdio::piped())
@@ -604,15 +611,12 @@ mod macos_environment_tests {
                 "provider_shared::macos_environment_tests::environment_probe_child",
             ]
         );
-        assert_eq!(
-            read.unwrap(),
-            BTreeMap::from([
-                ("STUDIO_TEST_A".to_owned(), "1".to_owned()),
-                (
-                    "STUDIO_TEST_B".to_owned(),
-                    "two words=and equals".to_owned()
-                ),
-            ])
+        let mut expected = loader;
+        expected.insert("STUDIO_TEST_A".to_owned(), "1".to_owned());
+        expected.insert(
+            "STUDIO_TEST_B".to_owned(),
+            "two words=and equals".to_owned(),
         );
+        assert_eq!(read.unwrap(), expected);
     }
 }
