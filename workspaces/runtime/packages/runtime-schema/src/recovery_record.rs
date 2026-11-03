@@ -320,7 +320,7 @@ mod tests {
         let schema_text = include_str!("schemas/recovery-agent-record.schema.json");
         assert_eq!(
             data_encoding::HEXLOWER.encode(&Sha256::digest(schema_text.as_bytes())),
-            "dbdc62dfbb341aab55f56ba8f923dbea06efb16c9d2281f8b86bcadb4ef95426",
+            "f6d4d698f089d03fdb168477334acd12d8570ea47c62ae29b93ca654d7d1c499",
             "recovery-agent-record.schema.json changed: review the typed owner and parity cases"
         );
         let schema: Value = serde_json::from_str(schema_text).expect("schema");
