@@ -6653,79 +6653,6 @@
               "epoch"
             ],
             "type": "object"
-          },
-          {
-            "additionalProperties": false,
-            "properties": {
-              "epoch": {
-                "format": "int64",
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "progress": {
-                "additionalProperties": false,
-                "properties": {
-                  "done": {
-                    "format": "uint64",
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": "integer"
-                  },
-                  "phase": {
-                    "enum": [
-                      "sizing",
-                      "staging",
-                      "importing_commits",
-                      "materializing",
-                      "restoring_attributes",
-                      "warming_caches",
-                      "transferring",
-                      "creating_line",
-                      "archiving",
-                      "uploading",
-                      "importing_project",
-                      "completed",
-                      "failed"
-                    ],
-                    "type": "string"
-                  },
-                  "total": {
-                    "format": "uint64",
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": [
-                      "integer",
-                      "null"
-                    ]
-                  },
-                  "unit": {
-                    "enum": [
-                      "files",
-                      "bytes",
-                      "commits"
-                    ],
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "phase",
-                  "done",
-                  "unit"
-                ],
-                "type": "object"
-              },
-              "reason": {
-                "const": "workspace_copy",
-                "type": "string"
-              }
-            },
-            "required": [
-              "reason",
-              "epoch",
-              "progress"
-            ],
-            "type": "object"
           }
         ]
       },
@@ -10592,16 +10519,6 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/AgentStall"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "startWait": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AgentEntityStartWaitDto"
               },
               {
                 "type": "null"
@@ -45427,17 +45344,6 @@
       "ReviewDefaults": {
         "additionalProperties": false,
         "properties": {
-          "account_key": {
-            "anyOf": [
-              {
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "effort": {
             "anyOf": [
               {
@@ -45479,12 +45385,6 @@
       "ReviewDefaultsDto": {
         "additionalProperties": false,
         "properties": {
-          "accountKey": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "effort": {
             "anyOf": [
               {
@@ -51181,8 +51081,7 @@
           "dispatch_pending",
           "paused",
           "native_failure",
-          "account_transfer",
-          "workspace_copy"
+          "account_transfer"
         ],
         "type": "string"
       },
@@ -51433,79 +51332,6 @@
             "required": [
               "reason",
               "epoch"
-            ],
-            "type": "object"
-          },
-          {
-            "additionalProperties": false,
-            "properties": {
-              "epoch": {
-                "format": "int64",
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "progress": {
-                "additionalProperties": false,
-                "properties": {
-                  "done": {
-                    "format": "uint64",
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": "integer"
-                  },
-                  "phase": {
-                    "enum": [
-                      "sizing",
-                      "staging",
-                      "importing_commits",
-                      "materializing",
-                      "restoring_attributes",
-                      "warming_caches",
-                      "transferring",
-                      "creating_line",
-                      "archiving",
-                      "uploading",
-                      "importing_project",
-                      "completed",
-                      "failed"
-                    ],
-                    "type": "string"
-                  },
-                  "total": {
-                    "format": "uint64",
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": [
-                      "integer",
-                      "null"
-                    ]
-                  },
-                  "unit": {
-                    "enum": [
-                      "files",
-                      "bytes",
-                      "commits"
-                    ],
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "phase",
-                  "done",
-                  "unit"
-                ],
-                "type": "object"
-              },
-              "reason": {
-                "const": "workspace_copy",
-                "type": "string"
-              }
-            },
-            "required": [
-              "reason",
-              "epoch",
-              "progress"
             ],
             "type": "object"
           }

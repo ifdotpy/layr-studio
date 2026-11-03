@@ -161,40 +161,11 @@ pub(super) fn run(args: &[String]) -> Result<ExitCode> {
                     worktrees,
                     skip_worktrees: skip_worktrees.clone(),
                 };
-                let last = std::sync::Mutex::new(
-                    None::<(
-                        std::time::Instant,
-                        studio_runtime_schema::layr_progress::CopyPhase,
-                    )>,
-                );
-                let progress = std::sync::Arc::new(
-                    move |value: studio_runtime_schema::layr_progress::CopyProgress| {
-                        let mut last = last.lock().expect("progress lock");
-                        if let Some((at, phase)) = last.as_ref() {
-                            let remaining = studio_runtime_services::layr_native::migration::PROGRESS_PUBLICATION_INTERVAL.saturating_sub(at.elapsed());
-                            if !remaining.is_zero() {
-                                if *phase == value.phase {
-                                    return;
-                                }
-                                std::thread::sleep(remaining);
-                            }
-                        }
-                        eprintln!(
-                            "{}",
-                            serde_json::to_string(&value).expect("progress serialization")
-                        );
-                        *last = Some((std::time::Instant::now(), value.phase));
-                    },
-                );
                 println!(
                     "{}",
                     serde_json::to_string_pretty(
-                        &studio_runtime_services::layr_native::migration::migrate_with_progress(
-                            &state,
-                            &project,
-                            dry_run,
-                            options,
-                            Some(progress)
+                        &studio_runtime_services::layr_native::migration::migrate_with_options(
+                            &state, &project, dry_run, options
                         )?
                     )?
                 );

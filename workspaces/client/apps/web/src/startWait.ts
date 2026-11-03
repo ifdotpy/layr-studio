@@ -34,8 +34,6 @@ export function startWaitLabel(agent: Agent): string | null {
       return "Waiting for native failure recovery";
     case StartWaitReason.account_transfer:
       return "Waiting for account transfer";
-    case StartWaitReason.workspace_copy:
-      return "Preparing the workspace";
   }
   const unreachable: never = wait;
   return unreachable;

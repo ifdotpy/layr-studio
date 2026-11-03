@@ -27,7 +27,6 @@ import {
   WifiOff,
 } from "lucide-react";
 import type { Agent } from "../types";
-import { AgentStatus } from "../generated/api";
 import {
   hasCompletedResult,
   type ChatIndicator,
@@ -35,7 +34,6 @@ import {
 import ChatStatus from "./agents/ChatStatus";
 import { offlineServerDescription } from "../servers/ProjectChatRows";
 import { reportPromptComposerRender } from "./prompt-composer/renderProbe";
-import LayrCopyProgress from "./sidebar/LayrCopyProgress";
 
 type Actions = {
   prepare: () => void;
@@ -202,12 +200,6 @@ const SidebarRowView = memo(function SidebarRowView({
             {row.name ?? ""}
           </strong>
         </span>
-        {(row.status === AgentStatus.queued ||
-          row.status === AgentStatus.starting) &&
-          row.startWait?.reason === "workspace_copy" &&
-          row.startWait.epoch === row.epoch && (
-            <LayrCopyProgress progress={row.startWait.progress} />
-          )}
         {(showServer || serverOffline || row.stall) && (
           <span className="fleet-chat-meta">
             {(showServer || serverOffline) && (

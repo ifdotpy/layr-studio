@@ -4514,35 +4514,6 @@ export interface components {
           epoch: number;
           /** @constant */
           reason: "account_transfer";
-        }
-      | {
-          /** Format: int64 */
-          epoch: number;
-          progress: {
-            /** Format: uint64 */
-            done: number;
-            /** @enum {string} */
-            phase:
-              | "sizing"
-              | "staging"
-              | "importing_commits"
-              | "materializing"
-              | "restoring_attributes"
-              | "warming_caches"
-              | "transferring"
-              | "creating_line"
-              | "archiving"
-              | "uploading"
-              | "importing_project"
-              | "completed"
-              | "failed";
-            /** Format: uint64 */
-            total?: number | null | undefined;
-            /** @enum {string} */
-            unit: "files" | "bytes" | "commits";
-          };
-          /** @constant */
-          reason: "workspace_copy";
         };
     /**
      * AgentEntityUsageResumeDto
@@ -6505,10 +6476,6 @@ export interface components {
       sharedRoomId?: null | string | undefined;
       source?: components["schemas"]["AgentSource"] | null | undefined;
       stall?: components["schemas"]["AgentStall"] | null | undefined;
-      startWait?:
-        | components["schemas"]["AgentEntityStartWaitDto"]
-        | null
-        | undefined;
       status?: components["schemas"]["AgentStatus"] | null | undefined;
       teamCounts?: components["schemas"]["TeamCounts"] | undefined;
       /** Threadid */
@@ -20440,7 +20407,6 @@ export interface components {
     };
     /** ReviewDefaults */
     ReviewDefaults: {
-      account_key?: string | null | undefined;
       /** Effort */
       effort: string | null;
       /** @description Override Fast mode for native reviews and reviewer tasks. Omission preserves caller inheritance for native reviews and worker-default inheritance for reviewer tasks. */
@@ -20450,7 +20416,6 @@ export interface components {
     };
     /** ReviewDefaultsDto */
     ReviewDefaultsDto: {
-      accountKey?: string | null | undefined;
       /** Effort */
       effort?: null | string | undefined;
       fastMode?: boolean | null | undefined;
@@ -22658,8 +22623,7 @@ export interface components {
       | "dispatch_pending"
       | "paused"
       | "native_failure"
-      | "account_transfer"
-      | "workspace_copy";
+      | "account_transfer";
     /**
      * @description One epoch-scoped wait. `until` is a retry deadline in Unix seconds.
      *
@@ -22749,35 +22713,6 @@ export interface components {
           epoch: number;
           /** @constant */
           reason: "account_transfer";
-        }
-      | {
-          /** Format: int64 */
-          epoch: number;
-          progress: {
-            /** Format: uint64 */
-            done: number;
-            /** @enum {string} */
-            phase:
-              | "sizing"
-              | "staging"
-              | "importing_commits"
-              | "materializing"
-              | "restoring_attributes"
-              | "warming_caches"
-              | "transferring"
-              | "creating_line"
-              | "archiving"
-              | "uploading"
-              | "importing_project"
-              | "completed"
-              | "failed";
-            /** Format: uint64 */
-            total?: number | null | undefined;
-            /** @enum {string} */
-            unit: "files" | "bytes" | "commits";
-          };
-          /** @constant */
-          reason: "workspace_copy";
         };
     /** StateResource */
     StateResource: {
@@ -39794,7 +39729,6 @@ export const StartWaitReason = {
   paused: "paused",
   native_failure: "native_failure",
   account_transfer: "account_transfer",
-  workspace_copy: "workspace_copy",
 } as const;
 export type StartWaitReason = components["schemas"]["StartWaitReason"];
 export const studio_api__agents__models__AgentRole = {

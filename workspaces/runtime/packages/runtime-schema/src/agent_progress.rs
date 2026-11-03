@@ -195,11 +195,6 @@ pub enum AgentStartWait {
         #[schemars(range(min = 0, max = crate::shared_values::MAX_SAFE_INTEGER))]
         epoch: i64,
     },
-    WorkspaceCopy {
-        #[schemars(range(min = 0, max = crate::shared_values::MAX_SAFE_INTEGER))]
-        epoch: i64,
-        progress: crate::layr_progress::CopyProgress,
-    },
 }
 
 fn present_deadline<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
@@ -220,7 +215,6 @@ impl AgentStartWait {
             Self::Paused { epoch, .. } => *epoch,
             Self::NativeFailure { epoch, .. } => *epoch,
             Self::AccountTransfer { epoch, .. } => *epoch,
-            Self::WorkspaceCopy { epoch, .. } => *epoch,
         }
     }
 }
@@ -277,7 +271,6 @@ pub struct TeamCounts {
 pub(crate) fn schemas() -> [(&'static str, serde_json::Value); 6] {
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
-        .with(|settings| settings.inline_subschemas = true)
         .into_generator();
     [
         (
@@ -362,15 +355,6 @@ pub(crate) fn check_schema_parity(openapi: &serde_json::Value) -> Result<(), Str
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn layr_copy_progress_round_trips_and_rejects_unknown_fields() {
-        let value =
-            serde_json::json!({"phase":"importing_commits","done":2,"total":4,"unit":"commits"});
-        let progress: crate::layr_progress::CopyProgress =
-            serde_json::from_value(value.clone()).unwrap();
-        assert_eq!(serde_json::to_value(progress).unwrap(), value);
-        assert!(serde_json::from_value::<crate::layr_progress::CopyProgress>(serde_json::json!({"phase":"importing_commits","done":2,"unit":"commits","extra":true})).is_err());
-    }
     #[test]
     fn transfer_progress_rejects_invalid_account_key() {
         let json = r#"{"kind":"completed","id":"t","targetAccountKey":""}"#;

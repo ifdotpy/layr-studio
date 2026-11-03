@@ -483,40 +483,17 @@ impl Plan {
         self.stage_at(&root, Path::new(""))
     }
 
-    pub(super) fn stage_with_progress(
-        &self,
-        destination: &Path,
-        progress: &dyn Fn(u64, u64),
-    ) -> Result<()> {
-        let root = Directory::open(destination)?;
-        self.stage_entries(&root, false, Some(progress))?;
-        self.directory_modes(&root, false)
-    }
-
     pub fn stage_at(&self, project: &Directory, relative: &Path) -> Result<()> {
         let destination = project.child(relative, true)?;
         self.stage_open(&destination)
     }
 
     pub fn stage_open(&self, destination: &Directory) -> Result<()> {
-        self.stage_open_with_progress(destination, None)
-    }
-
-    pub(super) fn stage_open_with_progress(
-        &self,
-        destination: &Directory,
-        progress: Option<&dyn Fn(u64, u64)>,
-    ) -> Result<()> {
-        self.stage_entries(destination, false, progress)?;
+        self.stage_entries(destination, false)?;
         self.directory_modes(destination, false)
     }
 
-    fn stage_entries(
-        &self,
-        destination: &Directory,
-        caches: bool,
-        progress: Option<&dyn Fn(u64, u64)>,
-    ) -> Result<()> {
+    fn stage_entries(&self, destination: &Directory, caches: bool) -> Result<()> {
         use rustix::fs::{Mode, OFlags, openat, symlinkat};
         self.admit()?;
         self.verify_source()?;
@@ -524,19 +501,6 @@ impl Plan {
             return Err(NativeLayrError::Refused(
                 "The staging volume changed after the space preflight".into(),
             ));
-        }
-        let total = self
-            .entries
-            .iter()
-            .filter(|entry| {
-                entry.cache == caches
-                    && !entry.relative.as_os_str().is_empty()
-                    && !entry.metadata.is_dir()
-            })
-            .count() as u64;
-        let mut done = 0;
-        if let Some(progress) = progress {
-            progress(done, total);
         }
         for entry in &self.entries {
             if entry.cache != caches || entry.relative.as_os_str().is_empty() {
@@ -590,10 +554,6 @@ impl Plan {
                 );
                 file.set_permissions(fs::Permissions::from_mode(meta.mode() & 0o7777))?;
                 file.set_times(fs::FileTimes::new().set_modified(meta.modified()?))?;
-            }
-            done += 1;
-            if let Some(progress) = progress {
-                progress(done, total);
             }
         }
         for entry in self
@@ -1094,7 +1054,7 @@ impl Plan {
             .collect();
         add_regenerable(state, cwd, &paths)?;
         let destination = project.child(relative, false)?;
-        self.stage_entries(&destination, true, None)?;
+        self.stage_entries(&destination, true)?;
         self.directory_modes(&destination, true)?;
         if !self.caches.is_empty() {
             super::run(state, cwd, &["save", "--caches"])?;

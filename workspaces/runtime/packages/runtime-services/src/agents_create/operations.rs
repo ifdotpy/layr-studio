@@ -3087,7 +3087,6 @@ async fn resolve_review_defaults(
     let Some(value) = value else {
         return Ok(
             studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
-                account_key: None,
                 model: None,
                 effort: None,
                 fast_mode: None,
@@ -3095,40 +3094,10 @@ async fn resolve_review_defaults(
         );
     };
     let mut defaults = studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
-        account_key: value.account_key.value().cloned(),
         model: None,
         effort: None,
         fast_mode: value.fast_mode,
     };
-    if let Some(key) = defaults.account_key.as_deref() {
-        if excluded_account_keys.iter().any(|excluded| excluded == key) {
-            return Err(OperationError::Invalid(
-                "This account is excluded from subagents",
-            ));
-        }
-        if let Some(driver) = context.driver.clone() {
-            let key = key.to_owned();
-            let (identity, status, native_proof) =
-                studio_runtime_process::blocking_pool::spawn_blocking(
-                    "runtime-services/agents_create/review_account_identity",
-                    move || account_identity_blocking(&driver, &key),
-                )
-                .await
-                .map_err(|_| OperationError::Internal)??;
-            if status != AccountStatus::Ready && !native_proof {
-                return Err(OperationError::Invalid(
-                    "This account is unavailable for review",
-                ));
-            }
-            if identity.provider != studio_runtime_providers::ProviderKind::Codex {
-                return Err(OperationError::Invalid(
-                    "Native review needs a Codex account",
-                ));
-            }
-        } else if value.model.value().is_none() {
-            return Err(OperationError::Internal);
-        }
-    }
     let Some(model) = value.model.value().map(String::as_str) else {
         if value.effort.value().is_some() {
             return Err(OperationError::Invalid(
@@ -3150,11 +3119,7 @@ async fn resolve_review_defaults(
             environment
                 .select_worker_account(crate::provider_callbacks::WorkerAccountRequest {
                     parent_account_key: account_key,
-                    requested_account_key: value
-                        .account_key
-                        .value()
-                        .map(String::as_str)
-                        .or(worker_account_key),
+                    requested_account_key: worker_account_key,
                     default_account_key: None,
                     model,
                     excluded_account_keys,
@@ -3170,12 +3135,7 @@ async fn resolve_review_defaults(
                         name,
                     ) => OperationError::Unavailable(name),
                 })?
-        } else if let Some(worker_account_key) = value
-            .account_key
-            .value()
-            .map(String::as_str)
-            .or(worker_account_key)
-        {
+        } else if let Some(worker_account_key) = worker_account_key {
             (
                 worker_account_key.to_owned(),
                 account_identity(context, worker_account_key).await?,
@@ -3183,11 +3143,6 @@ async fn resolve_review_defaults(
         } else {
             (account_key.to_owned(), account.clone())
         };
-    if catalog_account.provider != studio_runtime_providers::ProviderKind::Codex {
-        return Err(OperationError::Invalid(
-            "Native review needs a Codex account",
-        ));
-    }
     let catalog = if let Some(environment) = context.managed_creation_environment {
         Some(environment.catalog())
     } else {
@@ -3478,7 +3433,6 @@ pub(crate) fn build_agent_record(
         ));
         record.review_defaults = Some(Box::new(
             studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
-                account_key: None,
                 model: None,
                 effort: None,
                 fast_mode: None,
@@ -4465,7 +4419,6 @@ mod tests {
         for model in [Field::Null, Field::Value("gpt-6-astra".to_owned())] {
             for fast in [true, false] {
                 let payload = ReviewDefaults {
-                    account_key: Field::Missing,
                     model: model.clone(),
                     effort: Field::Null,
                     fast_mode: Some(fast),
@@ -4484,7 +4437,6 @@ mod tests {
             }
         }
         let legacy = ReviewDefaults {
-            account_key: Field::Missing,
             model: Field::Null,
             effort: Field::Null,
             fast_mode: None,
@@ -4494,43 +4446,6 @@ mod tests {
                 .await
                 .expect("legacy defaults validate");
         assert!(resolved.fast_mode.is_none());
-    }
-
-    #[tokio::test]
-    async fn review_defaults_validate_explicit_account() {
-        let root = tempfile::tempdir().unwrap();
-        let store = RuntimeStore::open(Some(root.path())).await.unwrap();
-        let environment = managed_fixture();
-        let validate = |_: &str, _: &Value| true;
-        let context = worker_defaults_context(
-            std::sync::Arc::new(store),
-            &environment,
-            std::sync::Arc::new(validate),
-        );
-        let account = AccountIdentity {
-            provider: studio_runtime_providers::ProviderKind::Codex,
-            home: None,
-            account_id: None,
-            email: None,
-        };
-        let defaults: ReviewDefaults =
-            serde_json::from_str(r#"{"account_key":"default","model":"gpt-6-astra"}"#).unwrap();
-        let result =
-            resolve_review_defaults(&context, Some(&defaults), "default", &account, None, &[])
-                .await
-                .unwrap();
-        assert_eq!(
-            serde_json::to_value(result).unwrap()["accountKey"],
-            "default"
-        );
-        let invalid: ReviewDefaults =
-            serde_json::from_str(r#"{"account_key":"claude-local","model":"gpt-6-astra"}"#)
-                .unwrap();
-        assert!(
-            resolve_review_defaults(&context, Some(&invalid), "default", &account, None, &[])
-                .await
-                .is_err()
-        );
     }
 
     #[tokio::test]

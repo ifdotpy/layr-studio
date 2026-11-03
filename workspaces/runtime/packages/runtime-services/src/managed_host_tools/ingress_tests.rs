@@ -3336,15 +3336,6 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
         "removed workspace mode must be refused"
     );
 
-    actor_value["excludedAccountKeys"] = json!(["default"]);
-    let updated_actor = actor_value.clone();
-    store
-        .transaction_with::<_, StoreError>(move |tx| {
-            AgentRepository::put(tx, &AgentRecord::from_value(updated_actor).unwrap())
-        })
-        .await
-        .unwrap();
-    let actor = Actor::from_record(&actor_value, &context.agent, context.epoch).unwrap();
     let reviewed = crate::managed_child_create::request_review(
         &store,
         &actor,
@@ -3372,48 +3363,6 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
     .value();
     assert_eq!(child["cwd"], review_directory);
     assert_eq!(child["nativeReview"]["status"], "pending");
-    assert_eq!(child["accountKey"], "default");
-    drop(read);
-
-    let root_id = context.agent.clone();
-    store
-        .transaction_with::<_, StoreError>(move |tx| {
-            let mut root = AgentRepository::get(tx, &AgentId::from(root_id.as_str()))?
-                .unwrap()
-                .value();
-            root["reviewDefaults"] = json!({"model":null,"accountKey":"alternate"});
-            AgentRepository::put(tx, &AgentRecord::from_value(root).unwrap())
-        })
-        .await
-        .unwrap();
-    let selected_actor = {
-        let read = store.test_reader().unwrap();
-        let root = AgentRepository::get(&read, &AgentId::from(context.agent.as_str()))
-            .unwrap()
-            .unwrap()
-            .value();
-        Actor::from_record(&root, &context.agent, context.epoch).unwrap()
-    };
-    let reviewed = crate::managed_child_create::request_review(
-        &store,
-        &selected_actor,
-        &json!({"target":{"type":"uncommittedChanges"},"cwd":review_cwd}),
-        "dispatcher-review-selected-account",
-        21.1,
-        &CreationEnvironment,
-    )
-    .await
-    .unwrap();
-    let child_id = reviewed.result().test_value()["agents"][0]["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let read = store.test_reader().unwrap();
-    let child = AgentRepository::get(&read, &AgentId::from(child_id.as_str()))
-        .unwrap()
-        .unwrap()
-        .value();
-    assert_eq!(child["accountKey"], "alternate");
     drop(read);
 
     actor_value["executionMode"] = json!("vm");
@@ -4486,34 +4435,4 @@ async fn null_and_absent_model_select_the_same_provider_default() {
         crate::provider_adapter::adapter(studio_runtime_providers::ProviderKind::Claude)
             .default_model()
     );
-}
-
-#[tokio::test]
-async fn reviewer_account_selection_respects_precedence() {
-    let (_dir, store, _) = fixture().await;
-    let load = std::collections::HashMap::new();
-    let spec = studio_runtime_schema::creation_intent::CreationIntent::default();
-    for (review, explicit, expected) in [
-        (Some("alternate"), None, "alternate"),
-        (None, None, "default"),
-        (Some("alternate"), Some("default"), "default"),
-    ] {
-        let root = json!({"accountKey":"default", "model":"gpt-6-astra", "workerDefaults":{"accountKey":"default"}, "reviewDefaults":{"model":"gpt-6-astra", "accountKey":review}});
-        let settings = crate::managed_child_create::resolve_worker_settings(
-            &store,
-            &CreationEnvironment,
-            crate::managed_child_create::WorkerSettingsRequest {
-                parent: &root,
-                root: &root,
-                spec: &spec,
-                profile: None,
-                role: "reviewer",
-                requested_account_key: explicit,
-                account_load: &load,
-            },
-        )
-        .await
-        .unwrap();
-        assert_eq!(settings.account_key, expected);
-    }
 }

@@ -49,25 +49,6 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("server sidebar projection", () => {
-  it("retains an epoch-scoped workspace copy wait for the chat row", () => {
-    const data = snapshot();
-    data.threads = [
-      {
-        id: "lead",
-        status: AgentStatus.starting,
-        epoch: 2,
-        startWait: {
-          reason: "workspace_copy",
-          epoch: 2,
-          progress: { phase: "staging", done: 2, total: 4, unit: "files" },
-        },
-      },
-    ];
-    expect(sidebarSnapshot(data).threads[0]).toMatchObject({
-      epoch: 2,
-      startWait: { reason: "workspace_copy", progress: { done: 2, total: 4 } },
-    });
-  });
   it("preserves organization, tails, workers and radio membership without transcripts or session state", () => {
     const data = snapshot();
     data.threads = [

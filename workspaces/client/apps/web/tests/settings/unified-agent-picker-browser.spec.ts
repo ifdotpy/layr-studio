@@ -248,7 +248,7 @@ test("unified agent picker roles, accounts and project/shared flows", async ({
       await expect(luna).toHaveAttribute("aria-selected", "true");
       await page.getByText("Review", { exact: true }).click();
       await expect(
-        page.getByLabel("Review account", { exact: true }),
+        page.getByText("Uses the caller account.", { exact: true }),
       ).toBeVisible();
       assert.equal(
         await page.getByLabel("Subagent account", { exact: true }).count(),

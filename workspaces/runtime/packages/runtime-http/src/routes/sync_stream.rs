@@ -2270,8 +2270,7 @@ fn resource_event(
     .expect("event serializes")
 }
 
-#[doc(hidden)]
-pub fn sse_event(name: &str, revision: Option<i64>, payload: impl Serialize) -> Event {
+pub(super) fn sse_event(name: &str, revision: Option<i64>, payload: impl Serialize) -> Event {
     // These stream DTOs contain only JSON-compatible fields and string map keys.
     let event = Event::default()
         .event(name)

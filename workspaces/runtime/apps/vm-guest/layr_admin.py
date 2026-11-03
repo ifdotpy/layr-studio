@@ -119,7 +119,7 @@ class Broker:
 
     async def dispatch(self, request_id, method, params, emit):
         if method in {"project.ensure", "project.import"}:
-            return await self.projects.dispatch(request_id, method, params, emit)
+            return await self.projects.dispatch(request_id, method, params)
         if method == "project.exec":
             return await self.projects.exec(request_id, params)
         if method == "project.seed":

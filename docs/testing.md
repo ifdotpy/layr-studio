@@ -93,7 +93,6 @@ their removed Python commands are not current instructions.
 | Load-sensitive Rust tests, manual heavy               | `just test-quarantine`                   |
 | Real launcher process probe (lsof), manual            | `just test-real-process-probe`           |
 | Many-agent scenario, manual heavy                     | `just test-rust-many-agents`             |
-| Backend instruction and allocation profiles, manual | `just bench-gungraun`                   |
 | Continuation corpus and store faults, manual heavy    | `just test-rust-usage-resume-corpora`    |
 | Hidden Rust native WebView scenarios, manual heavy    | `just test-native-webview`               |
 | Hidden Rust native WebView scenarios, manual heavy    | `just test-native-webview`               |
@@ -128,20 +127,6 @@ short tier. Load, stress, and contention runs require a separate explicit select
 a declared duration and resource budget, and no simultaneous ordinary checks or
 user work on the same machine. The run owner stops every generator on exit.
 Ordinary check evidence collected during a load run is invalid.
-
-`just bench-gungraun` is a manual profiling run, outside both test tiers and
-hosted CI. Install Valgrind and the runner matching the pinned crate with
-`cargo install gungraun-runner --version 0.17.2 --locked`. It runs Callgrind
-and DHAT on disposable fixtures; instruction and allocation counts do not
-measure elapsed time. Other work can run concurrently. The benchmark profile
-includes line tables for `callgrind_annotate` and DHAT output under
-`target/gungraun/`. Pass a benchmark name to the recipe to filter cases. Add a
-`#[library_benchmark]` to the owning crate's `benches/hot_paths.rs` and register
-it in its group; use a `#[bench]` setup expression to keep fixture creation out
-of the measured function. Compare results from the same toolchain and fixtures.
-The services benchmark enables rustix's libc auxiliary-vector reader because
-its direct reader can access an unmapped vDSO address under Valgrind. That is a
-benchmark build difference from the normal Linux backend.
 
 Provider callbacks, preparation, monitor starts, recovery, and request identities
 are covered by the witnesses selected in the facade. Shared limits and filters

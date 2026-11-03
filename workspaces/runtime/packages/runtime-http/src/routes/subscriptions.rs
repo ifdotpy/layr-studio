@@ -213,25 +213,32 @@ async fn view_value(
                     json!({"legacyMessages":studio_runtime_store::projection_value(&messages)}),
                 );
             }
-            let mut room = super::messages::room_snapshot(
-                state,
-                r.room_id.as_str().to_owned(),
-                None,
-                None,
-                studio_runtime_schema::shared_values::SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS as i64,
+            let mut room = serde_json::to_value(
+                super::messages::room_snapshot(
+                    state,
+                    r.room_id.as_str().to_owned(),
+                    None,
+                    None,
+                    studio_runtime_schema::shared_values::SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS as i64,
+                )
+                .await?,
             )
-            .await?;
+            .map_err(|_| ApiError::internal())?;
             // Preserve an exclusive history boundary while fitting a bounded tail.
             while serde_json::to_vec(&room)
                 .map_err(|_| ApiError::internal())?
                 .len()
                 > SYNC_STREAM_EVENT_MAX_BYTES / 2
             {
-                if room.messages.len() <= 1 {
+                let Some(messages) = room["messages"].as_array_mut() else {
+                    break;
+                };
+                if messages.len() <= 1 {
                     break;
                 }
-                room.messages.drain(..room.messages.len() / 2);
-                room.next_before = Some(Some(room.messages[0].seq));
+                messages.drain(..messages.len() / 2);
+                let first = messages[0]["seq"].clone();
+                room["nextBefore"] = first;
             }
             Ok(json!({"room":room}))
         }

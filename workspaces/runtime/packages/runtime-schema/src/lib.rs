@@ -41,7 +41,6 @@ pub mod idle_compaction;
 pub mod json_compat;
 pub mod json_object;
 pub mod layr_evidence;
-pub mod layr_progress;
 pub mod limit_reset_request;
 pub mod model_catalog;
 pub mod monitor_record;

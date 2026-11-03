@@ -23,12 +23,6 @@ from layr_share import Share, project_id
 
 
 class BrokerTests(unittest.IsolatedAsyncioTestCase):
-    async def test_import_forwards_progress_emitter(self):
-        emit = AsyncMock()
-        self.broker.projects.dispatch = AsyncMock(return_value={"imported": True})
-        await self.broker.dispatch("import", "project.import", {"projectId": "one"}, emit)
-        self.broker.projects.dispatch.assert_awaited_once_with("import", "project.import", {"projectId": "one"}, emit)
-
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -125,19 +119,6 @@ class BrokerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ImportTests(unittest.IsolatedAsyncioTestCase):
-    async def test_import_reports_phase_before_copy(self):
-        with tempfile.TemporaryDirectory() as name:
-            root = Path(name)
-            projects = Projects(root, root / "store", AsyncMock(), None)
-            projects.owner = lambda project: {"owner": "studio"}
-            projects.freeze_source = AsyncMock(side_effect=GuestError("test", "stop"))
-            emit = AsyncMock()
-            with patch("layr_projects.Path.is_dir", lambda path: path.name == "upload"), patch("layr_projects.Path.resolve", lambda path: path):
-                with self.assertRaises(GuestError):
-                    await projects.dispatch("import", "project.import", {"projectId": "app", "source": "/var/lib/codex-studio/projects/upload"}, emit)
-            emit.assert_awaited_once_with("workspace.copy", {"phase": "importing_project", "done": 0, "unit": "files"})
-            projects.freeze_source.assert_awaited_once()
-
     async def test_existing_project_ignores_mac_source_and_does_not_import(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)

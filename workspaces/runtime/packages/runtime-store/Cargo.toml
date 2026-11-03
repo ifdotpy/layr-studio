@@ -26,7 +26,6 @@ tokio = { workspace = true }
 zstd-safe = { workspace = true }
 
 [dev-dependencies]
-gungraun = "=0.17.2"
 studio-test-deps = { path = "../test-deps" }
 schemars.workspace = true
 studio-runtime-store = { path = ".", features = ["test-support"] }
@@ -42,7 +41,3 @@ test-support = []
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
-
-[[bench]]
-name = "hot_paths"
-harness = false
