@@ -193,6 +193,35 @@ Every agent and developer follows these rules:
    default path.
 7. The sweep config lives in the root `Cargo.toml` under `[workspace.metadata.layr-retest]`, and its `sweep` list must name the same command as the gate (checked by `layr-sweep-parity.test.ts`).
 
+### Child scheduling and priority-sensitive tests
+
+Studio defaults to lowering owned child process groups to nice 5 on Linux and
+macOS, so agent workloads compete less with the user's other work. This is
+best effort and happens after spawn; descendants normally inherit the resulting
+priority. Linux also applies a best-effort I/O priority. See the
+[scheduling design](plans/rust-child-priority.md) for the scope and limitations.
+
+A test that tries to reset a thread from nice 5 to nice 0 can fail with `EACCES`.
+On Linux, an unprivileged process needs an adequate `RLIMIT_NICE` or the
+appropriate privilege to raise its priority; with `RLIMIT_NICE=0` it cannot do
+so. On macOS, raising priority likewise requires privilege. Check the actual
+process priority and limits when a test depends on them: the spawn hook is
+advisory and inherited settings can vary.
+
+For a priority-sensitive run, use a separately launched process outside the
+Studio tree with the desired scheduling and limits, for example
+`systemd-run --user --unit=<name> --collect ...` on Linux.
+
+The server reads `CODEX_AGENT_CHILD_PRIORITY=normal` once at startup from its
+effective environment. This server-wide setting leaves inherited priority
+unchanged; it does not reset an already niced server or existing children, and
+removes the default protection for other work on the device. Exporting it in a
+shell before installation or `systemctl restart` does not pass it to the
+service. On a host managed by `just deliver-server`, there is currently no
+supported way to set it; use the external launch workaround. There is no
+per-project or per-command switch. Do not restart an active server or interrupt
+other agents just to change this setting.
+
 ### Run the gates
 
 ```sh
