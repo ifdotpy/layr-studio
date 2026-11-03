@@ -840,6 +840,74 @@ esac
 
     #[cfg(unix)]
     #[test]
+    fn resolved_merge_conflict_is_accepted_without_repeating_merge() {
+        use std::os::unix::fs::PermissionsExt;
+        let (state, worker) = fast_fixture();
+        let root = store_path(state.path());
+        let main = main_path(state.path(), worker["layrProjectId"].as_str().unwrap());
+        let lead = json!({"id":"lead","workspaceMode":"layr-native","role":"lead","isLead":true,"layrReady":true,"layrProjectId":worker["layrProjectId"],"layrLine":"main","cwd":main});
+        fs::write(binary_path(state.path()), r#"#!/bin/sh
+printf '%s\n' "$*" >> "$LAYR_ROOT/commands"
+case "$3 $4" in
+  'merge '*) printf 'CONFLICT (content): Merge conflict in file\n'; exit 1 ;;
+  'rev-parse head') echo resolved ;;
+  'status --json') if [ -f "$LAYR_ROOT/resolved" ]; then echo '{"staged":[],"unstaged":[],"untracked":[],"conflicts":[]}'; else echo '{"staged":[],"unstaged":[],"untracked":[],"conflicts":[{}]}'; fi ;;
+  'merge-base --is-ancestor') [ -f "$LAYR_ROOT/ancestor" ] || exit 1 ;;
+esac
+"#).unwrap();
+        fs::set_permissions(binary_path(state.path()), fs::Permissions::from_mode(0o755)).unwrap();
+        let first = merge(state.path(), &lead, &worker, "worker-state", "accept");
+        assert!(
+            matches!(first, Err(NativeLayrError::Conflict(ref message)) if message.contains("CONFLICT"))
+        );
+        assert!(matches!(
+            merge(state.path(), &lead, &worker, "worker-state", "accept"),
+            Err(NativeLayrError::Conflict(_))
+        ));
+        fs::write(root.join("resolved"), "").unwrap();
+        assert!(matches!(
+            merge(state.path(), &lead, &worker, "worker-state", "accept"),
+            Err(NativeLayrError::Conflict(_))
+        ));
+        fs::write(root.join("ancestor"), "").unwrap();
+        let result = merge(state.path(), &lead, &worker, "worker-state", "accept")
+            .expect("resolved conflict must recover");
+        assert_eq!(result["merge"]["to_state"], "resolved");
+        assert!(result["merge"].get("from_state").is_none());
+        let commands = fs::read_to_string(root.join("commands")).unwrap();
+        assert_eq!(
+            commands
+                .lines()
+                .filter(|line| line.contains(" merge "))
+                .count(),
+            1
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn interrupted_merge_never_runs_again() {
+        let (state, worker) = fast_fixture();
+        let main = main_path(state.path(), worker["layrProjectId"].as_str().unwrap());
+        let lead = json!({"id":"lead","workspaceMode":"layr-native","role":"lead","isLead":true,"layrReady":true,"layrProjectId":worker["layrProjectId"],"layrLine":"main","cwd":main});
+        let intent = json!({"lead":"lead","worker":"fast-worker","revision":"worker-state"});
+        let result = runtime::operation_in_store(
+            state.path(),
+            &store_path(state.path()),
+            "accept",
+            &intent,
+            || Err(NativeLayrError::Unknown("interrupted".into())),
+        );
+        assert!(matches!(result, Err(NativeLayrError::Unknown(_))));
+        assert!(matches!(
+            merge(state.path(), &lead, &worker, "worker-state", "accept"),
+            Err(NativeLayrError::Unknown(_))
+        ));
+        assert!(!store_path(state.path()).join("commands").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn native_layr_fake_evidence_retains_transport_fields() {
         let (state, worker) = fast_fixture();
         let response = evidence(state.path(), &worker, "full-named-state").unwrap();

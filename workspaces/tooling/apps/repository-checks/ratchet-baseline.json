@@ -1144,10 +1144,6 @@
       "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
     },
     {
-      "file": "workspaces/runtime/packages/runtime-http/src/routes/work_write.rs",
-      "fingerprint": "b47b1da7a070a730c32415ef46ebb5877bbdd4d4b561a0823a2513977138a401:0"
-    },
-    {
       "file": "workspaces/runtime/packages/runtime-http/src/validation.rs",
       "fingerprint": "4bf8ba4d2d21bb908196f15eaefd3d0645dd3c0c1402a54fda399ebc3668eae8:0"
     },

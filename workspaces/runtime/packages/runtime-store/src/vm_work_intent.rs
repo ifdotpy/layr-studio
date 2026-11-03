@@ -40,7 +40,8 @@ pub struct SubmissionResult {
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MergeReceipt {
-    pub from_state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_state: Option<String>,
     pub to_state: String,
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -81,6 +82,19 @@ mod tests {
         let intent: Intent<Acceptance, AcceptanceResult> = serde_json::from_str(stored).unwrap();
         let text = serde_json::to_string(&intent).unwrap();
         assert!(text.contains(r#""merge":{"from_state":"old","to_state":"new"}"#));
+    }
+    #[test]
+    fn recovered_merge_receipt_omits_unknown_previous_state() {
+        let receipt = MergeReceipt {
+            from_state: None,
+            to_state: "resolved".into(),
+        };
+        let value = serde_json::to_string(&receipt).unwrap();
+        assert_eq!(value, r#"{"to_state":"resolved"}"#);
+        assert_eq!(
+            serde_json::from_str::<MergeReceipt>(&value).unwrap(),
+            receipt
+        );
     }
     #[test]
     fn accepted_completion_round_trips_without_result_field() {

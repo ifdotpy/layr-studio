@@ -59,6 +59,7 @@ const MAX_ERROR_CHARS: usize = 1200;
 #[derive(Debug)]
 pub(crate) enum ChildError {
     Failed(String),
+    MergeConflict(String),
     TimedOut,
     /// The child did not run or its result could not be read. The text names
     /// the step and the operating-system error, for example
@@ -97,12 +98,17 @@ pub(crate) struct Request<'a> {
 
 /// Run a child with bounded output retention and one deadline for execution and pipe draining.
 pub(crate) fn run(request: Request<'_>) -> Result<Output, ChildError> {
-    run_with_environment(request, false)
+    run_with_environment(request, false, false)
 }
 
 /// Inherit helper inputs but remove every ambient Git override before applying fixed settings.
 pub(crate) fn run_without_git_environment(request: Request<'_>) -> Result<Output, ChildError> {
-    run_with_environment(request, true)
+    run_with_environment(request, true, false)
+}
+
+/// Layr merge reports conflicts on stdout even when it exits unsuccessfully.
+pub(crate) fn run_layr_merge(request: Request<'_>) -> Result<Output, ChildError> {
+    run_with_environment(request, true, true)
 }
 
 /// Test fixtures must not use the developer's Git configuration or prompt.
@@ -124,7 +130,11 @@ pub(crate) fn run_with_isolated_git_config(request: Request<'_>) -> Result<Outpu
     clippy::disallowed_methods,
     reason = "bounded child polling executes on the calling labeled blocking worker"
 )]
-fn run_with_environment(request: Request<'_>, remove_git: bool) -> Result<Output, ChildError> {
+fn run_with_environment(
+    request: Request<'_>,
+    remove_git: bool,
+    merge_output: bool,
+) -> Result<Output, ChildError> {
     studio_runtime_store::debug_assert_outside_sql();
     let Request {
         program,
@@ -263,7 +273,25 @@ fn run_with_environment(request: Request<'_>, remove_git: bool) -> Result<Output
                 };
             }
         });
-        let message = String::from_utf8_lossy(&stderr.bytes)
+        let stdout_text = String::from_utf8_lossy(&stdout.bytes);
+        let stderr_text = String::from_utf8_lossy(&stderr.bytes);
+        if merge_output {
+            for output in [&*stdout_text, &*stderr_text] {
+                if let Some(line) = output.lines().find(|line| {
+                    line.starts_with("CONFLICT (") || line.starts_with("Automatic merge left ")
+                }) {
+                    let start = output.find(line).unwrap_or_default();
+                    return Err(ChildError::MergeConflict(
+                        output[start..]
+                            .trim()
+                            .chars()
+                            .take(MAX_ERROR_CHARS)
+                            .collect(),
+                    ));
+                }
+            }
+        }
+        let message = stderr_text
             .trim()
             .chars()
             .take(MAX_ERROR_CHARS)

@@ -741,7 +741,9 @@ impl Git {
         })
         .map_err(|error| match error {
             ChildError::TimedOut => WorkspaceError::Deadline(step()),
-            ChildError::Failed(stderr) => WorkspaceError::Git(format!("{}: {stderr}", step())),
+            ChildError::Failed(stderr) | ChildError::MergeConflict(stderr) => {
+                WorkspaceError::Git(format!("{}: {stderr}", step()))
+            }
             ChildError::Launch(detail) => WorkspaceError::Git(format!(
                 "{}: the Git process could not run ({detail})",
                 step()

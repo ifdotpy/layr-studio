@@ -224,7 +224,8 @@ fn run_git_program_timeout(
     })
     .map(|output| output.stdout)
     .map_err(|error| match error {
-        bounded_child::ChildError::Failed(message) => GitError::Failed(message),
+        bounded_child::ChildError::Failed(message)
+        | bounded_child::ChildError::MergeConflict(message) => GitError::Failed(message),
         bounded_child::ChildError::TimedOut => GitError::TimedOut,
         bounded_child::ChildError::Launch(detail) => {
             eprintln!("workspace view Git process could not run: {detail}");

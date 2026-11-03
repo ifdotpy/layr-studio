@@ -322,14 +322,16 @@ async fn prepare_vm_accept(
                             params["expectedStateId"].as_str().unwrap_or_default(),
                             &operation_id,
                         )
-                        .map_err(native_layr_error);
+                        .map_err(WorkLayrError::Native);
                     }
-                    UnixGuestRpc::for_runtime_state(&runtime_state).call(
-                        "line.merge",
-                        &params,
-                        Some(&operation_id),
-                        Duration::from_secs(20),
-                    )
+                    UnixGuestRpc::for_runtime_state(&runtime_state)
+                        .call(
+                            "line.merge",
+                            &params,
+                            Some(&operation_id),
+                            Duration::from_secs(20),
+                        )
+                        .map_err(WorkLayrError::Guest)
                 },
             )
             .await
@@ -423,14 +425,16 @@ async fn prepare_vm_submission(
                             &native_owner,
                             params["stateId"].as_str().unwrap_or_default(),
                         )
-                        .map_err(native_layr_error);
+                        .map_err(WorkLayrError::Native);
                     }
-                    UnixGuestRpc::for_runtime_state(&runtime_state).call(
-                        "line.evidence",
-                        &params,
-                        Some(&request_id),
-                        Duration::from_secs(20),
-                    )
+                    UnixGuestRpc::for_runtime_state(&runtime_state)
+                        .call(
+                            "line.evidence",
+                            &params,
+                            Some(&request_id),
+                            Duration::from_secs(20),
+                        )
+                        .map_err(WorkLayrError::Guest)
                 },
             )
             .await
@@ -1907,15 +1911,55 @@ inventory::submit! {
 
 // Both Layr modes use the same durable exact-state task receipt contract.
 #[cfg(unix)]
-fn native_layr_error(
-    error: studio_runtime_services::layr_native::NativeLayrError,
-) -> studio_runtime_services::linux_vm_guest::GuestError {
-    let uncertain = !matches!(
-        error,
-        studio_runtime_services::layr_native::NativeLayrError::Refused(_)
-    );
-    studio_runtime_services::linux_vm_guest::GuestError::Transport {
-        message: error.to_string(),
-        uncertain,
+#[derive(Debug)]
+enum WorkLayrError {
+    Native(studio_runtime_services::layr_native::NativeLayrError),
+    Guest(studio_runtime_services::linux_vm_guest::GuestError),
+}
+
+#[cfg(unix)]
+impl std::fmt::Display for WorkLayrError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Native(error) => error.fmt(f),
+            Self::Guest(error) => error.fmt(f),
+        }
+    }
+}
+
+#[cfg(unix)]
+impl WorkLayrError {
+    fn uncertain(&self) -> bool {
+        match self {
+            Self::Native(error) => !matches!(
+                error,
+                studio_runtime_services::layr_native::NativeLayrError::Refused(_)
+                    | studio_runtime_services::layr_native::NativeLayrError::Conflict(_)
+            ),
+            Self::Guest(error) => error.uncertain(),
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod layr_error_tests {
+    use super::WorkLayrError;
+    use studio_runtime_services::{layr_native::NativeLayrError, linux_vm_guest::GuestError};
+
+    #[test]
+    fn native_merge_conflict_keeps_its_message_and_is_not_uncertain() {
+        let error =
+            WorkLayrError::Native(NativeLayrError::Conflict("CONFLICT (content): file".into()));
+        assert_eq!(
+            error.to_string(),
+            "Native Layr merge conflict: CONFLICT (content): file"
+        );
+        assert!(!error.uncertain());
+        let guest = WorkLayrError::Guest(GuestError::Transport {
+            message: "lost".into(),
+            uncertain: true,
+        });
+        assert!(guest.to_string().contains("VM guest transport"));
+        assert!(guest.uncertain());
     }
 }
