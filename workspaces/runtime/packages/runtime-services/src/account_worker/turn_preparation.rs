@@ -60,8 +60,6 @@ pub(super) struct Prepared {
 pub(super) enum Unclaimed {
     /// Busy-turn input claimed for the running turn, and that turn's id.
     Steer(Box<TurnIntent>, String, Box<preparation::PreparedSteer>),
-    /// The disk is full: the input stays queued at this epoch until the recheck.
-    DiskFull(i64, Option<super::PreparationDeadline>),
     /// An unsubmitted preparation cannot resume yet, but its deadline remains active.
     Deferred(i64, String, super::PreparationDeadline),
     /// A queued native review child: its first turn is `review/start`.
@@ -361,7 +359,7 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
         ),
         _ => None,
     };
-    if crate::disk_space::hold_agent_turn(
+    match crate::disk_space::hold_agent_turn(
         &bridge.store,
         agent_id,
         epoch,
@@ -370,12 +368,9 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
     )
     .await?
     {
-        // While the disk is full no new turn starts. The input stays queued
-        // with its identity; the desktop shows one notice with the free space.
-        return Ok(Err(Unclaimed::DiskFull(
-            epoch,
-            deferred.as_ref().map(|(_, deadline)| *deadline),
-        )));
+        crate::disk_space::TurnStorageAdmission::Ready => {}
+        crate::disk_space::TurnStorageAdmission::Failed
+        | crate::disk_space::TurnStorageAdmission::Stale => return Ok(Err(Unclaimed::Nothing)),
     }
     // Python's dispatcher claims a pending native review before queued input.
     if crate::native_review_turn::candidate(&bridge.store, agent_id, epoch, account).await? {

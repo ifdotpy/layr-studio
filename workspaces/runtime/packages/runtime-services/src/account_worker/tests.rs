@@ -825,6 +825,40 @@ struct State {
     retained: bool,
 }
 
+#[tokio::test]
+async fn disk_failure_does_not_replay_input_when_space_returns() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    let mut state = State::new().await;
+    let free = Arc::new(AtomicU64::new(0));
+    let sample = Arc::clone(&free);
+    state.bridge.disk_gate = Some(Arc::new(crate::disk_space::DiskGate::with_sampler(
+        state.root.clone(),
+        Arc::new(move |_| Some(sample.load(Ordering::SeqCst))),
+    )));
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    state.wake(&worker).await;
+    let failed = state
+        .wait_record(|record| record["status"] == "failed")
+        .await;
+    assert_eq!(failed["inFlight"], false);
+    assert!(failed["error"].as_str().unwrap().contains("disk space"));
+    assert_eq!(state.event_status("input").await, "failed");
+    assert!(peer.writes.try_recv().is_err());
+
+    free.store(
+        crate::disk_space::WORKER_STORAGE_MIN_FREE_BYTES * 4,
+        Ordering::SeqCst,
+    );
+    state.wake(&worker).await;
+    worker_barrier(&worker).await;
+    assert_eq!(state.record().await["status"], "failed");
+    assert_eq!(state.event_status("input").await, "failed");
+    assert!(peer.writes.try_recv().is_err());
+    worker.shutdown().await.unwrap();
+}
+
 /// Native protocol fixtures opt into idle inventory only in its dedicated tests.
 async fn test_bridge(store: Arc<RuntimeStore>) -> StoreBridge {
     store

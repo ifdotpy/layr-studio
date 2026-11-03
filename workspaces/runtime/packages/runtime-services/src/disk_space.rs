@@ -458,16 +458,23 @@ impl TurnStorageContext {
     }
 }
 
-const STORAGE_HOLD_PREFIX: &str = "Storage hold: ";
+const STORAGE_HOLD_PREFIX: &str = "Storage error: ";
 
-/// Admission before claiming a turn. Publish the visible reason while retaining
-/// the original queued event. The account worker rechecks using its disk wait.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TurnStorageAdmission {
+    Ready,
+    Failed,
+    Stale,
+}
+
+/// Admission before claiming a turn. A storage failure keeps unsent input for
+/// an explicit retry and does not schedule another attempt.
 pub async fn hold_agent_turn(
     store: &studio_runtime_store::RuntimeStore,
     agent_id: &str,
     epoch: i64,
     #[cfg(test)] gate_override: Option<&DiskGate>,
-) -> Result<bool, studio_runtime_store::StoreError> {
+) -> Result<TurnStorageAdmission, studio_runtime_store::StoreError> {
     #[cfg(test)]
     let gate = gate_override.or_else(|| GATE.get());
     #[cfg(not(test))]
@@ -480,7 +487,7 @@ async fn hold_agent_turn_with_gate(
     agent_id: &str,
     epoch: i64,
     gate: Option<&DiskGate>,
-) -> Result<bool, studio_runtime_store::StoreError> {
+) -> Result<TurnStorageAdmission, studio_runtime_store::StoreError> {
     let id = studio_runtime_store::AgentId::from(agent_id);
     let read_id = id.clone();
     let (context, workspaces) = store
@@ -497,58 +504,62 @@ async fn hold_agent_turn_with_gate(
         })
         .await?;
     let Some(context) = context else {
-        return Ok(true);
+        return Ok(TurnStorageAdmission::Stale);
     };
     let report = match gate {
         Some(gate) => gate.report(&workspaces),
         None => DiskGate::new(store.root().to_path_buf()).report(&workspaces),
     };
-    let reason = report
-        .hold_reason(context.role())
-        .map(|reason| format!("{STORAGE_HOLD_PREFIX}{reason}"));
-    let held = reason.is_some();
-    store
-        .transaction_with_error(move |tx| {
+    let reason = report.hold_reason(context.role()).map(|_| {
+        format!(
+            "{STORAGE_HOLD_PREFIX}Not enough free disk space. Free space and resend your message."
+        )
+    });
+    crate::scheduler::lifecycle_transaction_with(store, move |tx| {
             let Some(mut agent) = studio_runtime_store::AgentRepository::get(tx, &id)? else {
-                return Ok(true);
+                return Ok(TurnStorageAdmission::Stale);
             };
             if agent.epoch != epoch
                 || serde_json::from_value::<TurnStorageContext>(agent.value())? != context
             {
-                return Ok(true);
+                return Ok(TurnStorageAdmission::Stale);
             }
-            let previous = agent.error_text();
-            let changed = match &reason {
-                Some(reason) if previous != Some(reason.as_str()) => {
-                    agent.error = studio_runtime_schema::queue_command::Field::Value(studio_runtime_schema::provider_errors::AgentError::Message((reason).to_string()));
-                    true
-                }
-                None if previous.is_some_and(|reason| reason.starts_with(STORAGE_HOLD_PREFIX)) => {
+            if !matches!(agent.status, studio_runtime_store::AgentStatus::Queued | studio_runtime_store::AgentStatus::Starting) {
+                return Ok(TurnStorageAdmission::Stale);
+            }
+            if agent.auto_wake != Some(true) || agent.is_deleted() {
+                return Ok(TurnStorageAdmission::Stale);
+            }
+            let Some(reason) = reason else {
+                if agent.error_text().is_some_and(|text| text.starts_with("Storage hold: ")) {
                     agent.error = studio_runtime_schema::queue_command::Field::Missing;
-                    true
+                    agent.start_wait = None;
+                    studio_runtime_store::AgentRepository::put(tx, &agent)?;
                 }
-                _ => false,
+                return Ok(TurnStorageAdmission::Ready);
             };
-            use studio_runtime_schema::agent_progress::AgentStartWait;
-            let wait_changed = if held {
-                let wait = AgentStartWait::Disk { epoch };
-                if agent.start_wait.as_ref() != Some(&wait) {
-                    agent.start_wait = Some(wait);
-                    true
-                } else {
-                    false
+            if let Some(attempt) = agent.start_attempt.as_ref() {
+                if attempt.submitted != Some(false) || attempt.epoch != Some(epoch) {
+                    return Ok(TurnStorageAdmission::Stale);
                 }
-            } else if matches!(agent.start_wait, Some(AgentStartWait::Disk { epoch: wait_epoch }) if wait_epoch == epoch) {
-                agent.start_wait = None;
-                true
-            } else {
-                false
-            };
-            if changed || wait_changed {
-                studio_runtime_store::AgentRepository::put(tx, &agent)?;
-                crate::agents_create::publish_agent(tx, &agent.value())?;
+                let Some(attempt_id) = attempt.id.clone() else { return Ok(TurnStorageAdmission::Stale); };
+                studio_runtime_store::SchedulerRepository::settle_start_outcome(tx, &studio_runtime_store::TurnAttemptIdentity {
+                    agent_id: id.0.clone(), epoch, attempt_id,
+                }, "failed", Some(&reason))?;
+                agent = studio_runtime_store::AgentRepository::get(tx, &id)?.ok_or_else(|| studio_runtime_store::StoreError::SchemaMismatch("storage admission agent disappeared".into()))?;
+                if agent.status != studio_runtime_store::AgentStatus::Failed {
+                    return Ok(TurnStorageAdmission::Stale);
+                }
+            } else if agent.status != studio_runtime_store::AgentStatus::Queued || agent.in_flight == Some(true) {
+                return Ok(TurnStorageAdmission::Stale);
             }
-            Ok::<_, studio_runtime_store::StoreError>(held)
+            tx.execute("UPDATE runtime_events SET status='failed',error=?1 WHERE agent=?2 AND epoch=?3 AND status='pending'", rusqlite::params![reason, id.0, epoch])?;
+            agent.status = studio_runtime_store::AgentStatus::Failed;
+            agent.in_flight = Some(false);
+            agent.start_wait = None;
+            agent.error = studio_runtime_schema::queue_command::Field::Value(studio_runtime_schema::provider_errors::AgentError::Message(reason));
+            studio_runtime_store::AgentRepository::put(tx, &agent)?;
+            Ok::<_, studio_runtime_store::StoreError>(TurnStorageAdmission::Failed)
         })
         .await
 }
@@ -735,7 +746,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn worker_storage_turn_hold_preserves_queued_input_and_clears_only_its_reason() {
+    async fn worker_storage_failure_preserves_input_without_replaying_after_space_returns() {
         use studio_runtime_store::{
             AgentId, AgentRecord, AgentRepository, QueueEventId, QueueEventRepository,
             RuntimeStore, StoreError,
@@ -775,10 +786,11 @@ mod tests {
             root.path().to_path_buf(),
             Arc::new(move |_| Some(sample.load(Ordering::SeqCst))),
         );
-        assert!(
+        assert_eq!(
             hold_agent_turn_with_gate(&store, "worker", 1, Some(&gate))
                 .await
-                .expect("held")
+                .expect("failed"),
+            TurnStorageAdmission::Failed
         );
         let agent = store
             .read_async("test/storage-hold", |tx| {
@@ -787,12 +799,20 @@ mod tests {
             .await
             .expect("read")
             .expect("worker");
-        assert_eq!(agent.status, studio_runtime_store::AgentStatus::Queued);
+        assert_eq!(agent.status, studio_runtime_store::AgentStatus::Failed);
         assert_eq!(agent.epoch, 1);
-        assert_eq!(
-            agent.start_wait,
-            Some(studio_runtime_schema::agent_progress::AgentStartWait::Disk { epoch: 1 })
-        );
+        assert_ne!(agent.in_flight, Some(true));
+        assert!(agent.start_wait.is_none());
+        let chat_status = store
+            .read_async("test/storage-chat", |tx| {
+                tx.query_row("SELECT status FROM chats WHERE id='worker'", [], |row| {
+                    row.get::<_, String>(0)
+                })
+                .map_err(StoreError::from)
+            })
+            .await
+            .expect("chat state");
+        assert_eq!(chat_status, "failed");
         assert!(
             agent
                 .error_text()
@@ -807,10 +827,11 @@ mod tests {
             root.path().to_path_buf(),
             Arc::new(move |_| Some(sample.load(Ordering::SeqCst))),
         );
-        assert!(
-            !hold_agent_turn_with_gate(&store, "worker", 1, Some(&gate))
+        assert_eq!(
+            hold_agent_turn_with_gate(&store, "worker", 1, Some(&gate))
                 .await
-                .expect("resumed")
+                .expect("stale wake"),
+            TurnStorageAdmission::Stale
         );
         let agent = store
             .read_async("test/storage-recovered", |tx| {
@@ -819,9 +840,9 @@ mod tests {
             .await
             .expect("read")
             .expect("worker");
-        assert!(agent.error.is_missing());
+        assert!(agent.error_text().is_some());
         assert!(agent.start_wait.is_none());
-        assert_eq!(agent.status, studio_runtime_store::AgentStatus::Queued);
+        assert_eq!(agent.status, studio_runtime_store::AgentStatus::Failed);
         let after = store
             .read_async("test/storage-queue-after", |tx| {
                 QueueEventRepository::get(tx, &QueueEventId::from("original-input"))
@@ -829,10 +850,9 @@ mod tests {
             .await
             .expect("queued identity after hold and recovery")
             .expect("pending input");
-        assert_eq!(
-            before, after,
-            "input identity and pending state do not change"
-        );
+        assert_eq!(after.id, before.id);
+        assert_eq!(after.text, before.text);
+        assert_eq!(after.status, "failed");
     }
 
     fn gate(free: &Arc<AtomicU64>) -> DiskGate {
