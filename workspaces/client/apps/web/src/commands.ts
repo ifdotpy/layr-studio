@@ -86,27 +86,6 @@ export function nextCommandNumber(
   return next;
 }
 
-/**
- * A `lead_message` command to the paired peer lead of `grant`, with the next command number of
- * this browser. The command id is the only dedupe key of the message.
- */
-export function leadMessageCommand(
-  storage: Storage,
-  grant: string,
-  text: string,
-  id: string = randomUUID(),
-): CommandRequest {
-  const { client, number } = nextCommandNumber(storage, {});
-  return {
-    id,
-    client,
-    number,
-    kind: "lead_message",
-    target: grant,
-    body: { text },
-  };
-}
-
 let standaloneNumber = Date.now();
 /**
  * A command for a caller without a saved client (a script or a test). It uses one fixed client
@@ -199,13 +178,6 @@ export function createCommandClient(
       body: Variant<"answer">["body"],
       options?: CommandOptions,
     ) => run(make("answer", approval, body), options),
-    /** Send a text to the paired peer lead of a grant. The command id dedupes the message. */
-    leadMessage: (
-      grant: string,
-      text: string,
-      id: string = randomUUID(),
-      options?: CommandOptions,
-    ) => run(make("lead_message", grant, { text }, id), options),
     /** The message id is the command id, so a retry of the same message is the same command. */
     send: (message: SendMessageBody, options?: CommandOptions) =>
       run(

@@ -77,7 +77,7 @@ describe("command client", () => {
     expect(sent[0]!.id).not.toBe(sent[1]!.id);
   });
 
-  it("sends a message to a peer lead with the grant as target and the command id as the id", async () => {
+  it("sends a peer lead message with the grant as target and keeps id and number on retry", async () => {
     const sent: CommandRequest[] = [];
     const client = createCommandClient(memoryStorage(), async (body) => {
       sent.push(body);
@@ -92,16 +92,22 @@ describe("command client", () => {
         result: { id: "outbox-1" },
       };
     });
-    await client.leadMessage(
+    const request = client.make(
+      "lead_message",
       "grant-1",
-      "hello peer",
+      { text: "hello peer" },
       "0192f3a0-0000-7000-8000-000000000001",
     );
+    await client.run(request);
+    await client.run(request);
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toEqual(sent[1]);
     expect(sent[0]).toMatchObject({
       id: "0192f3a0-0000-7000-8000-000000000001",
       kind: "lead_message",
       target: "grant-1",
       body: { text: "hello peer" },
+      number: 1,
     });
   });
 

@@ -17,8 +17,9 @@ import {
   type HTMLAttributes,
   type ReactNode,
 } from "react";
-import { ApiError, errorText } from "../../../api";
-import { leadMessageCommand } from "../../../commands";
+import { ApiError, command, errorText } from "../../../api";
+import type { CommandRequest } from "../../../commands";
+import { MAX_DRAFT_TEXT_CODEPOINTS } from "../../../generated/sharedValues.ts";
 import { useSidebarBackend, type SidebarBackend } from "../../sidebar/services";
 import type { paths } from "../../../generated/api";
 import type { Agent, PeerTeam } from "../../../types";
@@ -34,12 +35,8 @@ type RadioRequest = {
   rejected?: boolean;
 };
 
-/** Send a text to the peer lead of `grant`. `id` is the command id, the dedupe key. */
-export type PeerLeadSend = (
-  grant: string,
-  text: string,
-  id: string,
-) => Promise<void>;
+/** Send one command of the peer lead message. A retry sends the same object. */
+export type PeerLeadSend = (request: CommandRequest) => Promise<unknown>;
 
 /** A lead of a paired project, shown in its team as a peer. Sends a message when `send` is set. */
 export function PeerLeadRows({
@@ -76,8 +73,11 @@ function PeerLeadMessage({
   const [text, setText] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
-  // The same text keeps its command id, so a retry after a lost response is the same message.
-  const attempt = useRef<{ id: string; text: string } | null>(null);
+  // The same text keeps its command object (id and number), so a retry after a lost response
+  // is the same command. Changed text makes a new command.
+  const attempt = useRef<{ text: string; request: CommandRequest } | null>(
+    null,
+  );
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const body = text.trim();
@@ -85,12 +85,15 @@ function PeerLeadMessage({
     const current =
       attempt.current?.text === body
         ? attempt.current
-        : { id: randomUUID(), text: body };
+        : {
+            text: body,
+            request: command.make("lead_message", grant, { text: body }),
+          };
     attempt.current = current;
     setPending(true);
     setError("");
     try {
-      await send(grant, body, current.id);
+      await send(current.request);
       attempt.current = null;
       setText("");
     } catch (e) {
@@ -104,7 +107,7 @@ function PeerLeadMessage({
       <input
         aria-label={`Message ${label}`}
         value={text}
-        maxLength={100000}
+        maxLength={MAX_DRAFT_TEXT_CODEPOINTS}
         disabled={pending}
         onChange={(e) => setText(e.currentTarget.value)}
       />
@@ -155,13 +158,9 @@ export function PeerTeamGroup({
 }) {
   const backend = useRef(useSidebarBackend()).current;
   const { post, saved, save } = backend;
-  const sendLead: PeerLeadSend = async (grant, text, id) => {
-    await post(
-      "/api/commands",
-      leadMessageCommand(localStorage, grant, text, id),
-      { timeoutMs: 15000 },
-    );
-  };
+  // The team's own server takes the command, so a remote team does not send to this one.
+  const sendLead: PeerLeadSend = (request) =>
+    post("/api/commands", request, { timeoutMs: 15000 });
   const requestKey = `studio-radio-open:${scope}:${team.id}`;
   const [request, setRequest] = useState<RadioRequest | null>(() =>
     saved<RadioRequest | null>(requestKey, null),
