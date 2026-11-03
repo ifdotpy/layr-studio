@@ -671,13 +671,25 @@ impl NotificationStreamBuffer {
 
     pub(crate) fn restore_pending(
         &mut self,
-        pending: NotificationPendingStreams,
+        pending: &NotificationPendingStreams,
     ) -> Result<(), NotificationDispatchError> {
-        for entry in pending.0 {
+        // Index pending keys against metadata once. Walking metadata backwards
+        // preserves the old first-match behavior for duplicate stored keys.
+        let mut targets: HashMap<&StreamKey, usize> = pending
+            .0
+            .iter()
+            .map(|entry| (&entry.key, usize::MAX))
+            .collect();
+        for (index, entry) in self.entries.iter().enumerate().rev() {
+            if let Some(target) = targets.get_mut(&entry.key) {
+                *target = index;
+            }
+        }
+        for entry in &pending.0 {
+            let index = targets[&entry.key];
             let target = self
                 .entries
-                .iter_mut()
-                .find(|target| target.key == entry.key)
+                .get_mut(index)
                 .ok_or(NotificationDispatchError::invalid_account())?;
             target.pending.clone_from(&entry.pending);
             target.count = entry.count;
@@ -1293,7 +1305,7 @@ mod tests {
         let mut restored = metadata;
         restored.rebuild_runtime_state();
         restored
-            .restore_pending(pending.expect("VM flush obligation"))
+            .restore_pending(&pending.expect("VM flush obligation"))
             .expect("VM pending restored");
         streams
             .merge_owner(restored.clone())
@@ -1309,6 +1321,31 @@ mod tests {
         streams.settle_turn("vm", "default", "same-thread", "same-turn");
         assert_eq!(streams.closed.len(), 1);
         assert_eq!(streams.closed[0].agent_id, "host");
+    }
+
+    #[test]
+    fn pending_restore_matches_first_saved_key_and_rejects_missing_keys() {
+        let key = StreamKey {
+            agent_id: "agent".into(),
+            account: "default".into(),
+            generation: 1,
+            thread: "thread".into(),
+            turn: None,
+            item: "item".into(),
+            method: "delta".into(),
+        };
+        let mut streams = NotificationStreamBuffer::default();
+        streams.enqueue_delta(key, "pending", &Value::Null, 0);
+        let (mut metadata, pending) = streams.persisted_parts();
+        metadata.entries.push(metadata.entries[0].clone());
+        metadata.rebuild_runtime_state();
+        let pending = pending.expect("pending entry");
+        metadata.restore_pending(&pending).expect("restore");
+        assert_eq!(metadata.entries[0].pending, "pending");
+        assert_eq!(metadata.entries[1].pending, "");
+        let mut missing = pending;
+        missing.0[0].key.item = "missing".into();
+        assert!(metadata.restore_pending(&missing).is_err());
     }
 
     #[test]
@@ -1341,7 +1378,7 @@ mod tests {
         restored.rebuild_runtime_state();
         assert!(!restored.has_pending(&key));
         restored
-            .restore_pending(pending)
+            .restore_pending(&pending)
             .expect("restore flush obligation");
         assert!(restored.pending_bytes() > 0);
         assert_eq!(restored.base(&key), Some("authoritative"));
