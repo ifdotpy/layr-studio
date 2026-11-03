@@ -1105,7 +1105,7 @@ fn check_durable_blockers(tx: &Transaction<'_>, agent: &str) -> Result<(), Trans
             ));
         }
     }
-    let uncertain: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND status IN ('reserved','dispatching','uncertain'))",[agent],|r| r.get(0)).map_err(studio_runtime_store::StoreError::from)?;
+    let uncertain: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND status IN ('reserved','dispatching'))",[agent],|r| r.get(0)).map_err(studio_runtime_store::StoreError::from)?;
     if uncertain {
         return Err(TransferError::Refused(
             "Waiting for confirmed message delivery",
@@ -2151,5 +2151,55 @@ mod provider_admission_tests {
                 .value()
                 .is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod durable_blocker_tests {
+    use super::*;
+
+    fn run_async<F: std::future::Future>(future: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime builds")
+            .block_on(future)
+    }
+
+    fn insert_event(store: &RuntimeStore, id: &str, status: &str) {
+        let (id, status) = (id.to_owned(), status.to_owned());
+        run_async(store.transaction(move |tx| {
+            tx.execute(
+                "INSERT INTO runtime_events(id,agent,epoch,kind,text,status,created,turn_id,error) VALUES (?1,'lead',2,'child_result','result',?2,1.0,NULL,NULL)",
+                rusqlite::params![id, status],
+            )?;
+            Ok(())
+        }))
+        .expect("insert event");
+    }
+
+    fn blocked(store: &RuntimeStore) -> Result<(), TransferError> {
+        run_async(store.transaction_with_error(|tx| check_durable_blockers(tx, "lead")))
+    }
+
+    #[test]
+    fn uncertain_old_delivery_does_not_hold_a_transfer() {
+        let root = tempfile::tempdir().expect("test root");
+        let store = run_async(RuntimeStore::open(Some(root.path()))).expect("test store opens");
+        insert_event(&store, "old-child-result", "uncertain");
+        assert!(blocked(&store).is_ok());
+    }
+
+    #[test]
+    fn dispatching_delivery_still_holds_a_transfer() {
+        let root = tempfile::tempdir().expect("test root");
+        let store = run_async(RuntimeStore::open(Some(root.path()))).expect("test store opens");
+        insert_event(&store, "live-child-result", "dispatching");
+        assert!(matches!(
+            blocked(&store),
+            Err(TransferError::Refused(
+                "Waiting for confirmed message delivery"
+            ))
+        ));
     }
 }
