@@ -31,7 +31,9 @@ const cargoEnvironment = prebuiltRelease
     }
   : process.env;
 const identity = signingIdentity();
-// Refuse to overwrite a previously verified artifact.
+// The parent can be new (the delivery receipt folder of a commit). The output itself must
+// not exist: refuse to overwrite a previously verified artifact.
+await mkdir(path.dirname(output), { recursive: true, mode: 0o700 });
 await mkdir(output, { recursive: false });
 output = await realpath(output);
 const stage = await mkdtemp(path.join(tmpdir(), "studio-native-package-"));
