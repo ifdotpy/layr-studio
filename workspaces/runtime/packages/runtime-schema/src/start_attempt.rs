@@ -200,6 +200,16 @@ pub enum VmPreparationPhase {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacyProjectImportPhase {
+    Planned,
+    Uploading,
+    Imported,
+    NotSent,
+    Unknown,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectImport {
     pub project_id: String,
@@ -209,16 +219,23 @@ pub struct ProjectImport {
     pub upload_id: String,
     pub root: String,
     /// Read older attempts without writing the superseded display phase again.
-    #[serde(default, rename = "phase", deserialize_with = "discard_legacy_phase", skip_serializing_if = "Option::is_none")]
-    pub legacy_phase: Option<String>,
+    #[serde(
+        default,
+        rename = "phase",
+        deserialize_with = "discard_legacy_phase",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub legacy_phase: Option<LegacyProjectImportPhase>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub archive_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub archive_sha256: Option<String>,
 }
 
-fn discard_legacy_phase<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
-    <Option<String> as Deserialize>::deserialize(deserializer)?;
+fn discard_legacy_phase<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<LegacyProjectImportPhase>, D::Error> {
+    <Option<LegacyProjectImportPhase> as Deserialize>::deserialize(deserializer)?;
     Ok(None)
 }
 
@@ -463,6 +480,8 @@ mod tests {
         assert!(serde_json::to_value(import).unwrap().get("phase").is_none());
         let current = serde_json::json!({"projectId":"p", "source":"s", "requestId":"r", "operation":"o", "uploadId":"u", "root":"/"});
         assert!(serde_json::from_value::<super::ProjectImport>(current).is_ok());
+        let invalid = serde_json::json!({"projectId":"p", "source":"s", "requestId":"r", "operation":"o", "uploadId":"u", "root":"/", "phase":"other"});
+        assert!(serde_json::from_value::<super::ProjectImport>(invalid).is_err());
     }
 
     #[test]
