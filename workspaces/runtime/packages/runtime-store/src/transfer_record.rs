@@ -134,6 +134,8 @@ transfer_methods! {
     QueueList => "thread/queue/list",
     BackgroundList => "thread/backgroundTerminals/list",
     Unsubscribe => "thread/unsubscribe",
+    ClaudeExport => "claude/moveExport",
+    ClaudeImport => "claude/moveImport",
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

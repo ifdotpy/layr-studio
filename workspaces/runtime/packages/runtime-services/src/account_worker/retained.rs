@@ -396,6 +396,7 @@ pub(crate) fn validate(request: &SessionRequest) -> Result<(), PortError> {
             | Method::AccountRead
             | Method::AccountRateLimitsRead
             | Method::ThreadStart
+            | Method::ClaudeMoveImport
             | Method::ThreadRealtimeItemStarted
             | Method::ThreadRealtimeTranscriptDelta
             | Method::ThreadRealtimeTranscriptDone
@@ -938,6 +939,7 @@ pub(crate) fn valid_actorless_request_shape(
         | Method::ConfigRead
         | Method::SkillsExtraRootsSet
         | Method::ThreadStart
+        | Method::ClaudeMoveImport
         | Method::ThreadRealtimeStart
         | Method::ThreadRealtimeStop
         | Method::ThreadRealtimeAppendSpeech
@@ -1826,6 +1828,7 @@ mod validation_tests {
                 | Method::BrowserWait
                 | Method::ClaudeCommands
                 | Method::ClaudeMoveExport
+                | Method::ClaudeMoveImport
                 | Method::ClaudeMoveIdentity
                 | Method::ClaudeMovePreflight
                 | Method::ClaudeMoveProof

@@ -1130,6 +1130,7 @@ pub(super) async fn submitted(
                 | Method::AccountRead
                 | Method::AccountRateLimitsRead
                 | Method::ThreadStart
+                | Method::ClaudeMoveImport
                 | Method::ThreadRealtimeStart
                 | Method::ThreadRealtimeStop
                 | Method::ThreadRealtimeAppendSpeech
@@ -1806,6 +1807,7 @@ fn settle_outcome(
                 | Method::BrowserWait
                 | Method::ClaudeCommands
                 | Method::ClaudeMoveExport
+                | Method::ClaudeMoveImport
                 | Method::ClaudeMoveIdentity
                 | Method::ClaudeMovePreflight
                 | Method::ClaudeMoveProof

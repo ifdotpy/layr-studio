@@ -1133,12 +1133,14 @@ impl TransferPreparation {
 pub enum TransferMethod {
     Start,
     Fork,
+    ClaudeImport,
 }
 impl TransferMethod {
     pub(crate) fn wire(self) -> &'static str {
         match self {
             Self::Start => "thread/start",
             Self::Fork => "thread/fork",
+            Self::ClaudeImport => "claude/moveImport",
         }
     }
 }

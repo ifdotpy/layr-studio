@@ -250,6 +250,7 @@ impl AccountSessionPort for CompletingSession {
                 | method @ Method::BrowserWait
                 | method @ Method::ClaudeCommands
                 | method @ Method::ClaudeMoveExport
+                | method @ Method::ClaudeMoveImport
                 | method @ Method::ClaudeMoveIdentity
                 | method @ Method::ClaudeMovePreflight
                 | method @ Method::ClaudeMoveProof
