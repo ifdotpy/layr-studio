@@ -107,6 +107,7 @@ mod registry_hints {
                             | ObservedTable::Rules
                             | ObservedTable::ServerLinks
                             | ObservedTable::FederationSettings
+                            | ObservedTable::ProjectGrants
                             | ObservedTable::FederationIdentity
                             | ObservedTable::FederationPeers
                             | ObservedTable::FederationInvites

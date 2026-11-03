@@ -1879,6 +1879,7 @@ async fn lead_pair(
         capability: Capability::LeadMessages,
         created_at: 1,
         revoked_at: None,
+        peer_label: "Peer".into(),
     };
     let peer = corpus.peer().to_owned();
     let remote_key = corpus.data["seed"]["remote"]["publicKey"]
