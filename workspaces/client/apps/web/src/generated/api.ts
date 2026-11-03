@@ -11054,6 +11054,9 @@ export interface components {
     CommandErrorCode: "receipt_expired";
     /** @description Identity of the outbox command that delivers an answer. */
     CommandId: string;
+    CommandLeadMessageBody: {
+      text: string;
+    };
     /**
      * CommandRequest
      * @description One write action. The owner is runtime-schema/src/command.rs.
@@ -11064,7 +11067,8 @@ export interface components {
       | components["schemas"]["CommandRequestStop"]
       | components["schemas"]["CommandRequestResolve"]
       | components["schemas"]["CommandRequestPause"]
-      | components["schemas"]["CommandRequestAnswer"];
+      | components["schemas"]["CommandRequestAnswer"]
+      | components["schemas"]["CommandRequestLeadMessage"];
     CommandRequestAnswer: {
       body: components["schemas"]["CommandAnswerBody"];
       client: string;
@@ -11074,6 +11078,18 @@ export interface components {
        * @enum {string}
        */
       kind: "answer";
+      number: number;
+      target: string;
+    };
+    CommandRequestLeadMessage: {
+      body: components["schemas"]["CommandLeadMessageBody"];
+      client: string;
+      id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "lead_message";
       number: number;
       target: string;
     };
@@ -11145,7 +11161,8 @@ export interface components {
     /** @description One applied command. The kind names the kind-specific result; only answer has one. */
     CommandResponse:
       | components["schemas"]["CommandResponseApplied"]
-      | components["schemas"]["CommandResponseAnswer"];
+      | components["schemas"]["CommandResponseAnswer"]
+      | components["schemas"]["CommandResponseLeadMessage"];
     CommandResponseAnswer: {
       /**
        * @description discriminator enum property added by openapi-typescript
@@ -11169,6 +11186,23 @@ export interface components {
       kind: "pause" | "resolve" | "send" | "stop" | "withdraw";
       ref_id: string;
       ref_kind: string;
+      rev: number;
+      rows: components["schemas"]["CommandRow"][];
+      seq: number;
+      /** @enum {string} */
+      status: "applied";
+    };
+    CommandResponseLeadMessage: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "lead_message";
+      ref_id: string;
+      ref_kind: string;
+      result: {
+        id: string;
+      };
       rev: number;
       rows: components["schemas"]["CommandRow"][];
       seq: number;

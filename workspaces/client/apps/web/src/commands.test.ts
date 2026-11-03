@@ -77,6 +77,34 @@ describe("command client", () => {
     expect(sent[0]!.id).not.toBe(sent[1]!.id);
   });
 
+  it("sends a message to a peer lead with the grant as target and the command id as the id", async () => {
+    const sent: CommandRequest[] = [];
+    const client = createCommandClient(memoryStorage(), async (body) => {
+      sent.push(body);
+      return {
+        status: "applied",
+        kind: "lead_message",
+        ref_kind: "outbox",
+        ref_id: "outbox-1",
+        rev: 0,
+        seq: 0,
+        rows: [],
+        result: { id: "outbox-1" },
+      };
+    });
+    await client.leadMessage(
+      "grant-1",
+      "hello peer",
+      "0192f3a0-0000-7000-8000-000000000001",
+    );
+    expect(sent[0]).toMatchObject({
+      id: "0192f3a0-0000-7000-8000-000000000001",
+      kind: "lead_message",
+      target: "grant-1",
+      body: { text: "hello peer" },
+    });
+  });
+
   it("retries the same command object with the same id and number", async () => {
     const sent: CommandRequest[] = [];
     let fail = true;

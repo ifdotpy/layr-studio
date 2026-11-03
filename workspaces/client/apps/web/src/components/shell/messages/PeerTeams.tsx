@@ -13,10 +13,12 @@ import {
   useEffect,
   useRef,
   useState,
+  type FormEvent,
   type HTMLAttributes,
   type ReactNode,
 } from "react";
 import { ApiError, errorText } from "../../../api";
+import { leadMessageCommand } from "../../../commands";
 import { useSidebarBackend, type SidebarBackend } from "../../sidebar/services";
 import type { paths } from "../../../generated/api";
 import type { Agent, PeerTeam } from "../../../types";
@@ -32,8 +34,21 @@ type RadioRequest = {
   rejected?: boolean;
 };
 
-/** A lead of a paired project, shown in its team as a peer. Read only. */
-export function PeerLeadRows({ leads }: { leads: PeerTeam["peerLeads"] }) {
+/** Send a text to the peer lead of `grant`. `id` is the command id, the dedupe key. */
+export type PeerLeadSend = (
+  grant: string,
+  text: string,
+  id: string,
+) => Promise<void>;
+
+/** A lead of a paired project, shown in its team as a peer. Sends a message when `send` is set. */
+export function PeerLeadRows({
+  leads,
+  send,
+}: {
+  leads: PeerTeam["peerLeads"];
+  send?: PeerLeadSend | undefined;
+}) {
   return (leads ?? []).map((lead) => (
     <div
       key={lead.grant}
@@ -42,8 +57,63 @@ export function PeerLeadRows({ leads }: { leads: PeerTeam["peerLeads"] }) {
     >
       <span className="peer-team-peer-label">{lead.label}</span>
       <span className="peer-team-peer-mark">Peer</span>
+      {send && (
+        <PeerLeadMessage label={lead.label} grant={lead.grant} send={send} />
+      )}
     </div>
   ));
+}
+
+function PeerLeadMessage({
+  label,
+  grant,
+  send,
+}: {
+  label: string;
+  grant: string;
+  send: PeerLeadSend;
+}) {
+  const [text, setText] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  // The same text keeps its command id, so a retry after a lost response is the same message.
+  const attempt = useRef<{ id: string; text: string } | null>(null);
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const body = text.trim();
+    if (!body || pending) return;
+    const current =
+      attempt.current?.text === body
+        ? attempt.current
+        : { id: randomUUID(), text: body };
+    attempt.current = current;
+    setPending(true);
+    setError("");
+    try {
+      await send(grant, body, current.id);
+      attempt.current = null;
+      setText("");
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <form className="peer-team-message" onSubmit={(e) => void submit(e)}>
+      <input
+        aria-label={`Message ${label}`}
+        value={text}
+        maxLength={100000}
+        disabled={pending}
+        onChange={(e) => setText(e.currentTarget.value)}
+      />
+      <button type="submit" disabled={pending || !text.trim()}>
+        Send
+      </button>
+      {error && <p role="alert">{error}</p>}
+    </form>
+  );
 }
 
 export function PeerTeamGroup({
@@ -85,6 +155,13 @@ export function PeerTeamGroup({
 }) {
   const backend = useRef(useSidebarBackend()).current;
   const { post, saved, save } = backend;
+  const sendLead: PeerLeadSend = async (grant, text, id) => {
+    await post(
+      "/api/commands",
+      leadMessageCommand(localStorage, grant, text, id),
+      { timeoutMs: 15000 },
+    );
+  };
   const requestKey = `studio-radio-open:${scope}:${team.id}`;
   const [request, setRequest] = useState<RadioRequest | null>(() =>
     saved<RadioRequest | null>(requestKey, null),
@@ -220,7 +297,10 @@ export function PeerTeamGroup({
         </div>
       )}
       {children}
-      <PeerLeadRows leads={team.peerLeads} />
+      <PeerLeadRows
+        leads={team.peerLeads}
+        send={disabled ? undefined : sendLead}
+      />
     </section>
   );
 }

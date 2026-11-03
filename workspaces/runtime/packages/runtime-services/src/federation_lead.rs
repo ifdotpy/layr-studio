@@ -255,6 +255,35 @@ pub(crate) fn send_in_transaction(
     Ok(reply)
 }
 
+/// Queue a message of the owner to the peer lead of `grant`. The sender is the root lead of
+/// the grant's local project, the only lead that `send_in_transaction` accepts. `key` is the
+/// command id, which dedupes the message.
+pub(crate) fn lead_message_in_transaction(
+    tx: &Transaction<'_>,
+    grant: &str,
+    text: &str,
+    key: &str,
+    now: f64,
+) -> Result<LeadSendReply> {
+    let rows = project_grants::rows_of_grant(tx, grant)?;
+    let first = rows
+        .first()
+        .ok_or(Error::Forbidden("the peer lead is unknown"))?;
+    let local_id: String = tx
+        .query_row(
+            "SELECT json_extract(record,'$.stateId') FROM runtime_federation_identity WHERE id='local'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(StoreError::from)?
+        .ok_or(Error::Unavailable("federation-credentials/private-key"))?;
+    let sender = root_lead(tx, &first.local_project, &local_id)?
+        .ok_or(Error::Forbidden("the project has no root lead"))?
+        .value();
+    send_in_transaction(tx, &sender, grant, text, key, now)
+}
+
 /// The root lead of a local project: a lead without a parent, bound to the project.
 /// A row bound to another server (`projectServerId` set and not `local`) is not ours.
 fn root_lead(

@@ -158,6 +158,12 @@ pub enum Command {
         target: BoundedText<1, COMMAND_TARGET_MAX_CHARS>,
         body: AnswerCommandBody,
     },
+    /// Send a text to the paired peer lead of a grant. `target` is the grant id. The command
+    /// id is the dedupe key of the message.
+    LeadMessage {
+        target: BoundedText<1, COMMAND_TARGET_MAX_CHARS>,
+        body: LeadMessageBody,
+    },
 }
 
 impl Command {
@@ -170,6 +176,7 @@ impl Command {
             Self::Resolve { .. } => "resolve",
             Self::Pause { .. } => "pause",
             Self::Answer { .. } => "answer",
+            Self::LeadMessage { .. } => "lead_message",
         }
     }
 
@@ -181,7 +188,8 @@ impl Command {
             | Self::Stop { target, .. }
             | Self::Resolve { target, .. }
             | Self::Pause { target, .. }
-            | Self::Answer { target, .. } => target.as_str(),
+            | Self::Answer { target, .. }
+            | Self::LeadMessage { target, .. } => target.as_str(),
         }
     }
 }
@@ -205,6 +213,12 @@ pub struct SendBody {
     )]
     #[schemars(with = "Option<String>")]
     pub delivery: Option<DeliveryMoment>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LeadMessageBody {
+    pub text: BoundedText<1, { studio_client_domain::drafts::MAX_DRAFT_TEXT_CODEPOINTS }>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -278,7 +292,8 @@ pub struct CommandResponse {
     pub outcome: CommandOutcome,
 }
 
-/// The kind of an applied command and its kind-specific result. Only `answer` has a result.
+/// The kind of an applied command and its kind-specific result. `answer` and `lead_message`
+/// have a result.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CommandOutcome {
@@ -287,7 +302,19 @@ pub enum CommandOutcome {
     Stop,
     Resolve,
     Pause,
-    Answer { result: AnswerResult },
+    Answer {
+        result: AnswerResult,
+    },
+    /// `id` is the outbox id of the queued lead message.
+    LeadMessage {
+        result: LeadMessageResult,
+    },
+}
+
+/// The result of a lead message: the outbox id of the queued message.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LeadMessageResult {
+    pub id: String,
 }
 
 impl CommandOutcome {
@@ -300,7 +327,7 @@ impl CommandOutcome {
             Command::Stop { .. } => Self::Stop,
             Command::Resolve { .. } => Self::Resolve,
             Command::Pause { .. } => Self::Pause,
-            Command::Answer { .. } => return None,
+            Command::Answer { .. } | Command::LeadMessage { .. } => return None,
         })
     }
 }
@@ -419,6 +446,17 @@ mod tests {
             r#"{{"id":"{id}","client":"c","number":1,"kind":"delete","target":"chat","body":{{}}}}"#
         );
         assert!(serde_json::from_str::<CommandRequest>(&delete).is_err());
+    }
+
+    #[test]
+    fn lead_message_is_a_tagged_command_with_the_grant_as_target() {
+        let wire = r#"{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"lead_message","target":"grant-1","body":{"text":"hi"}}"#;
+        let request: CommandRequest = serde_json::from_str(wire).expect("parse");
+        assert_eq!(request.command.name(), "lead_message");
+        assert_eq!(request.command.target(), "grant-1");
+        assert_eq!(serde_json::to_string(&request).expect("encode"), wire);
+        let extra = r#"{"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"lead_message","target":"grant-1","body":{"text":"hi","assets":[]}}"#;
+        assert!(serde_json::from_str::<CommandRequest>(extra).is_err());
     }
 
     #[test]

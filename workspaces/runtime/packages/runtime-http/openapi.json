@@ -22296,11 +22296,26 @@
         "description": "Identity of the outbox command that delivers an answer.",
         "type": "string"
       },
+      "CommandLeadMessageBody": {
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "maxLength": 100000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
       "CommandRequest": {
         "description": "One write action. The owner is runtime-schema/src/command.rs.",
         "discriminator": {
           "mapping": {
             "answer": "#/components/schemas/CommandRequestAnswer",
+            "lead_message": "#/components/schemas/CommandRequestLeadMessage",
             "pause": "#/components/schemas/CommandRequestPause",
             "resolve": "#/components/schemas/CommandRequestResolve",
             "send": "#/components/schemas/CommandRequestSend",
@@ -22327,6 +22342,9 @@
           },
           {
             "$ref": "#/components/schemas/CommandRequestAnswer"
+          },
+          {
+            "$ref": "#/components/schemas/CommandRequestLeadMessage"
           }
         ],
         "title": "CommandRequest"
@@ -22348,6 +22366,46 @@
           },
           "kind": {
             "const": "answer",
+            "type": "string"
+          },
+          "number": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "target": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "client",
+          "number",
+          "kind",
+          "target",
+          "body"
+        ],
+        "type": "object"
+      },
+      "CommandRequestLeadMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "$ref": "#/components/schemas/CommandLeadMessageBody"
+          },
+          "client": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[a-f0-9-]{36}$",
+            "type": "string"
+          },
+          "kind": {
+            "const": "lead_message",
             "type": "string"
           },
           "number": {
@@ -22594,6 +22652,7 @@
         "discriminator": {
           "mapping": {
             "answer": "#/components/schemas/CommandResponseAnswer",
+            "lead_message": "#/components/schemas/CommandResponseLeadMessage",
             "pause": "#/components/schemas/CommandResponseApplied",
             "resolve": "#/components/schemas/CommandResponseApplied",
             "send": "#/components/schemas/CommandResponseApplied",
@@ -22608,6 +22667,9 @@
           },
           {
             "$ref": "#/components/schemas/CommandResponseAnswer"
+          },
+          {
+            "$ref": "#/components/schemas/CommandResponseLeadMessage"
           }
         ]
       },
@@ -22704,6 +22766,62 @@
           "seq",
           "rows",
           "kind"
+        ],
+        "type": "object"
+      },
+      "CommandResponseLeadMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "lead_message",
+            "type": "string"
+          },
+          "ref_id": {
+            "type": "string"
+          },
+          "ref_kind": {
+            "type": "string"
+          },
+          "result": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "rev": {
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/CommandRow"
+            },
+            "type": "array"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "applied"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "ref_kind",
+          "ref_id",
+          "rev",
+          "seq",
+          "rows",
+          "kind",
+          "result"
         ],
         "type": "object"
       },
