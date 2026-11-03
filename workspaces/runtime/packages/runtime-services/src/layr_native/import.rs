@@ -122,7 +122,7 @@ pub(super) struct Plan {
     pub plain_git_metadata: Vec<metadata::PlainMetadata>,
     pub worktree_data: Vec<PathBuf>,
     pub size: Size,
-    destination_volume: u64,
+    destination_volume: VolumeId,
 }
 
 impl Plan {
@@ -662,14 +662,21 @@ fn open_source(root: &Path, relative: &Path) -> std::io::Result<File> {
     )?))
 }
 
-fn volume_id_fd(fd: &std::os::fd::OwnedFd) -> std::io::Result<u64> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VolumeId {
+    Other(u64),
+    #[cfg(target_os = "linux")]
+    Btrfs([u8; 16]),
+}
+
+fn volume_id_fd(fd: &impl std::os::fd::AsFd) -> std::io::Result<VolumeId> {
     #[cfg(target_os = "macos")]
     {
-        Ok(rustix::fs::fstat(fd)?.st_dev as u64)
+        Ok(VolumeId::Other(rustix::fs::fstat(fd)?.st_dev as u64))
     }
     #[cfg(target_os = "linux")]
     {
-        Ok(rustix::fs::fstatvfs(fd)?.f_fsid as u64)
+        filesystem_ffi::volume_id(fd)
     }
 }
 
@@ -1056,15 +1063,13 @@ impl Plan {
     }
 }
 
-fn volume_id(path: &Path) -> std::io::Result<u64> {
-    #[cfg(target_os = "linux")]
-    {
-        Ok(rustix::fs::statvfs(path)?.f_fsid as u64)
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        Ok(fs::metadata(path)?.dev())
-    }
+fn volume_id(path: &Path) -> std::io::Result<VolumeId> {
+    let fd = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NONBLOCK | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )?;
+    volume_id_fd(&fd)
 }
 
 pub(super) fn allocation_model() -> serde_json::Value {
