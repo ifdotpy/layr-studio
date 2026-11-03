@@ -978,18 +978,24 @@ pub fn merge(
     }
     let main = associated_cwd(state_dir, lead)?;
     associated_cwd(state_dir, worker)?;
+    let root = settings::record_store(state_dir, lead)?;
+    let project = project_id(lead)?;
     operation_in_store(
         state_dir,
-        &settings::record_store(state_dir, lead)?,
+        &root,
         request_id,
         &json!({"lead":lead["id"],"worker":worker["id"],"revision":revision}),
         || {
+            let _project_lock = lock(state_dir, &format!("{}:project:{project}", root.display()))?;
+            let from_state = run(state_dir, &main, &["rev-parse", "head"])?;
             run(
                 state_dir,
                 &main,
                 &["merge", text(worker, "layrLine")?, "--expect", revision],
             )?;
-            Ok(json!({"stateId":run(state_dir,&main,&["rev-parse","head"])?}))
+            Ok(
+                json!({"merge":{"from_state":from_state,"to_state":run(state_dir,&main,&["rev-parse","head"])?}}),
+            )
         },
     )
 }
@@ -1526,6 +1532,142 @@ esac
 #[cfg(test)]
 mod worker_base_tests {
     use super::*;
+    #[test]
+    fn concurrent_accepts_record_serial_main_states() {
+        use std::io::{Read, Write};
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let state = tempfile::tempdir().unwrap();
+        let root = super::super::store_path(state.path());
+        let project = "a".repeat(64);
+        let main = main_path(state.path(), &project);
+        std::fs::create_dir_all(&main).unwrap();
+        std::fs::write(root.join("head"), "initial").unwrap();
+        for name in ["first", "second", "release"] {
+            assert!(
+                std::process::Command::new("mkfifo")
+                    .arg(root.join(name))
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        let signal = |name: &str| {
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(root.join(name))
+                .unwrap();
+            let mut reader = file.try_clone().unwrap();
+            let (sender, receiver) = mpsc::channel();
+            let thread = std::thread::spawn(move || {
+                let mut byte = [0];
+                reader.read_exact(&mut byte).unwrap();
+                sender.send(()).unwrap();
+            });
+            (file, receiver, thread)
+        };
+        let (_first, first_rx, first_reader) = signal("first");
+        let (mut second, second_rx, second_reader) = signal("second");
+        let binary = state.path().join("fake-layr");
+        std::fs::write(
+            &binary,
+            r#"#!/bin/sh
+if [ "$3" = rev-parse ]; then
+  if [ ! -e "$LAYR_ROOT/released" ]; then
+    if mkdir "$LAYR_ROOT/entered" 2>/dev/null; then
+      printf x > "$LAYR_ROOT/first"
+      read unused < "$LAYR_ROOT/release"
+    else
+      printf x > "$LAYR_ROOT/second"
+    fi
+  fi
+  cat "$LAYR_ROOT/head"
+else
+  printf '%s' "$4" > "$LAYR_ROOT/head"
+fi
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let lead = json!({"id":"lead","isLead":true,"layrReady":true,"layrProjectId":project,"layrLine":"main","cwd":main});
+        let (sender, receiver) = mpsc::channel();
+        let spawn = |id: &'static str| {
+            let line = format!("agent-{}", studio_runtime_store::sha256_hex(id.as_bytes()));
+            let cwd = main.parent().unwrap().join(&line);
+            std::fs::create_dir_all(&cwd).unwrap();
+            let worker =
+                json!({"id":id,"layrReady":true,"layrProjectId":project,"layrLine":line,"cwd":cwd});
+            let (state, binary, lead, sender) = (
+                state.path().to_owned(),
+                binary.clone(),
+                lead.clone(),
+                sender.clone(),
+            );
+            std::thread::spawn(move || {
+                super::super::capability::TEST_BINARY
+                    .with(|slot| *slot.borrow_mut() = Some(binary));
+                sender
+                    .send(merge(&state, &lead, &worker, "reviewed", id))
+                    .unwrap();
+            })
+        };
+        let first = spawn("one");
+        first_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("first merge reached rev-parse");
+        let lock_name = format!("{}:project:{project}", root.display());
+        let probe = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(
+                state
+                    .path()
+                    .join(NATIVE_LAYR_DIRECTORY)
+                    .join("locks")
+                    .join(studio_runtime_store::sha256_hex(lock_name.as_bytes())),
+            )
+            .unwrap();
+        let project_lock_held = probe.try_lock().is_err();
+        drop(probe);
+        let second_thread = spawn("two");
+        let second_started_early = second_rx.try_recv().is_ok();
+        std::fs::write(root.join("released"), "").unwrap();
+        writeln!(
+            OpenOptions::new()
+                .write(true)
+                .open(root.join("release"))
+                .unwrap(),
+            "go"
+        )
+        .unwrap();
+        if !second_started_early {
+            second.write_all(b"x").unwrap();
+        }
+        first.join().unwrap();
+        second_thread.join().unwrap();
+        first_reader.join().unwrap();
+        second_reader.join().unwrap();
+        let mut receipts = receiver
+            .try_iter()
+            .map(|r| r.unwrap()["merge"].clone())
+            .collect::<Vec<_>>();
+        assert!(
+            project_lock_held,
+            "first merge did not hold the project lock during rev-parse"
+        );
+        assert!(
+            !second_started_early,
+            "second merge reached rev-parse while the first was held"
+        );
+        assert_eq!(receipts.len(), 2);
+        receipts.sort_by_key(|r| r["from_state"].as_str().unwrap() != "initial");
+        assert_eq!(receipts[0]["from_state"], "initial");
+        assert_eq!(receipts[0]["to_state"], receipts[1]["from_state"]);
+    }
     #[test]
     fn native_layr_worker_line_uses_requested_base() {
         let state = tempfile::tempdir().unwrap();

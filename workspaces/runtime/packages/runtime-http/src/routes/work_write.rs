@@ -336,9 +336,14 @@ async fn prepare_vm_accept(
             .map_err(|_| ApiError::internal())?;
             let result_id = call.result_id;
             match response {
-                Ok(_) => {
+                Ok(response) => {
                     let request = call.request_id;
-                    finish_vm_accept(&store, &task_id, &request, None)
+                    let merge = response
+                        .get("merge")
+                        .map(|value| serde_json::from_value(value.clone()))
+                        .transpose()
+                        .map_err(|_| ApiError::internal())?;
+                    finish_vm_accept(&store, &task_id, &request, None, merge)
                         .await
                         .map_err(write_error)?;
                     input.merged_result_id = Some(result_id);
@@ -346,7 +351,7 @@ async fn prepare_vm_accept(
                 Err(error) => {
                     let request = call.request_id;
                     let uncertain = error.uncertain();
-                    finish_vm_accept(&store, &task_id, &request, Some(uncertain))
+                    finish_vm_accept(&store, &task_id, &request, Some(uncertain), None)
                         .await
                         .map_err(write_error)?;
                     return Err(ApiError::new(

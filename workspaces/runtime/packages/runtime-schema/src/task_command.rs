@@ -254,6 +254,16 @@ impl<const DESCRIPTION_MAX: usize, const CANCEL_MAX: usize>
             }
         }
         if !validator.is_valid(value) {
+            if action == "submit"
+                && value["result"].as_str().is_some_and(|text| {
+                    text.chars().count() > crate::task_results::MAX_HTTP_RESULT_TEXT_CODEPOINTS
+                })
+            {
+                return Err(format!(
+                    "result exceeds {} characters",
+                    crate::task_results::MAX_HTTP_RESULT_TEXT_CODEPOINTS
+                ));
+            }
             return Err("Invalid task command field or bound".into());
         }
         let mut fields = value.as_object().cloned().ok_or("Invalid task command")?;
@@ -457,6 +467,12 @@ pub fn apply_tool_contract(name: &str, input: &mut serde_json::Map<String, Value
         .clone();
     for (field, mut schema) in command_properties(&variants) {
         if !matches!(field.as_str(), "action" | "agent" | "id") {
+            if field == "result" {
+                schema["description"] = json!(format!(
+                    "For submit, text is limited to {} characters.",
+                    crate::task_results::MAX_HTTP_RESULT_TEXT_CODEPOINTS
+                ));
+            }
             // SDK conversion applies JSON Schema defaults. Preserve omission
             // of optional arguments; defaults inside supplied objects still
             // belong to those objects' owners (for example gate deadlines).
@@ -480,6 +496,23 @@ pub fn apply_tool_contract(name: &str, input: &mut serde_json::Map<String, Value
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn submit_result_limit_is_advertised_and_explained() {
+        let limit = crate::task_results::MAX_HTTP_RESULT_TEXT_CODEPOINTS;
+        let raw = json!({"action":"submit","task_id":"task","result":"x".repeat(limit + 1),"checks":"checked","revision":"abc"});
+        assert_eq!(
+            TaskCommand::parse_tool(&raw).unwrap_err(),
+            format!("result exceeds {limit} characters")
+        );
+        let mut tool = json!({"type":"object","properties":{"action":{"type":"string"}},"required":["action"]}).as_object().unwrap().clone();
+        apply_tool_contract("orchestration_task", &mut tool);
+        assert!(
+            tool["properties"]["result"]["description"]
+                .as_str()
+                .unwrap()
+                .contains(&limit.to_string())
+        );
+    }
     #[test]
     fn task_command_schema_matches_owner_and_transport_variants() {
         let document: Value =
