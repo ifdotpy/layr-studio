@@ -605,9 +605,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 "CommandSendBody"
                     | "CommandWithdrawBody"
                     | "CommandStopBody"
+                    | "CommandLeadMessageBody"
                     | "CommandResponse"
                     | "CommandResponseApplied"
                     | "CommandResponseAnswer"
+                    | "CommandResponseLeadMessage"
                     | "CommandRow"
             )
     });

@@ -145,6 +145,8 @@ export function createCommandClient(
   }
   /** Show the expected result at once, then send. A retry sends the same object. */
   async function run(command: CommandRequest, options?: CommandOptions) {
+    // A lead message is not a row of a chat, so it has no pending entry.
+    if (command.kind === "lead_message") return post(command, options);
     pending?.begin({
       id: command.id,
       kind: command.kind,

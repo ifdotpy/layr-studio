@@ -2038,6 +2038,55 @@ async fn lead_message_is_queued_once_and_delivered_to_the_peer_root_lead() {
 }
 
 #[tokio::test]
+async fn owner_lead_message_uses_the_root_lead_and_dedupes_by_command_id() {
+    let corpus = &Corpus::new();
+    let (sender, _) = lead_pair(corpus, "owner-lead").await;
+    let now = corpus.now();
+    let key = fixture_request_id("owner-lead-key").to_owned();
+    let (first_key, retry_key) = (key.clone(), key.clone());
+    let first = sender
+        .transaction_with(move |tx| {
+            federation_lead::lead_message_in_transaction(
+                tx,
+                "g-send",
+                "hello peer",
+                &first_key,
+                now,
+            )
+        })
+        .await
+        .expect("owner lead message");
+    assert_eq!(first.grant, "g-send");
+    // A retry with the same command id returns the first reply and queues nothing more.
+    let again = sender
+        .transaction_with(move |tx| {
+            federation_lead::lead_message_in_transaction(
+                tx,
+                "g-send",
+                "hello peer",
+                &retry_key,
+                now + 1.0,
+            )
+        })
+        .await
+        .expect("retry owner lead message");
+    assert_eq!(first, again);
+    let outbox = rows(&sender, "runtime_federation_outbox");
+    assert_eq!(outbox.len(), 1);
+    assert_eq!(outbox[0]["id"], json!(first.id));
+    assert_eq!(outbox[0]["room"], "proj");
+    let unknown = sender
+        .transaction_with(move |tx| {
+            federation_lead::lead_message_in_transaction(tx, "no-such-grant", "x", &key, now)
+        })
+        .await;
+    assert!(
+        matches!(unknown, Err(FederationMessageError::Forbidden(_))),
+        "{unknown:?}"
+    );
+}
+
+#[tokio::test]
 async fn only_the_root_lead_sends_to_a_peer_lead() {
     let corpus = &Corpus::new();
     let (sender, _) = lead_pair(corpus, "lead-refusal").await;

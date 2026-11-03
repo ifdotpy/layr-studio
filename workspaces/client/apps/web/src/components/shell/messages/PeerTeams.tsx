@@ -13,10 +13,13 @@ import {
   useEffect,
   useRef,
   useState,
+  type FormEvent,
   type HTMLAttributes,
   type ReactNode,
 } from "react";
-import { ApiError, errorText } from "../../../api";
+import { ApiError, command, errorText } from "../../../api";
+import type { CommandRequest } from "../../../commands";
+import { MAX_DRAFT_TEXT_CODEPOINTS } from "../../../generated/sharedValues.ts";
 import { useSidebarBackend, type SidebarBackend } from "../../sidebar/services";
 import type { paths } from "../../../generated/api";
 import type { Agent, PeerTeam } from "../../../types";
@@ -32,8 +35,17 @@ type RadioRequest = {
   rejected?: boolean;
 };
 
-/** A lead of a paired project, shown in its team as a peer. Read only. */
-export function PeerLeadRows({ leads }: { leads: PeerTeam["peerLeads"] }) {
+/** Send one command of the peer lead message. A retry sends the same object. */
+export type PeerLeadSend = (request: CommandRequest) => Promise<unknown>;
+
+/** A lead of a paired project, shown in its team as a peer. Sends a message when `send` is set. */
+export function PeerLeadRows({
+  leads,
+  send,
+}: {
+  leads: PeerTeam["peerLeads"];
+  send?: PeerLeadSend | undefined;
+}) {
   return (leads ?? []).map((lead) => (
     <div
       key={lead.grant}
@@ -42,8 +54,69 @@ export function PeerLeadRows({ leads }: { leads: PeerTeam["peerLeads"] }) {
     >
       <span className="peer-team-peer-label">{lead.label}</span>
       <span className="peer-team-peer-mark">Peer</span>
+      {send && (
+        <PeerLeadMessage label={lead.label} grant={lead.grant} send={send} />
+      )}
     </div>
   ));
+}
+
+function PeerLeadMessage({
+  label,
+  grant,
+  send,
+}: {
+  label: string;
+  grant: string;
+  send: PeerLeadSend;
+}) {
+  const [text, setText] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  // The same text keeps its command object (id and number), so a retry after a lost response
+  // is the same command. Changed text makes a new command.
+  const attempt = useRef<{ text: string; request: CommandRequest } | null>(
+    null,
+  );
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const body = text.trim();
+    if (!body || pending) return;
+    const current =
+      attempt.current?.text === body
+        ? attempt.current
+        : {
+            text: body,
+            request: command.make("lead_message", grant, { text: body }),
+          };
+    attempt.current = current;
+    setPending(true);
+    setError("");
+    try {
+      await send(current.request);
+      attempt.current = null;
+      setText("");
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <form className="peer-team-message" onSubmit={(e) => void submit(e)}>
+      <input
+        aria-label={`Message ${label}`}
+        value={text}
+        maxLength={MAX_DRAFT_TEXT_CODEPOINTS}
+        disabled={pending}
+        onChange={(e) => setText(e.currentTarget.value)}
+      />
+      <button type="submit" disabled={pending || !text.trim()}>
+        Send
+      </button>
+      {error && <p role="alert">{error}</p>}
+    </form>
+  );
 }
 
 export function PeerTeamGroup({
@@ -85,6 +158,9 @@ export function PeerTeamGroup({
 }) {
   const backend = useRef(useSidebarBackend()).current;
   const { post, saved, save } = backend;
+  // The team's own server takes the command, so a remote team does not send to this one.
+  const sendLead: PeerLeadSend = (request) =>
+    post("/api/commands", request, { timeoutMs: 15000 });
   const requestKey = `studio-radio-open:${scope}:${team.id}`;
   const [request, setRequest] = useState<RadioRequest | null>(() =>
     saved<RadioRequest | null>(requestKey, null),
@@ -220,7 +296,10 @@ export function PeerTeamGroup({
         </div>
       )}
       {children}
-      <PeerLeadRows leads={team.peerLeads} />
+      <PeerLeadRows
+        leads={team.peerLeads}
+        send={disabled ? undefined : sendLead}
+      />
     </section>
   );
 }

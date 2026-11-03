@@ -49,3 +49,20 @@
   background: var(--mantine-primary-color-light);
   box-shadow: inset 0 0 0 1px var(--mantine-primary-color-filled);
 }
+.peer-team-message {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 4px 0 6px;
+  font-size: 12px;
+}
+.peer-team-message input {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+.peer-team-message p {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--mantine-color-red-6);
+  overflow-wrap: anywhere;
+}
