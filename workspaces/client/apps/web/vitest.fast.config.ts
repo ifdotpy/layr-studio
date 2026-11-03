@@ -14,6 +14,7 @@ export default {
       "src/layout/terminalGeometry.test.ts",
       "src/touchInputZoom.test.ts",
       "src/components/sidebar/sidebarWidth.test.ts",
+      "src/components/sidebar/LayrCopyProgress.test.ts",
       "src/components/shell/workspacePanelWidth.test.ts",
       "src/components/terminalHeight.test.ts",
       "src/components/terminalResize.test.ts",

@@ -34,6 +34,7 @@ import {
 import ChatStatus from "./agents/ChatStatus";
 import { offlineServerDescription } from "../servers/ProjectChatRows";
 import { reportPromptComposerRender } from "./prompt-composer/renderProbe";
+import LayrCopyProgress from "./sidebar/LayrCopyProgress";
 
 type Actions = {
   prepare: () => void;
@@ -200,6 +201,11 @@ const SidebarRowView = memo(function SidebarRowView({
             {row.name ?? ""}
           </strong>
         </span>
+        {(row.status === "queued" || row.status === "starting") &&
+          row.startWait?.reason === "workspace_copy" &&
+          row.startWait.epoch === row.epoch && (
+            <LayrCopyProgress progress={row.startWait.progress} />
+          )}
         {(showServer || serverOffline || row.stall) && (
           <span className="fleet-chat-meta">
             {(showServer || serverOffline) && (

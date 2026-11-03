@@ -1312,6 +1312,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         openapi["components"]["schemas"][name]["properties"]["status"] =
             serde_json::json!({"$ref":"#/components/schemas/MessageSendStatus"});
     }
+    openapi["components"]["schemas"]["AgentSummaryEntityDto"]["properties"]["startWait"] = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/AgentEntityStartWaitDto"},{"type":"null"}]});
     openapi["components"]["schemas"]["QueueItem"]["properties"]["status"] =
         serde_json::json!({"$ref":"#/components/schemas/MessageSendStatus"});
     openapi["components"]["schemas"]["MessageRecord"]["properties"]["status"] = serde_json::json!({"anyOf":[{"$ref":"#/components/schemas/MessageSendStatus"},{"type":"null"}]});
