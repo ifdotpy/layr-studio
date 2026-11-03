@@ -13,6 +13,8 @@ use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore, 
 
 #[derive(Debug, thiserror::Error)]
 pub enum NativeLayrError {
+    #[error("Native Layr merge conflict: {0}")]
+    Conflict(String),
     #[error("Native Layr: {0}")]
     Refused(String),
     #[error("Native Layr operation has an unknown outcome; inspect its receipt: {0}")]
@@ -38,6 +40,7 @@ enum ReceiptStatus {
     Pending,
     Completed,
     Failed,
+    Conflict,
     #[default]
     #[serde(other)]
     Unknown,
@@ -164,7 +167,7 @@ pub(super) fn run_with_binary(
             .ok_or_else(|| NativeLayrError::Refused("Non-UTF-8 cwd".into()))?,
     ]);
     argv.extend(args);
-    let output = bounded_child::run_without_git_environment(Request {
+    let request = Request {
         program: std::ffi::OsStr::new("/usr/bin/env"),
         git_directory: None,
         args: &argv,
@@ -177,8 +180,18 @@ pub(super) fn run_with_binary(
         } else {
             COMMAND_TIMEOUT
         },
-    })
+    };
+    let output = if args.first() == Some(&"merge") {
+        bounded_child::run_layr_merge(request)
+    } else {
+        bounded_child::run_without_git_environment(request)
+    }
     .map_err(|error| match error {
+        ChildError::Failed(detail)
+            if args.first() == Some(&"merge") && bounded_child::is_layr_merge_conflict(&detail) =>
+        {
+            NativeLayrError::Conflict(detail)
+        }
         ChildError::Failed(detail) => NativeLayrError::Refused(format!(
             "{}: {detail}",
             args.first().copied().unwrap_or("layr")
@@ -247,6 +260,18 @@ pub(super) fn operation_with_preflight_in_store(
     preflight: impl FnOnce() -> Result<()>,
     effect: impl FnOnce() -> Result<Value>,
 ) -> Result<Value> {
+    operation_with_recovery(state_dir, root, id, intent, preflight, effect, None)
+}
+
+fn operation_with_recovery(
+    state_dir: &Path,
+    root: &Path,
+    id: &str,
+    intent: &Value,
+    preflight: impl FnOnce() -> Result<()>,
+    effect: impl FnOnce() -> Result<Value>,
+    recover: Option<&dyn Fn() -> Result<Option<Value>>>,
+) -> Result<Value> {
     let _lock = lock(state_dir, &format!("{}:{id}", root.display()))?;
     let folder = settings::metadata(state_dir, root).join("receipts");
     fs::create_dir_all(&folder)?;
@@ -285,7 +310,28 @@ pub(super) fn operation_with_preflight_in_store(
             {
                 retry_import = intent["project"].as_str();
             }
-            ReceiptStatus::Failed => {
+            ReceiptStatus::Failed | ReceiptStatus::Conflict => {
+                if let Some(recover) = recover
+                    && let Some(result) = recover()?
+                {
+                    crate::atomic_file::replace(
+                        &path,
+                        &OperationReceipt::completed(id, intent, &result).bytes()?,
+                        Some(0o600),
+                        true,
+                    )?;
+                    return Ok(result);
+                }
+                if matches!(receipt.status, ReceiptStatus::Conflict) {
+                    return Err(NativeLayrError::Conflict(
+                        receipt
+                            .error
+                            .value()
+                            .and_then(Value::as_str)
+                            .unwrap_or("merge conflict")
+                            .into(),
+                    ));
+                }
                 return Err(NativeLayrError::Refused(
                     receipt
                         .error
@@ -347,6 +393,11 @@ pub(super) fn operation_with_preflight_in_store(
     let receipt = match &outcome {
         Ok(result) => OperationReceipt::completed(id, intent, result),
         Err(NativeLayrError::Unknown(_)) => return outcome,
+        Err(NativeLayrError::Conflict(detail)) => {
+            let mut receipt = OperationReceipt::failed(id, intent, detail);
+            receipt.status = ReceiptStatus::Conflict;
+            receipt
+        }
         Err(error) => OperationReceipt::failed(id, intent, &error.to_string()),
     };
     crate::atomic_file::replace(&path, &receipt.bytes()?, Some(0o600), true)?;
@@ -486,7 +537,8 @@ fn create_worker_line(
                     NativeLayrError::Refused(detail) => NativeLayrError::Refused(format!(
                         "Native Layr base revision could not be resolved: {detail}"
                     )),
-                    other @ (NativeLayrError::Unknown(_)
+                    other @ (NativeLayrError::Conflict(_)
+                    | NativeLayrError::Unknown(_)
                     | NativeLayrError::Io(_)
                     | NativeLayrError::Store(_)
                     | NativeLayrError::Worker) => other,
@@ -619,7 +671,8 @@ pub(super) fn prepare_files_with_git_policy(
                         NativeLayrError::Refused(message) => {
                             NativeLayrError::Refused(format!("{message}{retained}"))
                         }
-                        other @ (NativeLayrError::Io(_)
+                        other @ (NativeLayrError::Conflict(_)
+                        | NativeLayrError::Io(_)
                         | NativeLayrError::Store(_)
                         | NativeLayrError::Worker) => {
                             NativeLayrError::Refused(format!("{other}{retained}"))
@@ -980,11 +1033,12 @@ pub fn merge(
     associated_cwd(state_dir, worker)?;
     let root = settings::record_store(state_dir, lead)?;
     let project = project_id(lead)?;
-    operation_in_store(
+    operation_with_recovery(
         state_dir,
         &root,
         request_id,
         &json!({"lead":lead["id"],"worker":worker["id"],"revision":revision}),
+        || Ok(()),
         || {
             let _project_lock = lock(state_dir, &format!("{}:project:{project}", root.display()))?;
             let from_state = run(state_dir, &main, &["rev-parse", "head"])?;
@@ -994,9 +1048,43 @@ pub fn merge(
                 &["merge", text(worker, "layrLine")?, "--expect", revision],
             )?;
             Ok(
-                json!({"merge":{"from_state":from_state,"to_state":run(state_dir,&main,&["rev-parse","head"])?}}),
+                json!({"merge":studio_runtime_store::vm_work_intent::MergeReceipt {
+                    from_state: Some(from_state),
+                    to_state: run(state_dir, &main, &["rev-parse", "head"])?
+                }}),
             )
         },
+        Some(&|| {
+            let _project_lock = lock(state_dir, &format!("{}:project:{project}", root.display()))?;
+            let status: Value =
+                serde_json::from_str(&run(state_dir, &main, &["status", "--json"])?)
+                    .map_err(|e| NativeLayrError::Refused(e.to_string()))?;
+            if !["staged", "unstaged", "untracked", "conflicts"]
+                .iter()
+                .all(|key| status[*key].as_array().is_some_and(Vec::is_empty))
+            {
+                return Ok(None);
+            }
+            let head = run(state_dir, &main, &["rev-parse", "head"])?;
+            if run(
+                state_dir,
+                &main,
+                &["merge-base", "--is-ancestor", revision, &head],
+            )
+            .is_err()
+            {
+                return Ok(None);
+            }
+            if run(state_dir, &main, &["rev-parse", "head"])? != head {
+                return Ok(None);
+            }
+            Ok(Some(
+                json!({"merge":studio_runtime_store::vm_work_intent::MergeReceipt {
+                    from_state: None,
+                    to_state: head
+                }}),
+            ))
+        }),
     )
 }
 
@@ -1794,5 +1882,37 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
         assert!(commands.contains("line new default cached-main"));
         assert!(!commands.contains("line new missing"));
         assert!(!commands.contains("line new worker other"));
+    }
+}
+
+#[cfg(test)]
+mod merge_conflict_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn merge_failure_preserves_conflict_output() {
+        let state = tempfile::tempdir().unwrap();
+        let binary = state.path().join("layr");
+        std::fs::write(
+            &binary,
+            "#!/bin/sh\nprintf 'CONFLICT (content): Merge conflict in file\\n'\nexit 1\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let error = run_with_binary(
+            state.path(),
+            state.path(),
+            state.path(),
+            &["merge", "worker"],
+            &binary,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("CONFLICT (content): Merge conflict in file"),
+            "{error}"
+        );
     }
 }
