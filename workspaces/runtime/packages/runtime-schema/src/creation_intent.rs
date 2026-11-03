@@ -2,6 +2,17 @@
 use crate::{claude_permissions::PermissionMode, queue_command::Field};
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+mod review_state_tests {
+    #[test]
+    fn reviewer_spawn_retains_review_state() {
+        let value = serde_json::json!({"role":"reviewer","review_state":"01a1a137-e462-7190-8be9-3f0f87ff4513"});
+        let intent: super::CreationIntent =
+            serde_json::from_value(value.clone()).expect("review target is accepted");
+        assert_eq!(serde_json::to_value(intent).unwrap(), value);
+    }
+}
+
 fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     deserializer: D,
 ) -> Result<Option<T>, D::Error> {
@@ -187,6 +198,12 @@ pub struct CreationIntent {
         deserialize_with = "present",
         skip_serializing_if = "Option::is_none"
     )]
+    pub review_state: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub environment: Option<String>,
     #[serde(
         default,
@@ -206,6 +223,11 @@ pub struct CreationIntent {
         skip_serializing_if = "Option::is_none"
     )]
     pub workspace: Option<crate::records::WorkspaceMode>,
+}
+
+/// Advertise the reviewer target from the creation intent's field owner.
+pub fn review_state_tool_schema() -> serde_json::Value {
+    serde_json::json!({"type":"string", "description":"Exact native Layr state ID for a reviewer."})
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

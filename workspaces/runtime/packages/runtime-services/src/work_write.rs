@@ -1189,6 +1189,11 @@ pub enum VmSubmissionPreparation {
     Call(VmSubmissionCall),
 }
 
+fn reviewer_without_revision(owner: &AgentRecord, revision: &str) -> bool {
+    owner.role.value().copied() == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer)
+        && revision.trim().is_empty()
+}
+
 /// Persist an exact layr evidence request before contacting the guest. A pending
 /// or unknown request is never sent again; completed evidence can be replayed.
 pub async fn prepare_vm_submission(
@@ -1237,6 +1242,9 @@ pub async fn prepare_vm_submission(
             text(input.result.as_str().ok_or(Error::InvalidRequest("Supply result as text when the task has no result_schema"))?, false)?;
         }
         text(&input.checks, false)?;
+        if reviewer_without_revision(&owner, &input.revision) {
+            return Ok(VmSubmissionPreparation::NotVm);
+        }
         let revision = python_bounded_text(&input.revision, 200)?;
         validate_submission_files(&owner, &input.files, input.prepared_files.as_ref())?;
         if owner.execution_mode != Some(studio_runtime_store::AgentExecutionMode::Vm) && owner.workspace_mode != Some(studio_runtime_schema::records::WorkspaceMode::LayrNative) {
@@ -2526,7 +2534,11 @@ fn decide_submit(
         )?
     };
     let checks_text = python_bounded_text(&input.checks, 32000)?;
-    let revision_text = python_bounded_text(&input.revision, 200)?;
+    let revision_text = if reviewer_without_revision(submitter, &input.revision) {
+        String::new()
+    } else {
+        python_bounded_text(&input.revision, 200)?
+    };
     let mut result = json!({
         "id": result_id,
         "agent": submitter_id,
@@ -3086,9 +3098,10 @@ fn submit(
         );
     }
     validate_submission_files(&submitter, &input.files, input.prepared_files.as_ref())?;
-    if submitter.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
-        || submitter.workspace_mode
-            == Some(studio_runtime_schema::records::WorkspaceMode::LayrNative)
+    if !reviewer_without_revision(&submitter, &input.revision)
+        && (submitter.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
+            || submitter.workspace_mode
+                == Some(studio_runtime_schema::records::WorkspaceMode::LayrNative))
     {
         let Some(request_id) = input.vm_evidence_request_id.as_deref() else {
             return Err(Error::Conflict(
@@ -3980,6 +3993,48 @@ mod actor_tests {
                 .expect("agent row inserts");
         }
         connection
+    }
+
+    #[tokio::test]
+    async fn native_reviewer_submission_needs_no_revision_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(dir.path())).await.unwrap();
+        let record = json!({"compactions":0,"accountKey":"default","provider":"codex","id":"reviewer","rootId":"lead","epoch":1,"status":"running","autoWake":true,"role":"reviewer","workspaceMode":"layr-native"});
+        let lead = json!({"compactions":0,"accountKey":"default","provider":"codex","id":"lead","rootId":"lead","epoch":1,"status":"running","autoWake":true,"isLead":true,"agentMode":"multi","concurrency":8});
+        let item = work("review", Some("reviewer"), "running", json!([]));
+        store
+            .transaction(move |tx| {
+                AgentRepository::put(tx, &AgentRecord::from_value(record)?)?;
+                AgentRepository::put(tx, &AgentRecord::from_value(lead)?)?;
+                WorkItemsRepository::put_work(tx, "review", &item)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let mut input = super::SubmitWork {
+            prepared_gate_workspace: None,
+            task_id: "review".into(),
+            version: Some(2),
+            result: "reviewed".into(),
+            checks: "read".into(),
+            revision: String::new(),
+            files: vec![],
+            prepared_files: None,
+            state_dir: dir.path().into(),
+            vm_evidence: None,
+            vm_evidence_request_id: None,
+        };
+        let result = super::prepare_vm_submission(&store, "reviewer", None, "review", &mut input)
+            .await
+            .unwrap();
+        assert!(matches!(result, super::VmSubmissionPreparation::NotVm));
+        let result = store
+            .transaction_with_error(move |tx| {
+                super::write(tx, "reviewer", None, "review", WorkWrite::Submit(input))
+            })
+            .await
+            .unwrap();
+        assert_eq!(result.record["status"], "review");
     }
 
     #[test]
