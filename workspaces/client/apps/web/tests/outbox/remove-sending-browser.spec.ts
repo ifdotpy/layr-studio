@@ -192,9 +192,9 @@ test("remove-sending-browser", async ({ page: fixturePage }) => {
       createHash("sha256").update(String(payload)).digest("hex"),
     );
     database.exec("BEGIN IMMEDIATE");
-    // Set the disposable agents to paused in the store, as the pause command
-    // does, without the command. The held active turn must keep accepting
-    // current-turn input before removal inspects the seeded rows.
+    // Pause the disposable agents in the store, as the former stop did. A held
+    // active turn would still accept current-turn input before removal can
+    // inspect the seeded rows. Stop only interrupts now, so it cannot do this.
     for (const agent of [lead!, other!]) {
       const row = database
         .prepare("SELECT record FROM runtime_agents WHERE id=?")
