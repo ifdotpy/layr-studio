@@ -16,6 +16,7 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
 
 HERE = Path(__file__).resolve().parent
 INSTALLED, FAILED, WAITING = 0, 1, 75
@@ -154,7 +155,14 @@ def handover_backend(config, state, backend):
         code = child.poll()
         if code is not None:
             raise RuntimeError(f"the new build exited with {code} during the live handover; see canvas.log. The old build may have resumed, else the recovery loop starts a backend")
-        data = recovery.identity(config["port"], state)
+        try:
+            data = recovery.identity(config["port"], state)
+        except urllib.error.HTTPError as error:
+            # The new build holds the socket while it opens the state; its startup gate
+            # (runtime-server startup_gate.rs) answers 503 until then. Other errors stay errors.
+            if error.code != 503:
+                raise
+            data = None
         if data and data["pid"] == child.pid:
             return "handed over"
         time.sleep(.2)
