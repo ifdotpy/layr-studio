@@ -6840,6 +6840,7 @@ dependencies = [
  "icu_normalizer",
  "jsonschema 0.60.0",
  "libc",
+ "linux-raw-sys",
  "mime_guess",
  "nix",
  "notify",

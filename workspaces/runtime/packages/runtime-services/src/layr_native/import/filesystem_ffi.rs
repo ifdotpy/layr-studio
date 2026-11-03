@@ -4,6 +4,36 @@ use super::Result;
 use super::existing_ancestor;
 use std::{fs::File, path::Path};
 
+#[cfg(target_os = "linux")]
+#[allow(
+    unsafe_code,
+    reason = "read the btrfs filesystem UUID through its kernel ioctl"
+)]
+pub(super) fn volume_id(fd: &impl std::os::fd::AsFd) -> std::io::Result<super::VolumeId> {
+    use std::os::fd::AsRawFd;
+    if rustix::fs::fstatfs(fd)?.f_type as u64 == linux_raw_sys::general::BTRFS_SUPER_MAGIC as u64 {
+        // SAFETY: the kernel fills this correctly sized, zero-initialized ioctl buffer.
+        let mut info: linux_raw_sys::btrfs::btrfs_ioctl_fs_info_args =
+            unsafe { std::mem::zeroed() };
+        // SAFETY: the descriptor and writable buffer remain valid for the ioctl.
+        if unsafe {
+            nix::libc::ioctl(
+                fd.as_fd().as_raw_fd(),
+                linux_raw_sys::ioctl::BTRFS_IOC_FS_INFO as _,
+                &mut info,
+            )
+        } < 0
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(super::VolumeId::Btrfs(info.fsid))
+    } else {
+        Ok(super::VolumeId::Other(
+            rustix::fs::fstatvfs(fd)?.f_fsid as u64,
+        ))
+    }
+}
+
 /// CLONE_NOOWNERCOPY from sys/clonefile.h, a clone flag that keeps destination ownership.
 #[cfg(target_os = "macos")]
 const CLONE_NOOWNERCOPY: u32 = 0x0002;

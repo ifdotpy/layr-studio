@@ -2,6 +2,23 @@
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires two paths on different subvolumes of one btrfs filesystem"]
+    fn btrfs_subvolumes_share_import_volume_identity() {
+        let first = std::env::var_os("STUDIO_BTRFS_TEST_FIRST").expect("first subvolume");
+        let second = std::env::var_os("STUDIO_BTRFS_TEST_SECOND").expect("second subvolume");
+        assert_eq!(volume_id(Path::new(&first)).unwrap(), volume_id(Path::new(&second)).unwrap());
+        let source = tempfile::tempdir_in(&second).unwrap();
+        fs::write(source.path().join("file"), b"content").unwrap();
+        let plan = Plan::new(source.path(), false, Path::new(&first)).unwrap();
+        assert!(plan.entries.iter().find(|entry| entry.relative == Path::new("file")).unwrap().cloneable);
+        let other = tempfile::tempdir().unwrap();
+        fs::write(other.path().join("file"), b"content").unwrap();
+        let plan = Plan::new(other.path(), false, Path::new(&first)).unwrap();
+        assert!(!plan.entries.iter().find(|entry| entry.relative == Path::new("file")).unwrap().cloneable);
+    }
+
     #[test]
     fn native_import_omits_git_ignored_files_and_generated_metadata() {
         let source = tempfile::tempdir().expect("source");
