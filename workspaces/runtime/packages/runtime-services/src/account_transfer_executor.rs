@@ -882,6 +882,7 @@ async fn read_catalog(
 
 fn destination_settings(
     agent: &studio_runtime_store::AgentRecord,
+    source_account: &str,
     source_provider: ProviderKind,
     target_provider: ProviderKind,
     catalog: &CatalogObservation,
@@ -937,13 +938,20 @@ fn destination_settings(
         .try_into()
         .map_err(|_| TransferError::Refused("Invalid destination account"))?;
     let mut defaults = worker_defaults(agent)?.value().cloned().unwrap_or_default();
-    defaults.account_key = Field::Value(catalog.identity.account_key.clone());
-    if changed {
-        defaults.model = Field::Null;
-        defaults.effort = Field::Value("medium".into());
-        defaults.fast_mode = Field::Value(false);
-        defaults.daybreak_enabled = Field::Value(false);
-        defaults.cyber_access_program = Field::Value("standard".into());
+    // Defaults naming another account are the owner's own choice: keep them as they are.
+    if defaults
+        .account_key
+        .value()
+        .is_none_or(|key| key == source_account)
+    {
+        defaults.account_key = Field::Value(catalog.identity.account_key.clone());
+        if changed {
+            defaults.model = Field::Null;
+            defaults.effort = Field::Value("medium".into());
+            defaults.fast_mode = Field::Value(false);
+            defaults.daybreak_enabled = Field::Value(false);
+            defaults.cyber_access_program = Field::Value("standard".into());
+        }
     }
     let daybreak = !changed && agent.daybreak_enabled == Some(true);
     let cyber_program = match target_provider {
@@ -1098,7 +1106,13 @@ impl TransferExecutor for AccountTransferExecutor {
                 now: self.now,
             };
             let catalog = read_catalog(&catalog_context, target_provider, &home).await?;
-            let settings = destination_settings(agent, source_provider, target_provider, &catalog)?;
+            let settings = destination_settings(
+                agent,
+                source_account,
+                source_provider,
+                target_provider,
+                &catalog,
+            )?;
 
             let mut portable = None;
             let mut history_text = None;
@@ -1605,9 +1619,14 @@ mod destination_settings_tests {
                 priority: true,
             }],
         };
-        let result =
-            destination_settings(&agent, ProviderKind::Codex, ProviderKind::Codex, &catalog)
-                .unwrap();
+        let result = destination_settings(
+            &agent,
+            "source",
+            ProviderKind::Codex,
+            ProviderKind::Codex,
+            &catalog,
+        )
+        .unwrap();
         assert_eq!(
             result.settings.model.value().map(String::as_str),
             Some("model-a")
@@ -1638,6 +1657,69 @@ mod destination_settings_tests {
                 .as_str(),
             "target"
         );
+    }
+
+    fn claude_target_catalog() -> CatalogObservation {
+        CatalogObservation {
+            identity: CatalogIdentity {
+                account_key: "target".into(),
+                home: "/target".into(),
+                provider: ProviderKind::Claude,
+                generation: 1,
+            },
+            expires_at: Instant::now() + Duration::from_secs(30),
+            models: vec![ModelCapabilities {
+                model: "model-a".into(),
+                resolved_model: None,
+                is_default: true,
+                hidden: false,
+                access_programs: None,
+                supported_efforts: vec!["medium".into()],
+                default_effort: Some("medium".into()),
+                priority: false,
+            }],
+        }
+    }
+
+    #[test]
+    fn transfer_keeps_worker_defaults_naming_another_account() {
+        let agent = serde_json::from_str(r#"{"id":"agent","rootId":"agent","epoch":0,"status":"idle","compactions":0,"accountKey":"source","model":"model-a","workerDefaults":{"accountKey":"codex-login","model":"gpt-6.1-sol"}}"#).unwrap();
+        let result = destination_settings(
+            &agent,
+            "source",
+            ProviderKind::Claude,
+            ProviderKind::Claude,
+            &claude_target_catalog(),
+        )
+        .unwrap();
+        let defaults = result.settings.worker_defaults.value().unwrap();
+        assert_eq!(
+            defaults.account_key.value().map(String::as_str),
+            Some("codex-login")
+        );
+        assert_eq!(
+            defaults.model.value().map(String::as_str),
+            Some("gpt-6.1-sol")
+        );
+    }
+
+    #[test]
+    fn transfer_moves_worker_defaults_naming_source_account() {
+        let agent = serde_json::from_str(r#"{"id":"agent","rootId":"agent","epoch":0,"status":"idle","compactions":0,"accountKey":"source","model":"model-a","workerDefaults":{"accountKey":"source","model":"model-a"}}"#).unwrap();
+        let result = destination_settings(
+            &agent,
+            "source",
+            ProviderKind::Claude,
+            ProviderKind::Claude,
+            &claude_target_catalog(),
+        )
+        .unwrap();
+        let defaults = result.settings.worker_defaults.value().unwrap();
+        assert_eq!(
+            defaults.account_key.value().map(String::as_str),
+            Some("target")
+        );
+        assert_eq!(defaults.model.value().map(String::as_str), Some("model-a"));
     }
 
     #[test]
@@ -1686,6 +1768,7 @@ mod destination_settings_tests {
         };
         let settings = destination_settings(
             reading.agent("agent").unwrap(),
+            "source",
             ProviderKind::Codex,
             ProviderKind::Claude,
             &catalog,
@@ -1719,6 +1802,7 @@ mod destination_settings_tests {
         };
         let result = destination_settings(
             &serde_json::from_str(r#"{"id":"agent","rootId":"agent","epoch":0,"status":"idle","compactions":0,"accountKey":"source","model":"source-model"}"#).unwrap(),
+            "source",
             ProviderKind::Claude,
             ProviderKind::Codex,
             &catalog,
