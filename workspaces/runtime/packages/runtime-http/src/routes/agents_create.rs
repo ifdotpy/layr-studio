@@ -43,6 +43,7 @@ fn worker_defaults(value: &generated::WorkerDefaults) -> WorkerDefaults {
 
 fn review_defaults(value: &generated::ReviewDefaults) -> ReviewDefaults {
     ReviewDefaults {
+        account_key: nullable_field!(value.account_key.clone()),
         model: value.model.clone().map_or(Field::Null, Field::Value),
         effort: value.effort.clone().map_or(Field::Null, Field::Value),
         fast_mode: value.fast_mode,
@@ -994,11 +995,18 @@ async fn create_lead_with_model(
     }
     if let Some(Some(review)) = body.review_defaults.as_ref() {
         let review_account = body
-            .worker_defaults
+            .review_defaults
             .as_ref()
             .and_then(Option::as_ref)
             .and_then(|defaults| defaults.account_key.as_ref())
-            .and_then(Option::as_deref);
+            .and_then(Option::as_deref)
+            .or_else(|| {
+                body.worker_defaults
+                    .as_ref()
+                    .and_then(Option::as_ref)
+                    .and_then(|defaults| defaults.account_key.as_ref())
+                    .and_then(Option::as_deref)
+            });
         wait_for_agent_catalog(
             &state,
             AgentCatalogWaitRequest {
@@ -1618,10 +1626,17 @@ async fn conversation(
         } else {
             None
         };
-        let review_account = review_settings_catalog_account(
-            request.worker_defaults.as_ref(),
-            stored_worker_account.as_deref(),
-        );
+        let review_account = request
+            .review_defaults
+            .as_ref()
+            .and_then(|defaults| defaults.account_key.value())
+            .cloned()
+            .or_else(|| {
+                review_settings_catalog_account(
+                    request.worker_defaults.as_ref(),
+                    stored_worker_account.as_deref(),
+                )
+            });
         let review_model = request
             .review_defaults
             .as_ref()

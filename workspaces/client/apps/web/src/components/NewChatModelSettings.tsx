@@ -222,6 +222,7 @@ function ModelDraft({ server, projectId, path, onChange }: Props) {
     },
     reviewDefaults: settings.review_defaults
       ? {
+          accountKey: settings.review_defaults.account_key,
           model: settings.review_defaults.model,
           effort: settings.review_defaults.effort,
           ...(settings.review_defaults.fast_mode !== undefined
