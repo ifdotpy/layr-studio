@@ -359,6 +359,11 @@ These helpers can write files or run other commands.
 
 A native reviewer uses its private scratch folder as its working directory.
 Its `layrReadCwd` points to main for trusted state reads.
+When spawning a reviewer, the lead can provide `review_state` as the full state ID
+to review. Studio validates it in the project and includes it in the reviewer's
+first input, with examples for reading that exact state through `layr_read`.
+A reviewer can submit its task without a revision; implementer results still
+require their exact state ID.
 It owns no Layr line.
 Codex permits writes only in the private reviewer scratch folder.
 Claude uses the same scratch working directory and a sandbox that denies writes to the store.
