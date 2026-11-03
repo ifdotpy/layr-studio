@@ -30,7 +30,7 @@ use crate::remote_transport as transport;
 pub(crate) const EVENT_KIND: &str = "agent_message";
 
 /// True when the body carries a `lead-message` envelope. Only these take this path.
-pub(crate) fn is_lead_envelope(body: &Value) -> bool {
+pub fn is_lead_envelope(body: &Value) -> bool {
     body["envelope"]["kind"] == "lead-message"
 }
 

@@ -5,7 +5,7 @@
 use crate::StoreResult;
 use rusqlite::Transaction;
 
-pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
+pub(crate) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     let present: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('project_grants') WHERE name='peer_label')",
         [],

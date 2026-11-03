@@ -83,7 +83,7 @@ mod m2026_11_01_transfer_summary;
 mod m2026_11_01_work_detail_policy;
 mod m2026_11_02_agent_worker_base_ref;
 mod m2026_11_02_legacy_vm_transfers;
-mod m2026_11_02_project_grant_peer_label;
+pub(crate) mod m2026_11_02_project_grant_peer_label;
 mod m2026_11_02_project_grants;
 mod m2026_11_02_request_reference_approval;
 mod m2026_11_02_retired_status_columns;

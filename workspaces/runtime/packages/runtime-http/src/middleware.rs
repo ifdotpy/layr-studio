@@ -123,8 +123,10 @@ pub(crate) async fn boundary(
     } else {
         None
     };
+    let project_peer =
+        api && project_peer_source(state.store.clone(), headers, &method, &path).await;
     if api
-        && !trusted(
+        && !trusted_with(
             headers,
             write,
             &state.token,
@@ -132,6 +134,7 @@ pub(crate) async fn boundary(
             state.port,
             &serve_origin,
             &path,
+            project_peer,
         )
     {
         let message = if write {
@@ -881,6 +884,31 @@ pub(crate) fn trusted(
     public_origin: &Option<String>,
     path: &str,
 ) -> bool {
+    trusted_with(
+        headers,
+        write,
+        token,
+        peer_loopback,
+        port,
+        public_origin,
+        path,
+        false,
+    )
+}
+
+/// `project_peer` admits a forwarded source outside the tailnet. Only
+/// `project_peer_source` sets it, for a lead message from a peer with an active grant.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn trusted_with(
+    headers: &HeaderMap,
+    write: bool,
+    token: &str,
+    peer_loopback: bool,
+    port: u16,
+    public_origin: &Option<String>,
+    path: &str,
+    project_peer: bool,
+) -> bool {
     if !peer_loopback {
         return false;
     }
@@ -933,7 +961,8 @@ pub(crate) fn trusted(
                 .and_then(|v| v.to_str().ok())
                 != Some(authority)
             || !local_hosts.contains(&host.to_owned()) && host != authority
-            || !forwarded_source.is_some_and(is_tailnet_ip)
+            || !(forwarded_source.is_some_and(is_tailnet_ip)
+                || project_peer && forwarded_source.is_some())
         {
             return false;
         }
@@ -990,7 +1019,54 @@ fn valid_public_origin(origin: &str) -> bool {
     valid_port && host.ends_with(".ts.net") && host.len() > ".ts.net".len()
 }
 
-fn is_tailnet_ip(address: IpAddr) -> bool {
+/// The lead-message route that a paired project peer may call from outside the tailnet.
+pub(crate) const LEAD_MESSAGE_PATH: &str = "/api/federation/v1/message";
+
+/// True when the request is a POST of a lead message from outside the tailnet, from a peer
+/// key with an active project grant. The signature, the nonce and the grant are checked by
+/// the federation handler, which accepts only the lead envelope from outside the tailnet.
+pub(crate) async fn project_peer_source(
+    store: Option<std::sync::Arc<studio_runtime_store::RuntimeStore>>,
+    headers: &HeaderMap,
+    method: &Method,
+    path: &str,
+) -> bool {
+    if method != Method::POST || path != LEAD_MESSAGE_PATH {
+        return false;
+    }
+    let Some(source) = forwarded_source(headers) else {
+        return false;
+    };
+    if is_tailnet_ip(source) {
+        return false;
+    }
+    let Some(peer) = headers
+        .get("x-studio-client")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned)
+    else {
+        return false;
+    };
+    let Some(store) = store else {
+        return false;
+    };
+    store
+        .read_async("runtime-http/project-peer-source", move |tx| {
+            studio_runtime_store::project_grants::has_active_peer(tx, &peer)
+        })
+        .await
+        .unwrap_or(false)
+}
+
+/// The QUIC peer address that the link forwards as `X-Forwarded-For`.
+pub(crate) fn forwarded_source(headers: &HeaderMap) -> Option<IpAddr> {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<IpAddr>().ok())
+}
+
+pub(crate) fn is_tailnet_ip(address: IpAddr) -> bool {
     match address {
         IpAddr::V4(address) => u32::from(address) & 0xffc0_0000 == 0x6440_0000,
         IpAddr::V6(address) => {

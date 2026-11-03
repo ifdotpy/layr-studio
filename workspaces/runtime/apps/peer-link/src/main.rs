@@ -11,13 +11,13 @@ mod outbound;
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
-use iroh::endpoint::{Connection, IdleTimeout, QuicTransportConfig, VarInt, presets};
+use iroh::endpoint::{BindOpts, Connection, IdleTimeout, QuicTransportConfig, VarInt, presets};
 use iroh::{Endpoint, PublicKey, RelayMode, RelayUrl, SecretKey};
 use serde::Deserialize;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -199,6 +199,14 @@ fn builder(
         .hooks(identity::Pairing { keys }))
 }
 
+/// All interfaces (the backend default), a Tailscale address, or loopback (tests).
+/// Only the IPv4 unspecified address is accepted for all interfaces: the IPv6 socket is added with it.
+fn listen_allowed(address: IpAddr) -> bool {
+    address == IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+        || inbound::tailnet(address)
+        || address.is_loopback()
+}
+
 fn valid_host(host: &str) -> bool {
     (1..=255).contains(&host.len())
         && host
@@ -221,24 +229,38 @@ async fn run() -> Result<(), String> {
         .ok_or("The configuration is missing")?;
     let config: Config =
         serde_json::from_str(&first).map_err(|_| "The configuration is invalid".to_owned())?;
-    let loopback = config.listen.ip().is_loopback();
-    if !(inbound::tailnet(config.listen.ip()) || loopback) || !valid_host(&config.forwarded_host) {
-        return Err("Listen on a Tailscale address and use the Serve host".to_owned());
+    if !listen_allowed(config.listen.ip()) || !valid_host(&config.forwarded_host) {
+        return Err(
+            "Listen on all interfaces, a Tailscale address or loopback, and use the Serve host"
+                .to_owned(),
+        );
     }
     let secret = identity::secret_key(&config.private_key, &config.public_key)?;
     let keys: PairedKeys = Arc::new(RwLock::new(paired_keys(&config.peers)?));
-    let endpoint = builder(secret, keys.clone(), relay_mode(&config.relays)?)?
+    let mut endpoint_builder = builder(secret, keys.clone(), relay_mode(&config.relays)?)?
         .bind_addr(config.listen)
-        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    if config.listen.ip().is_unspecified() {
+        // IPv6 is optional: a host without IPv6 keeps the IPv4 socket.
+        endpoint_builder = endpoint_builder
+            .bind_addr_with_opts(
+                SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), config.listen.port()),
+                BindOpts::default().set_is_required(false),
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    let endpoint = endpoint_builder
         .bind()
         .await
         .map_err(|error| error.to_string())?;
     let listener = outbound::bind(&config.socket).map_err(|error| error.to_string())?;
+    // The backend advertises the IPv4 port, so the ready line names the IPv4 socket.
     let port = endpoint
         .bound_sockets()
-        .first()
+        .iter()
+        .find(|address| address.is_ipv4())
         .map(|address| address.port())
-        .ok_or("The endpoint has no socket")?;
+        .ok_or("The endpoint has no IPv4 socket")?;
     let links = Arc::new(Links::new(
         endpoint.clone(),
         keys,

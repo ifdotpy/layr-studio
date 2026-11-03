@@ -17,6 +17,8 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 const LINK_PORT: u16 = 4621;
+/// All IPv4 interfaces. The link accepts only paired keys, so the bind is not an access rule.
+const LINK_BIND: Ipv4Addr = Ipv4Addr::UNSPECIFIED;
 const START_TIMEOUT: Duration = Duration::from_secs(5);
 const CHILD_STOP_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_READY_LINE: usize = 4096;
@@ -568,6 +570,11 @@ fn tailscale_ipv4_blocking() -> Option<Ipv4Addr> {
         })
 }
 
+/// The listen address the link process gets: all interfaces on the given port.
+fn link_listen(port: u16) -> String {
+    format!("{LINK_BIND}:{port}")
+}
+
 async fn start_link(
     state_root: &Path,
     socket: &Path,
@@ -602,7 +609,7 @@ async fn start_link(
         if stopped.is_cancelled() {
             return None;
         }
-        let listen = format!("{address}:{port}");
+        let listen = link_listen(port);
         let config_state_root = state_root.to_path_buf();
         let config_socket = socket.to_path_buf();
         let config_peers = peers.to_vec();
@@ -813,9 +820,16 @@ mod tests {
         FIRST_RETRY_DELAY, LINK_HEALTHY_RESET_AFTER, PeerLinkReady, PeerLinkWorkState, PeerSource,
         forwarded_host, next_retry_delay, peers_for_source, wait_ready_or_cancel,
     };
+
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
+
+    #[test]
+    fn the_link_listens_on_all_interfaces() {
+        assert_eq!(super::link_listen(super::LINK_PORT), "0.0.0.0:4621");
+        assert_eq!(super::link_listen(0), "0.0.0.0:0");
+    }
 
     #[test]
     fn retry_backoff_is_bounded_and_starts_short() {
