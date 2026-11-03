@@ -40,6 +40,7 @@ serde_json = { workspace = true }
 studio-runtime-schema = { path = "../runtime-schema" }
 
 [dev-dependencies]
+gungraun = "=0.17.2"
 studio-test-deps = { path = "../test-deps" }
 studio-runtime-services = { path = "../runtime-services", features = ["test-support"] }
 studio-runtime-store = { path = "../runtime-store", features = ["test-support"] }
@@ -53,3 +54,11 @@ workspace = true
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
+
+[[bench]]
+name = "hot_paths"
+harness = false
+required-features = ["bench-support"]
+
+[features]
+bench-support = []
