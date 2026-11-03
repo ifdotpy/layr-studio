@@ -369,7 +369,7 @@ async fn python_send_and_receipt_corpus() {
             assert_eq!(rewritten, original, "{name}: stored reply round trip");
             assert_eq!(
                 signature,
-                studio_runtime_services::event_write::python_json(&old[0]["signature"]),
+                studio_runtime_services::event_write::request_signature(&old[0]["signature"]),
                 "{name}: exact signature"
             );
             let mut reply: Value =
