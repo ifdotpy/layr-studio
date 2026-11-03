@@ -892,8 +892,9 @@ mod tests {
         assert_eq!(after.text, before.text);
         assert_eq!(after.status, "failed");
 
-        store.transaction_with_error(|tx| {
-            let agent = AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":"codex","id":"legacy","rootId":"legacy","epoch":1,"status":"queued","autoWake":true,"cwd":"/tmp","startWait":{"reason":"disk","epoch":1}}))?;
+        let legacy_cwd = root.path().to_path_buf();
+        store.transaction_with_error(move |tx| {
+            let agent = AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":"codex","id":"legacy","rootId":"legacy","epoch":1,"status":"queued","autoWake":true,"cwd":legacy_cwd,"startWait":{"reason":"disk","epoch":1}}))?;
             AgentRepository::put(tx, &agent)?;
             crate::event_write::enqueue_event(tx, &agent, "legacy-input".into(), "user", "keep me".into(), 11.0).unwrap();
             Ok::<_, StoreError>(())
