@@ -4162,6 +4162,33 @@ mod tests {
     }
 
     #[test]
+    fn clear_native_failure_hold_preserves_terminal_faults() {
+        let mut record = agent(
+            json!({"compactions":0, "id":"agent", "rootId":"agent", "epoch":2, "status":"failed", "accountKey":"default"}),
+        );
+        for fault in [
+            super::TerminalFault::InvalidAttempt,
+            super::TerminalFault::PendingReceipt,
+        ] {
+            record.native_failure_hold = studio_runtime_schema::queue_command::Field::Value(
+                super::NativeFailureHold::Terminal {
+                    terminal_fault: fault,
+                },
+            );
+            record.clear_native_failure_hold();
+            assert_eq!(
+                record.native_failure_hold.value(),
+                Some(&super::NativeFailureHold::Terminal {
+                    terminal_fault: fault
+                })
+            );
+        }
+        record.set_native_failure_hold(true);
+        record.clear_native_failure_hold();
+        assert!(record.native_failure_hold.is_missing());
+    }
+
+    #[test]
     fn native_failure_hold_preserves_legacy_values_and_truthiness() {
         for value in [
             json!(true),
