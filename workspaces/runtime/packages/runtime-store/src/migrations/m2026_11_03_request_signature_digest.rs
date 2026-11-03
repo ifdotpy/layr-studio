@@ -1,12 +1,16 @@
 //! Store the sha256 digest of each message request signature instead of the canonical
-//! body text. A digest is 64 hex characters and never starts with `{` or `[`, so those
-//! rows are exactly the text rows written before the digest rule.
+//! body text. Only message rows change: their text signature is a JSON object with exactly
+//! the keys `agent`, `text` and `assets` (coordination.rs). Other request families keep
+//! their own JSON text signatures and are not touched.
 use crate::{StoreResult, sha256_hex};
 use rusqlite::{Transaction, params};
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     let mut query = tx.prepare(
-        "SELECT id,signature FROM request_results WHERE substr(signature,1,1) IN ('{','[')",
+        "SELECT id,signature FROM request_results WHERE json_valid(signature) \
+         AND json_type(signature,'$.agent')='text' AND json_type(signature,'$.text')='text' \
+         AND json_type(signature,'$.assets')='array' \
+         AND (SELECT count(*) FROM json_each(request_results.signature))=3",
     )?;
     let rows = query
         .query_map([], |row| {
@@ -29,12 +33,12 @@ mod tests {
     use rusqlite::Connection;
 
     #[test]
-    fn text_signatures_become_their_digest_and_digests_stay() {
+    fn message_signatures_become_their_digest_and_other_families_stay() {
         let mut db = Connection::open_in_memory().expect("database");
         db.execute_batch(
             "CREATE TABLE request_results(id TEXT PRIMARY KEY, signature TEXT NOT NULL, created INTEGER NOT NULL);
              INSERT INTO request_results VALUES('legacy','{\"agent\": \"lead\", \"text\": \"hello\", \"assets\": []}',1);
-             INSERT INTO request_results VALUES('array','[1, 2]',1);
+             INSERT INTO request_results VALUES('other','{\"task\": \"t\", \"action\": \"cancel\"}',1);
              INSERT INTO request_results VALUES('digest','placeholder',1);",
         )
         .expect("fixture");
@@ -57,7 +61,7 @@ mod tests {
             .expect("signature reads")
         };
         assert_eq!(signature("legacy"), sha256_hex(legacy.as_bytes()));
-        assert_eq!(signature("array"), sha256_hex(b"[1, 2]"));
+        assert_eq!(signature("other"), r#"{"task": "t", "action": "cancel"}"#);
         assert_eq!(signature("digest"), digest);
     }
 }
