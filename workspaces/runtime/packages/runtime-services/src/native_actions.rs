@@ -1170,7 +1170,7 @@ pub fn settle_provider(
                 | ReceiptOutcome::NoLiveAccountWorker
                 | ReceiptOutcome::ExpectedScopeMismatch
                 | ReceiptOutcome::DeadlineExpired
-                | ReceiptOutcome::NotHandedOff => Delivery::NotSent,
+                | ReceiptOutcome::NotHandedOff(_) => Delivery::NotSent,
                 ReceiptOutcome::Unknown { .. } => Delivery::Unknown,
             }
         }
@@ -1334,7 +1334,7 @@ pub async fn update_action_settings(
                     | ReceiptOutcome::NoLiveAccountWorker
                     | ReceiptOutcome::ExpectedScopeMismatch
                     | ReceiptOutcome::DeadlineExpired
-                    | ReceiptOutcome::NotHandedOff => NativeSettingsStatus::NotSent,
+                    | ReceiptOutcome::NotHandedOff(_) => NativeSettingsStatus::NotSent,
                     ReceiptOutcome::Unknown { .. } => NativeSettingsStatus::Unknown,
                 }
             }

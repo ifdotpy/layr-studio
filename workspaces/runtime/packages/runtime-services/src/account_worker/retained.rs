@@ -111,8 +111,9 @@ pub enum PortError {
     Invalid,
     #[error("retained-session/request-expired")]
     Expired,
+    /// Named cause proven before any write, for example `deadline`.
     #[error("retained-session/not-sent")]
-    NotSent,
+    NotSent(String),
     #[error("retained-session/unknown")]
     Unknown,
     #[error("retained-session/deadline")]
@@ -128,7 +129,9 @@ pub struct RequestCommand {
 impl RequestCommand {
     /// Answer a request the closing worker never sent.
     pub(super) fn not_sent(self) {
-        let _ignored = self.reply.send(Err(PortError::NotSent));
+        let _ignored = self
+            .reply
+            .send(Err(PortError::NotSent("idle-closing".into())));
     }
 }
 pub struct BarrierCommand {
@@ -201,8 +204,8 @@ impl RetainedSessionPort {
             }),
         )
         .await
-        .map_err(|_| PortError::NotSent)?
-        .map_err(|_| PortError::NotSent)?;
+        .map_err(|_| PortError::NotSent("send-deadline".into()))?
+        .map_err(|_| PortError::NotSent("worker-send".into()))?;
         tokio::time::timeout_at(deadline, receipt)
             .await
             .map_err(|_| PortError::Unknown)?
@@ -215,7 +218,7 @@ impl RetainedSessionPort {
         validate(&request)?;
         let deadline = tokio::time::Instant::from_std(request.deadline);
         if deadline <= tokio::time::Instant::now() {
-            return Err(PortError::NotSent);
+            return Err(PortError::NotSent("deadline".into()));
         }
         let (reply, receipt) = oneshot::channel();
         tokio::time::timeout_at(
@@ -227,8 +230,8 @@ impl RetainedSessionPort {
                 }))),
         )
         .await
-        .map_err(|_| PortError::NotSent)?
-        .map_err(|_| PortError::NotSent)?;
+        .map_err(|_| PortError::NotSent("send-deadline".into()))?
+        .map_err(|_| PortError::NotSent("worker-send".into()))?;
         tokio::time::timeout_at(deadline, receipt)
             .await
             .map_err(|_| PortError::Unknown)?
@@ -305,8 +308,8 @@ impl RetainedSessionPort {
             ))),
         )
         .await
-        .map_err(|_| PortError::NotSent)?
-        .map_err(|_| PortError::NotSent)?;
+        .map_err(|_| PortError::NotSent("send-deadline".into()))?
+        .map_err(|_| PortError::NotSent("worker-send".into()))?;
         tokio::time::timeout_at(deadline, receipt)
             .await
             .map_err(|_| PortError::Unknown)?

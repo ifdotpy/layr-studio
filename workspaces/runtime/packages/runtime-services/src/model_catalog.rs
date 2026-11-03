@@ -117,7 +117,7 @@ async fn read_account_session_catalog(
     account: String,
     _provider: ProviderKind,
     stop: Shutdown,
-) -> Result<ModelCatalog, &'static str> {
+) -> Result<ModelCatalog, String> {
     let mut shutdown = stop.subscribe();
     let mut rows = Vec::new();
     // A refresh is a new durable provider read. Page retries within this refresh
@@ -154,7 +154,7 @@ async fn read_account_session_catalog(
         let current_scope = match session.current_scope(&account) {
             Some(scope) => scope,
             None => tokio::select! {
-                _ = Shutdown::cancelled(&mut shutdown) => return Err("shutdown"),
+                _ = Shutdown::cancelled(&mut shutdown) => return Err("shutdown".into()),
                 result = tokio::time::timeout(CATALOG_TIMEOUT, session.ensure_session(&account)) => {
                     result.map_err(|_| "ensure-timeout")?.map_err(|_| "ensure-session")?
                 }
@@ -178,23 +178,25 @@ async fn read_account_session_catalog(
             deadline: std::time::Instant::now() + CATALOG_TIMEOUT,
         });
         let response = tokio::select! {
-            _ = Shutdown::cancelled(&mut shutdown) => return Err("shutdown"),
+            _ = Shutdown::cancelled(&mut shutdown) => return Err("shutdown".into()),
             result = tokio::time::timeout(CATALOG_TIMEOUT, request) => {
                 let receipt = result.map_err(|_| "request-timeout")?.map_err(|_| "provider-request")?;
                 if receipt.scope != current_scope
                     || receipt.operation != operation
                 {
-                    return Err("receipt-identity");
+                    return Err("receipt-identity".into());
                 }
                 match receipt.outcome {
                     ReceiptOutcome::Written { response: ProviderResponse::Reply(value), .. } => value,
-                    ReceiptOutcome::Written { response: ProviderResponse::Rejected(_), .. } => return Err("receipt-rejected"),
-                    ReceiptOutcome::WorkerNotSent { .. } => return Err("receipt-worker-not-sent"),
-                    ReceiptOutcome::Unknown { .. } => return Err("receipt-unknown"),
-                    ReceiptOutcome::NotHandedOff => return Err("receipt-not-handed-off"),
-                    ReceiptOutcome::NoLiveAccountWorker => return Err("receipt-no-live-account-worker"),
-                    ReceiptOutcome::ExpectedScopeMismatch => return Err("receipt-scope-mismatch"),
-                    ReceiptOutcome::DeadlineExpired => return Err("receipt-deadline-expired"),
+                    ReceiptOutcome::Written { response: ProviderResponse::Rejected(_), .. } => return Err("receipt-rejected".into()),
+                    ReceiptOutcome::WorkerNotSent { .. } => return Err("receipt-worker-not-sent".into()),
+                    ReceiptOutcome::Unknown { .. } => return Err("receipt-unknown".into()),
+                    ReceiptOutcome::NotHandedOff(cause) => {
+                        return Err(format!("receipt-not-handed-off:{cause}"));
+                    }
+                    ReceiptOutcome::NoLiveAccountWorker => return Err("receipt-no-live-account-worker".into()),
+                    ReceiptOutcome::ExpectedScopeMismatch => return Err("receipt-scope-mismatch".into()),
+                    ReceiptOutcome::DeadlineExpired => return Err("receipt-deadline-expired".into()),
                 }
             },
         };
@@ -202,11 +204,11 @@ async fn read_account_session_catalog(
             .map_err(|_| "page-encode")?
             .len();
         if bytes > MAX_CATALOG_PAGE_BYTES {
-            return Err("page-bytes");
+            return Err("page-bytes".into());
         }
         total_bytes = total_bytes.checked_add(bytes).ok_or("total-bytes")?;
         if total_bytes > MAX_CATALOG_RESPONSE_BYTES {
-            return Err("total-bytes");
+            return Err("total-bytes".into());
         }
         let mut page = ModelCatalog::parse(response).map_err(|error| {
             eprintln!("Invalid provider model catalog: {error}");
@@ -214,7 +216,7 @@ async fn read_account_session_catalog(
         })?;
         for row in &page.data {
             if !seen_models.insert(row.model.clone()) {
-                return Err("duplicate-model");
+                return Err("duplicate-model".into());
             }
         }
         rows.append(&mut page.data);
@@ -232,10 +234,10 @@ async fn read_account_session_catalog(
             Some(value) if !value.is_empty() && seen_cursors.insert(value.clone()) => {
                 cursor = Some(value)
             }
-            Some(_) => return Err("cursor-repeat"),
+            Some(_) => return Err("cursor-repeat".into()),
         }
     }
-    Err("page-limit")
+    Err("page-limit".into())
 }
 
 /// Admission reads never expose the display cache's stale fallback. The caller
@@ -583,7 +585,7 @@ impl ModelCatalogService {
                 Some(session) => {
                     read_account_session_catalog(session, account.clone(), provider, stop).await
                 }
-                None => Err("no-session"),
+                None => Err("no-session".into()),
             }
             .inspect_err(|reason| {
                 crate::diagnostics::log_stderr(format_args!(
@@ -1272,6 +1274,23 @@ pub(crate) mod tests {
         .await
         .expect_err("receipt without a live worker");
         assert_eq!(error, "receipt-no-live-account-worker");
+    }
+
+    #[tokio::test]
+    async fn not_handed_off_keeps_its_named_cause_in_the_catalog_error() {
+        let error = read_account_session_catalog(
+            Arc::new(OutcomeOnly(|| {
+                crate::account_session_runtime::SessionOutcome::NotHandedOff(
+                    "prepare-error:deadline".into(),
+                )
+            })),
+            "codex2".into(),
+            ProviderKind::Codex,
+            Shutdown::default(),
+        )
+        .await
+        .expect_err("receipt not handed off");
+        assert_eq!(error, "receipt-not-handed-off:prepare-error:deadline");
     }
 
     #[tokio::test]

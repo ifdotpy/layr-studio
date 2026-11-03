@@ -103,7 +103,7 @@ impl ClaudeSessionPort for ClaudePort {
                 .map_err(|e| match e {
                     PortError::Identity => ControlError::Changed,
                     PortError::Invalid | PortError::Expired => ControlError::Request,
-                    PortError::NotSent | PortError::Capacity => ControlError::NotSent,
+                    PortError::NotSent(_) | PortError::Capacity => ControlError::NotSent,
                     PortError::ScopeMismatch | PortError::Unknown | PortError::Deadline => {
                         ControlError::Unknown
                     }
@@ -174,7 +174,7 @@ fn history_error(error: PortError) -> HistoryError {
         PortError::ScopeMismatch
         | PortError::Invalid
         | PortError::Expired
-        | PortError::NotSent
+        | PortError::NotSent(_)
         | PortError::Unknown => HistoryError::Unavailable,
     }
 }

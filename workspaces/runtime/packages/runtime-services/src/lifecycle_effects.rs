@@ -622,7 +622,7 @@ async fn request_stop_work(
                 | ReceiptOutcome::NoLiveAccountWorker
                 | ReceiptOutcome::ExpectedScopeMismatch
                 | ReceiptOutcome::DeadlineExpired
-                | ReceiptOutcome::NotHandedOff => InterruptWriteResult::NotSent,
+                | ReceiptOutcome::NotHandedOff(_) => InterruptWriteResult::NotSent,
                 ReceiptOutcome::Written { .. } | ReceiptOutcome::Unknown { .. } => {
                     InterruptWriteResult::Unknown
                 }

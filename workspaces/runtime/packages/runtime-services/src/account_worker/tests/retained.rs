@@ -94,7 +94,7 @@ impl AccountSessionPort for ResetBrokerSession {
                 PortError::Identity
                 | PortError::ScopeMismatch
                 | PortError::Invalid
-                | PortError::NotSent
+                | PortError::NotSent(_)
                 | PortError::Deadline
                 | PortError::Capacity => {
                     AccountSessionError::Refused("Retained reset request was refused")
@@ -2841,7 +2841,10 @@ async fn retained_stale_scope_settles_unknown_and_epoch_expiry_refuses_before_wr
     assert_eq!(port.request(call).await.unwrap_err(), PortError::Identity);
     let mut call = durable_request(&state, &port, "expired");
     call.deadline = tokio::time::Instant::now().into_std();
-    assert_eq!(port.request(call).await.unwrap_err(), PortError::NotSent);
+    assert_eq!(
+        port.request(call).await.unwrap_err(),
+        PortError::NotSent("deadline".into())
+    );
     worker.shutdown().await.unwrap();
 }
 

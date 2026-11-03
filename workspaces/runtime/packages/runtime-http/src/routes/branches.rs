@@ -774,7 +774,7 @@ async fn provider_request(
         | ReceiptOutcome::NoLiveAccountWorker
         | ReceiptOutcome::ExpectedScopeMismatch
         | ReceiptOutcome::DeadlineExpired
-        | ReceiptOutcome::NotHandedOff => Err(unavailable()),
+        | ReceiptOutcome::NotHandedOff(_) => Err(unavailable()),
     }
 }
 

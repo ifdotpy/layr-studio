@@ -616,7 +616,8 @@ pub enum SessionOutcome {
     },
     /// The retained owner proved non-delivery before issuing a ticket, but
     /// supplied no more specific cause.
-    NotHandedOff,
+    /// Named pre-handoff cause, for example `deadline` or `prepare-error:...`.
+    NotHandedOff(String),
     NoLiveAccountWorker,
     ExpectedScopeMismatch,
     DeadlineExpired,
@@ -639,7 +640,7 @@ impl SessionReceipt {
             | SessionOutcome::NoLiveAccountWorker
             | SessionOutcome::ExpectedScopeMismatch
             | SessionOutcome::DeadlineExpired
-            | SessionOutcome::NotHandedOff => RequestCertainty::NotSent,
+            | SessionOutcome::NotHandedOff(_) => RequestCertainty::NotSent,
         }
     }
 
@@ -651,7 +652,7 @@ impl SessionReceipt {
             SessionOutcome::NoLiveAccountWorker
             | SessionOutcome::ExpectedScopeMismatch
             | SessionOutcome::DeadlineExpired
-            | SessionOutcome::NotHandedOff => None,
+            | SessionOutcome::NotHandedOff(_) => None,
         }
     }
 
@@ -663,7 +664,7 @@ impl SessionReceipt {
             | SessionOutcome::NoLiveAccountWorker
             | SessionOutcome::ExpectedScopeMismatch
             | SessionOutcome::DeadlineExpired
-            | SessionOutcome::NotHandedOff => None,
+            | SessionOutcome::NotHandedOff(_) => None,
         }
     }
 
@@ -675,7 +676,7 @@ impl SessionReceipt {
             | SessionOutcome::NoLiveAccountWorker
             | SessionOutcome::ExpectedScopeMismatch
             | SessionOutcome::DeadlineExpired
-            | SessionOutcome::NotHandedOff => None,
+            | SessionOutcome::NotHandedOff(_) => None,
         }
     }
 
@@ -684,7 +685,7 @@ impl SessionReceipt {
     /// needing delivery evidence must inspect the outcome or its ticket.
     pub fn not_sent_reason(&self) -> Option<NotSentReason> {
         match self.outcome {
-            SessionOutcome::WorkerNotSent { .. } | SessionOutcome::NotHandedOff => {
+            SessionOutcome::WorkerNotSent { .. } | SessionOutcome::NotHandedOff(_) => {
                 Some(NotSentReason::WorkerNotSent)
             }
             SessionOutcome::NoLiveAccountWorker => Some(NotSentReason::NoLiveAccountWorker),
