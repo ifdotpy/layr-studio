@@ -117,7 +117,7 @@ async fn read_account_session_catalog(
     account: String,
     _provider: ProviderKind,
     stop: Shutdown,
-) -> Result<ModelCatalog, ()> {
+) -> Result<ModelCatalog, &'static str> {
     let mut shutdown = stop.subscribe();
     let mut rows = Vec::new();
     // A refresh is a new durable provider read. Page retries within this refresh
@@ -127,7 +127,7 @@ async fn read_account_session_catalog(
         "{}-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|_| ())?
+            .map_err(|_| "refresh-clock")?
             .as_nanos(),
         REFRESH_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     );
@@ -144,7 +144,7 @@ async fn read_account_session_catalog(
         if let Some(cursor) = &cursor {
             params
                 .as_object_mut()
-                .ok_or(())?
+                .ok_or("params")?
                 .insert("cursor".into(), Value::String(cursor.clone()));
         }
         let session_clone = session.clone();
@@ -154,9 +154,9 @@ async fn read_account_session_catalog(
         let current_scope = match session.current_scope(&account) {
             Some(scope) => scope,
             None => tokio::select! {
-                _ = Shutdown::cancelled(&mut shutdown) => return Err(()),
+                _ = Shutdown::cancelled(&mut shutdown) => return Err("shutdown"),
                 result = tokio::time::timeout(CATALOG_TIMEOUT, session.ensure_session(&account)) => {
-                    result.map_err(|_| ())?.map_err(|_| ())?
+                    result.map_err(|_| "ensure-timeout")?.map_err(|_| "ensure-session")?
                 }
             },
         };
@@ -178,32 +178,43 @@ async fn read_account_session_catalog(
             deadline: std::time::Instant::now() + CATALOG_TIMEOUT,
         });
         let response = tokio::select! {
-            _ = Shutdown::cancelled(&mut shutdown) => return Err(()),
+            _ = Shutdown::cancelled(&mut shutdown) => return Err("shutdown"),
             result = tokio::time::timeout(CATALOG_TIMEOUT, request) => {
-                let receipt = result.map_err(|_| ())?.map_err(|_| ())?;
+                let receipt = result.map_err(|_| "request-timeout")?.map_err(|_| "provider-request")?;
                 if receipt.scope != current_scope
                     || receipt.operation != operation
                 {
-                    return Err(());
+                    return Err("receipt-identity");
                 }
-                let ReceiptOutcome::Written { response: ProviderResponse::Reply(value), .. } = receipt.outcome else { return Err(()); };
-                value
+                match receipt.outcome {
+                    ReceiptOutcome::Written { response: ProviderResponse::Reply(value), .. } => value,
+                    ReceiptOutcome::Written { response: ProviderResponse::Rejected(_), .. } => return Err("receipt-rejected"),
+                    ReceiptOutcome::WorkerNotSent { .. } => return Err("receipt-worker-not-sent"),
+                    ReceiptOutcome::Unknown { .. } => return Err("receipt-unknown"),
+                    ReceiptOutcome::NotHandedOff => return Err("receipt-not-handed-off"),
+                    ReceiptOutcome::NoLiveAccountWorker => return Err("receipt-no-live-account-worker"),
+                    ReceiptOutcome::ExpectedScopeMismatch => return Err("receipt-scope-mismatch"),
+                    ReceiptOutcome::DeadlineExpired => return Err("receipt-deadline-expired"),
+                }
             },
         };
-        let bytes = serde_json::to_vec(&response).map_err(|_| ())?.len();
+        let bytes = serde_json::to_vec(&response)
+            .map_err(|_| "page-encode")?
+            .len();
         if bytes > MAX_CATALOG_PAGE_BYTES {
-            return Err(());
+            return Err("page-bytes");
         }
-        total_bytes = total_bytes.checked_add(bytes).ok_or(())?;
+        total_bytes = total_bytes.checked_add(bytes).ok_or("total-bytes")?;
         if total_bytes > MAX_CATALOG_RESPONSE_BYTES {
-            return Err(());
+            return Err("total-bytes");
         }
         let mut page = ModelCatalog::parse(response).map_err(|error| {
             eprintln!("Invalid provider model catalog: {error}");
+            "parse"
         })?;
         for row in &page.data {
             if !seen_models.insert(row.model.clone()) {
-                return Err(());
+                return Err("duplicate-model");
             }
         }
         rows.append(&mut page.data);
@@ -213,7 +224,7 @@ async fn read_account_session_catalog(
         }
         match next {
             None => {
-                let mut result = first_page.ok_or(())?;
+                let mut result = first_page.ok_or("no-page")?;
                 result.data = rows;
                 result.next_cursor = Some(None);
                 return Ok(result);
@@ -221,10 +232,10 @@ async fn read_account_session_catalog(
             Some(value) if !value.is_empty() && seen_cursors.insert(value.clone()) => {
                 cursor = Some(value)
             }
-            Some(_) => return Err(()),
+            Some(_) => return Err("cursor-repeat"),
         }
     }
-    Err(())
+    Err("page-limit")
 }
 
 /// Admission reads never expose the display cache's stale fallback. The caller
@@ -572,8 +583,14 @@ impl ModelCatalogService {
                 Some(session) => {
                     read_account_session_catalog(session, account.clone(), provider, stop).await
                 }
-                None => Err(()),
-            };
+                None => Err("no-session"),
+            }
+            .inspect_err(|reason| {
+                crate::diagnostics::log_stderr(format_args!(
+                    "model catalog read for {account} failed: {reason}"
+                ));
+            })
+            .map_err(|_| ());
             if let Some(inner) = service.upgrade() {
                 store_result(&inner, &cache_key, generation, result);
             }
@@ -1041,6 +1058,7 @@ pub(crate) mod tests {
             Shutdown::default(),
         )
         .await
+        .map_err(|_| ())
         .map(|catalog| serde_json::to_value(catalog).expect("catalog serializes"))
     }
     impl crate::account_session_runtime::AccountSessionPort for AccountSessionPages {
@@ -1198,16 +1216,62 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn catalog_refresh_reports_unavailable_when_worker_cannot_start() {
         let session = lazy_session(true);
-        assert!(
-            read_account_session_catalog(
-                session,
-                "codex2".into(),
-                ProviderKind::Codex,
-                Shutdown::default(),
-            )
-            .await
-            .is_err()
-        );
+        let error = read_account_session_catalog(
+            session,
+            "codex2".into(),
+            ProviderKind::Codex,
+            Shutdown::default(),
+        )
+        .await
+        .expect_err("worker cannot start");
+        assert_eq!(error, "ensure-session");
+    }
+
+    /// A session that answers every request with one fixed receipt outcome.
+    struct OutcomeOnly(fn() -> crate::account_session_runtime::SessionOutcome);
+    impl crate::account_session_runtime::AccountSessionPort for OutcomeOnly {
+        fn current_scope(
+            &self,
+            account: &str,
+        ) -> Option<crate::account_session_runtime::ConnectionScope> {
+            Some(crate::account_session_runtime::ConnectionScope {
+                account: account.to_owned(),
+                connection: "connection".into(),
+                generation: 4,
+            })
+        }
+        fn provider_request<'a>(
+            &'a self,
+            request: crate::account_session_runtime::ProviderRequest,
+        ) -> crate::account_session_runtime::AccountSessionFuture<
+            'a,
+            crate::account_session_runtime::SessionReceipt,
+        > {
+            let outcome = (self.0)();
+            Box::pin(async move {
+                Ok(crate::account_session_runtime::SessionReceipt {
+                    scope: request.expected_scope.expect("catalog pins its scope"),
+                    operation: request.operation,
+                    outcome,
+                    replayed: false,
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn catalog_refresh_names_the_branch_that_failed() {
+        let error = read_account_session_catalog(
+            Arc::new(OutcomeOnly(|| {
+                crate::account_session_runtime::SessionOutcome::NoLiveAccountWorker
+            })),
+            "codex2".into(),
+            ProviderKind::Codex,
+            Shutdown::default(),
+        )
+        .await
+        .expect_err("receipt without a live worker");
+        assert_eq!(error, "receipt-no-live-account-worker");
     }
 
     #[tokio::test]
