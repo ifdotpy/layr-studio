@@ -126,9 +126,12 @@ impl EventWriteRepository {
         )?)
     }
 
+    /// Insert an event. A repeated id with the same identity is a no-op
+    /// (`Ok(false)`); a repeated id with other content, or any refused row
+    /// (such as an unknown kind), is an error.
     pub fn insert_event(connection: &Connection, event: &QueueEvent) -> StoreResult<bool> {
         let inserted = connection.execute_cached(
-            "INSERT OR IGNORE INTO runtime_events \
+            "INSERT INTO runtime_events \
              (id,agent,kind,text,status,created,epoch,turn_id,error) \
              VALUES (?1,?2,?3,?4,?5,?6,?7,NULL,NULL)",
             params![
@@ -140,8 +143,43 @@ impl EventWriteRepository {
                 event.created,
                 event.epoch
             ],
-        )?;
-        Ok(inserted != 0)
+        );
+        match inserted {
+            Ok(_) => Ok(true),
+            Err(rusqlite::Error::SqliteFailure(error, _))
+                if error.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_PRIMARYKEY =>
+            {
+                let stored = connection.query_row_cached(
+                    "SELECT agent,kind,text,created,epoch FROM runtime_events WHERE id=?1",
+                    [&event.id.0],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, f64>(3)?,
+                            row.get::<_, i64>(4)?,
+                        ))
+                    },
+                )?;
+                let same = stored
+                    == (
+                        event.agent.0.clone(),
+                        event.kind.clone(),
+                        event.text.clone(),
+                        event.created,
+                        event.epoch,
+                    );
+                if same {
+                    Ok(false)
+                } else {
+                    Err(StoreError::RecordContract(
+                        "runtime event id already exists with different content",
+                    ))
+                }
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     pub fn mark_event_enqueued(
