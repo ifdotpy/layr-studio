@@ -63,6 +63,16 @@ that the backend writes; the network path gives no rights (decision
 `docs/decisions/2026-11-01-p2p-project-peering.md`, "Zero trust"). Every request is still
 signed and checked against the project grant at the backend edge.
 
+Edge rule for a source outside the tailnet (the link forwards the QUIC peer address as
+`X-Forwarded-For`, and a relay peer shows `0.0.0.0`):
+
+- Admitted: a `POST /api/federation/v1/message` from a peer key with an active project grant
+  (`project_peer_source` in `runtime-http/src/middleware.rs`). The federation handler then
+  checks the signature, the nonce and the `LeadMessages` grant. It accepts only the lead
+  envelope from outside the tailnet (`refused_from_outside` in `routes/federation.rs`).
+- Refused: every other route or method, a peer with no active grant, and any non-lead
+  envelope. These keep the 403 of the tailnet rule. Owner paths are unchanged.
+
 `relays` is a list of relay URLs (optional, default empty). Empty means direct paths only: the
 process uses no relay, so no public relay sees the traffic. The owner turns relays on by adding
 URLs to the backend's link configuration. A relay forwards encrypted QUIC only.

@@ -116,6 +116,12 @@ async fn signed_post(
         .map_err(|_| ApiError::new(StatusCode::FORBIDDEN, "Invalid federation timestamp"))?;
     let observed_user = optional_single_header(&parts.headers, "tailscale-user-login")?;
     let origin = federation_effects::OriginObservation::from_trusted_serve(observed_user);
+    if refused_from_outside(&parts.headers, &action, &raw) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "Only a lead message is allowed from outside the tailnet",
+        ));
+    }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|_| ApiError::internal())?
@@ -370,5 +376,54 @@ mod ingress_tests {
             .unwrap();
         assert_eq!(snapshot["rooms"][0]["shareNames"], true);
         assert_eq!(snapshot["rooms"][0]["shareStatus"], false);
+    }
+}
+
+/// True when a request from outside the tailnet is not a lead message. The middleware
+/// admits only that route; this keeps every other federation action on the tailnet.
+fn refused_from_outside(
+    headers: &HeaderMap,
+    action: &federation_effects::FederationAction,
+    raw: &[u8],
+) -> bool {
+    let outside = crate::middleware::forwarded_source(headers)
+        .is_some_and(|source| !crate::middleware::is_tailnet_ip(source));
+    let lead = serde_json::from_slice::<serde_json::Value>(raw)
+        .is_ok_and(|body| studio_runtime_services::federation_lead::is_lead_envelope(&body));
+    outside && !(matches!(action, federation_effects::FederationAction::Message) && lead)
+}
+
+#[cfg(test)]
+mod outside_tests {
+    use super::*;
+
+    fn outside_headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", "203.0.113.7".parse().expect("header"));
+        headers
+    }
+
+    #[test]
+    fn only_a_lead_message_passes_from_outside_the_tailnet() {
+        let lead = br#"{"envelope":{"kind":"lead-message"}}"#;
+        let other = br#"{"envelope":{"kind":"chat"}}"#;
+        let message = federation_effects::FederationAction::Message;
+        assert!(!refused_from_outside(&outside_headers(), &message, lead));
+        assert!(refused_from_outside(&outside_headers(), &message, other));
+        assert!(refused_from_outside(
+            &outside_headers(),
+            &federation_effects::FederationAction::Pull,
+            lead
+        ));
+    }
+
+    #[test]
+    fn tailnet_and_local_requests_are_not_refused_here() {
+        let mut tailnet = HeaderMap::new();
+        tailnet.insert("x-forwarded-for", "100.75.160.63".parse().expect("header"));
+        let other = br#"{"envelope":{"kind":"chat"}}"#;
+        let pull = federation_effects::FederationAction::Pull;
+        assert!(!refused_from_outside(&tailnet, &pull, other));
+        assert!(!refused_from_outside(&HeaderMap::new(), &pull, other));
     }
 }
