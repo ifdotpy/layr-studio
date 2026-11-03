@@ -995,8 +995,7 @@ fn accepted_archive_preflight(
         ));
     }
 
-    if (owner_value.get("executionMode").and_then(Value::as_str) == Some("vm")
-        || crate::layr_native::is_native(&owner_value))
+    if vm_result_needs_merge(root_id, &owner)
         && !vm_merge_confirmed(
             connection,
             task_id,
@@ -1147,8 +1146,8 @@ pub struct VmSubmissionCall {
 }
 
 use studio_runtime_store::vm_work_intent::{
-    Acceptance, Intent as VmWorkIntent, Owner as VmOwner, PublicRequest as VmPublic, Submission,
-    SubmissionResult as VmSubmissionResult, View as VmView,
+    Acceptance, AcceptanceResult, Intent as VmWorkIntent, Owner as VmOwner,
+    PublicRequest as VmPublic, Submission, SubmissionResult as VmSubmissionResult, View as VmView,
 };
 
 fn read_vm_view(connection: &Connection, task_id: &str) -> Result<VmView, WorkWriteError> {
@@ -1532,8 +1531,9 @@ pub async fn finish_vm_accept(
     task_id: &str,
     request_id: &str,
     uncertain: Option<bool>,
+    merge: Option<studio_runtime_store::vm_work_intent::MergeReceipt>,
 ) -> Result<(), WorkWriteError> {
-    let outcome = uncertain.map_or(Ok(()), Err);
+    let outcome = uncertain.map_or(Ok(AcceptanceResult { merge }), Err);
     finish_vm_intent(store, task_id, request_id, outcome, |view| {
         &mut view.vm_accept
     })
@@ -3521,6 +3521,14 @@ fn accept(
     WorkItemsRepository::update_checked_work(tx, &input.task_id, &updated)?;
     let mut record = single_view(tx, &updated)?;
     record["archivePending"] = json!(archive_owner.is_some());
+    if let Some(VmWorkIntent::Completed {
+        owner,
+        result: AcceptanceResult { merge: Some(merge) },
+    }) = read_vm_view(tx, &input.task_id)?.vm_accept
+        && owner.id.result_id == result_id
+    {
+        record["merge"] = json!(merge);
+    }
 
     Ok(WorkWriteResult {
         record,
@@ -4099,9 +4107,12 @@ mod actor_tests {
                 json!({"compactions":0,"accountKey":"default","provider":"codex","id":"worker","rootId":"lead","epoch":2,"status":"idle","autoWake":true,"executionMode":"vm"}),
             ] { AgentRepository::put(tx, &AgentRecord::from_value(agent).expect("agent"))?; }
             let mut item = work("retry", Some("worker"), "review", json!([{"id":"result-1","agent":"worker","text":"done","checks":"checked","revision":"state","files":[]}]));
-            item["vmAccept"] = json!({"status":"completed","requestId":"merge","taskId":"retry","owner":"worker","revision":"state","resultId":"result-1","created":1.0});
+            item["vmAccept"] = json!({"status":"completed","requestId":"merge","taskId":"retry","owner":"worker","revision":"state","resultId":"result-1","created":1.0,"merge":{"from_state":"old","to_state":"new"}});
             WorkItemsRepository::put_work(tx, "retry", &item)?;
-            super::write(tx, "lead", Some(&request), "accept", WorkWrite::Accept(AcceptWork { task_id:"retry".into(), version:Some(2), reason:"verified".into(), override_reason:None, merged_result_id:Some("result-1".into()) }))?;
+            let accepted = super::write(tx, "lead", Some(&request), "accept", WorkWrite::Accept(AcceptWork { task_id:"retry".into(), version:Some(2), reason:"verified".into(), override_reason:None, merged_result_id:Some("result-1".into()) }))?;
+            assert_eq!(accepted.record["merge"], json!({"from_state":"old","to_state":"new"}));
+            let saved = WorkItemsRepository::work_record(tx, "retry")?.unwrap().value();
+            assert_eq!(saved["archiveIntent"]["publicResponse"]["merge"], accepted.record["merge"]);
             Ok(())
         }).await.expect("accepted pending archive");
         let input = AcceptWork {
@@ -4411,11 +4422,11 @@ mod actor_tests {
             .await
             .is_err()
         );
-        super::finish_vm_accept(&store, "vm-known", "merge", Some(true))
+        super::finish_vm_accept(&store, "vm-known", "merge", Some(true), None)
             .await
             .expect("late merge reply");
         for outcome in [Some(false), None] {
-            super::finish_vm_accept(&store, "vm-known", "merge", outcome)
+            super::finish_vm_accept(&store, "vm-known", "merge", outcome, None)
                 .await
                 .expect("stable merge proof");
         }
@@ -5595,6 +5606,37 @@ mod actor_tests {
         assert!(!super::vm_result_needs_merge("lead", &reviewer));
         let result = accept(&tx).expect("a reviewer result needs no merge");
         assert_eq!(result.record["status"], "accepted");
+        let intent = super::ArchiveIntent {
+            status: super::WorkEffectStatus::Pending,
+            task_id: "review-task".into(),
+            intent_id: "review-task:result-r".into(),
+            actor: "lead".into(),
+            actor_epoch: 2,
+            target: "worker".into(),
+            attempts: 0,
+            created: 10.0,
+            next_attempt_at: Some(10.0),
+            attempt_started_at: None,
+            updated: None,
+            last_outcome: None,
+            outcome: None,
+            public_request_id: None,
+            public_admission: None,
+            public_response: None,
+        };
+        assert_eq!(
+            super::accepted_archive_preflight(
+                &tx,
+                "review-task",
+                &result.record,
+                &intent,
+                "worker",
+                "lead",
+                2
+            )
+            .unwrap(),
+            None
+        );
         tx.rollback().expect("transaction rolls back");
 
         // An implementer's line still needs the merge before acceptance.
