@@ -1,15 +1,5 @@
 /** Pure helpers of the project "Peers" section (decision 2026-11-01, "Pairing per project"). */
 
-export type ProjectGrant = {
-  grantId: string;
-  peerStateId: string;
-  fingerprint: string;
-  localProject: string;
-  remoteProject: string;
-  capabilities: string[];
-  createdAt: number;
-};
-
 export type PeerInvitation = {
   protocol: 1;
   inviteId: string;
