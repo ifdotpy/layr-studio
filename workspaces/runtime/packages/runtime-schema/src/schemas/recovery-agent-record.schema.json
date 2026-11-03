@@ -884,10 +884,6 @@
       "type": "string",
       "enum": ["submitted", "acknowledged", "not_sent", "unknown", "rejected"]
     },
-    "LegacyProjectImportPhase": {
-      "type": "string",
-      "enum": ["planned", "uploading", "imported", "not_sent", "unknown"]
-    },
     "ProjectImport": {
       "type": "object",
       "properties": {
@@ -903,11 +899,7 @@
           "type": "string"
         },
         "phase": {
-          "description": "Read older attempts without writing the superseded display phase again.",
-          "anyOf": [
-            { "$ref": "#/$defs/LegacyProjectImportPhase" },
-            { "type": "null" }
-          ]
+          "$ref": "#/$defs/ProjectImportPhase"
         },
         "projectId": {
           "type": "string"
@@ -932,8 +924,13 @@
         "requestId",
         "operation",
         "uploadId",
-        "root"
+        "root",
+        "phase"
       ]
+    },
+    "ProjectImportPhase": {
+      "type": "string",
+      "enum": ["planned", "uploading", "imported", "not_sent", "unknown"]
     },
     "ProviderTicket": {
       "description": "Durable transport identity; response contents alone never authorize mutation.",
