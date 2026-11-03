@@ -1044,7 +1044,9 @@ pub async fn adopt_receipt(
 fn check_durable_blockers(tx: &Transaction<'_>, agent: &str) -> Result<(), TransferError> {
     let waiting: bool = tx
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM approvals WHERE agent=?1 AND state IN ('pending','unknown'))",
+            // An approval of an earlier epoch belongs to a turn that can no longer run.
+            "SELECT EXISTS(SELECT 1 FROM approvals WHERE agent=?1 AND state IN ('pending','unknown')
+             AND (epoch IS NULL OR epoch >= (SELECT json_extract(record,'$.epoch') FROM runtime_agents WHERE id=?1)))",
             [agent],
             |r| r.get(0),
         )
@@ -1311,6 +1313,32 @@ mod request_tests {
             )?;
             Ok(())
         })).expect("seed scoped fixture agents");
+    }
+
+    fn add_unknown_approval(store: &RuntimeStore, id: &str, epoch: i64) {
+        let id = id.to_owned();
+        run_async(store.transaction(move |tx| {
+            tx.execute(
+                "INSERT INTO approvals(id,agent,turn,created,epoch,kind,request,detail,state,answer,since)
+                 VALUES(?1,'lead','turn',1.0,?2,'exec','{\"kind\":\"exec\"}','{}','unknown','{}',2.0)",
+                rusqlite::params![id, epoch],
+            )?;
+            Ok(())
+        }))
+        .expect("seed approval");
+    }
+
+    #[test]
+    fn an_approval_of_an_earlier_epoch_does_not_block_a_transfer() {
+        let (_root, store) = store_with_agents();
+        add_unknown_approval(&store, "old", 0);
+        run_async(store.transaction_with_error(|tx| check_durable_blockers(tx, "lead")))
+            .expect("a dead epoch approval cannot hold the chat");
+        add_unknown_approval(&store, "live", 1);
+        assert!(
+            run_async(store.transaction_with_error(|tx| check_durable_blockers(tx, "lead")))
+                .is_err()
+        );
     }
 
     #[test]

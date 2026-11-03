@@ -53,7 +53,7 @@ type Props = {
   scope: string;
   onEdit: (item: QueueItemDto, text: string) => Promise<void>;
   onCancel: (item: QueueItemDto) => Promise<void>;
-  onSendNow?: (item: QueueItemDto) => Promise<void>;
+  onSendNow?: ((item: QueueItemDto) => Promise<void>) | undefined;
   onReorder: (ids: string[]) => Promise<void>;
   canReorder: boolean;
   refreshing?: boolean;
