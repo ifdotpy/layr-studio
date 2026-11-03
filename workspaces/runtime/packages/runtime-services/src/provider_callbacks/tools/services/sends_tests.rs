@@ -811,12 +811,25 @@ async fn complaint_read_projects_a_page_with_one_agent_scan() {
     let mut db = rusqlite::Connection::open(store.root().join("canvas.sqlite3")).unwrap();
     let tx = db.transaction().unwrap();
     for index in 0..100 {
-        let complaint: studio_runtime_store::ComplaintRecord = serde_json::from_value(json!({
-            "id":format!("complaint-{index}"), "leadId":lead_id, "author":worker_id,
-            "text":format!("Question {index}"), "recipient":"lead", "status":"open",
-            "created":index, "updated":index, "readAt":null, "version":1, "responses":[]
-        }))
-        .unwrap();
+        let complaint = studio_runtime_store::ComplaintRecord {
+            id: format!("complaint-{index}"),
+            lead_id: Some(lead_id.to_owned()),
+            author: Some(worker_id.to_owned()),
+            text: Some(format!("Question {index}")),
+            recipient: studio_runtime_schema::complaint_record::ComplaintRecipient::Lead,
+            status: studio_runtime_schema::complaint_record::ComplaintStatus::Open,
+            created: studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(
+                index as f64,
+            ),
+            updated: studio_runtime_schema::complaint_record::ComplaintSeconds::from_seconds(
+                index as f64,
+            ),
+            read_at: None,
+            version: Some(1),
+            responses: Vec::new(),
+            source_type: None,
+            title: None,
+        };
         studio_runtime_store::Table::<studio_runtime_store::ComplaintRecord>::new(&tx)
             .put(&complaint)
             .unwrap();

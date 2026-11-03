@@ -378,7 +378,7 @@ fn reconcile_complaint_notifications(
             .collect();
         let mut statement = tx
             .prepare_cached(
-                "SELECT requested.value, complaint.record FROM json_each(?1) requested \
+                "SELECT complaint.record, requested.value FROM json_each(?1) requested \
              LEFT JOIN runtime_complaints complaint ON complaint.id=requested.value",
             )
             .map_err(studio_runtime_store::StoreError::from)?;
@@ -389,12 +389,12 @@ fn reconcile_complaint_notifications(
             .next()
             .map_err(studio_runtime_store::StoreError::from)?
         {
-            let id: Option<String> = row.get(0).map_err(studio_runtime_store::StoreError::from)?;
+            let id: Option<String> = row.get(1).map_err(studio_runtime_store::StoreError::from)?;
             let Some(id) = id else {
                 all_answered = false;
                 break;
             };
-            let raw: Option<String> = row.get(1).map_err(studio_runtime_store::StoreError::from)?;
+            let raw: Option<String> = row.get(0).map_err(studio_runtime_store::StoreError::from)?;
             let Some(raw) = raw else {
                 all_answered = false;
                 break;
@@ -428,6 +428,25 @@ mod reconciliation_tests {
     use rusqlite::trace::{TraceEvent, TraceEventCodes};
 
     thread_local! { static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
+    #[test]
+    fn reached_blob_preserves_the_lookup_error_column() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_complaints(id TEXT PRIMARY KEY,record TEXT); CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT,kind TEXT,text TEXT,status TEXT,error TEXT); INSERT INTO runtime_complaints VALUES('bad',x'ff');").unwrap();
+        db.execute(
+            "INSERT INTO runtime_events VALUES('event','lead','complaint',?1,'pending',NULL)",
+            [
+                json!({"complaints":[{"complaint_id":"bad"},{"complaint_id":"absent"}]})
+                    .to_string(),
+            ],
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        let error = reconcile_complaint_notifications(&tx, "lead").unwrap_err();
+        assert!(
+            matches!(error, NotificationDispatchError::Store(studio_runtime_store::StoreError::Sqlite(rusqlite::Error::InvalidColumnType(0, ref name, rusqlite::types::Type::Blob))) if name == "record")
+        );
+    }
 
     #[test]
     fn reconciles_batched_complaints_and_stops_at_first_missing_entry() {
