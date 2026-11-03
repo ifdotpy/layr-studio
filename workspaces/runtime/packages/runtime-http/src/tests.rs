@@ -246,6 +246,7 @@ async fn a_lead_message_from_a_granted_peer_outside_the_tailnet_is_admitted() {
                     capability: Capability::LeadMessages,
                     created_at: 1,
                     revoked_at: None,
+                    peer_label: String::new(),
                 }],
             )?;
             Ok::<_, StoreError>(())

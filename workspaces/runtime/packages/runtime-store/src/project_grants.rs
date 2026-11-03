@@ -254,6 +254,8 @@ mod tests {
         let mut db = rusqlite::Connection::open_in_memory().expect("database");
         let tx = db.transaction().expect("transaction");
         install(&tx).expect("grant table installs");
+        crate::migrations::m2026_11_02_project_grant_peer_label::apply(&tx)
+            .expect("peer label column");
         tx.commit().expect("commit");
         db
     }
@@ -261,7 +263,7 @@ mod tests {
     fn row(capability: &str) -> rusqlite::Result<usize> {
         let db = database();
         db.execute(
-            "INSERT INTO project_grants VALUES('g','peer','PEM','a','b',?1,10,NULL)",
+            "INSERT INTO project_grants(grant_id,peer,peer_public_key,local_project,remote_project,capability,created_at,revoked_at) VALUES('g','peer','PEM','a','b',?1,10,NULL)",
             [capability],
         )
     }
@@ -276,7 +278,7 @@ mod tests {
     fn revocation_is_final() {
         let db = database();
         db.execute(
-            "INSERT INTO project_grants VALUES('g','peer','PEM','a','b','LeadMessages',10,NULL)",
+            "INSERT INTO project_grants(grant_id,peer,peer_public_key,local_project,remote_project,capability,created_at,revoked_at) VALUES('g','peer','PEM','a','b','LeadMessages',10,NULL)",
             [],
         )
         .expect("insert");
@@ -293,7 +295,7 @@ mod tests {
         let db = database();
         assert!(
             db.execute(
-                "INSERT INTO project_grants VALUES('g','peer','PEM','a','b','LeadMessages',10,5)",
+                "INSERT INTO project_grants(grant_id,peer,peer_public_key,local_project,remote_project,capability,created_at,revoked_at) VALUES('g','peer','PEM','a','b','LeadMessages',10,5)",
                 [],
             )
             .is_err()
@@ -315,6 +317,7 @@ mod tests {
                 capability: Capability::LeadMessages,
                 created_at: 1,
                 revoked_at: None,
+                peer_label: String::new(),
             }],
         )
         .expect("grant written");
