@@ -71,39 +71,32 @@ pub fn worker_id(key: &str) -> String {
 /// Explicit effort (including null) wins. A different explicit model uses its
 /// native effort; an omitted model uses the team's review default, then the caller.
 pub(crate) fn execution_settings(
-    actor: &Value,
-    root: &Value,
+    actor: &AgentRecord,
+    root: &AgentRecord,
     requested_model: &studio_runtime_schema::queue_command::Field<String>,
     requested_effort: &EffortSelection,
 ) -> (Option<String>, Option<String>, Option<bool>) {
-    let defaults = &root["reviewDefaults"];
+    let defaults = root.review_defaults.as_deref();
+    let default_model = defaults.and_then(|defaults| defaults.model.as_deref());
     let model = requested_model
         .value()
         .map(String::as_str)
-        .or_else(|| defaults.get("model").and_then(Value::as_str))
-        .or_else(|| actor.get("model").and_then(Value::as_str))
+        .or(default_model)
+        .or(actor.model.as_deref())
         .map(str::to_owned);
     let effort = if !requested_effort.is_inherit() {
         requested_effort.selected().cloned()
-    } else if requested_model.is_missing()
-        && defaults.get("model").and_then(Value::as_str).is_some()
-    {
-        defaults
-            .get("effort")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-    } else if model.as_deref() == actor.get("model").and_then(Value::as_str) {
-        actor
-            .get("effort")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
+    } else if requested_model.is_missing() && default_model.is_some() {
+        defaults.and_then(|defaults| defaults.effort.clone())
+    } else if model.as_deref() == actor.model.as_deref() {
+        actor.effort.value().cloned()
     } else {
         None
     };
     (
         model,
         effort,
-        defaults.get("fastMode").and_then(Value::as_bool),
+        defaults.and_then(|defaults| defaults.fast_mode),
     )
 }
 
@@ -157,7 +150,7 @@ impl ReviewPlan {
                 EffortSelection::Set(value.to_owned())
             });
         let (model, effort, fast_mode) =
-            execution_settings(&actor, &root, &requested_model, &requested_effort);
+            execution_settings(&checked, &checked_root, &requested_model, &requested_effort);
         let fast_mode = fast_mode
             .or_else(|| actor.get("fastMode").and_then(Value::as_bool))
             .unwrap_or(false);
