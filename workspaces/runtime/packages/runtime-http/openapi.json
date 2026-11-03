@@ -58541,6 +58541,22 @@
             ],
             "default": null
           },
+          "providerUnknown": {
+            "description": "Set on a stored provider item whose kind Studio does not know. raw is the provider item as opaque JSON text.",
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "raw": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "raw"
+            ],
+            "type": "object"
+          },
           "reasoningMs": {
             "anyOf": [
               {

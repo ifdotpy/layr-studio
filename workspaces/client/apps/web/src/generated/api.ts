@@ -25551,6 +25551,13 @@ export interface components {
       phase?: null | string | undefined;
       /** @default null */
       previousError?: components["schemas"]["JsonValue"] | null | undefined;
+      /** @description Set on a stored provider item whose kind Studio does not know. raw is the provider item as opaque JSON text. */
+      providerUnknown?:
+        | {
+            kind: string;
+            raw: string;
+          }
+        | undefined;
       /**
        * Reasoningms
        * @default null

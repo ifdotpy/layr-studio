@@ -356,7 +356,11 @@ pub(super) fn apply(
                                 .map(str::to_owned),
                             ),
                     ),
-                    json!({"toolStatus":items::tool_status(&item,method=="item/started"),"turnId":turn(agent,p)}),
+                    items::item_metadata(
+                        kind,
+                        &p["item"],
+                        json!({"toolStatus":items::tool_status(&item,method=="item/started"),"turnId":turn(agent,p)}),
+                    ),
                     at,
                 )?;
             }

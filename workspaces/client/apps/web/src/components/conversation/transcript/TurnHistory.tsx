@@ -37,6 +37,7 @@ import {
 import "./turn-history.css";
 import { messageRenderKey } from "../../message-delivery/messageDelivery";
 import ReasoningDuration from "./ReasoningDuration";
+import ProviderUnknownItem, { providerUnknown } from "./ProviderUnknownItem";
 import HistoryWindow from "./HistoryWindow";
 import { windowHistoryRows } from "./historyWindowModel";
 import QuestionCard from "../../questions/QuestionCard";
@@ -65,6 +66,8 @@ function row(
   requestCards?: RequestCards,
 ) {
   if (requestCards?.has(item.id)) return requestCards.get(item.id);
+  const unknown = providerUnknown(item);
+  if (unknown) return <ProviderUnknownItem {...unknown} />;
   if (isFileChange(item))
     return <ToolCard item={item} agentId={agentId} cwd={cwd} />;
   if (item.role === "reasoning") return <ReasoningDuration item={item} />;
