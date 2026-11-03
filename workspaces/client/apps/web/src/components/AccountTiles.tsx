@@ -288,6 +288,7 @@ function AccountTile({
 }
 
 type AccountTilesProps = {
+  automaticDescription?: string | undefined;
   label: string;
   showLabel?: boolean;
   visibleLabel?: string;
@@ -378,7 +379,10 @@ export function AccountTiles(p: AccountTilesProps) {
                 </Badge>
               </span>
             }
-            description="Prefers a free slot, project order, then fewer active agents."
+            description={
+              p.automaticDescription ||
+              "Prefers a free slot, project order, then fewer active agents."
+            }
             checked={!selected}
             data-selected={!selected || undefined}
             disabled={p.disabled}

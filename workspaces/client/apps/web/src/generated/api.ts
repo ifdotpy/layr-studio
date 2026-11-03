@@ -20427,6 +20427,7 @@ export interface components {
     };
     /** ReviewDefaults */
     ReviewDefaults: {
+      account_key?: string | null | undefined;
       /** Effort */
       effort: string | null;
       /** @description Override Fast mode for native reviews and reviewer tasks. Omission preserves caller inheritance for native reviews and worker-default inheritance for reviewer tasks. */
@@ -20436,6 +20437,7 @@ export interface components {
     };
     /** ReviewDefaultsDto */
     ReviewDefaultsDto: {
+      accountKey?: string | null | undefined;
       /** Effort */
       effort?: null | string | undefined;
       fastMode?: boolean | null | undefined;

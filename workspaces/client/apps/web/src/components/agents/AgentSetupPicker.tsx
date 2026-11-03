@@ -73,29 +73,32 @@ export function AgentSetupPicker(p: AgentSetupPickerProps) {
           {p.readOnlyReason}
         </Text>
       )}
-      {p.role === "review" ? (
-        <Text size="xs" c="dimmed">
-          Uses the caller account.
-        </Text>
-      ) : (
-        <AccountTiles
-          showLabel={false}
-          label={
-            p.accountLabel ||
-            (p.role === "worker" ? "Subagent account" : "Main agent account")
-          }
-          accounts={p.accounts}
-          value={p.accountKey}
-          onChange={(value) => p.onAccount(value || null)}
-          provider={p.provider}
-          onProvider={p.onProvider}
-          providers={p.providers.length > 1 ? p.providers : []}
-          disabled={!!p.readOnlyReason || p.accountDisabled}
-          accountDisabled={p.isAccountDisabled}
-          accountUnavailableReason={p.accountUnavailableReason}
-          automatic={p.automaticAccount}
-        />
-      )}
+      <AccountTiles
+        showLabel={false}
+        label={
+          p.accountLabel ||
+          (p.role === "review"
+            ? "Review account"
+            : p.role === "worker"
+              ? "Subagent account"
+              : "Main agent account")
+        }
+        accounts={p.accounts}
+        value={p.accountKey}
+        onChange={(value) => p.onAccount(value || null)}
+        provider={p.provider}
+        onProvider={p.onProvider}
+        providers={p.providers.length > 1 ? p.providers : []}
+        disabled={!!p.readOnlyReason || p.accountDisabled}
+        accountDisabled={p.isAccountDisabled}
+        accountUnavailableReason={p.accountUnavailableReason}
+        automatic={p.automaticAccount}
+        automaticDescription={
+          p.role === "review"
+            ? "Uses the caller account for native review and the worker default for reviewer tasks."
+            : undefined
+        }
+      />
       {gated("model_change") && (
         <ModelField
           retainCurrent={p.retainCurrentModel}
