@@ -212,7 +212,11 @@ function result(method: string, params: Record<string, unknown>) {
   }
 }
 
-createInterface({ input: process.stdin }).on("line", (line) => {
+const requests = createInterface({ input: process.stdin });
+// The server that started this provider owns stdin. When it ends, for any reason,
+// the control socket below would keep this process alive, so exit with it.
+requests.on("close", () => process.exit(0));
+requests.on("line", (line) => {
   const message = readProviderObject<FixtureRpcMessage>(line);
   if (message.method === undefined) {
     replies.get(message.id)?.(message);

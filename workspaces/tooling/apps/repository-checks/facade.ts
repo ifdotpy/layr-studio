@@ -1152,6 +1152,10 @@ export function gateSteps(root: string, name: string): GateStep[] {
       nodeTest("retired-server", "retired server action witness", [
         "workspaces/tooling/apps/repository-checks/tests/retired-server-action.test.ts",
       ]),
+      nodeTest("fixture-processes", "browser fixture process reaping", [
+        "workspaces/client/apps/web/tests/fixture-process-group.test.ts",
+        "workspaces/client/apps/web/tests/fixtures/rust-ui-fixture.test.ts",
+      ]),
       {
         id: "boundaries",
         label: "workspace boundary guards",
