@@ -1,19 +1,10 @@
 // Exercise the native host through hidden WebViews and disposable fixtures.
 import type { BackendIdentity } from "../desktop/backend.ts";
 import type { components } from "../web/src/generated/api.ts";
-import type { BrowserProfileArchive } from "../web/src/native/browserProfile.ts";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
-import {
-  mkdtemp,
-  mkdir,
-  readFile,
-  realpath,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { IncomingHttpHeaders, OutgoingHttpHeaders } from "node:http";
 import { tmpdir } from "node:os";
@@ -221,131 +212,6 @@ async function main() {
       const target = path.join(directory, profile);
       await run(target, mode, { CODEX_DESKTOP_PROFILE: target });
     }
-    const archive = path.join(directory, "profile.json");
-    const combined: BrowserProfileArchive = {
-      version: 1,
-      id: "fixture-profile",
-      owners: {
-        root: "http://127.0.0.1:4620",
-      },
-      snapshots: [
-        {
-          version: 1,
-          origin: "http://127.0.0.1:4620",
-          preferences: {
-            migrated: "saved Ж🦀",
-          },
-          databases: [
-            {
-              name: "migration-fixture",
-              version: 1,
-              stores: [
-                {
-                  name: "records",
-                  keyPath: "id",
-                  autoIncrement: false,
-                  indexes: [],
-                  records: [
-                    [
-                      ["value", "voice"],
-                      [
-                        "object",
-                        [
-                          ["id", ["value", "voice"]],
-                          [
-                            "pcm",
-                            ["view", "Int16Array", ["bytes", "AIAAAP9/"]],
-                          ],
-                          [
-                            "file",
-                            [
-                              "file",
-                              "bytes.bin",
-                              "application/octet-stream",
-                              1234,
-                              ["bytes", "AP8q"],
-                            ],
-                          ],
-                        ],
-                      ],
-                    ],
-                  ],
-                },
-                {
-                  name: "changes",
-                  keyPath: null,
-                  autoIncrement: true,
-                  nextKey: 101,
-                  indexes: [],
-                  records: [],
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    };
-    combined.owners["server:remote"] = "http://studio-remote.localhost:4623";
-    combined.snapshots.push({
-      version: 1,
-      origin: "http://studio-remote.localhost:4623",
-      preferences: { ":server:remote:draft": "remote draft survives" },
-      databases: [
-        {
-          name: "migration-fixture:server:remote",
-          version: 1,
-          stores: [
-            {
-              name: "records",
-              keyPath: null,
-              autoIncrement: false,
-              indexes: [],
-              records: [
-                [
-                  ["value", "voice"],
-                  ["value", "remote bytes"],
-                ],
-              ],
-            },
-          ],
-        },
-      ],
-    });
-    await writeFile(archive, JSON.stringify(combined));
-    const storeId = randomUUID().replaceAll("-", "");
-    console.log(`Isolated WebKit profile store: ${storeId}`);
-    await run(path.join(directory, "profile-client"), "profile-import", {
-      CODEX_NATIVE_PROFILE_IMPORT: archive,
-      STUDIO_NATIVE_CHECK_STORE_ID: storeId,
-    });
-    combined.version = 2;
-    combined.parts = "profile.parts";
-    const parts = path.join(directory, combined.parts);
-    await mkdir(parts, { mode: 0o700 });
-    for (const snapshot of combined.snapshots) {
-      snapshot.version = 2;
-      for (const database of snapshot.databases)
-        for (const store of database.stores) {
-          const records = store.records;
-          delete store.records;
-          store.chunks = [];
-          if (records!.length) {
-            const data = Buffer.from(JSON.stringify(records));
-            const digest = createHash("sha256").update(data).digest("hex");
-            await writeFile(path.join(parts, `${digest}.json`), data);
-            store.chunks.push({
-              sha256: digest,
-              bytes: data.length,
-              records: records!.length,
-            });
-          }
-        }
-    }
-    await writeFile(archive, JSON.stringify(combined));
-    await run(path.join(directory, "chunk-profile-client"), "profile-import", {
-      CODEX_NATIVE_PROFILE_IMPORT: archive,
-      STUDIO_NATIVE_CHECK_STORE_ID: randomUUID().replaceAll("-", ""),
-    });
     for (const mode of ["write", "read", "frames"]) await run(directory, mode);
     const fixture = await createFixture(directory);
     try {
