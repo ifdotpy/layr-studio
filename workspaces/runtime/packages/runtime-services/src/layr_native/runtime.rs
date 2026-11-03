@@ -27,12 +27,12 @@ pub enum NativeLayrError {
 }
 
 type Result<T> = std::result::Result<T, NativeLayrError>;
-type ProgressSink = Arc<dyn Fn(CopyProgress) + Send + Sync>;
+pub(crate) type ProgressSink = Arc<dyn Fn(CopyProgress) + Send + Sync>;
 
 /// Minimum interval between progress publications, in milliseconds.
 const PROGRESS_PUBLICATION_INTERVAL: Duration = Duration::from_millis(250);
 
-fn progress_channel() -> (
+pub(crate) fn progress_channel() -> (
     ProgressSink,
     tokio::sync::watch::Receiver<Option<CopyProgress>>,
 ) {
@@ -43,7 +43,7 @@ fn progress_channel() -> (
     (sink, receiver)
 }
 
-async fn next_progress(
+pub(crate) async fn next_progress(
     receiver: &mut tokio::sync::watch::Receiver<Option<CopyProgress>>,
     last: Option<tokio::time::Instant>,
 ) -> Option<CopyProgress> {
@@ -70,7 +70,7 @@ fn parse_import_progress(line: &[u8]) -> Option<CopyProgress> {
     })
 }
 
-fn progress_guard(current: &Value, expected: &Value) -> bool {
+pub(crate) fn progress_guard(current: &Value, expected: &Value) -> bool {
     current["id"] == expected["id"]
         && current["epoch"] == expected["epoch"]
         && matches!(current["status"].as_str(), Some("queued" | "starting"))
@@ -852,7 +852,7 @@ fn prepare_files_reporting(
     Ok(result)
 }
 
-async fn publish_progress(
+pub(crate) async fn publish_progress(
     store: &RuntimeStore,
     expected: &Value,
     progress: Option<CopyProgress>,

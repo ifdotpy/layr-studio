@@ -1,5 +1,6 @@
 //! Durable Linux VM project and line preparation shared by action and turn-start paths.
 
+use crate::layr_native::ProgressSink;
 use crate::{
     linux_vm_guest::GuestRpc,
     native_actions::{self, NativeError},
@@ -18,6 +19,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use studio_runtime_schema::layr_progress::{CopyPhase, CopyProgress, CopyUnit};
 use studio_runtime_store::path_identity::CanonicalPath;
 use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore};
 
@@ -44,10 +46,55 @@ impl From<crate::linux_vm_guest::GuestError> for VmProjectUploadError {
 }
 
 pub fn vm_project_archive(source: &Path) -> std::io::Result<VmProjectArchive> {
-    code_archive(source, false)
+    code_archive(source, false, None)
 }
 
-fn code_archive(source: &Path, worktree: bool) -> std::io::Result<VmProjectArchive> {
+fn report(
+    sink: &Option<ProgressSink>,
+    phase: CopyPhase,
+    done: u64,
+    total: Option<u64>,
+    unit: CopyUnit,
+) {
+    if let Some(sink) = sink {
+        sink(CopyProgress {
+            phase,
+            done,
+            total,
+            unit,
+        });
+    }
+}
+
+struct ArchiveProgressReader<'a, R> {
+    inner: R,
+    progress: &'a Option<ProgressSink>,
+    bytes: &'a mut u64,
+}
+
+impl<R: Read> Read for ArchiveProgressReader<'_, R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let count = self.inner.read(buffer)?;
+        if count != 0 {
+            *self.bytes += count as u64;
+            report(
+                self.progress,
+                CopyPhase::Archiving,
+                *self.bytes,
+                None,
+                CopyUnit::Bytes,
+            );
+        }
+        Ok(count)
+    }
+}
+
+fn code_archive(
+    source: &Path,
+    worktree: bool,
+    progress: Option<ProgressSink>,
+) -> std::io::Result<VmProjectArchive> {
+    report(&progress, CopyPhase::Archiving, 0, None, CopyUnit::Bytes);
     let source = CanonicalPath::existing(source)?;
     if !source.is_dir() {
         return Err(std::io::Error::new(
@@ -68,7 +115,16 @@ fn code_archive(source: &Path, worktree: bool) -> std::io::Result<VmProjectArchi
         identities
             .borrow_mut()
             .insert(source.to_path_buf(), vm_archive_identity(&metadata));
-        add_vm_tar_directory(&mut gzip, &source, &source, &exclusions, &identities)?;
+        let mut bytes = 0;
+        add_vm_tar_directory(
+            &mut gzip,
+            &source,
+            &source,
+            &exclusions,
+            &identities,
+            &progress,
+            &mut bytes,
+        )?;
         let _archive_file = gzip.finish()?;
     }
     for (path, before) in identities.into_inner() {
@@ -105,6 +161,8 @@ fn add_vm_tar_directory<W: Write>(
     directory: &Path,
     exclusions: &VmArchiveExclusions,
     identities: &std::cell::RefCell<HashMap<std::path::PathBuf, VmArchiveIdentity>>,
+    progress: &Option<ProgressSink>,
+    bytes: &mut u64,
 ) -> std::io::Result<()> {
     let mut children = fs::read_dir(directory)?.collect::<std::io::Result<Vec<_>>>()?;
     children.sort_by_key(|entry| entry.file_name());
@@ -125,9 +183,13 @@ fn add_vm_tar_directory<W: Write>(
             output.append_symlink(&name, vm_tar_mode(&metadata), &target)?;
         } else if kind.is_dir() {
             output.append_directory(&name, vm_tar_mode(&metadata))?;
-            add_vm_tar_directory(output, root, &path, exclusions, identities)?;
+            add_vm_tar_directory(output, root, &path, exclusions, identities, progress, bytes)?;
         } else if kind.is_file() {
-            let mut file = File::open(&path)?;
+            let mut file = ArchiveProgressReader {
+                inner: File::open(&path)?,
+                progress,
+                bytes,
+            };
             output.append_file(&name, vm_tar_mode(&metadata), metadata.len(), &mut file)?;
         } else {
             return Err(std::io::Error::new(
@@ -727,6 +789,40 @@ impl Preparation<'_> {
         request: &native_actions::Request,
         ticket: &crate::workspace_operations::ProviderTicket,
     ) -> native_actions::Result<()> {
+        let agent_id = AgentId::from(request.agent.as_str());
+        let expected = self
+            .store
+            .read_async("runtime-services/vm-progress", move |connection| {
+                Ok::<_, NativeError>(
+                    AgentRepository::get(connection, &agent_id)?
+                        .ok_or(NativeError::Changed)?
+                        .value(),
+                )
+            })
+            .await?;
+        let (progress, mut receiver) = crate::layr_native::progress_channel();
+        let mut last = None;
+        let task = self.prepare_vm_workspace_reporting(request, ticket, progress);
+        tokio::pin!(task);
+        let result = loop {
+            tokio::select! {
+                result = &mut task => break result,
+                Some(progress) = crate::layr_native::next_progress(&mut receiver, last) => {
+                    drop(crate::layr_native::publish_progress(self.store, &expected, Some(progress)).await);
+                    last = Some(tokio::time::Instant::now());
+                }
+            }
+        };
+        drop(crate::layr_native::publish_progress(self.store, &expected, None).await);
+        result
+    }
+
+    async fn prepare_vm_workspace_reporting(
+        &self,
+        request: &native_actions::Request,
+        ticket: &crate::workspace_operations::ProviderTicket,
+        progress: ProgressSink,
+    ) -> native_actions::Result<()> {
         let request = request.clone();
         let ticket = ticket.clone();
         let agent_id = AgentId::from(request.agent.as_str());
@@ -801,7 +897,7 @@ impl Preparation<'_> {
             project_import = Some(serde_json::json!({
                 "projectId":project_id,"source":source,"requestId":import_request_id,
                 "operation":import_operation,"uploadId":import_operation,
-                "root":upload_root,"phase":"planned"
+                "root":upload_root
             }));
             (
                 "line.bind",
@@ -903,10 +999,11 @@ impl Preparation<'_> {
                             .as_str()
                             .ok_or(NativeError::Invalid("vm-workspace/project"))?,
                     );
+                    let archive_progress = Arc::clone(&progress);
                     archive = Some(
                         studio_runtime_process::blocking_pool::spawn_blocking(
                             "runtime-services/vm-project-archive",
-                            move || vm_project_archive(&source),
+                            move || code_archive(&source, false, Some(archive_progress)),
                         )
                         .await
                         .map_err(|_| NativeError::Unavailable("workspace-state/vm-workspace"))?
@@ -991,13 +1088,6 @@ impl Preparation<'_> {
                 current["startAttempt"]["vmWorkspacePreparation"]["phase"] =
                     serde_json::json!("submitted");
                 current["startAttempt"]["vmWorkspacePreparation"]["error"] = Value::Null;
-                if current["startAttempt"]["vmWorkspacePreparation"]
-                    .get("projectImport")
-                    .is_some()
-                {
-                    current["startAttempt"]["vmWorkspacePreparation"]["projectImport"]["phase"] =
-                        serde_json::json!("planned");
-                }
                 AgentRepository::put(tx, &AgentRecord::from_value(current)?)?;
                 return Ok("new".to_owned());
             }
@@ -1015,87 +1105,94 @@ impl Preparation<'_> {
         }
         let mut bind_params = params;
         if let Some(import) = project_import.as_ref() {
-            let imported =
-                if let Some(existing) = reusable_project {
-                    existing
-                } else {
-                    let archive_ref = archive.as_ref().ok_or(NativeError::Changed)?;
-                    let import_record = import.clone();
-                    let operation = ticket.operation.clone();
-                    let agent_id = request.agent.clone();
-                    let archive_bytes = archive_ref.bytes;
-                    let archive_sha = archive_ref.sha256.clone();
-                    self.store.transaction_with_error(move |tx| {
-                    let mut current =
-                        AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
-                            .ok_or(NativeError::Changed)?
-                            .value();
-                    if current["startAttempt"]["id"] != operation {
-                        return Err(NativeError::Changed);
-                    }
-                    let saved =
-                        &mut current["startAttempt"]["vmWorkspacePreparation"]["projectImport"];
-                    if saved["requestId"] != import_record["requestId"] {
-                        return Err(NativeError::Changed);
-                    }
-                    saved["phase"] = serde_json::json!("uploading");
-                    saved["archiveBytes"] = serde_json::json!(archive_bytes);
-                    saved["archiveSha256"] = serde_json::json!(archive_sha);
-                    AgentRepository::put(tx, &AgentRecord::from_value(current)?)?;
-                    Ok(())
-                }).await?;
-                    let guest_for_upload = Arc::clone(guest);
-                    let import = import.clone();
-                    let archive = archive.take().ok_or(NativeError::Changed)?;
-                    let imported_result = studio_runtime_process::blocking_pool::spawn_blocking(
-                        "runtime-services/vm-project-upload",
-                        move || {
-                            Self::upload_vm_project(guest_for_upload.as_ref(), &import, &archive)
-                        },
-                    )
-                    .await;
-                    let imported_result = match imported_result {
-                        Ok(result) => result,
-                        Err(_) => Err(VmProjectUploadError {
-                            proven_not_sent: false,
-                            detail: "guest task outcome unknown".into(),
-                        }),
-                    };
-                    match imported_result {
-                        Ok(imported) => imported,
-                        Err(error) => {
-                            let not_sent = error.proven_not_sent;
-                            let detail = error.detail;
-                            let agent_id = request.agent.clone();
-                            let operation = ticket.operation.clone();
-                            self.store.transaction_with_error(move |tx| {
-                            let mut current = AgentRepository::get(
-                                tx,
-                                &AgentId::from(agent_id.as_str()),
-                            )?
-                            .ok_or(NativeError::Changed)?
-                            .value();
-                            if current["startAttempt"]["id"] != operation {
-                                return Err(NativeError::Changed);
-                            }
-                            current["startAttempt"]["vmWorkspacePreparation"]["phase"] =
-                                serde_json::json!(if not_sent { "not_sent" } else { "unknown" });
-                            current["startAttempt"]["vmWorkspacePreparation"]["projectImport"][
-                                "phase"
-                            ] = serde_json::json!(if not_sent { "not_sent" } else { "unknown" });
-                            current["startAttempt"]["vmWorkspacePreparation"]["error"] =
-                                serde_json::json!(detail);
-                            AgentRepository::put(tx, &AgentRecord::from_value(current)?)?;
-                            Ok(())
-                        }).await?;
-                            return Err(if not_sent {
-                                NativeError::Unavailable("workspace-state/vm-workspace")
-                            } else {
-                                NativeError::Unknown
-                            });
+            let imported = if let Some(existing) = reusable_project {
+                existing
+            } else {
+                let archive_ref = archive.as_ref().ok_or(NativeError::Changed)?;
+                let import_record = import.clone();
+                let operation = ticket.operation.clone();
+                let agent_id = request.agent.clone();
+                let archive_bytes = archive_ref.bytes;
+                let archive_sha = archive_ref.sha256.clone();
+                self.store
+                    .transaction_with_error(move |tx| {
+                        let mut current =
+                            AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
+                                .ok_or(NativeError::Changed)?
+                                .value();
+                        if current["startAttempt"]["id"] != operation {
+                            return Err(NativeError::Changed);
                         }
-                    }
+                        let saved =
+                            &mut current["startAttempt"]["vmWorkspacePreparation"]["projectImport"];
+                        if saved["requestId"] != import_record["requestId"] {
+                            return Err(NativeError::Changed);
+                        }
+                        saved["archiveBytes"] = serde_json::json!(archive_bytes);
+                        saved["archiveSha256"] = serde_json::json!(archive_sha);
+                        AgentRepository::put(tx, &AgentRecord::from_value(current)?)?;
+                        Ok(())
+                    })
+                    .await?;
+                let guest_for_upload = Arc::clone(guest);
+                let import = import.clone();
+                let archive = archive.take().ok_or(NativeError::Changed)?;
+                let upload_progress = Arc::clone(&progress);
+                let imported_result = studio_runtime_process::blocking_pool::spawn_blocking(
+                    "runtime-services/vm-project-upload",
+                    move || {
+                        Self::upload_vm_project(
+                            guest_for_upload.as_ref(),
+                            &import,
+                            &archive,
+                            Some(upload_progress),
+                        )
+                    },
+                )
+                .await;
+                let imported_result = match imported_result {
+                    Ok(result) => result,
+                    Err(_) => Err(VmProjectUploadError {
+                        proven_not_sent: false,
+                        detail: "guest task outcome unknown".into(),
+                    }),
                 };
+                match imported_result {
+                    Ok(imported) => imported,
+                    Err(error) => {
+                        let not_sent = error.proven_not_sent;
+                        let detail = error.detail;
+                        let agent_id = request.agent.clone();
+                        let operation = ticket.operation.clone();
+                        self.store
+                            .transaction_with_error(move |tx| {
+                                let mut current =
+                                    AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
+                                        .ok_or(NativeError::Changed)?
+                                        .value();
+                                if current["startAttempt"]["id"] != operation {
+                                    return Err(NativeError::Changed);
+                                }
+                                current["startAttempt"]["vmWorkspacePreparation"]["phase"] =
+                                    serde_json::json!(if not_sent {
+                                        "not_sent"
+                                    } else {
+                                        "unknown"
+                                    });
+                                current["startAttempt"]["vmWorkspacePreparation"]["error"] =
+                                    serde_json::json!(detail);
+                                AgentRepository::put(tx, &AgentRecord::from_value(current)?)?;
+                                Ok(())
+                            })
+                            .await?;
+                        return Err(if not_sent {
+                            NativeError::Unavailable("workspace-state/vm-workspace")
+                        } else {
+                            NativeError::Unknown
+                        });
+                    }
+                }
+            };
             let state_dir = self.store.state_dir().to_path_buf();
             let project_id = import["projectId"]
                 .as_str()
@@ -1122,25 +1219,18 @@ impl Preparation<'_> {
             )
             .await
             .map_err(|_| NativeError::Unavailable("workspace-state/vm-project-registration"))??;
-            let operation = ticket.operation.clone();
-            let agent_id = request.agent.clone();
-            self.store
-                .transaction_with_error(move |tx| {
-                    let mut current = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
-                        .ok_or(NativeError::Changed)?
-                        .value();
-                    if current["startAttempt"]["id"] != operation {
-                        return Err(NativeError::Changed);
-                    }
-                    current["startAttempt"]["vmWorkspacePreparation"]["projectImport"]["phase"] =
-                        serde_json::json!("imported");
-                    AgentRepository::put(tx, &AgentRecord::from_value(current)?)?;
-                    Ok(())
-                })
-                .await?;
             bind_params = serde_json::json!({
                 "projectId":imported["projectId"],"agentId":request.agent,"line":"main"
             });
+        }
+        if !is_lead {
+            report(
+                &Some(Arc::clone(&progress)),
+                CopyPhase::CreatingLine,
+                0,
+                None,
+                CopyUnit::Files,
+            );
         }
         let result = match guest_call(
             Arc::clone(guest),
@@ -1198,6 +1288,7 @@ impl Preparation<'_> {
             .as_str()
             .expect("validated VM project line")
             .to_owned();
+        let expected = agent.clone();
         let agent_id = request.agent.clone();
         let operation = ticket.operation.clone();
         self.store
@@ -1211,6 +1302,14 @@ impl Preparation<'_> {
                         .is_some_and(|value| !value.is_null())
                 {
                     return Err(NativeError::Changed);
+                }
+                // Clear before changing workspace generation, under the same guard.
+                if crate::layr_native::progress_guard(&current, &expected)
+                    && current["startWait"]["reason"] == "workspace_copy"
+                    && current["startWait"]["epoch"] == expected["epoch"]
+                    && let Some(object) = current.as_object_mut()
+                {
+                    object.remove("startWait");
                 }
                 for (source, target) in [
                     ("cwd", "cwd"),
@@ -1290,6 +1389,7 @@ impl Preparation<'_> {
         guest: &dyn GuestRpc,
         intent: &Value,
         archive: &VmProjectArchive,
+        progress: Option<ProgressSink>,
     ) -> Result<Value, VmProjectUploadError> {
         use crate::linux_vm_guest::GuestError;
 
@@ -1337,6 +1437,14 @@ impl Preparation<'_> {
         let mut reader = File::open(archive.file.path()).map_err(|_| GuestError::InvalidRequest)?;
         let mut chunk = vec![0u8; VM_UPLOAD_CHUNK_BYTES];
         let mut sequence = 0usize;
+        let mut uploaded = 0u64;
+        report(
+            &progress,
+            CopyPhase::Uploading,
+            uploaded,
+            Some(archive.bytes),
+            CopyUnit::Bytes,
+        );
         loop {
             let count = reader
                 .read(&mut chunk)
@@ -1354,6 +1462,14 @@ impl Preparation<'_> {
                 Some(&format!("{operation}:chunk:{sequence}")),
                 short_timeout,
             )?;
+            uploaded += count as u64;
+            report(
+                &progress,
+                CopyPhase::Uploading,
+                uploaded,
+                Some(archive.bytes),
+                CopyUnit::Bytes,
+            );
             sequence += 1;
         }
         guest.call(
@@ -1362,7 +1478,14 @@ impl Preparation<'_> {
             Some(&format!("{operation}:upload")),
             Duration::from_secs(1810),
         )?;
-        let project = guest.call(
+        report(
+            &progress,
+            CopyPhase::ImportingProject,
+            0,
+            None,
+            CopyUnit::Files,
+        );
+        let project = guest.stream(
             "project.import",
             &serde_json::json!({
                 "projectId":project_id,"source":root,"owner":Value::Null,
@@ -1370,6 +1493,17 @@ impl Preparation<'_> {
             }),
             Some(&format!("{operation}:import")),
             Duration::from_secs(1810),
+            &mut |frame| {
+                if frame["event"] == "workspace.copy"
+                    && let Ok(value) = serde_json::from_value::<CopyProgress>(frame["data"].clone())
+                    && value.phase == CopyPhase::ImportingProject
+                {
+                    if let Some(sink) = &progress {
+                        sink(value);
+                    }
+                }
+                Ok(())
+            },
         )?;
         if project.get("projectId").and_then(Value::as_str) != Some(project_id) {
             return Err(GuestError::InvalidRequest.into());
@@ -1682,7 +1816,7 @@ mod tests {
             params: &Value,
             request_id: Option<&str>,
             _timeout: Duration,
-            _on_frame: &mut dyn FnMut(Value) -> Result<(), GuestError>,
+            on_frame: &mut dyn FnMut(Value) -> Result<(), GuestError>,
         ) -> Result<Value, GuestError> {
             self.calls
                 .lock()
@@ -1711,6 +1845,9 @@ mod tests {
                     })
                 }
                 "project.import" => {
+                    on_frame(
+                        serde_json::json!({"event":"workspace.copy","data":{"phase":"importing_project","done":4,"unit":"files"}}),
+                    )?;
                     *self.project_id.lock().unwrap() =
                         params["projectId"].as_str().map(str::to_owned);
                     Ok(serde_json::json!({"projectId":params["projectId"]}))
@@ -1728,6 +1865,123 @@ mod tests {
         }
     }
 
+    struct PausedUploadGuest {
+        inner: UploadPreflightGuest,
+        reached: tokio::sync::Notify,
+        release: (Mutex<bool>, std::sync::Condvar),
+    }
+
+    impl GuestRpc for PausedUploadGuest {
+        fn stream(
+            &self,
+            method: &str,
+            params: &Value,
+            request_id: Option<&str>,
+            timeout: Duration,
+            on_frame: &mut dyn FnMut(Value) -> Result<(), GuestError>,
+        ) -> Result<Value, GuestError> {
+            if method == "upload.commit" {
+                self.reached.notify_one();
+                let (lock, condvar) = &self.release;
+                let mut released = lock.lock().unwrap();
+                while !*released {
+                    released = condvar.wait(released).unwrap();
+                }
+            }
+            self.inner
+                .stream(method, params, request_id, timeout, on_frame)
+        }
+    }
+
+    #[tokio::test]
+    async fn upload_progress_is_published_and_cleared() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("project");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("file"), "content").unwrap();
+        let store = Arc::new(
+            RuntimeStore::open(Some(&directory.path().join("state")))
+                .await
+                .unwrap(),
+        );
+        let agent = AgentRecord::from_value(serde_json::json!({"compactions":0,"accountKey":"default",
+            "id":"vm-lead","rootId":"vm-lead","epoch":1,"status":"starting","provider":"codex",
+            "executionMode":"vm","isLead":true,"autoWake":true,"cwd":source,"hostProjectPath":source,
+            "projectId":"project-1","startAttempt":{"id":"attempt-1"}})).unwrap();
+        let saved = agent.clone();
+        store
+            .transaction(move |tx| AgentRepository::put(tx, &saved))
+            .await
+            .unwrap();
+        let guest = Arc::new(PausedUploadGuest {
+            inner: UploadPreflightGuest::new(""),
+            reached: tokio::sync::Notify::new(),
+            release: (Mutex::new(false), std::sync::Condvar::new()),
+        });
+        let run_store = Arc::clone(&store);
+        let run_guest = Arc::clone(&guest);
+        let task = tokio::spawn(async move {
+            prepare_lead(
+                &run_store,
+                run_guest,
+                "vm-lead",
+                "attempt-1",
+                "turn:attempt-1",
+                1,
+            )
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(30), guest.reached.notified())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let progress = AgentRepository::get(&store.test_reader().unwrap(), &agent.id)
+            .unwrap()
+            .unwrap()
+            .value()["startWait"]
+            .clone();
+        *guest.release.0.lock().unwrap() = true;
+        guest.release.1.notify_one();
+        task.await.unwrap().unwrap();
+        assert_eq!(progress["progress"]["phase"], "uploading");
+        assert_eq!(progress["progress"]["done"], progress["progress"]["total"]);
+        let saved = AgentRepository::get(&store.test_reader().unwrap(), &agent.id)
+            .unwrap()
+            .unwrap()
+            .value();
+        assert!(saved.get("startWait").is_none());
+    }
+
+    #[test]
+    fn upload_reports_acknowledged_bytes() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(&vec![1; VM_UPLOAD_CHUNK_BYTES + 7]).unwrap();
+        let archive = VmProjectArchive {
+            file,
+            bytes: (VM_UPLOAD_CHUNK_BYTES + 7) as u64,
+            sha256: "fixture".into(),
+        };
+        let guest = UploadPreflightGuest::new("");
+        let intent =
+            serde_json::json!({"projectId":"p", "operation":"o", "uploadId":"u", "root":"/p"});
+        let values = Arc::new(Mutex::new(Vec::new()));
+        let capture = Arc::clone(&values);
+        let sink = Arc::new(move |progress| capture.lock().unwrap().push(progress));
+        Preparation::upload_vm_project(&guest, &intent, &archive, Some(sink))
+            .ok()
+            .unwrap();
+        let values = values.lock().unwrap();
+        assert!(values.iter().any(
+            |p: &studio_runtime_schema::layr_progress::CopyProgress| p.phase
+                == studio_runtime_schema::layr_progress::CopyPhase::Uploading
+                && p.done == archive.bytes
+                && p.total == Some(archive.bytes)
+        ));
+        assert!(values.iter().any(|p| p.phase == CopyPhase::ImportingProject
+            && p.done == 4
+            && p.unit == CopyUnit::Files));
+    }
+
     #[test]
     fn upload_identity_conflict_reuses_the_existing_guest_project() {
         let archive_file = tempfile::NamedTempFile::new().expect("archive fixture");
@@ -1743,7 +1997,7 @@ mod tests {
             "projectId":"stable-project", "operation":"stable-operation",
             "uploadId":"stable-operation", "root":"/projects/stable"
         });
-        let result = Preparation::upload_vm_project(&guest, &intent, &archive)
+        let result = Preparation::upload_vm_project(&guest, &intent, &archive, None)
             .ok()
             .expect("reuse existing project after upload identity conflict");
         assert_eq!(result["projectId"], "stable-project");
@@ -1775,6 +2029,7 @@ mod tests {
                 "id":"vm-lead", "rootId":"vm-lead", "epoch":1, "status":"starting",
                 "provider":"codex", "executionMode":"vm", "isLead":true, "autoWake":true,
                 "cwd":source, "hostProjectPath":source, "projectId":"project-1",
+                "startWait":{"reason":"workspace_copy","epoch":1,"progress":{"phase":"uploading","done":1,"unit":"bytes"}},
                 "startAttempt":{"id":"attempt-1"}
             }))
             .unwrap();
@@ -1806,6 +2061,7 @@ mod tests {
             saved["startAttempt"]["vmWorkspacePreparation"]["phase"],
             "not_sent"
         );
+        assert!(saved.get("startWait").is_none());
         drop(connection);
 
         prepare_lead(
@@ -1842,6 +2098,7 @@ mod tests {
             saved["startAttempt"]["vmWorkspacePreparation"]["phase"],
             "completed"
         );
+        assert!(saved.get("startWait").is_none());
     }
 
     #[tokio::test]
@@ -1892,9 +2149,10 @@ mod tests {
                 saved["startAttempt"]["vmWorkspacePreparation"]["phase"],
                 "unknown"
             );
-            assert_eq!(
-                saved["startAttempt"]["vmWorkspacePreparation"]["projectImport"]["phase"],
-                "unknown"
+            assert!(
+                saved["startAttempt"]["vmWorkspacePreparation"]["projectImport"]
+                    .get("phase")
+                    .is_none()
             );
         }
 

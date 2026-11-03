@@ -176,7 +176,7 @@ class Projects:
             atomic_json(marker, result)
         return result
 
-    async def dispatch(self, request_id, method, params):
+    async def dispatch(self, request_id, method, params, emit=None):
         project = project_id(params.get("projectId"))
         if method == "project.ensure":
             return await self.ensure(project)
@@ -195,6 +195,11 @@ class Projects:
                     and source.resolve() == source and source.is_dir(), "The import source must be a completed upload root")
             owner = self.owner(project)
             require(params.get("owner") in {None, owner["owner"]}, "The project owner differs from its installation identity")
+            if emit is not None:
+                try:
+                    await emit("workspace.copy", {"phase": "importing_project", "done": 0, "unit": "files"})
+                except (OSError, asyncio.TimeoutError):
+                    pass
             if incremental:
                 expect(exists, "The layr project does not exist", "not_found")
                 previous = await self.ensure(project)
