@@ -868,7 +868,7 @@ pub async fn start_account_worker_with_publication_sink(
             stop: stop.clone(),
         },
         queued_commands: VecDeque::new(),
-        resume_preparations: true,
+        resume_preparations: PreparationResume::Pending,
         preparation_waits: BTreeMap::new(),
         preparations: JoinSet::new(),
         preparation_aborts: Vec::new(),
@@ -908,10 +908,10 @@ pub async fn start_account_worker_with_publication_sink(
         publication_drain: None,
         delivered_publications: Vec::new(),
         closing: false,
-        restart_recovery_started: false,
+        restart_recovery_started: RestartRecoveryPhase::Pending,
         restart_recovery: None,
         connection_recovery: tokio::task::JoinSet::new(),
-        connection_recovery_active: false,
+        connection_recovery_active: ConnectionRecoveryPhase::Idle,
         managed_callbacks: JoinSet::new(),
     };
     let mut cancelled_owner = stop.subscribe();
@@ -1045,6 +1045,24 @@ impl Preparing {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PreparationResume {
+    Pending,
+    Complete,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RestartRecoveryPhase {
+    Pending,
+    Started,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConnectionRecoveryPhase {
+    Idle,
+    Active,
+}
+
 struct Worker {
     retained_requests: BTreeMap<RequestId, retained::PendingRequest>,
     retained_frames: BTreeMap<String, retained_frame::PendingFrame>,
@@ -1085,7 +1103,7 @@ struct Worker {
     retained_session: retained::RetainedSessionPort,
     queued_commands: VecDeque<AccountCommand>,
     /// Resume durable pending preparations once, after the session is ready.
-    resume_preparations: bool,
+    resume_preparations: PreparationResume,
     /// One event-driven wake per agent whose preparation is pending.
     preparation_waits: BTreeMap<String, (i64, tokio::task::AbortHandle)>,
     /// Concurrent per-agent turn preparations (see `turn_preparation`).
@@ -1143,10 +1161,10 @@ struct Worker {
     /// Whether accepted callback records may be waiting to start: set by a
     /// journal commit, a finished handler or answer, and at startup.
     callback_scan: bool,
-    restart_recovery_started: bool,
+    restart_recovery_started: RestartRecoveryPhase,
     restart_recovery: Option<JoinHandle<()>>,
     connection_recovery: tokio::task::JoinSet<()>,
-    connection_recovery_active: bool,
+    connection_recovery_active: ConnectionRecoveryPhase,
     managed_callbacks: JoinSet<ManagedCallbackResult>,
 }
 
@@ -1448,11 +1466,11 @@ impl Worker {
             if self.closing || *self.stop.borrow() {
                 return Ok(());
             }
-            if !self.restart_recovery_started
+            if self.restart_recovery_started == RestartRecoveryPhase::Pending
                 && self.session.status.borrow().initialization == InitializationStatus::Ready
             {
                 self.restore_existing_vm_sessions().await?;
-                self.restart_recovery_started = true;
+                self.restart_recovery_started = RestartRecoveryPhase::Started;
                 let first_pass = restart_recovery::FirstPass {
                     bridge: self.bridge.clone(),
                     account: self.account.clone(),
@@ -1469,10 +1487,10 @@ impl Worker {
             {
                 self.flush().await?;
             }
-            if self.resume_preparations
+            if self.resume_preparations == PreparationResume::Pending
                 && self.session.status.borrow().initialization == InitializationStatus::Ready
             {
-                self.resume_preparations = false;
+                self.resume_preparations = PreparationResume::Complete;
                 self.resume_pending_preparations().await?;
                 continue;
             }
@@ -1500,7 +1518,7 @@ impl Worker {
                 && self.pending.is_empty()
                 && self.retained_requests.is_empty()
                 && self.effects.is_empty()
-                && !self.resume_preparations
+                && self.resume_preparations == PreparationResume::Complete
                 && self.preparation_waits.is_empty()
                 && self.preparations.is_empty()
                 && self.queued_commands.is_empty()
@@ -1670,7 +1688,9 @@ impl Worker {
             ServeSignal::Event(Some(event)) => self.event(event).await?,
             ServeSignal::VmEvent(Some(event)) => self.handle_vm_message(event).await?,
             ServeSignal::VmEvent(None) => return Ok(false),
-            ServeSignal::ConnectionRecovery => self.connection_recovery_active = false,
+            ServeSignal::ConnectionRecovery => {
+                self.connection_recovery_active = ConnectionRecoveryPhase::Idle
+            }
             ServeSignal::ManagedCallback(callback) => {
                 let (cursor, generation, actor, epoch, handled) = callback
                     .ok_or(WorkerError::TaskFailed)?
@@ -1770,10 +1790,10 @@ impl Worker {
                 authorization,
                 reply,
             } => {
-                if self.connection_recovery_active {
+                if self.connection_recovery_active == ConnectionRecoveryPhase::Active {
                     let _sent = reply.send(Err(retained::PortError::Capacity));
                 } else {
-                    self.connection_recovery_active = true;
+                    self.connection_recovery_active = ConnectionRecoveryPhase::Active;
                     let request = connection_recovery::Command {
                         bridge: self.bridge.clone(),
                         account: self.account.clone(),

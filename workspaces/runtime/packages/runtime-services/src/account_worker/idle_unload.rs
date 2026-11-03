@@ -1098,9 +1098,9 @@ impl Worker {
             && self.vm_notification_waiters.is_empty()
             && self.request_waiters.is_empty()
             && self.restart_recovery.is_none()
-            && !self.connection_recovery_active
+            && self.connection_recovery_active == super::ConnectionRecoveryPhase::Idle
             && self.connection_recovery.is_empty()
-            && !self.resume_preparations
+            && self.resume_preparations == super::PreparationResume::Complete
             && self.preparation_waits.is_empty()
             && self.preparations.is_empty()
     }
