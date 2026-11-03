@@ -668,6 +668,10 @@ pub fn subject(state: &Path) -> Option<String> {
     origin.starts_with("https://").then(|| origin.to_owned())
 }
 
+fn subscribed_subject(subscribed: bool, read: impl FnOnce() -> Option<String>) -> Option<String> {
+    if subscribed { read() } else { None }
+}
+
 /// Push the due sign-in alerts until shutdown. Nothing runs while no device subscribed or
 /// the server has no https remote access origin.
 pub async fn run(
@@ -684,7 +688,7 @@ pub async fn run(
         let subscribed = Subscriptions::new(&state)
             .list()
             .is_ok_and(|rows| !rows.is_empty());
-        let Some(subject) = subject(&state).filter(|_| subscribed) else {
+        let Some(subject) = subscribed_subject(subscribed, || subject(&state)) else {
             continue;
         };
         let Ok(cards) = pending_cards(&store).await else {
