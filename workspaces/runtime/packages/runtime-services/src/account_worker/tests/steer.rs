@@ -416,8 +416,16 @@ async fn transport_close_before_reply_is_unconfirmed_and_never_resent(provider: 
     // can be submitted after the worker barrier. The rule under test is that the
     // steer is never resent, so a history read is answered and anything else fails.
     worker_barrier_with_history(&worker, &mut peer).await;
+    // `wake` only queues a command. The barrier returns after the worker handled
+    // it, and answers any history read that handling submits.
     state.wake(&worker).await;
-    frame(&mut peer, json!({"method":"test/barrier","params":{}})).await;
+    worker_barrier_with_history(&worker, &mut peer).await;
+    // Waiting for this frame to settle answers any history read the worker
+    // submits meanwhile. Any other write fails in the drain below.
+    let cursor = peer
+        .frame(json!({"method":"test/barrier","params":{}}))
+        .await;
+    acknowledged_with_history(&mut peer, cursor, None).await;
     while let Ok(wire) = peer.writes.try_recv() {
         assert_eq!(
             wire.value["method"], "thread/read",
