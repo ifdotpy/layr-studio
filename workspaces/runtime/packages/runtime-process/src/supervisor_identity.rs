@@ -94,9 +94,29 @@ impl ProcStat {
 
 #[cfg(target_os = "linux")]
 pub(crate) fn boot_id() -> Result<String> {
-    Ok(fs::read_to_string("/proc/sys/kernel/random/boot_id")?
-        .trim()
-        .to_owned())
+    static BOOT_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    cached_boot_id(&BOOT_ID, || {
+        fs::read_to_string("/proc/sys/kernel/random/boot_id")
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn cached_boot_id(
+    cache: &std::sync::OnceLock<String>,
+    read: impl FnOnce() -> std::io::Result<String>,
+) -> Result<String> {
+    if let Some(value) = cache.get() {
+        return Ok(value.clone());
+    }
+    let value = read()?.trim().to_owned();
+    if value.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Empty kernel boot identity",
+        )
+        .into());
+    }
+    Ok(cache.get_or_init(|| value).clone())
 }
 
 /// The boot session UUID cannot change while this process runs, so the first
@@ -570,6 +590,46 @@ pub(super) fn valid_start(value: &str) -> bool {
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)]
 mod tests {
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn boot_id_success_is_cached() {
+        use super::cached_boot_id;
+        use std::{cell::Cell, sync::OnceLock};
+        let cache = OnceLock::new();
+        let reads = Cell::new(0);
+        let read = || {
+            reads.set(reads.get() + 1);
+            Ok("boot-id".to_owned())
+        };
+        assert_eq!(cached_boot_id(&cache, read).unwrap(), "boot-id");
+        assert_eq!(cached_boot_id(&cache, read).unwrap(), "boot-id");
+        assert_eq!(reads.get(), 1);
+    }
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn boot_id_cache_retries_errors_and_empty_reads() {
+        use super::cached_boot_id;
+        use std::{cell::Cell, sync::OnceLock};
+        let cache = OnceLock::new();
+        let reads = Cell::new(0);
+        let read = |result: std::io::Result<&str>| {
+            reads.set(reads.get() + 1);
+            result.map(str::to_owned)
+        };
+        assert!(
+            cached_boot_id(&cache, || read(Err(std::io::Error::other("unavailable")))).is_err()
+        );
+        assert!(cached_boot_id(&cache, || read(Ok("  \n"))).is_err());
+        assert_eq!(
+            cached_boot_id(&cache, || read(Ok("boot-id\n"))).unwrap(),
+            "boot-id"
+        );
+        assert_eq!(
+            cached_boot_id(&cache, || read(Ok("changed"))).unwrap(),
+            "boot-id"
+        );
+        assert_eq!(reads.get(), 3);
+    }
     use super::*;
     use std::process::Command;
 
