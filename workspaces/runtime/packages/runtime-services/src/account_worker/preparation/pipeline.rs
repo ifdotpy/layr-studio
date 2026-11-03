@@ -9,6 +9,15 @@ use studio_runtime_providers::ProviderKind;
 use studio_runtime_store::Transaction;
 use studio_runtime_store::path_identity::CanonicalPath;
 
+fn thread_refusal(reason: thread::Refusal) -> WorkerError {
+    let detail = if let thread::Refusal::Blocked(reason) = reason {
+        format!("{reason:?}")
+    } else {
+        format!("{reason:?}")
+    };
+    refusal(format!("thread-preparation/{detail}"))
+}
+
 pub(crate) struct CommitGuard {
     idle_compaction_mode: Option<studio_runtime_schema::idle_compaction::Mode>,
     native_params: Option<Value>,
@@ -767,7 +776,7 @@ fn native_turn_params(
     );
     let params = thread::turn_params(snapshot, input);
     snapshot.settings.daybreak_enabled = enabled;
-    let mut params = params.map_err(|reason| refusal(format!("thread-preparation/{reason:?}")))?;
+    let mut params = params.map_err(thread_refusal)?;
     if let Some(program) = program {
         params.insert("cyberAccessProgram".into(), json!(program));
     }
@@ -1220,8 +1229,7 @@ async fn prepare_native_thread_for_transfer_owner(
             // does not validate Daybreak at this point.
             params: Value::Object(attempt.params),
         }),
-        thread::Outcome::Refuse(reason) => Err(refusal(format!("thread-preparation/{reason:?}"))),
-        thread::Outcome::Hold(reason) => Err(refusal(format!("thread-preparation/{reason:?}"))),
+        thread::Outcome::Refuse(reason) => Err(thread_refusal(reason)),
         thread::Outcome::Ready(_) | thread::Outcome::Resume(_) => {
             Err(refusal("native-thread/start-required".into()))
         }
@@ -1259,10 +1267,7 @@ pub(crate) async fn prepare_review_thread(
     ) {
         thread::Outcome::Start(attempt) => attempt,
         thread::Outcome::Refuse(reason) => {
-            return Err(refusal(format!("thread-preparation/{reason:?}")));
-        }
-        thread::Outcome::Hold(reason) => {
-            return Err(refusal(format!("thread-preparation/{reason:?}")));
+            return Err(thread_refusal(reason));
         }
         thread::Outcome::Ready(_) | thread::Outcome::Resume(_) => {
             return Err(refusal("native-review/thread-start-required".into()));
@@ -1691,10 +1696,7 @@ pub(crate) async fn prepare_safety_retry(
     ) {
         thread::Outcome::Resume(attempt) => attempt.params,
         thread::Outcome::Refuse(reason) => {
-            return Err(refusal(format!("thread-preparation/{reason:?}")));
-        }
-        thread::Outcome::Hold(reason) => {
-            return Err(refusal(format!("thread-preparation/{reason:?}")));
+            return Err(thread_refusal(reason));
         }
         thread::Outcome::Ready(_) | thread::Outcome::Start(_) => {
             return Err(refusal("safety-retry/source-thread-required".into()));
@@ -1905,8 +1907,7 @@ pub(crate) async fn prepare_ready(
                 )
                 .await;
             }
-            thread::Outcome::Hold(e) => return Err(refusal(format!("thread-preparation/{e:?}"))),
-            thread::Outcome::Refuse(e) => return Err(refusal(format!("thread-preparation/{e:?}"))),
+            thread::Outcome::Refuse(e) => return Err(thread_refusal(e)),
             // This connection loaded the thread with these settings: start the turn.
             thread::Outcome::Ready(_) => method = Method::TurnStart,
         }
@@ -1936,7 +1937,7 @@ pub(crate) async fn prepare_ready(
             has_assets: events.iter().any(|e| !e.metadata.assets.is_empty()),
         },
     )
-    .map_err(|e| refusal(format!("thread-preparation/{e:?}")))?;
+    .map_err(thread_refusal)?;
     apply_vm_reviewer_permissions(&mut params, vm_reviewer.as_ref());
     if snapshot.account.provider == studio_runtime_providers::ProviderKind::Claude {
         let agent_id = intent.agent_id.clone();
@@ -2015,8 +2016,7 @@ async fn thread_request(
 }
 fn continuation_gate(snapshot: &thread::Snapshot, attempt: &str) -> Result<(), WorkerError> {
     match thread::plan(snapshot, attempt, "continuation-admission") {
-        thread::Outcome::Hold(reason) => Err(refusal(format!("thread-preparation/{reason:?}"))),
-        thread::Outcome::Refuse(reason) => Err(refusal(format!("thread-preparation/{reason:?}"))),
+        thread::Outcome::Refuse(reason) => Err(thread_refusal(reason)),
         thread::Outcome::Start(_) => Err(refusal("thread-preparation/thread-required".into())),
         thread::Outcome::Resume(_) | thread::Outcome::Ready(_) => Ok(()),
     }

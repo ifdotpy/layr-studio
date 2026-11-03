@@ -191,9 +191,10 @@ pub enum Refusal {
     EmptyThreadIdentity,
     PreparationIdentity,
     MalformedCatalog,
+    Blocked(HoldReason),
 }
 
-/// All holds retain queued input. Replan after the documented observation changes.
+/// A temporary condition that prevents thread preparation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HoldReason {
@@ -330,7 +331,6 @@ pub enum Outcome {
     Ready(LoadedIdentity),
     Start(Box<PreparedAttempt>),
     Resume(Box<PreparedAttempt>),
-    Hold(HoldReason),
     Refuse(Refusal),
 }
 
@@ -540,16 +540,16 @@ pub fn plan(s: &Snapshot, next_attempt_id: &str, transport_ticket: &str) -> Outc
         return Outcome::Refuse(reason);
     }
     if s.closed || s.actor.deleted {
-        return Outcome::Hold(HoldReason::Inactive);
+        return Outcome::Refuse(Refusal::Blocked(HoldReason::Inactive));
     }
     if let Some(reason) = s.admission
         && !(reason == HoldReason::NativeRelease
             && unsubmitted_inspection(s, s.actor.thread_id.as_deref()))
     {
-        return Outcome::Hold(reason);
+        return Outcome::Refuse(Refusal::Blocked(reason));
     }
     if !s.account.available {
-        return Outcome::Hold(HoldReason::ConnectionUnavailable);
+        return Outcome::Refuse(Refusal::Blocked(HoldReason::ConnectionUnavailable));
     }
     if s.pending.as_ref().is_some_and(|p| {
         p.agent_id != s.actor.id || p.epoch != s.actor.epoch || p.account_key != s.account.key
@@ -560,10 +560,10 @@ pub fn plan(s: &Snapshot, next_attempt_id: &str, transport_ticket: &str) -> Outc
         .as_ref()
         .is_some_and(|p| p.connection_id == s.account.connection_id)
     {
-        return Outcome::Hold(HoldReason::PreparationPending);
+        return Outcome::Refuse(Refusal::Blocked(HoldReason::PreparationPending));
     }
     if s.workspace == WorkspaceReadiness::Pending {
-        return Outcome::Hold(HoldReason::WorkspacePending);
+        return Outcome::Refuse(Refusal::Blocked(HoldReason::WorkspacePending));
     }
     let source = s
         .actor

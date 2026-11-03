@@ -426,14 +426,24 @@ async fn drive(
         let body = if let Some(response) = recorded {
             response
         } else {
-            let (method, params) = request_for_stage(
+            let prepared = request_for_stage(
                 Arc::clone(&store),
                 resources,
                 &operation,
                 stage,
                 scope.generation,
             )
-            .await?;
+            .await;
+            let (method, params) = match prepared {
+                Err(error @ Error::Preparation(_)) => {
+                    operation.initial.stage = Stage::Failed;
+                    operation.dispatch.state = DispatchState::Rejected;
+                    operation.error = Some(error.to_string());
+                    persist_operation(&store, &mut operation).await?;
+                    return Err(error);
+                }
+                result => result?,
+            };
             if !persist_intent(
                 &store,
                 &mut operation,
