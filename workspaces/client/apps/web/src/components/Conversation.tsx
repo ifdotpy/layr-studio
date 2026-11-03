@@ -7,11 +7,7 @@ import {
 } from "../generated/api.ts";
 import { randomUUID } from "../uuid";
 import { sendsTextFile } from "../commands";
-import {
-  ProviderKind,
-  providerCapabilities,
-} from "../generated/providerKind.ts";
-import { capabilityControls } from "../providerControls.ts";
+import { ProviderKind, providerSupports } from "../generated/providerKind.ts";
 import type { ComponentProps, ReactNode } from "react";
 import { IdleCompactionNotice } from "./IdleCompactionNotice";
 import {
@@ -811,7 +807,10 @@ export default function Conversation(p: {
         : p.agent,
     [p.agent, liveAgent, p.id],
   );
-  const controls = capabilityControls(providerCapabilities(agent?.provider));
+  const controls = {
+    steer: providerSupports(agent?.provider, "steer"),
+    fork: providerSupports(agent?.provider, "fork"),
+  };
   useVisibleChatResult(
     scroll,
     p.agent,
