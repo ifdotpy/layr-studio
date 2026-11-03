@@ -129,6 +129,54 @@ async fn open(state: &State, bridge: StoreBridge, account: &Account) -> (Peer, A
 
 #[cfg(unix)]
 #[tokio::test]
+async fn legacy_disk_wait_fails_before_waiting_for_a_full_account_slot() {
+    let mut state = State::new().await;
+    state.bridge.disk_gate = Some(Arc::new(crate::disk_space::DiskGate::with_sampler(
+        state.root.clone(),
+        Arc::new(|_| Some(10 * 1024 * 1024 * 1024)),
+    )));
+    let agents = agents(&state, ProviderKind::Codex, 1).await;
+    let account = Account::new(&state, ProviderKind::Codex);
+    account
+        .driver
+        .set_start_throttle("default", throttle(8, 0, 1))
+        .unwrap();
+    let (mut peer, mut worker) = open(&state, state.bridge.clone(), &account).await;
+    wake_agent(&state, &worker, &agents[0]).await;
+    let (started, _) = serve_start(&mut peer, &agents).await;
+    assert_eq!(started, agents[0]);
+    let legacy = agents[1].clone();
+    state
+        .bridge
+        .store
+        .transaction_with_error(move |tx| {
+            let mut agent = AgentRepository::get(tx, &AgentId::from(legacy.as_str()))?.unwrap();
+            agent.start_wait = Some(
+                studio_runtime_schema::agent_progress::AgentStartWait::Disk { epoch: agent.epoch },
+            );
+            AgentRepository::put(tx, &agent)
+        })
+        .await
+        .unwrap();
+    let mut changes = state.bridge.agent_changes();
+    wake_agent(&state, &worker, &agents[1]).await;
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if record_of(&state, &agents[1]).await["status"] == "failed" {
+                break;
+            }
+            changes.changed().await.unwrap();
+        }
+    })
+    .await
+    .expect("legacy disk wait becomes a failure before account admission");
+    assert_eq!(state.event_status(&agents[1]).await, "failed");
+    assert!(peer.writes.try_recv().is_err());
+    worker.shutdown().await.unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn held_queued_agent_does_not_consume_a_start_burst() {
     let state = State::new().await;
     let agent = state.agent.clone();
