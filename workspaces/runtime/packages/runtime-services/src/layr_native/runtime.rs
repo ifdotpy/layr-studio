@@ -27,11 +27,7 @@ pub enum NativeLayrError {
 }
 
 type Result<T> = std::result::Result<T, NativeLayrError>;
-<<<<<<< head
 pub(crate) type ProgressSink = Arc<dyn Fn(CopyProgress) + Send + Sync>;
-=======
-pub(super) type ProgressSink = Arc<dyn Fn(CopyProgress) + Send + Sync>;
->>>>>>> d04b9849c37a739084de01a1a31ae504
 
 /// Minimum interval between progress publications, in milliseconds.
 pub(super) const PROGRESS_PUBLICATION_INTERVAL: Duration = Duration::from_millis(250);
