@@ -548,18 +548,18 @@ test("workspace ui", async ({ page: testPage }) => {
       .last()
       .getByRole("button", { name: "Close", exact: true })
       .click();
-    // Interrupt the held turn before a checkpoint. The shared root remains read-only for restore.
+    // Pause the held turn before a checkpoint. The shared root remains read-only for restore.
     await post(
       "/api/commands",
-      standaloneCommand("stop", lead.id, { descendants: true }),
+      standaloneCommand("pause", lead.id, { descendants: true }),
     );
-    // Stop only interrupts: the chat stays active and the turn ends.
+    // Pause ends the turn and leaves the agent idle.
     await poll(async () => {
       const agent = (await readTestState(origin)).runtime.agents.find(
         (a) => a.id === lead.id,
       );
-      return agent?.inFlight !== true && agent?.status !== "paused";
-    }, "interrupted turn settled");
+      return agent?.inFlight !== true;
+    }, "paused turn settled");
     await section("Checkpoints");
     await drawer
       .getByRole("textbox", { name: "Checkpoint name" })
