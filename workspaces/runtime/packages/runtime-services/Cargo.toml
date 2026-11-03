@@ -75,6 +75,7 @@ socket2 = "=0.6.5"
 linux-raw-sys = { version = "=0.12.1", features = ["btrfs", "ioctl"] }
 
 [dev-dependencies]
+gungraun = "=0.17.2"
 strum.workspace = true
 studio-test-deps = { path = "../test-deps" }
 studio-runtime-services = { path = ".", features = ["test-support"] }
@@ -88,3 +89,7 @@ workspace = true
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
+
+[[bench]]
+name = "hot_paths"
+harness = false
