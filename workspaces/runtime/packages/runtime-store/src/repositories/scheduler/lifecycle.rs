@@ -114,6 +114,7 @@ impl SchedulerRepository {
                 },
             ));
             agent.status = AgentStatus::Interrupted;
+            agent.start_wait = None;
             agent.in_flight = Some(false);
             agent.auto_wake = Some(false);
             agent.set_error_receipt(json!(Self::UNCLEAN_START_HOLD))?;

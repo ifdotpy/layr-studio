@@ -455,6 +455,8 @@ mod tests {
             .unwrap();
         agent.in_flight = Some(true);
         agent.auto_wake = Some(true);
+        agent.start_wait =
+            Some(studio_runtime_schema::agent_progress::AgentStartWait::Disk { epoch: 4 });
         AgentRepository::put(&connection, &agent).unwrap();
         let transaction = connection.transaction().expect("recovery transaction");
         SchedulerRepository::hold_unclean_starts(&transaction).expect("hold uncertain start");
@@ -465,6 +467,10 @@ mod tests {
             .expect("agent remains");
         assert_eq!(agent.in_flight, Some(false));
         assert_eq!(agent.auto_wake, Some(false));
+        assert!(
+            agent.start_wait.is_none(),
+            "an uncertain start is not still waiting"
+        );
         let statuses: Vec<String> = connection
             .prepare("SELECT status FROM runtime_events WHERE id IN ('first','tie') ORDER BY id")
             .expect("statuses")

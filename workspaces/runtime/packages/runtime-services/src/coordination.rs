@@ -383,6 +383,22 @@ fn post_managed_message(
     let blockers = admission.workspace(transaction, &agent)?;
 
     // A manual send wakes a stopped agent in the same transaction as the event.
+    if matches!(
+        agent.native_failure_hold.value(),
+        Some(studio_runtime_store::NativeFailureHold::Terminal { .. })
+    ) {
+        return Err(CoordinationError::InvalidRequest(
+            "This agent cannot resume. Copy the input into a new agent or message.",
+        ));
+    }
+    if matches!(&agent.start_outcome_hold,
+        Some(studio_runtime_store::StoredStartOutcomeHold::Known(studio_runtime_store::StartOutcomeHold::Held { reason: Some(reason), .. }))
+            if reason == studio_runtime_store::SchedulerRepository::UNCLEAN_START_HOLD)
+    {
+        agent.start_outcome_hold = None;
+        agent.start_wait = None;
+        agent.start_attempt = None;
+    }
     agent.auto_wake = Some(true);
     agent.error = studio_runtime_schema::queue_command::Field::Null;
     agent.clear_native_failure_hold();
@@ -1311,6 +1327,84 @@ mod tests {
             },
             &AllowAdmission,
         )
+    }
+
+    #[test]
+    fn new_message_releases_unclean_start_without_replaying_old_input() {
+        let mut connection = database();
+        let mut agent = studio_runtime_store::AgentRepository::get(&connection, &"lead".into())
+            .unwrap()
+            .unwrap();
+        agent.start_outcome_hold = Some(studio_runtime_store::StoredStartOutcomeHold::Known(
+            studio_runtime_store::StartOutcomeHold::Held {
+                operation_id: None,
+                connection_generation: None,
+                reason: Some(studio_runtime_store::SchedulerRepository::UNCLEAN_START_HOLD.into()),
+                attempt_id: Some("old-attempt".into()),
+                extra: Default::default(),
+            },
+        ));
+        agent.start_wait =
+            Some(studio_runtime_schema::agent_progress::AgentStartWait::Disk { epoch: 0 });
+        studio_runtime_store::AgentRepository::put(&connection, &agent).unwrap();
+        connection.execute("INSERT INTO runtime_events VALUES('old','lead','user','old input','uncertain',1,0,NULL,NULL)", []).unwrap();
+        let tx = connection.transaction().unwrap();
+        let id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+        post_lead(&tx, &id, "new input").unwrap();
+        let saved = studio_runtime_store::AgentRepository::get(&tx, &"lead".into())
+            .unwrap()
+            .unwrap();
+        assert!(saved.start_outcome_hold.is_none());
+        assert!(saved.start_wait.is_none());
+        let old: String = tx
+            .query_row(
+                "SELECT status FROM runtime_events WHERE id='old'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(old, "uncertain");
+    }
+
+    #[test]
+    fn terminal_fault_rejects_new_message_and_preserves_reserved_input() {
+        let mut connection = database();
+        let mut agent = studio_runtime_store::AgentRepository::get(&connection, &"lead".into())
+            .unwrap()
+            .unwrap();
+        agent.native_failure_hold = studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_store::NativeFailureHold::Terminal {
+                terminal_fault: studio_runtime_store::TerminalFault::InvalidAttempt,
+            },
+        );
+        studio_runtime_store::AgentRepository::put(&connection, &agent).unwrap();
+        connection.execute("INSERT INTO runtime_events VALUES('old','lead','user','old input','reserved',1,0,NULL,NULL)", []).unwrap();
+        let tx = connection.transaction().unwrap();
+        let id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+        assert!(post_lead(&tx, &id, "new input").is_err());
+        let saved = studio_runtime_store::AgentRepository::get(&tx, &"lead".into())
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            saved.native_failure_hold.value(),
+            Some(studio_runtime_store::NativeFailureHold::Terminal { .. })
+        ));
+        let (status, text): (String, String) = tx
+            .query_row(
+                "SELECT status,text FROM runtime_events WHERE id='old'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((status.as_str(), text.as_str()), ("reserved", "old input"));
+        let new_count: i64 = tx
+            .query_row(
+                "SELECT count(*) FROM runtime_events WHERE id=?1",
+                [&id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(new_count, 0);
     }
 
     #[test]

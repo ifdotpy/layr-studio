@@ -752,7 +752,19 @@ pub struct AgentRecord {
 #[serde(untagged)]
 pub enum NativeFailureHold {
     Boolean(bool),
+    Terminal {
+        #[serde(rename = "terminalFault")]
+        terminal_fault: TerminalFault,
+    },
     Unreadable(Value),
+}
+
+/// Terminal data faults preserve their evidence and cannot be resumed by a message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalFault {
+    InvalidAttempt,
+    PendingReceipt,
 }
 
 /// Normalize transfer values on decode while retaining historical JSON on disk.
@@ -844,6 +856,7 @@ impl AgentRecord {
     pub fn native_failure_held(&self) -> bool {
         match self.native_failure_hold.value() {
             Some(NativeFailureHold::Boolean(value)) => *value,
+            Some(NativeFailureHold::Terminal { .. }) => true,
             Some(NativeFailureHold::Unreadable(value)) => crate::truthy(Some(value)),
             None => false,
         }

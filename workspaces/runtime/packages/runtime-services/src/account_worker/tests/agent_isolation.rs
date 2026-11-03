@@ -439,7 +439,17 @@ async fn poisoned_durable_effect_is_parked_once_and_does_not_end_the_worker() {
     worker_barrier(&worker).await;
     assert_running(&mut worker).await;
     let held = record_of(&state, &a).await;
-    assert_held(&held, &format!("account_worker/{a}"));
+    assert_eq!(held["status"], "failed", "{held}");
+    assert_eq!(
+        held["nativeFailureHold"]["terminalFault"],
+        "pending_receipt"
+    );
+    assert!(
+        held["error"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("account_worker/{a}"))
+    );
     worker.shutdown().await.unwrap();
 
     // A restarted worker has nothing to run again and stays up.
@@ -754,6 +764,56 @@ async fn held_agent_keeps_its_unsent_input_and_a_message_starts_it_once() {
     assert!(peer.writes.try_recv().is_err(), "the input is sent once");
     assert_running(&mut worker).await;
     worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn invalid_attempt_identity_is_a_terminal_error_with_input_preserved() {
+    let state = State::new().await;
+    let id = state.agent.clone();
+    let claim_id = id.clone();
+    let epoch = state.epoch;
+    state
+        .bridge
+        .run(move |store| async move {
+            store::claim(Arc::clone(&store), "default", &claim_id, epoch)
+                .await?
+                .unwrap();
+            Ok(())
+        })
+        .await
+        .unwrap();
+    corrupt(
+        &state,
+        &id,
+        "UPDATE runtime_agents SET record=json_remove(record,'$.startAttempt.id') WHERE id=?1",
+    )
+    .await;
+    let fault_id = id.clone();
+    state
+        .bridge
+        .run(move |store| async move {
+            scheduler::lifecycle_transaction_with(&store, move |tx| {
+                agent_fault::hold_agent(
+                    tx,
+                    None,
+                    &fault_id,
+                    agent_fault::FaultStage::TurnPreparation,
+                    "invalid attempt",
+                )?;
+                Ok::<_, WorkerError>(())
+            })
+            .await
+        })
+        .await
+        .unwrap();
+    let held = record_of(&state, &id).await;
+    assert_eq!(held["status"], "failed");
+    assert_eq!(
+        held["nativeFailureHold"]["terminalFault"],
+        "invalid_attempt"
+    );
+    assert!(!held["error"].as_str().unwrap().contains("retry"));
+    assert_eq!(state.event_status("input").await, "reserved");
 }
 
 #[tokio::test]
