@@ -314,6 +314,12 @@ pub(super) fn operation_with_preflight_in_store(
         }
     }
     preflight()?;
+    // On Linux this check is read-only and refuses a daemon-owned partial project.
+    // Keep the failed receipt intact when no retry can start.
+    #[cfg(target_os = "linux")]
+    if let Some(project) = retry_import {
+        super::failed_import::discard_in_store(state_dir, root, project)?;
+    }
     let mut options = OpenOptions::new();
     options.create_new(true).write(true);
     #[cfg(unix)]
@@ -331,6 +337,7 @@ pub(super) fn operation_with_preflight_in_store(
         File::open(&folder)?.sync_all()?;
     }
     let outcome = (|| {
+        #[cfg(not(target_os = "linux"))]
         if let Some(project) = retry_import {
             super::failed_import::discard_in_store(state_dir, root, project)?;
         }
@@ -1296,6 +1303,42 @@ esac
                     .as_bytes()
             );
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn failed_import_cleanup_refusal_preserves_original_receipt() {
+        let state = tempfile::tempdir().unwrap();
+        let root = store_path(state.path());
+        let project = "a".repeat(64);
+        let id = format!("import:{project}");
+        let intent = json!({"project": project, "source": "/source"});
+        let folder = settings::metadata(state.path(), &root).join("receipts");
+        fs::create_dir_all(&folder).unwrap();
+        fs::create_dir_all(root.join("projects").join(&project)).unwrap();
+        let path = folder.join(format!(
+            "{}.json",
+            studio_runtime_store::sha256_hex(id.as_bytes())
+        ));
+        let original = OperationReceipt::failed(&id, &intent, "original import failure")
+            .bytes()
+            .unwrap();
+        fs::write(&path, &original).unwrap();
+        let error = operation_with_preflight_in_store(
+            state.path(),
+            &root,
+            &id,
+            &intent,
+            || Ok(()),
+            || panic!("must not retry"),
+        )
+        .expect_err("cleanup must refuse");
+        assert!(
+            error
+                .to_string()
+                .contains("requires daemon-owned subvolume removal")
+        );
+        assert_eq!(fs::read(path).unwrap(), original);
     }
 
     #[test]
