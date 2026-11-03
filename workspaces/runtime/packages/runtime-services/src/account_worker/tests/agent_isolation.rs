@@ -488,8 +488,84 @@ async fn journal_keeps_reading_behind_a_completion_no_request_can_bind() {
     tokio::time::timeout(PROGRESS_DEADLINE, progress)
         .await
         .expect("the journal keeps reading and settling provider frames");
-    assert_held(&record_of(&state, &a).await, "has no bound attempt");
+    let record = record_of(&state, &a).await;
+    assert_eq!(record["status"], "completed", "{record}");
+    assert_eq!(record["inFlight"], false, "{record}");
+    assert_ne!(record["nativeFailureHold"], true, "{record}");
+    assert_eq!(record["lastCompletedTurn"], "turn", "{record}");
     assert_running(&mut worker).await;
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn uncorrelated_completion_fails_without_holding_or_replaying_input() {
+    let state = State::new().await;
+    let agent = state.agent.clone();
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    let start = state.start(&mut peer, &worker).await;
+    peer.accepted(&start).await;
+    corrupt(&state, &agent,
+        "UPDATE runtime_agents SET record=json_remove(record,'$.startAttempt.turnId','$.turnId') WHERE id=?1").await;
+    corrupt(&state, &agent,
+        "UPDATE runtime_execution_attempts SET record=json_remove(record,'$.turnId') WHERE run IN (SELECT id FROM runtime_execution_runs WHERE agent=?1)").await;
+    corrupt(
+        &state,
+        &agent,
+        "UPDATE runtime_events SET status='dispatching',turn_id=NULL WHERE agent=?1",
+    )
+    .await;
+    let cursor = peer.frame(json!({"method":"turn/completed","params":{"threadId":"fake-thread-0","turn":{"id":"turn","status":"completed"}}})).await;
+    peer.acknowledged_at_least(cursor).await;
+    worker_barrier(&worker).await;
+    let record = record_of(&state, &agent).await;
+    assert_eq!(record["status"], "failed", "{record}");
+    assert_eq!(record["inFlight"], false, "{record}");
+    assert_ne!(record["nativeFailureHold"], true, "{record}");
+    assert_eq!(state.event_status("input").await, "uncertain");
+    assert!(
+        record["error"].to_string().contains("could not be matched"),
+        "{record}"
+    );
+    assert!(
+        peer.writes.try_recv().is_err(),
+        "no provider input is repeated"
+    );
+    let id = agent.clone();
+    state
+        .bridge
+        .run(move |store| async move {
+            scheduler::lifecycle_transaction_with(&store, move |tx| {
+                let message_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+                crate::coordination::post_message_with_admission(
+                    tx,
+                    crate::coordination::PostManagedMessage {
+                        room: &id,
+                        id: &message_id,
+                        text: "next message",
+                        delivery: studio_runtime_schema::delivery::DeliveryMoment::CurrentTurn,
+                        assets: &[],
+                    },
+                    &crate::message_admission::PreparedAdmission::default(),
+                )
+                .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
+                Ok::<_, WorkerError>(())
+            })
+            .await
+        })
+        .await
+        .unwrap();
+    let next = state.start(&mut peer, &worker).await;
+    assert!(
+        next["params"]["input"].to_string().contains("next message"),
+        "{next}"
+    );
+    assert!(
+        !next["params"]["input"]
+            .to_string()
+            .contains("Review comment"),
+        "{next}"
+    );
     worker.shutdown().await.unwrap();
 }
 
