@@ -913,6 +913,114 @@ mod tests {
         .expect("invalid moment refused");
     }
 
+    fn database_with_kind_check() -> Connection {
+        let connection = database();
+        connection
+            .execute_batch(
+                "DROP TABLE runtime_events;
+                 CREATE TABLE runtime_events(id TEXT PRIMARY KEY, agent TEXT NOT NULL,
+                   kind TEXT NOT NULL CHECK(kind IN ('user','followup')), text TEXT NOT NULL,
+                   status TEXT NOT NULL, created REAL NOT NULL, epoch INTEGER NOT NULL,
+                   turn_id TEXT, error TEXT);",
+            )
+            .expect("kind-checked events table");
+        connection
+    }
+
+    fn stored_event_count(connection: &Connection, id: &str) -> i64 {
+        connection
+            .query_row(
+                "SELECT count(*) FROM runtime_events WHERE id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .expect("event count reads")
+    }
+
+    #[test]
+    fn event_refused_by_store_is_an_error_and_is_not_stored() {
+        let mut connection = database_with_kind_check();
+        let agent = AgentRepository::get(&connection, &AgentId::from("a"))
+            .expect("agent reads")
+            .expect("agent exists");
+        let refused = with_transaction(&mut connection, |transaction| {
+            enqueue_event(
+                transaction,
+                &agent,
+                "peer-lead:refused".to_owned(),
+                "peer_lead_message",
+                "hello".to_owned(),
+                1.0,
+            )
+        });
+        assert!(refused.is_err(), "unknown kind must be reported");
+        assert_eq!(stored_event_count(&connection, "peer-lead:refused"), 0);
+    }
+
+    #[test]
+    fn duplicate_event_with_same_content_is_a_no_op() {
+        let mut connection = database_with_kind_check();
+        let agent = AgentRepository::get(&connection, &AgentId::from("a"))
+            .expect("agent reads")
+            .expect("agent exists");
+        let write = |connection: &mut Connection| {
+            with_transaction(connection, |transaction| {
+                enqueue_event(
+                    transaction,
+                    &agent,
+                    "peer-lead:same".to_owned(),
+                    "user",
+                    "hello".to_owned(),
+                    1.0,
+                )
+            })
+        };
+        assert!(write(&mut connection).expect("first write stores"));
+        assert!(!write(&mut connection).expect("same replay is a no-op"));
+        assert_eq!(stored_event_count(&connection, "peer-lead:same"), 1);
+    }
+
+    #[test]
+    fn duplicate_event_id_keeps_the_first_row() {
+        let mut connection = database_with_kind_check();
+        let agent = AgentRepository::get(&connection, &AgentId::from("a"))
+            .expect("agent reads")
+            .expect("agent exists");
+        with_transaction(&mut connection, |transaction| {
+            enqueue_event(
+                transaction,
+                &agent,
+                "peer-lead:changed".to_owned(),
+                "user",
+                "original".to_owned(),
+                1.0,
+            )
+        })
+        .expect("first write stores");
+        let changed = with_transaction(&mut connection, |transaction| {
+            enqueue_event(
+                transaction,
+                &agent,
+                "peer-lead:changed".to_owned(),
+                "user",
+                "different".to_owned(),
+                1.0,
+            )
+        });
+        assert!(
+            !changed.expect("a repeated id is a no-op"),
+            "a repeated id stores nothing"
+        );
+        let text: String = connection
+            .query_row(
+                "SELECT text FROM runtime_events WHERE id='peer-lead:changed'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("stored text reads");
+        assert_eq!(text, "original");
+    }
+
     fn fixture_request_id(label: &str) -> String {
         static ISSUANCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
         let root = uuid::Uuid::parse_str(
