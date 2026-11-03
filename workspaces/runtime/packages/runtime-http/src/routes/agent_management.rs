@@ -1082,7 +1082,7 @@ mod native_review_preflight_tests {
                     .expect("VM lead exists")
                     .value();
                 let intent = &agent["startAttempt"]["vmWorkspacePreparation"]["projectImport"];
-                assert!(intent.get("phase").is_none());
+                assert_eq!(intent["phase"], "uploading");
                 assert!(intent["projectId"].as_str().is_some());
                 assert!(intent["requestId"].as_str().is_some());
                 assert!(intent["source"].as_str().is_some());
@@ -1409,10 +1409,9 @@ mod native_review_preflight_tests {
             saved["startAttempt"]["vmWorkspacePreparation"]["phase"],
             "completed"
         );
-        assert!(
-            saved["startAttempt"]["vmWorkspacePreparation"]["projectImport"]
-                .get("phase")
-                .is_none()
+        assert_eq!(
+            saved["startAttempt"]["vmWorkspacePreparation"]["projectImport"]["phase"],
+            "imported"
         );
     }
 

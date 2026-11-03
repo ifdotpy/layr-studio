@@ -897,7 +897,7 @@ impl Preparation<'_> {
             project_import = Some(serde_json::json!({
                 "projectId":project_id,"source":source,"requestId":import_request_id,
                 "operation":import_operation,"uploadId":import_operation,
-                "root":upload_root
+                "root":upload_root,"phase":"planned"
             }));
             (
                 "line.bind",
@@ -1088,6 +1088,9 @@ impl Preparation<'_> {
                 current["startAttempt"]["vmWorkspacePreparation"]["phase"] =
                     serde_json::json!("submitted");
                 current["startAttempt"]["vmWorkspacePreparation"]["error"] = Value::Null;
+                if current["startAttempt"]["vmWorkspacePreparation"].get("projectImport").is_some() {
+                    current["startAttempt"]["vmWorkspacePreparation"]["projectImport"]["phase"] = serde_json::json!("planned");
+                }
                 AgentRepository::put(tx, &AgentRecord::from_value(current)?)?;
                 return Ok("new".to_owned());
             }
@@ -1128,6 +1131,7 @@ impl Preparation<'_> {
                         if saved["requestId"] != import_record["requestId"] {
                             return Err(NativeError::Changed);
                         }
+                        saved["phase"] = serde_json::json!("uploading");
                         saved["archiveBytes"] = serde_json::json!(archive_bytes);
                         saved["archiveSha256"] = serde_json::json!(archive_sha);
                         AgentRepository::put(tx, &AgentRecord::from_value(current)?)?;
@@ -1179,6 +1183,12 @@ impl Preparation<'_> {
                                     } else {
                                         "unknown"
                                     });
+                                current["startAttempt"]["vmWorkspacePreparation"]["projectImport"]
+                                    ["phase"] = serde_json::json!(if not_sent {
+                                    "not_sent"
+                                } else {
+                                    "unknown"
+                                });
                                 current["startAttempt"]["vmWorkspacePreparation"]["error"] =
                                     serde_json::json!(detail);
                                 AgentRepository::put(tx, &AgentRecord::from_value(current)?)?;
@@ -1219,6 +1229,22 @@ impl Preparation<'_> {
             )
             .await
             .map_err(|_| NativeError::Unavailable("workspace-state/vm-project-registration"))??;
+            let operation = ticket.operation.clone();
+            let agent_id = request.agent.clone();
+            self.store
+                .transaction_with_error(move |tx| {
+                    let mut current = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
+                        .ok_or(NativeError::Changed)?
+                        .value();
+                    if current["startAttempt"]["id"] != operation {
+                        return Err(NativeError::Changed);
+                    }
+                    current["startAttempt"]["vmWorkspacePreparation"]["projectImport"]["phase"] =
+                        serde_json::json!("imported");
+                    AgentRepository::put(tx, &AgentRecord::from_value(current)?)?;
+                    Ok(())
+                })
+                .await?;
             bind_params = serde_json::json!({
                 "projectId":imported["projectId"],"agentId":request.agent,"line":"main"
             });
@@ -1621,6 +1647,30 @@ mod tests {
         Mutex,
         atomic::{AtomicBool, Ordering},
     };
+
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct OldProjectImport {
+        project_id: String,
+        source: String,
+        request_id: String,
+        operation: String,
+        upload_id: String,
+        root: String,
+        phase: OldProjectImportPhase,
+        archive_bytes: Option<u64>,
+        archive_sha256: Option<String>,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum OldProjectImportPhase {
+        Planned,
+        Uploading,
+        Imported,
+        NotSent,
+        Unknown,
+    }
 
     #[test]
     fn imported_vm_project_is_registered_for_host_mac_sync() {
@@ -2098,6 +2148,20 @@ mod tests {
             saved["startAttempt"]["vmWorkspacePreparation"]["phase"],
             "completed"
         );
+        let old: OldProjectImport = serde_json::from_value(
+            saved["startAttempt"]["vmWorkspacePreparation"]["projectImport"].clone(),
+        )
+        .expect("older binaries can read the persisted import");
+        assert!(matches!(old.phase, OldProjectImportPhase::Imported));
+        assert!(
+            !old.project_id.is_empty()
+                && !old.source.is_empty()
+                && !old.request_id.is_empty()
+                && !old.operation.is_empty()
+                && !old.upload_id.is_empty()
+                && !old.root.is_empty()
+        );
+        assert!(old.archive_bytes.is_some() && old.archive_sha256.is_some());
         assert!(saved.get("startWait").is_none());
     }
 
@@ -2149,10 +2213,9 @@ mod tests {
                 saved["startAttempt"]["vmWorkspacePreparation"]["phase"],
                 "unknown"
             );
-            assert!(
-                saved["startAttempt"]["vmWorkspacePreparation"]["projectImport"]
-                    .get("phase")
-                    .is_none()
+            assert_eq!(
+                saved["startAttempt"]["vmWorkspacePreparation"]["projectImport"]["phase"],
+                "unknown"
             );
         }
 
