@@ -1966,6 +1966,7 @@ mod tests {
                     | other @ Method::BrowserWait
                     | other @ Method::ClaudeCommands
                     | other @ Method::ClaudeMoveExport
+                    | other @ Method::ClaudeMoveImport
                     | other @ Method::ClaudeMoveIdentity
                     | other @ Method::ClaudeMovePreflight
                     | other @ Method::ClaudeMoveProof

@@ -2022,6 +2022,7 @@ impl VoiceProviderPort for BlockingProvider {
                 | Method::BrowserWait
                 | Method::ClaudeCommands
                 | Method::ClaudeMoveExport
+                | Method::ClaudeMoveImport
                 | Method::ClaudeMoveIdentity
                 | Method::ClaudeMovePreflight
                 | Method::ClaudeMoveProof

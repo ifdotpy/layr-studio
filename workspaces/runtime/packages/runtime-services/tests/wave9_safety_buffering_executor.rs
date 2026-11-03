@@ -228,6 +228,7 @@ impl AccountSessionPort for Session<'_> {
                 | Method::BrowserWait
                 | Method::ClaudeCommands
                 | Method::ClaudeMoveExport
+                | Method::ClaudeMoveImport
                 | Method::ClaudeMoveIdentity
                 | Method::ClaudeMovePreflight
                 | Method::ClaudeMoveProof
@@ -483,6 +484,7 @@ impl AccountSessionPort for StartBlockingSession {
                 | Method::BrowserWait
                 | Method::ClaudeCommands
                 | Method::ClaudeMoveExport
+                | Method::ClaudeMoveImport
                 | Method::ClaudeMoveIdentity
                 | Method::ClaudeMovePreflight
                 | Method::ClaudeMoveProof

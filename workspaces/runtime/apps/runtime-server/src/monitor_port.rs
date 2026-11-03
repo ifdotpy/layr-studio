@@ -2970,6 +2970,7 @@ mod tests {
                         | Method::BrowserWait
                         | Method::ClaudeCommands
                         | Method::ClaudeMoveExport
+                        | Method::ClaudeMoveImport
                         | Method::ClaudeMoveIdentity
                         | Method::ClaudeMovePreflight
                         | Method::ClaudeMoveProof
@@ -3787,6 +3788,7 @@ mod tests {
                         | Method::BrowserWait
                         | Method::ClaudeCommands
                         | Method::ClaudeMoveExport
+                        | Method::ClaudeMoveImport
                         | Method::ClaudeMoveIdentity
                         | Method::ClaudeMovePreflight
                         | Method::ClaudeMoveProof
