@@ -4866,3 +4866,52 @@ async fn retained_vm_thread_start_provenance_survives_next_generation_attach() {
         .await
         .unwrap();
 }
+
+/// An actor-less read-only model list is not blocked by an unload of the
+/// agent's thread that waits for its turn recovery.
+#[tokio::test]
+async fn actorless_model_list_is_not_blocked_by_another_threads_unload_recovery() {
+    let state = State::new().await;
+    let mut peer = Peer::new();
+    let worker = peer.worker(state.bridge.clone()).await;
+    let start = state.start(&mut peer, &worker).await;
+    peer.accepted(&start).await;
+    let port = worker.retained_session();
+    // The provider unloads the thread while a turn is attached to it.
+    let _pending = peer
+        .frame(json!({"method":"thread/closed","params":{"threadId":"fake-thread-0"}}))
+        .await;
+    let mut call = request(&state, &port, "model-list-during-unload-recovery");
+    call.actor = None;
+    call.expected_scope = Some(port.scope().clone());
+    call.method = Method::ModelList;
+    call.params = json!({"limit":100,"includeHidden":true});
+    let sender = port.clone();
+    let task = tokio::spawn(async move { sender.request(call.clone()).await });
+    let wire = peer.write("model/list").await;
+    peer.reply(&wire, json!({"data":[],"nextCursor":null}))
+        .await;
+    assert_eq!(
+        task.await.unwrap().unwrap().result,
+        RequestResult::Reply(json!({"data":[],"nextCursor":null}))
+    );
+}
+
+/// A thread unload while its turn/start answer is still pending settles that
+/// attempt as unknown. The input stays pending and nothing is sent again.
+#[tokio::test]
+async fn thread_unload_settles_the_attached_start_as_unknown_without_resend() {
+    let state = State::new().await;
+    let mut peer = Peer::new();
+    let worker = peer.worker(state.bridge.clone()).await;
+    let _start = state.start(&mut peer, &worker).await;
+    let cursor = peer
+        .frame(json!({"method":"thread/closed","params":{"threadId":"fake-thread-0"}}))
+        .await;
+    peer.acknowledged(cursor).await;
+    assert_eq!(state.event_status("input").await, "uncertain");
+    assert!(
+        peer.writes.try_recv().is_err(),
+        "the start is not sent again"
+    );
+}
