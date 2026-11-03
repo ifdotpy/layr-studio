@@ -82,14 +82,12 @@ fn resolve_binary_in_path(path: &std::ffi::OsStr) -> Result<PathBuf, NativeLayrC
 #[cfg(target_os = "linux")]
 fn linux_readiness(state_dir: &Path) -> Result<(), String> {
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
-    // Linux statfs filesystem type identifier, BTRFS_SUPER_MAGIC.
-    const BTRFS_FILESYSTEM_TYPE: u64 = 0x9123_683e;
     let store = super::settings::selected_store(state_dir).map_err(|e| e.to_string())?;
     if !store.is_dir()
         || rustix::fs::statfs(&store)
             .map(|info| info.f_type as u64)
             .ok()
-            != Some(BTRFS_FILESYSTEM_TYPE)
+            != Some(linux_raw_sys::general::BTRFS_SUPER_MAGIC as u64)
     {
         return Err(format!(
             "Native Layr requires a btrfs store at {}.",
