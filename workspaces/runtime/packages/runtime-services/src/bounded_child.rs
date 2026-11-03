@@ -56,15 +56,10 @@ thread_local! {
 
 const MAX_ERROR_CHARS: usize = 1200;
 
-pub(crate) fn is_layr_merge_conflict(message: &str) -> bool {
-    message
-        .lines()
-        .any(|line| line.starts_with("CONFLICT (") || line.starts_with("Automatic merge left "))
-}
-
 #[derive(Debug)]
 pub(crate) enum ChildError {
     Failed(String),
+    MergeConflict(String),
     TimedOut,
     /// The child did not run or its result could not be read. The text names
     /// the step and the operating-system error, for example
@@ -278,13 +273,25 @@ fn run_with_environment(
                 };
             }
         });
-        let merge_stdout = String::from_utf8_lossy(&stdout.bytes);
-        let bytes = if merge_output && is_layr_merge_conflict(&merge_stdout) {
-            &stdout.bytes
-        } else {
-            &stderr.bytes
-        };
-        let message = String::from_utf8_lossy(bytes)
+        let stdout_text = String::from_utf8_lossy(&stdout.bytes);
+        let stderr_text = String::from_utf8_lossy(&stderr.bytes);
+        if merge_output {
+            for output in [&*stdout_text, &*stderr_text] {
+                if let Some(line) = output.lines().find(|line| {
+                    line.starts_with("CONFLICT (") || line.starts_with("Automatic merge left ")
+                }) {
+                    let start = output.find(line).unwrap_or_default();
+                    return Err(ChildError::MergeConflict(
+                        output[start..]
+                            .trim()
+                            .chars()
+                            .take(MAX_ERROR_CHARS)
+                            .collect(),
+                    ));
+                }
+            }
+        }
+        let message = stderr_text
             .trim()
             .chars()
             .take(MAX_ERROR_CHARS)

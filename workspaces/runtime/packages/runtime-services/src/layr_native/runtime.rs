@@ -187,11 +187,7 @@ pub(super) fn run_with_binary(
         bounded_child::run_without_git_environment(request)
     }
     .map_err(|error| match error {
-        ChildError::Failed(detail)
-            if args.first() == Some(&"merge") && bounded_child::is_layr_merge_conflict(&detail) =>
-        {
-            NativeLayrError::Conflict(detail)
-        }
+        ChildError::MergeConflict(detail) => NativeLayrError::Conflict(detail),
         ChildError::Failed(detail) => NativeLayrError::Refused(format!(
             "{}: {detail}",
             args.first().copied().unwrap_or("layr")
@@ -1912,6 +1908,26 @@ mod merge_conflict_tests {
             error
                 .to_string()
                 .contains("CONFLICT (content): Merge conflict in file"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn merge_conflict_after_long_output_keeps_its_type_and_message() {
+        let state = tempfile::tempdir().unwrap();
+        let binary = state.path().join("layr");
+        std::fs::write(&binary, "#!/bin/sh\ni=0; while [ $i -lt 100 ]; do echo 'Auto-merging a-very-long-file-name'; i=$((i+1)); done\necho 'CONFLICT (content): Merge conflict in important-file'\nexit 1\n").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let error = run_with_binary(
+            state.path(),
+            state.path(),
+            state.path(),
+            &["merge", "worker"],
+            &binary,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, NativeLayrError::Conflict(ref message) if message.contains("CONFLICT (content): Merge conflict in important-file")),
             "{error}"
         );
     }
