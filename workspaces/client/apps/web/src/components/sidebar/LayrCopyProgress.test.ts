@@ -19,3 +19,27 @@ test("renders server phases with determinate and indeterminate progress", () => 
   expect(unknown).toContain("Importing history");
   expect(unknown).not.toContain("value=");
 });
+
+test("renders line creation and VM copy phases", () => {
+  for (const [phase, label] of [
+    ["creating_line", "Creating workspace line"],
+    ["archiving", "Building archive"],
+    ["uploading", "Uploading archive"],
+    ["importing_project", "Importing project"],
+  ] as const) {
+    const markup = renderToStaticMarkup(
+      createElement(LayrCopyProgress, {
+        progress: { phase, done: 0, unit: "bytes" },
+      }),
+    );
+    expect(markup).toContain(label);
+    expect(markup).not.toContain("value=");
+  }
+  const upload = renderToStaticMarkup(
+    createElement(LayrCopyProgress, {
+      progress: { phase: "uploading", done: 512, total: 1024, unit: "bytes" },
+    }),
+  );
+  expect(upload).toContain("512 bytes");
+  expect(upload).toContain('value="50"');
+});

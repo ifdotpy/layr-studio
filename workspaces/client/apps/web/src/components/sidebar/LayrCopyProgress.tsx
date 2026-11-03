@@ -13,6 +13,10 @@ const labels: Record<Progress["phase"], string> = {
   restoring_attributes: "Restoring file attributes",
   warming_caches: "Preparing caches",
   transferring: "Transferring files",
+  creating_line: "Creating workspace line",
+  archiving: "Building archive",
+  uploading: "Uploading archive",
+  importing_project: "Importing project",
   completed: "Copy complete",
   failed: "Copy failed",
 };
