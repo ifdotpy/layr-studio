@@ -237,7 +237,7 @@ pub(crate) fn remote_message_receipt(
         return Ok(None);
     }
 
-    let signature = crate::event_write::python_json(&json!({
+    let signature = crate::event_write::request_signature(&json!({
         "agent": room,
         "text": text,
         "assets": [],
@@ -326,7 +326,7 @@ fn post_managed_message(
         ));
     }
     crate::message_admission::attachments(input.assets)?;
-    let signature = crate::event_write::python_json(&json!({
+    let signature = crate::event_write::request_signature(&json!({
         "agent": input.room,
         "text": text,
         "assets": input.assets,
@@ -1292,6 +1292,67 @@ mod tests {
         assert_eq!(
             saved.profile_instructions.value().map(String::as_str),
             Some("Use the project profile.")
+        );
+    }
+
+    fn post_lead(
+        transaction: &studio_runtime_store::Transaction<'_>,
+        id: &str,
+        text: &str,
+    ) -> Result<super::PostMessageResult, CoordinationError> {
+        post_message_with_admission(
+            transaction,
+            PostManagedMessage {
+                room: "lead",
+                id,
+                text,
+                delivery: DeliveryMoment::CurrentTurn,
+                assets: &[],
+            },
+            &AllowAdmission,
+        )
+    }
+
+    #[test]
+    fn managed_message_stores_digest_and_replays_or_conflicts_by_body() {
+        let mut connection = database();
+        let id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+        let transaction = connection.transaction().expect("transaction");
+        assert!(
+            post_lead(&transaction, &id, "hello")
+                .expect("first send")
+                .event_inserted
+        );
+        let replay = post_lead(&transaction, &id, "hello").expect("same body replays");
+        assert!(!replay.event_inserted);
+        assert!(post_lead(&transaction, &id, "other body").is_err());
+
+        let identity = studio_runtime_schema::persistence::RequestIdentity::new(
+            "message",
+            &["lead", "user"],
+            &id,
+            &[],
+        )
+        .expect("message identity");
+        let stored: String = transaction
+            .query_row(
+                "SELECT signature FROM request_results WHERE id=?1",
+                [identity.id()],
+                |row| row.get(0),
+            )
+            .expect("stored signature reads");
+        assert_eq!(stored.len(), 64, "{stored}");
+        assert!(
+            stored
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+            "{stored}"
+        );
+        assert_eq!(
+            stored,
+            crate::event_write::request_signature(
+                &json!({"agent":"lead","text":"hello","assets":[]})
+            )
         );
     }
 
