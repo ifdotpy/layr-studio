@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import urllib.error
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
@@ -377,7 +378,7 @@ class StopBackendHandover(unittest.TestCase):
         self.killed = []
         self.identity_pid = 100
 
-    def stop(self, child_exit=None):
+    def stop(self, child_exit=None, identity=None):
         class Child:
             pid = 200
             def poll(inner):
@@ -387,7 +388,9 @@ class StopBackendHandover(unittest.TestCase):
             self.identity_pid = 200
             return Child()
         recovery = installer.recovery
-        with patch.object(recovery, "identity", lambda *_: {"pid": self.identity_pid}), \
+        if identity is None:
+            identity = lambda *_: {"pid": self.identity_pid}
+        with patch.object(recovery, "identity", identity), \
                 patch.object(recovery, "process_start_time", lambda _pid: "t0"), \
                 patch.object(recovery, "verify_listener", lambda *_: None), \
                 patch.object(recovery, "rust_server", lambda _config: Path(self.config["runtimeServer"])), \
@@ -403,6 +406,23 @@ class StopBackendHandover(unittest.TestCase):
         argv, options = self.popen[0]
         self.assertEqual(argv, ["/fake/studio-runtime-server", "--takeover"])
         self.assertTrue(options["start_new_session"])
+        self.assertEqual(self.killed, [])
+
+    def test_a_new_build_that_answers_503_while_it_opens_the_state_is_waited_for(self):
+        # The new build holds the socket and its startup gate answers 503 until the state opens.
+        (self.state / installer.HANDOVER_SOCKET).touch()
+        answers = [
+            {"pid": 100},  # stop_backend: the old backend still owns the port
+            urllib.error.HTTPError("http://127.0.0.1:4620/api/desktop", 503, "Service Unavailable", None, None),
+            {"pid": 200},  # handover_backend: the new build serves
+        ]
+        def identity(*_):
+            answer = answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+        self.assertEqual(self.stop(identity=identity), "handed over")
+        self.assertEqual(answers, [])
         self.assertEqual(self.killed, [])
 
     def test_a_new_build_that_exits_is_reported_and_the_old_one_is_not_signalled(self):

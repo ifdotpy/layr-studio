@@ -154,7 +154,12 @@ def handover_backend(config, state, backend):
         code = child.poll()
         if code is not None:
             raise RuntimeError(f"the new build exited with {code} during the live handover; see canvas.log. The old build may have resumed, else the recovery loop starts a backend")
-        data = recovery.identity(config["port"], state)
+        try:
+            data = recovery.identity(config["port"], state)
+        except (OSError, RuntimeError, ValueError):
+            # The new build holds the socket while it opens the state; its startup gate answers
+            # 503 until then. Keep polling until the deadline.
+            data = None
         if data and data["pid"] == child.pid:
             return "handed over"
         time.sleep(.2)
