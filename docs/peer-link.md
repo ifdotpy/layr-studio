@@ -26,7 +26,7 @@ line, so the private key is never in the arguments or the environment:
 
 ```json
 {
-  "listen": "100.x.y.z:4621",
+  "listen": "0.0.0.0:4621",
   "privateKey": "<PKCS#8 PEM>",
   "publicKey": "<SPKI PEM>",
   "peers": ["<SPKI PEM>"],
@@ -42,8 +42,26 @@ The process answers `{"ready": true, "port": N}`. After that line it writes `{"c
 paired keys and closes the connections of a removed key. The process exits when stdin closes,
 so it ends with its backend. The backend starts it on Unix when the Serve origin is known. After
 an exit it starts the process again with a doubling delay of at most 30 seconds; the delay resets
-after 60 seconds of healthy run. It listens on the Tailscale IPv4 address of the Mac, on UDP
-port 4621, or on a free port when 4621 is in use.
+after 60 seconds of healthy run.
+
+What listens where:
+
+- The backend passes `listen: 0.0.0.0:<port>`. The process binds UDP on all IPv4 interfaces, on
+  port 4621, or on a free IPv4 port when 4621 is in use. It also binds UDP on all IPv6 interfaces
+  (`[::]:<port>`, the same port as IPv4 when 4621 is free). The IPv6 bind is optional: a host
+  without IPv6 keeps the IPv4 socket. The ready line names the IPv4 port.
+- The backend starts the process only when the Mac has a Tailscale IPv4 address. That address is
+  the advertised direct hint (`advert`). The Tailscale path is one more direct path: peers reach
+  the process on it, and iroh also uses the paths it finds on other interfaces.
+- The process accepts a listen address of `0.0.0.0`, a Tailscale address, or loopback (tests).
+  Any other address is refused at start.
+
+Why all interfaces is safe: the bind does not decide access. Every peer must hold a key in
+`peers`. The endpoint hooks refuse any other key before a stream opens, so a host on the LAN or
+the internet that does not hold a paired key gets no stream. The paired keys are the same ones
+that the backend writes; the network path gives no rights (decision
+`docs/decisions/2026-11-01-p2p-project-peering.md`, "Zero trust"). Every request is still
+signed and checked against the project grant at the backend edge.
 
 `relays` is a list of relay URLs (optional, default empty). Empty means direct paths only: the
 process uses no relay, so no public relay sees the traffic. The owner turns relays on by adding
@@ -156,7 +174,7 @@ are not bound, so a path through another network needs the listen address on tha
 owner decides the bind address (backend change, not in this link).
 
 Tests (`workspaces/runtime/apps/peer-link/src/tests.rs`): a direct connection by key on loopback; a
-key outside `peers` is refused by the server and never dialed by the client; a reconnect after a
+socket bound on `0.0.0.0` accepts a paired key; the listen check (all interfaces, Tailscale, loopback only); a key outside `peers` is refused by the server and never dialed by the client; a reconnect after a
 drop emits `connected` again; a connection through a local relay with no direct path (the test
 relay runs in the test process, with its self-signed certificate as the only root).
 
