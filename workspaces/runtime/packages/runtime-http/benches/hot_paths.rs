@@ -3,7 +3,7 @@ use std::hint::black_box;
 use axum::response::sse::Event;
 use gungraun::{Dhat, LibraryBenchmarkConfig, library_benchmark, library_benchmark_group, main};
 use serde_json::{Value, json};
-use studio_runtime_http::routes::sync_stream::sse_event;
+use studio_runtime_http::routes::sse_event;
 
 fn payload() -> Value {
     json!({"protocol":1,"workspaceId":"workspace","epoch":"epoch","revision":42,"resources":[{"kind":"agent","id":"worker"}],"resourceVersions":[{"revision":42,"items":[{"id":"item","text":"a transcript line"}]}]})

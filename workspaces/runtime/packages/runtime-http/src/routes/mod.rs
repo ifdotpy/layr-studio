@@ -51,11 +51,10 @@ mod subscriptions;
 mod sync;
 mod sync_delta;
 mod sync_documents;
-#[cfg(not(feature = "bench-support"))]
 mod sync_stream;
 #[cfg(feature = "bench-support")]
 #[doc(hidden)]
-pub mod sync_stream;
+pub use sync_stream::sse_event;
 pub(crate) use sync_stream::SyncSessions;
 #[cfg(test)]
 pub(crate) use sync_stream::SyncStreamQuery;
