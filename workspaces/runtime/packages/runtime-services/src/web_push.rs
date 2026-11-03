@@ -684,7 +684,10 @@ pub async fn run(
         let subscribed = Subscriptions::new(&state)
             .list()
             .is_ok_and(|rows| !rows.is_empty());
-        let Some(subject) = subject(&state).filter(|_| subscribed) else {
+        if !subscribed {
+            continue;
+        }
+        let Some(subject) = subject(&state) else {
             continue;
         };
         let Ok(cards) = pending_cards(&store).await else {
