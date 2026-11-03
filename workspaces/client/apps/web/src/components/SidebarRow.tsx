@@ -27,6 +27,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import type { Agent } from "../types";
+import { AgentStatus } from "../generated/api";
 import {
   hasCompletedResult,
   type ChatIndicator,
@@ -201,7 +202,8 @@ const SidebarRowView = memo(function SidebarRowView({
             {row.name ?? ""}
           </strong>
         </span>
-        {(row.status === "queued" || row.status === "starting") &&
+        {(row.status === AgentStatus.queued ||
+          row.status === AgentStatus.starting) &&
           row.startWait?.reason === "workspace_copy" &&
           row.startWait.epoch === row.epoch && (
             <LayrCopyProgress progress={row.startWait.progress} />

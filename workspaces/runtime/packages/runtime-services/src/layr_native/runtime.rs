@@ -95,131 +95,6 @@ fn report(
     }
 }
 
-#[cfg(test)]
-mod progress_tests {
-    #[tokio::test(start_paused = true)]
-    async fn delayed_consumer_publishes_only_the_latest_count_at_the_interval() {
-        use studio_runtime_schema::layr_progress::{CopyPhase, CopyProgress, CopyUnit};
-        let (send, mut receive) = super::progress_channel();
-        let progress = |done| CopyProgress {
-            phase: CopyPhase::Staging,
-            done,
-            total: Some(10),
-            unit: CopyUnit::Files,
-        };
-        send(progress(1));
-        let first = super::next_progress(&mut receive, None).await.unwrap();
-        assert_eq!(first.done, 1);
-        let last = tokio::time::Instant::now();
-        send(progress(2));
-        let pending = tokio::spawn(async move {
-            super::next_progress(&mut receive, Some(last))
-                .await
-                .unwrap()
-        });
-        tokio::task::yield_now().await;
-        send(progress(3));
-        tokio::time::advance(
-            super::PROGRESS_PUBLICATION_INTERVAL - std::time::Duration::from_millis(1),
-        )
-        .await;
-        assert!(!pending.is_finished());
-        send(progress(4));
-        tokio::time::advance(std::time::Duration::from_millis(1)).await;
-        assert_eq!(pending.await.unwrap().done, 4);
-    }
-    #[tokio::test]
-    async fn progress_is_published_to_the_agent_and_cleared() {
-        use studio_runtime_schema::layr_progress::{CopyPhase, CopyProgress, CopyUnit};
-        use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, StoreError};
-        let (_dir, store) = crate::entity_publication::test_support::store().await;
-        let expected = serde_json::json!({"compactions":0,"accountKey":"default","provider":"codex","id":"a","rootId":"a","epoch":2,"status":"starting","cwd":"/one","autoWake":true});
-        let inserted = expected.clone();
-        store
-            .transaction_with(move |tx| -> Result<(), StoreError> {
-                AgentRepository::put(tx, &AgentRecord::from_value(inserted)?)?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        let progress = CopyProgress {
-            phase: CopyPhase::Staging,
-            done: 2,
-            total: Some(4),
-            unit: CopyUnit::Files,
-        };
-        super::publish_progress(&store, &expected, Some(progress))
-            .await
-            .unwrap();
-        let (_, summary) =
-            crate::entity_publication::test_support::client_entity(&store, "agentSummary", "a")
-                .unwrap();
-        assert_eq!(summary["startWait"]["progress"]["done"], 2);
-        store
-            .transaction_with(|tx| -> Result<(), StoreError> {
-                let record = AgentRepository::get(tx, &AgentId::from("a"))?
-                    .unwrap()
-                    .value();
-                assert_eq!(
-                    crate::sync_views::agent_start_wait(&record)
-                        .unwrap()
-                        .unwrap()
-                        .epoch(),
-                    2
-                );
-                assert_eq!(record["startWait"]["progress"]["done"], 2);
-                let summary =
-                    crate::sync_views::project_persisted_record("agentSummary", &record).unwrap();
-                assert_eq!(summary["startWait"]["progress"]["done"], 2);
-                Ok(())
-            })
-            .await
-            .unwrap();
-        super::publish_progress(&store, &expected, None)
-            .await
-            .unwrap();
-        store
-            .transaction_with(|tx| -> Result<(), StoreError> {
-                let record = AgentRepository::get(tx, &AgentId::from("a"))?
-                    .unwrap()
-                    .value();
-                assert!(record.get("startWait").is_none());
-                Ok(())
-            })
-            .await
-            .unwrap();
-    }
-    #[test]
-    fn progress_guard_rejects_a_changed_workspace_or_inactive_agent() {
-        let expected = serde_json::json!({"id":"a","epoch":2,"status":"starting","cwd":"/one","autoWake":true});
-        assert!(super::progress_guard(&expected, &expected));
-        for changed in [
-            serde_json::json!({"id":"a","epoch":3,"status":"starting","cwd":"/one","autoWake":true}),
-            serde_json::json!({"id":"a","epoch":2,"status":"running","cwd":"/one","autoWake":true}),
-            serde_json::json!({"id":"a","epoch":2,"status":"starting","cwd":"/other","autoWake":true}),
-        ] {
-            assert!(!super::progress_guard(&changed, &expected));
-        }
-    }
-    #[test]
-    fn vendored_git_import_progress_is_typed_at_the_boundary() {
-        let source = include_str!("../../../../apps/layr/src/gitbridge.rs");
-        assert!(source.contains("layr: imported {imported} commits of {refname}"));
-        let progress =
-            super::parse_import_progress(b"layr: imported 50 commits of local/main").unwrap();
-        assert_eq!(
-            progress.phase,
-            studio_runtime_schema::layr_progress::CopyPhase::ImportingCommits
-        );
-        assert_eq!(progress.done, 50);
-        assert_eq!(progress.total, None);
-        assert_eq!(
-            progress.unit,
-            studio_runtime_schema::layr_progress::CopyUnit::Commits
-        );
-        assert!(super::parse_import_progress(b"unrelated diagnostic").is_none());
-    }
-}
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
 /// Deadline for the potentially long first import, in seconds (24 hours).
 const IMPORT_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
@@ -2110,5 +1985,131 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
         assert!(commands.contains("line new default cached-main"));
         assert!(!commands.contains("line new missing"));
         assert!(!commands.contains("line new worker other"));
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    #[tokio::test(start_paused = true)]
+    async fn delayed_consumer_publishes_only_the_latest_count_at_the_interval() {
+        use studio_runtime_schema::layr_progress::{CopyPhase, CopyProgress, CopyUnit};
+        let (send, mut receive) = super::progress_channel();
+        let progress = |done| CopyProgress {
+            phase: CopyPhase::Staging,
+            done,
+            total: Some(10),
+            unit: CopyUnit::Files,
+        };
+        send(progress(1));
+        let first = super::next_progress(&mut receive, None).await.unwrap();
+        assert_eq!(first.done, 1);
+        let last = tokio::time::Instant::now();
+        send(progress(2));
+        let pending = tokio::spawn(async move {
+            super::next_progress(&mut receive, Some(last))
+                .await
+                .unwrap()
+        });
+        tokio::task::yield_now().await;
+        send(progress(3));
+        tokio::time::advance(
+            super::PROGRESS_PUBLICATION_INTERVAL - std::time::Duration::from_millis(1),
+        )
+        .await;
+        assert!(!pending.is_finished());
+        send(progress(4));
+        tokio::time::advance(std::time::Duration::from_millis(1)).await;
+        assert_eq!(pending.await.unwrap().done, 4);
+    }
+    #[tokio::test]
+    async fn progress_is_published_to_the_agent_and_cleared() {
+        use studio_runtime_schema::layr_progress::{CopyPhase, CopyProgress, CopyUnit};
+        use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, StoreError};
+        let (_dir, store) = crate::entity_publication::test_support::store().await;
+        let expected = serde_json::json!({"compactions":0,"accountKey":"default","provider":"codex","id":"a","rootId":"a","epoch":2,"status":"starting","cwd":"/one","autoWake":true});
+        let inserted = expected.clone();
+        store
+            .transaction_with(move |tx| -> Result<(), StoreError> {
+                AgentRepository::put(tx, &AgentRecord::from_value(inserted)?)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let progress = CopyProgress {
+            phase: CopyPhase::Staging,
+            done: 2,
+            total: Some(4),
+            unit: CopyUnit::Files,
+        };
+        super::publish_progress(&store, &expected, Some(progress))
+            .await
+            .unwrap();
+        let (_, summary) =
+            crate::entity_publication::test_support::client_entity(&store, "agentSummary", "a")
+                .unwrap();
+        assert_eq!(summary["startWait"]["progress"]["done"], 2);
+        store
+            .transaction_with(|tx| -> Result<(), StoreError> {
+                let record = AgentRepository::get(tx, &AgentId::from("a"))?
+                    .unwrap()
+                    .value();
+                assert_eq!(
+                    crate::sync_views::agent_start_wait(&record)
+                        .unwrap()
+                        .unwrap()
+                        .epoch(),
+                    2
+                );
+                assert_eq!(record["startWait"]["progress"]["done"], 2);
+                let summary =
+                    crate::sync_views::project_persisted_record("agentSummary", &record).unwrap();
+                assert_eq!(summary["startWait"]["progress"]["done"], 2);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        super::publish_progress(&store, &expected, None)
+            .await
+            .unwrap();
+        store
+            .transaction_with(|tx| -> Result<(), StoreError> {
+                let record = AgentRepository::get(tx, &AgentId::from("a"))?
+                    .unwrap()
+                    .value();
+                assert!(record.get("startWait").is_none());
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+    #[test]
+    fn progress_guard_rejects_a_changed_workspace_or_inactive_agent() {
+        let expected = serde_json::json!({"id":"a","epoch":2,"status":"starting","cwd":"/one","autoWake":true});
+        assert!(super::progress_guard(&expected, &expected));
+        for changed in [
+            serde_json::json!({"id":"a","epoch":3,"status":"starting","cwd":"/one","autoWake":true}),
+            serde_json::json!({"id":"a","epoch":2,"status":"running","cwd":"/one","autoWake":true}),
+            serde_json::json!({"id":"a","epoch":2,"status":"starting","cwd":"/other","autoWake":true}),
+        ] {
+            assert!(!super::progress_guard(&changed, &expected));
+        }
+    }
+    #[test]
+    fn vendored_git_import_progress_is_typed_at_the_boundary() {
+        let source = include_str!("../../../../apps/layr/src/gitbridge.rs");
+        assert!(source.contains("layr: imported {imported} commits of {refname}"));
+        let progress =
+            super::parse_import_progress(b"layr: imported 50 commits of local/main").unwrap();
+        assert_eq!(
+            progress.phase,
+            studio_runtime_schema::layr_progress::CopyPhase::ImportingCommits
+        );
+        assert_eq!(progress.done, 50);
+        assert_eq!(progress.total, None);
+        assert_eq!(
+            progress.unit,
+            studio_runtime_schema::layr_progress::CopyUnit::Commits
+        );
+        assert!(super::parse_import_progress(b"unrelated diagnostic").is_none());
     }
 }
