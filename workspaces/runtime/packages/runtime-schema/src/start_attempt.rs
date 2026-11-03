@@ -199,9 +199,9 @@ pub enum VmPreparationPhase {
     Completed,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum LegacyProjectImportPhase {
+pub enum ProjectImportPhase {
     Planned,
     Uploading,
     Imported,
@@ -218,25 +218,11 @@ pub struct ProjectImport {
     pub operation: String,
     pub upload_id: String,
     pub root: String,
-    /// Read older attempts without writing the superseded display phase again.
-    #[serde(
-        default,
-        rename = "phase",
-        deserialize_with = "discard_legacy_phase",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub legacy_phase: Option<LegacyProjectImportPhase>,
+    pub phase: ProjectImportPhase,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub archive_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub archive_sha256: Option<String>,
-}
-
-fn discard_legacy_phase<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<LegacyProjectImportPhase>, D::Error> {
-    <Option<LegacyProjectImportPhase> as Deserialize>::deserialize(deserializer)?;
-    Ok(None)
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -474,14 +460,59 @@ mod tests {
     use serde::Deserialize;
 
     #[test]
-    fn project_import_accepts_legacy_phase_without_writing_it() {
-        let value = serde_json::json!({"projectId":"p", "source":"s", "requestId":"r", "operation":"o", "uploadId":"u", "root":"/", "phase":"uploading"});
-        let import: super::ProjectImport = serde_json::from_value(value).unwrap();
-        assert!(serde_json::to_value(import).unwrap().get("phase").is_none());
-        let current = serde_json::json!({"projectId":"p", "source":"s", "requestId":"r", "operation":"o", "uploadId":"u", "root":"/"});
-        assert!(serde_json::from_value::<super::ProjectImport>(current).is_ok());
-        let invalid = serde_json::json!({"projectId":"p", "source":"s", "requestId":"r", "operation":"o", "uploadId":"u", "root":"/", "phase":"other"});
-        assert!(serde_json::from_value::<super::ProjectImport>(invalid).is_err());
+    fn project_import_written_by_current_version_is_readable_by_base_version() {
+        // Frozen from the base version: the persisted phase is required.
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct BaseProjectImport {
+            project_id: String,
+            source: String,
+            request_id: String,
+            operation: String,
+            upload_id: String,
+            root: String,
+            phase: BasePhase,
+            archive_bytes: Option<u64>,
+            archive_sha256: Option<String>,
+        }
+        #[derive(Deserialize, PartialEq, Debug)]
+        #[serde(rename_all = "snake_case")]
+        enum BasePhase {
+            Planned,
+            Uploading,
+            Imported,
+            NotSent,
+            Unknown,
+        }
+        for phase in ["planned", "uploading", "imported", "not_sent", "unknown"] {
+            let input = serde_json::json!({"projectId":"p", "source":"s", "requestId":"r", "operation":"o", "uploadId":"u", "root":"/", "phase":phase});
+            let current: super::ProjectImport = serde_json::from_value(input).unwrap();
+            let old: BaseProjectImport =
+                serde_json::from_value(serde_json::to_value(current).unwrap()).unwrap();
+            assert_eq!(
+                old.phase,
+                serde_json::from_value(serde_json::json!(phase)).unwrap()
+            );
+            assert_eq!(
+                (
+                    old.project_id,
+                    old.source,
+                    old.request_id,
+                    old.operation,
+                    old.upload_id,
+                    old.root
+                ),
+                (
+                    "p".into(),
+                    "s".into(),
+                    "r".into(),
+                    "o".into(),
+                    "u".into(),
+                    "/".into()
+                )
+            );
+            assert!(old.archive_bytes.is_none() && old.archive_sha256.is_none());
+        }
     }
 
     #[test]

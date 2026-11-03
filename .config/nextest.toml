@@ -84,7 +84,9 @@ inherits = "ci"
 # Reviewer permissions stay read-only under yolo across preparation, turns, and monitors.
 # Command replay witnesses feed recorded management commands through decide and compare the canonical outcome.
 # Generated ingress witnesses cover pattern parity and integral-decimal inputs.
+# Import phase remains readable by the preceding runtime during rollback.
 default-filter = '''
+    (package(=studio-runtime-schema) & kind(lib) & test(project_import_written_by_current_version_is_readable_by_base_version)) |
     (package(=studio-runtime-schema) & kind(lib) & (test(reviewer_spawn_retains_review_state) | test(submission_revision_can_be_omitted_at_ingress))) |
     (package(=studio-runtime-services) & kind(lib) & (test(native_reviewer_submission_needs_no_revision_evidence) | test(managed_spawn_native_layr_lead_uses_project_binding))) |
     (package(=studio-runtime-http) & kind(lib) & (test(chat_read_accepts_projected_room_roots) | test(account_response_includes_server_eligibility))) |
@@ -494,7 +496,9 @@ platform = 'cfg(target_os = "linux")'
 # Reviewer permissions stay read-only under yolo across preparation, turns, and monitors.
 # Command replay witnesses feed recorded management commands through decide and compare the canonical outcome.
 # Generated ingress witnesses cover pattern parity and integral-decimal inputs.
+# Import phase remains readable by the preceding runtime during rollback.
 default-filter = '''
+    (package(=studio-runtime-schema) & kind(lib) & test(project_import_written_by_current_version_is_readable_by_base_version)) |
     (package(=studio-runtime-schema) & kind(lib) & (test(reviewer_spawn_retains_review_state) | test(submission_revision_can_be_omitted_at_ingress))) |
     (package(=studio-runtime-services) & kind(lib) & (test(native_reviewer_submission_needs_no_revision_evidence) | test(managed_spawn_native_layr_lead_uses_project_binding))) |
     (package(=studio-runtime-http) & kind(lib) & (test(chat_read_accepts_projected_room_roots) | test(account_response_includes_server_eligibility))) |
