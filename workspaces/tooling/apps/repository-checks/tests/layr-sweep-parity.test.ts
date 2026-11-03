@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { isDeepStrictEqual } from "node:util";
@@ -36,21 +37,44 @@ function sweepInManifest(): unknown {
   return retestMetadata().sweep;
 }
 
-// Undefined when the env job count equals the gate owner CARGO_BUILD_JOBS (gate-config.ts).
-export function jobsMismatch(env: unknown): string | undefined {
-  const jobs = (env as Record<string, unknown> | undefined)?.CARGO_BUILD_JOBS;
-  if (jobs !== String(CARGO_BUILD_JOBS))
-    return `env CARGO_BUILD_JOBS ${JSON.stringify(jobs)} differs from gate-config ${CARGO_BUILD_JOBS}`;
+// Undefined when the retest env sets no job count: jobs do not change the unit hashes, and a
+// focused `layr retest run` must keep its own count.
+export function retestEnvJobsMismatch(env: unknown): string | undefined {
+  if (Object.hasOwn((env ?? {}) as object, "CARGO_BUILD_JOBS"))
+    return "retest env sets CARGO_BUILD_JOBS; a focused run would take the gate count";
   return undefined;
 }
 
-test("the env job count in Cargo.toml is the gate-config CARGO_BUILD_JOBS", () => {
-  assert.equal(jobsMismatch(retestMetadata().env), undefined);
+// Undefined when worker-env.sh exports the owner CARGO_BUILD_JOBS (gate-config.ts).
+export function workerEnvJobsMismatch(script: string): string | undefined {
+  const exported = /CARGO_BUILD_JOBS=(\d+)/.exec(script)?.[1];
+  if (exported !== String(CARGO_BUILD_JOBS))
+    return `worker-env.sh CARGO_BUILD_JOBS ${exported ?? "missing"} differs from gate-config ${CARGO_BUILD_JOBS}`;
+  return undefined;
+}
+
+test("the retest env in Cargo.toml sets no job count", () => {
+  assert.equal(retestEnvJobsMismatch(retestMetadata().env), undefined);
 });
 
-test("an env job count other than the owner fails the parity check", () => {
+test("worker-env.sh exports the focused CARGO_BUILD_JOBS owner", () => {
+  const script = readFileSync(
+    fileURLToPath(new URL("../../../worker-env.sh", import.meta.url)),
+    "utf8",
+  );
+  assert.equal(workerEnvJobsMismatch(script), undefined);
+});
+
+test("a retest env with a job count fails the parity check", () => {
   assert.match(
-    jobsMismatch({ CARGO_BUILD_JOBS: String(CARGO_BUILD_JOBS + 1) }) ?? "",
+    retestEnvJobsMismatch({ CARGO_BUILD_JOBS: "8" }) ?? "",
+    /sets CARGO_BUILD_JOBS/,
+  );
+});
+
+test("a worker-env job count other than the owner fails the parity check", () => {
+  assert.match(
+    workerEnvJobsMismatch(`CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS + 1}`) ?? "",
     /differs from gate-config/,
   );
 });
