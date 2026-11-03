@@ -5,15 +5,23 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     #[ignore = "requires two paths on different subvolumes of one btrfs filesystem"]
+    /// Set STUDIO_BTRFS_TEST_FIRST and STUDIO_BTRFS_TEST_SECOND to different
+    /// btrfs subvolumes, and STUDIO_NON_BTRFS_TEST_PATH to a writable non-btrfs directory.
     fn btrfs_subvolumes_share_import_volume_identity() {
         let first = std::env::var_os("STUDIO_BTRFS_TEST_FIRST").expect("first subvolume");
         let second = std::env::var_os("STUDIO_BTRFS_TEST_SECOND").expect("second subvolume");
+        let non_btrfs = std::env::var_os("STUDIO_NON_BTRFS_TEST_PATH").expect("non-btrfs path");
+        let magic = linux_raw_sys::general::BTRFS_SUPER_MAGIC as u64;
+        assert_eq!(rustix::fs::statfs(Path::new(&first)).unwrap().f_type as u64, magic);
+        assert_eq!(rustix::fs::statfs(Path::new(&second)).unwrap().f_type as u64, magic);
+        assert_ne!(rustix::fs::statvfs(Path::new(&first)).unwrap().f_fsid, rustix::fs::statvfs(Path::new(&second)).unwrap().f_fsid);
+        assert_ne!(rustix::fs::statfs(Path::new(&non_btrfs)).unwrap().f_type as u64, magic);
         assert_eq!(volume_id(Path::new(&first)).unwrap(), volume_id(Path::new(&second)).unwrap());
         let source = tempfile::tempdir_in(&second).unwrap();
         fs::write(source.path().join("file"), b"content").unwrap();
         let plan = Plan::new(source.path(), false, Path::new(&first)).unwrap();
         assert!(plan.entries.iter().find(|entry| entry.relative == Path::new("file")).unwrap().cloneable);
-        let other = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir_in(non_btrfs).unwrap();
         fs::write(other.path().join("file"), b"content").unwrap();
         let plan = Plan::new(other.path(), false, Path::new(&first)).unwrap();
         assert!(!plan.entries.iter().find(|entry| entry.relative == Path::new("file")).unwrap().cloneable);
