@@ -326,6 +326,9 @@ mod tests {
         connection
             .execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL)")
             .unwrap();
+        connection
+            .execute_batch(crate::agent_volatile::agent_volatile_table_sql())
+            .unwrap();
         assert!(
             CoordinationRepository::agents(&connection)
                 .unwrap()
