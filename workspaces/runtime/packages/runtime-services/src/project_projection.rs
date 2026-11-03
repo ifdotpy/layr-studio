@@ -1,7 +1,7 @@
 //! Typed public project sync view.
 use crate::sync_views::{SYNC_ARRAY_ITEMS, bound_sync_text};
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use studio_runtime_schema::project_projection::{
     ProjectReadiness, ProjectSync, ProjectVault, ReadinessState,
 };
@@ -79,26 +79,20 @@ fn strings(field: &mut Field<Vec<String>>) {
     }
 }
 
-/// The peer leads of one local project: one per active grant of it whose paired server is
-/// still paired. A revoked grant gives none (decision 2026-11-01, "Leads in one team").
-/// `servers` maps a paired server id to its label.
-pub fn active_peer_leads(
-    project_id: &str,
-    grants: &[GrantRow],
-    servers: &BTreeMap<String, String>,
-) -> Vec<PeerLead> {
+/// The peer leads of one local project: one per active grant of it. The label comes from
+/// the grant, so no paired server row is needed. A revoked grant gives none (decision
+/// 2026-11-01, "Leads in one team").
+pub fn active_peer_leads(project_id: &str, grants: &[GrantRow]) -> Vec<PeerLead> {
     let mut seen = BTreeSet::new();
     grants
         .iter()
         .filter(|row| row.local_project == project_id && row.revoked_at.is_none())
         .filter(|row| seen.insert(row.grant_id.clone()))
-        .filter_map(|row| {
-            servers.get(&row.peer).map(|label| PeerLead {
-                grant: row.grant_id.clone(),
-                remote_project: row.remote_project.clone(),
-                server: row.peer.clone(),
-                label: label.clone(),
-            })
+        .map(|row| PeerLead {
+            grant: row.grant_id.clone(),
+            remote_project: row.remote_project.clone(),
+            server: row.peer.clone(),
+            label: row.peer_label.clone(),
         })
         .collect()
 }
@@ -110,19 +104,7 @@ pub fn peer_leads_of(
     project_id: &str,
 ) -> StoreResult<Vec<PeerLead>> {
     let grants = project_grants::all_rows(tx)?;
-    if grants.is_empty() {
-        return Ok(Vec::new());
-    }
-    let servers = crate::multi_server::paired_servers(tx)?
-        .into_iter()
-        .map(|server| {
-            (
-                server.id.as_str().to_owned(),
-                server.label.as_str().to_owned(),
-            )
-        })
-        .collect();
-    Ok(active_peer_leads(project_id, &grants, &servers))
+    Ok(active_peer_leads(project_id, &grants))
 }
 
 pub fn project_record(
@@ -289,11 +271,8 @@ mod tests {
             capability: capability.parse().unwrap(),
             created_at: 10,
             revoked_at,
+            peer_label: "Laptop".into(),
         }
-    }
-
-    fn servers() -> BTreeMap<String, String> {
-        BTreeMap::from([("server-b".to_owned(), "Laptop".to_owned())])
     }
 
     fn team_project() -> ProjectLive {
@@ -304,7 +283,7 @@ mod tests {
     #[test]
     fn active_grant_gives_one_peer_lead_on_each_team() {
         let grants = [grant("g1", "LeadMessages", None)];
-        let leads = active_peer_leads("proj-a", &grants, &servers());
+        let leads = active_peer_leads("proj-a", &grants);
         assert_eq!(
             leads,
             vec![PeerLead {
@@ -334,7 +313,7 @@ mod tests {
     #[test]
     fn revoked_grant_gives_no_peer_lead() {
         let grants = [grant("g1", "LeadMessages", Some(20))];
-        assert!(active_peer_leads("proj-a", &grants, &servers()).is_empty());
+        assert!(active_peer_leads("proj-a", &grants).is_empty());
         let projection = project_record(
             team_project(),
             Field::Null,
@@ -352,16 +331,12 @@ mod tests {
     }
 
     #[test]
-    fn unpaired_server_and_other_project_give_no_peer_lead() {
+    fn other_project_gives_no_peer_lead() {
         let other_project = GrantRow {
             local_project: "proj-z".into(),
             ..grant("g2", "LeadMessages", None)
         };
-        let unpaired = GrantRow {
-            peer: "server-c".into(),
-            ..grant("g3", "LeadMessages", None)
-        };
-        assert!(active_peer_leads("proj-a", &[other_project, unpaired], &servers()).is_empty());
+        assert!(active_peer_leads("proj-a", &[other_project]).is_empty());
     }
 
     #[test]
@@ -370,6 +345,6 @@ mod tests {
             grant("g1", "LeadMessages", None),
             grant("g1", "LeadMessages", None),
         ];
-        assert_eq!(active_peer_leads("proj-a", &grants, &servers()).len(), 1);
+        assert_eq!(active_peer_leads("proj-a", &grants).len(), 1);
     }
 }

@@ -243,6 +243,16 @@ async fn manage(
                 serde_json::to_value(snapshot).map_err(|_| ApiError::internal())?,
             ))
         }
+        FederationRequest::CreateProjectInvite { .. }
+        | FederationRequest::AcceptProjectPeer { .. }
+        | FederationRequest::ListProjectGrants { .. }
+        | FederationRequest::RevokeProjectGrant { .. } => {
+            let store = state.store.clone().ok_or_else(ApiError::internal)?;
+            let result = federation::manage_with_origin(store, &body, origin.as_deref())
+                .await
+                .map_err(map_service_error)?;
+            Ok(Json(result))
+        }
         FederationRequest::SetEnabled { .. }
         | FederationRequest::ApprovePeer { .. }
         | FederationRequest::RevokePeer { .. }

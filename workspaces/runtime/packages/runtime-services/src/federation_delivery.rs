@@ -313,6 +313,39 @@ pub async fn pair_peer(
         Ok::<_, Error>(updated)
     }).await
 }
+/// Send a project pairing request (`scope: project`) to the inviting server. It is signed
+/// like every federation request, and the reply is verified with the invitation key.
+pub async fn pair_project(
+    store: Arc<RuntimeStore>,
+    transport: &impl FederationTransport,
+    state_id: &str,
+    origin: &str,
+    public_key: &str,
+    body: Value,
+    now: f64,
+) -> Result<Value> {
+    let identity = transport::load_federation_identity(&store).await?;
+    let peer = core::Peer::pending(state_id, origin, public_key);
+    core::validate("PairRequest", &body, "body")?;
+    let budget = PassBudget::new(
+        Instant::now() + PASS_TIMEOUT,
+        Arc::new(AtomicBool::new(false)),
+    );
+    request(
+        Arc::clone(&store),
+        transport,
+        Request {
+            peer: &peer,
+            identity: &identity,
+            path: "/api/federation/v1/pair",
+            body,
+            now: now as i64,
+            budget: &budget,
+        },
+    )
+    .await
+}
+
 struct Request<'a> {
     peer: &'a core::Peer,
     identity: &'a RemoteIdentity,

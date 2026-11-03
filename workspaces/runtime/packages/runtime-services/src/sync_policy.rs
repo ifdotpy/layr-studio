@@ -2292,6 +2292,17 @@ struct PeerTeamProjection {
     peer_leads: Vec<studio_runtime_schema::project_record::PeerLead>,
 }
 
+/// Republish every peer team entity from the project records and the project grants.
+/// A writer of grants calls it in its transaction, so the peer leads show or hide at once.
+pub(crate) fn publish_peer_teams(transaction: &Transaction<'_>) -> StoreResult<()> {
+    maintain_peer_team_entities(
+        transaction,
+        &live_agent_records(transaction)?,
+        &projection_records(transaction, "runtime_projects")?,
+        &|_, _, _, _| true,
+    )
+}
+
 fn maintain_peer_team_entities(
     transaction: &Transaction<'_>,
     agent_records: &[(String, String)],

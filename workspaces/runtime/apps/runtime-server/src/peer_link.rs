@@ -198,11 +198,18 @@ impl PeerLinkRuntime {
         let (changed, changes) = mpsc::channel(1);
         // Subscribe before the first snapshot so a commit between registration
         // and the read remains queued for a second, authoritative snapshot.
+        let grant_changed = changed.clone();
         store.add_table_change_observer(ObservedTable::AccessClients, move || {
             match changed.try_send(()) {
                 Ok(()) | Err(mpsc::error::TrySendError::Full(())) => {}
                 Err(mpsc::error::TrySendError::Closed(())) => {}
             }
+        });
+        store.add_table_change_observer(ObservedTable::ProjectGrants, move || match grant_changed
+            .try_send(())
+        {
+            Ok(()) | Err(mpsc::error::TrySendError::Full(())) => {}
+            Err(mpsc::error::TrySendError::Closed(())) => {}
         });
         let stop = CancellationToken::new();
         let task_stop = stop.clone();
@@ -514,6 +521,8 @@ async fn update_peers(link: &mut RunningLink, peers: &[String]) -> std::io::Resu
     Ok(())
 }
 
+/// The keys the link accepts: the paired servers, and the peers of active project grants
+/// (decision 2026-11-01, "Pairing per project"). A revoked grant drops its key.
 async fn paired_server_keys(store: Arc<RuntimeStore>) -> Result<Vec<String>, String> {
     store
         .read_async("runtime-server/peer-link-snapshot", |connection| {
@@ -522,7 +531,9 @@ async fn paired_server_keys(store: Arc<RuntimeStore>) -> Result<Vec<String>, Str
                  WHERE json_extract(record,'$.kind')='server' \
                    AND json_extract(record,'$.status')='paired' \
                    AND COALESCE(json_extract(record,'$.revoked'),0)=0 \
-                 ORDER BY id",
+                 UNION \
+                 SELECT peer_public_key FROM project_grants WHERE revoked_at IS NULL \
+                 ORDER BY 1",
             )?;
             let keys = statement
                 .query_map([], |row| row.get::<_, String>(0))?

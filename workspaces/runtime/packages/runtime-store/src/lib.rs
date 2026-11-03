@@ -231,6 +231,7 @@ pub enum ObservedTable {
     Rules,
     ServerLinks,
     FederationSettings,
+    ProjectGrants,
     FederationIdentity,
     FederationPeers,
     FederationInvites,
@@ -333,6 +334,7 @@ impl ObservedTable {
             Self::Rules => "runtime_rules",
             Self::ServerLinks => "runtime_server_links",
             Self::FederationSettings => "runtime_federation_settings",
+            Self::ProjectGrants => "project_grants",
             Self::FederationIdentity => "runtime_federation_identity",
             Self::FederationPeers => "runtime_federation_peers",
             Self::FederationInvites => "runtime_federation_invites",
@@ -363,6 +365,7 @@ impl ObservedTable {
             Self::Rules => 1 << 8,
             Self::ServerLinks => 1 << 10,
             Self::FederationSettings => 1 << 11,
+            Self::ProjectGrants => 1 << 21,
             Self::FederationIdentity => 1 << 12,
             Self::FederationPeers => 1 << 13,
             Self::FederationInvites => 1 << 14,
@@ -384,7 +387,7 @@ impl ObservedTable {
     }
 }
 
-const OBSERVED_TABLES: [ObservedTable; 25] = [
+const OBSERVED_TABLES: [ObservedTable; 26] = [
     ObservedTable::AccessClients,
     ObservedTable::UsageResumes,
     ObservedTable::Agents,
@@ -397,6 +400,7 @@ const OBSERVED_TABLES: [ObservedTable; 25] = [
     ObservedTable::Rules,
     ObservedTable::ServerLinks,
     ObservedTable::FederationSettings,
+    ObservedTable::ProjectGrants,
     ObservedTable::FederationIdentity,
     ObservedTable::FederationPeers,
     ObservedTable::FederationInvites,
@@ -3549,6 +3553,7 @@ mod commit_notification_tests {
                 ("runtime_rules", 0),
                 ("runtime_server_links", 0),
                 ("runtime_federation_settings", 0),
+                ("project_grants", 0),
                 ("runtime_federation_identity", 0),
                 ("runtime_federation_peers", 0),
                 ("runtime_federation_invites", 0),
