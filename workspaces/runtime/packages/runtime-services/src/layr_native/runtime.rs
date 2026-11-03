@@ -594,7 +594,7 @@ fn create_worker_line(
     )
 }
 
-#[cfg(test)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn prepare_files(state_dir: &Path, record: &Value) -> Result<Value> {
     prepare_files_reporting(state_dir, record, false, None)
 }
