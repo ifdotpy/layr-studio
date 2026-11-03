@@ -202,6 +202,58 @@ for (const initialRole of ["orchestrator", "worker", "review"] as const) {
   }
 }
 
+test("review account selection is saved in review defaults", async () => {
+  const onDraftChange = vi.fn();
+  choices.read.mockResolvedValue({
+    data: [
+      {
+        model: "gpt-6-astra",
+        provider: "codex",
+        supportedReasoningEfforts: [],
+        serviceTiers: [],
+      },
+    ],
+  });
+  renderToStaticMarkup(
+    createElement(
+      MantineProvider,
+      null,
+      createElement(ExecutionSettings, {
+        presentation: "panel",
+        initialRole: "review",
+        agent: {
+          id: "lead",
+          isLead: true,
+          source: AgentSource.managed,
+          status: AgentStatus.idle,
+          accountKey: "default",
+          reviewDefaults: {
+            model: "gpt-6-astra",
+            effort: null,
+            accountKey: "alternate",
+          },
+        },
+        catalog: { models: [], loading: false, error: "", retry: () => {} },
+        refresh: async () => {},
+        onDraftChange,
+      }),
+    ),
+  );
+  const picker = choices.pickers.at(-1)!;
+  expect(picker.accountKey).toBe("alternate");
+  expect(picker.automaticAccount).toBe(true);
+  picker.onAccount(null);
+  await vi.waitFor(() =>
+    expect(onDraftChange).toHaveBeenCalledWith({
+      review_defaults: {
+        account_key: null,
+        model: "gpt-6-astra",
+        effort: null,
+      },
+    }),
+  );
+});
+
 for (const isLead of [true, false]) {
   test(`the ${isLead ? "lead" : "worker"} panel always renders every role`, () => {
     const markup = renderToStaticMarkup(
@@ -382,6 +434,84 @@ function futureWorkerChoice(automatic = false) {
     done,
   };
 }
+
+test("review account change loads the new catalog and replaces incompatible settings", async () => {
+  const done = deferred<void>();
+  choices.terminal = () => done.resolve();
+  choices.read.mockResolvedValue(freshModels);
+  const agent: Agent = {
+    id: "review-lead",
+    isLead: true,
+    accountKey: "old-codex",
+    provider: ProviderKind.codex,
+    source: AgentSource.managed,
+    status: AgentStatus.idle,
+    model: "gpt-6-astra",
+    reviewDefaults: {
+      accountKey: "old-codex",
+      model: "gpt-6-astra",
+      effort: "high",
+      fastMode: true,
+    },
+  };
+  choices.post.mockResolvedValue({
+    ...agent,
+    reviewDefaults: {
+      accountKey: "future-codex",
+      model: "gpt-6.1-sol",
+      effort: "medium",
+      fastMode: false,
+    },
+  });
+  renderToStaticMarkup(
+    createElement(
+      MantineProvider,
+      null,
+      createElement(ExecutionSettings, {
+        presentation: "panel",
+        initialRole: "review",
+        agent,
+        accounts: [
+          {
+            id: "old-codex",
+            label: "Old",
+            home: "",
+            source: "fixture",
+            provider: ProviderKind.codex,
+            status: AccountStatus.ready,
+          },
+          {
+            id: "future-codex",
+            label: "Future",
+            home: "",
+            source: "fixture",
+            provider: ProviderKind.codex,
+            status: AccountStatus.ready,
+          },
+        ],
+        catalog: { models: [], loading: false, error: "", retry: () => {} },
+        refresh: async () => {},
+      }),
+    ),
+  );
+  choices.pickers.at(-1)!.onAccount("future-codex");
+  await done.promise;
+  expect(choices.read).toHaveBeenCalledWith({
+    query: { account_key: "future-codex", workers: undefined, fresh: "1" },
+  });
+  expect(choices.post).toHaveBeenCalledWith(
+    "/api/conversation",
+    expect.objectContaining({
+      review_defaults: {
+        account_key: "future-codex",
+        model: "gpt-6.1-sol",
+        effort: "medium",
+        fast_mode: false,
+      },
+    }),
+    expect.anything(),
+  );
+});
 
 test.each(["future-codex", null])(
   "the actual future-worker account choice waits for fresh metadata: %s",

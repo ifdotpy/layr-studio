@@ -45316,6 +45316,17 @@
       "ReviewDefaults": {
         "additionalProperties": false,
         "properties": {
+          "account_key": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "effort": {
             "anyOf": [
               {
@@ -45357,6 +45368,12 @@
       "ReviewDefaultsDto": {
         "additionalProperties": false,
         "properties": {
+          "accountKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "effort": {
             "anyOf": [
               {
