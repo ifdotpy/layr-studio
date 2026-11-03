@@ -1,3 +1,4 @@
+use crate::cached_sql::CachedSql;
 use std::collections::{BTreeMap, BTreeSet};
 use std::marker::PhantomData;
 
@@ -2716,7 +2717,7 @@ impl<'connection, R: JsonRecord> Table<'connection, R> {
             updates.join(","),
         );
         self.connection
-            .execute(&sql, params_from_iter(values.iter()))?;
+            .execute_cached(&sql, params_from_iter(values.iter()))?;
         Ok(())
     }
 
@@ -2782,7 +2783,7 @@ impl<'connection, R: JsonRecord> Table<'connection, R> {
             return crate::agent_volatile::update(self.connection, id, &value);
         }
         let encoded = encode_record(self.connection, record, id)?;
-        let changed = self.connection.execute(
+        let changed = self.connection.execute_cached(
             &format!("UPDATE {} SET record=?1 WHERE id=?2", quoted_table::<R>()),
             params![encoded, id],
         )?;
@@ -2804,7 +2805,7 @@ impl<'connection, R: JsonRecord> Table<'connection, R> {
             "INSERT INTO {}(id,record) VALUES (?1,?2) ON CONFLICT(id) {conflict}",
             quoted_table::<R>()
         );
-        let changed = self.connection.execute(&sql, params![id, encoded])?;
+        let changed = self.connection.execute_cached(&sql, params![id, encoded])?;
         Ok(changed == 1)
     }
 
@@ -4459,6 +4460,27 @@ mod tests {
         let diagnostic = error.to_string();
         assert!(diagnostic.contains("record_decode"));
         assert!(!diagnostic.contains("private user text"));
+    }
+
+    #[test]
+    fn repeated_external_record_writes_preserve_values() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE runtime_event_meta(id TEXT PRIMARY KEY,record TEXT NOT NULL)",
+            )
+            .unwrap();
+        let table = Table::<EventMetadataRecord>::new(&connection);
+        let key = QueueEventId::from("event-1");
+        for i in 0..100 {
+            let value = EventMetadataRecord::from_value(json!({"sequence": i})).unwrap();
+            table.put_at(&key, &value).unwrap();
+            assert!(table.update_at(&key, &value).unwrap());
+        }
+        assert_eq!(
+            table.get(&key).unwrap().unwrap().into_value(),
+            json!({"sequence": 99})
+        );
     }
 
     #[test]
