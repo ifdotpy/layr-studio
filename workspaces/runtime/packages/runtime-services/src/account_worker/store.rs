@@ -532,10 +532,11 @@ fn continued_thread_call(
 }
 
 /// Whether every outstanding thread call is superseded by an explicit later message.
+/// A held call whose outbox row is gone has no receipt left to wait for, so it
+/// does not block; a live or not-yet-restarted row does.
 pub(super) fn thread_calls_can_continue(
     db: &rusqlite::Connection,
     agent_id: &str,
-    held_operation: &str,
 ) -> Result<bool, WorkerError> {
     let rows = Outbox::for_owner_tagged::<ProviderCall>(
         db,
@@ -545,7 +546,6 @@ pub(super) fn thread_calls_can_continue(
         PROVIDER_CALL_TAG,
     )
     .map_err(outbox_error)?;
-    let mut found = false;
     for row in rows {
         let ProviderCall::Account(call) = &row.payload else {
             continue;
@@ -556,7 +556,6 @@ pub(super) fn thread_calls_can_continue(
         ) {
             continue;
         }
-        found |= call.context.operation == held_operation;
         if row.status != OutboxStatus::Unknown
             || !call.restarted
             || !continued_thread_call(db, &call.context)?
@@ -564,7 +563,7 @@ pub(super) fn thread_calls_can_continue(
             return Ok(false);
         }
     }
-    Ok(found)
+    Ok(true)
 }
 
 /// A later user message explicitly supersedes a restarted, uncertain thread call.
@@ -1004,7 +1003,19 @@ pub(super) async fn claim(
                 }
                 match scheduler::claim_preparation_in_transaction(tx, &agent, epoch, attempt, now())
                 {
-                    Ok(intent) => Ok(intent),
+                    Ok(intent) => {
+                        // The fresh preparation replaces a receipt-pending hold that
+                        // `thread_calls_can_continue` let through.
+                        if intent.is_some()
+                            && let Some(mut current) =
+                                AgentRepository::get(tx, &AgentId::from(agent.as_str()))?
+                            && current.start_outcome_hold.is_some()
+                        {
+                            current.start_outcome_hold = None;
+                            AgentRepository::put(tx, &current)?;
+                        }
+                        Ok(intent)
+                    }
                     Err(scheduler::SchedulerError::PolicyRefused(reason)) => {
                         hold_before_claim(tx, &agent, &reason)?;
                         Ok(None)
