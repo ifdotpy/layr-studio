@@ -79,10 +79,8 @@ mod tests {
     fn accepted_completion_retains_merge_receipt() {
         let stored = r#"{"status":"completed","requestId":"rpc","owner":"a","revision":"rev","resultId":"r","merge":{"from_state":"old","to_state":"new"}}"#;
         let intent: Intent<Acceptance, AcceptanceResult> = serde_json::from_str(stored).unwrap();
-        assert_eq!(
-            serde_json::to_value(intent).unwrap()["merge"],
-            serde_json::json!({"from_state":"old","to_state":"new"})
-        );
+        let text = serde_json::to_string(&intent).unwrap();
+        assert!(text.contains(r#""merge":{"from_state":"old","to_state":"new"}"#));
     }
     #[test]
     fn accepted_completion_round_trips_without_result_field() {
