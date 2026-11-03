@@ -94,9 +94,14 @@ impl ProcStat {
 
 #[cfg(target_os = "linux")]
 pub(crate) fn boot_id() -> Result<String> {
-    Ok(fs::read_to_string("/proc/sys/kernel/random/boot_id")?
+    static BOOT_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    if let Some(value) = BOOT_ID.get() {
+        return Ok(value.clone());
+    }
+    let value = fs::read_to_string("/proc/sys/kernel/random/boot_id")?
         .trim()
-        .to_owned())
+        .to_owned();
+    Ok(BOOT_ID.get_or_init(|| value).clone())
 }
 
 /// The boot session UUID cannot change while this process runs, so the first
