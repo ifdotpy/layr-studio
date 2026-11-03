@@ -188,15 +188,7 @@ pub(crate) fn send_in_transaction(
         return Err(Error::Invalid("request id"));
     }
     snapshot(tx, &first.peer, "", now)?.authorize(false)?;
-    let state_id: String = tx
-        .query_row(
-            "SELECT json_extract(record,'$.stateId') FROM runtime_federation_identity WHERE id='local'",
-            [],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(StoreError::from)?
-        .ok_or(Error::Unavailable("federation-credentials/private-key"))?;
+    let state_id = local_state_id(tx)?;
     let namespace =
         uuid::Uuid::parse_str(&state_id).map_err(|_| Error::Invalid("identity.stateId"))?;
     let message_id = uuid::Uuid::new_v5(&namespace, key.as_bytes()).to_string();
@@ -269,19 +261,23 @@ pub(crate) fn lead_message_in_transaction(
     let first = rows
         .first()
         .ok_or(Error::Forbidden("the peer lead is unknown"))?;
-    let local_id: String = tx
-        .query_row(
-            "SELECT json_extract(record,'$.stateId') FROM runtime_federation_identity WHERE id='local'",
-            [],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(StoreError::from)?
-        .ok_or(Error::Unavailable("federation-credentials/private-key"))?;
+    let local_id = local_state_id(tx)?;
     let sender = root_lead(tx, &first.local_project, &local_id)?
         .ok_or(Error::Forbidden("the project has no root lead"))?
         .value();
     send_in_transaction(tx, &sender, grant, text, key, now)
+}
+
+/// The state id of this server's federation identity.
+fn local_state_id(tx: &Transaction<'_>) -> Result<String> {
+    tx.query_row(
+        "SELECT json_extract(record,'$.stateId') FROM runtime_federation_identity WHERE id='local'",
+        [],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(StoreError::from)?
+    .ok_or(Error::Unavailable("federation-credentials/private-key"))
 }
 
 /// The root lead of a local project: a lead without a parent, bound to the project.
