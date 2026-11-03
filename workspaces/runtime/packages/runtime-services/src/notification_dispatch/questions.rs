@@ -421,97 +421,6 @@ fn reconcile_complaint_notifications(
     Ok(())
 }
 
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod reconciliation_tests {
-    use super::*;
-    use rusqlite::trace::{TraceEvent, TraceEventCodes};
-
-    thread_local! { static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
-
-    #[test]
-    fn reached_blob_preserves_the_lookup_error_column() {
-        let mut db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_complaints(id TEXT PRIMARY KEY,record TEXT); CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT,kind TEXT,text TEXT,status TEXT,error TEXT); INSERT INTO runtime_complaints VALUES('bad',x'ff');").unwrap();
-        db.execute(
-            "INSERT INTO runtime_events VALUES('event','lead','complaint',?1,'pending',NULL)",
-            [
-                json!({"complaints":[{"complaint_id":"bad"},{"complaint_id":"absent"}]})
-                    .to_string(),
-            ],
-        )
-        .unwrap();
-        let tx = db.transaction().unwrap();
-        let error = reconcile_complaint_notifications(&tx, "lead").unwrap_err();
-        assert!(
-            matches!(error, NotificationDispatchError::Store(studio_runtime_store::StoreError::Sqlite(rusqlite::Error::InvalidColumnType(0, ref name, rusqlite::types::Type::Blob))) if name == "record")
-        );
-    }
-
-    #[test]
-    fn reconciles_batched_complaints_and_stops_at_first_missing_entry() {
-        let mut db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_complaints(id TEXT PRIMARY KEY,record TEXT); CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT,kind TEXT,text TEXT,status TEXT,error TEXT);").unwrap();
-        let tx = db.transaction().unwrap();
-        let mut entries = Vec::new();
-        for index in 0..100 {
-            let id = format!("c{index}");
-            let record = json!({"id":id,"author":"worker","leadId":"lead","text":"question","recipient":"lead","status":"resolved","created":1,"updated":1,"readAt":1,"version":1,"responses":[]});
-            tx.execute(
-                "INSERT INTO runtime_complaints VALUES(?1,?2)",
-                rusqlite::params![id, record.to_string()],
-            )
-            .unwrap();
-            entries.push(json!({"complaint_id":id}));
-        }
-        tx.execute("INSERT INTO runtime_complaints VALUES('bad',x'ff')", [])
-            .unwrap();
-        for (id, entries) in [
-            ("answered", entries),
-            (
-                "missing",
-                vec![
-                    json!({"complaint_id":"absent"}),
-                    json!({"complaint_id":"bad"}),
-                ],
-            ),
-        ] {
-            tx.execute(
-                "INSERT INTO runtime_events VALUES(?1,'lead','complaint',?2,'pending',NULL)",
-                rusqlite::params![id, json!({"complaints":entries}).to_string()],
-            )
-            .unwrap();
-        }
-        tx.commit().unwrap();
-        READS.set(0);
-        db.trace_v2(
-            TraceEventCodes::SQLITE_TRACE_STMT,
-            Some(|event| {
-                if let TraceEvent::Stmt(statement, _) = event
-                    && statement.sql().contains("LEFT JOIN runtime_complaints")
-                {
-                    READS.set(READS.get() + 1);
-                }
-            }),
-        );
-        let tx = db.transaction().unwrap();
-        reconcile_complaint_notifications(&tx, "lead").unwrap();
-        let statuses: Vec<String> = ["answered", "missing"]
-            .into_iter()
-            .map(|id| {
-                tx.query_row(
-                    "SELECT status FROM runtime_events WHERE id=?1",
-                    [id],
-                    |row| row.get(0),
-                )
-                .unwrap()
-            })
-            .collect();
-        assert_eq!(statuses, ["stored_only", "pending"]);
-        assert_eq!(READS.get(), 2);
-    }
-}
-
 fn save_complaint_projection(
     tx: &Transaction<'_>,
     complaint: &ComplaintRecord,
@@ -672,4 +581,95 @@ pub(super) fn resolved(
         agent["status"] = json!("running");
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod reconciliation_tests {
+    use super::*;
+    use rusqlite::trace::{TraceEvent, TraceEventCodes};
+
+    thread_local! { static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
+    #[test]
+    fn reached_blob_preserves_the_lookup_error_column() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_complaints(id TEXT PRIMARY KEY,record TEXT); CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT,kind TEXT,text TEXT,status TEXT,error TEXT); INSERT INTO runtime_complaints VALUES('bad',x'ff');").unwrap();
+        db.execute(
+            "INSERT INTO runtime_events VALUES('event','lead','complaint',?1,'pending',NULL)",
+            [
+                json!({"complaints":[{"complaint_id":"bad"},{"complaint_id":"absent"}]})
+                    .to_string(),
+            ],
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        let error = reconcile_complaint_notifications(&tx, "lead").unwrap_err();
+        assert!(
+            matches!(error, NotificationDispatchError::Store(studio_runtime_store::StoreError::Sqlite(rusqlite::Error::InvalidColumnType(0, ref name, rusqlite::types::Type::Blob))) if name == "record")
+        );
+    }
+
+    #[test]
+    fn reconciles_batched_complaints_and_stops_at_first_missing_entry() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_complaints(id TEXT PRIMARY KEY,record TEXT); CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT,kind TEXT,text TEXT,status TEXT,error TEXT);").unwrap();
+        let tx = db.transaction().unwrap();
+        let mut entries = Vec::new();
+        for index in 0..100 {
+            let id = format!("c{index}");
+            let record = json!({"id":id,"author":"worker","leadId":"lead","text":"question","recipient":"lead","status":"resolved","created":1,"updated":1,"readAt":1,"version":1,"responses":[]});
+            tx.execute(
+                "INSERT INTO runtime_complaints VALUES(?1,?2)",
+                rusqlite::params![id, record.to_string()],
+            )
+            .unwrap();
+            entries.push(json!({"complaint_id":id}));
+        }
+        tx.execute("INSERT INTO runtime_complaints VALUES('bad',x'ff')", [])
+            .unwrap();
+        for (id, entries) in [
+            ("answered", entries),
+            (
+                "missing",
+                vec![
+                    json!({"complaint_id":"absent"}),
+                    json!({"complaint_id":"bad"}),
+                ],
+            ),
+        ] {
+            tx.execute(
+                "INSERT INTO runtime_events VALUES(?1,'lead','complaint',?2,'pending',NULL)",
+                rusqlite::params![id, json!({"complaints":entries}).to_string()],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+        READS.set(0);
+        db.trace_v2(
+            TraceEventCodes::SQLITE_TRACE_STMT,
+            Some(|event| {
+                if let TraceEvent::Stmt(statement, _) = event
+                    && statement.sql().contains("LEFT JOIN runtime_complaints")
+                {
+                    READS.set(READS.get() + 1);
+                }
+            }),
+        );
+        let tx = db.transaction().unwrap();
+        reconcile_complaint_notifications(&tx, "lead").unwrap();
+        let statuses: Vec<String> = ["answered", "missing"]
+            .into_iter()
+            .map(|id| {
+                tx.query_row(
+                    "SELECT status FROM runtime_events WHERE id=?1",
+                    [id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+            })
+            .collect();
+        assert_eq!(statuses, ["stored_only", "pending"]);
+        assert_eq!(READS.get(), 2);
+    }
 }
